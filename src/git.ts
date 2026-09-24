@@ -29,7 +29,7 @@ export const git = (...args: string[]) => run(args, null);
 const gitWithInput = (input: string, ...args: string[]) => run(args, input);
 
 /** Runs a git command that changes state, then refreshes. Errors go to the status bar. */
-async function change(...args: string[]) {
+export async function change(...args: string[]) {
   try {
     await git(...args);
   } catch (e) {
@@ -149,8 +149,12 @@ async function showChange(f: FileStatus, inIndex: boolean) {
   showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree");
 }
 
-export function showDiff(path: string, original: string, modified: string, label: string) {
-  closeDiff();
+let diffBack: (() => void) | undefined;
+
+/** Shows a diff in place of the editor. `back` runs when the diff closes, instead of showing the editor. */
+export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void) {
+  closeDiff(false);
+  diffBack = back;
   diffEditor ??= monaco.editor.createDiffEditor($("diff-editor"), {
     theme: "vs-dark",
     automaticLayout: true,
@@ -168,18 +172,22 @@ export function showDiff(path: string, original: string, modified: string, label
   });
   $("diff-path").textContent = path;
   $("diff-label").textContent = label;
-  $("diff-open").onclick = () => (closeDiff(), host.openFile(`${host.root()}/${path}`));
-  $("editor").hidden = true;
+  $("diff-open").onclick = () => (closeDiff(false), host.openFile(`${host.root()}/${path}`));
+  document.querySelectorAll<HTMLElement>("#editor, #history").forEach((e) => (e.hidden = true));
   $("diff").hidden = false;
 }
 
-export function closeDiff() {
+/** Closes the diff. By default it returns to where the diff came from, such as the history view. */
+export function closeDiff(goBack = true) {
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
   model?.original.dispose();
   model?.modified.dispose();
   $("diff").hidden = true;
-  $("editor").hidden = false;
+  const back = diffBack;
+  diffBack = undefined;
+  if (goBack && back) back();
+  else $("editor").hidden = false;
 }
 
 // ---- Branches ----
@@ -322,7 +330,7 @@ export function initGit(h: Host, editor: monaco.editor.IStandaloneCodeEditor) {
   $("commit-push").onclick = () => commit(true);
   $("stage-all").onclick = () => change("add", "--all");
   $("unstage-all").onclick = () => change("reset", "--quiet");
-  $("diff-close").onclick = closeDiff;
+  $("diff-close").onclick = () => closeDiff();
   $("commit-message").onkeydown = (e) => {
     if (e.key === "Enter" && e.metaKey) commit(false);
   };

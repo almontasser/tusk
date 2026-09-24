@@ -436,6 +436,22 @@ watcher reports that write, which triggers another refresh, which runs
 `git status` again. Every git command runs with `--no-optional-locks`, which
 stops read-only commands from writing the index and breaks the loop.
 
+### History
+
+`src/history.ts` shows the log in place of the editor, like the diff view. It
+reads `git log` in pages of 300 with a format of unit-separated fields
+(`LOG_FORMAT`), parsed by `parseLog`. File history adds `--follow` to track
+renames; `--follow` accepts only one file, so a folder's history runs without
+it.
+
+A commit's changed files come from `git diff-tree -r -M --name-status -z`
+against its first parent, so a merge commit shows what the merge brought into
+the branch. The first commit uses `--root`. A file's diff compares it at the
+parent (using the old path for a rename) with it at the commit.
+
+A diff opened from the history view returns there when it closes: `showDiff`
+takes a function to run on close.
+
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell

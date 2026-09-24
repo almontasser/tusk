@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, checksSummary, lineChanges, parseBlame, parseHunks, parseStatus } from "./gitparse.ts";
+import { age, checksSummary, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -77,4 +77,31 @@ test("summarizes pull request checks", () => {
   assert.equal(checksSummary([ok, statusPending]), "pending");
   assert.equal(checksSummary([running, failed]), "failed");
   assert.equal(checksSummary([{ status: "COMPLETED", conclusion: "SKIPPED" }, ok]), "passed");
+});
+
+test("parses log records, changed files, and conflicts", () => {
+  const out =
+    "aaa\x1fa1\x1fAda\x1f1700000000\x1fHEAD -> main, origin/main, tag: v1\x1fp1 p2\x1fMerge branch 'x'\x1e\n" +
+    "bbb\x1fb1\x1fBo\x1f1690000000\x1f\x1f\x1fFirst: with | pipes\x1e\n";
+  const commits = parseLog(out);
+  assert.equal(commits.length, 2);
+  assert.deepEqual(commits[0].refs, ["HEAD -> main", "origin/main", "tag: v1"]);
+  assert.deepEqual(commits[0].parents, ["p1", "p2"]);
+  assert.deepEqual([commits[1].refs, commits[1].parents, commits[1].subject], [[], [], "First: with | pipes"]);
+
+  assert.deepEqual(parseNameStatus("M\0app/A.php\0R087\0old.php\0new.php\0A\0b.php\0"), [
+    { status: "M", path: "app/A.php" },
+    { status: "R", from: "old.php", path: "new.php" },
+    { status: "A", path: "b.php" },
+  ]);
+
+  const lines = ["a", "<<<<<<< HEAD", "ours", "||||||| base", "orig", "=======", "theirs", ">>>>>>> feature", "b", "<<<<<<< HEAD", "x", "=======", ">>>>>>> other"];
+  assert.deepEqual(parseConflicts(lines), [
+    { start: 2, currentLabel: "HEAD", base: 4, separator: 6, end: 8, incomingLabel: "feature" },
+    { start: 10, currentLabel: "HEAD", separator: 12, end: 13, incomingLabel: "other" },
+  ]);
+  assert.deepEqual(parseConflicts(["<<<<<<< HEAD", "unfinished"]), []);
+
+  const status = (index: string, worktree: string) => ({ index, worktree, path: "x" });
+  assert.deepEqual(["UU", "AA", "DD", "AU", "UD", "M ", " M", "A "].map((s) => isConflict(status(s[0], s[1]))), [true, true, true, true, true, false, false, false]);
 });

@@ -156,3 +156,72 @@ export function checksSummary(checks: Check[] | null | undefined): CheckState | 
   if (states.includes("pending")) return "pending";
   return states.every((s) => s === "skipped") ? "skipped" : "passed";
 }
+
+export type Commit = { hash: string; short: string; author: string; time: number; refs: string[]; parents: string[]; subject: string };
+
+/** The `git log` format that `parseLog` reads: fields split by \x1f, commits ended by \x1e. */
+export const LOG_FORMAT = "--format=%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%P%x1f%s%x1e";
+
+export function parseLog(out: string): Commit[] {
+  return out
+    .split("\x1e")
+    .map((r) => r.replace(/^\n/, ""))
+    .filter(Boolean)
+    .map((r) => {
+      const [hash, short, author, time, refs, parents, subject] = r.split("\x1f");
+      return {
+        hash,
+        short,
+        author,
+        time: Number(time),
+        refs: refs ? refs.split(", ").filter((ref) => ref !== "HEAD") : [],
+        parents: parents ? parents.split(" ") : [],
+        subject,
+      };
+    });
+}
+
+export type ChangedFile = { status: string; path: string; from?: string };
+
+/** Parses `git diff-tree -r -M --name-status -z`: a status, then one path, or two for renames and copies. */
+export function parseNameStatus(out: string): ChangedFile[] {
+  const fields = out.split("\0").filter(Boolean);
+  const files: ChangedFile[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const status = fields[i][0];
+    if (!/^[ACDMRTUX]$/.test(status)) continue; // Skips the commit hash that some forms print first.
+    if (status === "R" || status === "C") files.push({ status, from: fields[++i], path: fields[++i] });
+    else files.push({ status, path: fields[++i] });
+  }
+  return files;
+}
+
+export type Conflict = {
+  /** 1-based lines of the markers: <<<<<<<, ||||||| (if present), =======, and >>>>>>>. */
+  start: number;
+  base?: number;
+  separator: number;
+  end: number;
+  currentLabel: string;
+  incomingLabel: string;
+};
+
+/** Finds git conflict blocks in a file's lines. */
+export function parseConflicts(lines: string[]): Conflict[] {
+  const conflicts: Conflict[] = [];
+  let open: Partial<Conflict> | null = null;
+  lines.forEach((line, i) => {
+    const n = i + 1;
+    if (line.startsWith("<<<<<<<")) open = { start: n, currentLabel: line.slice(7).trim() };
+    else if (open && line.startsWith("|||||||") && open.separator === undefined) open.base = n;
+    else if (open && line.startsWith("=======") && open.separator === undefined) open.separator = n;
+    else if (open && line.startsWith(">>>>>>>") && open.separator !== undefined) {
+      conflicts.push({ ...(open as Conflict), end: n, incomingLabel: line.slice(7).trim() });
+      open = null;
+    }
+  });
+  return conflicts;
+}
+
+/** Status letter pairs that mean a merge conflict in `git status --porcelain`. */
+export const isConflict = (f: FileStatus) => f.index === "U" || f.worktree === "U" || (f.index === f.worktree && "AD".includes(f.index));

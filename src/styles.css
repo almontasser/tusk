@@ -153,3 +153,33 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .find-match .line { color: var(--muted); min-width: 3ch; text-align: right; }
 .find-match .preview { overflow: hidden; text-overflow: ellipsis; }
 .find-match mark { background: #e5c07b55; color: inherit; border-radius: 2px; }
+
+#history { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#history[hidden] { display: none; }
+#history header { display: flex; align-items: center; gap: 12px; padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+#history-title { font-weight: 600; white-space: nowrap; }
+#history-filter { flex: 1; max-width: 360px; padding: 3px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+#history header label { color: var(--muted); white-space: nowrap; }
+#history-close { margin-left: auto; background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; }
+.history-body { flex: 1; min-height: 0; display: flex; }
+.history-commits { width: 50%; overflow: auto; border-right: 1px solid var(--border); }
+#history-list { list-style: none; margin: 0; padding: 0; }
+#history-list li { padding: 4px 12px; border-bottom: 1px solid #ffffff08; cursor: default; }
+#history-list li:hover { background: #ffffff10; }
+#history-list li.selected { background: #3574f040; }
+#history-list .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#history-list .meta, #history-detail .meta { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.ref { font-size: 11px; border: 1px solid #6aa7f8; color: #6aa7f8; border-radius: 3px; padding: 0 4px; margin-right: 6px; }
+.ref.tag { border-color: #e5c07b; color: #e5c07b; }
+#history-more { margin: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 10px; }
+#history-detail { flex: 1; overflow: auto; padding: 8px 16px; }
+#history-detail h2 { font-size: 14px; margin: 4px 0; }
+#history-detail h3 { font-size: 12px; color: var(--muted); margin: 14px 0 4px; text-transform: uppercase; }
+#history-detail .message { white-space: pre-wrap; font: 12px "JetBrains Mono", "SF Mono", Menlo, monospace; margin: 8px 0; }
+.history-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.history-actions button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+.history-files { list-style: none; margin: 0; padding: 0; }
+.history-files li { display: flex; gap: 8px; padding: 2px 0; cursor: default; font: 12px "JetBrains Mono", "SF Mono", Menlo, monospace; }
+.history-files li:hover { background: #ffffff10; }
+.history-files li.tracked .name { font-weight: 700; }
+.history-files .letter { width: 1ch; }

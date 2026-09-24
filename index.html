@@ -70,6 +70,21 @@
     <main>
       <nav id="tabs" role="tablist"></nav>
       <div id="editor"></div>
+      <div id="history" hidden>
+        <header>
+          <span id="history-title">Git Log</span>
+          <input id="history-filter" placeholder="Filter by message, author, hash, or branch" aria-label="Filter commits" spellcheck="false" />
+          <label><input type="checkbox" id="history-all" /> All branches</label>
+          <button id="history-close" aria-label="Close history">×</button>
+        </header>
+        <div class="history-body">
+          <div class="history-commits">
+            <ul id="history-list"></ul>
+            <button id="history-more" hidden>Load More</button>
+          </div>
+          <div id="history-detail"></div>
+        </div>
+      </div>
       <div id="diff" hidden>
         <header><span id="diff-path"></span><span id="diff-label"></span><button id="diff-open">Open File</button><button id="diff-close" aria-label="Close diff">×</button></header>
         <div id="diff-editor"></div>

@@ -7,6 +7,7 @@ import { type Item, pick, rank } from "./palette";
 import { annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
+import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
@@ -235,7 +236,8 @@ async function openFile(path: string) {
     tabs.set(path, { model, saved: model.getAlternativeVersionId() });
     model.onDidChangeContent(renderTabs);
   }
-  closeDiff();
+  closeDiff(false);
+  hideHistory();
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
   editor.focus();
@@ -438,6 +440,8 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Annotate with Git Blame", run: annotate },
+  { label: "Git Log", keys: "Meta+9", run: () => showLog() },
+  { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
@@ -513,6 +517,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
 editor.onDidChangeCursorPosition(saveSoon);
 editor.onDidScrollChange(saveSoon);

@@ -1,6 +1,7 @@
 // File operations in the project tree: create, rename, move, delete, and a context menu.
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { showFileHistory } from "./history";
 import { updateReferences } from "./lsp";
 import { pick } from "./palette";
 import { newFileContent, psr4From } from "./psr4";
@@ -170,6 +171,7 @@ function menuFor(path: string): MenuItem[] {
   }
   items.push(
     "-",
+    { label: "Show History", run: () => showFileHistory(path) },
     { label: "Copy Path", run: () => copyPath(path) },
     { label: "Copy Relative Path", run: () => copyPath(path, true) },
     { label: "Reveal in Finder", run: () => revealInFinder(path) },

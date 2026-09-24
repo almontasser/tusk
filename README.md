@@ -41,7 +41,6 @@ file to change when you add it.
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
-| Git history | There's no log or history view of past commits yet. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ### Missing
@@ -154,6 +153,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
 | ⌘1 | Show the project tree |
+| ⌘9 | Git log |
 | ⌘S | Save |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
@@ -269,6 +269,15 @@ last changed it, when, and the commit message. To show the commit, age, and
 author of every line in place of line numbers, run **Annotate with Git Blame**
 from ⌘⇧A. Run it again to hide them.
 
+Press ⌘9 for the **Git Log**: the commits of the current branch, or of every
+branch, with branch and tag labels. Filter them by message, author, hash, or
+branch name. Select a commit to see its message and changed files, and click a
+file to see its diff against the previous commit. From a commit, you can copy
+its hash, check it out, create a branch at it, cherry-pick it onto the current
+branch, or revert it. To see the commits that changed one file, run **Show File
+History**, or right-click the file in the tree and choose **Show History**. File
+history follows renames.
+
 The branch name in the status bar shows commits ahead (↑) and behind (↓) the
 upstream branch. Click it to check out a local or remote branch, create a
 branch from the name you type, or pull, push, and fetch. Pull, push, and fetch
@@ -318,6 +327,7 @@ committed.
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/terminal.ts` | Terminal panel |
 | `src/git.ts` | Commit view, diff view, and branches |
+| `src/history.ts` | Git log, file history, and commit actions |
 | `src/gitparse.ts` | Parsers for git output, line diffs, and check summaries |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
 | `src/runner.ts` | Test runner, run links, and Run Anything |
