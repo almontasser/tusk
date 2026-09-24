@@ -533,6 +533,14 @@ run that fails to start doesn't show old results. `openTerminal` takes an
 `onExit` callback, and when the process ends, `src/testresults.ts` reads the
 report and shows the **Tests** tab.
 
+For progress during the run, the command also gets `--log-events-text`, which
+PHPUnit 10 and later write as events happen (`Test Prepared`, `Test Passed`,
+and so on). The runner checks for `vendor/phpunit/phpunit/src/Event`, which
+PHPUnit 10 added, since older versions reject the option. Every 500 ms,
+`showLive` reads the file and redraws the tree with `parseEvents`. When the
+process exits, the JUnit report replaces the live tree. If there's no report,
+for example because the run crashed, the live tree stays with its last state.
+
 `src/junit.ts` parses the report with regexes, since the report has a fixed
 shape and Node, which runs the tests, has no XML parser. The reports differ:
 

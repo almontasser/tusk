@@ -1,7 +1,7 @@
 // The Tests tab: a tree of the last run's results, read from the JUnit report the run wrote.
 import { invoke } from "@tauri-apps/api/core";
 import { findTests } from "./phptests";
-import { parseJUnit, sameTest, type TestResult } from "./junit";
+import { type LiveTest, parseEvents, parseJUnit, sameTest, type TestResult } from "./junit";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; rerun(): unknown; rerunFailed(failed: TestResult[]): unknown };
@@ -15,7 +15,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
   e.textContent = text;
   return e;
 }
-const icon = (status: TestResult["status"]) => el("span", `codicon codicon-${icons[status]} test-${status}`);
+const icon = (status: LiveTest["status"]) =>
+  el("span", status === "running" ? "codicon codicon-loading codicon-modifier-spin test-running" : `codicon codicon-${icons[status]} test-${status}`);
 const seconds = (s: number) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(2)} s`);
 
 const panel = el("div", "tests");
@@ -94,6 +95,40 @@ export async function showResults(report: string): Promise<boolean> {
   );
   showPanelView("Tests", panel);
   return true;
+}
+
+/**
+ * Shows progress while tests run, from PHPUnit's event stream. Rows can't be opened yet, because the stream
+ * has no file paths; the JUnit report replaces this view when the run ends.
+ */
+export async function showLive(events: string, running: boolean) {
+  const text = await invoke<string>("read_file", { path: events }).catch(() => "");
+  const { total, tests } = parseEvents(text);
+  const done = tests.filter((t) => t.status !== "running");
+  const failures = tests.filter((t) => t.status === "failed").length;
+  const summary = q(".tests-summary");
+  summary.textContent = `${running ? "Running" : "Stopped"}: ${done.length}${total ? ` of ${total}` : ""}${failures ? ` · ${failures} failed` : ""}`;
+  summary.className = `tests-summary ${failures ? "test-failed" : ""}`;
+  q(".tests-detail").textContent = running ? "Results open when the run ends." : "The run ended without a report. Its terminal tab has the output.";
+  const classes = new Map<string, LiveTest[]>();
+  for (const t of tests) classes.set(t.className, [...(classes.get(t.className) ?? []), t]);
+  q(".tests-tree").replaceChildren(
+    ...[...classes].map(([className, cases]) => {
+      const li = el("li");
+      const status = cases.some((c) => c.status === "failed") ? "failed" : cases.some((c) => c.status === "running") ? "running" : "passed";
+      const row = el("div", "test-row");
+      row.append(icon(status), el("span", "name", className.replace(/^Tests\\/, "")));
+      const children = el("ul");
+      for (const c of cases) {
+        const item = el("li", "test-row test-case");
+        item.append(icon(c.status), el("span", "name", c.name));
+        children.append(item);
+      }
+      li.append(row, children);
+      return li;
+    }),
+  );
+  showPanelView("Tests", panel);
 }
 
 export function initTestResults(h: Host) {

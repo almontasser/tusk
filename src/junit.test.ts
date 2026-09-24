@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseJUnit, sameTest } from "./junit.ts";
+import { filterFor, parseEvents, parseJUnit, sameTest } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -60,4 +60,23 @@ test("matches reported names to declarations", () => {
   assert.ok(sameTest("`home page` → it loads", "it loads"));
   assert.ok(sameTest('it checks numbers with data set "(2)"', "it checks numbers"));
   assert.ok(!sameTest("Passes", "test_fails"));
+});
+
+test("reads the live event stream", () => {
+  const events = `Test Suite Started (/app/phpunit.xml, 3 tests)
+Test Prepared (Tests\\Unit\\ExampleTest::test_one)
+Test Passed (Tests\\Unit\\ExampleTest::test_one)
+Test Finished (Tests\\Unit\\ExampleTest::test_one)
+Test Prepared (P\\Tests\\Feature\\PostTest::__pest_evaluable__home_page__→_it_loads)
+Test Failed (P\\Tests\\Feature\\PostTest::__pest_evaluable__home_page__→_it_loads)
+Failed asserting that false is true.
+Test Prepared (Tests\\Unit\\ExampleTest::test_two)
+`;
+  const { total, tests } = parseEvents(events);
+  assert.equal(total, 3);
+  assert.deepEqual(tests.map((t) => [t.className, t.name, t.status]), [
+    ["Tests\\Unit\\ExampleTest", "test one", "passed"],
+    ["Tests\\Feature\\PostTest", "home page → it loads", "failed"],
+    ["Tests\\Unit\\ExampleTest", "test two", "running"],
+  ]);
 });

@@ -8,7 +8,7 @@ import { startDebugging, XDEBUG_ENV } from "./debug";
 import { filterFor, type TestResult } from "./junit";
 import { sailRunning } from "./sail";
 import { openTerminal } from "./terminal";
-import { initTestResults, showResults } from "./testresults";
+import { initTestResults, showLive, showResults } from "./testresults";
 
 let getRoot: () => string;
 let last: { title: string; command: string[]; tests: boolean } | undefined;
@@ -25,7 +25,16 @@ async function run(title: string, command: string[], tests = false) {
   const report = inSail ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
   await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
   const reportArg = inSail ? "storage/logs/editor-junit.xml" : report;
-  return openTerminal(getRoot(), title, [...command, "--log-junit", reportArg], () => showResults(report));
+  // PHPUnit 10 and later (and Pest 2 and later) stream events to a file as tests run.
+  const live = await exists("vendor/phpunit/phpunit/src/Event");
+  const events = inSail ? `${getRoot()}/storage/logs/editor-events.txt` : report.replace(/junit\.xml$/, "events.txt");
+  const liveArgs = live ? ["--log-events-text", inSail ? "storage/logs/editor-events.txt" : events] : [];
+  if (live) await invoke("remove_path", { path: events }).catch(() => {});
+  const timer = live ? setInterval(() => showLive(events, true), 500) : undefined;
+  return openTerminal(getRoot(), title, [...command, "--log-junit", reportArg, ...liveArgs], async () => {
+    clearInterval(timer);
+    if (!(await showResults(report)) && live) showLive(events, false);
+  });
 }
 
 async function reportPath() {

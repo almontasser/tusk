@@ -32,7 +32,7 @@ file to change when you add it.
 | Type hierarchy | It shows the type that the current file declares, not the type under the cursor. Traits aren't shown. A file declaring several types shows the first. |
 | Find in files | Results stop at 2,000 matches, and Replace All changes only the files in those results. There's no replace for a single match. |
 | Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
-| Test results | Results appear when a run ends, not live. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
+| Test results | While tests run, the tree can't open tests yet (PHPUnit's event stream has no file paths); that works once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
 | Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
 | Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
@@ -423,8 +423,9 @@ and `test()` calls, including those inside `describe()`. Tests run through
 `vendor/bin/phpunit` otherwise. To run the whole suite, run **Run All Tests**
 from ⌘⇧A.
 
-When a run ends, the **Tests** tab in the bottom panel shows the results as a
-tree of test classes and files. Classes with failures start expanded.
+While tests run, the **Tests** tab shows progress: how many tests have run,
+how many failed, and a spinner on the test in progress. When the run ends, it
+shows the results as a tree of test classes and files. Classes with failures start expanded.
 
 - Click a test to see its failure message and open it at the failing line, or
   at its declaration when it passed.

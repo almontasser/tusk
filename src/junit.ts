@@ -78,3 +78,22 @@ export function sameTest(reported: string, name: string): boolean {
   const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/^test/, "");
   return key(baseName(reported)) === key(name);
 }
+
+export type LiveTest = { className: string; name: string; status: "running" | TestResult["status"] };
+
+/** Reads PHPUnit's --log-events-text stream, written as tests run, for progress before the JUnit report exists. */
+export function parseEvents(text: string): { total: number; tests: LiveTest[] } {
+  const total = Number(text.match(/^Test Suite Started \(.*?, (\d+) tests?\)/m)?.[1] ?? 0);
+  const tests = new Map<string, LiveTest>();
+  const status: Record<string, LiveTest["status"]> = { Prepared: "running", Passed: "passed", Failed: "failed", Errored: "failed", Skipped: "skipped", "Marked Incomplete": "skipped" };
+  for (const [, event, id] of text.matchAll(/^Test (Prepared|Passed|Failed|Errored|Skipped|Marked Incomplete) \((.+?)\)$/gm)) {
+    const at = id.lastIndexOf("::");
+    const className = id.slice(0, at).replace(/^P\\/, "");
+    // Pest's generated method names, such as __pest_evaluable__group__→_it_works, made readable.
+    const name = id.slice(at + 2).replace(/^__pest_evaluable_/, "").replace(/__/g, " ").replace(/_/g, " ").trim();
+    const existing = tests.get(id);
+    // A test that failed stays failed, even though "Finished" events follow.
+    if (!existing || existing.status === "running") tests.set(id, { className, name, status: status[event] });
+  }
+  return { total, tests: [...tests.values()] };
+}
