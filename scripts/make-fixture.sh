@@ -90,6 +90,29 @@ php -r '$f = "app/Filament/Resources/Authors/AuthorResource.php"; $s = file_get_
   $s = str_replace("use App\\Models\\Author;", "use App\\Filament\\Resources\\Authors\\RelationManagers\\PostsRelationManager;\nuse App\\Models\\Author;", $s);
   file_put_contents($f, preg_replace("/(getRelations\(\): array\s*\{\s*return \[)\s*\/\/\s*/", "$1\n            PostsRelationManager::class,\n        ", $s));'
 
+# Pest, which also runs the PHPUnit tests, with one Pest test file.
+composer require pestphp/pest pestphp/pest-plugin-laravel --dev --with-all-dependencies --no-interaction
+cat > tests/Pest.php <<'PHP'
+<?php
+
+pest()->extend(Tests\TestCase::class)->in('Feature');
+PHP
+cat > tests/Feature/PostTest.php <<'PHP'
+<?php
+
+use App\Models\Post;
+
+it('has a fillable title', function () {
+    expect((new Post)->isFillable('title'))->toBeTrue();
+});
+
+describe('home page', function () {
+    it('loads', function () {
+        $this->get('/')->assertOk();
+    });
+});
+PHP
+
 # Its own repository, for testing the git features.
 git init --quiet --initial-branch=main
 git add --all

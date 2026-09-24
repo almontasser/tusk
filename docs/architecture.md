@@ -421,6 +421,38 @@ the `run_capture` command, and ranks command names against the first word you
 type. The rest of the line becomes the command's arguments. Commands run
 through `/bin/sh -c`, so quoting and pipes work.
 
+### Test results
+
+Every test run adds `--log-junit <app cache>/junit.xml`, which PHPUnit, Pest,
+and `php artisan test` all accept. The report is deleted before the run, so a
+run that fails to start doesn't show old results. `openTerminal` takes an
+`onExit` callback, and when the process ends, `src/testresults.ts` reads the
+report and shows the **Tests** tab.
+
+`src/junit.ts` parses the report with regexes, since the report has a fixed
+shape and Node, which runs the tests, has no XML parser. The reports differ:
+
+| | PHPUnit | Pest |
+| --- | --- | --- |
+| `file` | Absolute path | `tests/X.php::name`, or a label such as `Scratch (Tests\Unit\Scratch)::Fails` for PHPUnit-style classes |
+| `line` | The test's line | Missing |
+| Test name | Method name | Description, with `describe()` blocks as `` `group` → ``, or a readable label (`Fails` for `test_fails`) |
+| Failure message | Starts with `Class::name` on its own line | Starts with the name, without a line break |
+
+The parser strips the name from the message and takes the failure's line from
+the last `file.php:line` in the message that points to the test file. When the
+report has no real path, the file comes from that location or from the class
+name, assuming Laravel's `Tests\` to `tests/` mapping. For a test without a
+line, the tab finds the declaration with `findTests`, comparing names without
+case, punctuation, or a `test` prefix (`sameTest`).
+
+**Rerun failed tests** passes a `--filter` built from the failed names. For
+PHPUnit, it's `::(names)( with data set .*)?$`. Pest matches a filter against
+method names for PHPUnit-style classes and against descriptions for Pest tests,
+so each name's words are joined with `[_ ]?` to match both. The filter never
+starts with `(`: PHP would read the parentheses as regex delimiters, and the
+match would become case-sensitive.
+
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
 

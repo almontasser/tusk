@@ -32,7 +32,7 @@ file to change when you add it.
 | Type hierarchy | Phpactor can provide it, but Monaco has no view for it. It needs its own panel. |
 | Find in files | Results stop at 2,000 matches, and Replace All changes only the files in those results. There's no replace for a single match. |
 | Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
-| Test results | Tests print to a terminal tab. There's no tree of passed and failed tests (it would parse JUnit output in `src/runner.ts`). |
+| Test results | Results appear when a run ends, not live. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
 | Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
 | Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
@@ -332,8 +332,20 @@ TypeScript version when `node_modules/typescript` exists.
 
 In test files, **▶ Run test** and **▶ Run all tests in file** links appear above
 PHPUnit test methods (`test*` methods, `#[Test]`, and `@test`) and Pest `it()`
-and `test()` calls. Tests run through `php artisan test` in Laravel projects,
-and through `vendor/bin/pest` or `vendor/bin/phpunit` otherwise.
+and `test()` calls, including those inside `describe()`. Tests run through
+`php artisan test` in Laravel projects, and through `vendor/bin/pest` or
+`vendor/bin/phpunit` otherwise. To run the whole suite, run **Run All Tests**
+from ⌘⇧A.
+
+When a run ends, the **Tests** tab in the bottom panel shows the results as a
+tree of test classes and files. Classes with failures start expanded.
+
+- Click a test to see its failure message and open it at the failing line, or
+  at its declaration when it passed.
+- Click **Rerun failed tests** (next to **Rerun**) to run only the tests that
+  failed.
+
+The terminal tab keeps the runner's full output.
 
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
@@ -494,7 +506,8 @@ reads the project and `vendor` but skips hidden folders, `node_modules`, and
 ## Test app
 
 `scripts/make-fixture.sh` creates `fixtures/demo`, a Laravel 12 app with
-Filament 4, an `Author` model, a `Post` model, and a Filament resource for posts.
+Filament 4, an `Author` model, a `Post` model, a Filament resource for posts,
+and Pest with one Pest test file next to Laravel's PHPUnit examples.
 Use it to try navigation and refactoring by hand. The `fixtures` folder isn't
 committed.
 

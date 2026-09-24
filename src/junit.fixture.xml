@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="/app/phpunit.xml" tests="8" assertions="6" errors="1" failures="2" skipped="1" time="0.173701">
+    <testsuite name="Unit" tests="7" assertions="5" errors="1" failures="2" skipped="1" time="0.021106">
+      <testsuite name="Tests\Unit\ExampleTest" file="/app/tests/Unit/ExampleTest.php" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.003585">
+        <testcase name="test_that_true_is_true" file="/app/tests/Unit/ExampleTest.php" line="12" class="Tests\Unit\ExampleTest" classname="Tests.Unit.ExampleTest" assertions="1" time="0.003585"/>
+      </testsuite>
+      <testsuite name="Tests\Unit\ScratchTest" file="/app/tests/Unit/ScratchTest.php" tests="6" assertions="4" errors="1" failures="2" skipped="1" time="0.017521">
+        <testcase name="test_passes" file="/app/tests/Unit/ScratchTest.php" line="10" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.006714"/>
+        <testcase name="test_fails" file="/app/tests/Unit/ScratchTest.php" line="15" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.009065">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\ScratchTest::test_fails
+Letters &lt;differ&gt; &amp; "so" on
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+-'a'
++'b'
+
+/app/tests/Unit/ScratchTest.php:17</failure>
+        </testcase>
+        <testcase name="test_errors" file="/app/tests/Unit/ScratchTest.php" line="20" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="0" time="0.000450">
+          <error type="RuntimeException">Tests\Unit\ScratchTest::test_errors
+RuntimeException: boom
+
+/app/tests/Unit/ScratchTest.php:22</error>
+        </testcase>
+        <testcase name="test_skipped" file="/app/tests/Unit/ScratchTest.php" line="25" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="0" time="0.000643">
+          <skipped/>
+        </testcase>
+        <testsuite name="Tests\Unit\ScratchTest::test_data" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.000649">
+          <testcase name="test_data with data set &quot;one&quot;" file="/app/tests/Unit/ScratchTest.php" line="31" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.000293"/>
+          <testcase name="test_data with data set &quot;two&quot;" file="/app/tests/Unit/ScratchTest.php" line="31" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.000356">
+            <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\ScratchTest::test_data with data set "two"
+Failed asserting that 2 is less than 2.
+
+/app/tests/Unit/ScratchTest.php:33</failure>
+          </testcase>
+        </testsuite>
+      </testsuite>
+    </testsuite>
+    <testsuite name="Feature" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.152595">
+      <testsuite name="Tests\Feature\ExampleTest" file="/app/tests/Feature/ExampleTest.php" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.152595">
+        <testcase name="test_the_application_returns_a_successful_response" file="/app/tests/Feature/ExampleTest.php" line="13" class="Tests\Feature\ExampleTest" classname="Tests.Feature.ExampleTest" assertions="1" time="0.152595"/>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>

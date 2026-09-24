@@ -15,7 +15,7 @@ import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, openSettings, removeEditor, settings } from "./settings";
 import { initSearch, openSearch, refreshSearch } from "./search";
-import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
+import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -693,6 +693,7 @@ const actions: Action[] = [
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
+  { label: "Run All Tests", run: () => root && runAllTests() },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
@@ -783,7 +784,7 @@ window.addEventListener(
   true,
 );
 
-initRunner(() => root);
+initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }));
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initSettings();
 initFormatting({ root: () => root, status });

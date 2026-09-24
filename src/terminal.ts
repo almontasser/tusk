@@ -22,8 +22,8 @@ const themes = {
 const theme = () => themes[isDark() ? "dark" : "light"];
 onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme())));
 
-/** Opens a terminal tab. Without `command`, it runs your login shell. */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[]) {
+/** Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process ends. */
+export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void) {
   showPanel(true);
   const el = document.createElement("div");
   el.className = "term";
@@ -42,6 +42,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
       session.exited = true;
       term.write("\r\n\x1b[2m[Process exited]\x1b[0m\r\n");
       renderTabs();
+      onExit?.();
     }),
   ]);
   const input = term.onData((data) => invoke("pty_write", { id, data }).catch(() => {}));

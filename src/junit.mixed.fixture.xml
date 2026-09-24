@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="/app/phpunit.xml" tests="12" assertions="10" errors="1" failures="3" skipped="1" time="0.180293">
+    <testsuite name="Unit" tests="7" assertions="5" errors="1" failures="2" skipped="1" time="0.009754">
+      <testsuite name="Tests\Unit\ExampleTest" file="Example (Tests\Unit\Example)" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.001352">
+        <testcase name="That true is true" file="Example (Tests\Unit\Example)::That true is true" class="Tests\Unit\ExampleTest" classname="Tests.Unit.ExampleTest" assertions="1" time="0.001352"/>
+      </testsuite>
+      <testsuite name="Tests\Unit\ScratchTest" file="Scratch (Tests\Unit\Scratch)" tests="6" assertions="4" errors="1" failures="2" skipped="1" time="0.008402">
+        <testcase name="Passes" file="Scratch (Tests\Unit\Scratch)::Passes" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.003546"/>
+        <testcase name="Fails" file="Scratch (Tests\Unit\Scratch)::Fails" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.003563">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">FailsLetters &lt;differ&gt; &amp; "so" on
+Failed asserting that two strings are identical.
+at tests/Unit/ScratchTest.php:17</failure>
+        </testcase>
+        <testcase name="Errors" file="Scratch (Tests\Unit\Scratch)::Errors" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="0" time="0.000319">
+          <error type="RuntimeException">ErrorsRuntimeException: boom
+at tests/Unit/ScratchTest.php:22</error>
+        </testcase>
+        <testcase name="Skipped" file="Scratch (Tests\Unit\Scratch)::Skipped" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="0" time="0.000437">
+          <skipped/>
+        </testcase>
+        <testsuite name="Data" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.000536">
+          <testcase name="Data with data set &quot;one&quot;" file="Scratch (Tests\Unit\Scratch)::Data with data set &quot;one&quot;" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.000158"/>
+          <testcase name="Data with data set &quot;two&quot;" file="Scratch (Tests\Unit\Scratch)::Data with data set &quot;two&quot;" class="Tests\Unit\ScratchTest" classname="Tests.Unit.ScratchTest" assertions="1" time="0.000378">
+            <failure type="PHPUnit\Framework\ExpectationFailedException">Data with data set "two"Failed asserting that 2 is less than 2.
+at tests/Unit/ScratchTest.php:33</failure>
+          </testcase>
+        </testsuite>
+      </testsuite>
+    </testsuite>
+    <testsuite name="Feature" tests="5" assertions="5" errors="0" failures="1" skipped="0" time="0.170539">
+      <testsuite name="Tests\Feature\ExampleTest" file="Example (Tests\Feature\Example)" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.115820">
+        <testcase name="The application returns a successful response" file="Example (Tests\Feature\Example)::The application returns a successful response" class="Tests\Feature\ExampleTest" classname="Tests.Feature.ExampleTest" assertions="1" time="0.115820"/>
+      </testsuite>
+      <testsuite name="Tests\Feature\PostTest" file="tests/Feature/PostTest.php" tests="2" assertions="2" errors="0" failures="0" skipped="0" time="0.029862">
+        <testcase name="it has a fillable title" file="tests/Feature/PostTest.php::it has a fillable title" class="Tests\Feature\PostTest" classname="Tests.Feature.PostTest" assertions="1" time="0.015312"/>
+        <testcase name="`home page` → it loads" file="tests/Feature/PostTest.php::`home page` → it loads" class="Tests\Feature\PostTest" classname="Tests.Feature.PostTest" assertions="1" time="0.014549"/>
+      </testsuite>
+      <testsuite name="Tests\Feature\ScratchPestTest" file="tests/Feature/ScratchPestTest.php" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.024857">
+        <testcase name="it fails on purpose" file="tests/Feature/ScratchPestTest.php::it fails on purpose" class="Tests\Feature\ScratchPestTest" classname="Tests.Feature.ScratchPestTest" assertions="1" time="0.017794">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">it fails on purposeFailed asserting that 1 is identical to 2.
+at tests/Feature/ScratchPestTest.php:4</failure>
+        </testcase>
+        <testcase name="`group` → it nested passes" file="tests/Feature/ScratchPestTest.php::`group` → it nested passes" class="Tests\Feature\ScratchPestTest" classname="Tests.Feature.ScratchPestTest" assertions="1" time="0.007063"/>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>

@@ -12,8 +12,8 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /**
  * Returns the tests in a file, with a whole-file entry first. PHPUnit tests are
- * `test*` methods or methods marked `#[Test]` or `@test`. Pest tests are top-level
- * `it(...)` and `test(...)` calls.
+ * `test*` methods or methods marked `#[Test]` or `@test`. Pest tests are
+ * `it(...)` and `test(...)` calls, also inside `describe(...)`.
  * ponytail: line-based regexes; a PHP parser would catch multi-line declarations.
  */
 export function findTests(source: string): TestCase[] {
@@ -28,7 +28,7 @@ export function findTests(source: string): TestCase[] {
       if (method[1].startsWith("test") || marked) tests.push({ line, name: method[1], filter: `::${method[1]}( with data set .*)?$` });
       marked = false;
     }
-    const pest = text.match(/^(it|test)\(\s*(['"])(.*?)\2/);
+    const pest = text.match(/^\s*(it|test)\(\s*(['"])(.*?)\2/);
     if (pest) tests.push({ line, name: `${pest[1] === "it" ? "it " : ""}${pest[3]}`, filter: escapeRegex(pest[3]) });
   });
   if (!tests.length) return [];

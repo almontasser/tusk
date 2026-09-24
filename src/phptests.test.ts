@@ -43,6 +43,7 @@ test("finds Pest tests and escapes their names", () => {
   const tests = findTests(pest);
   assert.deepEqual(tests.map((t) => t.name), ["all tests in file", "it creates a post (with title)", "deletes posts"]);
   assert.equal(tests[1].filter, "creates a post \\(with title\\)");
+  assert.equal(findTests("<?php\ndescribe('group', function () {\n    it('nests', fn () => 1);\n});")[1]?.name, "it nests");
 });
 
 test("picks the test around the cursor", () => {

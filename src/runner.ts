@@ -1,20 +1,39 @@
 // Runs tests, Artisan commands, and other commands in terminal tabs.
 import { invoke } from "@tauri-apps/api/core";
+import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
 import { startDebugging, XDEBUG_ENV } from "./debug";
+import { filterFor, type TestResult } from "./junit";
 import { openTerminal } from "./terminal";
+import { initTestResults, showResults } from "./testresults";
 
 let getRoot: () => string;
-let last: { title: string; command: string[] } | undefined;
+let last: { title: string; command: string[]; tests: boolean } | undefined;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
 const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
 
-function run(title: string, command: string[]) {
-  last = { title, command };
-  return openTerminal(getRoot(), title, command);
+/** Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. */
+async function run(title: string, command: string[], tests = false) {
+  last = { title, command, tests };
+  if (!tests) return openTerminal(getRoot(), title, command);
+  const report = await reportPath();
+  await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
+  return openTerminal(getRoot(), title, [...command, "--log-junit", report], () => showResults(report));
+}
+
+async function reportPath() {
+  const dir = await appCacheDir();
+  await invoke("create_dir", { path: dir });
+  return `${dir}/junit.xml`;
+}
+
+/** `php artisan test`, which runs Pest when it's installed, or else the test binary. */
+async function testRunner() {
+  if (await exists("artisan")) return ["php", "artisan", "test"];
+  return [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
 }
 
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
@@ -26,13 +45,18 @@ const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", li
  */
 export async function runTest(path: string, test: TestCase, debug = false) {
   const file = path.slice(getRoot().length + 1);
-  const runner = (await exists("artisan"))
-    ? ["php", "artisan", "test"]
-    : [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
+  const runner = await testRunner();
   const filter = test.filter ? ["--filter", test.filter] : [];
   const title = `${debug ? "Debug" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}`;
   if (debug) await startDebugging();
-  return run(title, [...(debug ? ["/usr/bin/env", ...XDEBUG_ENV] : []), ...runner, file, ...filter]);
+  return run(title, [...(debug ? ["/usr/bin/env", ...XDEBUG_ENV] : []), ...runner, file, ...filter], true);
+}
+
+export const runAllTests = async () => run("Tests", await testRunner(), true);
+
+async function rerunFailed(failed: TestResult[]) {
+  const filter = filterFor(failed, await exists("vendor/bin/pest"));
+  return run(`Tests: ${failed.length} failed`, [...(await testRunner()), "--filter", filter], true);
 }
 
 /** Runs the test around the cursor, or all tests in the file. */
@@ -43,7 +67,7 @@ export function runTestAtCursor(editor: monaco.editor.ICodeEditor, debug = false
   if (test) runTest(model.uri.fsPath, test, debug);
 }
 
-export const rerun = () => last && openTerminal(getRoot(), last.title, last.command);
+export const rerun = () => last && run(last.title, last.command, last.tests);
 
 type ArtisanList = { commands: { name: string; description: string; hidden?: boolean }[] };
 let artisanCache: { root: string; items: { name: string; description: string }[] } | undefined;
@@ -80,8 +104,9 @@ export async function runAnything() {
 }
 
 /** Adds run links above tests in test files. */
-export function initRunner(root: () => string) {
+export function initRunner(root: () => string, openAt: (path: string, line: number) => Promise<unknown>) {
   getRoot = root;
+  initTestResults({ root, openAt, rerun, rerunFailed });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, debug?: boolean) => runTest(path, test, debug));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {

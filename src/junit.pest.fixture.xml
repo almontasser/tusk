@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="/app/phpunit.xml" tests="6" assertions="5" errors="0" failures="3" skipped="1" time="0.011361">
+    <testsuite name="Unit" tests="6" assertions="5" errors="0" failures="3" skipped="1" time="0.011361">
+      <testsuite name="Tests\MathTest" file="tests/MathTest.php" tests="6" assertions="5" errors="0" failures="3" skipped="1" time="0.011361">
+        <testcase name="it adds (1 + 1)" file="tests/MathTest.php::it adds (1 + 1)" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.003553"/>
+        <testcase name="fails" file="tests/MathTest.php::fails" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.003995">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">failsFailed asserting that two strings are identical.
+at tests/MathTest.php:8</failure>
+        </testcase>
+        <testsuite name="it checks numbers" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.001179">
+          <testcase name="it checks numbers with data set &quot;(1)&quot;" file="tests/MathTest.php::it checks numbers with data set &quot;(1)&quot;" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.000389"/>
+          <testcase name="it checks numbers with data set &quot;(2)&quot;" file="tests/MathTest.php::it checks numbers with data set &quot;(2)&quot;" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.000790">
+            <failure type="PHPUnit\Framework\ExpectationFailedException">it checks numbers with data set "(2)"Failed asserting that 2 is less than 2.
+at tests/MathTest.php:12</failure>
+          </testcase>
+        </testsuite>
+        <testcase name="`group` → it nested fails" file="tests/MathTest.php::`group` → it nested fails" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.001910">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">`group` → it nested failsFailed asserting that true is false.
+at tests/MathTest.php:16</failure>
+        </testcase>
+        <testcase name="it skips" file="tests/MathTest.php::it skips" class="Tests\MathTest" classname="Tests.MathTest" assertions="0" time="0.000724">
+          <skipped/>
+        </testcase>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>
