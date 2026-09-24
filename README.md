@@ -20,6 +20,24 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
 
+## Known gaps
+
+These PhpStorm features are missing or limited. Each one names the file to
+change when you add it.
+
+| Area | Gap |
+| --- | --- |
+| Type hierarchy | Phpactor can provide it, but Monaco has no view for it. It needs its own panel. |
+| Find in files | Plain text only. There's no regex option, and case sensitivity is automatic: the search is case-sensitive only when the query has a capital letter (`search_text` in `src-tauri/src/search.rs` already accepts both options; `findInFiles` in `src/main.ts` needs toggles). |
+| Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
+| Test results | Tests print to a terminal tab. There's no tree of passed and failed tests (it would parse JUnit output in `src/runner.ts`). |
+| Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
+| Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
+| Formatting | Only PHP files format (through Mago). |
+| First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. |
+| Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
+| Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
+
 ## Requirements
 
 To use the app, you need:
