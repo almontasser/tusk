@@ -136,7 +136,9 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action. The app reopens the last folder when it starts. Refactorings such as rename
+Folder…** action. The app reopens the last folder when it starts. If a project has a
+`.phpactor.json` file, Phpactor asks whether to trust it, because the file can
+run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.
 
 ## Laravel features

@@ -41,7 +41,15 @@ async function openFolder(dir: unknown = null) {
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
-  startLsp(dir, { ensureModel, markSaved, renamed, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) => status(`Language server failed: ${e}`));
+  restartServers();
+}
+
+/** Starts (or restarts) the language servers for the open folder. */
+function restartServers() {
+  if (!root) return;
+  startLsp(root, { ensureModel, markSaved, renamed, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) =>
+    status(`Language server failed: ${e}`),
+  );
 }
 
 async function ensureModel(path: string) {
@@ -328,6 +336,7 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Annotate with Git Blame", run: annotate },
+  { label: "Restart Language Servers", run: restartServers },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },

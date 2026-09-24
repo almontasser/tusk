@@ -123,6 +123,19 @@ The client remembers the title of each `$/progress` token. When the progress
 titled "Indexing workspace" ends, it sends `didSave` for every open PHP file,
 which makes Phpactor check them again against the full index.
 
+### Questions from servers
+
+A server can ask a question with `window/showMessageRequest`. Phpactor does
+this when a project has a `.phpactor.json`, because that file can run code:
+it asks whether to trust the file. The client shows the question as a native
+dialog with the server's options as buttons (up to three) and sends back the
+option you choose. Phpactor saves the answer in
+`~/.local/share/phpactor/trust.json`.
+
+After you trust the file, Phpactor asks for a restart to load it. The client
+restarts the language servers when a server's message asks for that. The
+**Restart Language Servers** action does the same by hand.
+
 ### Status bar
 
 Each language server has its own status slot, and the status bar shows the

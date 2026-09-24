@@ -3,6 +3,7 @@
 // serve the same language; Monaco merges their completions, locations, hovers,
 // code actions, and markers.
 import { invoke } from "@tauri-apps/api/core";
+import { message } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
@@ -25,6 +26,21 @@ export type Host = {
 
 let host: Host;
 const servers: Server[] = [];
+
+/**
+ * Shows a server's question as a native dialog and returns the chosen action, or null if
+ * dismissed. Phpactor asks this way, for example whether to trust a project's .phpactor.json.
+ */
+async function askUser(server: string, params: L.ShowMessageRequestParams): Promise<L.MessageActionItem | null> {
+  const actions = params.actions ?? [];
+  const [a, b, c] = actions.map((x) => x.title);
+  const buttons =
+    actions.length >= 3 ? { yes: a, no: b, cancel: c } : actions.length === 2 ? { ok: a, cancel: b } : actions.length === 1 ? { ok: a } : undefined;
+  // ponytail: native dialogs have at most three buttons; a fourth action and beyond can't be chosen.
+  const result = await message(params.message, { title: server, kind: params.type === 1 ? "error" : params.type === 2 ? "warning" : "info", buttons });
+  const keys = actions.length >= 3 ? ["Yes", "No", "Cancel"] : ["Ok", "Cancel"];
+  return actions.find((x) => x.title === result) ?? actions[keys.indexOf(result)] ?? null;
+}
 
 // ---- Conversions between LSP (0-based) and Monaco (1-based) ----
 
@@ -172,6 +188,8 @@ async function startServer(name: string, root: string, langs: string[], initiali
       if (model) setMarkers(model, owner, msg.params.diagnostics);
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
       host.status(`${name}: ${msg.params.message}`, name);
+      // Phpactor asks for a restart after you trust a project's .phpactor.json.
+      if (/restart the language server/i.test(msg.params.message)) setTimeout(() => startLsp(root, host), 500);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
       host.status(v.kind === "end" ? "" : [v.title, v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" "), name);
@@ -189,8 +207,7 @@ async function startServer(name: string, root: string, langs: string[], initiali
       case "workspace/configuration":
         return params.items.map(() => null);
       case "window/showMessageRequest":
-        host.status(`${name}: ${params.message}`, name);
-        return null;
+        return askUser(name, params);
       default: // client/registerCapability, window/workDoneProgress/create, and others need no work.
         return null;
     }
