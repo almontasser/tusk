@@ -7,10 +7,11 @@ import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpoint, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
+import { closeMerge, initMerge, openMerge } from "./merge";
 import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
@@ -454,6 +455,7 @@ async function openFile(path: string) {
     model.onDidChangeContent(renderTabs);
   }
   closeDiff(false);
+  closeMerge();
   hideHistory();
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
@@ -554,6 +556,12 @@ async function applySaveRules(model: monaco.editor.ITextModel) {
   if (props.insert_final_newline === "false" && endsWithNewline)
     edits.push({ range: new monaco.Range(last - 1, model.getLineMaxColumn(last - 1), last, 1), text: "" });
   if (edits.length) model.pushEditOperations(null, edits, () => null);
+}
+
+/** Writes a model that has no tab, such as the merge view's result for a file that isn't open. */
+async function writeModel(path: string) {
+  const model = monaco.editor.getModel(monaco.Uri.file(path));
+  if (model) await invoke("write_file", { path, contents: model.getValue() });
 }
 
 async function saveFile(path: string) {
@@ -762,6 +770,7 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Stash Changes…", run: stashChanges },
+  { label: "Resolve Conflicts in Merge Tool", run: () => active && openMerge(relative(active)) },
   { label: "Stage Selected Changes (in a diff)", run: stageSelected },
   { label: "Stashes…", run: stashes },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
@@ -1019,6 +1028,7 @@ $("sidebar-resize").onmousedown = (down) => {
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
 initHttpClient({ root: () => root, status });
 initComposer({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });

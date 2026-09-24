@@ -4,6 +4,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
+import { openMerge } from "./merge";
 import { age, applyBlocks, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
@@ -120,8 +121,8 @@ function conflictRow(f: FileStatus) {
   li.innerHTML = `<span class="letter">!</span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
   li.querySelector(".name")!.textContent = name;
   li.querySelector(".dir")!.textContent = f.path.slice(0, -name.length - 1);
-  li.title = "Open the file to resolve each conflict, or accept one side";
-  li.onclick = () => host.openFile(`${host.root()}/${f.path}`);
+  li.title = "Open the merge tool to resolve each conflict, or accept one side";
+  li.onclick = () => openMerge(f.path);
   const buttons = li.querySelector(".buttons")!;
   const button = (label: string, title: string, run: () => unknown) => {
     const b = document.createElement("button");

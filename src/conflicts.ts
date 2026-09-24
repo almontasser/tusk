@@ -25,6 +25,11 @@ function accept(model: monaco.editor.ITextModel, start: number, choice: Choice) 
   model.pushEditOperations([], [{ range, text }], () => null);
 }
 
+/** Resolves every conflict in a model the same way, bottom up so earlier line numbers stay valid. */
+export function acceptAll(model: monaco.editor.ITextModel, choice: Choice) {
+  for (const c of parseConflicts(model.getLinesContent()).reverse()) accept(model, c.start, choice);
+}
+
 /** Registers the accept command and the links above conflict blocks. Call once. */
 export function initConflicts() {
   monaco.editor.registerCommand("conflict.accept", (_, uri: string, start: number, choice: Choice) => {

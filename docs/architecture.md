@@ -731,6 +731,15 @@ the three choices above each block, and decorations shade each side. A choice
 replaces the whole block with an undoable edit. After a save, `afterSave` in
 `git.ts` stages a conflicted file if it has no conflict blocks left.
 
+
+The three-pane merge tool (`src/merge.ts`) reads the base, your side, and
+their side from the index stages (`git show :1:`, `:2:`, and `:3:`). The side
+panes get read-only models, highlighted with `lineChanges` against the base.
+The middle pane uses the file's own model, so the inline links and conflict
+colors from `conflicts.ts` work unchanged, and an open tab of the file shows the
+same edits. **Mark Resolved** writes the model and runs `git add`. The side
+panes copy the middle pane's scroll position, which keeps them near the same
+lines without aligning each one.
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell

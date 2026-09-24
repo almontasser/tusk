@@ -504,8 +504,8 @@ button.link:hover { text-decoration: underline; }
    History and diff views
    ========================================================================== */
 
-#diff, #history { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#diff header, #history header { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+#diff, #history, #merge { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#merge header, #diff header, #history header { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
 #diff header .codicon-diff { color: var(--muted); }
 #diff-path { font-weight: 600; }
 #diff-label { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -715,3 +715,23 @@ button.link:hover { text-decoration: underline; }
 .composer-package .update.safe { color: var(--green); }
 .composer-package .update.major { color: var(--yellow); }
 .composer-package .badge.warn { color: var(--orange); }
+
+/* ==========================================================================
+   Merge tool
+   ========================================================================== */
+
+#merge header .codicon-git-merge { color: var(--muted); }
+#merge-path { font-weight: 600; }
+#merge-count { color: var(--faint); margin-right: auto; }
+#merge header button:not(.icon-button) { padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
+#merge header button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#merge header button:disabled { opacity: 0.5; }
+.merge-titles { display: grid; grid-template-columns: 1fr 1.2fr 1fr; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border-subtle); color: var(--muted); font-size: 12px; }
+.merge-titles span { padding: 4px 12px; }
+.merge-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr 1fr; }
+.merge-panes > div { min-width: 0; min-height: 0; }
+.merge-panes > div + div { border-left: 1px solid var(--border); }
+.merge-ours { background: #3574f026; }
+.merge-theirs { background: #5fb86526; }
+.merge-ours-gutter { border-left: 3px solid var(--blue); }
+.merge-theirs-gutter { border-left: 3px solid var(--green); }

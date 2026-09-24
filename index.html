@@ -180,6 +180,17 @@
           </header>
           <div id="diff-editor"></div>
         </div>
+        <div id="merge" hidden>
+          <header>
+            <span class="codicon codicon-git-merge"></span><span id="merge-path"></span><span id="merge-count"></span>
+            <button id="merge-accept-ours" title="Resolve every remaining conflict with your side">Accept All Yours</button>
+            <button id="merge-accept-theirs" title="Resolve every remaining conflict with their side">Accept All Theirs</button>
+            <button id="merge-resolved" class="primary" title="Save the file and stage it (git add)">Mark Resolved</button>
+            <button class="icon-button" id="merge-close" aria-label="Close merge" title="Close"><span class="codicon codicon-close"></span></button>
+          </header>
+          <div class="merge-titles"><span>Yours</span><span>Result</span><span>Theirs</span></div>
+          <div class="merge-panes"><div id="merge-ours-pane"></div><div id="merge-result"></div><div id="merge-theirs-pane"></div></div>
+        </div>
         <section id="panel" hidden>
           <div id="panel-resize"></div>
           <nav id="terminal-tabs" role="tablist"></nav>
