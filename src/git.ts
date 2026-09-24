@@ -5,7 +5,7 @@ import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
-import { age, applyBlocks, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
+import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -286,8 +286,21 @@ export async function stageSelected() {
   const blocks = selectedBlocks();
   if (!blocks.length) return host.status("Select lines in a change first.");
   const { f, inIndex, original, modified } = staging;
-  // Staging takes blocks from the working tree into the index; unstaging puts HEAD's lines back.
-  const index = inIndex ? applyBlocks(modified, original, blocks.map(mirror)) : applyBlocks(original, modified, blocks);
+  // A text selection stages just its lines; a click in a block stages the whole block.
+  const side = lastSide === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
+  const selections = (side.getSelections() ?? []).filter((r) => !r.isEmpty());
+  // A selection that ends at column 1 doesn't include that last line.
+  const selectedLine = (line: number) => selections.some((r) => line >= r.startLineNumber && (line < r.endLineNumber || (line === r.endLineNumber && r.endColumn > 1)));
+  const onOriginal = (line: number) => lastSide === "original" && selectedLine(line);
+  const onModified = (line: number) => lastSide === "modified" && selectedLine(line);
+  // Staging takes lines from the working tree into the index; unstaging puts HEAD's lines back.
+  const index = selections.length
+    ? inIndex
+      ? applyLines(modified, original, blocks.map(mirror), onModified, onOriginal)
+      : applyLines(original, modified, blocks, onOriginal, onModified)
+    : inIndex
+      ? applyBlocks(modified, original, blocks.map(mirror))
+      : applyBlocks(original, modified, blocks);
   try {
     const hash = (await gitWithInput(index, "hash-object", "-w", "--stdin", `--path=${f.path}`)).trim();
     const mode = (await git("ls-files", "--stage", "--", f.path)).split(" ")[0] || "100644";

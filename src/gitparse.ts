@@ -311,3 +311,90 @@ export function rebaseTodo(steps: RebaseStep[], messageFile: (i: number) => stri
     })
     .join("\n") + "\n";
 }
+
+/** How alike two lines are, from 0 to 1: the Dice coefficient of their character pairs. */
+function similarity(a: string, b: string): number {
+  const pairs = (s: string) => {
+    const m = new Map<string, number>();
+    const t = s.trim();
+    for (let i = 0; i < t.length - 1; i++) m.set(t.slice(i, i + 2), (m.get(t.slice(i, i + 2)) ?? 0) + 1);
+    return m;
+  };
+  const x = pairs(a);
+  const y = pairs(b);
+  let common = 0;
+  let total = 0;
+  for (const [k, n] of x) (common += Math.min(n, y.get(k) ?? 0)), (total += n);
+  for (const n of y.values()) total += n;
+  return total ? (2 * common) / total : a.trim() === b.trim() ? 1 : 0;
+}
+
+type Step = { from?: number; to?: number };
+
+/** Lines of two runs, paired in order by similarity; lines without a match stand alone. */
+function pairLines(from: string[], to: string[]): Step[] {
+  const p = from.length;
+  const q = to.length;
+  const score = Array.from({ length: p + 1 }, () => new Array<number>(q + 1).fill(0));
+  for (let i = p - 1; i >= 0; i--)
+    for (let j = q - 1; j >= 0; j--) {
+      const sim = similarity(from[i], to[j]);
+      score[i][j] = Math.max(score[i + 1][j], score[i][j + 1], sim >= 0.4 ? sim + score[i + 1][j + 1] : 0);
+    }
+  const matched: Step[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < p || j < q) {
+    if (i < p && j < q && similarity(from[i], to[j]) >= 0.4 && score[i][j] === similarity(from[i], to[j]) + score[i + 1][j + 1]) matched.push({ from: i++, to: j++ });
+    else if (i < p && (j >= q || score[i][j] === score[i + 1][j])) matched.push({ from: i++ });
+    else matched.push({ to: j++ });
+  }
+  // Leftover lines between similar pairs pair by position, as when a line is rewritten outright.
+  const steps: Step[] = [];
+  let froms: number[] = [];
+  let tos: number[] = [];
+  const flush = () => {
+    const n = Math.min(froms.length, tos.length);
+    for (let k = 0; k < n; k++) steps.push({ from: froms[k], to: tos[k] });
+    froms.slice(n).forEach((f) => steps.push({ from: f }));
+    tos.slice(n).forEach((t) => steps.push({ to: t }));
+    froms = [];
+    tos = [];
+  };
+  for (const m of matched) {
+    if (m.from !== undefined && m.to !== undefined) (flush(), steps.push(m));
+    else if (m.from !== undefined) froms.push(m.from);
+    else tos.push(m.to!);
+  }
+  flush();
+  return steps;
+}
+
+/**
+ * Applies only the selected lines of each block: the `from` text with some of the block's lines taken
+ * from `to`. Within a block, lines pair up by similarity, so a changed line pairs with its new version.
+ * A selected pair takes the `to` line; a `from` line with no pair is removed only if selected, and a
+ * `to` line with no pair is added only if selected. `selectedFrom` and `selectedTo` get 1-based line
+ * numbers in each text.
+ */
+export function applyLines(from: string, to: string, blocks: Block[], selectedFrom: (line: number) => boolean, selectedTo: (line: number) => boolean): string {
+  const lines = from.split("\n");
+  const target = to.split("\n");
+  for (const b of [...blocks].sort((x, y) => y.originalStartLineNumber - x.originalStartLineNumber)) {
+    const fromStart = b.originalEndLineNumber ? b.originalStartLineNumber : b.originalStartLineNumber + 1;
+    const fromCount = b.originalEndLineNumber ? b.originalEndLineNumber - b.originalStartLineNumber + 1 : 0;
+    const toStart = b.modifiedEndLineNumber ? b.modifiedStartLineNumber : b.modifiedStartLineNumber + 1;
+    const toCount = b.modifiedEndLineNumber ? b.modifiedEndLineNumber - b.modifiedStartLineNumber + 1 : 0;
+    const fromLines = lines.slice(fromStart - 1, fromStart - 1 + fromCount);
+    const toLines = target.slice(toStart - 1, toStart - 1 + toCount);
+    const out: string[] = [];
+    for (const step of pairLines(fromLines, toLines)) {
+      const selected = (step.from !== undefined && selectedFrom(fromStart + step.from)) || (step.to !== undefined && selectedTo(toStart + step.to));
+      if (step.from !== undefined && step.to !== undefined) out.push(selected ? toLines[step.to] : fromLines[step.from]);
+      else if (step.from !== undefined) !selected && out.push(fromLines[step.from]);
+      else if (selected) out.push(toLines[step.to!]);
+    }
+    lines.splice(fromStart - 1, fromCount, ...out);
+  }
+  return lines.join("\n");
+}

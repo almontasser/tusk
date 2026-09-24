@@ -52,7 +52,7 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
-| Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. Partial staging works per change block, not per single line within a block. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
+| Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
@@ -486,10 +486,16 @@ buttons to open, stage, unstage, or discard it. Write a message and press ⌘⏎
 or click **Commit**. **Commit and Push** also pushes, and sets the upstream
 branch on the first push.
 
-To stage part of a file, open its diff from **Changes**, select lines in the
-changes you want (or click in one), and click **Stage Selected**. Every change
-block that the selection touches is staged, and the rest stay unstaged. In a
-diff from **Staged**, the button is **Unstage Selected**.
+To stage part of a file, open its diff from **Changes** and click **Stage
+Selected**:
+
+- Click in a change (without selecting) to stage the whole change.
+- Select lines to stage only those. On the right, select new or changed lines;
+  on the left, select removed lines. A changed line pairs with its new version,
+  so selecting the new line stages the replacement.
+
+The rest stays unstaged. In a diff from **Staged**, the button is **Unstage
+Selected**, and works the same way.
 
 The editor marks lines that differ from the last commit in the gutter: green
 for added lines, blue for changed lines, and a gray triangle where lines were

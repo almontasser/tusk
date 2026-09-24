@@ -657,6 +657,15 @@ come from the working tree. To unstage, the staged text gets HEAD's lines back
 The selection counts on the side you last clicked, so you can select deleted
 lines on the left.
 
+With a text selection, `applyLines` stages single lines instead of whole
+blocks. Within a block, `pairLines` pairs old and new lines in order by
+similarity (the Dice coefficient of character pairs, at least 0.4, found with a
+small dynamic program), and pairs any lines left between two matches by
+position. A selected pair takes the new line; an old line with no pair is
+removed only if selected, and a new line with no pair is added only if
+selected. So in `welcome` → (`$x = 1;`, `home`), selecting `home` stages the
+replacement without the added line.
+
 ### Change markers and blame
 
 `trackEditor` in `git.ts` adds three things to the code editor:

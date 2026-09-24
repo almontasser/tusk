@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, applyBlocks, checksSummary, lineMap, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, applyBlocks, applyLines, checksSummary, lineMap, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -146,4 +146,27 @@ test("writes a rebase todo list", () => {
     (i) => `/tmp/it's msg-${i}.txt`,
   );
   assert.equal(todo, "pick a1 First\nfixup b2 Typo\npick c3 Old words\nexec git commit --amend --quiet --file='/tmp/it'\\''s msg-2.txt'\ndrop d4 Oops\n");
+});
+
+test("applies only the selected lines of a block", () => {
+  const index = "a\nb\nc\nz\n";
+  const work = "a\nB\nC\nnew\nz\n";
+  // One block: b, c changed to B, C, and "new" added.
+  const block = { originalStartLineNumber: 2, originalEndLineNumber: 3, modifiedStartLineNumber: 2, modifiedEndLineNumber: 4 };
+  const on = (...lines: number[]) => (l: number) => lines.includes(l);
+  const none = () => false;
+  assert.equal(applyLines(index, work, [block], none, on(2)), "a\nB\nc\nz\n"); // only b -> B
+  assert.equal(applyLines(index, work, [block], none, on(4)), "a\nb\nc\nnew\nz\n"); // only the added line
+  assert.equal(applyLines(index, work, [block], none, on(2, 3, 4)), work);
+  // A deletion counts only when selected on the left.
+  const deleted = { originalStartLineNumber: 2, originalEndLineNumber: 3, modifiedStartLineNumber: 1, modifiedEndLineNumber: 0 };
+  assert.equal(applyLines(index, "a\nz\n", [deleted], on(3), none), "a\nb\nz\n");
+  // A changed line pairs with its new version, not with a line added before it.
+  const added = { originalStartLineNumber: 2, originalEndLineNumber: 2, modifiedStartLineNumber: 2, modifiedEndLineNumber: 3 };
+  const before = "a\n    return view('welcome');\nz\n";
+  const after = "a\n    $x = 1;\n    return view('home');\nz\n";
+  assert.equal(applyLines(before, after, [added], none, on(3)), "a\n    return view('home');\nz\n");
+  assert.equal(applyLines(before, after, [added], none, on(2)), "a\n    $x = 1;\n    return view('welcome');\nz\n");
+  // Unstaging mirrors: from the index back toward HEAD.
+  assert.equal(applyLines(work, index, [mirror(block)], on(2), none), "a\nb\nC\nnew\nz\n");
 });
