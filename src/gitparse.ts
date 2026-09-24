@@ -322,7 +322,7 @@ export function alignmentGaps(
   return gaps;
 }
 
-export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
+export type RebaseAction = "pick" | "reword" | "edit" | "squash" | "fixup" | "drop";
 export type RebaseStep = { hash: string; subject: string; action: RebaseAction; message?: string };
 
 /**

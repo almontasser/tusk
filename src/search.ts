@@ -1,6 +1,6 @@
 // Find and replace in files: the Search view in the sidebar.
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { confirm } from "./palette";
 import { monaco } from "./editor";
 import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
@@ -172,7 +172,7 @@ async function replaceIn(paths: string[]) {
   const listed = matches.filter((m) => paths.includes(m.path)).length;
   const count = matches.length >= MAX_MATCHES && paths.length > 1 ? "all" : String(listed);
   const where = paths.length === 1 ? paths[0].slice(host.root().length + 1) : `${paths.length} files`;
-  if (!(await ask(`Replace ${count} matches in ${where} with "${replacement()}"?`, { kind: "warning" }))) return;
+  if (!(await confirm(`Replace ${count} matches in ${where} with "${replacement()}"?`, "Replace All"))) return;
   let replaced = 0;
   for (const path of paths) {
     try {

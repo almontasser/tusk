@@ -789,6 +789,13 @@ becomes `pick` plus `exec git commit --amend --file=<message>`, and
 `--autostash` sets aside uncommitted changes. Ranges that contain merge
 commits are refused, since a plain `rebase -i` would flatten them.
 
+An `edit` step stops the rebase with the commit applied. git then writes
+`rebase-merge/amend` with the commit's hash, which `detectOperation` reads to
+tell an edit stop from a conflict. git refuses `--continue` while changes are
+staged at an edit stop, so **Continue** there first runs
+`git commit --amend --no-edit` when `git diff --cached --quiet` finds staged
+changes.
+
 ### Stash
 
 Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
@@ -1306,10 +1313,18 @@ The UI is a tree, a tab bar, and panels. Plain DOM code handles that in fewer
 lines than a framework needs for setup. Revisit this if the panels in
 milestones 4 and 5 become hard to maintain.
 
-### 2026-09-24: Use the dialog plugin for confirmations
+### 2026-09-24: Ask questions in the palette
 
-`window.confirm` is unreliable in WKWebView, so the app asks through
-`@tauri-apps/plugin-dialog` instead.
+`window.confirm` is unreliable in WKWebView. The dialog plugin's native dialogs
+replaced it at first, but one that's open when the page reloads (as it does on
+every hot reload in development) stays on screen and can't be answered, even
+with Escape. Every question now goes through `choose` and `confirm` in
+`src/palette.ts`, which list the answers in the palette; Escape, or opening
+another palette, counts as no answer. This covers deletes, discards, merges,
+stash drops, Replace All, unsaved changes when closing a tab, and questions
+from language servers (`window/showMessageRequest`), which now also show every
+action a server offers rather than at most three. The dialog plugin remains
+for choosing a folder.
 
 ### 2026-09-24: Bundle pinned tools instead of global installs
 

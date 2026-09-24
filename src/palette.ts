@@ -62,8 +62,9 @@ let close: (() => void) | null = null;
 /**
  * Opens the picker. `source` runs on every query change, after `delay` ms for slow sources.
  * `initial` prefills the input, optionally selecting part of it (such as a file name without its extension).
+ * `onCancel` runs when the picker closes without a choice.
  */
-export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number] }) {
+export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number]; onCancel?: () => void }) {
   close?.();
   const overlay = document.createElement("div");
   overlay.id = "palette";
@@ -138,14 +139,16 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
 
   const choose = (i: number) => {
     const item = items[i];
-    dismiss(false);
+    dismiss(false, !!item);
     item?.run();
   };
 
-  const dismiss = (restoreFocus = true) => {
+  const dismiss = (restoreFocus = true, chosen = false) => {
+    if (!overlay.isConnected) return;
     overlay.remove();
     close = null;
     if (restoreFocus) previousFocus?.focus();
+    if (!chosen) initial?.onCancel?.();
   };
   close = dismiss;
 
@@ -169,3 +172,15 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
   if (initial?.select) input.setSelectionRange(...initial.select);
   update();
 }
+
+/**
+ * Asks a question in the picker and returns the chosen option, or null for Escape. Used instead of native
+ * dialogs, which a page reload can leave stuck on screen.
+ */
+export const choose = (question: string, options: string[]) =>
+  new Promise<string | null>((resolve) =>
+    pick(question, () => options.map((label) => ({ label, run: () => resolve(label) })), 0, { value: "", onCancel: () => resolve(null) }),
+  );
+
+/** Asks a yes-or-no question: `action` confirms, and Cancel or Escape doesn't. */
+export const confirm = async (question: string, action: string) => (await choose(question, [action, "Cancel"])) === action;

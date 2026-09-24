@@ -52,7 +52,7 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
-| Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. |
+| Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
@@ -555,11 +555,14 @@ Files over 1 MB aren't kept.
 To rewrite recent commits, open a commit in the Git Log and choose
 **Interactive Rebase from Here…**, or run **Interactive Rebase…** from ⌘⇧A and
 choose the commit to rebase onto. The commits after it are listed, oldest
-first. For each, choose **Pick**, **Reword** (and edit its message),
-**Squash into previous**, **Fixup** (squash and discard its message), or
-**Drop**, and use the arrows to reorder them. **Start Rebase** runs `git rebase
--i` in a terminal tab; uncommitted changes are stashed and restored. If a
-commit conflicts, resolve it, then click **Continue** in the Commit view.
+first. For each, choose **Pick**, **Reword** (and edit its message), **Edit**
+(stop at it to change its files), **Squash into previous**, **Fixup** (squash
+and discard its message), or **Drop**, and use the arrows to reorder them.
+**Start Rebase** runs `git rebase -i` in a terminal tab; uncommitted changes
+are stashed and restored. If a commit conflicts, resolve it, then click
+**Continue** in the Commit view. At an **Edit** commit, the rebase stops and
+the Commit view says so: change files, stage what belongs in the commit, and
+click **Continue**. The staged changes are added to that commit.
 
 ### Stash
 

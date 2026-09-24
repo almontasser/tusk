@@ -1,6 +1,6 @@
-// Interactive rebase: choose what happens to each commit after a base (pick, reword, squash, fixup,
+// Interactive rebase: choose what happens to each commit after a base (pick, reword, edit, squash, fixup,
 // drop) and their order, then run git's own rebase -i with that todo list. It runs in a terminal tab,
-// so a conflict stops it there and the Commit view's banner offers Continue and Abort.
+// so a conflict or an edit stops it there and the Commit view's banner offers Continue and Abort.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { git, refreshGit } from "./git";
@@ -14,6 +14,7 @@ let host: Host;
 const ACTIONS: [RebaseAction, string][] = [
   ["pick", "Pick"],
   ["reword", "Reword"],
+  ["edit", "Edit (stop to change it)"],
   ["squash", "Squash into previous"],
   ["fixup", "Fixup (discard message)"],
   ["drop", "Drop"],

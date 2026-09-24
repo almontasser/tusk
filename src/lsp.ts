@@ -3,10 +3,10 @@
 // serve the same language; Monaco merges their completions, locations, hovers,
 // code actions, and markers.
 import { invoke } from "@tauri-apps/api/core";
-import { message } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
+import { choose } from "./palette";
 import { settings } from "./settings";
 
 type M = typeof monaco.languages;
@@ -29,18 +29,13 @@ let host: Host;
 const servers: Server[] = [];
 
 /**
- * Shows a server's question as a native dialog and returns the chosen action, or null if
- * dismissed. Phpactor asks this way, for example whether to trust a project's .phpactor.json.
+ * Shows a server's question in the picker and returns the chosen action, or null if dismissed.
+ * Phpactor asks this way, for example whether to trust a project's .phpactor.json.
  */
 async function askUser(server: string, params: L.ShowMessageRequestParams): Promise<L.MessageActionItem | null> {
   const actions = params.actions ?? [];
-  const [a, b, c] = actions.map((x) => x.title);
-  const buttons =
-    actions.length >= 3 ? { yes: a, no: b, cancel: c } : actions.length === 2 ? { ok: a, cancel: b } : actions.length === 1 ? { ok: a } : undefined;
-  // ponytail: native dialogs have at most three buttons; a fourth action and beyond can't be chosen.
-  const result = await message(params.message, { title: server, kind: params.type === 1 ? "error" : params.type === 2 ? "warning" : "info", buttons });
-  const keys = actions.length >= 3 ? ["Yes", "No", "Cancel"] : ["Ok", "Cancel"];
-  return actions.find((x) => x.title === result) ?? actions[keys.indexOf(result)] ?? null;
+  const result = await choose(`${server}: ${params.message}`, actions.length ? actions.map((x) => x.title) : ["OK"]);
+  return actions.find((x) => x.title === result) ?? null;
 }
 
 // ---- Conversions between LSP (0-based) and Monaco (1-based) ----

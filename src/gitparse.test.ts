@@ -130,10 +130,11 @@ test("writes a rebase todo list", () => {
       { hash: "b2", subject: "Typo", action: "fixup" },
       { hash: "c3", subject: "Old words", action: "reword", message: "New words" },
       { hash: "d4", subject: "Oops", action: "drop" },
+      { hash: "e5", subject: "Fix me", action: "edit" },
     ],
     (i) => `/tmp/it's msg-${i}.txt`,
   );
-  assert.equal(todo, "pick a1 First\nfixup b2 Typo\npick c3 Old words\nexec git commit --amend --quiet --file='/tmp/it'\\''s msg-2.txt'\ndrop d4 Oops\n");
+  assert.equal(todo, "pick a1 First\nfixup b2 Typo\npick c3 Old words\nexec git commit --amend --quiet --file='/tmp/it'\\''s msg-2.txt'\ndrop d4 Oops\nedit e5 Fix me\n");
 });
 
 test("applies only the selected lines of a block", () => {

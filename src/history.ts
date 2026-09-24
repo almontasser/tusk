@@ -1,8 +1,7 @@
 // Git history: the log of the repository or of one file, commit details, and commit actions.
-import { ask } from "@tauri-apps/plugin-dialog";
 import { change, git, showDiff } from "./git";
 import { age, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
-import { pick } from "./palette";
+import { confirm, pick } from "./palette";
 import { interactiveRebase } from "./rebase";
 
 type Host = { root(): string; status(text: string): void };
@@ -117,10 +116,10 @@ async function select(c: Commit) {
     actions.append(b);
   };
   action("Copy Hash", () => navigator.clipboard.writeText(c.hash).then(() => host.status(`Copied ${c.hash}`)));
-  action("Check Out", () => confirmThen(`Check out ${c.short}? You'll be on a detached HEAD, not a branch.`, "checkout", c.hash));
+  action("Check Out", () => confirmThen("Check Out", `Check out ${c.short}? You'll be on a detached HEAD, not a branch.`, "checkout", c.hash));
   action("New Branch Here…", () => newBranch(c));
-  action("Cherry-Pick", () => confirmThen(`Apply ${c.short} "${c.subject}" to the current branch?`, "cherry-pick", c.hash));
-  action("Revert", () => confirmThen(`Create a commit that undoes ${c.short} "${c.subject}"?`, "revert", "--no-edit", c.hash));
+  action("Cherry-Pick", () => confirmThen("Cherry-Pick", `Apply ${c.short} "${c.subject}" to the current branch?`, "cherry-pick", c.hash));
+  action("Revert", () => confirmThen("Revert", `Create a commit that undoes ${c.short} "${c.subject}"?`, "revert", "--no-edit", c.hash));
   action("Interactive Rebase from Here…", () => interactiveRebase(c.hash));
 
   const list = el("ul", "history-files");
@@ -156,8 +155,8 @@ async function diff(c: Commit, f: ChangedFile) {
   showDiff(f.path, before, after, `${c.short} ${c.subject}`, reopen);
 }
 
-async function confirmThen(question: string, ...args: string[]) {
-  if (!(await ask(question, { kind: "warning" }))) return;
+async function confirmThen(action: string, question: string, ...args: string[]) {
+  if (!(await confirm(question, action))) return;
   await change(...args);
   commits = [];
   await load();

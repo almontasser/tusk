@@ -1,12 +1,11 @@
 // Git integration: commit view, diff view, and branches. Everything shells out to `git`.
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
 import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
-import { type Item, pick, rank } from "./palette";
+import { confirm, type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
 type Host = {
@@ -82,7 +81,8 @@ const unstaged = (f: FileStatus) => !isConflict(f) && f.worktree !== " ";
 
 // ---- Merges, rebases, cherry-picks, and reverts in progress ----
 
-type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string };
+/** `editing` is the commit a rebase stopped at for an `edit` step, to change before continuing. */
+type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string; editing?: string };
 let operation: Operation | null = null;
 let gitDir: { root: string; path: string } | undefined;
 
@@ -96,7 +96,11 @@ async function detectOperation(): Promise<Operation | null> {
   if (!dir) return null;
   const exists = (name: string) => invoke<boolean>("path_exists", { path: `${dir}/${name}` });
   for (const [name, kind] of [["rebase-merge", "rebase"], ["rebase-apply", "rebase"], ["MERGE_HEAD", "merge"], ["CHERRY_PICK_HEAD", "cherry-pick"], ["REVERT_HEAD", "revert"]] as const) {
-    if (await exists(name)) return { kind, gitDir: dir };
+    if (!(await exists(name))) continue;
+    // git writes rebase-merge/amend when it stops at an edit step.
+    const amend = name === "rebase-merge" ? await invoke<string>("read_file", { path: `${dir}/rebase-merge/amend` }).catch(() => "") : "";
+    const editing = amend.trim() ? (await git("log", "-1", "--format=%h %s", amend.trim()).catch(() => amend.trim().slice(0, 7))).trim() : undefined;
+    return { kind, gitDir: dir, editing };
   }
   return null;
 }
@@ -105,18 +109,21 @@ function renderOperation() {
   const banner = $("git-operation");
   banner.hidden = !operation;
   if (!operation) return;
-  const { kind, gitDir: dir } = operation;
+  const { kind, gitDir: dir, editing } = operation;
   const conflicts = current?.files.filter(isConflict).length ?? 0;
   const next = kind === "merge" ? "commit" : "continue";
-  banner.querySelector("span")!.textContent =
-    `${kind[0].toUpperCase() + kind.slice(1)} in progress. ` + (conflicts ? `Resolve ${conflicts} conflict${conflicts > 1 ? "s" : ""}, then ${next}.` : `No conflicts left: ${next} when ready.`);
+  banner.querySelector("span")!.textContent = editing && !conflicts
+    ? `Rebase stopped to edit ${editing}. Change and stage files, then continue: staged changes go into this commit.`
+    : `${kind[0].toUpperCase() + kind.slice(1)} in progress. ` + (conflicts ? `Resolve ${conflicts} conflict${conflicts > 1 ? "s" : ""}, then ${next}.` : `No conflicts left: ${next} when ready.`);
   $("operation-abort").onclick = async () => {
-    if (await ask(`Abort the ${kind} and return to the state before it? Conflict resolutions are lost.`, { kind: "warning" })) change(kind, "--abort");
+    if (await confirm(`Abort the ${kind} and return to the state before it? Conflict resolutions are lost.`, `Abort the ${kind}`)) change(kind, "--abort");
   };
   const continueButton = $("operation-continue");
   continueButton.hidden = kind === "merge"; // A merge finishes with a normal commit.
-  // GIT_EDITOR=true accepts git's prepared message instead of opening an editor.
-  continueButton.onclick = () => openTerminal(host.root(), `${kind} --continue`, ["/bin/sh", "-c", `GIT_EDITOR=true git ${kind} --continue`]);
+  // GIT_EDITOR=true accepts git's prepared message instead of opening an editor. At an edit stop, git
+  // refuses to continue with staged changes, so they're amended into the commit first.
+  const amend = editing && !conflicts ? "git diff --cached --quiet || git commit --amend --no-edit --quiet; " : "";
+  continueButton.onclick = () => openTerminal(host.root(), `${kind} --continue`, ["/bin/sh", "-c", `${amend}GIT_EDITOR=true git ${kind} --continue`]);
   // Offer git's prepared merge message, such as "Merge branch 'feature'".
   const message = $("commit-message") as HTMLTextAreaElement;
   if (kind === "merge" && !message.value) invoke<string>("read_file", { path: `${dir}/MERGE_MSG` }).then((m) => (message.value ||= m.replace(/^#.*$/gm, "").trim()), () => {});
@@ -149,7 +156,7 @@ function conflictRow(f: FileStatus) {
 async function acceptSide(f: FileStatus, side: "ours" | "theirs") {
   const deleted = side === "ours" ? f.index === "D" : f.worktree === "D";
   const what = deleted ? `delete ${f.path}, as ${side === "ours" ? "your" : "their"} side did` : `replace ${f.path} with ${side === "ours" ? "your" : "their"} version`;
-  if (!(await ask(`Resolve the conflict and ${what}? Other changes to the file are lost.`, { kind: "warning" }))) return;
+  if (!(await confirm(`Resolve the conflict and ${what}? Other changes to the file are lost.`, `Use ${side === "ours" ? "your" : "their"} version`))) return;
   if (deleted) return change("rm", "--quiet", "--", f.path);
   try {
     await git("checkout", `--${side}`, "--", f.path);
@@ -217,7 +224,7 @@ function fileRow(f: FileStatus, inIndex: boolean) {
 
 async function discard(f: FileStatus) {
   const untracked = f.worktree === "?";
-  const ok = await ask(untracked ? `Move the new file ${f.path} to the Trash?` : `Discard your changes to ${f.path}?`, { kind: "warning" });
+  const ok = await confirm(untracked ? `Move the new file ${f.path} to the Trash?` : `Discard your changes to ${f.path}?`, untracked ? "Move to Trash" : "Discard Changes");
   if (!ok) return;
   if (untracked) await invoke("trash_path", { path: `${host.root()}/${f.path}` });
   else await change("restore", "--", f.path);
@@ -573,7 +580,7 @@ function stashActions(ref: string, subject: string) {
     {
       label: "Drop",
       detail: "Delete the stash",
-      run: async () => (await ask(`Delete the stash "${subject}"? This can't be undone.`, { kind: "warning" })) && change("stash", "drop", ref),
+      run: async () => (await confirm(`Delete the stash "${subject}"? This can't be undone.`, "Delete Stash")) && change("stash", "drop", ref),
     },
   ];
   pick(`${ref}: ${subject}`, (q) => rank(q, items));

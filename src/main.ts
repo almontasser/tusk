@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { message, open } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
-import { type Item, pick, rank } from "./palette";
+import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
@@ -504,9 +504,9 @@ async function closeTab(path: string) {
   if (isDirty(tab)) {
     const choice = settings.autoSave
       ? "Save"
-      : await message(`Save changes to ${nameOf(path)}?`, { kind: "warning", buttons: { yes: "Save", no: "Don't Save", cancel: "Cancel" } });
-    if (choice === "Cancel") return;
-    if (choice === "Save" || choice === "Yes") {
+      : await choose(`Save changes to ${nameOf(path)}?`, ["Save", "Don't Save", "Cancel"]);
+    if (choice === "Cancel" || choice === null) return;
+    if (choice === "Save") {
       await saveFile(path);
       if (isDirty(tab)) return;
     }

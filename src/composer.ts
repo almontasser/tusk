@@ -1,9 +1,8 @@
 // Composer tool window: the project's direct packages with available updates, and actions to require,
 // update, and remove packages. Commands use the bundled composer.phar and run in terminal tabs.
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { packages, type Package } from "./composerdata";
-import { pick } from "./palette";
+import { confirm, pick } from "./palette";
 import { openTerminal } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
@@ -80,7 +79,7 @@ function packageActions(p: Package) {
     {
       label: "Remove…",
       run: async () => {
-        if (await ask(`Remove ${p.name} from the project?`, { title: "Remove package", kind: "warning" }))
+        if (await confirm(`Remove ${p.name} from the project?`, `Remove ${p.name}`))
           run(`composer remove ${p.name}`, ["remove", ...(p.dev ? ["--dev"] : []), p.name]);
       },
     },
