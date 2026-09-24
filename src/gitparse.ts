@@ -252,11 +252,10 @@ export const mirror = (b: Block): Block => ({
 });
 
 /**
- * Maps line numbers of one text to the matching lines of another, for scrolling two versions of a file
- * together. Lines that occur exactly once in both texts, in the same order, are anchors (the idea behind
- * patience diff); a line between anchors keeps its distance from the anchor above, capped before the next.
+ * Pairs of 1-based lines, [from, to], that match: lines that occur exactly once in both texts, in the
+ * same order (the longest increasing run, as in patience diff).
  */
-export function lineMap(from: string[], to: string[]): (line: number) => number {
+export function lineAnchors(from: string[], to: string[]): [number, number][] {
   const count = (lines: string[]) => {
     const m = new Map<string, number[]>();
     lines.forEach((l, i) => l.trim() && m.set(l, [...(m.get(l) ?? []), i + 1]));
@@ -281,17 +280,46 @@ export function lineMap(from: string[], to: string[]): (line: number) => number 
     prev[k] = lo ? tails[lo - 1] : -1;
     tails[lo] = k;
   });
-  const anchors: [number, number][] = [[0, 0]];
   const chain: [number, number][] = [];
   for (let k = tails.at(-1) ?? -1; k >= 0; k = prev[k]) chain.unshift(pairs[k]);
-  anchors.push(...chain, [from.length + 1, to.length + 1]);
-  return (line) => {
-    let i = 0;
-    while (i < anchors.length - 1 && anchors[i + 1][0] <= line) i++;
-    const [fa, ta] = anchors[i];
-    const next = anchors[Math.min(i + 1, anchors.length - 1)];
-    return Math.max(1, Math.min(ta + (line - fa), next[1] - 1, to.length));
-  };
+  return chain;
+}
+
+/**
+ * Blank lines to add to three versions of a file so that lines they share sit side by side: for each
+ * pane, [after line, blank lines]. Result lines anchored in both sides split the texts into segments,
+ * and each segment is padded to the tallest pane's height.
+ */
+export function alignmentGaps(
+  ours: string[],
+  result: string[],
+  theirs: string[],
+  /** Result lines that have one extra line drawn above them, such as a conflict's buttons. */
+  resultExtra: number[] = [],
+): Record<"ours" | "result" | "theirs", [number, number][]> {
+  const toOurs = new Map(lineAnchors(result, ours));
+  const toTheirs = new Map(lineAnchors(result, theirs));
+  const shared: [number, number, number][] = [[0, 0, 0]];
+  for (const [r, o] of toOurs) {
+    const t = toTheirs.get(r);
+    // Keep the order increasing in every pane.
+    const last = shared.at(-1)!;
+    if (t !== undefined && o > last[0] && t > last[2]) shared.push([o, r, t]);
+  }
+  shared.push([ours.length + 1, result.length + 1, theirs.length + 1]);
+  const gaps: Record<"ours" | "result" | "theirs", [number, number][]> = { ours: [], result: [], theirs: [] };
+  for (let k = 1; k < shared.length; k++) {
+    const [o0, r0, t0] = shared[k - 1];
+    const [o1, r1, t1] = shared[k];
+    const extra = resultExtra.filter((line) => line > r0 && line < r1).length;
+    const heights = [o1 - o0 - 1, r1 - r0 - 1 + extra, t1 - t0 - 1];
+    const tallest = Math.max(...heights);
+    (["ours", "result", "theirs"] as const).forEach((pane, i) => {
+      const after = [o1, r1, t1][i] - 1;
+      if (tallest > heights[i]) gaps[pane].push([after, tallest - heights[i]]);
+    });
+  }
+  return gaps;
 }
 
 export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";

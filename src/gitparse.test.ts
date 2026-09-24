@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, applyBlocks, applyLines, checksSummary, lineMap, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -122,18 +122,6 @@ test("applies chosen diff blocks", () => {
   assert.equal(applyBlocks("a\nd\n", original, [mirror(deleted)]), original);
 });
 
-test("maps lines between versions of a file", () => {
-  const result = ["<?php", "", "use A;", "<<<<<<< HEAD", "ours line", "=======", "theirs line", ">>>>>>> b", "function x() {", "}", "tail"];
-  const ours = ["<?php", "", "// added", "// more", "use A;", "ours line", "function x() {", "}", "tail"];
-  const map = lineMap(result, ours);
-  assert.equal(map(1), 1);
-  assert.equal(map(3), 5); // use A; moved down by two lines
-  assert.equal(map(5), 6); // the conflict's own side
-  assert.equal(map(7), 6); // their line has no match: stays at the last anchor's neighbour
-  assert.equal(map(9), 7);
-  assert.equal(map(11), 9);
-  assert.equal(lineMap(["a"], [])(1), 1);
-});
 
 test("writes a rebase todo list", () => {
   const todo = rebaseTodo(
@@ -169,4 +157,21 @@ test("applies only the selected lines of a block", () => {
   assert.equal(applyLines(before, after, [added], none, on(2)), "a\n    $x = 1;\n    return view('welcome');\nz\n");
   // Unstaging mirrors: from the index back toward HEAD.
   assert.equal(applyLines(work, index, [mirror(block)], on(2), none), "a\nb\nC\nnew\nz\n");
+});
+
+test("pads three versions so shared lines line up", () => {
+  const ours = ["start", "mine 1", "mine 2", "end"];
+  const result = ["start", "<<<", "mine 1", "mine 2", "===", "theirs", ">>>", "end"];
+  const theirs = ["start", "theirs", "end", "extra"];
+  const gaps = alignmentGaps(ours, result, theirs);
+  // Between "start" and "end", the result has 6 lines, ours 2, and theirs 1.
+  assert.deepEqual(gaps.ours, [[3, 4], [4, 1]]);
+  assert.deepEqual(gaps.theirs, [[2, 5]]);
+  // After "end", theirs has one more line than the others.
+  assert.deepEqual(gaps.result, [[8, 1]]);
+  // Lines only one side kept, while ours is behind the result, still line up.
+  const long = alignmentGaps(["a", "x", "b"], ["pre1", "pre2", "a", "b"], ["pre1", "pre2", "a", "x", "b"]);
+  assert.deepEqual(long.result, [[3, 1]]);
+  // A line of buttons above the conflict makes that segment one line taller in the result.
+  assert.deepEqual(alignmentGaps(ours, result, theirs, [2]).ours, [[3, 5], [4, 1]]);
 });

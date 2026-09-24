@@ -2,7 +2,7 @@
 import { monaco } from "./editor";
 import { type Conflict, parseConflicts } from "./gitparse";
 
-type Choice = "current" | "incoming" | "both";
+export type Choice = "current" | "incoming" | "both";
 
 /** The lines that replace a conflict block for a choice. The base section (diff3 style) is dropped. */
 function resolution(lines: string[], c: Conflict, choice: Choice) {
@@ -11,7 +11,7 @@ function resolution(lines: string[], c: Conflict, choice: Choice) {
   return choice === "current" ? current : choice === "incoming" ? incoming : [...current, ...incoming];
 }
 
-function accept(model: monaco.editor.ITextModel, start: number, choice: Choice) {
+export function accept(model: monaco.editor.ITextModel, start: number, choice: Choice) {
   const lines = model.getLinesContent();
   const c = parseConflicts(lines).find((x) => x.start === start);
   if (!c) return; // The block changed since the link was drawn.

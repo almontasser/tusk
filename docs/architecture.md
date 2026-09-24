@@ -770,14 +770,21 @@ The middle pane uses the file's own model, so the inline links and conflict
 colors from `conflicts.ts` work unchanged, and an open tab of the file shows the
 same edits. **Mark Resolved** writes the model and runs `git add`. Saving a resolved file
 that's open in a tab also runs `git add`, so `change` in `git.ts` runs
-state-changing commands one at a time; two at once fail on git's `index.lock`. Scrolling any pane scrolls the others to the matching line. `lineMap` in
-`src/gitparse.ts` maps line numbers between the result and each side: lines
-that occur exactly once in both texts, in the same order (the longest
-increasing run, as in patience diff), are anchors, and a line between anchors
-keeps its distance from the anchor above, capped before the next one. Every
-pane maps through the result, the one text that shares lines with both sides.
-The other panes move with `ScrollType.Immediate`: a smooth scroll fires its
-events after the `syncing` guard is released and would scroll the panes back.
+state-changing commands one at a time; two at once fail on git's `index.lock`. The panes are padded so that lines all three versions share sit side by side.
+`alignmentGaps` in `src/gitparse.ts` finds anchors: result lines that match a
+line in both sides, where lines that occur exactly once in both texts, in the
+same order, match (`lineAnchors`, the idea behind patience diff). Between two
+anchors, each pane has some number of lines; the shorter panes get a striped
+view zone for the difference. Every pane is then the same height, so scrolling
+copies one position to the others, with `ScrollType.Immediate` (a smooth scroll
+fires its events after the `syncing` guard is released and would scroll the
+panes back). The zones are recomputed 150 ms after the result changes.
+
+The result pane turns off CodeLens and draws its own **Accept** buttons as
+one-line view zones above each conflict, because a CodeLens takes height the
+alignment can't count. Monaco draws its text layer above view zones, so a click
+never reaches the buttons; `onMouseDown` reports a view-zone target with its
+id, and the button under the pointer is found by position.
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell

@@ -2,9 +2,9 @@
 // where the inline Accept links resolve each conflict. The middle pane shares the file's model, so
 // its edits are the real file.
 import { invoke } from "@tauri-apps/api/core";
-import { acceptAll, decorateConflicts } from "./conflicts";
+import { accept, acceptAll, type Choice, decorateConflicts } from "./conflicts";
 import { createEditor, monaco } from "./editor";
-import { lineChanges, lineMap, parseConflicts } from "./gitparse";
+import { alignmentGaps, lineChanges, parseConflicts } from "./gitparse";
 import { addEditor } from "./settings";
 
 type Host = {
@@ -33,51 +33,85 @@ function createPanes() {
   };
   const result = createEditor($("merge-result"));
   addEditor(result);
+  // The merge view draws its own Accept buttons, as view zones whose height the alignment counts.
+  result.updateOptions({ codeLens: false, stickyScroll: { enabled: false } });
+  result.onMouseDown((e) => {
+    if (e.target.type !== monaco.editor.MouseTargetType.CONTENT_VIEW_ZONE) return;
+    const row = buttonRows.get(e.target.detail.viewZoneId);
+    const { posx, posy } = e.event;
+    const button = [...(row?.querySelectorAll("button") ?? [])].find((b) => {
+      const r = b.getBoundingClientRect();
+      return posx >= r.left && posx <= r.right && posy >= r.top && posy <= r.bottom;
+    });
+    button?.click();
+  });
   decorateConflicts(result);
   panes = { ours: side($("merge-ours-pane")), result, theirs: side($("merge-theirs-pane")) };
   const { ours, theirs } = panes;
   for (const ed of [ours, result, theirs]) ed.onDidScrollChange((e) => e.scrollTopChanged && syncFrom(ed));
   result.onDidChangeModelContent(() => {
-    clearTimeout(remapTimer);
-    remapTimer = setTimeout(remap, 200);
+    clearTimeout(alignTimer);
+    alignTimer = setTimeout(align, 150);
   });
 }
 
-// ---- Aligned scrolling ----
-// Scrolling any pane scrolls the others to the matching line, found by lineMap between each side
-// and the result, so unchanged code stays level even where one side added or removed lines.
+// ---- Alignment ----
+// Blank striped space is added where a pane has fewer lines than the others (view zones), so lines
+// the three versions share sit side by side and the panes are the same height. Scrolling then copies
+// one position to all. The result's conflict buttons are zones too, so their height is counted.
 
-type Maps = Record<"ours" | "theirs", { to: (line: number) => number; from: (line: number) => number }>;
-let maps: Maps | null = null;
-let remapTimer: ReturnType<typeof setTimeout> | undefined;
+const zoneIds = new Map<monaco.editor.ICodeEditor, string[]>();
+/** Button rows by zone id. Monaco's text layer covers view zones, so clicks are found by position. */
+const buttonRows = new Map<string, HTMLElement>();
+let alignTimer: ReturnType<typeof setTimeout> | undefined;
 let syncing = false;
 
-function remap() {
-  if (!panes?.result.getModel() || !panes.ours.getModel() || !panes.theirs.getModel()) return (maps = null);
-  const lines = (ed: monaco.editor.IStandaloneCodeEditor) => ed.getModel()!.getLinesContent();
-  const result = lines(panes.result);
-  const side = (ed: monaco.editor.IStandaloneCodeEditor) => ({ to: lineMap(result, lines(ed)), from: lineMap(lines(ed), result) });
-  maps = { ours: side(panes.ours), theirs: side(panes.theirs) };
+function setZones(ed: monaco.editor.IStandaloneCodeEditor, zones: monaco.editor.IViewZone[]) {
+  ed.changeViewZones((acc) => {
+    for (const id of zoneIds.get(ed) ?? []) acc.removeZone(id);
+    zoneIds.set(ed, zones.map((z) => acc.addZone(z)));
+  });
 }
 
-/** Puts `line` at the same height in `ed` as `source` shows its first visible line, keeping the offset within it. */
-function scrollTo(ed: monaco.editor.IStandaloneCodeEditor, line: number, offset: number) {
-  // Immediate: a smooth scroll would fire its events after `syncing` is reset and scroll the others back.
-  ed.setScrollTop(ed.getTopForLineNumber(line) + offset, monaco.editor.ScrollType.Immediate);
+const spacer = (afterLineNumber: number, heightInLines: number): monaco.editor.IViewZone => {
+  const domNode = document.createElement("div");
+  domNode.className = "merge-spacer";
+  return { afterLineNumber, heightInLines, domNode };
+};
+
+/** A line of Accept buttons above a conflict in the result pane. */
+function conflictButtons(model: monaco.editor.ITextModel, start: number): monaco.editor.IViewZone {
+  const domNode = document.createElement("div");
+  domNode.className = "merge-conflict-actions";
+  for (const [label, choice] of [["Accept Yours", "current"], ["Accept Theirs", "incoming"], ["Accept Both", "both"]] as [string, Choice][]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => accept(model, start, choice);
+    domNode.append(b);
+  }
+  return { afterLineNumber: start - 1, heightInLines: 1, domNode };
+}
+
+function align() {
+  if (!panes?.result.getModel() || !panes.ours.getModel() || !panes.theirs.getModel()) return;
+  const model = panes.result.getModel()!;
+  const conflicts = parseConflicts(model.getLinesContent()).map((c) => c.start);
+  const gaps = alignmentGaps(panes.ours.getModel()!.getLinesContent(), model.getLinesContent(), panes.theirs.getModel()!.getLinesContent(), conflicts);
+  setZones(panes.ours, gaps.ours.map(([after, n]) => spacer(after, n)));
+  setZones(panes.theirs, gaps.theirs.map(([after, n]) => spacer(after, n)));
+  const rows = conflicts.map((start) => conflictButtons(model, start));
+  setZones(panes.result, [...rows, ...gaps.result.map(([after, n]) => spacer(after, n))]);
+  buttonRows.clear();
+  zoneIds.get(panes.result)!.slice(0, rows.length).forEach((id, i) => buttonRows.set(id, rows[i].domNode));
+  syncFrom(panes.result);
 }
 
 function syncFrom(source: monaco.editor.IStandaloneCodeEditor) {
-  if (syncing || !panes || !maps) return;
-  const first = source.getVisibleRanges()[0]?.startLineNumber;
-  if (!first) return;
-  const offset = source.getScrollTop() - source.getTopForLineNumber(first);
+  if (syncing || !panes) return;
   syncing = true;
   try {
-    // Every pane is mapped through the result, the one text that both sides share lines with.
-    const resultLine = source === panes.result ? first : source === panes.ours ? maps.ours.from(first) : maps.theirs.from(first);
-    if (source !== panes.result) scrollTo(panes.result, resultLine, offset);
-    if (source !== panes.ours) scrollTo(panes.ours, maps.ours.to(resultLine), offset);
-    if (source !== panes.theirs) scrollTo(panes.theirs, maps.theirs.to(resultLine), offset);
+    // Immediate: a smooth scroll would fire its events after `syncing` is reset and scroll the others back.
+    for (const ed of [panes.ours, panes.result, panes.theirs]) if (ed !== source) ed.setScrollTop(source.getScrollTop(), monaco.editor.ScrollType.Immediate);
   } finally {
     syncing = false;
   }
@@ -112,11 +146,11 @@ export async function openMerge(rel: string) {
   markChanges(panes!.ours, base, ours, "merge-ours");
   markChanges(panes!.theirs, base, theirs, "merge-theirs");
   current = { rel, path, sides, listener: model.onDidChangeContent(updateCount) };
-  remap();
   $("merge-path").textContent = rel;
   updateCount();
   document.querySelectorAll<HTMLElement>("#editor, #history, #diff").forEach((e) => (e.hidden = true));
   $("merge").hidden = false;
+  align();
   panes!.result.focus();
 }
 
@@ -128,7 +162,7 @@ export function closeMerge() {
   panes?.result.setModel(null);
   current.sides.forEach((m) => m.dispose());
   current = null;
-  maps = null;
+  for (const ed of [panes?.ours, panes?.result, panes?.theirs]) if (ed) setZones(ed, []);
   $("merge").hidden = true;
   $("editor").hidden = false;
 }

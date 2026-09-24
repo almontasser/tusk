@@ -761,3 +761,7 @@ button.link:hover { text-decoration: underline; }
 .rebase-step.action-squash .subject, .rebase-step.action-fixup .subject { color: var(--muted); padding-left: 16px; }
 #rebase .buttons { display: flex; justify-content: flex-end; gap: 8px; }
 #rebase .buttons button { padding: 4px 16px; }
+.merge-spacer { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--border-subtle) 6px 7px); }
+.merge-conflict-actions { padding-left: 4px; font-size: 12px; line-height: 21px; }
+.merge-conflict-actions button { border: 0; background: none; padding: 0; margin-right: 14px; color: var(--blue); cursor: pointer; pointer-events: auto; }
+.merge-conflict-actions button:hover { text-decoration: underline; }
