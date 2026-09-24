@@ -101,6 +101,19 @@ stops the old server.
 
 The bridge doesn't parse messages. All protocol logic lives in `src/lsp.ts`.
 
+### Phpactor's index
+
+Phpactor's indexer ignores `.gitignore`. The client passes
+`indexer.exclude_patterns` that add hidden folders, `node_modules`, `storage`,
+and `bootstrap/cache` to Phpactor's defaults. On a project with three git
+worktrees under `.claude/`, this cut the index from 125,859 files to about
+26,700.
+
+Phpactor keeps index entries for files that later become excluded, which
+would list classes twice. The client sets its own `indexer.index_path` with a
+version suffix (`%project_id%-editor-1`). When the patterns change, bump the
+suffix, and every project gets a fresh index.
+
 ### Language server client
 
 `src/lsp.ts` is a small client written for this editor:
@@ -201,16 +214,24 @@ stay useful.
 
 ### Default Mago configuration
 
-The editor analyzes one file at a time, and Mago then reads only that file and
-the paths in `includes`. Without a configuration, the analyzer reports every
-facade method, framework helper, and project class that the file uses as
-missing. On the test app,
-Mago's default lint rules also produced 124 `literal-named-argument` warnings
-and 30 `strict-types` warnings on standard Laravel code. The bundled
-`resources/mago.toml` includes the whole project (except `node_modules`,
-`storage`, and `bootstrap/cache`) as context, turns on the Laravel lint integration,
-and turns those two rules off. The client passes it to Phpactor only when the
-project has no `mago.toml`.
+Phpactor sends Mago one file at a time on standard input. Mago then uses the
+files in `paths` (the project's own code) and `includes` (library code) as
+context, and reports problems only in the file it received. The bundled
+`resources/mago.toml`, used when a project has no `mago.toml`, sets:
+
+- `paths = ["."]` and `includes = ["vendor"]`, so project classes and
+  framework classes such as facades resolve. Project folders must not go in
+  `includes`, because Mago never lints included files.
+- `excludes` for hidden folders (`.*`), `node_modules`, `storage`, and
+  `bootstrap/cache`. Hidden folders can hold whole copies of the project, such
+  as git worktrees in `.claude/`.
+- The Laravel lint integration, with `strict-types` and
+  `literal-named-argument` turned off. On the test app, those two rules
+  produced 154 warnings on standard Laravel code.
+
+Mago has no server mode, so each analysis parses the project again. It takes
+about 0.6 seconds on the test app and about 2 seconds on a project with 27,000
+PHP files. Lint takes milliseconds.
 
 ### PHPStan and Larastan
 
@@ -562,6 +583,14 @@ Reading Filament resources correctly needs the project's own classes, and only
 PHP can load them. Writing the server in PHP with no Composer dependencies means
 no build step and no bundled PHP archive, and it runs on the PHP that the
 project needs anyway.
+
+### 2026-09-24: Exclude hidden folders from indexing and analysis
+
+Tools such as Claude Code keep git worktrees inside hidden folders of the
+project. Each worktree is a full copy with its own `vendor`, so indexing it
+multiplies the work and duplicates every class. Hidden folders rarely hold PHP
+that belongs to the project, so the editor excludes them from Phpactor's index
+and from Mago.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

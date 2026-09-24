@@ -491,6 +491,28 @@ async function startServer(name: string, root: string, langs: string[], initiali
   }
 }
 
+/**
+ * Phpactor's indexer ignores .gitignore, so without these patterns it walks copies of the
+ * project in hidden folders (such as git worktrees under .claude/ or .idea/), node_modules,
+ * and compiled views, and lists every class several times.
+ */
+const phpactorIndexer = {
+  "indexer.exclude_patterns": [
+    // Phpactor's defaults, which this list replaces.
+    "/vendor/**/Tests/**/*",
+    "/vendor/**/tests/**/*",
+    "/vendor/composer/**/*",
+    "/vendor/rector/rector/stubs-rector",
+    "/.*/**/*",
+    "/node_modules/**/*",
+    "/storage/**/*",
+    "/bootstrap/cache/**/*",
+  ],
+  // Phpactor keeps entries for files that later become excluded. Bump the suffix whenever
+  // the patterns change, so projects get a fresh index instead of stale duplicates.
+  "indexer.index_path": "%cache%/index/%project_id%-editor-1",
+};
+
 /** Starts the language servers for a project, stopping those of the previous project. */
 export async function startLsp(root: string, h: Host) {
   host = h;
@@ -498,6 +520,7 @@ export async function startLsp(root: string, h: Host) {
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = (name: string) => invoke<string>("tool_path", { name });
   const phpactor = startServer("phpactor", root, ["php"], {
+    ...phpactorIndexer,
     "language_server_worse_reflection.inlay_hints.enable": true,
     "language_server_worse_reflection.inlay_hints.types": true,
     "language_server_worse_reflection.inlay_hints.params": true,

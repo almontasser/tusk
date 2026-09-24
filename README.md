@@ -34,7 +34,8 @@ change when you add it.
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
 | Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
 | Formatting | Only PHP files format (through Mago). |
-| First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. |
+| First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
+| Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
@@ -223,7 +224,8 @@ Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 Mago checks PHP files as you type (static analysis and lint) and formats them.
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
 defaults tuned for Laravel, in `src-tauri/resources/mago.toml`: the analyzer
-reads the whole project, including `vendor`, and two rules that flag normal Laravel code on nearly every file
+reads the project and `vendor` but skips hidden folders, `node_modules`, and
+`storage`, and two rules that flag normal Laravel code on nearly every file
 (`strict-types` and `literal-named-argument`) are off.
 
 ## Test app

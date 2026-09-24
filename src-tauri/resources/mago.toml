@@ -2,10 +2,14 @@
 # A project's mago.toml replaces this file completely.
 
 [source]
-# The editor analyzes one file at a time. Include the whole project as context, so the
-# analyzer sees the project's own classes and framework classes such as Laravel facades.
-includes = ["."]
-excludes = ["node_modules", "storage", "bootstrap/cache"]
+# The editor sends one file at a time on standard input. Mago reads `paths` as the project's
+# own code and `includes` as library code, and uses both as context, so project classes and
+# framework classes such as Laravel facades resolve. Don't list project folders in
+# `includes`: Mago never lints included files.
+paths = ["."]
+includes = ["vendor"]
+# Hidden folders can hold whole copies of the project, such as git worktrees in .claude/.
+excludes = [".*", "node_modules", "storage", "bootstrap/cache"]
 
 [linter]
 integrations = ["laravel"]
