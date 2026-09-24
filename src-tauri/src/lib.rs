@@ -36,6 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(fs::WatchState::default())
         .manage(lsp::LspState::default())
+        .manage(lsp::AiRequests::default())
         .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             db::db_query,
@@ -52,6 +53,8 @@ pub fn run() {
             lsp::lsp_send,
             lsp::lsp_stop,
             lsp::ai_start,
+            lsp::ai_request,
+            lsp::ai_cancel,
             tools::tool_path,
             tools::path_exists,
             tools::run_capture,

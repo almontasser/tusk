@@ -103,6 +103,53 @@ pub fn ai_start(app: AppHandle, state: State<LspState>, model: String, key: Stri
     Ok(port)
 }
 
+/// Open requests to llama-server by the client's ID, so a request for a suggestion that's no longer
+/// wanted can be cancelled.
+#[derive(Default)]
+pub struct AiRequests(Mutex<HashMap<u32, std::net::TcpStream>>);
+
+/// Posts `body` (JSON) to `path` on the local llama-server and returns the response body. Closing
+/// the connection, which `ai_cancel` does, makes the server stop generating, so it's free sooner.
+#[tauri::command]
+pub async fn ai_request(state: State<'_, AiRequests>, id: u32, port: u16, key: String, path: String, body: String) -> Result<String, String> {
+    use std::io::Read;
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
+    state.0.lock().unwrap().insert(id, stream.try_clone().map_err(|e| e.to_string())?);
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        stream.write_all(request.as_bytes())?;
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response)?;
+        Ok::<_, std::io::Error>(response)
+    })
+    .await;
+    state.0.lock().unwrap().remove(&id);
+    let response = result.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    parse_response(&response)
+}
+
+/// The body of an HTTP/1.1 response with a Content-Length, or an error for a status other than 200.
+fn parse_response(response: &[u8]) -> Result<String, String> {
+    let text = String::from_utf8_lossy(response);
+    let (head, body) = text.split_once("\r\n\r\n").ok_or("incomplete response")?;
+    let status = head.split(' ').nth(1).unwrap_or("");
+    if status != "200" {
+        return Err(format!("HTTP {status}: {body}"));
+    }
+    Ok(body.to_string())
+}
+
+/// Cancels the request `id`, if it's still open.
+#[tauri::command]
+pub fn ai_cancel(state: State<AiRequests>, id: u32) {
+    if let Some(stream) = state.0.lock().unwrap().remove(&id) {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 /// Stops the server (or debug adapter) `name`, if it's running.
 #[tauri::command]
 pub fn lsp_stop(state: State<LspState>, name: String) {
@@ -144,7 +191,14 @@ fn read_message(r: &mut impl BufRead) -> std::io::Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_message;
+    use super::{parse_response, read_message};
+
+    #[test]
+    fn reads_http_responses() {
+        assert_eq!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap(), "{}");
+        assert!(parse_response(b"HTTP/1.1 401 Unauthorized\r\n\r\nno").unwrap_err().contains("401"));
+        assert!(parse_response(b"HTTP/1.1 200 OK").is_err());
+    }
 
     #[test]
     fn reads_framed_messages() {

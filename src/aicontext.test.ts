@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chunk, columnType, modelDoc, outline, pack, referencedClasses, similar, words } from "./aicontext.ts";
+import { buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, words } from "./aicontext.ts";
 
 const post = `<?php
 
@@ -114,4 +114,47 @@ class Post`,
 
 test("packs parts into a budget, skipping ones that don't fit", () => {
   assert.deepEqual(pack([{ text: "aaaa" }, { text: "bbbbbbb" }, { text: "cc" }], 7).map((p) => p.text), ["aaaa", "cc"]);
+});
+
+test("removes the code a suggestion repeats from below the cursor", () => {
+  const below = ["", "        return $post;", "    }"];
+  assert.equal(cleanSuggestion("$post->save();\n\n        return $post;\n    }", "", below), "$post->save();");
+  assert.equal(cleanSuggestion("$post->save();\n        $post->refresh();  \n", "", below), "$post->save();\n        $post->refresh();");
+  // Nothing new: only whitespace, or only the rest of the line that's already there.
+  assert.equal(cleanSuggestion("  \n", "", below), "");
+  assert.equal(cleanSuggestion(");", ");", below), "");
+  // The first line may equal the next one: completing a line never counts as repeating.
+  assert.equal(cleanSuggestion("return $post;", "", below), "return $post;");
+});
+
+test("builds the request around the cursor", () => {
+  const lines = ["<?php", "", "function a()", "{", "    return 1;", "}"];
+  const body = infillRequest(lines, 5, 12, [], 64);
+  assert.equal(body.input_prefix, "<?php\n\nfunction a()\n{\n");
+  assert.equal(body.prompt, "    return ");
+  assert.equal(body.input_suffix, "1;\n}");
+  assert.equal(body.n_indent, 4);
+  assert.equal(infillRequest(lines, 1, 1, [], 0).input_prefix, "");
+});
+
+test("gathers outlines, models, recent code, and similar code, without repeats", () => {
+  const post = "<?php\n\nnamespace App\\Models;\n\nclass Post extends Model\n{\n    public function publish(): void\n    {\n        $this->published = true;\n    }\n}\n";
+  const helper = "<?php\n\nfunction helper()\n{\n    $post->published = true;\n    $post->save();\n    return $post;\n}\n";
+  const files = new Map([
+    ["app/Models/Post.php", { text: post, chunks: chunk("app/Models/Post.php", post) }],
+    ["app/helpers.php", { text: helper, chunks: chunk("app/helpers.php", helper) }],
+  ]);
+  const index: Index = {
+    psr4: { "App\\": "app/" },
+    files,
+    models: { "App\\Models\\Post": { class: "App\\Models\\Post", columns: { published: { type: "tinyint", nullable: false } }, casts: {}, relations: [] } },
+    outline: (rel) => outline(files.get(rel)!.text),
+  };
+  const source = "<?php\n\nnamespace App\\Http;\n\nuse App\\Models\\Post;\n\nclass C\n{\n    function f(Post $post)\n    {\n        $post->published = true;\n        $post->\n    }\n}\n";
+  const like = similarCode(index, "app/Http/C.php", source, 12);
+  assert.deepEqual(like.map((c) => c.path).sort(), ["app/Models/Post.php", "app/helpers.php"]);
+  const extra = buildContext(index, "app/Http/C.php", source, source.indexOf("$post->\n"), [{ path: "app/Other.php", start: 0, text: "recent" }], like);
+  assert.deepEqual(extra.map((e) => e.filename), ["_ide_helper_models.php", "app/Models/Post.php", "app/Other.php", "app/helpers.php"]);
+  assert.match(extra[0].text, /@property bool \$published/);
+  assert.match(extra[1].text, /public function publish\(\): void\n {4}\{ … \}/);
 });

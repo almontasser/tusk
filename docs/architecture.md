@@ -444,10 +444,9 @@ call it and read the code in its prompt cache. Each start gets a random API key
 (`--api-key`), which the client sends as a bearer token; only `/health` works
 without it.
 
-Each suggestion is a request to `/infill`, sent through `curl` from
-`run_capture`. This works the same in development and in the bundled app,
-where the page's origin might block a request to `http://127.0.0.1`. The
-request carries:
+Each suggestion is a request to `/infill`. `infillRequest` in `aicontext.ts`
+builds the body, so the editor and the benchmark send the same prompts. It
+carries:
 
 - The 150 lines before the cursor, the text before the cursor on its line, and
   the rest of the line plus 40 lines after it. The server keeps at most 3/4 of
@@ -458,12 +457,26 @@ request carries:
   each carries its path relative to the project root.
 - `n_indent`, which stops the suggestion at a line indented less than the
   cursor's line, so a suggestion stays inside its block.
+- Greedy decoding (`top_k: 1`), which scored 4 points higher than sampling in
+  the benchmark, and gives the same suggestion for the same prompt.
 - A limit of 1.5 seconds and 128 tokens for writing.
 
-The provider waits 250 ms after typing stops, skips the middle of a word, and
-drops a reply whose request Monaco cancelled. When a suggestion's first line
-ends with the rest of the current line, such as a closing bracket, it replaces
-that text instead of adding a second copy.
+The request goes through `ai_request` in `lsp.rs`, a plain HTTP/1.1 POST over a
+`TcpStream`, rather than `fetch`: the bundled app's page origin might block a
+request to `http://127.0.0.1`. The client gives each request an ID. When Monaco
+cancels a request because you typed again, `ai_cancel` shuts the socket, and
+llama-server stops working on it when it sees the connection close. The server
+has a single slot, so a request that was left running delayed the next one:
+after a long request, the next one took 3.7 seconds when the first ran to the
+end, and 0.9 seconds when it was cancelled.
+
+The provider waits 250 ms after typing stops and skips the middle of a word.
+`cleanSuggestion` then trims the reply. Small models often go on to repeat
+the code below the cursor (5–6% of benchmark suggestions did), so a suggestion
+ends before a line equal to the next non-blank line below. A suggestion that
+adds nothing is dropped. When a suggestion's first line ends with the rest of
+the current line, such as a closing bracket, it replaces that text instead of
+adding a second copy.
 
 ### Context for AI completion
 
@@ -526,6 +539,37 @@ beforehand, which processes the prompt without writing anything, as llama.vim
 does. That happens 500 ms after an editor gains focus, and 1 second after the
 cursor settles in a new block of 10 lines. A suggestion after that takes about
 0.2 seconds instead of 1–2.
+
+### Measuring completion
+
+`scripts/ai-bench.ts` measures completion on a real project. It hides code in
+method bodies of PHP classes under `app/`: either a whole line from its
+indentation, or the rest of a line after a point where a developer would pause
+(`->`, `::`, `(`, `= `, `, `, or `[`). Then it asks the model to fill it in with
+each kind of context. It indexes the project the way the editor does, builds
+prompts with the editor's own functions, and starts `llama-server` with the
+same options. It scores the first line of each cleaned suggestion: exact
+matches, edit similarity, empty suggestions, and how often the raw suggestion
+repeated the code below. Recent code isn't measured, since a benchmark has no
+history of where you worked.
+
+```sh
+node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs]
+```
+
+Results on koel (2,428 files; no database, so no model columns), with 300
+cases and the 1.5B model:
+
+| Context | Exact first line | Edit similarity | Context tokens (median) |
+| --- | --- | --- | --- |
+| None | 48.0% | 73.3% | 0 |
+| Class outlines | 51.3% | 75.3% | 919 |
+| Outlines and similar code (what the editor sends) | 59.7% | 78.7% | 1,611 |
+| Twice the budget for outlines and similar code | 59.7% | 78.3% | 2,441 |
+
+A wider context adds tokens, and so time, without better suggestions, so the
+budget stays. Run the benchmark again after changing the context, the
+request, or the model.
 
 ## Laravel, diagnostics, and formatting (milestone 3)
 

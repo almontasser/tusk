@@ -1,6 +1,7 @@
 // Context for AI completion: code from other files that helps the model complete the current one.
 // Free of editor imports so Node can test it.
-import { nameResolver, withoutComments } from "./phptypes.ts";
+import { nameResolver, parseTypeDeclaration, withoutComments } from "./phptypes.ts";
+import { pathsFor, type Psr4 } from "./psr4.ts";
 import { matchBracket } from "./refactorparse.ts";
 
 /**
@@ -156,4 +157,110 @@ export function pack<T extends { text: string }>(parts: T[], budget: number): T[
     out.push(p);
   }
   return out;
+}
+
+/** The project as AI completion knows it. */
+export type Index = {
+  psr4: Psr4;
+  /** Source files by path relative to the root, with their chunks for similarity search. */
+  files: Map<string, { text: string; chunks: Chunk[] }>;
+  /** Eloquent models by class. */
+  models: Record<string, ModelFacts>;
+  /** A file's outline, from its unsaved text when it's open. */
+  outline: (rel: string) => string;
+};
+/** Code the user worked on: the lines from `start` (0-based) of a file, by path relative to the root. */
+export type Recent = { path: string; start: number; text: string };
+export type Extra = { filename: string; text: string };
+
+/** The files AI completion indexes: source files, outside dependencies, caches, and build output. */
+export const INDEXED = /\.(php|js|jsx|ts|tsx|vue)$/;
+export const SKIPPED = /^(vendor|node_modules|storage|public|bootstrap\/cache)\//;
+// ponytail: the first 3,000 source files; a bigger project leaves the rest out of similarity search.
+export const MAX_FILES = 3000;
+
+/** Characters of each kind of context: about 4,000 tokens in all. */
+export const BUDGET = { definitions: 7000, recent: 3000, similar: 3500 };
+
+/**
+ * The `n` chunks of the project most like the 20 lines before `line` (1-based) in the file `rel`,
+ * whose current text is `source`. Its chunks near the cursor are in the prompt already, so they're left out.
+ */
+export function similarCode(index: Index, rel: string, source: string, line: number, n = 5): Chunk[] {
+  const query = words(source.split("\n").slice(Math.max(0, line - 20), line).join("\n"));
+  const inPrompt = (c: Chunk) => c.path === rel && c.start < line + 40 && c.start + c.lines > line - 150;
+  const all = function* () {
+    for (const [f, e] of index.files) if (f !== rel) yield* e.chunks;
+    yield* chunk(rel, source);
+  };
+  return similar(all(), query, n, inPrompt);
+}
+
+/**
+ * The extra files for a request, most stable first so the server can reuse its processed prompt:
+ * outlines of the project classes used near the cursor (at `offset`), with the models' columns;
+ * code from other files the user worked on lately; and code like the lines before the cursor.
+ */
+export function buildContext(index: Index, rel: string, source: string, offset: number, recent: Recent[], like: Chunk[]): Extra[] {
+  const definitions: Extra[] = [];
+  if (rel.endsWith(".php")) {
+    const used = referencedClasses(source, offset)
+      .flatMap((fqn) => {
+        const file = pathsFor(fqn, index.psr4).find((f) => f !== rel && index.files.has(f));
+        return file ? [{ fqn, file }] : [];
+      })
+      .slice(0, 8)
+      // In a fixed order, so moving the cursor changes the prompt only when the set of classes changes.
+      .sort((a, b) => a.file.localeCompare(b.file));
+    const own = parseTypeDeclaration(source)?.fqn;
+    const docs = [...(own ? [own] : []), ...used.map((u) => u.fqn)].filter((c) => index.models[c]).map((c) => modelDoc(index.models[c]));
+    if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });
+    definitions.push(...used.map((u) => ({ filename: u.file, text: `<?php\n\n${index.outline(u.file)}\n` })));
+  }
+  const worked = recent.filter((r) => r.path !== rel).map((r) => ({ filename: r.path, text: r.text + "\n" }));
+  // Files already outlined and code already sent as recent are left out, so the budget goes to other code.
+  const sent = (c: Chunk) =>
+    definitions.some((d) => d.filename === c.path) || recent.some((r) => r.path === c.path && r.start < c.start + c.lines && c.start < r.start + 30);
+  const similarParts = like.filter((c) => !sent(c)).map((c) => ({ filename: c.path, text: c.text + "\n" }));
+  return [...pack(definitions, BUDGET.definitions), ...pack(worked, BUDGET.recent), ...pack(similarParts, BUDGET.similar)];
+}
+
+/**
+ * The body of an /infill request for the cursor at `line` and `column` (1-based): 150 lines before
+ * it, and the rest of its line plus 40 lines after it. With `predict` 0 the server only processes
+ * the prompt, to have it ready.
+ */
+export function infillRequest(lines: string[], line: number, column: number, extra: Extra[], predict: number) {
+  const current = lines[line - 1];
+  const before = lines.slice(Math.max(0, line - 151), line - 1);
+  return {
+    input_prefix: before.length ? before.join("\n") + "\n" : "",
+    prompt: current.slice(0, column - 1),
+    input_suffix: [current.slice(column - 1), ...lines.slice(line, line + 40)].join("\n"),
+    input_extra: extra,
+    // Stops at a line indented less than this one, so a suggestion stays inside its block.
+    n_indent: current.match(/^\s*/)![0].length,
+    n_predict: predict,
+    // Greedy: the most likely token every time. It scored 4 points higher than sampling in
+    // scripts/ai-bench.ts, and the same prompt always gives the same suggestion.
+    samplers: ["top_k"],
+    top_k: 1,
+    cache_prompt: true,
+    t_max_predict_ms: 1500,
+    response_fields: ["content"],
+  };
+}
+
+/**
+ * A suggestion without the code that already follows it. Small models often go on to repeat the
+ * lines below the cursor, so the suggestion ends before a line equal to the next non-blank line
+ * there. Empty when nothing new is left.
+ */
+export function cleanSuggestion(text: string, after: string, below: string[]): string {
+  let lines = text.replace(/\s+$/, "").split("\n");
+  const next = below.find((l) => l.trim())?.trim();
+  const repeat = lines.findIndex((l, i) => i > 0 && l.trim() === next);
+  if (repeat > 0) lines = lines.slice(0, repeat);
+  const out = lines.join("\n").replace(/\s+$/, "");
+  return out.trim() && out.trim() !== after.trim() ? out : "";
 }

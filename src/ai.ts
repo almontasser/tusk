@@ -5,9 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
-import { chunk, type Chunk, type ModelFacts, modelDoc, outline, pack, referencedClasses, similar, words } from "./aicontext";
-import { parseTypeDeclaration } from "./phptypes";
-import { pathsFor, type Psr4, psr4From } from "./psr4";
+import { buildContext, chunk, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, similarCode } from "./aicontext";
+import { type Psr4, psr4From } from "./psr4";
 import { onSettings, settings, updateSetting } from "./settings";
 
 type Model = { label: string; repo: string; revision: string; file: string; size: number; sha256: string };
@@ -138,12 +137,6 @@ type Project = {
 let project: Project | null = null;
 let projectRoot = () => "";
 
-const INDEXED = /\.(php|js|jsx|ts|tsx|vue)$/;
-const SKIPPED = /^(vendor|node_modules|storage|public|bootstrap\/cache)\//;
-// ponytail: the first 3,000 source files; a bigger project leaves the rest out of similarity search.
-const MAX_FILES = 3000;
-/** Characters of each kind of context: about 4,000 tokens in all. */
-const BUDGET = { definitions: 7000, recent: 3000, similar: 3500 };
 
 const readFile = (path: string) => invoke<string>("read_file", { path }).catch(() => "");
 
@@ -204,98 +197,52 @@ function remember(ed: monaco.editor.ICodeEditor) {
   recent = [...recent.filter((r) => !(r.path === path && Math.abs(r.start - start) < 20)), { path, start, text }].slice(-6);
 }
 
-const outlineOf = (p: Project, rel: string) => {
-  const open = monaco.editor.getModel(monaco.Uri.file(`${p.root}/${rel}`));
-  if (open) return outline(open.getValue());
-  if (!p.outlines.has(rel)) p.outlines.set(rel, outline(p.files.get(rel)?.text ?? ""));
-  return p.outlines.get(rel)!;
-};
-
 const relative = (p: Project, path: string) => (path.startsWith(p.root + "/") ? path.slice(p.root.length + 1) : path);
+
+/** The project for aicontext.ts: open files are outlined from their unsaved text. */
+const indexOf = (p: Project): Index => ({
+  ...p,
+  outline: (rel) => {
+    const open = monaco.editor.getModel(monaco.Uri.file(`${p.root}/${rel}`));
+    if (open) return outline(open.getValue());
+    if (!p.outlines.has(rel)) p.outlines.set(rel, outline(p.files.get(rel)?.text ?? ""));
+    return p.outlines.get(rel)!;
+  },
+});
 
 let similarFor = { key: "", chunks: [] as Chunk[] };
 /** Similar code is searched again when the cursor moves 10 lines or more, so typing doesn't change the prompt. */
 const similarKey = (p: Project, model: monaco.editor.ITextModel, line: number) => `${relative(p, model.uri.path)}:${Math.floor(line / 10)}`;
 
-type Extra = { filename: string; text: string };
-
-/**
- * The extra files for a request, most stable first so the server can reuse its processed prompt:
- * outlines of the project classes used near the cursor, with the models' columns; code from other
- * files the user worked on lately; and the project code most like the lines before the cursor.
- */
 function context(model: monaco.editor.ITextModel, position: monaco.Position): Extra[] {
   const p = project;
   if (!p) return [];
+  const index = indexOf(p);
   const rel = relative(p, model.uri.path);
   const source = model.getValue();
-  const line = position.lineNumber;
-
-  const definitions: Extra[] = [];
-  if (rel.endsWith(".php")) {
-    const used = referencedClasses(source, model.getOffsetAt(position))
-      .flatMap((fqn) => {
-        const file = pathsFor(fqn, p.psr4).find((f) => f !== rel && p.files.has(f));
-        return file ? [{ fqn, file }] : [];
-      })
-      .slice(0, 8)
-      // In a fixed order, so moving the cursor changes the prompt only when the set of classes changes.
-      .sort((a, b) => a.file.localeCompare(b.file));
-    const own = parseTypeDeclaration(source)?.fqn;
-    const docs = [...(own ? [own] : []), ...used.map((u) => u.fqn)].filter((c) => p.models[c]).map((c) => modelDoc(p.models[c]));
-    if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });
-    definitions.push(...used.map((u) => ({ filename: u.file, text: `<?php\n\n${outlineOf(p, u.file)}\n` })));
-  }
-
-  const worked = recent
-    .filter((r) => r.path !== model.uri.path)
-    .map((r) => ({ filename: relative(p, r.path), text: r.text + "\n" }));
-
-  const key = similarKey(p, model, line);
-  if (similarFor.key !== key) {
-    const query = words(model.getLinesContent().slice(Math.max(0, line - 20), line).join("\n"));
-    // Chunks near the cursor are in the prompt already.
-    const inPrompt = (c: Chunk) => c.path === rel && c.start < line + 40 && c.start + c.lines > line - 150;
-    const all = function* () {
-      for (const [f, e] of p.files) if (f !== rel) yield* e.chunks;
-      yield* chunk(rel, source);
-    };
-    similarFor = { key, chunks: similar(all(), query, 5, inPrompt) };
-  }
-  // Files already outlined and code already sent as recent are left out, so the budget goes to other code.
-  const sent = (c: Chunk) =>
-    definitions.some((d) => d.filename === c.path) || recent.some((r) => relative(p, r.path) === c.path && r.start < c.start + c.lines && c.start < r.start + 30);
-  const like = similarFor.chunks.filter((c) => !sent(c)).map((c) => ({ filename: c.path, text: c.text + "\n" }));
-
-  return [...pack(definitions, BUDGET.definitions), ...pack(worked, BUDGET.recent), ...pack(like, BUDGET.similar)];
+  const key = similarKey(p, model, position.lineNumber);
+  if (similarFor.key !== key) similarFor = { key, chunks: similarCode(index, rel, source, position.lineNumber) };
+  const worked = recent.map((r) => ({ ...r, path: relative(p, r.path) }));
+  return buildContext(index, rel, source, model.getOffsetAt(position), worked, similarFor.chunks);
 }
 
-/** Asks the server to fill in the code at `position`. With `predict` 0 it only processes the prompt, to have it ready. */
-async function infill(model: monaco.editor.ITextModel, position: monaco.Position, predict: number) {
-  const line = model.getLineContent(position.lineNumber);
-  const first = Math.max(1, position.lineNumber - 150);
-  const last = Math.min(model.getLineCount(), position.lineNumber + 40);
-  const below = last > position.lineNumber ? "\n" + model.getValueInRange(new monaco.Range(position.lineNumber + 1, 1, last, model.getLineMaxColumn(last))) : "";
-  const body = {
-    input_prefix: model.getValueInRange(new monaco.Range(first, 1, position.lineNumber, 1)),
-    prompt: line.slice(0, position.column - 1),
-    input_suffix: line.slice(position.column - 1) + below,
-    input_extra: context(model, position),
-    // Stops at a line indented less than this one, so a suggestion stays inside its block.
-    n_indent: line.match(/^\s*/)![0].length,
-    n_predict: predict,
-    top_k: 40,
-    top_p: 0.99,
-    samplers: ["top_k", "top_p", "infill"],
-    cache_prompt: true,
-    t_max_predict_ms: 1500,
-    response_fields: ["content"],
-  };
-  const reply = await curl(["-sf", "-X", "POST", "-H", "Content-Type: application/json", "-H", `Authorization: Bearer ${key}`, "--data-binary", "@-", `http://127.0.0.1:${port}/infill`], JSON.stringify(body)).catch(() => "");
+let nextRequest = 0;
+
+/**
+ * Asks the server to fill in the code at `position`. With `predict` 0 it only processes the prompt, to
+ * have it ready. Cancelling `token` closes the connection, which stops the server's work on it.
+ */
+async function infill(model: monaco.editor.ITextModel, position: monaco.Position, predict: number, token?: monaco.CancellationToken) {
+  const body = infillRequest(model.getLinesContent(), position.lineNumber, position.column, context(model, position), predict);
+  const id = ++nextRequest;
+  const cancel = token?.onCancellationRequested(() => invoke("ai_cancel", { id }));
   try {
-    return (JSON.parse(reply).content as string).trimEnd();
+    const reply = await invoke<string>("ai_request", { id, port, key, path: "/infill", body: JSON.stringify(body) });
+    return (JSON.parse(reply).content as string) ?? "";
   } catch {
     return "";
+  } finally {
+    cancel?.dispose();
   }
 }
 
@@ -306,8 +253,9 @@ const provider: monaco.languages.InlineCompletionsProvider = {
     if (project?.root !== projectRoot() && projectRoot()) indexProject(projectRoot());
     const after = model.getLineContent(position.lineNumber).slice(position.column - 1);
     if (/^\w/.test(after)) return; // In the middle of a word.
-    const text = await infill(model, position, 128);
-    if (!text.trim() || token.isCancellationRequested) return;
+    const below = model.getLinesContent().slice(position.lineNumber, position.lineNumber + 10);
+    const text = cleanSuggestion(await infill(model, position, 128, token), after, below);
+    if (!text || token.isCancellationRequested) return;
     // When the suggestion ends with the rest of the line (a closing bracket, say), replace it instead of repeating it.
     const rest = after.trimEnd();
     const replaceRest = rest && text.split("\n")[0].endsWith(rest);

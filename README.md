@@ -105,6 +105,7 @@ pnpm test                          # Frontend logic, with Node's test runner
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust
 cargo test --manifest-path src-tauri/Cargo.toml db -- --ignored   # MySQL and PostgreSQL, needs the servers in src-tauri/src/db.rs
 php -d zend.assertions=1 filament-lsp/tests.php fixtures/demo   # Filament server, needs the test app
+node scripts/ai-bench.ts <project> <model.gguf>   # AI completion quality, see docs/architecture.md
 ```
 
 ## Build a release
@@ -452,7 +453,14 @@ PHP, JavaScript, TypeScript, and Vue files, leaving out `vendor`,
 `node_modules`, and files that `.gitignore` excludes. Indexing 1,500 files takes
 under half a second.
 
+In a benchmark on an open-source Laravel app, the project context raised the
+share of suggestions that match the hidden line exactly from 48% to 60%.
+Suggestions also stop before code that's already below the cursor, instead of
+repeating it.
+
 A suggestion usually appears about 0.4 seconds after you stop typing. When you
+type again before it arrives, the editor cancels the request, so the model
+moves on to the new text at once. When you
 open a file or move to another part of it, the model needs up to 2 seconds to
 read the new context, so the editor has it read the context as soon as you
 arrive, before you type.
