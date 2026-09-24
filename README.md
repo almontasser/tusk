@@ -22,8 +22,10 @@ For the design and the reasons behind each choice, see
 
 ## Known gaps
 
-These PhpStorm features are missing or limited. Each one names the file to
-change when you add it.
+These PhpStorm features are missing or limited. Where it helps, a gap names the
+file to change when you add it.
+
+### Limited
 
 | Area | Gap |
 | --- | --- |
@@ -41,6 +43,25 @@ change when you add it.
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
 | Git history | There's no log or history view of past commits yet. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
+
+### Missing
+
+| Area | Gap |
+| --- | --- |
+| Session restore | Open tabs, cursor positions, and the panel layout aren't restored. Only the last folder is. |
+| Split editors | There's one editor pane. Only the diff view shows two files side by side. |
+| Replace in files | Find in files can't replace. |
+| Saving | There's no **Save All** and no auto-save. |
+| Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
+| Debugger | There's no Xdebug integration or step debugging. |
+| Database | There's no database browser or query console. |
+| Frontend languages | JavaScript, TypeScript, Vue, Tailwind, and CSS get only Monaco's built-in support, with no language server. |
+| Git | There's no stash, rebase, cherry-pick, merge conflict resolution, or line-by-line staging. |
+| Local history | There's no history of saved versions outside git. |
+| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
+| Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
+| Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
+| Updates | There's no auto-update. Each new version is a new DMG to install. |
 
 ## Requirements
 
