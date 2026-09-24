@@ -90,15 +90,32 @@ export function rewriteArgs(args: string[], oldParams: Param[], newParams: Param
   return { args: [...out, ...namedOut] };
 }
 
-export type InlinePlan = { error: string } | { assignment: number; value: string; uses: { line: number; column: number }[] };
+export type InlinePlan = { error: string } | { assignment: number; assignmentEnd: number; value: string; uses: { line: number; column: number }[] };
+
+/** The index of the first ";" in `text` outside brackets and strings, or -1. */
+function statementEnd(text: string): number {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'" || c === '"') {
+      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
+    } else if ("([{".includes(c)) {
+      const end = matchBracket(text, i);
+      if (end < 0) return -1;
+      i = end;
+    } else if (c === ";") return i;
+  }
+  return -1;
+}
 
 /**
- * Plans inlining `$name` within lines [from, to] (1-based): exactly one plain assignment on its own line,
- * no other writes, and uses only after it. Columns are 1-based offsets of the `$`.
+ * Plans inlining `$name` within lines [from, to] (1-based): exactly one plain assignment starting its line,
+ * possibly continuing over the lines after it, no other writes, and uses only after it. Columns are
+ * 1-based offsets of the `$`. `assignment` to `assignmentEnd` are the lines the assignment takes.
  */
 export function planInline(lines: string[], name: string, from: number, to: number): InlinePlan {
   const word = new RegExp(`\\$${name}(?![\\w])`, "g");
   let assignment = 0;
+  let assignmentEnd = 0;
   let value = "";
   const uses: { line: number; column: number }[] = [];
   for (let n = from; n <= to; n++) {
@@ -108,11 +125,20 @@ export function planInline(lines: string[], name: string, from: number, to: numb
       const before = text.slice(0, m.index);
       const plain = /^\s*=(?!=|>)/.test(after);
       if (plain && !assignment && /^\s*$/.test(before)) {
-        const expr = after.match(/^\s*=\s*(.+?);\s*(\/\/.*)?$/);
-        if (!expr) return { error: `the assignment on line ${n} spans several lines` };
+        // The statement runs to the first ";" outside brackets and strings, on this line or a later one.
+        const full = lines.slice(n - 1, to).join("\n");
+        const valueStart = m.index! + m[0].length + after.match(/^\s*=\s*/)![0].length;
+        const semicolon = statementEnd(full.slice(valueStart));
+        if (semicolon < 0) return { error: `the assignment on line ${n} doesn't end` };
+        const end = valueStart + semicolon;
+        const lineEnd = full.indexOf("\n", end);
+        if (!/^\s*(\/\/.*)?$/.test(full.slice(end + 1, lineEnd < 0 ? undefined : lineEnd))) return { error: `there's more code after the assignment to $${name}` };
+        const lastLine = n + (full.slice(0, end).match(/\n/g)?.length ?? 0);
+        value = full.slice(valueStart, end).trim();
         assignment = n;
-        value = expr[1];
-        continue;
+        assignmentEnd = lastLine;
+        n = lastLine; // Skip the assignment's own lines.
+        break;
       }
       if (plain || /^\s*(\[[^\]]*\]|->\w+)*\s*([-+*/.%&|^]|\?\?|<<|>>|\*\*)?=(?!=|>)/.test(after) || /^\s*(\+\+|--)/.test(after) || /(\+\+|--|&)\s*$/.test(before) || /\bas\s+(\$\w+\s*=>\s*)?$/.test(before) || /\b(global|static|unset)\b/.test(before))
         return { error: `$${name} is changed on line ${n}` };
@@ -123,6 +149,8 @@ export function planInline(lines: string[], name: string, from: number, to: numb
   if (!assignment) return { error: `there's no assignment to $${name}` };
   if (!uses.length) return { error: `$${name} isn't used after its assignment` };
   // Parentheses keep the meaning where the value is an expression, such as $a + $b.
-  const simple = /^(\$?[\w\\]+|'[^']*'|"[^"]*"|\d+(\.\d+)?)((->|\?->|::)\$?\w+)*(\([^()]*\))?((->|\?->|::)\w+(\([^()]*\))?)*$/.test(value) || /^\[.*\]$/.test(value);
-  return { assignment, value: simple ? value : `(${value})`, uses };
+  // A method chain broken over lines counts as one simple value.
+  const flat = value.replace(/\s*\n\s*/g, "");
+  const simple = /^(\$?[\w\\]+|'[^']*'|"[^"]*"|\d+(\.\d+)?)((->|\?->|::)\$?\w+)*(\([^()]*\))?((->|\?->|::)\w+(\([^()]*\))?)*$/.test(flat) || /^\[.*\]$/s.test(flat);
+  return { assignment, assignmentEnd, value: simple ? value : `(${value})`, uses };
 }

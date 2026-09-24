@@ -317,8 +317,9 @@ lines to the docblock, attributes, and one blank line.
 
 `src/refactorparse.ts` holds the text work, tested in Node: `matchBracket` and
 `splitTopLevel` scan brackets and strings (not heredocs), `planInline` checks
-that a variable has exactly one plain assignment, alone on its line, and no
-other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`),
+that a variable has exactly one plain assignment, starting its line and
+ending at the first `;` outside brackets and strings (`statementEnd`), so a
+closure or a chain over several lines counts as one, and no other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`),
 and `rewriteArgs` maps a call's arguments to a new parameter list by name.
 `src/refactor.ts` applies them: inlining is one undoable edit in the model;
 a signature change becomes a `WorkspaceEdit` for `applyWorkspaceEdit`, which
@@ -330,6 +331,17 @@ scans the project's files (`--filesystem=git`), while the language server's
 `textDocument/references` relies on its index and missed calls in files it
 hadn't indexed. Safe Delete uses the same search for methods. Functions, which
 the command doesn't cover, still use the language server.
+
+Change Signature also changes overrides. `overridesOf` searches project files
+for `extends` or `implements` lines naming the class, keeps the types whose
+parsed declaration really names it, and repeats for each one found, to reach
+grandchildren. Phpactor's Go to Implementation would include `vendor`, but it
+answers from the index, which misses classes created since the last full
+index: in testing, file change events for new files didn't reach the index
+until a reindex. Each override's parameter list gets the new text, and calls
+through the override (`references:member` on its class) are rewritten too,
+without duplicates. References that are declarations (`function name(`) are
+skipped, since they have their own edit.
 
 ### Type hierarchy
 

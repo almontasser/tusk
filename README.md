@@ -54,7 +54,7 @@ file to change when you add it.
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
 | Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
-| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature doesn't update overriding methods in subclasses, and neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable handles a single-line assignment in the same function. |
+| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
@@ -307,9 +307,10 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 ## Inline variable and change signature
 
 Press ⌥⌘N on a variable to replace it with its value and remove the
-assignment. It works when the variable is assigned once, on its own line, and
-never changed afterwards, within the same function; otherwise it says why it
-can't. The value gets parentheses when it's an expression, such as
+assignment. It works when the variable is assigned once, in a statement that
+starts its line (it may continue over several lines, such as a query builder
+chain), and never changed afterwards, within the same function; otherwise it
+says why it can't. The value gets parentheses when it's an expression, such as
 `($a + $b)`.
 
 Press ⌘F6 in a method or function to change its parameters. Edit the list, for
@@ -317,7 +318,9 @@ example to reorder, remove, or add parameters, and press ⏎. A new parameter
 needs a default value. The editor finds every call, shows how many it will
 change, and on **Apply** rewrites the declaration and the calls: positional
 arguments move with their parameters, named arguments stay named, and a
-skipped position gets the parameter's default. Calls it can't rewrite safely,
+skipped position gets the parameter's default. Methods in subclasses and
+implementing classes that override it get the same parameters, and their calls
+change too. Calls it can't rewrite safely,
 such as ones that spread `...$args`, are listed and left unchanged.
 
 ## Type hierarchy
