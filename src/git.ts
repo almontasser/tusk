@@ -251,8 +251,8 @@ let diffBack: (() => void) | undefined;
 export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void) {
   closeDiff(false);
   diffBack = back;
+  // No theme option here: it would reset Monaco's global theme. The Theme setting sets it.
   diffEditor ??= monaco.editor.createDiffEditor($("diff-editor"), {
-    theme: "vs-dark",
     automaticLayout: true,
     readOnly: true,
     originalEditable: false,

@@ -69,3 +69,16 @@ export function initFormatting(h: Host) {
     },
   });
 }
+
+/** Formats a model in place with an undoable edit. Used by format on save, so errors only go to the status bar. */
+export async function formatModel(model: monaco.editor.ITextModel) {
+  if (!host.root() || model.uri.scheme !== "file") return;
+  try {
+    const text = await format(model.uri.fsPath, model.getValue(), model.getLanguageId());
+    if (text !== null && text !== model.getValue()) {
+      model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+    }
+  } catch (e) {
+    host.status(`Format failed: ${String(e).trim().split("\n")[0]}`);
+  }
+}

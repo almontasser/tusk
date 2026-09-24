@@ -67,6 +67,24 @@ save automatically, as in PhpStorm: `showModel` saves the tab you leave, closing
 a tab saves it (and keeps it open if the save fails), and the window's `blur`
 event saves every tab. ⌘S runs `saveAll`.
 
+### Settings and themes
+
+`src/settings.ts` keeps one settings object, loads it from `settings.json` in
+the app's config folder (`appConfigDir`), and ignores unknown keys and values of
+the wrong type. The dialog is built from one list of fields. Each change applies
+at once (`apply`) and writes the file.
+
+`apply` updates Monaco's editor options, calls `monaco.editor.setTheme`, and sets
+`data-theme` on the root element. The stylesheet defines colors as variables,
+with a light set under `:root[data-theme="light"]`. Other modules react through
+`onSettings`, as the terminal does to switch its colors. No editor is created
+with a `theme` option, because that would reset Monaco's global theme. The
+"system" theme follows `prefers-color-scheme` as it changes.
+
+Format on save formats the active editor through Monaco's format action, which
+applies minimal edits and keeps the cursor in place, and formats other files
+with one undoable edit.
+
 ### External changes
 
 The frontend batches `fs-change` events for 150 ms. For each changed file that

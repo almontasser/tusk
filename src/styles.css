@@ -5,9 +5,29 @@
   --text: #dfe1e5;
   --muted: #8c8f94;
   --accent: #3574f0;
+  --hover: #ffffff10;
+  --red: #e06c75;
+  --green: #73bd79;
+  --blue: #6aa7f8;
+  --yellow: #e5c07b;
   font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--text);
   background: var(--bg);
+}
+
+/* Set by the Theme setting (src/settings.ts). */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #f7f8fa;
+  --border: #dfe1e5;
+  --text: #1e1f22;
+  --muted: #6c707e;
+  --accent: #3574f0;
+  --hover: #0000000d;
+  --red: #c94f4f;
+  --green: #3f8f45;
+  --blue: #3574f0;
+  --yellow: #a8781f;
 }
 
 * { box-sizing: border-box; }
@@ -20,7 +40,7 @@ body { margin: 0; height: 100vh; display: flex; overflow: hidden; }
 #tree, #tree ul { list-style: none; margin: 0; padding: 0; }
 #tree ul { padding-left: 12px; }
 #tree .row { padding: 2px 8px; cursor: default; white-space: nowrap; user-select: none; }
-#tree .row:hover { background: #ffffff10; }
+#tree .row:hover { background: var(--hover); }
 #tree .row.active { background: #3574f040; }
 #tree .dir::before { content: "▸ "; color: var(--muted); }
 #tree .dir.open::before { content: "▾ "; }
@@ -69,15 +89,15 @@ button { font: inherit; color: inherit; }
 .git-group button:hover, .git-files button:hover { color: var(--text); }
 .git-files { list-style: none; margin: 0; padding: 0; }
 .git-files li { display: flex; align-items: baseline; gap: 6px; padding: 2px 12px; white-space: nowrap; cursor: default; }
-.git-files li:hover { background: #ffffff10; }
+.git-files li:hover { background: var(--hover); }
 .git-files .letter { width: 1ch; font-family: monospace; }
 .git-files .dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .git-files .buttons { margin-left: auto; display: none; }
 .git-files li:hover .buttons { display: flex; }
 .git-files .buttons button { margin: 0; }
-.status-M .letter, .status-R .letter { color: #6aa7f8; }
-.status-A .letter, .status-U .letter { color: #73bd79; }
-.status-D .letter { color: #e06c75; }
+.status-M .letter, .status-R .letter { color: var(--blue); }
+.status-A .letter, .status-U .letter { color: var(--green); }
+.status-D .letter { color: var(--red); }
 #commit-message { display: block; width: calc(100% - 24px); margin: 12px 12px 6px; min-height: 70px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px; font: inherit; }
 .amend { display: block; padding: 0 12px 8px; color: var(--muted); }
 .commit-buttons { display: flex; gap: 8px; padding: 0 12px; }
@@ -106,14 +126,14 @@ button { font: inherit; color: inherit; }
 .pr-toolbar button, .pr-actions button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
 #pr-list, .pr-checks, .pr-files { list-style: none; margin: 0; padding: 0; }
 #pr-list li.pr { padding: 6px 12px; cursor: default; border-bottom: 1px solid var(--border); }
-#pr-list li.pr:hover, .pr-checks li:hover, .pr-files li:hover { background: #ffffff10; }
+#pr-list li.pr:hover, .pr-checks li:hover, .pr-files li:hover { background: var(--hover); }
 .pr-title { overflow: hidden; text-overflow: ellipsis; }
 .pr-meta, .muted { color: var(--muted); font-size: 12px; }
 li.muted, p.muted { padding: 8px 12px; }
 .badge { font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-right: 6px; color: var(--muted); }
-.checks-passed { color: #73bd79; }
-.checks-failed { color: #e06c75; }
-.checks-pending { color: #e5c07b; }
+.checks-passed { color: var(--green); }
+.checks-failed { color: var(--red); }
+.checks-pending { color: var(--yellow); }
 .checks-skipped, .checks-none { color: var(--muted); }
 #pr-detail { padding: 8px 12px; }
 #pr-detail h2 { font-size: 14px; margin: 8px 0 4px; }
@@ -122,8 +142,8 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .pr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .pr-checks li, .pr-files li { padding: 2px 0; cursor: default; display: flex; gap: 6px; }
 .pr-files .name { flex: 1; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-.pr-files .added { color: #73bd79; }
-.pr-files .deleted { color: #e06c75; }
+.pr-files .added { color: var(--green); }
+.pr-files .deleted { color: var(--red); }
 .pr-comment { border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; }
 .pr-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
 
@@ -149,7 +169,7 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .find-file button { display: none; background: none; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; padding: 0 4px; }
 .find-file:hover button { display: inline; }
 .find-match { display: flex; gap: 8px; padding: 1px 12px 1px 20px; cursor: default; white-space: nowrap; overflow: hidden; font: 12px "JetBrains Mono", "SF Mono", Menlo, monospace; }
-.find-match:hover { background: #ffffff10; }
+.find-match:hover { background: var(--hover); }
 .find-match .line { color: var(--muted); min-width: 3ch; text-align: right; }
 .find-match .preview { overflow: hidden; text-overflow: ellipsis; }
 .find-match mark { background: #e5c07b55; color: inherit; border-radius: 2px; }
@@ -164,13 +184,13 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .history-body { flex: 1; min-height: 0; display: flex; }
 .history-commits { width: 50%; overflow: auto; border-right: 1px solid var(--border); }
 #history-list { list-style: none; margin: 0; padding: 0; }
-#history-list li { padding: 4px 12px; border-bottom: 1px solid #ffffff08; cursor: default; }
-#history-list li:hover { background: #ffffff10; }
+#history-list li { padding: 4px 12px; border-bottom: 1px solid var(--hover); cursor: default; }
+#history-list li:hover { background: var(--hover); }
 #history-list li.selected { background: #3574f040; }
 #history-list .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #history-list .meta, #history-detail .meta { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
-.ref { font-size: 11px; border: 1px solid #6aa7f8; color: #6aa7f8; border-radius: 3px; padding: 0 4px; margin-right: 6px; }
-.ref.tag { border-color: #e5c07b; color: #e5c07b; }
+.ref { font-size: 11px; border: 1px solid var(--blue); color: var(--blue); border-radius: 3px; padding: 0 4px; margin-right: 6px; }
+.ref.tag { border-color: var(--yellow); color: var(--yellow); }
 #history-more { margin: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 10px; }
 #history-detail { flex: 1; overflow: auto; padding: 8px 16px; }
 #history-detail h2 { font-size: 14px; margin: 4px 0; }
@@ -180,7 +200,7 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .history-actions button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
 .history-files { list-style: none; margin: 0; padding: 0; }
 .history-files li { display: flex; gap: 8px; padding: 2px 0; cursor: default; font: 12px "JetBrains Mono", "SF Mono", Menlo, monospace; }
-.history-files li:hover { background: #ffffff10; }
+.history-files li:hover { background: var(--hover); }
 .history-files li.tracked .name { font-weight: 700; }
 .history-files .letter { width: 1ch; }
 
@@ -188,8 +208,21 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 #git-operation span { flex-basis: 100%; }
 #git-operation button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; }
 #git-operation[hidden], #conflicts-group[hidden] { display: none; }
-.status-C .letter { color: #e06c75; font-weight: 700; }
+.status-C .letter { color: var(--red); font-weight: 700; }
 .conflict-current { background: #73bd7926; }
 .conflict-incoming { background: #6aa7f826; }
 .conflict-base { background: #8c8f941f; }
-.conflict-marker { background: #ffffff0d; opacity: 0.7; }
+.conflict-marker { background: var(--hover); opacity: 0.7; }
+
+#settings { width: min(520px, calc(100vw - 32px)); padding: 0; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 16px 48px #0008; }
+#settings::backdrop { background: #0006; }
+#settings form { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; }
+#settings h2 { margin: 0 0 4px; font-size: 16px; }
+.setting { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; }
+.setting-checkbox { grid-template-columns: auto 1fr; }
+.setting small { grid-column: 1 / -1; color: var(--muted); }
+.setting-checkbox small { padding-left: 24px; }
+.setting input[type="text"] { width: 260px; }
+.setting input[type="number"] { width: 70px; }
+.setting input:not([type="checkbox"]), .setting select { padding: 3px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+#settings button { align-self: flex-end; padding: 4px 16px; background: var(--accent); color: white; border: 0; border-radius: 4px; }

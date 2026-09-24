@@ -49,7 +49,7 @@ file to change when you add it.
 | --- | --- |
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | There's one editor pane. Only the diff view shows two files side by side. |
-| Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
+| Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
@@ -157,12 +157,29 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘1 | Show the project tree |
 | ⌘9 | Git log |
 | ⌘S | Save all files |
+| ⌘, | Settings |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action. Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
-switch to another app. ⌘S saves every changed file.
+Folder…** action. ## Settings
+
+Press ⌘, to open **Settings**. Changes apply immediately and are saved in
+`~/Library/Application Support/dev.almontasser.phpeditor/settings.json`.
+
+| Setting | Default |
+| --- | --- |
+| Theme: dark, light, or match the system | Dark |
+| Editor font and font size | JetBrains Mono, SF Mono, or Menlo at 13 |
+| Wrap long lines | Off |
+| Show the minimap | Off |
+| Show inlay hints | On |
+| Save files automatically | On |
+| Format files when saving | Off |
+
+Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
+switch to another app. ⌘S saves every changed file. If you turn automatic saving
+off, closing a changed tab asks whether to save it.
 
 The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
@@ -397,6 +414,7 @@ committed.
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files |
+| `src/settings.ts` | Settings, the settings dialog, and the theme |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

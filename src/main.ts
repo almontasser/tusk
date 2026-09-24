@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { message, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
@@ -9,7 +9,8 @@ import { afterSave, annotate, branchListeners, branches, closeDiff, focusCommit,
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
-import { detectFormatters, initFormatting } from "./format";
+import { detectFormatters, formatModel, initFormatting } from "./format";
+import { initSettings, openSettings, settings } from "./settings";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
@@ -103,7 +104,7 @@ async function restoreSession(session: Session) {
 
 /** Shows a tab's model in the editor, saving the view state of the tab it replaces. */
 function showModel(path: string) {
-  if (active && active !== path && tabs.has(active)) saveFile(active);
+  if (settings.autoSave && active && active !== path && tabs.has(active)) saveFile(active);
   if (active && tabs.has(active) && editor.getModel()) viewStates.set(active, editor.saveViewState()!);
   active = path;
   editor.setModel(tabs.get(path)?.model ?? null);
@@ -252,9 +253,17 @@ async function openFile(path: string) {
 async function closeTab(path: string) {
   const tab = tabs.get(path);
   if (!tab) return;
-  // Closing saves, as in PhpStorm. If the save fails, the tab stays open with its changes.
-  await saveFile(path);
-  if (isDirty(tab)) return;
+  // With auto-save, closing saves, as in PhpStorm; otherwise it asks. If a save fails, the tab stays open.
+  if (isDirty(tab)) {
+    const choice = settings.autoSave
+      ? "Save"
+      : await message(`Save changes to ${nameOf(path)}?`, { kind: "warning", buttons: { yes: "Save", no: "Don't Save", cancel: "Cancel" } });
+    if (choice === "Cancel") return;
+    if (choice === "Save" || choice === "Yes") {
+      await saveFile(path);
+      if (isDirty(tab)) return;
+    }
+  }
   tab.model.dispose();
   tabs.delete(path);
   viewStates.delete(path);
@@ -271,6 +280,11 @@ async function closeTab(path: string) {
 async function saveFile(path: string) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
+  if (settings.formatOnSave) {
+    // The active editor formats through Monaco, which applies minimal edits and keeps the cursor in place.
+    if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
+    else await formatModel(tab.model);
+  }
   const text = tab.model.getValue();
   try {
     await invoke("write_file", { path, contents: text });
@@ -286,7 +300,7 @@ async function saveFile(path: string) {
 const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
-window.addEventListener("blur", () => saveAll());
+window.addEventListener("blur", () => settings.autoSave && saveAll());
 
 function renderTabs() {
   $("tabs").replaceChildren(
@@ -433,6 +447,7 @@ const actions: Action[] = [
   editorAction("Delete Line", "Meta+Backspace", "editor.action.deleteLines"),
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
   { label: "Save All", keys: "Meta+S", run: saveAll },
+  { label: "Settings…", keys: "Meta+Comma", run: openSettings },
   { label: "Close Tab", keys: "Meta+W", run: () => closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },
@@ -525,6 +540,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initSettings([editor]);
 initFormatting({ root: () => root, status });
 initConflicts(editor);
 initHistory({ root: () => root, status });

@@ -19,7 +19,6 @@ export { monaco };
 
 export function createEditor(el: HTMLElement) {
   return monaco.editor.create(el, {
-    theme: "vs-dark",
     automaticLayout: true,
     fontSize: 13,
     fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",

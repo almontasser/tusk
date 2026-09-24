@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { isDark, onSettings } from "./settings";
 
 type Session = { id: number; title: string; term: Terminal; fit: FitAddon; el: HTMLElement; exited: boolean; dispose(): void };
 
@@ -12,7 +13,12 @@ const sessions: Session[] = [];
 let active: Session | undefined;
 let panelVisible = false;
 
-const theme = { background: "#1e1f22", foreground: "#dfe1e5", cursor: "#dfe1e5", selectionBackground: "#3574f066" };
+const themes = {
+  dark: { background: "#1e1f22", foreground: "#dfe1e5", cursor: "#dfe1e5", selectionBackground: "#3574f066" },
+  light: { background: "#ffffff", foreground: "#1e1f22", cursor: "#1e1f22", selectionBackground: "#3574f040", black: "#1e1f22", white: "#6c707e", brightWhite: "#8c8f94", yellow: "#a8781f", brightYellow: "#c9951f" },
+};
+const theme = () => themes[isDark() ? "dark" : "light"];
+onSettings(() => sessions.forEach((s) => (s.term.options.theme = theme())));
 
 /** Opens a terminal tab. Without `command`, it runs your login shell. */
 export async function openTerminal(cwd: string, title = "Terminal", command?: string[]) {
@@ -20,7 +26,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   const el = document.createElement("div");
   el.className = "term";
   $("terminals").append(el);
-  const term = new Terminal({ theme, fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace", fontSize: 12, cursorBlink: true });
+  const term = new Terminal({ theme: theme(), fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace", fontSize: 12, cursorBlink: true });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
