@@ -55,7 +55,7 @@ file to change when you add it.
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
-| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
+| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
@@ -156,6 +156,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the current file's class |
+| ⌘⌦ | Safe delete the class, method, or function at the cursor |
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
@@ -281,6 +282,21 @@ becomes the query.
   regex mode, `$1` or `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
+
+## Safe delete
+
+Press ⌘⌦ in a class, interface, trait, enum, method, or function to delete it
+only if nothing uses it. The editor looks for usages with Phpactor, and also
+searches the project's PHP files for the names Laravel uses: a class's full
+name in strings (as in config files), and a method's name, its scope name
+(`scopePublished` as `published`), or its attribute name (`getFullNameAttribute`
+as `full_name`). So `->relationship('author')` counts as a use of `author()`.
+
+- If something uses it, the palette lists the usages. Choose one to open it,
+  or choose **Delete anyway**.
+- If nothing does, confirm in the palette. A method or function is removed with
+  its docblock and attributes (undo with ⌘Z). A class that's alone in its file
+  moves the file to the Trash.
 
 ## Type hierarchy
 

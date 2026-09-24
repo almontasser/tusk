@@ -295,6 +295,24 @@ them, and saves the file. It also runs file operations (create, rename, and
 delete) through Rust commands. When a class rename renames its file, the open
 tab moves to the new path.
 
+### Safe delete
+
+`src/safedelete.ts` finds the declaration with `textDocument/documentSymbol`
+and its usages with `textDocument/references`, leaving out references inside
+the declaration itself, such as recursive calls. Phpactor misses Laravel's
+calls by name, so a whole-word, case-sensitive text search over `*.php` adds
+possible usages: a class's full name with single or double backslashes, or a
+method's names from `laravelNames` (its own, its scope name, and its accessor
+attribute name). A match that isn't a real usage only means you're asked
+before deleting.
+
+The confirmation is a palette choice, not a native dialog. A native dialog
+that's open when the page reloads stays on screen and can't be answered. The
+deletion also checks that the model's version hasn't changed since the check,
+because the symbol's line numbers would be out of date, and only one Safe
+Delete runs at a time. `deletionLines` in `src/phptypes.ts` widens the removed
+lines to the docblock, attributes, and one blank line.
+
 ### Type hierarchy
 
 Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`

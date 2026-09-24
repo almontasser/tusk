@@ -11,6 +11,7 @@ import { afterSave, annotate, trackEditor, branchListeners, branches, stashChang
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { initHttpClient, selectEnvironment } from "./httpclient";
+import { initSafeDelete, safeDelete } from "./safedelete";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
@@ -709,6 +710,7 @@ const actions: Action[] = [
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
   editorAction("Find Usages", "Alt+F7", "editor.action.goToReferences"),
+  { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => active.endsWith(".php") && showTypeHierarchy(active) },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
@@ -998,6 +1000,7 @@ initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
 initHttpClient({ root: () => root, status });
 initComposer({ root: () => root, status });
+initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,
