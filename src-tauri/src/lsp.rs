@@ -79,13 +79,15 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
 /// AI code completion, and returns the port. It's kept with the language servers as
 /// `llama`, so `lsp_stop("llama")` and quitting the app stop it.
 #[tauri::command]
-pub fn ai_start(app: AppHandle, state: State<LspState>, model: String) -> Result<u16, String> {
+/// `key` is required on every request except `/health`, so a web page in a browser can't use the
+/// server or read the code in its prompt cache.
+pub fn ai_start(app: AppHandle, state: State<LspState>, model: String, key: String) -> Result<u16, String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
         .arg(tools_dir(&app)?.join("llama/llama-server"))
         // --cache-reuse lets a request reuse the processed prompt even after text before the cursor shifts.
-        .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string()])
+        .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string(), "--api-key", &key])
         .args(["-ngl", "99", "-c", "8192", "-np", "1", "-b", "1024", "-ub", "1024", "--cache-reuse", "256"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

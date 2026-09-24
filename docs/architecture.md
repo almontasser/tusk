@@ -439,6 +439,10 @@ question in the palette would sit behind the modal Settings dialog.
 watchdog as the language servers, and stores it in the language server table
 as `llama`. That way `lsp_stop("llama")` and quitting the app stop it too.
 The client waits for `/health` before it asks for suggestions.
+The server allows requests from any origin, so a web page in a browser could
+call it and read the code in its prompt cache. Each start gets a random API key
+(`--api-key`), which the client sends as a bearer token; only `/health` works
+without it.
 
 Each suggestion is a request to `/infill`, sent through `curl` from
 `run_capture`. This works the same in development and in the bundled app,

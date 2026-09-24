@@ -42,6 +42,8 @@ let status: (text: string, source?: string) => void = () => {};
 let wanted = "";
 /** The running server's port, 0 until it's ready. */
 let port = 0;
+/** The server's API key, new for each start. */
+let key = "";
 
 const run = (program: string, args: string[], input?: string) => invoke<string>("run_capture", { cwd: "/", program, args, input });
 const curl = (args: string[], input?: string) => run("/usr/bin/curl", args, input);
@@ -89,7 +91,8 @@ async function apply() {
     await download(m, path);
     if (wanted !== id) return;
     status(`Loading ${m.label}…`, "ai:progress");
-    const p = await invoke<number>("ai_start", { model: path });
+    key = crypto.randomUUID();
+    const p = await invoke<number>("ai_start", { model: path, key });
     for (let i = 0; i < 120 && wanted === id && !port; i++) {
       if (await curl(["-sf", `http://127.0.0.1:${p}/health`]).then(() => true, () => false)) port = p;
       else await sleep(500);
@@ -149,7 +152,7 @@ const provider: monaco.languages.InlineCompletionsProvider = {
       t_max_predict_ms: 1500,
       response_fields: ["content"],
     };
-    const reply = await curl(["-sf", "-X", "POST", "-H", "Content-Type: application/json", "--data-binary", "@-", `http://127.0.0.1:${port}/infill`], JSON.stringify(body)).catch(() => "");
+    const reply = await curl(["-sf", "-X", "POST", "-H", "Content-Type: application/json", "-H", `Authorization: Bearer ${key}`, "--data-binary", "@-", `http://127.0.0.1:${port}/infill`], JSON.stringify(body)).catch(() => "");
     const text = reply && (JSON.parse(reply).content as string).trimEnd();
     if (!text?.trim() || token.isCancellationRequested) return;
     // When the suggestion ends with the rest of the line (a closing bracket, say), replace it instead of repeating it.
