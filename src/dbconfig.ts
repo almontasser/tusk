@@ -16,15 +16,22 @@ export function parseEnv(text: string): Record<string, string> {
   return env;
 }
 
-/** Laravel's defaults from config/database.php fill anything .env leaves out. */
-export function connectionFromEnv(env: Record<string, string>, root: string): Connection {
+/**
+ * Laravel's defaults from config/database.php fill anything .env leaves out. In a Sail project, DB_HOST
+ * names the database's container, which only resolves inside Docker, so connect to the port Sail
+ * forwards to this Mac instead.
+ */
+export function connectionFromEnv(env: Record<string, string>, root: string, sail = false): Connection {
   const driver = env.DB_CONNECTION || "sqlite";
   if (driver === "sqlite") {
     const file = env.DB_DATABASE || "database/database.sqlite";
     return { driver, host: "", port: 0, username: "", password: "", database: file.startsWith("/") ? file : `${root}/${file}` };
   }
   const port = Number(env.DB_PORT) || (driver === "pgsql" ? 5432 : 3306);
-  return { driver, host: env.DB_HOST || "127.0.0.1", port, database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "" };
+  const host = env.DB_HOST || "127.0.0.1";
+  if (sail && !/^(127\.0\.0\.1|localhost|::1)$/.test(host))
+    return { driver, host: "127.0.0.1", port: Number(env.FORWARD_DB_PORT) || port, database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "" };
+  return { driver, host, port, database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "" };
 }
 
 /** The statement around an offset, as PhpStorm runs the statement under the caret. */

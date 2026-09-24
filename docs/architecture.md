@@ -945,6 +945,15 @@ breakpoint paths and stack frames, so the rest of the client sees local paths
 only. The server path is saved per project in `localStorage`. Without one, a
 `docker-compose.yml` that mentions Laravel Sail maps `/var/www/html`.
 
+`src/sail.ts` decides where commands run. A project uses Sail when
+`vendor/bin/sail` exists and a compose file mentions Sail's images, and Sail is
+running when `docker compose ps --status running --quiet` prints anything. It
+checks on every run, so starting or stopping the containers takes effect at
+once. In Sail, test runs write the JUnit report to
+`storage/logs/editor-junit.xml`, which the container can write and git
+ignores, and the Tests tab maps `/var/www/html` in reported paths back to the
+project.
+
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 

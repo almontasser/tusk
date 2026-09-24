@@ -34,7 +34,8 @@ let failed: TestResult[] = [];
 q('[data-run="rerun"]').onclick = () => host.rerun();
 q('[data-run="failed"]').onclick = () => failed.length && host.rerunFailed(failed);
 
-const absolute = (file: string) => (file.startsWith("/") ? file : `${host.root()}/${file}`);
+// Reports from Sail name files by their path in the container.
+const absolute = (file: string) => (file.startsWith("/") ? file.replace(/^\/var\/www\/html(?=\/)/, host.root()) : `${host.root()}/${file}`);
 
 /** Opens a test at its failure, or at its declaration, which Pest's report leaves out. */
 async function open(r: TestResult) {

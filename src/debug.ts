@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
 import { pick } from "./palette";
+import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -189,11 +190,7 @@ export function togglePauseOnExceptions() {
 async function serverRoot(): Promise<string | null> {
   const saved = readSetting(`debug:serverRoot:${host.root()}`);
   if (saved !== null) return saved || null;
-  for (const file of ["docker-compose.yml", "compose.yaml", "docker-compose.yaml", "compose.yml"]) {
-    const text = await invoke<string>("read_file", { path: `${host.root()}/${file}` }).catch(() => "");
-    if (/laravel\/sail|sail-\d/.test(text)) return "/var/www/html";
-  }
-  return null;
+  return (await usesSail(host.root())) ? "/var/www/html" : null;
 }
 
 export async function setServerRoot() {

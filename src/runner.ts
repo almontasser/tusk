@@ -6,6 +6,7 @@ import { pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
 import { startDebugging, XDEBUG_ENV } from "./debug";
 import { filterFor, type TestResult } from "./junit";
+import { sailRunning } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showResults } from "./testresults";
 
@@ -19,9 +20,12 @@ const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("
 async function run(title: string, command: string[], tests = false) {
   last = { title, command, tests };
   if (!tests) return openTerminal(getRoot(), title, command);
-  const report = await reportPath();
+  // In Sail, the report has to be somewhere the container can write: storage/logs, which git ignores.
+  const inSail = command[0] === sail();
+  const report = inSail ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
   await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
-  return openTerminal(getRoot(), title, [...command, "--log-junit", report], () => showResults(report));
+  const reportArg = inSail ? "storage/logs/editor-junit.xml" : report;
+  return openTerminal(getRoot(), title, [...command, "--log-junit", reportArg], () => showResults(report));
 }
 
 async function reportPath() {
@@ -30,10 +34,18 @@ async function reportPath() {
   return `${dir}/junit.xml`;
 }
 
-/** `php artisan test`, which runs Pest when it's installed, or else the test binary. */
-async function testRunner() {
-  if (await exists("artisan")) return ["php", "artisan", "test"];
-  return [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
+// Absolute paths: the terminal looks a relative program up in PATH, not in the project.
+const sail = () => `${getRoot()}/vendor/bin/sail`;
+const bin = (name: string) => `${getRoot()}/vendor/bin/${name}`;
+
+/**
+ * `php artisan test`, which runs Pest when it's installed, or else the test binary. When Sail's containers
+ * are running, tests run in them; with `debug`, through `sail debug`, which sets Xdebug's trigger.
+ */
+async function testRunner(debug = false) {
+  if (await sailRunning(getRoot())) return debug ? [sail(), "debug", "test"] : [sail(), "test"];
+  const local = (await exists("artisan")) ? ["php", "artisan", "test"] : [(await exists("vendor/bin/pest")) ? bin("pest") : bin("phpunit")];
+  return debug ? ["/usr/bin/env", ...XDEBUG_ENV, ...local] : local;
 }
 
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
@@ -45,14 +57,17 @@ const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", li
  */
 export async function runTest(path: string, test: TestCase, debug = false) {
   const file = path.slice(getRoot().length + 1);
-  const runner = await testRunner();
+  const runner = await testRunner(debug);
   const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${debug ? "Debug" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}`;
+  const title = `${debug ? "Debug" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
   if (debug) await startDebugging();
-  return run(title, [...(debug ? ["/usr/bin/env", ...XDEBUG_ENV] : []), ...runner, file, ...filter], true);
+  return run(title, [...runner, file, ...filter], true);
 }
 
-export const runAllTests = async () => run("Tests", await testRunner(), true);
+export const runAllTests = async () => {
+  const runner = await testRunner();
+  return run(runner[0] === sail() ? "Tests (Sail)" : "Tests", runner, true);
+};
 
 async function rerunFailed(failed: TestResult[]) {
   const filter = filterFor(failed, await exists("vendor/bin/pest"));
@@ -88,6 +103,8 @@ async function artisanCommands() {
  */
 export async function runAnything() {
   const artisan = (await exists("artisan")) ? await artisanCommands().catch(() => []) : [];
+  // Artisan commands run in Sail's container when it's up; other command lines run on this Mac.
+  const php = (await sailRunning(getRoot())) ? "vendor/bin/sail artisan" : "php artisan"; // A shell line, so relative works
   pick("Run anything: an Artisan command with arguments, or a shell command", (query) => {
     const line = query.trim().replace(/^(php\s+)?artisan\s+/, "");
     if (!line) return [];
@@ -96,7 +113,7 @@ export async function runAnything() {
     const items = artisan.map((c) => ({
       label: c.name,
       detail: c.description,
-      run: () => runLine(`artisan ${c.name}`, `php artisan ${c.name}${suffix}`),
+      run: () => runLine(`artisan ${c.name}`, `${php} ${c.name}${suffix}`),
     }));
     const ranked = rank(word, items).map((i) => ({ ...i, label: `artisan ${i.label}${suffix}` }));
     return [...ranked.slice(0, 50), { label: query.trim(), detail: "Run in terminal", run: () => runLine(word, query.trim()) }];

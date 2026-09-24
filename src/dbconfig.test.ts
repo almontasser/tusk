@@ -16,6 +16,12 @@ test("fills in Laravel's defaults", () => {
   });
 });
 
+test("connects to Sail's forwarded port", () => {
+  const env = { DB_CONNECTION: "mysql", DB_HOST: "mysql", DB_PORT: "3306", FORWARD_DB_PORT: "3307", DB_USERNAME: "sail" };
+  assert.deepEqual([connectionFromEnv(env, "/app", true).host, connectionFromEnv(env, "/app", true).port], ["127.0.0.1", 3307]);
+  assert.equal(connectionFromEnv(env, "/app").host, "mysql");
+});
+
 test("finds the statement under the caret", () => {
   const sql = "select 1;\n\nselect 2;\nselect 3";
   assert.equal(statementAt(sql, 3), "select 1");

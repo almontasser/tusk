@@ -56,7 +56,7 @@ file to change when you add it.
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
-| Tools | There's no Composer UI, Docker or Sail support, or spell checking. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | There's no Composer UI or spell checking. Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -533,6 +533,13 @@ debugging on for the processes it starts.
   shows the exception's class and message.
 
 ### Docker and Sail
+
+In a Sail project (its compose file uses Laravel Sail) whose containers are
+running, tests, **Debug** on tests, and Artisan commands from Run Anything run
+in the container through `vendor/bin/sail`. Their terminal tabs say "(Sail)".
+When the containers are stopped, everything runs on this Mac. The database
+tool connects through the port Sail forwards (`FORWARD_DB_PORT`, or
+`DB_PORT`), because `DB_HOST` names a container that your Mac can't resolve.
 
 When PHP runs in a container, its paths differ from yours, so the debugger has
 to map them. For a Sail project (its `docker-compose.yml` uses Laravel Sail),

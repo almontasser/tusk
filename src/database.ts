@@ -16,6 +16,7 @@ import {
   updateStatement,
 } from "./dbconfig";
 import { monaco } from "./editor";
+import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
 type Result = { columns: string[]; rows: (string | null)[][]; affected: number; truncated: boolean };
@@ -39,7 +40,7 @@ const query = (sql: string) => invoke<Result>("db_query", { connection, sql });
 
 async function loadConnection() {
   const env = await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => "");
-  connection = connectionFromEnv(parseEnv(env), host.root());
+  connection = connectionFromEnv(parseEnv(env), host.root(), await usesSail(host.root()));
   schema = null;
   const c = connection;
   $("db-connection").textContent =
