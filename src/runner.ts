@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
+import { startDebugging, XDEBUG_ENV } from "./debug";
 import { openTerminal } from "./terminal";
 
 let getRoot: () => string;
@@ -19,22 +20,27 @@ function run(title: string, command: string[]) {
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
 const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", line]);
 
-/** Runs one test, or the whole file when the test has no filter, through `php artisan test` or the test binary. */
-export async function runTest(path: string, test: TestCase) {
+/**
+ * Runs one test, or the whole file when the test has no filter, through `php artisan test` or
+ * the test binary. With `debug`, it starts the debugger and runs the test with Xdebug enabled.
+ */
+export async function runTest(path: string, test: TestCase, debug = false) {
   const file = path.slice(getRoot().length + 1);
   const runner = (await exists("artisan"))
     ? ["php", "artisan", "test"]
     : [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
   const filter = test.filter ? ["--filter", test.filter] : [];
-  return run(`Test: ${test.filter ? test.name : file.split("/").pop()}`, [...runner, file, ...filter]);
+  const title = `${debug ? "Debug" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}`;
+  if (debug) await startDebugging();
+  return run(title, [...(debug ? ["/usr/bin/env", ...XDEBUG_ENV] : []), ...runner, file, ...filter]);
 }
 
 /** Runs the test around the cursor, or all tests in the file. */
-export function runTestAtCursor(editor: monaco.editor.ICodeEditor) {
+export function runTestAtCursor(editor: monaco.editor.ICodeEditor, debug = false) {
   const model = editor.getModel();
   if (!model || !isTestFile(model.uri.fsPath)) return;
   const test = testAt(findTests(model.getValue()), editor.getPosition()?.lineNumber ?? 1);
-  if (test) runTest(model.uri.fsPath, test);
+  if (test) runTest(model.uri.fsPath, test, debug);
 }
 
 export const rerun = () => last && openTerminal(getRoot(), last.title, last.command);
@@ -76,16 +82,19 @@ export async function runAnything() {
 /** Adds run links above tests in test files. */
 export function initRunner(root: () => string) {
   getRoot = root;
-  monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase) => runTest(path, test));
+  monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, debug?: boolean) => runTest(path, test, debug));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {
       const path = model.uri.fsPath;
       const lenses = !isTestFile(path)
         ? []
-        : findTests(model.getValue()).map((test) => ({
-            range: new monaco.Range(test.line, 1, test.line, 1),
-            command: { id: "tests.run", title: test.filter ? "▶ Run test" : "▶ Run all tests in file", arguments: [path, test] },
-          }));
+        : findTests(model.getValue()).flatMap((test) => {
+            const range = new monaco.Range(test.line, 1, test.line, 1);
+            return [
+              { range, command: { id: "tests.run", title: test.filter ? "▶ Run test" : "▶ Run all tests in file", arguments: [path, test] } },
+              { range, command: { id: "tests.run", title: "Debug", arguments: [path, test, true] } },
+            ];
+          });
       return { lenses, dispose() {} };
     },
   });

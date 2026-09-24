@@ -1,4 +1,5 @@
-// Bottom panel with terminal tabs. Shells, Artisan commands, and tests all run here.
+// Bottom panel with tabs. Shells, Artisan commands, and tests run in terminal tabs; other
+// views, such as the debugger, can add a tab with showPanelView.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
@@ -6,7 +7,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { isDark, onSettings } from "./settings";
 
-type Session = { id: number; title: string; term: Terminal; fit: FitAddon; el: HTMLElement; exited: boolean; dispose(): void };
+/** A panel tab: a terminal, or another view (without `term`). */
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon };
 
 const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
@@ -18,7 +20,7 @@ const themes = {
   light: { background: "#ffffff", foreground: "#1e1f22", cursor: "#1e1f22", selectionBackground: "#3574f040", black: "#1e1f22", white: "#6c707e", brightWhite: "#8c8f94", yellow: "#a8781f", brightYellow: "#c9951f" },
 };
 const theme = () => themes[isDark() ? "dark" : "light"];
-onSettings(() => sessions.forEach((s) => (s.term.options.theme = theme())));
+onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme())));
 
 /** Opens a terminal tab. Without `command`, it runs your login shell. */
 export async function openTerminal(cwd: string, title = "Terminal", command?: string[]) {
@@ -33,7 +35,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   fit.fit();
 
   const id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
-  const session: Session = { id, title, term, fit, el, exited: false, dispose: () => {} };
+  const session: Session = { title, term, fit, el, exited: false, dispose: () => {} };
   const unlisteners = await Promise.all([
     listen<string>(`pty:${id}`, (e) => term.write(e.payload)),
     listen(`pty-exit:${id}`, () => {
@@ -63,10 +65,8 @@ function activate(session: Session | undefined) {
   active = session;
   sessions.forEach((s) => (s.el.hidden = s !== session));
   renderTabs();
-  if (session) {
-    session.fit.fit();
-    session.term.focus();
-  }
+  session?.fit?.fit();
+  session?.term?.focus();
 }
 
 function close(session: Session) {
@@ -97,7 +97,7 @@ function renderTabs() {
 function showPanel(visible: boolean) {
   panelVisible = visible;
   $("panel").hidden = !visible;
-  if (visible) active?.fit.fit();
+  if (visible) active?.fit?.fit();
 }
 
 /** Shows the panel, focusing the terminal, or hides it when a terminal has focus. */
@@ -106,6 +106,20 @@ export function toggleTerminal(cwd: string) {
   const focused = active?.el.contains(document.activeElement);
   showPanel(!focused || !panelVisible);
   if (panelVisible) activate(active);
+}
+
+/** Shows a view as a panel tab, adding the tab the first time. `onClose` runs when its tab closes. */
+export function showPanelView(title: string, el: HTMLElement, onClose: () => void = () => {}) {
+  showPanel(true);
+  let session = sessions.find((s) => s.el === el);
+  if (!session) {
+    el.classList.add("panel-view");
+    $("terminals").append(el);
+    session = { title, el, exited: false, dispose: () => (el.remove(), onClose()) };
+    sessions.push(session);
+  }
+  session.title = title;
+  activate(session);
 }
 
 // Drag the top edge of the panel to resize it.

@@ -120,6 +120,7 @@ script.
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
 | Vue language server | 3.3.11 | npm package, run with Node |
+| PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
 
 Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.
@@ -757,6 +758,34 @@ Monaco has no Vue grammar. `editor.ts` registers `vue` for `.vue` files with
 Monaco's HTML grammar, which highlights `<script>` as JavaScript and `<style>`
 as CSS.
 
+## Debugging
+
+The debugger is the Xdebug adapter from VS Code's PHP Debug extension. It
+speaks the Debug Adapter Protocol (DAP), which frames messages like LSP, so the
+Rust bridge runs it as the `xdebug` "server", and `lsp_stop` ends it.
+`src/debug.ts` is a small DAP client:
+
+1. `startDebugging` starts the adapter and sends `initialize`, then `launch`
+   with port 9003. The adapter listens for Xdebug connections.
+2. On the adapter's `initialized` event, the client sends every breakpoint
+   (`setBreakpoints` per file), no exception filters, and `configurationDone`.
+3. On a `stopped` event, it reads the `stackTrace`, opens the top frame's file
+   at its line, marks the line, and loads the frame's `scopes`. Variables load
+   one level at a time, when you expand them.
+4. Stepping sends `continue`, `next`, `stepIn`, or `stepOut` for the stopped
+   thread. `evaluate` runs in the selected frame.
+
+Debugging starts processes with `XDEBUG_MODE=debug` and `XDEBUG_SESSION=1`, so
+Xdebug connects without a `php.ini` change. `php artisan serve` passes both
+variables to the PHP server it starts.
+
+Breakpoints are model decorations with a glyph in the gutter, so they show in
+every pane and move with the lines as you edit. The line numbers are saved per
+project in `localStorage`.
+
+The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
+any element be a panel tab next to the terminals.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -911,6 +940,13 @@ and it's much faster. But it can't load `tsserver` plugins, and Vue's language
 server depends on `@vue/typescript-plugin`. vtsls with TypeScript 5.9 serves
 JavaScript, TypeScript, and Vue with one server. Revisit this when Vue's tooling
 supports TypeScript 7.
+
+### 2026-09-24: The PHP Debug adapter instead of a DBGp client
+
+Xdebug speaks DBGp, an XML protocol over TCP. The PHP Debug adapter already
+turns DBGp into the Debug Adapter Protocol and handles its details (connection
+per request, property paging, evaluation). It runs over the same bridge as the
+language servers.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

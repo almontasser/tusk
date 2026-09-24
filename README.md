@@ -50,7 +50,7 @@ file to change when you add it.
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
 | Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
-| Debugger | There's no Xdebug integration or step debugging. |
+| Debugger | Breakpoints have no conditions or hit counts, and there's no option to pause on exceptions. Projects in Docker or Sail need path mappings, which aren't supported yet. |
 | Database | There's no database browser or query console. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
@@ -151,6 +151,11 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |
+| ⌃⇧D | Debug the test at the cursor |
+| ⌘F8 | Toggle a breakpoint on the current line |
+| F9 | Resume (while debugging) |
+| F8, F7, ⇧F8 | Step over, step into, step out |
+| ⌘F2 | Stop debugging |
 | ⌘K | Commit |
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
@@ -378,6 +383,29 @@ in the status bar.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 
+## Debugging
+
+The editor debugs PHP with Xdebug, which must be installed in your PHP
+(`php -m` lists it). You don't need to change your `php.ini`: the editor turns
+debugging on for the processes it starts.
+
+1. Click the gutter to the left of a line number, or press ⌘F8, to set a
+   breakpoint. Breakpoints are saved with the project.
+2. Start a debug session in one of these ways:
+   - Click **Debug** above a test, or press ⌃⇧D in a test. The test runs with
+     Xdebug on.
+   - Run **Start Debug Server** from ⌘⇧A. It runs `php artisan serve` with
+     Xdebug on, so every page you open in the browser stops at your breakpoints.
+   - For another setup, such as Herd or Valet, run **Start Listening for PHP
+     Debug Connections**, then start a request with Xdebug's trigger (the
+     `XDEBUG_SESSION` cookie, which browser extensions set) and
+     `xdebug.mode=debug` in your PHP configuration.
+3. When execution stops, the **Debug** tab in the bottom panel shows the call
+   stack and variables. Click a frame to see its variables, expand objects and
+   arrays, and type an expression, such as `$request->all()`, to evaluate it.
+   Use F9 to resume, F8 to step over, F7 to step into, ⇧F8 to step out, and ⌘F2
+   to stop.
+
 ## Diagnostics and formatting
 
 **Formatting** (⌥⌘L) uses your project's own tools:
@@ -428,6 +456,7 @@ committed.
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files |
 | `src/settings.ts` | Settings, the settings dialog, and the theme |
+| `src/debug.ts` | The Xdebug debugger: breakpoints, stepping, and the Debug panel |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

@@ -5,6 +5,7 @@ import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { decorateConflicts, initConflicts } from "./conflicts";
+import { attachDebugger, initDebugger, isPaused, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
@@ -36,6 +37,7 @@ function addPane(): Pane {
   addEditor(ed);
   trackEditor(ed);
   decorateConflicts(ed);
+  attachDebugger(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
   ed.onDidFocusEditorText(() => focusPane(pane));
@@ -127,6 +129,7 @@ async function openFolder(dir: unknown = null) {
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
   detectFormatters();
+  loadBreakpoints();
   if (session) await restoreSession(session);
   restartServers();
 }
@@ -550,6 +553,24 @@ const actions: Action[] = [
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
+  { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
+  { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },
+  { label: "Stop Debugging", keys: "Meta+F2", run: stopDebugging },
+  { label: "Resume Program", keys: "F9", run: () => isPaused() && resume() },
+  { label: "Step Over", keys: "F8", run: () => isPaused() && stepOver() },
+  { label: "Step Into", keys: "F7", run: () => isPaused() && stepInto() },
+  { label: "Step Out", keys: "Shift+F8", run: () => isPaused() && stepOut() },
+  { label: "Debug Panel", run: showDebugPanel },
+  {
+    label: "Start Debug Server (php artisan serve with Xdebug)",
+    run: async () => {
+      if (!root) return;
+      await startDebugging();
+      // Laravel's serve command passes XDEBUG_MODE and XDEBUG_SESSION to the PHP server it starts.
+      openTerminal(root, "Debug server", ["/usr/bin/env", ...XDEBUG_ENV, "php", "artisan", "serve"]);
+    },
+  },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
@@ -619,6 +640,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initSettings();
 initFormatting({ root: () => root, status });
 initConflicts();

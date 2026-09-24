@@ -48,6 +48,7 @@ pub fn run() {
             fs::watch,
             lsp::lsp_start,
             lsp::lsp_send,
+            lsp::lsp_stop,
             tools::tool_path,
             tools::path_exists,
             tools::run_capture,

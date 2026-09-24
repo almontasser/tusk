@@ -52,3 +52,16 @@ if ! cmp -s "$root/node-tools/package-lock.json" "$node_dest/package-lock.json";
   cp "$root/node-tools/package.json" "$root/node-tools/package-lock.json" "$node_dest/"
   (cd "$node_dest" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
 fi
+
+# The Xdebug adapter from VS Code's PHP Debug extension. It speaks the Debug Adapter
+# Protocol and ships as a .vsix (a zip) with its dependencies included.
+fetch php-debug-1.40.2.vsix \
+  https://github.com/xdebug/vscode-php-debug/releases/download/v1.40.2/php-debug-1.40.2.vsix \
+  17631993fe800083a2fc89a6782c8bf58a79603ad201ddff60d9b59ba2345d5f
+if [ ! -f "$dest/php-debug/.version-1.40.2" ]; then
+  rm -rf "$dest/php-debug" "$cache/php-debug"
+  unzip -q "$cache/php-debug-1.40.2.vsix" 'extension/*' -d "$cache/php-debug"
+  mv "$cache/php-debug/extension" "$dest/php-debug"
+  rm -rf "$cache/php-debug"
+  touch "$dest/php-debug/.version-1.40.2"
+fi

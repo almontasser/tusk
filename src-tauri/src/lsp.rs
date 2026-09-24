@@ -42,6 +42,8 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
         "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         "typescript" => ("node", "node/node_modules/@vtsls/language-server/bin/vtsls.js", &["--stdio"]),
         "vue" => ("node", "node/node_modules/@vue/language-server/bin/vue-language-server.js", &["--stdio"]),
+        // Not a language server: the Xdebug debug adapter. DAP frames messages the same way.
+        "xdebug" => ("node", "php-debug/out/phpDebug.js", &[]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
     let tools = tools_dir(&app)?;
@@ -68,6 +70,15 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
         let _ = old.wait();
     }
     Ok(std::process::id())
+}
+
+/// Stops the server (or debug adapter) `name`, if it's running.
+#[tauri::command]
+pub fn lsp_stop(state: State<LspState>, name: String) {
+    if let Some((mut child, _)) = state.0.lock().unwrap().remove(&name) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 #[tauri::command]
