@@ -54,7 +54,7 @@ file to change when you add it.
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
 | Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
-| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
+| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature doesn't update overriding methods in subclasses, and neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable handles a single-line assignment in the same function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
@@ -156,6 +156,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the current file's class |
 | ⌘⌦ | Safe delete the class, method, or function at the cursor |
+| ⌥⌘N | Inline the variable at the cursor |
+| ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
@@ -300,6 +302,22 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 - If nothing does, confirm in the palette. A method or function is removed with
   its docblock and attributes (undo with ⌘Z). A class that's alone in its file
   moves the file to the Trash.
+
+## Inline variable and change signature
+
+Press ⌥⌘N on a variable to replace it with its value and remove the
+assignment. It works when the variable is assigned once, on its own line, and
+never changed afterwards, within the same function; otherwise it says why it
+can't. The value gets parentheses when it's an expression, such as
+`($a + $b)`.
+
+Press ⌘F6 in a method or function to change its parameters. Edit the list, for
+example to reorder, remove, or add parameters, and press ⏎. A new parameter
+needs a default value. The editor finds every call, shows how many it will
+change, and on **Apply** rewrites the declaration and the calls: positional
+arguments move with their parameters, named arguments stay named, and a
+skipped position gets the parameter's default. Calls it can't rewrite safely,
+such as ones that spread `...$args`, are listed and left unchanged.
 
 ## Type hierarchy
 

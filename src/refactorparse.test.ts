@@ -1,0 +1,39 @@
+/// <reference types="node" />
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
+
+test("splits arguments at top-level commas", () => {
+  assert.deepEqual(splitTopLevel(`$a, foo($b, [1, 2]), 'x, y', "q\\", r"`), ["$a", "foo($b, [1, 2])", "'x, y'", `"q\\", r"`]);
+  assert.deepEqual(splitTopLevel(""), []);
+  const text = "call(a(b), ')')";
+  assert.equal(matchBracket(text, 4), text.length - 1);
+});
+
+test("rewrites call arguments for a new signature", () => {
+  const old = parseParams("int $a, string $b = 'x', ?array $c = null");
+  const reordered = parseParams("?array $c = null, int $a");
+  assert.deepEqual(rewriteArgs(["1", "'y'", "[2]"], old, reordered), { args: ["[2]", "1"] });
+  // $c left out before $a: its default fills the gap.
+  assert.deepEqual(rewriteArgs(["1"], old, reordered), { args: ["null", "1"] });
+  // Named arguments stay named and move to the end.
+  assert.deepEqual(rewriteArgs(["b: 'z'", "a: 5"], old, parseParams("string $b = 'x', int $a")), { args: ["b: 'z'", "a: 5"] });
+  const added = parseParams("int $a, bool $strict = false, string $b = 'x'");
+  assert.deepEqual(rewriteArgs(["1", "'y'"], old, added), { args: ["1", "false", "'y'"] });
+  assert.ok("error" in rewriteArgs(["...$all"], old, reordered));
+  assert.ok("error" in rewriteArgs(["1"], old, parseParams("int $a, int $d")));
+});
+
+test("plans inlining a variable", () => {
+  const lines = ["function x() {", "    $total = $a + $b;", "    echo $total;", "    return $total * 2;", "}"];
+  assert.deepEqual(planInline(lines, "total", 1, 5), { assignment: 2, value: "($a + $b)", uses: [{ line: 3, column: 10 }, { line: 4, column: 12 }] });
+  const call = ["$user = User::find(1);", "$user->name;"];
+  assert.deepEqual(planInline(call, "user", 1, 2), { assignment: 1, value: "User::find(1)", uses: [{ line: 2, column: 1 }] });
+  assert.ok("error" in planInline(["$a = 1;", "$a++;"], "a", 1, 2));
+  assert.ok("error" in planInline(["$a = 1;", "$a[] = 2;"], "a", 1, 2));
+  assert.ok("error" in planInline(["$a = 1;", "$a = 2;"], "a", 1, 2));
+  assert.ok("error" in planInline(["echo $a;", "$a = 1;"], "a", 1, 2));
+  assert.ok("error" in planInline(["$a = 1;", "foreach ($xs as $a) {}"], "a", 1, 2));
+  // $ab isn't $a.
+  assert.deepEqual(planInline(["$a = 1;", "$ab = $a;"], "a", 1, 2), { assignment: 1, value: "1", uses: [{ line: 2, column: 7 }] });
+});

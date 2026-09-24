@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { phpactorRequest } from "./lsp";
+import { callsOf } from "./refactor";
 import { pick } from "./palette";
 import { deletionLines, laravelNames } from "./phptypes";
 
@@ -25,7 +26,7 @@ const contains = (r: L.Range, line: number, character: number) =>
   (line > r.start.line || (line === r.start.line && character >= r.start.character)) && (line < r.end.line || (line === r.end.line && character <= r.end.character));
 
 /** The innermost class, method, or function declaration around the position. */
-function symbolAt(symbols: L.DocumentSymbol[], line: number, character: number, container?: L.DocumentSymbol): { symbol: L.DocumentSymbol; container?: L.DocumentSymbol } | null {
+export function symbolAt(symbols: L.DocumentSymbol[], line: number, character: number, container?: L.DocumentSymbol): { symbol: L.DocumentSymbol; container?: L.DocumentSymbol } | null {
   for (const s of symbols) {
     if (!contains(s.range, line, character)) continue;
     const inner = symbolAt(s.children ?? [], line, character, s);
@@ -35,14 +36,9 @@ function symbolAt(symbols: L.DocumentSymbol[], line: number, character: number, 
   return null;
 }
 
-async function usagesOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, fqn: string | null): Promise<Usage[]> {
+async function usagesOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, fqn: string | null, container?: L.DocumentSymbol): Promise<Usage[]> {
   const uri = model.uri.toString();
-  const refs =
-    (await phpactorRequest<L.Location[] | null>("textDocument/references", {
-      textDocument: { uri },
-      position: symbol.selectionRange.start,
-      context: { includeDeclaration: false },
-    })) ?? [];
+  const refs = await callsOf(model, symbol, container).catch(() => []);
   const usages: Usage[] = refs
     // Recursive calls inside the declaration itself don't keep it alive.
     .filter((r) => !(r.uri === uri && contains(symbol.range, r.range.start.line, r.range.start.character)))
@@ -91,7 +87,7 @@ async function check(editor: monaco.editor.ICodeEditor) {
   const version = model.getVersionId();
 
   host.status(`Looking for usages of ${label}…`);
-  const usages = await usagesOf(model, symbol, fqn);
+  const usages = await usagesOf(model, symbol, fqn, found.container);
   host.status("");
   if (usages.length) {
     const rel = (p: string) => (p.startsWith(host.root() + "/") ? p.slice(host.root().length + 1) : p);

@@ -313,6 +313,24 @@ because the symbol's line numbers would be out of date, and only one Safe
 Delete runs at a time. `deletionLines` in `src/phptypes.ts` widens the removed
 lines to the docblock, attributes, and one blank line.
 
+### Inline variable and change signature
+
+`src/refactorparse.ts` holds the text work, tested in Node: `matchBracket` and
+`splitTopLevel` scan brackets and strings (not heredocs), `planInline` checks
+that a variable has exactly one plain assignment, alone on its line, and no
+other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`),
+and `rewriteArgs` maps a call's arguments to a new parameter list by name.
+`src/refactor.ts` applies them: inlining is one undoable edit in the model;
+a signature change becomes a `WorkspaceEdit` for `applyWorkspaceEdit`, which
+edits and saves each file.
+
+Calls of a method come from Phpactor's command line, `phpactor references:member
+<class> <method> --format=json`, run with the editor's index path. The command
+scans the project's files (`--filesystem=git`), while the language server's
+`textDocument/references` relies on its index and missed calls in files it
+hadn't indexed. Safe Delete uses the same search for methods. Functions, which
+the command doesn't cover, still use the language server.
+
 ### Type hierarchy
 
 Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`

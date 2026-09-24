@@ -15,6 +15,7 @@ import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
 import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
+import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
@@ -776,6 +777,8 @@ const actions: Action[] = [
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
   editorAction("Find Usages", "Alt+F7", "editor.action.goToReferences"),
   { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
+  { label: "Inline Variable", keys: "Alt+Meta+N", run: () => inlineVariable(editor), editorOnly: true },
+  { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => active.endsWith(".php") && showTypeHierarchy(active) },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
@@ -1069,6 +1072,7 @@ initRebase({ root: () => root, status });
 initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
 initHttpClient({ root: () => root, status });
 initComposer({ root: () => root, status });
+initRefactor({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({

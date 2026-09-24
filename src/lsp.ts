@@ -635,6 +635,8 @@ const phpactorIndexer = {
   // the patterns change, so projects get a fresh index instead of stale duplicates.
   "indexer.index_path": "%cache%/index/%project_id%-editor-1",
 };
+/** The editor's index, for running Phpactor's command line against the same index as the server. */
+export const PHPACTOR_INDEX = { "indexer.index_path": phpactorIndexer["indexer.index_path"] };
 
 const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
