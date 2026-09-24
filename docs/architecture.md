@@ -841,6 +841,13 @@ start at 5, so both show on a changed line. Decorations stick to their lines
 as you edit, and models created later, such as a file opened after the run,
 get their marks in `onDidCreateModel`.
 
+The Coverage tab is a panel view (`showPanelView`) that reuses the Tests tab's
+toolbar styles and the Find view's file groups (`fileGroup` in `src/search.ts`,
+generic over its items). `uncoveredRanges` in `src/junit.ts` joins uncovered
+statement lines into runs, splitting a run only at a covered statement, since
+blank lines and comments aren't in the report. A file's text is read when its
+rows first show, so collapsed files cost nothing.
+
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
 

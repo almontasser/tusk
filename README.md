@@ -57,7 +57,7 @@ file to change when you add it.
 | Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
-| Coverage | There's no coverage summary per file or folder, only the total in the status bar, and no line-by-line list of which tests covered a line. |
+| Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
 | Profiler | There's no viewer for Xdebug profiles (Cachegrind files). |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
@@ -641,6 +641,12 @@ Hover over a mark to see how many times the line ran. Marks follow their lines
 as you edit and stay until the next coverage run, or until you run **Hide
 Coverage**. ⌃R reruns with coverage too.
 
+The **Coverage** tab in the bottom panel lists every file with uncovered lines,
+least covered first, with each file's percentage. Under each file, a row shows
+a run of uncovered lines, such as `15–17`, and the code on its first line.
+Click a row to open it there. The tab's buttons rerun with coverage and hide
+coverage.
+
 Coverage needs PCOV or Xdebug for PHP. PHPUnit uses PCOV when it's loaded, and
 the editor sets `XDEBUG_MODE=coverage` for Xdebug. Only the folders in
 `phpunit.xml`'s `<source>` are measured. In Sail, the container's PHP must have
@@ -937,7 +943,7 @@ committed.
 | `src/runner.ts` | Test runner, run links, Run Anything, routes, and Tinker |
 | `src/testresults.ts` | The Tests tab: live progress and the results tree |
 | `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, and Clover coverage reports, and builds rerun filters |
-| `src/coverage.ts` | Code coverage marks in the gutter |
+| `src/coverage.ts` | Code coverage marks in the gutter and the Coverage tab |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
 | `src/files.ts` | File operations and the tree's context menu |

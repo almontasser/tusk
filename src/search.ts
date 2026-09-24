@@ -91,8 +91,11 @@ function render(error: string) {
   );
 }
 
-/** A file in a results list, with its matches below. Click the file to collapse them; they render when first shown. */
-function fileGroup(path: string, list: Match[], row: (m: Match) => HTMLElement, open: boolean, action?: HTMLElement) {
+/**
+ * A file in a results list, with its items below. Click the file to collapse them; they render when first shown.
+ * The badge shows `count`, or else the number of items.
+ */
+export function fileGroup<T>(path: string, list: T[], row: (item: T) => HTMLElement, open: boolean, action?: HTMLElement, count?: string) {
   const group = document.createElement("li");
   const header = document.createElement("div");
   header.className = "find-file";
@@ -102,7 +105,7 @@ function fileGroup(path: string, list: Match[], row: (m: Match) => HTMLElement, 
   header.innerHTML = `<span class="chevron codicon codicon-chevron-down"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span>`;
   header.querySelector(".name")!.textContent = name;
   header.querySelector(".dir")!.textContent = rel.slice(0, -name.length - 1);
-  header.querySelector(".count")!.textContent = String(list.length);
+  header.querySelector(".count")!.textContent = count ?? String(list.length);
   if (action) header.append(action);
   const rows = document.createElement("ul");
   const chevron = header.querySelector(".chevron")!;

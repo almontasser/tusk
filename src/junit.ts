@@ -121,3 +121,15 @@ export function parseClover(xml: string): Coverage {
   }
   return coverage;
 }
+
+/** Runs of uncovered statement lines as [first, last], split wherever a covered statement lies between them. */
+export function uncoveredRanges(lines: Map<number, number>): [number, number][] {
+  const ranges: [number, number][] = [];
+  let open = false;
+  for (const [line, count] of [...lines].sort((a, b) => a[0] - b[0])) {
+    if (count) open = false;
+    else if (open) ranges[ranges.length - 1][1] = line;
+    else (ranges.push([line, line]), (open = true));
+  }
+  return ranges;
+}

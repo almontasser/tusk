@@ -10,7 +10,7 @@ import { sailRunning } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
-import { loadCoverage } from "./coverage";
+import { initCoverage, loadCoverage } from "./coverage";
 import { methodLine, routeTarget } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 
@@ -90,14 +90,14 @@ export async function runTest(path: string, test: TestCase, debug = false, cover
   const file = path.slice(getRoot().length + 1);
   const runner = await testRunner(debug);
   const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${debug ? "Debug" : coverage ? "Coverage" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
+  const title = `${debug ? "Debug" : coverage ? "Test with coverage" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
   if (debug) await startDebugging();
   return run(title, [...runner, file, ...filter], true, coverage);
 }
 
 export const runAllTests = async (coverage = false) => {
   const runner = await testRunner();
-  return run(`${coverage ? "Coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage);
+  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage);
 };
 
 async function rerunFailed(failed: TestResult[]) {
@@ -207,6 +207,7 @@ export function initRunner(root: () => string, open: (path: string, line: number
   openAt = open;
   status = showStatus;
   initTestResults({ root, openAt: open, rerun, rerunFailed });
+  initCoverage({ openAt: open, rerun });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, debug?: boolean) => runTest(path, test, debug));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {
