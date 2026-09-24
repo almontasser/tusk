@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionFromEnv, parseEnv, quoteIdentifier, statementAt } from "./dbconfig.ts";
+import { connectionFromEnv, literal, parseEnv, quoteIdentifier, statementAt, updateStatement } from "./dbconfig.ts";
 
 test("parses .env values", () => {
   const env = parseEnv(`# comment\nDB_CONNECTION=mysql\nDB_PASSWORD="se#cret"\nDB_HOST=db # the host\n# DB_PORT=1\nexport DB_USERNAME='sail'\n`);
@@ -28,4 +28,11 @@ test("finds the statement under the caret", () => {
 test("quotes identifiers per driver", () => {
   assert.equal(quoteIdentifier("mysql", "a`b"), "`a``b`");
   assert.equal(quoteIdentifier("sqlite", 'a"b'), '"a""b"');
+});
+
+test("builds cell updates", () => {
+  assert.equal(literal("mysql", "a\\b'c"), "'a\\\\b''c'");
+  assert.equal(literal("pgsql", "a\\b"), "'a\\b'");
+  assert.equal(updateStatement("sqlite", "posts", "title", null, { id: "7" }), `UPDATE "posts" SET "title" = NULL WHERE "id" = '7'`);
+  assert.equal(updateStatement("mysql", "t", "v", "x", { a: "1", b: null }), "UPDATE `t` SET `v` = 'x' WHERE `a` = '1' AND `b` IS NULL");
 });

@@ -40,7 +40,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
-| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results are read-only (no editing cells), stop at 1,000 rows, and there's no SQL completion from the schema. |
+| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. You can edit cells of a table's data, but not add or delete rows. |
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
@@ -436,10 +436,15 @@ anything missing. SQLite, MySQL, MariaDB, and PostgreSQL work without
 installing a client, because the drivers are built into the app.
 
 - Click a table to see its columns. A `?` after a type marks a nullable column.
-- Double-click a table to show its first 500 rows.
+- Double-click a table to show its first 500 rows. Double-click a cell to
+  edit it, and press Enter to save the change to the database, or Escape to
+  cancel. Type `NULL` for a null value. Tables without a primary key are
+  read-only.
 - Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then
   press ⌘⏎ to run the statement under the caret, or the selection. ⌘⏎ also runs
   SQL in any `.sql` file.
+- SQL completion suggests your tables and columns. After `name.`, it suggests
+  the columns of that table, or of the table that `name` is an alias for.
 
 Results show in the **Database** tab of the bottom panel. After you change
 `.env`, click **Refresh** in the tool window.

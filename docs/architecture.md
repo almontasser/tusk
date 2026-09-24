@@ -811,6 +811,16 @@ The query console is `console.sql` in the app's data folder, in a folder named
 after the project path, so it never shows up in the project's git status. It
 opens as a normal tab, so saving and session restore work unchanged. **Execute
 Query** is a Monaco action bound to ⌘⏎ when the editor's language is SQL.
+SQL completion loads every table's columns in one query (`schemaQuery`) and
+keeps them until the connection reloads or a statement returns no rows, which
+may have changed the schema. An alias is found with a pattern (`posts p`,
+`posts as p`) anywhere in the file.
+
+Cell edits apply at once, one `UPDATE` per cell, with every value as a string
+literal that the database converts to the column's type. The row is found by
+its primary key (`primaryKeyQuery`), using the values shown in the grid. If
+the update doesn't change exactly one row, the editor reports it and keeps the
+old value. There's no batch of pending edits to submit, as PhpStorm has.
 `statementAt` finds the statement around the caret by splitting on semicolons,
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.

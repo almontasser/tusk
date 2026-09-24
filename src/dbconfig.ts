@@ -60,3 +60,31 @@ export function columnsQuery(driver: string, table: string): string {
   if (driver === "sqlite") return `SELECT name, type, CASE WHEN "notnull" THEN 'NO' ELSE 'YES' END FROM pragma_table_info(${quote(table)})`;
   return `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = ${schema(driver)} AND table_name = ${quote(table)} ORDER BY ordinal_position`;
 }
+
+/** Each row is a table, one of its columns, and the column's type, for SQL completion. */
+export function schemaQuery(driver: string): string {
+  if (driver === "sqlite")
+    return "SELECT m.name, p.name, p.type FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%' ORDER BY m.name, p.cid";
+  return `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = ${schema(driver)} ORDER BY table_name, ordinal_position`;
+}
+
+/** Each row is one column of the table's primary key. */
+export function primaryKeyQuery(driver: string, table: string): string {
+  if (driver === "sqlite") return `SELECT name FROM pragma_table_info(${quote(table)}) WHERE pk > 0 ORDER BY pk`;
+  if (driver === "pgsql")
+    return `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = ${quote(quoteIdentifier(driver, table))}::regclass AND i.indisprimary`;
+  return `SELECT column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND table_name = ${quote(table)} AND constraint_name = 'PRIMARY' ORDER BY ordinal_position`;
+}
+
+/** A string literal. MySQL also treats backslashes as escapes. Every database converts a string to the column's type. */
+export function literal(driver: string, value: string | null): string {
+  if (value === null) return "NULL";
+  return quote(driver === "mysql" || driver === "mariadb" ? value.replace(/\\/g, "\\\\") : value);
+}
+
+/** Updates one cell of the row whose primary key has the given values. */
+export function updateStatement(driver: string, table: string, column: string, value: string | null, key: Record<string, string | null>): string {
+  const id = (name: string) => quoteIdentifier(driver, name);
+  const where = Object.entries(key).map(([k, v]) => (v === null ? `${id(k)} IS NULL` : `${id(k)} = ${literal(driver, v)}`));
+  return `UPDATE ${id(table)} SET ${id(column)} = ${literal(driver, value)} WHERE ${where.join(" AND ")}`;
+}
