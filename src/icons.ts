@@ -31,6 +31,7 @@ const byExtension: [RegExp, Icon][] = [
   [/\.(sh|bash|zsh)$/, { codicon: "terminal", color: "icon-config" }],
   [/\.(lock)$/, { codicon: "lock", color: "icon-lock" }],
   [/\.(sql|sqlite)$/, { codicon: "database", color: "icon-config" }],
+  [/\.(http|rest)$/, { codicon: "globe", color: "icon-ts" }],
 ];
 
 /** Folders that hold dependencies or generated files, shown dimmed, as PhpStorm marks excluded folders. */

@@ -658,3 +658,17 @@ button.link:hover { text-decoration: underline; }
 .hierarchy .kind-interface { color: var(--green); }
 .hierarchy .kind-trait { color: var(--orange); }
 .hierarchy .kind-enum { color: #d673d6; }
+
+/* ==========================================================================
+   HTTP client
+   ========================================================================== */
+
+.http-response { display: flex; flex-direction: column; height: 100%; overflow: auto; font-size: 12px; padding: 2px 12px 10px; }
+.http-summary { padding-bottom: 6px; color: var(--muted); overflow-wrap: anywhere; }
+.http-summary .status { font-weight: 600; }
+.http-summary .good { color: var(--green); }
+.http-summary .redirect { color: var(--yellow); }
+.http-summary .bad, .http-error { color: var(--red); }
+.http-response details { margin-bottom: 6px; }
+.http-response summary { cursor: default; color: var(--muted); }
+.http-response pre { margin: 4px 0 0; font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

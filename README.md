@@ -56,7 +56,7 @@ file to change when you add it.
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
-| Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
+| Tools | There's no Composer UI, Docker or Sail support, or spell checking. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -293,6 +293,35 @@ interface, trait, or enum that the file declares.
 
 Click a type to open it. Types that Phpactor's index doesn't know are listed
 without a file.
+
+## HTTP client
+
+Write requests in a `.http` file, as in PhpStorm, and click **▶ Send Request**
+above one, or press ⌘⏎ in it. The response opens in the **HTTP** tab: status,
+time, headers, and the body, with JSON formatted.
+
+```http
+### Create a post
+POST {{host}}/api/posts
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{"title": "Hello"}
+
+### List posts
+GET {{host}}/api/posts
+    ?page=2
+```
+
+Variables such as `{{host}}` come from `http-client.env.json` next to the
+`.http` file or in the project root, with one set of values per environment.
+Put secrets in `http-client.private.env.json`, which overrides the shared file,
+and don't commit it. The first environment is used until you run **Select HTTP
+Environment…** from ⌘⇧A.
+
+```json
+{ "local": { "host": "http://localhost:8000" }, "staging": { "host": "https://staging.example.com" } }
+```
 
 ## Laravel features
 

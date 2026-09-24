@@ -313,6 +313,16 @@ builds the tree from requests it does support:
 Children load when a row expands, so a large hierarchy, such as `Model`'s,
 costs nothing until you open it.
 
+### HTTP client
+
+`src/httpfile.ts` parses `.http` files and curl's output, and Node tests both.
+`src/httpclient.ts` registers an `http` language with a Monarch grammar, a
+code lens per request, and ⌘⏎. A request runs `/usr/bin/curl -sS -i` through
+`run_capture`, with the body on stdin (`--data-binary @-`) and the total time
+appended by `--write-out` after a marker. curl ships with macOS, and running it
+from Rust avoids the browser's CORS rules that `fetch` in the webview would
+apply. Interim responses, such as `100 Continue`, are skipped when parsing.
+
 ## Laravel, diagnostics, and formatting (milestone 3)
 
 ### Several language servers

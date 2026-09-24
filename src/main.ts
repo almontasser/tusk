@@ -9,6 +9,7 @@ import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
+import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
@@ -750,6 +751,7 @@ const actions: Action[] = [
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   editorAction("Execute Query", "", "phpEditor.runSql"),
+  { label: "Select HTTP Environment…", run: () => active && selectEnvironment(active) },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
@@ -983,6 +985,7 @@ $("sidebar-resize").onmousedown = (down) => {
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initHttpClient({ root: () => root, status });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,
