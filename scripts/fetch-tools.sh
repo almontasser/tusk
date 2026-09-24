@@ -31,6 +31,12 @@ fetch laravel-lsp-0.0.32.phar \
   86d43f017b2247f1da428891a84a7db66d1f4443a0858301fe3a0d38482c5a51
 cp "$cache/laravel-lsp-0.0.32.phar" "$dest/laravel-lsp.phar"
 
+# Composer, for the Composer tool window. Checksum from getcomposer.org.
+fetch composer-2.10.2.phar \
+  https://getcomposer.org/download/2.10.2/composer.phar \
+  5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027
+cp "$cache/composer-2.10.2.phar" "$dest/composer.phar"
+
 case "$(uname -m)" in
   arm64) arch=aarch64; mago_sha=99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd ;;
   x86_64) arch=x86_64; mago_sha=b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa ;;

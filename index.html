@@ -31,6 +31,7 @@
         <button data-view="prs" title="Pull Requests"><span class="codicon codicon-git-pull-request"></span></button>
         <button data-view="search" title="Find in Files (⌘⇧F)"><span class="codicon codicon-search"></span></button>
         <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
+        <button data-view="composer" title="Composer"><span class="codicon codicon-package"></span></button>
         <div class="spacer"></div>
         <button data-panel="log" title="Git Log (⌘9)"><span class="codicon codicon-history"></span></button>
         <button data-panel="debug" title="Debug"><span class="codicon codicon-bug"></span></button>
@@ -126,6 +127,18 @@
           </header>
           <p id="db-connection" class="db-connection muted" title="From the project's .env file"></p>
           <ul id="db-tables"></ul>
+        </section>
+        <section id="view-composer" hidden>
+          <header class="view-header">
+            <span>Composer</span>
+            <div class="view-actions">
+              <button class="icon-button" id="composer-require" title="Require a package"><span class="codicon codicon-add"></span></button>
+              <button class="icon-button" id="composer-update" title="Update all packages (composer update)"><span class="codicon codicon-arrow-up"></span></button>
+              <button class="icon-button" id="composer-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+            </div>
+          </header>
+          <p id="composer-summary" class="db-connection muted"></p>
+          <ul id="composer-list"></ul>
         </section>
         <div id="sidebar-resize" aria-hidden="true"></div>
       </aside>

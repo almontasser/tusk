@@ -56,7 +56,7 @@ file to change when you add it.
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
-| Tools | There's no Composer UI or spell checking. Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | There's no spell checking. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -322,6 +322,22 @@ Environment…** from ⌘⇧A.
 ```json
 { "local": { "host": "http://localhost:8000" }, "staging": { "host": "https://staging.example.com" } }
 ```
+
+## Composer
+
+The **Composer** tool window (the package icon) lists the project's direct
+dependencies, with dev dependencies marked, and checks Packagist for updates.
+An update shows in green when it fits the version constraint in
+`composer.json`, and in yellow when it needs a new constraint.
+
+- Click a package to update it, upgrade it to its latest version (which
+  changes the constraint), remove it, or open it on Packagist.
+- Click **+** to search Packagist and require a package, as a dependency or a
+  dev dependency.
+- Click the arrow to run `composer update` for everything.
+
+Commands run in terminal tabs with the Composer that ships with the editor, and
+the list reloads when they finish.
 
 ## Laravel features
 

@@ -686,3 +686,17 @@ button.link:hover { text-decoration: underline; }
 .http-response details { margin-bottom: 6px; }
 .http-response summary { cursor: default; color: var(--muted); }
 .http-response pre { margin: 4px 0 0; font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ==========================================================================
+   Composer
+   ========================================================================== */
+
+#composer-list { list-style: none; margin: 0; padding: 0 0 12px; }
+#composer-list > li.muted { padding: 4px 12px; }
+.composer-package { display: flex; flex-direction: column; padding: 4px 12px; cursor: default; }
+.composer-package:hover { background: var(--hover); }
+.composer-package .name { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-package .version { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.composer-package .update.safe { color: var(--green); }
+.composer-package .update.major { color: var(--yellow); }
+.composer-package .badge.warn { color: var(--orange); }

@@ -9,6 +9,7 @@ import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
+import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
@@ -750,6 +751,9 @@ const actions: Action[] = [
   { label: "Reindex Project", run: reindex },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
+  { label: "Composer", run: () => showView("composer") },
+  { label: "Composer: Require Package…", run: () => requirePackage() },
+  { label: "Composer: Update All", run: () => root && updateAll() },
   editorAction("Execute Query", "", "phpEditor.runSql"),
   { label: "Select HTTP Environment…", run: () => active && selectEnvironment(active) },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
@@ -936,6 +940,7 @@ function showView(name: string) {
   if (name === "commit") refreshGit();
   if (name === "prs") loadPullRequests();
   if (name === "database") loadTables();
+  if (name === "composer") loadPackages();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -986,6 +991,7 @@ initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
 initHttpClient({ root: () => root, status });
+initComposer({ root: () => root, status });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,
