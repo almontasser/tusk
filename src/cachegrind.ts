@@ -9,7 +9,12 @@ export type ProfiledFunction = {
   /** Time in the function's own code, and including what it called, in milliseconds. */
   self: number;
   inclusive: number;
+  /** The functions it called and the functions that called it, with how often and how long those calls took. */
+  callees: Call[];
+  callers: Call[];
 };
+
+export type Call = { fn: ProfiledFunction; calls: number; time: number };
 
 export type Profile = { command: string; functions: ProfiledFunction[]; /** The script's total time in milliseconds. */ total: number };
 
@@ -33,7 +38,14 @@ export function parseCachegrind(text: string): Profile {
   type Block = { fn: ProfiledFunction; time: number; calls: number; totals?: Map<ProfiledFunction, number> };
   const unclaimed: Block[] = [];
   let block: Block | undefined;
+  let callee = "";
   let expect: "self" | "call" | "" = "";
+  const get = (name: string) => {
+    let fn = byName.get(name);
+    if (!fn) byName.set(name, (fn = { name, file: "", line: 0, calls: 0, self: 0, inclusive: 0, callees: [], callers: [] }));
+    return fn;
+  };
+  const edges = new Map<ProfiledFunction, Map<ProfiledFunction, Call>>();
   const resolve = (kind: "fl" | "fn", value: string) => {
     const m = value.match(/^\((\d+)\)(?: (.*))?$/);
     if (!m) return value;
@@ -63,13 +75,12 @@ export function parseCachegrind(text: string): Profile {
     } else if (key === "cfl" || key === "cfi") resolve("fl", line.slice(eq + 1));
     else if (key === "fn") {
       finish();
-      const name = resolve("fn", line.slice(eq + 1));
-      let fn = byName.get(name);
-      if (!fn) byName.set(name, (fn = { name, file, line: 0, calls: 0, self: 0, inclusive: 0 }));
+      const fn = get(resolve("fn", line.slice(eq + 1)));
+      fn.file ||= file;
       fn.calls++;
       block = { fn, time: 0, calls: 0 };
       expect = "self";
-    } else if (key === "cfn") resolve("fn", line.slice(eq + 1));
+    } else if (key === "cfn") callee = resolve("fn", line.slice(eq + 1));
     else if (key === "calls") expect = "call";
     else if (/^\d/.test(line) && block) {
       const [position, time = "0"] = line.split(" ");
@@ -78,7 +89,16 @@ export function parseCachegrind(text: string): Profile {
       if (expect === "self") {
         block.fn.self += cost;
         block.fn.line ||= Number(position);
-      } else if (expect === "call") block.calls++;
+      } else if (expect === "call") {
+        block.calls++;
+        const target = get(callee);
+        let out = edges.get(block.fn);
+        if (!out) edges.set(block.fn, (out = new Map()));
+        const call = out.get(target) ?? { fn: target, calls: 0, time: 0 };
+        call.calls++;
+        call.time += cost;
+        out.set(target, call);
+      }
       expect = "";
     } else if (line.startsWith("cmd: ")) command = line.slice(5);
     else if (line.startsWith("events: ") && line.includes("Time_(10ns)")) scale = 1 / 100_000;
@@ -87,6 +107,11 @@ export function parseCachegrind(text: string): Profile {
   finish();
   // What's left unclaimed are the roots: {main}, and anything PHP ran after it, such as shutdown functions.
   for (const root of unclaimed) for (const [fn, t] of root.totals ?? []) fn.inclusive += t;
+  for (const [caller, out] of edges)
+    for (const call of out.values()) {
+      caller.callees.push(call);
+      call.fn.callers.push({ fn: caller, calls: call.calls, time: call.time });
+    }
   const functions = [...byName.values()];
   const main = byName.get("{main}");
   return { command, functions, total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)) };

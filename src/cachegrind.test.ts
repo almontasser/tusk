@@ -37,3 +37,11 @@ test("counts recursion through another function once", () => {
   close(get("a").self, 40 / 100_000);
   close(p.total, 65 / 100_000);
 });
+
+test("lists each function's callers and callees", () => {
+  const greet = fn("Greeter->greet");
+  assert.deepEqual(greet.callees.map((c) => [c.fn.name, c.calls]).sort(), [["php::str_repeat", 3], ["php::strtoupper", 3]]);
+  close(greet.callees.find((c) => c.fn.name === "php::strtoupper")!.time, (42 + 8 + 4) / 100_000);
+  assert.deepEqual(greet.callers.map((c) => [c.fn.name, c.calls]), [["{main}", 3]]);
+  assert.deepEqual(fn("fib").callers.map((c) => c.fn.name).sort(), ["fib", "{main}"]);
+});

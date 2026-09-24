@@ -1403,6 +1403,16 @@ of `artisan serve` itself, because `serve` passes only some variables to the
 server it starts and `XDEBUG_TRIGGER` isn't one of them. `server.php` finds
 `public` from the working directory, so the server runs there.
 
+The parser also sums each caller-to-callee pair's calls and time from the
+`calls=` lines, and inverts them for callers. That's one entry per pair of
+functions that called each other, not per call, so it stays small even for
+millions of calls. The side pane of the Profiler tab lists these pairs.
+
+After a profiling run, the editor keeps the newest 50 profiles in its folder and
+deletes older ones, since a Laravel request's profile can be several megabytes.
+The profiling server checks ports from 8000 with `lsof` and takes the first
+free one.
+
 Xdebug gzips profiles by default. macOS's `/usr/bin/gzip -dc` decompresses them
 through `run_capture`, so no Rust crate was added. `stat -f "%m %z %N"` lists
 profiles with their time and size.

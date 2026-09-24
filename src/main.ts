@@ -30,7 +30,7 @@ import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoute
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage } from "./coverage";
-import { chooseProfile, initProfiler, profileDir, profileEnv } from "./profiler";
+import { chooseProfile, initProfiler, startProfilingServer } from "./profiler";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -868,18 +868,7 @@ const actions: Action[] = [
   { label: "Run Test at Cursor with Coverage", run: () => runTestAtCursor(editor, "coverage") },
   { label: "Profile Test at Cursor", run: () => runTestAtCursor(editor, "profile") },
   { label: "Open Xdebug Profile…", run: chooseProfile },
-  {
-    label: "Start Profiling Server (PHP's server with the Xdebug profiler)",
-    run: async () => {
-      if (!root) return;
-      // PHP's own server, as artisan serve starts it: artisan serve doesn't pass XDEBUG_TRIGGER on to it.
-      const server = "vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php";
-      const dir = await profileDir();
-      status(`Each request writes a profile to ${dir}. Open them with Open Xdebug Profile….`);
-      // server.php finds the public folder from the working directory, as artisan serve runs it.
-      openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...profileEnv(dir), "php", "-S", "127.0.0.1:8000", `${root}/${server}`]);
-    },
-  },
+  { label: "Start Profiling Server (PHP's server with the Xdebug profiler)", run: () => root && startProfilingServer() },
   { label: "Hide Coverage", run: hideCoverage },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, "debug") },

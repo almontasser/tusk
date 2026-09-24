@@ -58,7 +58,7 @@ file to change when you add it.
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
-| Profiler | The Profiler tab lists functions, not callers and callees or a call graph. It shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
+| Profiler | There's no call graph or call tree, only each function's direct callers and callees. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
@@ -868,8 +868,8 @@ of the bottom panel. Run these from ⌘⇧A:
 - **Profile Test at Cursor** runs the test at the cursor with the profiler,
   and opens its profile when the run ends.
 - **Start Profiling Server (PHP's server with the Xdebug profiler)** serves the
-  app at `http://127.0.0.1:8000`, as `php artisan serve` does. Each request
-  writes a profile.
+  app at `http://127.0.0.1:8000`, as `php artisan serve` does, or on the next
+  free port if 8000 is taken. Each request writes a profile.
 - **Open Xdebug Profile…** lists profiles from the editor's runs and from
   Xdebug's own `xdebug.output_dir`, newest first, with their time and size.
   **Choose File…** opens any other `cachegrind.out` file, compressed or not.
@@ -877,14 +877,23 @@ of the bottom panel. Run these from ⌘⇧A:
 The Profiler tab lists every function with its calls, its own time, and its
 total time, which includes the functions it called. Both times also show as a
 share of the whole run, and a line under the own time shows that share at a
-glance. Click a column header to sort by it, type in the filter to find
-functions, and click a function to open it. Recursive functions count their
-nested calls once.
+glance. Recursive functions count their nested calls once.
+
+- Click a column header to sort by it, and type in the filter to find
+  functions.
+- Select **Project code only** to hide `vendor` packages and PHP's own
+  functions. The choice is remembered.
+- Click a function to see, beside the table, the functions that called it and
+  the functions it called, each with the number of calls and their time. Click
+  one there to move to it.
+- Double-click a function, or press ⏎, to open it. ↑ and ↓ move through the
+  list.
+- The folder button opens another profile.
 
 Profiling needs Xdebug. The editor sets `XDEBUG_MODE=profile` and
 `XDEBUG_TRIGGER`, so it works whether your `php.ini` starts Xdebug always or on
-a trigger. Profiles from the editor go to the app's cache folder. Profiling
-doesn't run in Sail's containers.
+a trigger. Profiles from the editor go to the app's cache folder, which keeps
+the newest 50. Profiling doesn't run in Sail's containers.
 
 ## Database
 
