@@ -709,6 +709,17 @@ cost small, with no sweep over the whole history.
 Viewing a version reuses the git diff view. `showDiff` takes an optional header
 action, which **Stage Selected** also uses.
 
+### Interactive rebase
+
+`src/rebase.ts` runs git's own `rebase -i` rather than replaying commits
+itself, so conflicts, `--continue`, and `--abort` behave as in a terminal. The
+dialog writes a todo list (`rebaseTodo` in `src/gitparse.ts`) to the app cache,
+and `GIT_SEQUENCE_EDITOR='cp <todo>'` puts it in place of git's list. A reword
+becomes `pick` plus `exec git commit --amend --file=<message>`, and
+`GIT_EDITOR=true` keeps squash's combined message, so no editor ever opens.
+`--autostash` sets aside uncommitted changes. Ranges that contain merge
+commits are refused, since a plain `rebase -i` would flatten them.
+
 ### Stash
 
 Stash actions use the palette. **Stash Changes…** runs `git stash push`, with

@@ -11,6 +11,7 @@ import { afterSave, annotate, trackEditor, branchListeners, branches, stashChang
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
+import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
 import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
@@ -805,6 +806,7 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Stash Changes…", run: stashChanges },
+  { label: "Interactive Rebase…", run: () => root && chooseRebaseBase() },
   { label: "Resolve Conflicts in Merge Tool", run: () => active && openMerge(relative(active)) },
   { label: "Stage Selected Changes (in a diff)", run: stageSelected },
   { label: "Stashes…", run: stashes },
@@ -1063,6 +1065,7 @@ $("sidebar-resize").onmousedown = (down) => {
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initRebase({ root: () => root, status });
 initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
 initHttpClient({ root: () => root, status });
 initComposer({ root: () => root, status });

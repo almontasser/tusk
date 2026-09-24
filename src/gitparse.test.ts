@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, applyBlocks, checksSummary, lineMap, mirror, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, applyBlocks, checksSummary, lineMap, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -133,4 +133,17 @@ test("maps lines between versions of a file", () => {
   assert.equal(map(9), 7);
   assert.equal(map(11), 9);
   assert.equal(lineMap(["a"], [])(1), 1);
+});
+
+test("writes a rebase todo list", () => {
+  const todo = rebaseTodo(
+    [
+      { hash: "a1", subject: "First", action: "pick" },
+      { hash: "b2", subject: "Typo", action: "fixup" },
+      { hash: "c3", subject: "Old words", action: "reword", message: "New words" },
+      { hash: "d4", subject: "Oops", action: "drop" },
+    ],
+    (i) => `/tmp/it's msg-${i}.txt`,
+  );
+  assert.equal(todo, "pick a1 First\nfixup b2 Typo\npick c3 Old words\nexec git commit --amend --quiet --file='/tmp/it'\\''s msg-2.txt'\ndrop d4 Oops\n");
 });

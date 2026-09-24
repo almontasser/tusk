@@ -740,3 +740,24 @@ button.link:hover { text-decoration: underline; }
 .find-match button { display: none; margin-left: auto; flex-shrink: 0; border: 0; background: none; color: var(--muted); font-size: 13px !important; padding: 0 2px; }
 .find-match:hover button { display: inline; }
 .find-match button:hover { color: var(--text); }
+
+/* ==========================================================================
+   Interactive rebase
+   ========================================================================== */
+
+#rebase { width: min(720px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 0; border-radius: 12px; box-shadow: var(--shadow); }
+#rebase::backdrop { background: #0007; }
+#rebase form { display: flex; flex-direction: column; gap: 10px; padding: 20px 24px; max-height: 80vh; }
+#rebase h2 { margin: 0; font-size: 16px; }
+#rebase p { margin: 0; }
+.rebase-steps { list-style: none; margin: 0; padding: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.rebase-step { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: var(--radius); }
+.rebase-step:hover { background: var(--hover); }
+.rebase-step select { width: 170px; flex-shrink: 0; }
+.rebase-step code { color: var(--faint); padding-top: 3px; }
+.rebase-step .subject { flex: 1; min-width: 0; padding-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rebase-step textarea.subject { white-space: pre-wrap; padding: 4px 6px; font: inherit; }
+.rebase-step.action-drop .subject { text-decoration: line-through; color: var(--faint); }
+.rebase-step.action-squash .subject, .rebase-step.action-fixup .subject { color: var(--muted); padding-left: 16px; }
+#rebase .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+#rebase .buttons button { padding: 4px 16px; }

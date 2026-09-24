@@ -52,7 +52,7 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
-| Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
+| Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. Partial staging works per change block, not per single line within a block. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
@@ -516,6 +516,17 @@ the file as it is now, and click **Restore This Version** to put it back. The
 current text is kept as a version first, so a restore can be undone the same
 way. Versions older than 14 days are deleted, and each file keeps at most 100.
 Files over 1 MB aren't kept.
+
+### Interactive rebase
+
+To rewrite recent commits, open a commit in the Git Log and choose
+**Interactive Rebase from Here…**, or run **Interactive Rebase…** from ⌘⇧A and
+choose the commit to rebase onto. The commits after it are listed, oldest
+first. For each, choose **Pick**, **Reword** (and edit its message),
+**Squash into previous**, **Fixup** (squash and discard its message), or
+**Drop**, and use the arrows to reorder them. **Start Rebase** runs `git rebase
+-i` in a terminal tab; uncommitted changes are stashed and restored. If a
+commit conflicts, resolve it, then click **Continue** in the Commit view.
 
 ### Stash
 

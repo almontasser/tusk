@@ -293,3 +293,21 @@ export function lineMap(from: string[], to: string[]): (line: number) => number 
     return Math.max(1, Math.min(ta + (line - fa), next[1] - 1, to.length));
   };
 }
+
+export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
+export type RebaseStep = { hash: string; subject: string; action: RebaseAction; message?: string };
+
+/**
+ * The todo list for `git rebase -i`, oldest commit first. A reword is a pick followed by an exec that
+ * amends the message from a file, so no editor opens: `messageFile(i)` names the file for step i.
+ */
+export function rebaseTodo(steps: RebaseStep[], messageFile: (i: number) => string): string {
+  const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  return steps
+    .flatMap((s, i) => {
+      if (s.action === "drop") return [`drop ${s.hash} ${s.subject}`];
+      if (s.action === "reword") return [`pick ${s.hash} ${s.subject}`, `exec git commit --amend --quiet --file=${quote(messageFile(i))}`];
+      return [`${s.action} ${s.hash} ${s.subject}`];
+    })
+    .join("\n") + "\n";
+}

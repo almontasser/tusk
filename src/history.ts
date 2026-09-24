@@ -3,6 +3,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { change, git, showDiff } from "./git";
 import { age, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
 import { pick } from "./palette";
+import { interactiveRebase } from "./rebase";
 
 type Host = { root(): string; status(text: string): void };
 
@@ -120,6 +121,7 @@ async function select(c: Commit) {
   action("New Branch Here…", () => newBranch(c));
   action("Cherry-Pick", () => confirmThen(`Apply ${c.short} "${c.subject}" to the current branch?`, "cherry-pick", c.hash));
   action("Revert", () => confirmThen(`Create a commit that undoes ${c.short} "${c.subject}"?`, "revert", "--no-edit", c.hash));
+  action("Interactive Rebase from Here…", () => interactiveRebase(c.hash));
 
   const list = el("ul", "history-files");
   // In a file's history, list that file first.
