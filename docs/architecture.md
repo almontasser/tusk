@@ -502,6 +502,27 @@ extra files, in this order:
    through PSR-4 (`pathsFor`) are sent as outlines: the file without imports,
    with each method body replaced by `{ … }`, cut at 2,500 characters. Open
    files are outlined from their unsaved text.
+   The classes of the names before `->` near the cursor come first, from
+   Phpactor, so a variable's class is included even when the file never names
+   it. `typedNames` lists the variables and properties before `->` in the 30
+   lines before the cursor, nearest first, up to six, and the editor asks
+   Phpactor for each one's type definition (`textDocument/typeDefinition`),
+   whose file gives the class. A request never waits for Phpactor: it uses the
+   types found so far and starts lookups for the rest, and a type that arrives
+   readies the prompt again. A lookup often runs before Phpactor has the edit
+   that declared the variable, so a name with no type is asked again after a
+   second. Found types are kept until the file changes on disk.
+
+   A Blade view has no classes of its own, so it gets them from the code that
+   renders it. `viewCallers` searches the index for the view's name in quotes
+   (`view('posts.show', …)`, `@include('posts.show')`, `Route::view`, a
+   Livewire component's `render()`), and for a component
+   (`resources/views/components/…`), its `<x-…>` tag. The first three matches
+   each add the 12 lines before and 8 after, which is where the variables are
+   passed, and the classes used around each match become the view's
+   definitions. The classes that render the view (under `app/`) are outlined too,
+   for a Livewire component's properties, and so is a component's own class
+   under `app/View/Components/`.
 2. **Models.** `introspect.php models` boots the app once, and describes
    every model under `app/`: columns from `Schema::getColumns` (or the model's
    fillable, casts, and timestamps without a database), casts, and
@@ -568,7 +589,20 @@ cases and the 1.5B model:
 | Twice the budget for outlines and similar code | 59.7% | 78.3% | 2,441 |
 
 A wider context adds tokens, and so time, without better suggestions, so the
-budget stays. Run the benchmark again after changing the context, the
+budget stays.
+
+The `types` configuration adds the classes Phpactor finds for the names before
+`->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
+the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
+Over 600 cases, the types changed the context in 71, and the exact first line
+went from 43 to 44 of those (62.7% to 62.8% overall). koel imports nearly
+every class it uses, so the types rarely add a class the outlines lack, and
+without a database there are no model columns, where a variable's type
+matters most (`$playlist->` after `$playlist = $this->service->create()`).
+The types stay: they cost about 50 tokens and a Phpactor request that doesn't
+delay suggestions, and they help code that gets its objects from other
+classes. Blade views aren't measured: the benchmark only hides code in PHP
+classes. Run the benchmark again after changing the context, the
 request, or the model.
 
 ## Laravel, diagnostics, and formatting (milestone 3)

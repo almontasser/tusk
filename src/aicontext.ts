@@ -1,6 +1,6 @@
 // Context for AI completion: code from other files that helps the model complete the current one.
 // Free of editor imports so Node can test it.
-import { nameResolver, parseTypeDeclaration, withoutComments } from "./phptypes.ts";
+import { componentClassPath, nameResolver, parseTypeDeclaration, withoutComments } from "./phptypes.ts";
 import { pathsFor, type Psr4 } from "./psr4.ts";
 import { matchBracket } from "./refactorparse.ts";
 
@@ -196,27 +196,84 @@ export function similarCode(index: Index, rel: string, source: string, line: num
   return similar(all(), query, n, inPrompt);
 }
 
+/** The name Laravel knows a Blade view by: resources/views/posts/show.blade.php is posts.show. */
+export function viewName(rel: string): string | null {
+  return rel.match(/^resources\/views\/(.+)\.blade\.php$/)?.[1].replaceAll("/", ".") ?? null;
+}
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Code that renders a Blade view: the file, the match's offset in it, and the lines around the match. */
+export type Caller = { path: string; offset: number; text: string };
+
+/**
+ * The places that render the Blade view `rel`, up to `max`: code that names the view in quotes, such as
+ * `view('posts.show', compact('post'))` or `@include('posts.show')`, and `<x-…>` tags for a component.
+ * Each comes with the 12 lines before the match and 8 after it, where the view's variables are passed.
+ */
+export function viewCallers(index: Index, rel: string, max = 3): Caller[] {
+  const name = viewName(rel);
+  if (!name) return [];
+  const pattern = new RegExp(
+    `(['"])${escapeRegex(name)}\\1` + (name.startsWith("components.") ? `|<x-${escapeRegex(name.slice("components.".length))}(?![\\w.-])` : ""),
+  );
+  const out: Caller[] = [];
+  for (const [path, { text }] of index.files) {
+    const m = path === rel ? null : pattern.exec(text);
+    if (!m) continue;
+    const line = text.slice(0, m.index).split("\n").length - 1;
+    out.push({ path, offset: m.index, text: text.split("\n").slice(Math.max(0, line - 12), line + 9).join("\n") });
+    if (out.length === max) break;
+  }
+  return out;
+}
+
+/**
+ * Names just before `->` in the 30 lines before `offset`, nearest first: variables such as `$post`
+ * and properties such as `author` in `$post->author->`. A language server can say what type each is.
+ */
+export function typedNames(source: string, offset: number, max = 6): { name: string; offset: number }[] {
+  let start = offset;
+  for (let i = 0; i < 30 && start > 0; i++) start = source.lastIndexOf("\n", start - 1);
+  const nearest = new Map<string, number>();
+  for (const m of source.slice(Math.max(0, start), offset).matchAll(/(\$?\w+)\??->/g)) if (m[1] !== "$this") nearest.set(m[1], Math.max(0, start) + m.index!);
+  return [...nearest].sort((a, b) => b[1] - a[1]).slice(0, max).map(([name, at]) => ({ name, offset: at }));
+}
+
 /**
  * The extra files for a request, most stable first so the server can reuse its processed prompt:
  * outlines of the project classes used near the cursor (at `offset`), with the models' columns;
  * code from other files the user worked on lately; and code like the lines before the cursor.
+ * `types` are classes a language server found for the names before `->` near the cursor. A Blade
+ * view also gets the code that renders it, and the classes used there, since that's where its
+ * variables come from.
  */
-export function buildContext(index: Index, rel: string, source: string, offset: number, recent: Recent[], like: Chunk[]): Extra[] {
+export function buildContext(index: Index, rel: string, source: string, offset: number, recent: Recent[], like: Chunk[], types: string[] = []): Extra[] {
+  const callers = rel.endsWith(".blade.php") ? viewCallers(index, rel) : [];
+  const sources = [
+    ...(rel.endsWith(".php") ? [{ path: rel, text: source, offset }] : []),
+    ...callers.map((c) => ({ path: c.path, text: index.files.get(c.path)!.text, offset: c.offset })),
+  ];
+  const fileOf = (fqn: string) => pathsFor(fqn, index.psr4).find((f) => f !== rel && index.files.has(f));
+  const used = [...new Set([...types, ...sources.flatMap((s) => (s.path.endsWith(".blade.php") && s.path !== rel ? [] : referencedClasses(s.text, s.offset)))])]
+    .flatMap((fqn) => {
+      const file = fileOf(fqn);
+      return file ? [{ fqn, file }] : [];
+    })
+    .slice(0, 8);
+  // Classes that own the view: a component's class, and the classes that render it (Livewire components, mailables, controllers).
+  const component = viewName(rel)?.startsWith("components.") ? componentClassPath(`x-${viewName(rel)!.slice("components.".length)}`) : null;
+  const owners = [component, ...callers.map((c) => c.path)].filter((f): f is string => !!f && f.startsWith("app/") && !f.endsWith(".blade.php") && index.files.has(f));
+  const outlined = [...new Set([...used.map((u) => u.file), ...owners])].sort();
+  const own = rel.endsWith(".php") ? parseTypeDeclaration(source)?.fqn : undefined;
+  const docs = [...new Set([...(own ? [own] : []), ...used.map((u) => u.fqn)])].filter((c) => index.models[c]).map((c) => modelDoc(index.models[c]));
+
   const definitions: Extra[] = [];
-  if (rel.endsWith(".php")) {
-    const used = referencedClasses(source, offset)
-      .flatMap((fqn) => {
-        const file = pathsFor(fqn, index.psr4).find((f) => f !== rel && index.files.has(f));
-        return file ? [{ fqn, file }] : [];
-      })
-      .slice(0, 8)
-      // In a fixed order, so moving the cursor changes the prompt only when the set of classes changes.
-      .sort((a, b) => a.file.localeCompare(b.file));
-    const own = parseTypeDeclaration(source)?.fqn;
-    const docs = [...(own ? [own] : []), ...used.map((u) => u.fqn)].filter((c) => index.models[c]).map((c) => modelDoc(index.models[c]));
-    if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });
-    definitions.push(...used.map((u) => ({ filename: u.file, text: `<?php\n\n${index.outline(u.file)}\n` })));
-  }
+  if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });
+  // In a fixed order, so moving the cursor changes the prompt only when the set of classes changes.
+  definitions.push(...outlined.map((file) => ({ filename: file, text: `<?php\n\n${index.outline(file)}\n` })));
+  // The code around each call, even when its class is outlined: the outline drops the method body that passes the variables.
+  definitions.push(...callers.map((c) => ({ filename: c.path, text: c.text + "\n" })));
   const worked = recent.filter((r) => r.path !== rel).map((r) => ({ filename: r.path, text: r.text + "\n" }));
   // Files already outlined and code already sent as recent are left out, so the budget goes to other code.
   const sent = (c: Chunk) =>
@@ -263,4 +320,14 @@ export function cleanSuggestion(text: string, after: string, below: string[]): s
   if (repeat > 0) lines = lines.slice(0, repeat);
   const out = lines.join("\n").replace(/\s+$/, "");
   return out.trim() && out.trim() !== after.trim() ? out : "";
+}
+
+/**
+ * How much of the text after the cursor a suggestion replaces: all of it when the suggestion's last
+ * line (where that text would end up) contains it, as when the editor already closed a bracket or
+ * `{{ }}` that the suggestion closes too; otherwise none.
+ */
+export function replacedAfter(suggestion: string, after: string): number {
+  const rest = after.trim();
+  return rest && suggestion.split("\n").at(-1)!.includes(rest) ? after.trimEnd().length : 0;
 }

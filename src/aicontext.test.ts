@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, words } from "./aicontext.ts";
+import { replacedAfter, buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, typedNames, viewCallers, viewName, words } from "./aicontext.ts";
 
 const post = `<?php
 
@@ -157,4 +157,61 @@ test("gathers outlines, models, recent code, and similar code, without repeats",
   assert.deepEqual(extra.map((e) => e.filename), ["_ide_helper_models.php", "app/Models/Post.php", "app/Other.php", "app/helpers.php"]);
   assert.match(extra[0].text, /@property bool \$published/);
   assert.match(extra[1].text, /public function publish\(\): void\n {4}\{ … \}/);
+});
+
+const indexOf = (files: Record<string, string>, models: Index["models"] = {}): Index => {
+  const map = new Map(Object.entries(files).map(([f, text]) => [f, { text, chunks: chunk(f, text) }]));
+  return { psr4: { "App\\": "app/" }, files: map, models, outline: (rel) => outline(map.get(rel)!.text) };
+};
+
+test("finds the code that renders a Blade view", () => {
+  assert.equal(viewName("resources/views/posts/show.blade.php"), "posts.show");
+  assert.equal(viewName("app/Models/Post.php"), null);
+  const index = indexOf({
+    "app/Http/Controllers/PostController.php": "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\Post;\n\nclass PostController\n{\n    public function show(Post $post)\n    {\n        return view('posts.show', compact('post'));\n    }\n}\n",
+    "resources/views/posts/index.blade.php": "@foreach ($posts as $post)\n    <x-post.card :post=\"$post\" />\n@endforeach\n",
+    "routes/web.php": "<?php\n\nRoute::view('/about', 'posts.showcase');\n",
+  });
+  assert.deepEqual(viewCallers(index, "resources/views/posts/show.blade.php").map((c) => c.path), ["app/Http/Controllers/PostController.php"]);
+  assert.match(viewCallers(index, "resources/views/posts/show.blade.php")[0].text, /compact\('post'\)/);
+  // A component is found by its tag, not by a longer tag that starts the same.
+  assert.deepEqual(viewCallers(index, "resources/views/components/post/card.blade.php").map((c) => c.path), ["resources/views/posts/index.blade.php"]);
+  assert.deepEqual(viewCallers(index, "resources/views/components/post.blade.php"), []);
+});
+
+test("gives a Blade view the classes used where it's rendered", () => {
+  const post = "<?php\n\nnamespace App\\Models;\n\nclass Post extends Model\n{\n}\n";
+  const controller = "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\Post;\n\nclass PostController\n{\n    public function show(Post $post)\n    {\n        return view('posts.show', compact('post'));\n    }\n}\n";
+  const index = indexOf(
+    { "app/Models/Post.php": post, "app/Http/Controllers/PostController.php": controller },
+    { "App\\Models\\Post": { class: "App\\Models\\Post", columns: { title: { type: "varchar", nullable: false } }, casts: {}, relations: [] } },
+  );
+  const view = "<h1>{{ $post-> }}</h1>\n";
+  const extra = buildContext(index, "resources/views/posts/show.blade.php", view, view.indexOf("->") + 2, [], []);
+  assert.deepEqual(extra.map((e) => e.filename), ["_ide_helper_models.php", "app/Http/Controllers/PostController.php", "app/Models/Post.php", "app/Http/Controllers/PostController.php"]);
+  assert.match(extra[0].text, /@property string \$title/);
+  assert.match(extra[3].text, /compact\('post'\)/);
+});
+
+test("lists the names before -> near the cursor, nearest first", () => {
+  const source = "$user = $repo->find($id);\n$user->profile->update();\n$this->mailer->send($user?->email);\n$user->";
+  assert.deepEqual(typedNames(source, source.length).map((n) => n.name), ["$user", "mailer", "profile", "$repo"]);
+  assert.equal(source.slice(typedNames(source, source.length)[0].offset, typedNames(source, source.length)[0].offset + 5), "$user");
+});
+
+test("adds the classes a language server found to the definitions", () => {
+  const index = indexOf({ "app/Services/Mailer.php": "<?php\n\nnamespace App\\Services;\n\nclass Mailer\n{\n    public function send(string $to): void\n    {\n    }\n}\n" });
+  const source = "<?php\n\nclass C\n{\n    function f()\n    {\n        $this->mailer->\n    }\n}\n";
+  assert.deepEqual(buildContext(index, "app/C.php", source, source.indexOf("->\n") + 2, [], []).map((e) => e.filename), []);
+  assert.deepEqual(buildContext(index, "app/C.php", source, source.indexOf("->\n") + 2, [], [], ["App\\Services\\Mailer"]).map((e) => e.filename), ["app/Services/Mailer.php"]);
+});
+
+test("replaces the closing text the editor already added when the suggestion has it", () => {
+  assert.equal(replacedAfter("$post->author->name }}</p>", " }}"), 3);
+  assert.equal(replacedAfter("$post->title);", ");"), 2);
+  assert.equal(replacedAfter("$post->title", ");"), 0);
+  assert.equal(replacedAfter("$post->save();", ""), 0);
+  // The text after the cursor ends up after the suggestion's last line, so that's the line that counts.
+  assert.equal(replacedAfter("[\n    'a' => 1,\n]);", ");"), 2);
+  assert.equal(replacedAfter("); // done\n$next = 1;", ");"), 0);
 });

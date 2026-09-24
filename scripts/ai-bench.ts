@@ -4,15 +4,18 @@
 //
 //   node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs]
 //
-// `configs` is a comma-separated subset of: none, defs, full, wide (default: all). `wide` is full
-// context with twice the budget for definitions and similar code.
+// `configs` is a comma-separated subset of: none, defs, full, wide, types (default: none, defs, full,
+// types). `wide` is full context with twice the budget for definitions and similar code. `types` is
+// full context plus the classes of the names before `->` near the cursor, from Phpactor's command
+// line, as the editor gets them from Phpactor. For a project without vendor/, build Phpactor's index
+// first: php src-tauri/resources/tools/phpactor.phar index:build --working-dir=<project>
 // Recent code isn't measured: a benchmark has no history of where the user worked.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { BUDGET, buildContext, chunk, cleanSuggestion, type Extra, INDEXED, type Index, infillRequest, MAX_FILES, type ModelFacts, outline, SKIPPED, similarCode } from "../src/aicontext.ts";
+import { BUDGET, buildContext, chunk, typedNames, cleanSuggestion, type Extra, INDEXED, type Index, infillRequest, MAX_FILES, type ModelFacts, outline, SKIPPED, similarCode } from "../src/aicontext.ts";
 import { psr4From } from "../src/psr4.ts";
 
-const [root, modelPath, count = "80", only = "none,defs,full,wide"] = process.argv.slice(2);
+const [root, modelPath, count = "80", only = "none,defs,full,types"] = process.argv.slice(2);
 if (!root || !modelPath) throw new Error("Usage: node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs]");
 const tools = new URL("../src-tauri/resources/tools/", import.meta.url).pathname;
 
@@ -87,9 +90,28 @@ function editSimilarity(a: string, b: string) {
   return 1 - d[b.length] / Math.max(a.length, b.length, 1);
 }
 
+/** Classes in the type Phpactor reports for the name at `offset` in a file on disk; the editor asks the language server instead. */
+const typeCache = new Map<string, string[]>();
+function typeAt(file: string, offset: number) {
+  const key = `${file}:${offset}`;
+  if (!typeCache.has(key)) {
+    const out = (() => {
+      try {
+        return execFileSync("php", [`${tools}phpactor.phar`, "offset:info", `${root}/${file}`, String(offset + 1), `--working-dir=${root}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      } catch {
+        return "";
+      }
+    })();
+    typeCache.set(key, out.match(/^type:(.*)$/m)?.[1].match(/[A-Z]\w*(?:\\\w+)+/g) ?? []);
+  }
+  return typeCache.get(key)!;
+}
+
 // ---- Run ----
 const configs = only.split(",");
 type Score = { exact: number; similarity: number; empty: number; repeats: number; ms: number[]; tokens: number[] };
+/** Cases where the Phpactor types changed the context, and exact matches in them with and without the types. */
+const typed = { cases: 0, full: 0, types: 0 };
 const scores = Object.fromEntries(configs.map((c) => [c, { exact: 0, similarity: 0, empty: 0, repeats: 0, ms: [], tokens: [] } as Score]));
 
 for (const [n, c] of cases.entries()) {
@@ -103,10 +125,17 @@ for (const [n, c] of cases.entries()) {
     defs: buildContext(index, c.file, source, offset, [], []),
     full: buildContext(index, c.file, source, offset, [], like),
   };
+  if (configs.includes("types")) {
+    // The names come before the cursor, so their offsets are the same in the file on disk.
+    const found = typedNames(source, offset).flatMap((n) => typeAt(c.file, n.offset));
+    extra.types = buildContext(index, c.file, source, offset, [], like, [...new Set(found)]);
+  }
   const budget = { ...BUDGET };
   Object.assign(BUDGET, { definitions: budget.definitions * 2, similar: budget.similar * 2 });
   extra.wide = buildContext(index, c.file, source, offset, [], similarCode(index, c.file, source, c.line, 10));
   Object.assign(BUDGET, budget);
+  const changed = configs.includes("full") && configs.includes("types") && JSON.stringify(extra.types) !== JSON.stringify(extra.full);
+  if (changed) typed.cases++;
   for (const config of configs) {
     const body = infillRequest(lines, c.line, c.column, extra[config], 128);
     const { text, ms } = await ask(body);
@@ -116,7 +145,10 @@ for (const [n, c] of cases.entries()) {
     if (text.split("\n").some((l, i) => i > 0 && l.trim() === next)) s.repeats++;
     const first = cleanSuggestion(text, "", below).split("\n")[0].trimEnd();
     if (!first.trim()) s.empty++;
-    if (first === c.expected) s.exact++;
+    if (first === c.expected) {
+      s.exact++;
+      if (changed && (config === "full" || config === "types")) typed[config]++;
+    }
     s.similarity += editSimilarity(first, c.expected);
     s.ms.push(ms);
     s.tokens.push(extra[config].reduce((sum, e) => sum + e.text.length, 0) / 4);
@@ -132,4 +164,5 @@ console.log("| --- | --- | --- | --- | --- | --- | --- |");
 for (const [config, s] of Object.entries(scores)) {
   console.log(`| ${config} | ${pct(s.exact)} | ${pct(s.similarity)} | ${pct(s.empty)} | ${pct(s.repeats)} | ${median(s.ms).toFixed(0)} ms | ${median(s.tokens).toFixed(0)} |`);
 }
+if (typed.cases) console.log(`\nThe types changed the context in ${typed.cases} cases. Exact first line there: ${typed.full} without them, ${typed.types} with them.`);
 server.kill();

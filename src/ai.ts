@@ -5,7 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
-import { buildContext, chunk, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, similarCode } from "./aicontext";
+import { buildContext, chunk, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, replacedAfter, similarCode, typedNames } from "./aicontext";
+import { phpactorRequest } from "./lsp";
+import { parseTypeDeclaration } from "./phptypes";
 import { type Psr4, psr4From } from "./psr4";
 import { onSettings, settings, updateSetting } from "./settings";
 
@@ -176,6 +178,7 @@ export function aiFilesChanged(paths: string[]) {
     const rel = path.slice(p.root.length + 1);
     if (!path.startsWith(p.root + "/") || !INDEXED.test(rel) || SKIPPED.test(rel)) continue;
     readFile(path).then((text) => indexFile(p, rel, text));
+    for (const key of types.keys()) if (key.startsWith(`${path}|`)) types.delete(key);
     if (/^(app|database\/migrations)\/.*\.php$/.test(rel)) {
       clearTimeout(modelsTimer);
       modelsTimer = setTimeout(() => loadModels(p), 5000);
@@ -214,6 +217,47 @@ let similarFor = { key: "", chunks: [] as Chunk[] };
 /** Similar code is searched again when the cursor moves 10 lines or more, so typing doesn't change the prompt. */
 const similarKey = (p: Project, model: monaco.editor.ITextModel, line: number) => `${relative(p, model.uri.path)}:${Math.floor(line / 10)}`;
 
+/** Types Phpactor found for names before `->`, by file path and name: a class, or null and when it was asked. */
+const types = new Map<string, { fqn: string | null; at: number }>();
+const asking = new Set<string>();
+/** Readies the prompt for the focused editor again, after context arrives late. */
+let rewarm = () => {};
+
+/**
+ * The classes of the names before `->` near the cursor that Phpactor has found so far. Names it hasn't
+ * been asked about yet are looked up in the background, so a request never waits for Phpactor; the
+ * next one has them. A name with no type is asked again after a second: the lookup often runs before
+ * Phpactor has the edit that declared the name, or the code around it is half typed. Types are kept
+ * until the file changes on disk.
+ */
+function typesNear(p: Project, model: monaco.editor.ITextModel, offset: number): string[] {
+  if (!model.uri.path.endsWith(".php") || model.uri.path.endsWith(".blade.php")) return [];
+  const found: string[] = [];
+  for (const { name, offset: at } of typedNames(model.getValue(), offset)) {
+    const key = `${model.uri.path}|${name}`;
+    const known = types.get(key);
+    if (known?.fqn) found.push(known.fqn);
+    if ((known && (known.fqn || Date.now() - known.at < 1000)) || asking.has(key)) continue;
+    asking.add(key);
+    const pos = model.getPositionAt(at + 1);
+    phpactorRequest<{ uri?: string; targetUri?: string } | { uri?: string; targetUri?: string }[]>("textDocument/typeDefinition", {
+      textDocument: { uri: model.uri.toString() },
+      position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+    })
+      .catch(() => null)
+      .then(async (result) => {
+        const target = [result ?? []].flat()[0];
+        const path = target && monaco.Uri.parse(target.targetUri ?? target.uri ?? "").path;
+        const text = path?.startsWith(p.root + "/") ? (p.files.get(relative(p, path))?.text ?? null) : null;
+        const fqn = (text && parseTypeDeclaration(text)?.fqn) || null;
+        types.set(key, { fqn, at: Date.now() });
+        asking.delete(key);
+        if (fqn) rewarm();
+      });
+  }
+  return found;
+}
+
 function context(model: monaco.editor.ITextModel, position: monaco.Position): Extra[] {
   const p = project;
   if (!p) return [];
@@ -223,7 +267,8 @@ function context(model: monaco.editor.ITextModel, position: monaco.Position): Ex
   const key = similarKey(p, model, position.lineNumber);
   if (similarFor.key !== key) similarFor = { key, chunks: similarCode(index, rel, source, position.lineNumber) };
   const worked = recent.map((r) => ({ ...r, path: relative(p, r.path) }));
-  return buildContext(index, rel, source, model.getOffsetAt(position), worked, similarFor.chunks);
+  const offset = model.getOffsetAt(position);
+  return buildContext(index, rel, source, offset, worked, similarFor.chunks, typesNear(p, model, offset));
 }
 
 let nextRequest = 0;
@@ -256,10 +301,7 @@ const provider: monaco.languages.InlineCompletionsProvider = {
     const below = model.getLinesContent().slice(position.lineNumber, position.lineNumber + 10);
     const text = cleanSuggestion(await infill(model, position, 128, token), after, below);
     if (!text || token.isCancellationRequested) return;
-    // When the suggestion ends with the rest of the line (a closing bracket, say), replace it instead of repeating it.
-    const rest = after.trimEnd();
-    const replaceRest = rest && text.split("\n")[0].endsWith(rest);
-    const end = replaceRest ? position.column + rest.length : position.column;
+    const end = position.column + replacedAfter(text, after);
     return { items: [{ insertText: text, range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, end) }] };
   },
   disposeInlineCompletions() {},
@@ -282,7 +324,10 @@ function watchEditor(ed: monaco.editor.ICodeEditor) {
       if (always || similarKey(project, model, pos.lineNumber) !== similarFor.key) infill(model, pos, 0);
     }, delay);
   };
-  ed.onDidFocusEditorText(() => warm(true, 500));
+  ed.onDidFocusEditorText(() => {
+    rewarm = () => warm(true, 300);
+    warm(true, 500);
+  });
   ed.onDidChangeCursorPosition(() => warm(false, 1000));
 }
 
