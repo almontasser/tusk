@@ -244,12 +244,7 @@ async function startServer(
       else if (!progressTimers.has(token)) {
         progressTimers.set(token, setTimeout(() => (progressShown.add(token), host.status(text, `${name}:progress`)), 800));
       }
-      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) {
-        if (name === "phpactor" && restartAfterIndexing) {
-          restartAfterIndexing = false;
-          startLsp(currentRoot, host);
-        } else recheckOpenFiles();
-      }
+      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) recheckOpenFiles();
       if (v.kind === "end") (progressTitles.delete(token), progressShown.delete(token));
     }
   });
@@ -759,7 +754,6 @@ async function startFrontendServersLazily(root: string) {
 /** Starts the language servers for a project, stopping those of the previous project. */
 export async function startLsp(root: string, h: Host) {
   host = h;
-  currentRoot = root;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
   builtInTypeScript(true);
@@ -767,6 +761,9 @@ export async function startLsp(root: string, h: Host) {
   const tool = (name: string) => invoke<string>("tool_path", { name });
   const phpactor = startServer("phpactor", root, ["php"], {
     ...phpactorIndexer,
+    // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
+    // settings, so it would use the default index path and report functions from newer packages as not found.
+    "language_server.diagnostic_outsource": false,
     "language_server_worse_reflection.inlay_hints.enable": true,
     "language_server_worse_reflection.inlay_hints.types": true,
     "language_server_worse_reflection.inlay_hints.params": true,
@@ -789,6 +786,26 @@ export async function startLsp(root: string, h: Host) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
+  checkComposerLock(root);
+}
+
+/**
+ * Reindexes when composer.lock differs from the last time the editor saw it, including installs made
+ * while the editor was closed. A simple hash of the file is kept per project.
+ */
+export async function checkComposerLock(root: string) {
+  const lock = await invoke<string>("read_file", { path: `${root}/composer.lock` }).catch(() => null);
+  if (lock === null) return;
+  let hash = 0;
+  for (let i = 0; i < lock.length; i++) hash = (Math.imul(31, hash) + lock.charCodeAt(i)) | 0;
+  const key = `composerLock:${root}`;
+  try {
+    if (localStorage.getItem(key) === String(hash)) return;
+    localStorage.setItem(key, String(hash));
+  } catch {
+    return; // Without storage, don't reindex on every start.
+  }
+  reindex();
 }
 
 export const didSave = (model: monaco.editor.ITextModel) => servers.forEach((s) => s.didSave(model));
@@ -824,14 +841,8 @@ export async function updateReferences(renames: { from: string; to: string }[]) 
  * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
  * package's old modification times, so Phpactor's update pass takes them for already indexed.
  */
-// A running Phpactor keeps "not found" results for functions it already looked up, so after a reindex
-// a fresh process has to replace it.
-let restartAfterIndexing = false;
-let currentRoot = "";
-
 export function reindex() {
   const phpactor = servers.find((s) => s.name === "phpactor");
-  restartAfterIndexing = !!phpactor;
   phpactor?.request("phpactor/indexer/reindex", { soft: false }).catch((e) => host.status(`Can't reindex: ${e}`));
 }
 

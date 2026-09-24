@@ -187,12 +187,25 @@ suffix, and every project gets a fresh index.
 
 Composer extracts package files with the package's own modification times,
 which are older than Phpactor's index. Phpactor's update pass at startup
-compares times, so it skips a newly installed package, and its functions show
-as not found. When the file watcher reports a change to `composer.lock`,
-`reindex()` sends Phpactor's `phpactor/indexer/reindex` request with `soft:
-false`, which resets the index and rebuilds it. A running Phpactor also keeps
-"not found" results for functions it already looked up, even across saves, so
-when that indexing ends, the editor restarts the language servers.
+compares times, so it skips a newly installed package, and its classes and
+functions show as not found. `checkComposerLock` keeps a hash of
+`composer.lock` per project in `localStorage`. When the hash differs, at
+startup (so installs made while the editor was closed count) or when the file
+watcher reports a change, `reindex()` sends Phpactor's
+`phpactor/indexer/reindex` request with `soft: false`, which resets the index
+and rebuilds it. The first time a project opens, there's no hash yet, so it
+reindexes once.
+
+### Diagnostics run in the server process
+
+By default, Phpactor runs its own diagnostics in a child process,
+`phpactor language-server:diagnostics`. That process reads only
+`.phpactor.json` and the global config, not the settings the editor sends
+with `initialize`, so it used Phpactor's default index path instead of the
+editor's. That index can be missing newer packages, and functions from them
+showed as not found even after a reindex. The editor sets
+`language_server.diagnostic_outsource` to `false`, so diagnostics run in the
+server process with the editor's settings.
 
 ### Pest in diagnostics
 
@@ -1175,3 +1188,11 @@ the `mysql`, `psql`, or `sqlite3` clients. Laravel's own `php artisan db`
 needs those clients too. Three small synchronous driver crates add a few
 megabytes to the app. `sqlx` would cover all three, but it needs a Rust type per
 column, and the grid only needs text.
+
+### 2026-09-24: Phpactor diagnostics in the server process
+
+Phpactor's separate diagnostics process ignores settings sent by the client,
+including the index path. Passing them through the XDG config folder would
+hide your own global Phpactor config, and writing `.phpactor.json` would change
+the project. Running diagnostics in the server process can delay other
+requests while a large file is checked, which is the cost.

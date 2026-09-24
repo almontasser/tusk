@@ -526,9 +526,9 @@ Results show in the **Database** tab of the bottom panel. After you change
 ## Diagnostics and formatting
 
 When `composer.lock` changes, for example after `composer require`, the editor
-rebuilds Phpactor's index and then restarts the language servers, so new
-packages' classes and functions are found. To do this yourself, run **Reindex
-Project** from ⌘⇧A.
+rebuilds Phpactor's index, so new packages' classes and functions are found.
+This also happens when you open a project whose `composer.lock` changed while
+the editor was closed. To do it yourself, run **Reindex Project** from ⌘⇧A.
 
 **Formatting** (⌥⌘L) uses your project's own tools:
 

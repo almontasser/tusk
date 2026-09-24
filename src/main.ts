@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
-import { didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
+import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
@@ -615,7 +615,7 @@ listen<string[]>("fs-change", ({ payload }) => {
         }
       }
     }
-    if (paths.has(`${root}/composer.lock`)) reindex();
+    if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     const php = [...paths].filter((p) => p.endsWith(".php"));
     filesChanged(await Promise.all(php.map(async (path) => ({ path, exists: await invoke<boolean>("path_exists", { path }) }))));
     for (const dir of new Set([...paths].map(parentOf))) {
