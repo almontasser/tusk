@@ -68,8 +68,22 @@ const severity = [0, 8, 4, 2, 1]; // Error, Warning, Information, Hint
 /** Library code you don't edit. PhpStorm doesn't report problems there either. */
 const isLibrary = (model: monaco.editor.ITextModel) => /\/(vendor|node_modules)\//.test(model.uri.path);
 
+/**
+ * Pest binds each test closure to the project's test case, so `$this->get()` works, but Phpactor and Mago
+ * can't see that. In Pest files, drop their complaints about `$this` lines, and the hint to add a namespace.
+ */
+// ponytail: drops every such problem on a `$this` line; reading tests/Pest.php could type `$this` instead.
+function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): boolean {
+  if (!/\/tests\//.test(model.uri.path) || !/^\s*(it|test|describe)\(/m.test(model.getValue())) return false;
+  const message = typeof d.message === "string" ? d.message : d.message.value;
+  if (message.startsWith("Namespace should probably be")) return true;
+  const line = d.range.start.line + 1;
+  return line <= model.getLineCount() && model.getLineContent(line).includes("$this") && /\$this|TestCase|`mixed`/.test(message);
+}
+
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
   if (isLibrary(model)) list = [];
+  list = list.filter((d) => !pestFalsePositive(model, d));
   monaco.editor.setModelMarkers(
     model,
     owner,
@@ -154,6 +168,8 @@ const clientCapabilities: L.ClientCapabilities = {
 };
 
 type Server = {
+  name: string;
+  request<T>(method: string, params: unknown): Promise<T>;
   stop(): void;
   didSave(model: monaco.editor.ITextModel): void;
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
@@ -162,7 +178,6 @@ type Server = {
   filesChanged(changes: L.FileEvent[]): void;
 };
 
-/** Starts the bundled server `name` for the given Monaco languages. */
 /**
  * Starts the bundled server `name` for the given Monaco languages. `settings` answers the
  * server's `workspace/configuration` requests, by section name.
@@ -229,7 +244,12 @@ async function startServer(
       else if (!progressTimers.has(token)) {
         progressTimers.set(token, setTimeout(() => (progressShown.add(token), host.status(text, `${name}:progress`)), 800));
       }
-      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) recheckOpenFiles();
+      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) {
+        if (name === "phpactor" && restartAfterIndexing) {
+          restartAfterIndexing = false;
+          startLsp(currentRoot, host);
+        } else recheckOpenFiles();
+      }
       if (v.kind === "end") (progressTitles.delete(token), progressShown.delete(token));
     }
   });
@@ -309,6 +329,8 @@ async function startServer(
   registerProviders(monaco.languages);
 
   return {
+    name,
+    request,
     stop() {
       unlisten();
       disposables.forEach((d) => d.dispose());
@@ -737,6 +759,7 @@ async function startFrontendServersLazily(root: string) {
 /** Starts the language servers for a project, stopping those of the previous project. */
 export async function startLsp(root: string, h: Host) {
   host = h;
+  currentRoot = root;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
   builtInTypeScript(true);
@@ -795,6 +818,21 @@ export async function updateReferences(renames: { from: string; to: string }[]) 
     const edit = await server.willRename(files).catch(() => null);
     if (edit) await applyWorkspaceEdit(edit);
   }
+}
+
+/**
+ * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
+ * package's old modification times, so Phpactor's update pass takes them for already indexed.
+ */
+// A running Phpactor keeps "not found" results for functions it already looked up, so after a reindex
+// a fresh process has to replace it.
+let restartAfterIndexing = false;
+let currentRoot = "";
+
+export function reindex() {
+  const phpactor = servers.find((s) => s.name === "phpactor");
+  restartAfterIndexing = !!phpactor;
+  phpactor?.request("phpactor/indexer/reindex", { soft: false }).catch((e) => host.status(`Can't reindex: ${e}`));
 }
 
 /** Tells the servers which PHP files changed on disk. `exists` false means deleted. */

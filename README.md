@@ -41,7 +41,7 @@ file to change when you add it.
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. You can edit cells of a table's data, but not add or delete rows. |
-| Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
+| Pull requests | Descriptions and comments show as plain text, not rendered Markdown, and there are no comments on specific lines (`src/prs.ts`). |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ### Missing
@@ -53,7 +53,7 @@ file to change when you add it.
 | Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
 | Debugger | Breakpoints have no hit counts or log messages, and there's no watch list. Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
-| Git | There's no interactive rebase or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
+| Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
 | Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
@@ -347,6 +347,10 @@ tree of test classes and files. Classes with failures start expanded.
 
 The terminal tab keeps the runner's full output.
 
+In Pest files, `$this` in a test is the project's test case, which Phpactor and
+Mago can't see, so the editor hides their problems about `$this` on those
+lines.
+
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
 works. To run any other command, choose the last item. Tests and commands run
@@ -359,6 +363,11 @@ including new files. Click a file to see its diff. Hover over a file for
 buttons to open, stage, unstage, or discard it. Write a message and press ⌘⏎
 or click **Commit**. **Commit and Push** also pushes, and sets the upstream
 branch on the first push.
+
+To stage part of a file, open its diff from **Changes**, select lines in the
+changes you want (or click in one), and click **Stage Selected**. Every change
+block that the selection touches is staged, and the rest stay unstaged. In a
+diff from **Staged**, the button is **Unstage Selected**.
 
 The editor marks lines that differ from the last commit in the gutter: green
 for added lines, blue for changed lines, and a gray triangle where lines were
@@ -414,6 +423,11 @@ and comments. Click a changed file to see its diff without checking out the
 branch. Click **Check Out** to switch to the branch. When the current branch
 has a pull request, its number and check status appear next to the branch name
 in the status bar.
+
+Below the conversation, write a comment and click **Comment**, **Approve**, or
+**Request Changes** (which needs a comment). **Merge…** asks how to merge (a
+merge commit, squash, or rebase) and asks you to confirm before it merges on
+GitHub.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 
@@ -484,6 +498,11 @@ Results show in the **Database** tab of the bottom panel. After you change
 `.env`, click **Refresh** in the tool window.
 
 ## Diagnostics and formatting
+
+When `composer.lock` changes, for example after `composer require`, the editor
+rebuilds Phpactor's index and then restarts the language servers, so new
+packages' classes and functions are found. To do this yourself, run **Reindex
+Project** from ⌘⇧A.
 
 **Formatting** (⌥⌘L) uses your project's own tools:
 

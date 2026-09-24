@@ -225,3 +225,28 @@ export function parseConflicts(lines: string[]): Conflict[] {
 
 /** Status letter pairs that mean a merge conflict in `git status --porcelain`. */
 export const isConflict = (f: FileStatus) => f.index === "U" || f.worktree === "U" || (f.index === f.worktree && "AD".includes(f.index));
+
+/** A change block as Monaco's diff reports it. An end of 0 means no lines on that side (the block is after `start`). */
+export type Block = { originalStartLineNumber: number; originalEndLineNumber: number; modifiedStartLineNumber: number; modifiedEndLineNumber: number };
+
+/** The original text with the chosen blocks taken from the modified text: how staging part of a file builds the new index. */
+export function applyBlocks(original: string, modified: string, blocks: Block[]): string {
+  const lines = original.split("\n");
+  const from = modified.split("\n");
+  // From the bottom up, so earlier line numbers stay valid.
+  for (const b of [...blocks].sort((x, y) => y.originalStartLineNumber - x.originalStartLineNumber)) {
+    const at = b.originalEndLineNumber ? b.originalStartLineNumber - 1 : b.originalStartLineNumber;
+    const removed = b.originalEndLineNumber ? b.originalEndLineNumber - b.originalStartLineNumber + 1 : 0;
+    const added = b.modifiedEndLineNumber ? from.slice(b.modifiedStartLineNumber - 1, b.modifiedEndLineNumber) : [];
+    lines.splice(at, removed, ...added);
+  }
+  return lines.join("\n");
+}
+
+/** The same block seen from the other side, for undoing blocks (unstaging). */
+export const mirror = (b: Block): Block => ({
+  originalStartLineNumber: b.modifiedStartLineNumber,
+  originalEndLineNumber: b.modifiedEndLineNumber,
+  modifiedStartLineNumber: b.originalStartLineNumber,
+  modifiedEndLineNumber: b.originalEndLineNumber,
+});

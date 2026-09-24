@@ -1,7 +1,9 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, and diffs.
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { git, showDiff } from "./git";
 import { type Check, checkState, checksSummary } from "./gitparse";
+import { pick } from "./palette";
 import { openTerminal } from "./terminal";
 
 type Author = { login: string };
@@ -102,6 +104,7 @@ export async function showPullRequest(number: number) {
   action("Check Out", () => openTerminal(host.root(), `Check out #${number}`, ["gh", "pr", "checkout", String(number)]));
   action("Open in Browser", () => openUrl(pr.url));
   action("Refresh", () => showPullRequest(number));
+  if (pr.state === "OPEN") action("Merge…", () => merge(pr));
 
   const checks = el("ul", "pr-checks");
   for (const c of pr.statusCheckRollup ?? []) {
@@ -132,6 +135,34 @@ export async function showPullRequest(number: number) {
   for (const c of pr.comments) entry(c.author.login, "", c.body);
 
   const heading = (text: string) => el("h3", "", text);
+  const review = el("div", "pr-review");
+  const box = el("textarea");
+  box.placeholder = "Leave a comment (Markdown)";
+  box.setAttribute("aria-label", "Comment");
+  const buttons = el("div", "pr-actions");
+  const reply = (label: string, args: string[], needsText: boolean, done: string) => {
+    const b = el("button", "", label);
+    b.onclick = async () => {
+      const body = box.value.trim();
+      if (needsText && !body) return host.status(`Write a comment first: ${label} needs one.`);
+      buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      try {
+        await gh(...args, String(number), ...(body ? ["--body", body] : []));
+        host.status(done);
+        showPullRequest(number);
+      } catch (e) {
+        host.status(`Can't ${label.toLowerCase()}: ${String(e).trim()}`);
+        buttons.querySelectorAll("button").forEach((x) => (x.disabled = false));
+      }
+    };
+    buttons.append(b);
+  };
+  reply("Comment", ["pr", "comment"], true, `Commented on #${number}`);
+  if (pr.state === "OPEN") {
+    reply("Approve", ["pr", "review", "--approve"], false, `Approved #${number}`);
+    reply("Request Changes", ["pr", "review", "--request-changes"], true, `Requested changes on #${number}`);
+  }
+  review.append(box, buttons);
   const meta = el("div", "pr-meta", `${pr.state.toLowerCase()} · ${pr.author.login} · ${pr.headRefName} → ${pr.baseRefName}`);
   detail.replaceChildren(
     back,
@@ -144,6 +175,32 @@ export async function showPullRequest(number: number) {
     files,
     heading("Conversation"),
     conversation,
+    review,
+  );
+}
+
+/** Asks how to merge, confirms, and merges on GitHub. */
+function merge(pr: Details) {
+  const methods = [
+    { label: "Create a merge commit", flag: "--merge" },
+    { label: "Squash and merge", flag: "--squash" },
+    { label: "Rebase and merge", flag: "--rebase" },
+  ];
+  pick(`Merge #${pr.number} into ${pr.baseRefName}`, () =>
+    methods.map((m) => ({
+      label: m.label,
+      run: async () => {
+        if (!(await ask(`${m.label}: #${pr.number} "${pr.title}" into ${pr.baseRefName} on GitHub?`, { title: "Merge pull request", kind: "warning" }))) return;
+        try {
+          host.status(`Merging #${pr.number}…`);
+          await gh("pr", "merge", String(pr.number), m.flag);
+          host.status(`Merged #${pr.number}`);
+        } catch (e) {
+          host.status(`Can't merge #${pr.number}: ${String(e).trim()}`);
+        }
+        showPullRequest(pr.number);
+      },
+    })),
   );
 }
 

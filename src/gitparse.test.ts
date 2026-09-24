@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, checksSummary, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, applyBlocks, checksSummary, mirror, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -104,4 +104,20 @@ test("parses log records, changed files, and conflicts", () => {
 
   const status = (index: string, worktree: string) => ({ index, worktree, path: "x" });
   assert.deepEqual(["UU", "AA", "DD", "AU", "UD", "M ", " M", "A "].map((s) => isConflict(status(s[0], s[1]))), [true, true, true, true, true, false, false, false]);
+});
+
+test("applies chosen diff blocks", () => {
+  const original = "a\nb\nc\nd\n";
+  const modified = "a\nB\nc\nnew\nd\n";
+  // As Monaco reports them: line 2 changed, and a line inserted after line 3.
+  const changed = { originalStartLineNumber: 2, originalEndLineNumber: 2, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 };
+  const inserted = { originalStartLineNumber: 3, originalEndLineNumber: 0, modifiedStartLineNumber: 4, modifiedEndLineNumber: 4 };
+  assert.equal(applyBlocks(original, modified, [inserted]), "a\nb\nc\nnew\nd\n");
+  assert.equal(applyBlocks(original, modified, [changed]), "a\nB\nc\nd\n");
+  assert.equal(applyBlocks(original, modified, [changed, inserted]), modified);
+  // Undoing a block works from the other side.
+  assert.equal(applyBlocks(modified, original, [mirror(inserted)]), "a\nB\nc\nd\n");
+  const deleted = { originalStartLineNumber: 2, originalEndLineNumber: 3, modifiedStartLineNumber: 1, modifiedEndLineNumber: 0 };
+  assert.equal(applyBlocks(original, "a\nd\n", [deleted]), "a\nd\n");
+  assert.equal(applyBlocks("a\nd\n", original, [mirror(deleted)]), original);
 });

@@ -4,7 +4,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
-import { age, type BlameLine, type FileStatus, isConflict, lineChanges, parseBlame, parseStatus, type Status } from "./gitparse";
+import { age, applyBlocks, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -238,6 +238,10 @@ async function commit(push: boolean) {
 
 let diffEditor: monaco.editor.IStandaloneDiffEditor | undefined;
 
+/** The staged or unstaged change on screen, whose blocks can be staged or unstaged. */
+let staging: { f: FileStatus; inIndex: boolean; original: string; modified: string } | undefined;
+let lastSide: "original" | "modified" = "modified";
+
 /** Shows a file's staged change (HEAD to index) or unstaged change (index to working tree). */
 async function showChange(f: FileStatus, inIndex: boolean) {
   const show = (spec: string) => git("show", spec).catch(() => "");
@@ -246,6 +250,46 @@ async function showChange(f: FileStatus, inIndex: boolean) {
     ? await show(`:${f.path}`)
     : await invoke<string>("read_file", { path: `${host.root()}/${f.path}` }).catch(() => "");
   showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree");
+  staging = { f, inIndex, original, modified };
+  const button = $("diff-stage");
+  button.textContent = inIndex ? "Unstage Selected" : "Stage Selected";
+  button.title = `${inIndex ? "Unstage" : "Stage"} the changes that the selection touches (select lines on either side)`;
+  button.hidden = false;
+}
+
+/** The diff's change blocks that the selection touches, on the side you last clicked. */
+function selectedBlocks(): Block[] {
+  const side = lastSide === "original" ? diffEditor!.getOriginalEditor() : diffEditor!.getModifiedEditor();
+  const ranges = side.getSelections() ?? [];
+  return (diffEditor!.getLineChanges() ?? []).filter((c) => {
+    const [start, end] =
+      lastSide === "original"
+        ? [c.originalStartLineNumber, c.originalEndLineNumber || c.originalStartLineNumber]
+        : [c.modifiedStartLineNumber, c.modifiedEndLineNumber || c.modifiedStartLineNumber];
+    return ranges.some((r) => r.startLineNumber <= end && r.endLineNumber >= start);
+  });
+}
+
+/** Stages (or, in a staged diff, unstages) the selected blocks by writing a new index version of the file. */
+export async function stageSelected() {
+  if (!staging || !diffEditor) return;
+  const blocks = selectedBlocks();
+  if (!blocks.length) return host.status("Select lines in a change first.");
+  const { f, inIndex, original, modified } = staging;
+  // Staging takes blocks from the working tree into the index; unstaging puts HEAD's lines back.
+  const index = inIndex ? applyBlocks(modified, original, blocks.map(mirror)) : applyBlocks(original, modified, blocks);
+  try {
+    const hash = (await gitWithInput(index, "hash-object", "-w", "--stdin", `--path=${f.path}`)).trim();
+    const mode = (await git("ls-files", "--stage", "--", f.path)).split(" ")[0] || "100644";
+    await git("update-index", "--add", "--cacheinfo", `${mode},${hash},${f.path}`);
+  } catch (e) {
+    return host.status(`Can't update the index: ${String(e).trim()}`);
+  }
+  const scroll = diffEditor.getModifiedEditor().getScrollTop();
+  await refreshGit();
+  await showChange(f, inIndex);
+  diffEditor.getModifiedEditor().setScrollTop(scroll);
+  host.status(`${inIndex ? "Unstaged" : "Staged"} ${blocks.length} ${blocks.length === 1 ? "change" : "changes"} in ${f.path}`);
 }
 
 let diffBack: (() => void) | undefined;
@@ -255,14 +299,18 @@ export function showDiff(path: string, original: string, modified: string, label
   closeDiff(false);
   diffBack = back;
   // No theme option here: it would reset Monaco's global theme. The Theme setting sets it.
-  diffEditor ??= monaco.editor.createDiffEditor($("diff-editor"), {
-    automaticLayout: true,
-    readOnly: true,
-    originalEditable: false,
-    fontSize: 13,
-    fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
-    minimap: { enabled: false },
-  });
+  if (!diffEditor) {
+    diffEditor = monaco.editor.createDiffEditor($("diff-editor"), {
+      automaticLayout: true,
+      readOnly: true,
+      originalEditable: false,
+      fontSize: 13,
+      fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
+      minimap: { enabled: false },
+    });
+    diffEditor.getOriginalEditor().onDidFocusEditorText(() => (lastSide = "original"));
+    diffEditor.getModifiedEditor().onDidFocusEditorText(() => (lastSide = "modified"));
+  }
   // A non-file scheme keeps these models away from the language servers.
   const uri = (side: string) => monaco.Uri.from({ scheme: "git", path: `/${side}/${path}`, query: String(Date.now()) });
   diffEditor.setModel({
@@ -278,6 +326,8 @@ export function showDiff(path: string, original: string, modified: string, label
 
 /** Closes the diff. By default it returns to where the diff came from, such as the history view. */
 export function closeDiff(goBack = true) {
+  staging = undefined;
+  $("diff-stage").hidden = true;
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
   model?.original.dispose();
@@ -432,6 +482,7 @@ export function initGit(h: Host) {
   $("stage-all").onclick = () => change("add", "--all");
   $("unstage-all").onclick = () => change("reset", "--quiet");
   $("diff-close").onclick = () => closeDiff();
+  $("diff-stage").onclick = stageSelected;
   $("commit-message").onkeydown = (e) => {
     if (e.key === "Enter" && e.metaKey) commit(false);
   };

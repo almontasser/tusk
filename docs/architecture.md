@@ -162,6 +162,26 @@ would list classes twice. The client sets its own `indexer.index_path` with a
 version suffix (`%project_id%-editor-1`). When the patterns change, bump the
 suffix, and every project gets a fresh index.
 
+### Reindexing after Composer changes
+
+Composer extracts package files with the package's own modification times,
+which are older than Phpactor's index. Phpactor's update pass at startup
+compares times, so it skips a newly installed package, and its functions show
+as not found. When the file watcher reports a change to `composer.lock`,
+`reindex()` sends Phpactor's `phpactor/indexer/reindex` request with `soft:
+false`, which resets the index and rebuilds it. A running Phpactor also keeps
+"not found" results for functions it already looked up, even across saves, so
+when that indexing ends, the editor restarts the language servers.
+
+### Pest in diagnostics
+
+Pest binds test closures to the test case that `tests/Pest.php` sets, so
+`$this->get()` works in a Pest test. Phpactor reports `$this` as undefined, and
+Mago types it as `PHPUnit\Framework\TestCase`. In files under `tests/` that
+call `it()`, `test()`, or `describe()`, `setMarkers` drops problems that mention
+`$this`, `TestCase`, or `mixed` on lines that use `$this`, and Phpactor's hint
+to add a namespace.
+
 ### Rechecking after indexing
 
 Phpactor checks a file when you open it. During the first indexing, names
@@ -489,6 +509,21 @@ close it or open a file. A staged change compares `HEAD` with the index, and an
 unstaged change compares the index with the file on disk. Both sides are
 read-only models with a `git` URI scheme, so the language servers ignore them.
 
+### Partial staging
+
+**Stage Selected** in a diff writes a new index version of the file instead of
+building a patch for `git apply`. `applyBlocks` in `src/gitparse.ts` takes the
+diff's original text and copies in the change blocks that the selection
+touches, using the blocks that Monaco's diff editor computed
+(`getLineChanges`). To stage, the original is the index version and the blocks
+come from the working tree. To unstage, the staged text gets HEAD's lines back
+(`mirror` turns the blocks around). The result goes in with
+`git hash-object -w --stdin --path=<file>` and
+`git update-index --cacheinfo <mode>,<hash>,<file>`, keeping the file's mode.
+
+The selection counts on the side you last clicked, so you can select deleted
+lines on the left.
+
 ### Change markers and blame
 
 `trackEditor` in `git.ts` adds three things to the code editor:
@@ -570,6 +605,11 @@ local name contains a slash. Checking out a remote branch runs
 `git checkout --track`.
 
 ### Pull requests
+
+Comments, reviews, and merges are `gh pr comment`, `gh pr review --approve` or
+`--request-changes`, and `gh pr merge` with `--merge`, `--squash`, or
+`--rebase`. A merge always asks for confirmation first, because it changes
+the repository on GitHub.
 
 `src/prs.ts` runs the GitHub CLI (`gh pr list`, `gh pr view`) through
 `run_capture` and reads its JSON output. `checksSummary` in `gitparse.ts`

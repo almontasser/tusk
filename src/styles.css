@@ -91,7 +91,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 input[type="checkbox"] { accent-color: var(--accent); margin: 0 6px 0 0; vertical-align: -2px; }
 
 /* Standard buttons: neutral by default, .primary for the main action. */
-.primary, #commit-push, #diff-open, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, #settings button {
+.primary, #commit-push, #diff-open, #diff-stage, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, #settings button {
   border: 1px solid var(--input-border);
   border-radius: var(--radius);
   padding: 3px 12px;
@@ -100,7 +100,7 @@ input[type="checkbox"] { accent-color: var(--accent); margin: 0 6px 0 0; vertica
 }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .primary:hover { background: var(--accent-hover); }
-#commit-push:hover, #diff-open:hover, #history-more:hover, .pr-actions button:hover, .history-actions button:hover, #git-operation button:hover, .debug-toolbar button:hover:not(:disabled), .find-file button:hover { background: var(--hover); }
+#commit-push:hover, #diff-open:hover, #diff-stage:hover, #history-more:hover, .pr-actions button:hover, .history-actions button:hover, #git-operation button:hover, .debug-toolbar button:hover:not(:disabled), .find-file button:hover { background: var(--hover); }
 button:disabled { opacity: 0.4; }
 
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius); color: var(--muted); }
@@ -495,7 +495,7 @@ button.link:hover { text-decoration: underline; }
 #diff header .codicon-diff { color: var(--muted); }
 #diff-path { font-weight: 600; }
 #diff-label { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#diff-open { margin-left: auto; }
+#diff-label { margin-right: auto; }
 #diff-editor { flex: 1; min-height: 0; }
 #history-title { font-weight: 600; white-space: nowrap; }
 #history-filter { flex: 1; max-width: 380px; height: 26px; }
@@ -629,3 +629,5 @@ button.link:hover { text-decoration: underline; }
 .test-skipped { color: var(--muted); }
 .tests-summary.test-passed, .tests-summary.test-failed { font-weight: 600; }
 .tests-detail { flex: 1; min-width: 0; margin: 0; padding: 8px 12px; overflow: auto; font-family: var(--mono); white-space: pre-wrap; color: var(--text); }
+.pr-review { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.pr-review textarea { min-height: 70px; resize: vertical; }

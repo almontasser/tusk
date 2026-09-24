@@ -2,12 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
-import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
+import { didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
@@ -561,6 +561,7 @@ listen<string[]>("fs-change", ({ payload }) => {
         }
       }
     }
+    if (paths.has(`${root}/composer.lock`)) reindex();
     const php = [...paths].filter((p) => p.endsWith(".php"));
     filesChanged(await Promise.all(php.map(async (path) => ({ path, exists: await invoke<boolean>("path_exists", { path }) }))));
     for (const dir of new Set([...paths].map(parentOf))) {
@@ -679,6 +680,7 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Stash Changes…", run: stashChanges },
+  { label: "Stage Selected Changes (in a diff)", run: stageSelected },
   { label: "Stashes…", run: stashes },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
   { label: "Split Right", keys: "Meta+Backslash", run: splitRight },
@@ -686,6 +688,7 @@ const actions: Action[] = [
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
+  { label: "Reindex Project", run: reindex },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   editorAction("Execute Query", "", "phpEditor.runSql"),
