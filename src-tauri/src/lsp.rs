@@ -75,6 +75,31 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
     Ok(std::process::id())
 }
 
+/// Starts the bundled llama-server with the GGUF file `model` on a free local port, for
+/// AI code completion, and returns the port. It's kept with the language servers as
+/// `llama`, so `lsp_stop("llama")` and quitting the app stop it.
+#[tauri::command]
+pub fn ai_start(app: AppHandle, state: State<LspState>, model: String) -> Result<u16, String> {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", WATCHDOG, "sh"])
+        .arg(tools_dir(&app)?.join("llama/llama-server"))
+        // --cache-reuse lets a request reuse the processed prompt even after text before the cursor shifts.
+        .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string()])
+        .args(["-ngl", "99", "-c", "8192", "-np", "1", "-b", "1024", "-ub", "1024", "--cache-reuse", "256"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Could not start llama-server: {e}"))?;
+    let stdin = child.stdin.take().unwrap();
+    if let Some((mut old, _)) = state.0.lock().unwrap().insert("llama".into(), (child, stdin)) {
+        let _ = old.kill();
+        let _ = old.wait();
+    }
+    Ok(port)
+}
+
 /// Stops the server (or debug adapter) `name`, if it's running.
 #[tauri::command]
 pub fn lsp_stop(state: State<LspState>, name: String) {

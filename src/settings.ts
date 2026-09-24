@@ -16,6 +16,9 @@ export type Settings = {
   autoSave: boolean;
   formatOnSave: boolean;
   spellCheck: boolean;
+  aiCompletion: boolean;
+  /** A key of MODELS in ai.ts. */
+  aiModel: string;
   /** Shortcut overrides by action name, such as { "Go to File": "Meta+P" }. "" removes the shortcut. */
   keymap: Record<string, string>;
 };
@@ -30,6 +33,8 @@ const defaults: Settings = {
   autoSave: true,
   formatOnSave: false,
   spellCheck: true,
+  aiCompletion: false,
+  aiModel: "qwen2.5-coder-3b",
   keymap: {},
 };
 
@@ -50,6 +55,17 @@ const fields: Field[] = [
   { key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
+  { key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
+  {
+    key: "aiModel",
+    label: "AI completion model",
+    type: "select",
+    options: [
+      ["qwen2.5-coder-1.5b", "Qwen2.5-Coder 1.5B: fastest (1.6 GB)"],
+      ["qwen2.5-coder-3b", "Qwen2.5-Coder 3B: balanced (3.3 GB)"],
+      ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
+    ],
+  },
   { key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
 ];
 

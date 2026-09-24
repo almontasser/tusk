@@ -775,3 +775,4 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .merge-conflict-actions { padding-left: 4px; font-size: 12px; line-height: 21px; }
 .merge-conflict-actions button { border: 0; background: none; padding: 0; margin-right: 14px; color: var(--blue); cursor: pointer; pointer-events: auto; }
 .merge-conflict-actions button:hover { text-decoration: underline; }
+#ai-status.loading { opacity: 0.5; }

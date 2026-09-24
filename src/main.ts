@@ -24,6 +24,7 @@ import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
+import { initAi } from "./ai";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
@@ -824,6 +825,7 @@ const actions: Action[] = [
   { label: "Local History: Deleted Files…", run: showDeletedFiles },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
+  { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   { label: "Composer", run: () => showView("composer") },
@@ -1004,6 +1006,7 @@ window.addEventListener(
 
 initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }));
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
+initAi({ status });
 initSettings();
 initFormatting({ root: () => root, status });
 initConflicts();

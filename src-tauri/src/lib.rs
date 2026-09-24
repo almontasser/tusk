@@ -51,6 +51,7 @@ pub fn run() {
             lsp::lsp_start,
             lsp::lsp_send,
             lsp::lsp_stop,
+            lsp::ai_start,
             tools::tool_path,
             tools::path_exists,
             tools::run_capture,

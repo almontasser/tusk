@@ -142,6 +142,7 @@ script.
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
 | Vue language server | 3.3.11 | npm package, run with Node |
 | PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
+| `llama-server` (llama.cpp) | b11165 | Native binary and its libraries, for AI completion |
 
 Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.
@@ -415,6 +416,52 @@ reports misspellings as information, with a fix and an "ignore in the project"
 code action, which writes `typos.toml`. It's a native binary, so the bridge
 runs it without a runtime (an empty runtime in `lsp.rs`). Changing the
 **Check spelling** setting restarts the servers, which starts or stops it.
+
+### AI code completion
+
+`ai.ts` shows suggestions from a local model as Monaco inline completions
+(ghost text). The model runs in `llama-server` from llama.cpp, bundled like
+Mago. The fetch script keeps only the server, the libraries it loads, and the
+licence (24 MB); the libraries keep their `.0.dylib` names because the server
+finds them through `@loader_path`. It uses the GPU through Metal.
+
+Models aren't bundled. The **AI completion model** setting picks one of three
+Qwen2.5-Coder base models, which are trained for fill-in-the-middle. Each is
+pinned to a Hugging Face revision and checked against its SHA-256 after
+download. The download runs the system `curl` with `-C -` and `--retry`, so
+it resumes after a dropped connection (Hugging Face's CDN resets long HTTP/2
+downloads now and then). A download that still fails keeps its `.part` file,
+and turning the setting on again continues it. The status bar shows progress by polling the size of
+the `.part` file. Turning the setting on is the consent to download, since a
+question in the palette would sit behind the modal Settings dialog.
+
+`ai_start` in `lsp.rs` starts the server on a free port with the same
+watchdog as the language servers, and stores it in the language server table
+as `llama`. That way `lsp_stop("llama")` and quitting the app stop it too.
+The client waits for `/health` before it asks for suggestions.
+
+Each suggestion is a request to `/infill`, sent through `curl` from
+`run_capture`. This works the same in development and in the bundled app,
+where the page's origin might block a request to `http://127.0.0.1`. The
+request carries:
+
+- The 200 lines before the cursor, the text before the cursor on its line, and
+  the rest of the line plus 60 lines after it.
+- The first 2,000 characters of up to five other open files, as
+  `input_extra`, which gives the model their imports and class declarations.
+- `n_indent`, which stops the suggestion at a line indented less than the
+  cursor's line, so a suggestion stays inside its block.
+- Time limits of 1 second for reading the prompt and 1.5 seconds for writing,
+  and a limit of 128 tokens.
+
+The server runs with `--cache-reuse 256` and a single slot. It keeps the
+processed prompt from the last request and reuses the parts that didn't
+change, even when text before the cursor moved, so a request after a
+keystroke only processes the new text. The provider waits 250 ms after typing
+stops, skips the middle of a word, and drops a reply whose request Monaco
+cancelled. When a suggestion's first line ends with the rest of the current
+line, such as a closing bracket, it replaces that text instead of adding a
+second copy.
 
 ## Laravel, diagnostics, and formatting (milestone 3)
 

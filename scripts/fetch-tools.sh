@@ -38,8 +38,8 @@ fetch composer-2.10.2.phar \
 cp "$cache/composer-2.10.2.phar" "$dest/composer.phar"
 
 case "$(uname -m)" in
-  arm64) arch=aarch64; mago_sha=99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd; typos_sha=c57edf504147dc74dab985f3b56170969e2ab00d4b1b1f1dcb5fb7eb0e3c9b89 ;;
-  x86_64) arch=x86_64; mago_sha=b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa; typos_sha=e9069658eedfc575033451bf146980b05fe911e357f8013672d1a375f49bc0a1 ;;
+  arm64) arch=aarch64; llama_arch=arm64; llama_sha=70f06308f7993891085ee620dca5eb796a46ba4ec70a0410da7ee3933b0951c5; mago_sha=99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd; typos_sha=c57edf504147dc74dab985f3b56170969e2ab00d4b1b1f1dcb5fb7eb0e3c9b89 ;;
+  x86_64) arch=x86_64; llama_arch=x64; llama_sha=3563ba2fa6fe7a98cdabc33eced4d1986d5ae63aa11fc1d997b635990f60feda; mago_sha=b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa; typos_sha=e9069658eedfc575033451bf146980b05fe911e357f8013672d1a375f49bc0a1 ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 fetch "mago-1.50.0-$arch.tar.gz" \
@@ -76,4 +76,18 @@ if [ ! -f "$dest/php-debug/.version-1.40.2" ]; then
   mv "$cache/php-debug/extension" "$dest/php-debug"
   rm -rf "$cache/php-debug"
   touch "$dest/php-debug/.version-1.40.2"
+fi
+
+# llama-server from llama.cpp, for AI code completion with a model the user downloads.
+# Only the server and the libraries it loads (under their .0 names, through @loader_path) are kept.
+fetch "llama-b11165-$llama_arch.tar.gz" \
+  "https://github.com/ggml-org/llama.cpp/releases/download/b11165/llama-b11165-bin-macos-$llama_arch.tar.gz" \
+  "$llama_sha"
+if [ ! -f "$dest/llama/.version-b11165" ]; then
+  rm -rf "$dest/llama" "$cache/llama"
+  mkdir -p "$dest/llama" "$cache/llama"
+  tar -xzf "$cache/llama-b11165-$llama_arch.tar.gz" -C "$cache/llama" --strip-components 1
+  cp -L "$cache/llama/llama-server" "$cache/llama/libllama-server-impl.dylib" "$cache/llama/LICENSE" "$cache"/llama/lib*[a-z].0.dylib "$dest/llama/"
+  rm -rf "$cache/llama"
+  touch "$dest/llama/.version-b11165"
 fi

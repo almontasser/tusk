@@ -55,7 +55,7 @@ file to change when you add it.
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. Suggestions take their context from the current file and the start of other open files, not from the whole project. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -76,7 +76,7 @@ To build the app, you also need:
 - Node.js 24 or later, and pnpm
 
 The app bundles its tools (Phpactor, Laravel LSP, Mago, Composer, `typos-lsp`,
-the Xdebug adapter, and the Tailwind CSS, TypeScript, and Vue language
+the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, TypeScript, and Vue language
 servers), and compiles in the database drivers, so you don't install them
 yourself. Sail support needs Docker, which Sail itself needs. If your project has PHPStan or Larastan in
 `vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
@@ -217,6 +217,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
+| AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 
 ### EditorConfig
 
@@ -393,6 +394,35 @@ misspelling to replace it with the suggestion, or to ignore the word in the
 project, which adds it to `typos.toml` in the project root. Commit that file
 so the rest of the team skips the word too. To turn spell checking off, clear
 **Check spelling** in Settings.
+
+## AI code completion
+
+The editor can suggest code as you type, like GitHub Copilot, with a model
+that runs on your Mac. No code leaves the machine. Suggestions appear as gray
+text after the cursor: press Tab to accept one, or keep typing to ignore it. While
+the list of completions is open, a suggestion shows only if it agrees with the
+selected item; press Escape to close the list and see it.
+
+To turn it on, select **AI code completion** in Settings, or run
+**Toggle AI Completion** from the palette. The first time, the editor
+downloads the model into
+`~/Library/Application Support/dev.almontasser.phpeditor/models/`, and the
+status bar shows the progress. While it's on, the status bar shows **AI**;
+click it to turn completion off.
+
+Choose the model in **AI completion model**:
+
+| Model | Download | Notes |
+| --- | --- | --- |
+| Qwen2.5-Coder 1.5B | 1.6 GB | Fastest, good at finishing a line |
+| Qwen2.5-Coder 3B | 3.3 GB | The default: fast, with better multi-line suggestions |
+| Qwen2.5-Coder 7B | 8.1 GB | The best suggestions, but slower, and needs 16 GB of memory or more |
+
+The first start takes about 15 seconds while macOS prepares the GPU code;
+later starts take a second or two. On an M4 Pro, the 1.5B model returns a
+suggestion in about 0.1–0.3 seconds. The model uses a little more memory than
+its download size while completion is on (1.9 GB for the 1.5B model). Turning completion off stops it and frees that memory. To delete a
+downloaded model, remove its file from the `models` folder.
 
 ## Laravel features
 
