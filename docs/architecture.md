@@ -820,6 +820,12 @@ actions don't flash. Other messages clear themselves after 8 seconds. Messages
 that report a failure (they contain words such as "failed", "error", or
 "fatal") also appear as a toast.
 
+Diagnostics for files inside `vendor` and `node_modules` are dropped
+(`setMarkers` in `lsp.ts`). Those files open for go to definition and peeks, and
+Phpactor and Mago analyze library code as strictly as your own, which filled the
+counts with problems you can't fix. The counts cover open tabs and update when
+markers or tabs change.
+
 ### Palette
 
 `matchPositions` in `palette.ts` finds the letters to highlight: the query as

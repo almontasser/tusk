@@ -530,6 +530,7 @@ function renderTabs() {
   );
   $("path").textContent = active ? relative(active) : "";
   $("empty-editor").hidden = tabs.size > 0 || !root;
+  updateProblems();
   $("editor").style.display = tabs.size ? "" : "none";
   updateStatusItems();
 }

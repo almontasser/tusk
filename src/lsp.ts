@@ -65,7 +65,11 @@ const markdown = (c: L.MarkupContent | L.MarkedString | string): monaco.IMarkdow
 const completionKinds = "Text Method Function Constructor Field Variable Class Interface Module Property Unit Value Enum Keyword Snippet Color File Reference Folder EnumMember Constant Struct Event Operator TypeParameter".split(" ");
 const severity = [0, 8, 4, 2, 1]; // Error, Warning, Information, Hint
 
+/** Library code you don't edit. PhpStorm doesn't report problems there either. */
+const isLibrary = (model: monaco.editor.ITextModel) => /\/(vendor|node_modules)\//.test(model.uri.path);
+
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
+  if (isLibrary(model)) list = [];
   monaco.editor.setModelMarkers(
     model,
     owner,
