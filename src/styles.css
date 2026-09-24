@@ -575,6 +575,20 @@ button.link:hover { text-decoration: underline; }
 .debug-frames li:hover { background: var(--hover); }
 .debug-frames li.selected { background: var(--selected); }
 .debug-frames .loc { color: var(--faint); overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.debug-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.debug-watches { flex-shrink: 0; max-height: 45%; overflow: auto; border-bottom: 1px solid var(--border); font-family: var(--mono); padding-left: 6px; }
+.debug-watches ul { list-style: none; margin: 0; padding: 0; }
+.debug-watches ul ul { padding-left: 14px; }
+.debug-watches input { width: 100%; border: 0; border-radius: 0; background: transparent; font: 12px var(--mono); box-shadow: none !important; padding: 3px 4px; }
+.debug-watches .var, .debug-vars .var { position: relative; }
+.watch-remove { margin-left: auto; border: 0; background: none; color: var(--faint); font-size: 12px !important; opacity: 0; }
+.debug-watches .var:hover .watch-remove { opacity: 1; }
+.debug-watches .var { height: 22px; display: flex; align-items: center; white-space: nowrap; padding: 0 4px; border-radius: 4px; }
+.debug-watches .var:hover { background: var(--hover); }
+.debug-watches .var.expandable::before { font: 14px/1 codicon; content: "\eab6"; color: var(--faint); margin-right: 2px; }
+.debug-watches .var.expandable.open::before { content: "\eab4"; }
+.debug-watches .name { color: var(--purple); }
+.debug-watches .type { color: var(--faint); margin-left: 4px; }
 .debug-vars { flex: 1; overflow: auto; padding-left: 6px; font-family: var(--mono); }
 .debug-vars ul { padding-left: 14px; }
 .debug-vars .var { height: 22px; display: flex; align-items: center; white-space: nowrap; padding: 0 4px; border-radius: 4px; }
@@ -616,6 +630,7 @@ button.link:hover { text-decoration: underline; }
 .db-grid tr:hover td { background: var(--hover); }
 .db-grid td.editing { padding: 0; }
 .db-grid td.editing input { width: 100%; min-width: 120px; padding: 2px 9px; border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 0 0 1px var(--accent); }
+.breakpoint.log { background: var(--orange); border-radius: 2px; transform: rotate(45deg) scale(0.85); }
 .breakpoint.conditional::after { content: "?"; display: block; color: #fff; font: bold 9px/11px var(--ui-family); text-align: center; }
 .debug-toolbar button.on { background: var(--selected); color: var(--accent); }
 

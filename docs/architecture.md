@@ -995,10 +995,17 @@ Breakpoints are model decorations with a glyph in the gutter, so they show in
 every pane and move with the lines as you edit. The line numbers are saved per
 project in `localStorage`.
 
-Each breakpoint has a condition, an empty string when there's none. The
-decorations map each decoration id to its condition, so a condition moves with
-its line as you edit. Saved breakpoints are `[line, condition]` pairs; the
-older format, a list of line numbers, still loads.
+Each breakpoint has options named as in the Debug Adapter Protocol:
+`condition`, `hitCondition`, and `logMessage`, all optional. The decorations
+map each decoration id to its options, so they move with the line as you edit.
+Saved breakpoints are `[line, options]` pairs; the older formats, line numbers
+and `[line, condition]` pairs, still load. `setBreakpoints` sends only the
+options that are set. The adapter prints log messages as `output` events,
+which the Debug tab already shows.
+
+Watches are a list of expressions per project in `localStorage`. After a frame
+is selected, each one goes to `evaluate` with the `watch` context, and the
+result renders with the same row as a variable, so objects expand.
 
 Pause on exceptions sends the exception filters `Exception` and `Error`. The
 adapter passes them to Xdebug as exception breakpoints, and Xdebug also matches

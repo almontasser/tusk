@@ -6,7 +6,7 @@ import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceS
 import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { attachDebugger, editBreakpoint, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { componentClassPath } from "./phptypes";
@@ -787,7 +787,7 @@ const actions: Action[] = [
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
-  { label: "Edit Breakpoint Condition…", keys: "Meta+Shift+F8", run: () => active && editBreakpointCondition(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Edit Breakpoint…", keys: "Meta+Shift+F8", run: () => active && editBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Toggle Pause on Exceptions", run: togglePauseOnExceptions },
   { label: "Set Server Path for Debugging…", run: () => root && setServerRoot() },
   { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },

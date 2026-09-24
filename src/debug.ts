@@ -40,12 +40,14 @@ listen<string>("lsp:xdebug", ({ payload }) => {
 });
 
 // ---- Breakpoints ----
-// Each breakpoint is a line and a condition ("" for none), kept per file. For files with an open
-// model, decorations track the lines as you edit, so the model is the source of truth there.
+// Each breakpoint is a line and its options, kept per file. For files with an open model,
+// decorations track the lines as you edit, so the model is the source of truth there.
 
-type Breakpoints = Map<number, string>;
+/** A breakpoint's options, as the Debug Adapter Protocol names them. Empty means pause every time. */
+export type BreakpointOptions = { condition?: string; hitCondition?: string; logMessage?: string };
+type Breakpoints = Map<number, BreakpointOptions>;
 const breakpoints = new Map<string, Breakpoints>();
-const decorations = new Map<string, Map<string, string>>(); // path → decoration id → condition
+const decorations = new Map<string, Map<string, BreakpointOptions>>(); // path → decoration id → options
 const modelFor = (path: string) => monaco.editor.getModel(monaco.Uri.file(path));
 const storageKey = () => `breakpoints:${host.root()}`;
 
@@ -54,11 +56,16 @@ function breakpointsOf(path: string): Breakpoints {
   const ids = decorations.get(path);
   if (!model || !ids) return breakpoints.get(path) ?? new Map();
   const result: Breakpoints = new Map();
-  for (const [id, condition] of ids) {
+  for (const [id, options] of ids) {
     const line = model.getDecorationRange(id)?.startLineNumber;
-    if (line) result.set(line, condition);
+    if (line) result.set(line, options);
   }
   return result;
+}
+
+function describe(o: BreakpointOptions): string {
+  const parts = [o.logMessage ? `Logs \`${o.logMessage}\` without pausing` : "Pauses", o.condition && `when \`${o.condition}\``, o.hitCondition && `on hit ${o.hitCondition}`];
+  return `${parts.filter(Boolean).join(" ")}. Right-click to edit.`;
 }
 
 function renderBreakpoints(path: string) {
@@ -67,11 +74,11 @@ function renderBreakpoints(path: string) {
   const entries = [...(breakpoints.get(path) ?? [])];
   const ids = model.deltaDecorations(
     [...(decorations.get(path)?.keys() ?? [])],
-    entries.map(([line, condition]) => ({
+    entries.map(([line, o]) => ({
       range: new monaco.Range(line, 1, line, 1),
       options: {
-        glyphMarginClassName: condition ? "breakpoint conditional" : "breakpoint",
-        glyphMarginHoverMessage: { value: condition ? `Breakpoint when \`${condition}\` (right-click to edit)` : "Breakpoint (right-click to add a condition)" },
+        glyphMarginClassName: o.logMessage ? "breakpoint log" : o.condition || o.hitCondition ? "breakpoint conditional" : "breakpoint",
+        glyphMarginHoverMessage: { value: describe(o) },
         stickiness: 1,
       },
     })),
@@ -92,9 +99,13 @@ function persist() {
 export function loadBreakpoints() {
   breakpoints.clear();
   try {
-    // Older versions saved a list of line numbers per file.
-    for (const [path, list] of Object.entries<(number | [number, string])[]>(JSON.parse(localStorage.getItem(storageKey()) ?? "{}")))
-      breakpoints.set(path, new Map(list.map((b) => (typeof b === "number" ? [b, ""] : b))));
+    // Older versions saved line numbers, then [line, condition] pairs.
+    type Saved = number | [number, string | BreakpointOptions];
+    for (const [path, list] of Object.entries<Saved[]>(JSON.parse(localStorage.getItem(storageKey()) ?? "{}")))
+      breakpoints.set(
+        path,
+        new Map(list.map((b): [number, BreakpointOptions] => (typeof b === "number" ? [b, {}] : [b[0], typeof b[1] === "string" ? (b[1] ? { condition: b[1] } : {}) : b[1]]))),
+      );
   } catch {
     // No saved breakpoints.
   }
@@ -111,29 +122,44 @@ function update(path: string, change: (b: Breakpoints) => void) {
 }
 
 export function toggleBreakpoint(path: string, line: number) {
-  update(path, (b) => (b.has(line) ? b.delete(line) : b.set(line, "")));
+  update(path, (b) => (b.has(line) ? b.delete(line) : b.set(line, {})));
 }
 
-/** Asks for a PHP expression; the breakpoint then pauses only when it's true. Adds the breakpoint if there's none. */
-export function editBreakpointCondition(path: string, line: number) {
-  const current = breakpointsOf(path).get(line) ?? "";
-  pick(
-    `Condition for the breakpoint on line ${line}, such as $user->id === 5`,
-    (q) => [
-      {
-        label: q.trim() ? `Pause when ${q.trim()}` : "Pause every time (no condition)",
-        run: () => update(path, (b) => b.set(line, q.trim())),
-      },
-    ],
-    0,
-    { value: current },
-  );
+const prompts: { key: keyof BreakpointOptions; name: string; placeholder: string }[] = [
+  { key: "condition", name: "Condition", placeholder: "A PHP expression; pause only when it's true, such as $user->id === 5" },
+  { key: "hitCondition", name: "Hit count", placeholder: "Pause on a hit count: 5 (the fifth time), >= 5, or % 3 (every third time)" },
+  { key: "logMessage", name: "Log message", placeholder: "Log instead of pausing; put expressions in braces, such as Saving {$post->id}" },
+];
+
+/** Edits a breakpoint's condition, hit count, or log message, adding the breakpoint if there's none. */
+export function editBreakpoint(path: string, line: number) {
+  const current = breakpointsOf(path).get(line) ?? {};
+  pick(`Breakpoint on line ${line}`, () => [
+    ...prompts.map((p) => ({
+      label: `${p.name}: ${current[p.key] || "none"}`,
+      run: () =>
+        pick(
+          p.placeholder,
+          (q) => [
+            {
+              label: q.trim() ? `Set ${p.name.toLowerCase()} to ${q.trim()}` : `No ${p.name.toLowerCase()}`,
+              run: () => update(path, (b) => b.set(line, { ...current, [p.key]: q.trim() || undefined })),
+            },
+          ],
+          0,
+          { value: current[p.key] ?? "" },
+        ),
+    })),
+    ...(breakpointsOf(path).has(line) ? [{ label: "Remove breakpoint", run: () => update(path, (b) => b.delete(line)) }] : []),
+  ]);
 }
 
 const sendBreakpoints = (path: string) =>
   request("setBreakpoints", {
     source: { path },
-    breakpoints: [...breakpointsOf(path)].sort(([a], [b]) => a - b).map(([line, condition]) => (condition ? { line, condition } : { line })),
+    breakpoints: [...breakpointsOf(path)]
+      .sort(([a], [b]) => a - b)
+      .map(([line, o]) => Object.fromEntries(Object.entries({ line, ...o }).filter(([, v]) => v !== undefined && v !== ""))),
   }).catch(() => {});
 
 /** Adds breakpoints to an editor's gutter: click toggles one, and right-click edits its condition. */
@@ -143,7 +169,7 @@ export function attachDebugger(editor: monaco.editor.IStandaloneCodeEditor) {
     const model = editor.getModel();
     if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !model || model.uri.scheme !== "file") return;
     const line = e.target.position!.lineNumber;
-    if (e.event.rightButton) editBreakpointCondition(model.uri.fsPath, line);
+    if (e.event.rightButton) editBreakpoint(model.uri.fsPath, line);
     else toggleBreakpoint(model.uri.fsPath, line);
   });
 }
@@ -331,7 +357,13 @@ panel.innerHTML = `
   </div>
   <div class="debug-body">
     <ul class="debug-frames" aria-label="Call stack" data-empty="The call stack appears here when execution pauses."></ul>
-    <ul class="debug-vars" aria-label="Variables" data-empty="Variables appear here when execution pauses."></ul>
+    <div class="debug-side">
+      <div class="debug-watches">
+        <ul aria-label="Watches"></ul>
+        <input placeholder="Add a watch, such as $request->all(), and press Enter" aria-label="Add a watch expression" spellcheck="false" />
+      </div>
+      <ul class="debug-vars" aria-label="Variables" data-empty="Variables appear here when execution pauses."></ul>
+    </div>
   </div>
   <div class="debug-console">
     <pre></pre>
@@ -366,8 +398,55 @@ function render() {
       return li;
     }),
   );
-  if (!frames.length) q<HTMLElement>(".debug-vars").replaceChildren();
+  if (!frames.length) {
+    q<HTMLElement>(".debug-vars").replaceChildren();
+    renderWatches();
+  }
 }
+
+// ---- Watches ----
+// Expressions evaluated in the selected frame each time execution pauses, saved per project.
+
+const watchKey = () => `watches:${host.root()}`;
+const loadWatches = (): string[] => JSON.parse(readSetting(watchKey()) ?? "[]");
+const saveWatches = (list: string[]) => writeSetting(watchKey(), list.length ? JSON.stringify(list) : null);
+
+async function renderWatches() {
+  const list = q<HTMLElement>(".debug-watches ul");
+  const rows = await Promise.all(
+    loadWatches().map(async (expression, i) => {
+      let v: Variable = { name: expression, value: "not available while running", variablesReference: 0 };
+      if (selectedFrame && stoppedThread !== null) {
+        try {
+          const r = await request<{ result: string; type?: string; variablesReference: number }>("evaluate", { expression, frameId: selectedFrame.id, context: "watch" });
+          v = { name: expression, value: r.result, type: r.type, variablesReference: r.variablesReference };
+        } catch (e) {
+          v = { name: expression, value: String(e instanceof Error ? e.message : e), variablesReference: 0 };
+        }
+      }
+      const li = variableRow(v);
+      const remove = document.createElement("button");
+      remove.className = "watch-remove codicon codicon-close";
+      remove.title = "Remove the watch";
+      remove.onclick = (e) => {
+        e.stopPropagation();
+        saveWatches(loadWatches().filter((_, j) => j !== i));
+        renderWatches();
+      };
+      li.querySelector(".var")!.append(remove);
+      return li;
+    }),
+  );
+  list.replaceChildren(...rows);
+}
+
+q<HTMLInputElement>(".debug-watches input").onkeydown = (e) => {
+  const input = e.currentTarget as HTMLInputElement;
+  if (e.key !== "Enter" || !input.value.trim()) return;
+  saveWatches([...loadWatches(), input.value.trim()]);
+  input.value = "";
+  renderWatches();
+};
 
 let selectedFrame: Frame | undefined;
 
@@ -384,6 +463,7 @@ async function selectFrame(frame: Frame | undefined) {
   q<HTMLElement>(".debug-vars").replaceChildren(
     ...scopes.map((s, i) => variableRow({ name: s.name, value: "", variablesReference: s.variablesReference }, i === 0)),
   );
+  renderWatches();
 }
 
 /** A tree row for a variable; rows with children expand on click, loading them on demand. */
