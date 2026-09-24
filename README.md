@@ -523,7 +523,8 @@ cherry-pick, or revert. Conflicted files are listed under **Merge Conflicts**.
 Hover over a file to keep **Yours** or **Theirs** for the whole file, or ✓ to
 mark it resolved as it is.
 
-Click a conflicted file to open the merge tool. Your version is on the left
+Click a conflicted file, or run **Resolve Conflicts in Merge Tool** from ⌘⇧A,
+to open the merge tool. Your version is on the left
 and theirs on the right, each with the lines it changed from the common base
 highlighted. The middle pane is the file itself: above each conflict, choose
 **Accept Current**, **Accept Incoming**, or **Accept Both**, or edit it

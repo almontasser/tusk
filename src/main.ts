@@ -297,6 +297,7 @@ function status(text: string, source = "app") {
 
 /** Shows an error message in the corner for a few seconds. */
 function toast(text: string) {
+  console.warn(`[toast] ${text}`); // So an error can be traced after the toast closes.
   const el = document.createElement("div");
   el.className = "toast";
   el.innerHTML = `<span class="codicon codicon-error"></span><p></p><button class="codicon codicon-close" aria-label="Dismiss"></button>`;

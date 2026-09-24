@@ -737,7 +737,9 @@ their side from the index stages (`git show :1:`, `:2:`, and `:3:`). The side
 panes get read-only models, highlighted with `lineChanges` against the base.
 The middle pane uses the file's own model, so the inline links and conflict
 colors from `conflicts.ts` work unchanged, and an open tab of the file shows the
-same edits. **Mark Resolved** writes the model and runs `git add`. The side
+same edits. **Mark Resolved** writes the model and runs `git add`. Saving a resolved file
+that's open in a tab also runs `git add`, so `change` in `git.ts` runs
+state-changing commands one at a time; two at once fail on git's `index.lock`. The side
 panes copy the middle pane's scroll position, which keeps them near the same
 lines without aligning each one.
 ### Branches

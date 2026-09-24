@@ -31,14 +31,22 @@ const run = (args: string[], input: string | null) =>
 export const git = (...args: string[]) => run(args, null);
 const gitWithInput = (input: string, ...args: string[]) => run(args, input);
 
+// Commands that write the index run one at a time. Two at once, such as the git add after saving a
+// resolved file and the one from Mark Resolved, would fail on git's index.lock.
+let queue: Promise<unknown> = Promise.resolve();
+
 /** Runs a git command that changes state, then refreshes. Errors go to the status bar. */
-export async function change(...args: string[]) {
-  try {
-    await git(...args);
-  } catch (e) {
-    host.status(`git ${args[0]}: ${String(e).trim()}`);
-  }
-  await refreshGit();
+export function change(...args: string[]) {
+  const next = queue.then(async () => {
+    try {
+      await git(...args);
+    } catch (e) {
+      host.status(`git ${args[0]}: ${String(e).trim()}`);
+    }
+    await refreshGit();
+  });
+  queue = next;
+  return next;
 }
 
 // ---- Status ----
