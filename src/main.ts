@@ -4,7 +4,8 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
-import { annotate, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
@@ -318,6 +319,8 @@ const actions: Action[] = [
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
   { label: "Annotate with Git Blame", run: annotate },
+  { label: "Pull Requests", run: () => showView("prs") },
+  { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
@@ -396,9 +399,12 @@ function showView(name: string) {
   document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
   if (name === "commit") refreshGit();
+  if (name === "prs") loadPullRequests();
 }
 document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view!)));
 initGit({ root: () => root, openFile, status, showView }, editor);
+initPullRequests({ root: () => root, status, showView });
+branchListeners.push(updateBranchPullRequest);
 
 $("open-folder").onclick = () => openFolder();
 

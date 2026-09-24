@@ -14,7 +14,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | 2. PHP intelligence through Phpactor | Done |
 | 3. Laravel LSP, Mago, and Larastan diagnostics | Done |
 | 4. Terminal, Artisan, test runner, search | Done |
-| 5. Git, blame, and pull requests | Not started |
+| 5. Git, blame, and pull requests | Done |
 | 6. Filament language server | Not started |
 
 For the design and the reasons behind each choice, see
@@ -36,6 +36,8 @@ change when you add it.
 | Formatting | Only PHP files format (through Mago). |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
+| Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
+| Git history | There's no log or history view of past commits yet. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ## Requirements
@@ -45,6 +47,7 @@ To use the app, you need:
 - macOS
 - PHP 8.1 or later on your `PATH`. The app finds PHP through your login shell,
   so installs from Homebrew and Laravel Herd work.
+- Git, and optionally the GitHub CLI (`gh`) for pull requests.
 
 To build the app, you also need:
 
@@ -173,6 +176,21 @@ upstream branch. Click it to check out a local or remote branch, create a
 branch from the name you type, or pull, push, and fetch. Pull, push, and fetch
 run in a terminal tab, so you can answer credential prompts.
 
+## Pull requests
+
+The **Pull Requests** tab lists the repository's pull requests through the
+GitHub CLI. Filter by open pull requests, ones you created, or ones waiting for
+your review. Each row shows check status (✓ passed, ✗ failed, ● running) and
+the review decision.
+
+Click a pull request to see its checks, changed files, description, reviews,
+and comments. Click a changed file to see its diff without checking out the
+branch. Click **Check Out** to switch to the branch. When the current branch
+has a pull request, its number and check status appear next to the branch name
+in the status bar.
+
+Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
+
 ## Diagnostics and formatting
 
 Mago checks PHP files as you type (static analysis and lint) and formats them.
@@ -201,7 +219,8 @@ committed.
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/terminal.ts` | Terminal panel |
 | `src/git.ts` | Commit view, diff view, and branches |
-| `src/gitparse.ts` | Parsers for git status, diff, and blame output |
+| `src/gitparse.ts` | Parsers for git output, line diffs, and check summaries |
+| `src/prs.ts` | Pull requests through the GitHub CLI |
 | `src/runner.ts` | Test runner, run links, and Run Anything |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |

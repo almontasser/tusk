@@ -16,6 +16,10 @@ type Host = {
 const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
 let current: Status | undefined;
+let lastBranch: string | undefined;
+
+/** Functions to call when the checked-out branch (or the project) changes. */
+export const branchListeners: (() => void)[] = [];
 
 // `--no-optional-locks` stops read-only commands such as `status` from rewriting .git/index.
 // Otherwise every refresh changes .git, the file watcher reports it, and the refresh repeats forever.
@@ -41,6 +45,11 @@ export async function refreshGit() {
   if (!host.root()) return;
   current = await git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined);
   headCache.clear(); // HEAD may have moved.
+  const branch = current && `${host.root()}:${current.branch}`;
+  if (branch !== lastBranch) {
+    lastBranch = branch;
+    branchListeners.forEach((f) => f());
+  }
   renderBranch();
   renderCommitView();
   onRefresh();

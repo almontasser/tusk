@@ -134,3 +134,25 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
   flush();
   return changes;
 }
+
+/** One entry of `statusCheckRollup` from `gh pr list/view --json`: a check run or a commit status. */
+export type Check = { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string };
+export type CheckState = "passed" | "failed" | "pending" | "skipped";
+
+export function checkState(c: Check): CheckState {
+  const result = c.conclusion || c.state || "";
+  if (c.status && c.status !== "COMPLETED") return "pending";
+  if (["SUCCESS"].includes(result)) return "passed";
+  if (["NEUTRAL", "SKIPPED", "STALE"].includes(result)) return "skipped";
+  if (["PENDING", "EXPECTED", ""].includes(result)) return "pending";
+  return "failed"; // FAILURE, ERROR, CANCELLED, TIMED_OUT, ACTION_REQUIRED
+}
+
+/** Summarizes all checks: any failure wins, then anything pending, then passed. */
+export function checksSummary(checks: Check[] | null | undefined): CheckState | "none" {
+  const states = (checks ?? []).map(checkState);
+  if (!states.length) return "none";
+  if (states.includes("failed")) return "failed";
+  if (states.includes("pending")) return "pending";
+  return states.every((s) => s === "skipped") ? "skipped" : "passed";
+}

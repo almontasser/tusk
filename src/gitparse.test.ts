@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, lineChanges, parseBlame, parseHunks, parseStatus } from "./gitparse.ts";
+import { age, checksSummary, lineChanges, parseBlame, parseHunks, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -62,4 +62,19 @@ test("finds added, modified, and deleted lines between two versions", () => {
     { kind: "added", start: 6, end: 6 },
   ]);
   assert.deepEqual(lineChanges([], ["x"]), [{ kind: "added", start: 1, end: 1 }]);
+});
+
+test("summarizes pull request checks", () => {
+  const ok = { status: "COMPLETED", conclusion: "SUCCESS" };
+  const running = { status: "IN_PROGRESS", conclusion: "" };
+  const failed = { status: "COMPLETED", conclusion: "FAILURE" };
+  const statusOk = { state: "SUCCESS" };
+  const statusPending = { state: "PENDING" };
+  assert.equal(checksSummary([]), "none");
+  assert.equal(checksSummary(null), "none");
+  assert.equal(checksSummary([ok, statusOk]), "passed");
+  assert.equal(checksSummary([ok, running]), "pending");
+  assert.equal(checksSummary([ok, statusPending]), "pending");
+  assert.equal(checksSummary([running, failed]), "failed");
+  assert.equal(checksSummary([{ status: "COMPLETED", conclusion: "SKIPPED" }, ok]), "passed");
 });

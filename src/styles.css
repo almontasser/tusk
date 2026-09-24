@@ -58,7 +58,7 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 button { font: inherit; color: inherit; }
 #side-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-#side-tabs button { flex: 1; padding: 6px; background: none; border: 0; color: var(--muted); cursor: default; }
+#side-tabs button { flex: 1; padding: 6px 2px; white-space: nowrap; background: none; border: 0; color: var(--muted); cursor: default; }
 #side-tabs button.active { color: var(--text); box-shadow: inset 0 -2px var(--accent); }
 
 #view-commit { padding: 0 0 12px; }
@@ -91,11 +91,38 @@ button { font: inherit; color: inherit; }
 #diff header button { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; }
 #diff-open { margin-left: auto; }
 #diff-editor { flex: 1; min-height: 0; }
-#branch { background: none; border: 0; color: var(--muted); padding: 0 0 0 12px; cursor: default; }
-#branch:hover { color: var(--text); }
+#branch, #branch-pr { background: none; border: 0; color: var(--muted); padding: 0 0 0 12px; cursor: default; }
+#branch:hover, #branch-pr:hover { color: var(--text); }
 
 .gutter-added, .gutter-modified { width: 3px !important; margin-left: 4px; }
 .gutter-added { background: #549159; }
 .gutter-modified { background: #375fad; }
 .gutter-deleted { width: 0 !important; height: 0 !important; margin-left: 4px; margin-top: -4px; border: 4px solid transparent; border-left-color: #868a91; }
 .inline-blame { color: #6f737a; font-style: italic; }
+
+#view-prs { padding-bottom: 12px; }
+.pr-toolbar { display: flex; gap: 6px; padding: 8px 12px; }
+.pr-toolbar select { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.pr-toolbar button, .pr-actions button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+#pr-list, .pr-checks, .pr-files { list-style: none; margin: 0; padding: 0; }
+#pr-list li.pr { padding: 6px 12px; cursor: default; border-bottom: 1px solid var(--border); }
+#pr-list li.pr:hover, .pr-checks li:hover, .pr-files li:hover { background: #ffffff10; }
+.pr-title { overflow: hidden; text-overflow: ellipsis; }
+.pr-meta, .muted { color: var(--muted); font-size: 12px; }
+li.muted, p.muted { padding: 8px 12px; }
+.badge { font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-right: 6px; color: var(--muted); }
+.checks-passed { color: #73bd79; }
+.checks-failed { color: #e06c75; }
+.checks-pending { color: #e5c07b; }
+.checks-skipped, .checks-none { color: var(--muted); }
+#pr-detail { padding: 8px 12px; }
+#pr-detail h2 { font-size: 14px; margin: 8px 0 4px; }
+#pr-detail h3 { font-size: 12px; color: var(--muted); margin: 14px 0 4px; text-transform: uppercase; }
+button.link { background: none; border: 0; color: var(--accent); padding: 0; }
+.pr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pr-checks li, .pr-files li { padding: 2px 0; cursor: default; display: flex; gap: 6px; }
+.pr-files .name { flex: 1; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.pr-files .added { color: #73bd79; }
+.pr-files .deleted { color: #e06c75; }
+.pr-comment { border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; }
+.pr-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }

@@ -371,6 +371,26 @@ local branches (`refs/heads/`) from remote ones (`refs/remotes/`) even when a
 local name contains a slash. Checking out a remote branch runs
 `git checkout --track`.
 
+### Pull requests
+
+`src/prs.ts` runs the GitHub CLI (`gh pr list`, `gh pr view`) through
+`run_capture` and reads its JSON output. `checksSummary` in `gitparse.ts`
+reduces `statusCheckRollup` to one state. It accepts both check runs (with
+`status` and `conclusion`) and commit statuses (with `state`).
+
+To diff a pull request file without checking it out, the view fetches the pull
+request head into `refs/remotes/pr/<number>` and the base branch into
+`refs/remotes/origin/<base>`. It then compares the file at their merge base
+with the file at the head, which matches what GitHub shows. The fetch doesn't
+touch your working tree or current branch.
+
+The pull request for the current branch (`gh pr view` without a number) loads
+when the branch or project changes, through `branchListeners` in `git.ts`.
+It makes a network call, so it doesn't run on every refresh.
+
+Descriptions and comments render as plain text (`textContent`), so content
+from GitHub can't inject HTML into the editor.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -467,6 +487,11 @@ if you want it.
 Git can only diff files on disk, so `git diff` markers would lag until you
 save. A line diff in TypeScript against the cached `HEAD` version updates while
 you type and needs no process per keystroke.
+
+### 2026-09-24: The GitHub CLI instead of the GitHub API
+
+`gh` already handles sign-in, tokens, GitHub Enterprise hosts, and repository
+detection from the git remote. Calling it keeps credentials out of the editor.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

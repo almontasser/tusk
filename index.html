@@ -11,6 +11,7 @@
       <nav id="side-tabs" role="tablist">
         <button role="tab" data-view="project" class="active">Project</button>
         <button role="tab" data-view="commit">Commit</button>
+        <button role="tab" data-view="prs">Pull Requests</button>
       </nav>
       <section id="view-project">
         <div id="project">No folder open.</div>
@@ -32,6 +33,21 @@
           </div>
         </div>
       </section>
+      <section id="view-prs" hidden>
+        <div id="pr-list-view">
+          <div class="pr-toolbar">
+            <select id="pr-filter" aria-label="Filter pull requests">
+              <option value="open">Open</option>
+              <option value="mine">Created by me</option>
+              <option value="review">Review requested</option>
+            </select>
+            <button id="pr-refresh" title="Refresh">↻</button>
+            <button id="pr-create" title="Create a pull request">New</button>
+          </div>
+          <ul id="pr-list"></ul>
+        </div>
+        <div id="pr-detail" hidden></div>
+      </section>
     </aside>
     <main>
       <nav id="tabs" role="tablist"></nav>
@@ -45,7 +61,7 @@
         <nav id="terminal-tabs" role="tablist"></nav>
         <div id="terminals"></div>
       </section>
-      <footer id="status"><span id="path"></span><span id="lsp-status"></span><button id="branch" hidden></button></footer>
+      <footer id="status"><span id="path"></span><span id="lsp-status"></span><button id="branch-pr" hidden></button><button id="branch" hidden></button></footer>
     </main>
   </body>
 </html>
