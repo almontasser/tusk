@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, applyBlocks, checksSummary, mirror, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, applyBlocks, checksSummary, lineMap, mirror, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -120,4 +120,17 @@ test("applies chosen diff blocks", () => {
   const deleted = { originalStartLineNumber: 2, originalEndLineNumber: 3, modifiedStartLineNumber: 1, modifiedEndLineNumber: 0 };
   assert.equal(applyBlocks(original, "a\nd\n", [deleted]), "a\nd\n");
   assert.equal(applyBlocks("a\nd\n", original, [mirror(deleted)]), original);
+});
+
+test("maps lines between versions of a file", () => {
+  const result = ["<?php", "", "use A;", "<<<<<<< HEAD", "ours line", "=======", "theirs line", ">>>>>>> b", "function x() {", "}", "tail"];
+  const ours = ["<?php", "", "// added", "// more", "use A;", "ours line", "function x() {", "}", "tail"];
+  const map = lineMap(result, ours);
+  assert.equal(map(1), 1);
+  assert.equal(map(3), 5); // use A; moved down by two lines
+  assert.equal(map(5), 6); // the conflict's own side
+  assert.equal(map(7), 6); // their line has no match: stays at the last anchor's neighbour
+  assert.equal(map(9), 7);
+  assert.equal(map(11), 9);
+  assert.equal(lineMap(["a"], [])(1), 1);
 });

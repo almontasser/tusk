@@ -739,9 +739,14 @@ The middle pane uses the file's own model, so the inline links and conflict
 colors from `conflicts.ts` work unchanged, and an open tab of the file shows the
 same edits. **Mark Resolved** writes the model and runs `git add`. Saving a resolved file
 that's open in a tab also runs `git add`, so `change` in `git.ts` runs
-state-changing commands one at a time; two at once fail on git's `index.lock`. The side
-panes copy the middle pane's scroll position, which keeps them near the same
-lines without aligning each one.
+state-changing commands one at a time; two at once fail on git's `index.lock`. Scrolling any pane scrolls the others to the matching line. `lineMap` in
+`src/gitparse.ts` maps line numbers between the result and each side: lines
+that occur exactly once in both texts, in the same order (the longest
+increasing run, as in patience diff), are anchors, and a line between anchors
+keeps its distance from the anchor above, capped before the next one. Every
+pane maps through the result, the one text that shares lines with both sides.
+The other panes move with `ScrollType.Immediate`: a smooth scroll fires its
+events after the `syncing` guard is released and would scroll the panes back.
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell

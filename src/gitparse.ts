@@ -250,3 +250,46 @@ export const mirror = (b: Block): Block => ({
   modifiedStartLineNumber: b.originalStartLineNumber,
   modifiedEndLineNumber: b.originalEndLineNumber,
 });
+
+/**
+ * Maps line numbers of one text to the matching lines of another, for scrolling two versions of a file
+ * together. Lines that occur exactly once in both texts, in the same order, are anchors (the idea behind
+ * patience diff); a line between anchors keeps its distance from the anchor above, capped before the next.
+ */
+export function lineMap(from: string[], to: string[]): (line: number) => number {
+  const count = (lines: string[]) => {
+    const m = new Map<string, number[]>();
+    lines.forEach((l, i) => l.trim() && m.set(l, [...(m.get(l) ?? []), i + 1]));
+    return m;
+  };
+  const a = count(from);
+  const b = count(to);
+  const pairs: [number, number][] = [];
+  for (const [line, at] of a) if (at.length === 1 && b.get(line)?.length === 1) pairs.push([at[0], b.get(line)![0]]);
+  pairs.sort((x, y) => x[0] - y[0]);
+  // The longest run of pairs that also increases on the other side (longest increasing subsequence).
+  const tails: number[] = [];
+  const prev: number[] = [];
+  pairs.forEach(([, j], k) => {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pairs[tails[mid]][1] < j) lo = mid + 1;
+      else hi = mid;
+    }
+    prev[k] = lo ? tails[lo - 1] : -1;
+    tails[lo] = k;
+  });
+  const anchors: [number, number][] = [[0, 0]];
+  const chain: [number, number][] = [];
+  for (let k = tails.at(-1) ?? -1; k >= 0; k = prev[k]) chain.unshift(pairs[k]);
+  anchors.push(...chain, [from.length + 1, to.length + 1]);
+  return (line) => {
+    let i = 0;
+    while (i < anchors.length - 1 && anchors[i + 1][0] <= line) i++;
+    const [fa, ta] = anchors[i];
+    const next = anchors[Math.min(i + 1, anchors.length - 1)];
+    return Math.max(1, Math.min(ta + (line - fa), next[1] - 1, to.length));
+  };
+}

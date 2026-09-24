@@ -53,7 +53,7 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
-| Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. In the merge tool, the side panes follow the result's scrolling but don't align line by line. |
+| Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
@@ -530,7 +530,8 @@ highlighted. The middle pane is the file itself: above each conflict, choose
 **Accept Current**, **Accept Incoming**, or **Accept Both**, or edit it
 directly. **Accept All Yours** and **Accept All Theirs** resolve every
 remaining conflict at once, and **Mark Resolved** saves and stages the file
-when no conflicts are left. The same links appear when a conflicted file is
+when no conflicts are left. Scrolling any pane scrolls the others to the
+matching line. The same links appear when a conflicted file is
 open in a tab, and saving it with no conflicts left also marks it resolved.
 For a merge, the commit message is filled in, so you can click **Commit** to
 finish.

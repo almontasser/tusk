@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { acceptAll, decorateConflicts } from "./conflicts";
 import { createEditor, monaco } from "./editor";
-import { lineChanges, parseConflicts } from "./gitparse";
+import { lineChanges, lineMap, parseConflicts } from "./gitparse";
 import { addEditor } from "./settings";
 
 type Host = {
@@ -35,11 +35,52 @@ function createPanes() {
   addEditor(result);
   decorateConflicts(result);
   panes = { ours: side($("merge-ours-pane")), result, theirs: side($("merge-theirs-pane")) };
-  // The sides follow the middle's scrolling. Lines only roughly align, as each side has its own changes.
-  result.onDidScrollChange((e) => {
-    panes!.ours.setScrollTop(e.scrollTop);
-    panes!.theirs.setScrollTop(e.scrollTop);
+  const { ours, theirs } = panes;
+  for (const ed of [ours, result, theirs]) ed.onDidScrollChange((e) => e.scrollTopChanged && syncFrom(ed));
+  result.onDidChangeModelContent(() => {
+    clearTimeout(remapTimer);
+    remapTimer = setTimeout(remap, 200);
   });
+}
+
+// ---- Aligned scrolling ----
+// Scrolling any pane scrolls the others to the matching line, found by lineMap between each side
+// and the result, so unchanged code stays level even where one side added or removed lines.
+
+type Maps = Record<"ours" | "theirs", { to: (line: number) => number; from: (line: number) => number }>;
+let maps: Maps | null = null;
+let remapTimer: ReturnType<typeof setTimeout> | undefined;
+let syncing = false;
+
+function remap() {
+  if (!panes?.result.getModel() || !panes.ours.getModel() || !panes.theirs.getModel()) return (maps = null);
+  const lines = (ed: monaco.editor.IStandaloneCodeEditor) => ed.getModel()!.getLinesContent();
+  const result = lines(panes.result);
+  const side = (ed: monaco.editor.IStandaloneCodeEditor) => ({ to: lineMap(result, lines(ed)), from: lineMap(lines(ed), result) });
+  maps = { ours: side(panes.ours), theirs: side(panes.theirs) };
+}
+
+/** Puts `line` at the same height in `ed` as `source` shows its first visible line, keeping the offset within it. */
+function scrollTo(ed: monaco.editor.IStandaloneCodeEditor, line: number, offset: number) {
+  // Immediate: a smooth scroll would fire its events after `syncing` is reset and scroll the others back.
+  ed.setScrollTop(ed.getTopForLineNumber(line) + offset, monaco.editor.ScrollType.Immediate);
+}
+
+function syncFrom(source: monaco.editor.IStandaloneCodeEditor) {
+  if (syncing || !panes || !maps) return;
+  const first = source.getVisibleRanges()[0]?.startLineNumber;
+  if (!first) return;
+  const offset = source.getScrollTop() - source.getTopForLineNumber(first);
+  syncing = true;
+  try {
+    // Every pane is mapped through the result, the one text that both sides share lines with.
+    const resultLine = source === panes.result ? first : source === panes.ours ? maps.ours.from(first) : maps.theirs.from(first);
+    if (source !== panes.result) scrollTo(panes.result, resultLine, offset);
+    if (source !== panes.ours) scrollTo(panes.ours, maps.ours.to(resultLine), offset);
+    if (source !== panes.theirs) scrollTo(panes.theirs, maps.theirs.to(resultLine), offset);
+  } finally {
+    syncing = false;
+  }
 }
 
 /** Highlights the lines a side changed from the common base. */
@@ -71,6 +112,7 @@ export async function openMerge(rel: string) {
   markChanges(panes!.ours, base, ours, "merge-ours");
   markChanges(panes!.theirs, base, theirs, "merge-theirs");
   current = { rel, path, sides, listener: model.onDidChangeContent(updateCount) };
+  remap();
   $("merge-path").textContent = rel;
   updateCount();
   document.querySelectorAll<HTMLElement>("#editor, #history, #diff").forEach((e) => (e.hidden = true));
@@ -86,6 +128,7 @@ export function closeMerge() {
   panes?.result.setModel(null);
   current.sides.forEach((m) => m.dispose());
   current = null;
+  maps = null;
   $("merge").hidden = true;
   $("editor").hidden = false;
 }
