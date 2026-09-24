@@ -48,8 +48,8 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Session restore | Terminal tabs and the terminal panel aren't restored. |
-| Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
+| Session restore | Shells come back fresh, without their history, and command tabs (tests, servers) aren't re-run. |
+| Split editors | Up to four panes, side by side only, sharing one tab bar. |
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
@@ -224,10 +224,11 @@ status bar shows it), and saving applies `trim_trailing_whitespace` and
 `insert_final_newline`. Without one, the editor detects indentation from each
 file's content. Changes to `.editorconfig` apply to open files at once.
 
-Press ⌘\ to split the editor: the current file opens in a second pane on the
-right. Clicking a tab opens it in the focused pane, and a tab shown in the other
-pane is underlined in gray. Press ⌘\ again to move between panes, and run
-**Unsplit** to close the focused pane.
+Press ⌘\ to split the editor: the current file opens in a new pane on the
+right, up to four panes. With four, ⌘\ moves to the next pane. Clicking a tab
+opens it in the focused pane, and a tab shown in another pane is underlined in
+gray. Run **Unsplit** to close the focused pane. The panes, and the shell
+terminals, come back when the project reopens.
 
 Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving

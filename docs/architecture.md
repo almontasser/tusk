@@ -908,11 +908,16 @@ Each project's session is saved in `localStorage` under `session:<root>`:
 | `views` | Monaco view state for each open tab |
 | `dirs` | Expanded folders in the tree |
 | `view` | The sidebar view: project, commit, or pull requests |
+| `panes`, `focused` | Each pane's file, left to right, and the focused pane |
+| `shells`, `panel` | How many plain shells were open, and whether the panel showed |
 
 The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
-sidebar view), when the page unloads, and before it opens another folder. When
-it opens a folder, it expands the saved folders, reopens the tabs, and skips
-files that no longer exist.
+sidebar view), when the page unloads or the window loses focus, and before it
+opens another folder. When it opens a folder, it expands the saved folders,
+reopens the tabs, skips files that no longer exist, splits the panes again,
+and opens the shells as new shells in the project folder. Terminal tabs that
+ran a command, such as a test run or `artisan serve`, aren't restored, since
+running a command again on its own can surprise you.
 
 ## Tailwind CSS (frontend step 1)
 

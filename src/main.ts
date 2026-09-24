@@ -24,7 +24,7 @@ import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
-import { openTerminal, toggleTerminal } from "./terminal";
+import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -70,9 +70,11 @@ function focusPane(pane: Pane) {
   markActiveInTree();
 }
 
-/** Opens a pane on the right with the current file (two panes at most). */
+const MAX_PANES = 4;
+
+/** Opens a pane on the right with the current file. With four panes, it moves to the next pane instead. */
 function splitRight() {
-  if (panes.length > 1) return focusPane(panes.find((p) => p !== currentPane())!), editor.focus();
+  if (panes.length >= MAX_PANES) return focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]), editor.focus();
   const path = active;
   const view = editor.saveViewState();
   const pane = addPane();
@@ -151,7 +153,19 @@ async function openFolder(dir: unknown = null) {
 
 // ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
 
-type Session = { tabs: string[]; active: string; views: Record<string, monaco.editor.ICodeEditorViewState>; dirs: string[]; view: string };
+type Session = {
+  tabs: string[];
+  active: string;
+  views: Record<string, monaco.editor.ICodeEditorViewState>;
+  dirs: string[];
+  view: string;
+  /** Each pane's file, left to right, and the focused pane. */
+  panes?: string[];
+  focused?: number;
+  /** How many shell terminals were open, and whether the panel showed. */
+  shells?: number;
+  panel?: boolean;
+};
 const sessionKey = () => `session:${root}`;
 
 function loadSession(): Session | null {
@@ -172,6 +186,10 @@ function saveSession() {
     views: Object.fromEntries(paths.filter((p) => viewStates.has(p)).map((p) => [p, viewStates.get(p)!])),
     dirs: [...openDirs],
     view: currentView,
+    panes: panes.map((p) => (p.editor === editor ? active : p.active)),
+    focused: panes.indexOf(currentPane()),
+    shells: shellCount(),
+    panel: panelShown(),
   };
   try {
     localStorage.setItem(sessionKey(), JSON.stringify(session));
@@ -187,8 +205,20 @@ window.addEventListener("beforeunload", saveSession);
 async function restoreSession(session: Session) {
   // Files deleted since the last session are skipped.
   for (const path of session.tabs) await openFile(path).catch(() => viewStates.delete(path));
-  if (tabs.has(session.active)) await openFile(session.active);
+  const [first, ...others] = session.panes ?? [session.active];
+  if (tabs.has(first)) await openFile(first);
+  // Split panes, left to right; the first pane already shows its file.
+  for (const path of others) {
+    if (!tabs.has(path) || panes.length >= MAX_PANES) continue;
+    splitRight();
+    showModel(path);
+  }
+  const focused = panes[session.focused ?? 0];
+  if (focused) focusPane(focused), editor.focus();
   if (session.view && session.view !== "project") showView(session.view);
+  // Shells come back fresh in the project folder; command tabs, such as a server, aren't re-run.
+  for (let i = 0; i < (session.shells ?? 0); i++) await openTerminal(root);
+  if ((session.shells ?? 0) > 0 && !session.panel) toggleTerminal(root);
 }
 
 /** Shows a tab's model in the editor, saving the view state of the tab it replaces. */
@@ -590,7 +620,7 @@ async function saveFile(path: string) {
 const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
-window.addEventListener("blur", () => settings.autoSave && saveAll());
+window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
 
 function renderTabs() {
   $("tabs").replaceChildren(

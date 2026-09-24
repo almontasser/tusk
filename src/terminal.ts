@@ -7,8 +7,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { isDark, onSettings } from "./settings";
 
-/** A panel tab: a terminal, or another view (without `term`). */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon };
+/** A panel tab: a terminal, or another view (without `term`). `shell` marks a plain shell, not a command. */
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; shell?: boolean };
 
 const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
@@ -21,6 +21,10 @@ const themes = {
 };
 const theme = () => themes[isDark() ? "dark" : "light"];
 onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme())));
+
+/** How many plain shells are open and running, for restoring them with the project. */
+export const shellCount = () => sessions.filter((s) => s.shell && !s.exited).length;
+export const panelShown = () => panelVisible;
 
 /** Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process ends. */
 export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void) {
@@ -35,7 +39,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   fit.fit();
 
   const id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
-  const session: Session = { title, term, fit, el, exited: false, dispose: () => {} };
+  const session: Session = { title, term, fit, el, exited: false, dispose: () => {}, shell: !command };
   const unlisteners = await Promise.all([
     listen<string>(`pty:${id}`, (e) => term.write(e.payload)),
     listen(`pty-exit:${id}`, () => {
