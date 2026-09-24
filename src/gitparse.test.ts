@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, parseBlame, parseHunks, parseStatus } from "./gitparse.ts";
+import { age, lineChanges, parseBlame, parseHunks, parseStatus } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -48,4 +48,18 @@ test("formats ages", () => {
   assert.equal(age(0, 30), "now");
   assert.equal(age(0, 3 * 86400 + 5), "3d");
   assert.equal(age(0, 400 * 86400), "1y");
+});
+
+test("finds added, modified, and deleted lines between two versions", () => {
+  const base = ["a", "b", "c", "d", "e"];
+  assert.deepEqual(lineChanges(base, base), []);
+  assert.deepEqual(lineChanges(base, ["a", "b", "x", "y", "c", "d", "e"]), [{ kind: "added", start: 3, end: 4 }]);
+  assert.deepEqual(lineChanges(base, ["a", "B", "c", "d", "e"]), [{ kind: "modified", start: 2, end: 2 }]);
+  assert.deepEqual(lineChanges(base, ["a", "d", "e"]), [{ kind: "deleted", start: 1, end: 1 }]);
+  assert.deepEqual(lineChanges(base, ["b", "c", "d", "e"]), [{ kind: "deleted", start: 1, end: 1 }]);
+  assert.deepEqual(lineChanges(base, ["a", "B", "c", "d", "e", "f"]), [
+    { kind: "modified", start: 2, end: 2 },
+    { kind: "added", start: 6, end: 6 },
+  ]);
+  assert.deepEqual(lineChanges([], ["x"]), [{ kind: "added", start: 1, end: 1 }]);
 });

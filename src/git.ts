@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
-import { type FileStatus, parseStatus, type Status } from "./gitparse";
+import { age, type BlameLine, type FileStatus, lineChanges, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -17,7 +17,12 @@ const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
 let current: Status | undefined;
 
-export const git = (...args: string[]) => invoke<string>("run_capture", { cwd: host.root(), program: "git", args });
+// `--no-optional-locks` stops read-only commands such as `status` from rewriting .git/index.
+// Otherwise every refresh changes .git, the file watcher reports it, and the refresh repeats forever.
+const run = (args: string[], input: string | null) =>
+  invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["--no-optional-locks", ...args], input });
+export const git = (...args: string[]) => run(args, null);
+const gitWithInput = (input: string, ...args: string[]) => run(args, input);
 
 /** Runs a git command that changes state, then refreshes. Errors go to the status bar. */
 async function change(...args: string[]) {
@@ -35,8 +40,10 @@ async function change(...args: string[]) {
 export async function refreshGit() {
   if (!host.root()) return;
   current = await git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined);
+  headCache.clear(); // HEAD may have moved.
   renderBranch();
   renderCommitView();
+  onRefresh();
 }
 
 function renderBranch() {
@@ -203,7 +210,103 @@ export async function branches() {
   });
 }
 
-export function initGit(h: Host) {
+// ---- Editor: change markers, inline blame, and blame annotations ----
+
+const headCache = new Map<string, Promise<string | null>>();
+let onRefresh = () => {};
+
+/** The file's content at HEAD, or null for files git doesn't track. */
+function headOf(rel: string) {
+  if (!headCache.has(rel)) headCache.set(rel, git("show", `HEAD:${rel}`).catch(() => null));
+  return headCache.get(rel)!;
+}
+
+const annotated = new Set<string>();
+let toggleAnnotations = () => {};
+
+/** Toggles blame annotations (commit, age, and author) in place of line numbers. */
+export const annotate = () => toggleAnnotations();
+
+/** Adds change markers, inline blame for the cursor line, and blame annotations to an editor. */
+function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
+  const markers = editor.createDecorationsCollection();
+  const inline = editor.createDecorationsCollection();
+  let blame: { version: number; lines: Promise<BlameLine[]> } | undefined;
+  const debounce = (fn: () => unknown, ms: number) => {
+    let t: ReturnType<typeof setTimeout>;
+    return () => (clearTimeout(t), (t = setTimeout(fn, ms)));
+  };
+  const relOf = (model: monaco.editor.ITextModel) => {
+    const root = host.root();
+    return current && model.uri.scheme === "file" && model.uri.fsPath.startsWith(root + "/") ? model.uri.fsPath.slice(root.length + 1) : undefined;
+  };
+
+  const updateMarkers = debounce(async () => {
+    const model = editor.getModel();
+    const rel = model && relOf(model);
+    const head = rel ? await headOf(rel) : null;
+    if (!model || head === null || editor.getModel() !== model) return markers.clear();
+    markers.set(
+      lineChanges(head.split("\n"), model.getLinesContent()).map((c) => ({
+        range: new monaco.Range(c.start, 1, c.end, 1),
+        options: { isWholeLine: true, linesDecorationsClassName: `gutter-${c.kind}` },
+      })),
+    );
+  }, 200);
+
+  /** Blame for the editor's current text, including unsaved edits, cached per model version. */
+  const blameLines = () => {
+    const model = editor.getModel();
+    const rel = model && relOf(model);
+    if (!model || !rel) return Promise.resolve([]);
+    const version = model.getAlternativeVersionId();
+    if (blame?.version !== version) {
+      blame = { version, lines: gitWithInput(model.getValue(), "blame", "--porcelain", "--contents", "-", "--", rel).then(parseBlame, () => []) };
+    }
+    return blame.lines;
+  };
+  const describe = (b: BlameLine) =>
+    /^0+$/.test(b.hash) ? "You · Not committed yet" : `${b.author}, ${age(b.time)} ago · ${b.summary}`;
+
+  const updateInline = debounce(async () => {
+    const model = editor.getModel();
+    const line = editor.getPosition()?.lineNumber;
+    const lines = await blameLines();
+    const b = line && lines[line - 1];
+    if (!model || !line || !b || editor.getModel() !== model) return inline.clear();
+    const col = model.getLineMaxColumn(line);
+    inline.set([{ range: new monaco.Range(line, col, line, col), options: { after: { content: `    ${describe(b)}`, inlineClassName: "inline-blame" } } }]);
+  }, 300);
+
+  const applyAnnotations = async () => {
+    const model = editor.getModel();
+    const rel = model && relOf(model);
+    if (!rel || !annotated.has(rel)) return editor.updateOptions({ lineNumbers: "on", lineNumbersMinChars: 5 });
+    const lines = await blameLines();
+    const label = (n: number) => {
+      const b = lines[n - 1];
+      if (!b || /^0+$/.test(b.hash)) return "";
+      return `${b.hash.slice(0, 7)} ${age(b.time).padStart(3)} ${b.author.split(" ")[0].slice(0, 10).padEnd(10)}`;
+    };
+    editor.updateOptions({ lineNumbers: label, lineNumbersMinChars: 24 });
+  };
+  toggleAnnotations = () => {
+    const model = editor.getModel();
+    const rel = model && relOf(model);
+    if (!rel) return;
+    annotated.has(rel) ? annotated.delete(rel) : annotated.add(rel);
+    applyAnnotations();
+  };
+
+  const updateAnnotations = debounce(applyAnnotations, 300);
+  editor.onDidChangeModel(() => (blame = undefined, updateMarkers(), updateInline(), applyAnnotations()));
+  editor.onDidChangeModelContent(() => (updateMarkers(), updateInline(), updateAnnotations()));
+  editor.onDidChangeCursorPosition(updateInline);
+  onRefresh = () => (blame = undefined, updateMarkers(), updateInline(), updateAnnotations());
+}
+
+export function initGit(h: Host, editor: monaco.editor.IStandaloneCodeEditor) {
+  trackEditor(editor);
   host = h;
   $("branch").onclick = () => branches();
   $("commit").onclick = () => commit(false);

@@ -93,3 +93,9 @@ button { font: inherit; color: inherit; }
 #diff-editor { flex: 1; min-height: 0; }
 #branch { background: none; border: 0; color: var(--muted); padding: 0 0 0 12px; cursor: default; }
 #branch:hover { color: var(--text); }
+
+.gutter-added, .gutter-modified { width: 3px !important; margin-left: 4px; }
+.gutter-added { background: #549159; }
+.gutter-modified { background: #375fad; }
+.gutter-deleted { width: 0 !important; height: 0 !important; margin-left: 4px; margin-top: -4px; border: 4px solid transparent; border-left-color: #868a91; }
+.inline-blame { color: #6f737a; font-style: italic; }

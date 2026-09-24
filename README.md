@@ -161,6 +161,13 @@ buttons to open, stage, unstage, or discard it. Write a message and press ⌘⏎
 or click **Commit**. **Commit and Push** also pushes, and sets the upstream
 branch on the first push.
 
+The editor marks lines that differ from the last commit in the gutter: green
+for added lines, blue for changed lines, and a gray triangle where lines were
+deleted. The markers update as you type. The line with the cursor shows who
+last changed it, when, and the commit message. To show the commit, age, and
+author of every line in place of line numbers, run **Annotate with Git Blame**
+from ⌘⇧A. Run it again to hide them.
+
 The branch name in the status bar shows commits ahead (↑) and behind (↓) the
 upstream branch. Click it to check out a local or remote branch, create a
 branch from the name you type, or pull, push, and fetch. Pull, push, and fetch

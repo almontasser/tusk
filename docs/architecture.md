@@ -340,6 +340,30 @@ close it or open a file. A staged change compares `HEAD` with the index, and an
 unstaged change compares the index with the file on disk. Both sides are
 read-only models with a `git` URI scheme, so the language servers ignore them.
 
+### Change markers and blame
+
+`trackEditor` in `git.ts` adds three things to the code editor:
+
+- **Change markers.** `lineChanges` in `gitparse.ts` compares the editor text
+  with the file at `HEAD` (`git show HEAD:<path>`, cached until the next git
+  refresh). It trims the lines both versions share at the start and end, then
+  runs a longest common subsequence on the rest. It runs 200 ms after you stop
+  typing, so the markers include unsaved edits.
+- **Inline blame.** For the cursor line, the editor shows the author, age, and
+  commit message as text after the line. Blame runs `git blame --porcelain
+  --contents -` with the editor text on standard input, so lines you haven't
+  saved show "Not committed yet". Results are cached per model version.
+- **Annotations.** **Annotate with Git Blame** swaps the line numbers for a
+  function that returns the commit, age, and author of each line. Monaco's
+  `lineNumbers` option accepts a function, so this needs no custom gutter.
+
+### Avoiding a refresh loop
+
+`git status` refreshes cached file information in `.git/index`. The file
+watcher reports that write, which triggers another refresh, which runs
+`git status` again. Every git command runs with `--no-optional-locks`, which
+stops read-only commands from writing the index and breaks the loop.
+
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell
@@ -437,6 +461,12 @@ PhpStorm has a separate Run tool window. A terminal tab shows the same colored
 output, accepts input for interactive Artisan prompts, and needs no second
 output view. A structured test tree, which parses JUnit output, can come later
 if you want it.
+
+### 2026-09-24: Change markers diff in the frontend
+
+Git can only diff files on disk, so `git diff` markers would lag until you
+save. A line diff in TypeScript against the cached `HEAD` version updates while
+you type and needs no process per keystroke.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

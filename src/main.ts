@@ -4,7 +4,7 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
-import { branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { annotate, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
@@ -317,6 +317,7 @@ const actions: Action[] = [
   { label: "Push…", keys: "Meta+Shift+K", run: () => root && pushBranch() },
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
+  { label: "Annotate with Git Blame", run: annotate },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
@@ -397,7 +398,7 @@ function showView(name: string) {
   if (name === "commit") refreshGit();
 }
 document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view!)));
-initGit({ root: () => root, openFile, status, showView });
+initGit({ root: () => root, openFile, status, showView }, editor);
 
 $("open-folder").onclick = () => openFolder();
 

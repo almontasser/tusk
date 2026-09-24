@@ -81,3 +81,56 @@ export function age(seconds: number, now = Date.now() / 1000): string {
   for (const [unit, size] of units) if (diff >= size) return `${Math.floor(diff / size)}${unit}`;
   return "now";
 }
+
+/**
+ * Compares two versions of a file line by line and returns the changed ranges of the new
+ * version, like `parseHunks`. Trims the common start and end, then runs a longest common
+ * subsequence on the rest.
+ * ponytail: quadratic LCS; above 4 million cell pairs the middle is marked modified as one block.
+ */
+export function lineChanges(before: string[], after: string[]): LineChange[] {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let end = 0;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  const a = before.slice(start, before.length - end);
+  const b = after.slice(start, after.length - end);
+  if (!a.length && !b.length) return [];
+  const hunk = (removed: number, added: number, at: number): LineChange =>
+    added === 0
+      ? { kind: "deleted", start: Math.max(at, 1), end: Math.max(at, 1) }
+      : { kind: removed === 0 ? "added" : "modified", start: at + 1, end: at + added };
+  if (a.length * b.length > 4_000_000) return [hunk(a.length, b.length, start)];
+
+  // lcs[i * (b.length + 1) + j] is the LCS length of a[i..] and b[j..].
+  const w = b.length + 1;
+  const lcs = new Uint32Array((a.length + 1) * w);
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i * w + j] = a[i] === b[j] ? lcs[(i + 1) * w + j + 1] + 1 : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
+
+  const changes: LineChange[] = [];
+  let i = 0;
+  let j = 0;
+  let removed = 0;
+  let added = 0;
+  const flush = () => {
+    if (removed || added) changes.push(hunk(removed, added, start + j - added));
+    removed = added = 0;
+  };
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      flush();
+      i++;
+      j++;
+    } else if (j < b.length && (i === a.length || lcs[i * w + j + 1] >= lcs[(i + 1) * w + j])) {
+      added++;
+      j++;
+    } else {
+      removed++;
+      i++;
+    }
+  }
+  flush();
+  return changes;
+}
