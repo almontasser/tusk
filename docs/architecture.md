@@ -81,6 +81,8 @@ script.
 | Laravel LSP | 0.0.32 | PHP archive (`.phar`) |
 | Mago | 1.50.0 | Native binary for the build machine's architecture |
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
+| vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
+| Vue language server | 3.3.11 | npm package, run with Node |
 
 Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.
@@ -682,6 +684,34 @@ and TypeScript (`setModeConfiguration`), which would otherwise compete for those
 languages. Monaco turns each whole-file result into minimal edits, so the cursor
 and undo history stay useful.
 
+## JavaScript, TypeScript, and Vue (frontend step 3)
+
+The TypeScript server is vtsls, which wraps TypeScript's `tsserver` and supports
+`tsserver` plugins. Vue's language server works in "hybrid" mode: it handles
+templates and styles, and relies on a TypeScript server with
+`@vue/typescript-plugin` for everything TypeScript knows. The pieces connect
+like this:
+
+- vtsls serves `javascript`, `typescript`, and `vue`. Its settings (answered
+  through `workspace/configuration`) load `@vue/typescript-plugin` from the
+  bundled `tools/node` folder as a global plugin.
+- The Vue server gets the bundled TypeScript's `lib` folder as `tsdk`. When it
+  needs TypeScript information, it sends a `tsserver/request` notification. The
+  client forwards each one to vtsls as the `typescript.tsserverRequest` command
+  and sends the result back as `tsserver/response`. `startServer` takes an
+  `onNotification` function for server-specific notifications like these.
+
+Both start lazily (`startFrontendServersLazily`): vtsls with the first
+JavaScript, TypeScript, or Vue model, and the Vue server with the first Vue
+model. While vtsls runs, Monaco's built-in TypeScript features are turned off,
+so completions and diagnostics don't appear twice. Formatting stays with
+`format.ts`: the client doesn't register formatting providers from language
+servers.
+
+Monaco has no Vue grammar. `editor.ts` registers `vue` for `.vue` files with
+Monaco's HTML grammar, which highlights `<script>` as JavaScript and `<style>`
+as CSS.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -828,6 +858,14 @@ JavaScript servers with the `node` on your `PATH`, as it does with `php`.
 Projects choose their formatter, often in `lint-staged` or CI. Formatting with a
 different tool than the project uses creates noisy diffs. The editor prefers
 Prettier and Pint from the project, and uses Mago only when neither is there.
+
+### 2026-09-24: vtsls with TypeScript 5.9, not TypeScript 7
+
+TypeScript 7 is a native rewrite with its own language server (`tsc --lsp`),
+and it's much faster. But it can't load `tsserver` plugins, and Vue's language
+server depends on `@vue/typescript-plugin`. vtsls with TypeScript 5.9 serves
+JavaScript, TypeScript, and Vue with one server. Revisit this when Vue's tooling
+supports TypeScript 7.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

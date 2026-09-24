@@ -51,3 +51,12 @@ monaco.languages.onLanguage("blade", async () => {
     },
   });
 });
+
+// Vue single-file components use Monaco's HTML grammar, which already highlights
+// <script> as JavaScript and <style> as CSS. The Vue and TypeScript servers add the rest.
+monaco.languages.register({ id: "vue", extensions: [".vue"], aliases: ["Vue"] });
+monaco.languages.onLanguage("vue", async () => {
+  const html = await import("monaco-editor/languages/definitions/html/html.js");
+  monaco.languages.setLanguageConfiguration("vue", html.conf);
+  monaco.languages.setMonarchTokensProvider("vue", html.language);
+});

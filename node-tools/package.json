@@ -3,6 +3,9 @@
   "private": true,
   "description": "Node-based language servers bundled with the editor. scripts/fetch-tools.sh installs them with npm ci.",
   "dependencies": {
-    "@tailwindcss/language-server": "0.16.0"
+    "@tailwindcss/language-server": "0.16.0",
+    "@vtsls/language-server": "0.3.0",
+    "@vue/language-server": "3.3.11",
+    "typescript": "5.9.3"
   }
 }

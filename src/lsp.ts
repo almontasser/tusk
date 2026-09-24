@@ -140,7 +140,6 @@ const clientCapabilities: L.ClientCapabilities = {
       codeActionLiteralSupport: { codeActionKind: { valueSet: ["", "quickfix", "refactor", "refactor.extract", "refactor.inline", "refactor.rewrite", "source", "source.organizeImports"] } },
       resolveSupport: { properties: ["edit"] },
     },
-    formatting: {},
     rename: { prepareSupport: true },
     publishDiagnostics: {},
     foldingRange: {},
@@ -155,6 +154,7 @@ type Server = {
   didSave(model: monaco.editor.ITextModel): void;
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
   willRename(files: L.FileRename[]): Promise<L.WorkspaceEdit | null>;
+  executeCommand(command: string, args: unknown[]): Promise<any>;
   filesChanged(changes: L.FileEvent[]): void;
 };
 
@@ -163,7 +163,15 @@ type Server = {
  * Starts the bundled server `name` for the given Monaco languages. `settings` answers the
  * server's `workspace/configuration` requests, by section name.
  */
-async function startServer(name: string, root: string, langs: string[], initializationOptions: object, settings: Record<string, unknown> = {}): Promise<Server> {
+async function startServer(
+  name: string,
+  root: string,
+  langs: string[],
+  initializationOptions: object,
+  settings: Record<string, unknown> = {},
+  /** Handles notifications this client doesn't know, with a function to notify the server back. */
+  onNotification?: (method: string, params: any, notify: (method: string, params: unknown) => void) => void,
+): Promise<Server> {
   let nextId = 1;
   const pending = new Map<number, { resolve(v: any): void; reject(e: any): void }>();
   const diagnostics = new Map<string, L.Diagnostic[]>();
@@ -200,6 +208,8 @@ async function startServer(name: string, root: string, langs: string[], initiali
       host.status(`${name}: ${msg.params.message}`, name);
       // Phpactor asks for a restart after you trust a project's .phpactor.json.
       if (/restart the language server/i.test(msg.params.message)) setTimeout(() => startLsp(root, host), 500);
+    } else if (onNotification && msg.method !== "$/progress") {
+      onNotification(msg.method, msg.params, notify);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
       host.status(v.kind === "end" ? "" : [v.title, v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" "), name);
@@ -293,6 +303,7 @@ async function startServer(name: string, root: string, langs: string[], initiali
     filesChanged(changes) {
       if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
     },
+    executeCommand: (command, args) => request("workspace/executeCommand", { command, arguments: args }),
     async willRename(files) {
       if (!c.workspace?.fileOperations?.willRename) return null;
       return request<L.WorkspaceEdit | null>("workspace/willRenameFiles", { files });
@@ -473,15 +484,6 @@ async function startServer(name: string, root: string, langs: string[], initiali
       }));
     }
 
-    if (c.documentFormattingProvider) {
-      reg(ml.registerDocumentFormattingEditProvider(langs, {
-        async provideDocumentFormattingEdits(model, options) {
-          const edits = await request<L.TextEdit[] | null>("textDocument/formatting", { ...doc(model), options });
-          return (edits ?? []).map((e) => ({ range: toRange(e.range), text: e.newText }));
-        },
-      }));
-    }
-
     if (c.renameProvider) {
       const prepare = typeof c.renameProvider === "object" && c.renameProvider.prepareProvider;
       reg(ml.registerRenameProvider(langs, {
@@ -639,10 +641,88 @@ const tailwindSettings = {
   },
 };
 
+/** Settings for vtsls, which also loads the Vue TypeScript plugin from the bundled tools. */
+function typescriptSettings(nodeDir: string) {
+  const language = {
+    inlayHints: { parameterNames: { enabled: "literals" }, functionLikeReturnTypes: { enabled: true } },
+    suggest: { completeFunctionCalls: true },
+  };
+  return {
+    typescript: language,
+    javascript: language,
+    vtsls: {
+      autoUseWorkspaceTsdk: true,
+      tsserver: {
+        globalPlugins: [
+          { name: "@vue/typescript-plugin", location: nodeDir, languages: ["vue"], configNamespace: "typescript", enableForWorkspaceTypeScriptVersions: true },
+        ],
+      },
+    },
+  };
+}
+
+/** Monaco's built-in TypeScript features, turned off while vtsls serves JavaScript and TypeScript. Formatting is left to format.ts. */
+function builtInTypeScript(enabled: boolean) {
+  for (const defaults of [monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults]) {
+    const m = defaults.modeConfiguration;
+    defaults.setModeConfiguration({
+      ...m,
+      completionItems: enabled, hovers: enabled, documentSymbols: enabled, definitions: enabled, references: enabled,
+      documentHighlights: enabled, rename: enabled, diagnostics: enabled, signatureHelp: enabled, codeActions: enabled, inlayHints: enabled,
+    });
+  }
+}
+
+let lazyStart: monaco.IDisposable | undefined;
+
+/**
+ * Starts the TypeScript server (vtsls) when the first JavaScript, TypeScript, or Vue file
+ * opens, and the Vue server when the first Vue file opens. The Vue server asks vtsls for
+ * TypeScript information through `tsserver/request` notifications, which this forwards.
+ */
+async function startFrontendServersLazily(root: string) {
+  const nodeDir = await invoke<string>("tool_path", { name: "node" });
+  let ts: Promise<Server | null> | undefined;
+  let vue: Promise<Server | null> | undefined;
+  const add = (p: Promise<Server>, what: string) =>
+    p.then(
+      (s) => (servers.push(s), s),
+      (e) => (host.status(`${what} server failed: ${e}`), null),
+    );
+  const startTs = () =>
+    (ts ??= add(startServer("typescript", root, ["javascript", "typescript", "vue"], typescriptSettings(nodeDir), typescriptSettings(nodeDir)), "TypeScript").then((s) => {
+      if (s) builtInTypeScript(false);
+      return s;
+    }));
+  const startVue = () =>
+    (vue ??= startTs().then((tsServer) =>
+      add(
+        startServer("vue", root, ["vue"], { typescript: { tsdk: `${nodeDir}/node_modules/typescript/lib` } }, {}, (method, params, notify) => {
+          if (method !== "tsserver/request" || !tsServer) return;
+          for (const [id, command, args] of params as [number, string, unknown][]) {
+            tsServer
+              .executeCommand("typescript.tsserverRequest", [command, args, { isAsync: true, lowPriority: true }])
+              .then((res) => notify("tsserver/response", [[id, res?.body]]), () => notify("tsserver/response", [[id, null]]));
+          }
+        }),
+        "Vue",
+      ),
+    ));
+  const onModel = (m: monaco.editor.ITextModel) => {
+    const lang = m.getLanguageId();
+    if (lang === "javascript" || lang === "typescript") startTs();
+    if (lang === "vue") startVue();
+  };
+  monaco.editor.getModels().forEach(onModel);
+  lazyStart = monaco.editor.onDidCreateModel(onModel);
+}
+
 /** Starts the language servers for a project, stopping those of the previous project. */
 export async function startLsp(root: string, h: Host) {
   host = h;
   servers.splice(0).forEach((s) => s.stop());
+  lazyStart?.dispose();
+  builtInTypeScript(true);
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = (name: string) => invoke<string>("tool_path", { name });
   const phpactor = startServer("phpactor", root, ["php"], {
@@ -664,6 +744,7 @@ export async function startLsp(root: string, h: Host) {
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue"], {}, tailwindSettings)
     : null;
+  startFrontendServersLazily(root);
   for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);

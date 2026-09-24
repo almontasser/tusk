@@ -53,7 +53,7 @@ file to change when you add it.
 | Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
-| Frontend languages | JavaScript, TypeScript, and Vue get only Monaco's built-in support, with no language server. |
+| Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no stash, interactive rebase, or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
@@ -69,8 +69,8 @@ To use the app, you need:
 - PHP 8.1 or later on your `PATH`. The app finds PHP through your login shell,
   so installs from Homebrew and Laravel Herd work.
 - Git, and optionally the GitHub CLI (`gh`) for pull requests.
-- Node.js, for Tailwind CSS support. Laravel projects that use Vite already need
-  it.
+- Node.js, for Tailwind CSS, JavaScript, TypeScript, and Vue support. Laravel
+  projects that use Vite already need it.
 
 To build the app, you also need:
 
@@ -78,7 +78,8 @@ To build the app, you also need:
 - Node.js 24 or later, and pnpm
 
 The app bundles its language tools (Phpactor, Laravel LSP, Mago, and the
-Tailwind CSS language server), so you don't install them yourself. If your project has PHPStan or Larastan in
+Tailwind CSS, TypeScript, and Vue language servers), so you don't install them
+yourself. If your project has PHPStan or Larastan in
 `vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
 checks each download against its SHA-256 checksum.
 
@@ -261,6 +262,19 @@ Classes are recognized in `class` attributes, in PHP arrays such as Filament's
 server reads your Tailwind setup from your CSS entry file (Tailwind 4) or
 `tailwind.config.js` (Tailwind 3), and uses the project's installed
 `tailwindcss` when `node_modules` exists.
+
+## JavaScript, TypeScript, and Vue
+
+JavaScript, TypeScript, and Vue files get a full TypeScript language server
+(vtsls), with project-wide completion, hover, go to definition, find
+references, rename, code actions, inlay hints, and type errors. In `.vue`
+files, the Vue language server adds template and style support, and TypeScript
+features work inside templates too, such as hover and completion in
+`{{ … }}`.
+
+The servers start the first time you open a JavaScript, TypeScript, or Vue
+file, so PHP-only work doesn't pay for them. They use the project's own
+TypeScript version when `node_modules/typescript` exists.
 
 ## Tests and commands
 
