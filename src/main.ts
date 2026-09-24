@@ -66,7 +66,16 @@ async function renamed(from: string, to: string) {
   if (wasActive) await openFile(to);
 }
 
-const status = (text: string) => ($("lsp-status").textContent = text);
+/**
+ * Status messages by source, so one language server finishing a task doesn't clear another's
+ * progress. The status bar shows the most recent message that is still set.
+ */
+const statuses = new Map<string, string>();
+function status(text: string, source = "app") {
+  statuses.delete(source);
+  if (text) statuses.set(source, text);
+  $("lsp-status").textContent = [...statuses.values()].at(-1) ?? "";
+}
 
 async function renderDir(ul: HTMLUListElement, dir: string) {
   renderedDirs.set(dir, ul);

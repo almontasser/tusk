@@ -114,6 +114,21 @@ would list classes twice. The client sets its own `indexer.index_path` with a
 version suffix (`%project_id%-editor-1`). When the patterns change, bump the
 suffix, and every project gets a fresh index.
 
+### Rechecking after indexing
+
+Phpactor checks a file when you open it. During the first indexing, names
+defined in files that aren't indexed yet, such as Laravel's `config()` helper,
+can show as not found, and Phpactor doesn't recheck them when indexing ends.
+The client remembers the title of each `$/progress` token. When the progress
+titled "Indexing workspace" ends, it sends `didSave` for every open PHP file,
+which makes Phpactor check them again against the full index.
+
+### Status bar
+
+Each language server has its own status slot, and the status bar shows the
+most recent message that is still set. Otherwise one server finishing a task
+would clear another server's indexing progress.
+
 ### Language server client
 
 `src/lsp.ts` is a small client written for this editor:

@@ -19,7 +19,8 @@ export type Host = {
   renamed(from: string, to: string): void;
   /** Opens a file at a 1-based line. */
   openAt(path: string, line: number): void;
-  status(text: string): void;
+  /** Shows a status message; each source has its own slot, and "" clears it. */
+  status(text: string, source?: string): void;
 };
 
 let host: Host;
@@ -170,10 +171,13 @@ async function startServer(name: string, root: string, langs: string[], initiali
       const model = monaco.editor.getModel(monaco.Uri.parse(msg.params.uri));
       if (model) setMarkers(model, owner, msg.params.diagnostics);
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
-      host.status(`${name}: ${msg.params.message}`);
+      host.status(`${name}: ${msg.params.message}`, name);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
-      host.status(v.kind === "end" ? "" : [v.title, v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" "));
+      host.status(v.kind === "end" ? "" : [v.title, v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" "), name);
+      if (v.kind === "begin") progressTitles.set(msg.params.token, v.title);
+      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(msg.params.token) ?? "")) recheckOpenFiles();
+      if (v.kind === "end") progressTitles.delete(msg.params.token);
     }
   });
 
@@ -185,7 +189,7 @@ async function startServer(name: string, root: string, langs: string[], initiali
       case "workspace/configuration":
         return params.items.map(() => null);
       case "window/showMessageRequest":
-        host.status(`${name}: ${params.message}`);
+        host.status(`${name}: ${params.message}`, name);
         return null;
       default: // client/registerCapability, window/workDoneProgress/create, and others need no work.
         return null;
@@ -204,6 +208,16 @@ async function startServer(name: string, root: string, langs: string[], initiali
     if (action.edit) await applyWorkspaceEdit(action.edit);
     if (action.command) await execute(action.command);
   }
+
+  const progressTitles = new Map<string | number, string>();
+
+  /**
+   * Files opened during indexing were checked against a partial index, so names defined in
+   * files not yet indexed (such as Laravel's config() helper) show as not found. Phpactor
+   * doesn't recheck them when indexing ends, so a save notification asks it to.
+   */
+  const recheckOpenFiles = () =>
+    monaco.editor.getModels().filter(serves).forEach((m) => notify("textDocument/didSave", { textDocument: { uri: m.uri.toString() } }));
 
   const serves = (model: monaco.editor.ITextModel) => langs.includes(model.getLanguageId()) && model.uri.scheme === "file";
 
