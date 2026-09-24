@@ -59,6 +59,14 @@ same URI, so milestone 2 needs no path translation.
 A tab is dirty when the model's alternative version ID differs from the ID
 recorded at the last save. Undoing back to the saved text clears the dirty mark.
 
+### Saving
+
+`saveFile` writes one tab if it has unsaved changes, then marks it saved, sends
+`didSave` to the language servers, and lets git mark a resolved conflict. Files
+save automatically, as in PhpStorm: `showModel` saves the tab you leave, closing
+a tab saves it (and keeps it open if the save fails), and the window's `blur`
+event saves every tab. ⌘S runs `saveAll`.
+
 ### External changes
 
 The frontend batches `fs-change` events for 150 ms. For each changed file that

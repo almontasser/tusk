@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
@@ -103,6 +103,7 @@ async function restoreSession(session: Session) {
 
 /** Shows a tab's model in the editor, saving the view state of the tab it replaces. */
 function showModel(path: string) {
+  if (active && active !== path && tabs.has(active)) saveFile(active);
   if (active && tabs.has(active) && editor.getModel()) viewStates.set(active, editor.saveViewState()!);
   active = path;
   editor.setModel(tabs.get(path)?.model ?? null);
@@ -251,7 +252,9 @@ async function openFile(path: string) {
 async function closeTab(path: string) {
   const tab = tabs.get(path);
   if (!tab) return;
-  if (isDirty(tab) && !(await ask(`Discard unsaved changes to ${nameOf(path)}?`, { kind: "warning" }))) return;
+  // Closing saves, as in PhpStorm. If the save fails, the tab stays open with its changes.
+  await saveFile(path);
+  if (isDirty(tab)) return;
   tab.model.dispose();
   tabs.delete(path);
   viewStates.delete(path);
@@ -264,14 +267,26 @@ async function closeTab(path: string) {
   markActiveInTree();
 }
 
-async function save() {
-  const tab = tabs.get(active);
-  if (!tab) return;
-  await invoke("write_file", { path: active, contents: tab.model.getValue() });
-  markSaved(active);
+/** Saves one tab's file if it has unsaved changes. */
+async function saveFile(path: string) {
+  const tab = tabs.get(path);
+  if (!tab || !isDirty(tab)) return;
+  const text = tab.model.getValue();
+  try {
+    await invoke("write_file", { path, contents: text });
+  } catch (e) {
+    return status(`Couldn't save ${relative(path)}: ${e}`);
+  }
+  markSaved(path);
   didSave(tab.model);
-  afterSave(active, tab.model.getValue());
+  afterSave(path, text);
 }
+
+/** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
+const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
+
+// Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
+window.addEventListener("blur", () => saveAll());
 
 function renderTabs() {
   $("tabs").replaceChildren(
@@ -417,7 +432,7 @@ const actions: Action[] = [
   editorAction("Duplicate Line", "Meta+D", "editor.action.copyLinesDownAction"),
   editorAction("Delete Line", "Meta+Backspace", "editor.action.deleteLines"),
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
-  { label: "Save", keys: "Meta+S", run: save },
+  { label: "Save All", keys: "Meta+S", run: saveAll },
   { label: "Close Tab", keys: "Meta+W", run: () => closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },

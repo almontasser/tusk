@@ -49,7 +49,6 @@ file to change when you add it.
 | --- | --- |
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | There's one editor pane. Only the diff view shows two files side by side. |
-| Saving | There's no **Save All** and no auto-save. |
 | Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
@@ -157,12 +156,15 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘T | Update the project (`git pull`) |
 | ⌘1 | Show the project tree |
 | ⌘9 | Git log |
-| ⌘S | Save |
+| ⌘S | Save all files |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action. The app reopens the last folder when it starts, with the tabs you had open in
+Folder…** action. Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
+switch to another app. ⌘S saves every changed file.
+
+The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
 when you switch tabs and when you reopen the project. Expanded folders in the
 tree and the sidebar view come back too. If a project has a
