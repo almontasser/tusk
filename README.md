@@ -32,7 +32,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| TODO comments | The list finds `TODO`, `FIXME`, and `XXX` anywhere in a file, including strings, not only in comments. Results stop at 20,000. |
+| TODO comments | The view finds `TODO`, `FIXME`, and `XXX` anywhere in a file, including strings, not only in comments. Results stop at 20,000. |
 | Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
 | Formatting | Without Prettier, only PHP files format. |
@@ -301,9 +301,11 @@ becomes the query.
 
 ### TODO comments
 
-Run **TODO** from ⌘⇧A to list every `TODO`, `FIXME`, and `XXX` in the
-project's files. Type to filter the list, and choose one to open it. Files
-that `.gitignore` excludes, such as `vendor`, aren't searched.
+Click the checklist icon in the tool window bar, or run **TODO** from ⌘⇧A, to
+open the **TODO** view. It lists every `TODO`, `FIXME`, and `XXX` in the
+project's files, grouped by file. Click one to open it. The list updates when
+files change, and the refresh button reloads it. Files that `.gitignore`
+excludes, such as `vendor`, aren't searched.
 
 ## Bookmarks
 

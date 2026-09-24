@@ -1418,9 +1418,10 @@ the debugger.
   config folder, in VS Code's format. One completion provider for every
   language (`"*"`) filters them by `scope`. While the file is open in a tab, the
   provider reads the tab's text, so changes apply without a save or reload.
-- **TODO** (`showTodos` in `src/search.ts`) reuses `search_text` with a
-  case-sensitive regex, so it respects `.gitignore` and the 20,000-match limit.
-  It shows results in the palette rather than a new sidebar view.
+- **TODO** (`loadTodos` in `src/search.ts`) is a sidebar view that reuses
+  `search_text` with a case-sensitive regex, so it respects `.gitignore` and
+  the 20,000-match limit. It shares the Find view's file groups
+  (`fileGroup`), and reloads after file changes while it shows.
 - **Routes** (`showRoutes` in `src/runner.ts`) parse `artisan route:list
   --json`. `routeTarget` in `src/phptypes.ts` reads the action; the class is
   found through composer.json's PSR-4 folders first (fast, and works before
@@ -1690,9 +1691,9 @@ and package name in code unless it has large custom word lists. `typos` looks
 only for known misspellings, which fits code with few false positives. The
 cost is that a rare misspelling that isn't on its list goes unnoticed.
 
-### 2026-09-25: Small tools in the palette, not new tool windows
+### 2026-09-25: Small tools in the palette, except TODO
 
-TODO comments, bookmarks, and routes list in the palette instead of sidebar
-views. The palette already filters, ranks, and opens results, so each tool is
-a few lines. A persistent tool window would cost more layout code and state
-for a list you usually glance at and leave.
+Bookmarks and routes list in the palette instead of sidebar views. The palette
+already filters, ranks, and opens results, so each tool is a few lines, and
+you usually glance at these lists and leave. TODO comments get a sidebar view,
+because you work through them one by one and want the list to stay open.

@@ -25,7 +25,7 @@ import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
-import { initSearch, openSearch, refreshSearch, showTodos } from "./search";
+import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
@@ -698,6 +698,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     renderTabs();
     refreshGit();
     refreshSearch();
+    refreshTodos();
   }, 150);
 });
 
@@ -885,7 +886,7 @@ const actions: Action[] = [
     },
   },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
-  { label: "TODO", run: showTodos },
+  { label: "TODO", run: () => showView("todo") },
   { label: "Toggle Bookmark", keys: "F3", run: () => active && toggleBookmark(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
   { label: "Edit Snippets (Live Templates)", run: () => editSnippets(openFile) },
@@ -1059,6 +1060,7 @@ function showView(name: string) {
   if (name === "prs") loadPullRequests();
   if (name === "database") loadTables();
   if (name === "composer") loadPackages();
+  if (name === "todo") loadTodos();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -1086,6 +1088,7 @@ $("welcome-open").onclick = () => openFolder();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
+$("todo-refresh").onclick = () => loadTodos();
 
 // Drag the sidebar's right edge to resize it; the width is remembered.
 try {
