@@ -41,7 +41,7 @@ async function openFolder(dir: unknown = null) {
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
-  startLsp(dir, { ensureModel, markSaved, renamed, status }).catch((e) => status(`Language server failed: ${e}`));
+  startLsp(dir, { ensureModel, markSaved, renamed, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) => status(`Language server failed: ${e}`));
 }
 
 async function ensureModel(path: string) {

@@ -28,7 +28,7 @@ pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools"))
 }
 
-/// Starts the bundled language server `name` for `root`, replacing a running one with the
+/// Starts the bundled language server `name` (`phpactor`, `laravel`, or `filament`) for `root`, replacing a running one with the
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
@@ -37,6 +37,7 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
     let args = match name.as_str() {
         "phpactor" => vec!["phpactor.phar", "language-server"],
         "laravel" => vec!["laravel-lsp.phar"],
+        "filament" => vec!["filament-lsp/server.php"],
         _ => return Err(format!("Unknown language server: {name}")),
     };
     let tools = tools_dir(&app)?;

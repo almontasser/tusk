@@ -84,6 +84,11 @@ PHP
 
 php artisan migrate --no-interaction
 php artisan make:filament-resource Post --generate --no-interaction
+php artisan make:filament-resource Author --generate --no-interaction
+php artisan make:filament-relation-manager AuthorResource posts title --no-interaction
+php -r '$f = "app/Filament/Resources/Authors/AuthorResource.php"; $s = file_get_contents($f);
+  $s = str_replace("use App\\Models\\Author;", "use App\\Filament\\Resources\\Authors\\RelationManagers\\PostsRelationManager;\nuse App\\Models\\Author;", $s);
+  file_put_contents($f, preg_replace("/(getRelations\(\): array\s*\{\s*return \[)\s*\/\/\s*/", "$1\n            PostsRelationManager::class,\n        ", $s));'
 
 # Its own repository, for testing the git features.
 git init --quiet --initial-branch=main

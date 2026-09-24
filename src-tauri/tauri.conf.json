@@ -34,7 +34,8 @@
     ],
     "resources": {
       "resources/tools/": "tools/",
-      "resources/mago.toml": "tools/mago.toml"
+      "resources/mago.toml": "tools/mago.toml",
+      "../filament-lsp/": "tools/filament-lsp/"
     }
   }
 }

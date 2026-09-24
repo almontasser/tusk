@@ -25,7 +25,7 @@ pushes events to the frontend with Tauri events (`emit`).
 | Diagnostics and formatting | Mago and Larastan | 3 |
 | Terminal | `xterm.js` and `portable-pty` | 4 |
 | Git and pull requests | The `git` and `gh` command-line tools | 5 |
-| Filament intelligence | A custom language server written in PHP | 6 |
+| Filament intelligence | A custom language server written in PHP (`filament-lsp/`) | 6 |
 
 The backend runs each language server as a child process. The frontend starts
 one client per server, and Monaco merges their results.
@@ -394,6 +394,66 @@ It makes a network call, so it doesn't run on every refresh.
 Descriptions and comments render as plain text (`textContent`), so content
 from GitHub can't inject HTML into the editor.
 
+## Filament language server (milestone 6)
+
+Phpactor already completes Filament's fluent methods, such as
+`TextInput::make()->required()`, because they are ordinary typed PHP. The
+Filament server covers what no general PHP server knows: the strings Filament
+resolves against Eloquent models at run time.
+
+### Structure
+
+The server is plain PHP with no dependencies, in `filament-lsp/`. The app
+bundles the folder as `tools/filament-lsp/` and starts it with
+`php server.php` in the project folder when `vendor/filament/filament` exists.
+
+| File | Role |
+| --- | --- |
+| `server.php` | LSP over standard input and output: completion, definition, code lenses, and diagnostics |
+| `introspect.php` | Boots the project and prints JSON about a resource, its model, and its relationships |
+| `tests.php` | Tests against the test app |
+
+### Why a subprocess
+
+PHP can't unload a class. If the server loaded the project's classes itself,
+edits to models and resources would never show up. So the server runs
+`introspect.php` in a new process, which boots the app, reads the classes
+through reflection, and exits. The server caches each result until you save any
+file. A call takes about 0.3 seconds on the test app.
+
+### Finding the model for a file
+
+1. If the file declares a class that extends `Resource`, it's the resource.
+   Otherwise the server looks for a `*Resource.php` file in the file's folder,
+   then in each parent folder up to `app/`. Filament 4 keeps pages, schemas,
+   tables, and relation managers in subfolders of the resource's folder.
+2. `introspect.php` calls `Resource::getModel()`, `getPages()`, and
+   `getRelations()`.
+3. For a relation manager, the subject is the related model of its
+   `$relationship` on the resource's model.
+
+### Models
+
+Relationships are public methods with no required parameters whose declared
+return type extends Eloquent's `Relation`. The introspector calls each one to
+find the related model, which doesn't query the database. Columns come from the
+schema builder when the app boots and connects. Otherwise they come from the
+model's key, `$fillable`, casts, and timestamps. Related models are described
+one level deep, which covers paths such as `author.name`.
+
+### Text patterns
+
+The server finds strings with line-based patterns: `::make('…')`,
+`->relationship('…')`, and `->relationship('…', '…')`. Diagnostics check only
+relationship names (from `->relationship()` and dotted `::make()` paths),
+because plain field names can be virtual attributes that aren't columns.
+
+### Links
+
+Code lenses carry the command `phpEditor.open` with a file URI and a line.
+`lsp.ts` registers that command and opens the file. Any other code lens
+command goes back to its server through `workspace/executeCommand`.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -495,6 +555,13 @@ you type and needs no process per keystroke.
 
 `gh` already handles sign-in, tokens, GitHub Enterprise hosts, and repository
 detection from the git remote. Calling it keeps credentials out of the editor.
+
+### 2026-09-24: The Filament server is PHP without dependencies
+
+Reading Filament resources correctly needs the project's own classes, and only
+PHP can load them. Writing the server in PHP with no Composer dependencies means
+no build step and no bundled PHP archive, and it runs on the PHP that the
+project needs anyway.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

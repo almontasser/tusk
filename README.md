@@ -15,7 +15,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | 3. Laravel LSP, Mago, and Larastan diagnostics | Done |
 | 4. Terminal, Artisan, test runner, search | Done |
 | 5. Git, blame, and pull requests | Done |
-| 6. Filament language server | Not started |
+| 6. Filament language server | Done |
 
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
@@ -36,6 +36,7 @@ change when you add it.
 | Formatting | Only PHP files format (through Mago). |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
+| Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
 | Git history | There's no log or history view of past commits yet. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
@@ -80,6 +81,7 @@ checks each download against its SHA-256 checksum.
 ```sh
 pnpm test                          # Frontend logic, with Node's test runner
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust
+php -d zend.assertions=1 filament-lsp/tests.php fixtures/demo   # Filament server, needs the test app
 ```
 
 ## Build a release
@@ -143,6 +145,31 @@ LSP. It adds completion, hover, go to definition, links, and diagnostics for
 config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
+
+## Filament features
+
+In projects that install Filament (`vendor/filament/filament`), a Filament
+language server understands the strings Filament resolves against your
+Eloquent models:
+
+- **Completion.** In `::make('…')`, it suggests the model's columns and
+  relationships. After a relationship and a dot, such as `'author.'`, it
+  suggests the related model's columns. In `->relationship('…')`, it suggests
+  relationship names. In the second argument, such as
+  `->relationship('author', '…')`, it suggests the related model's columns.
+- **Go to declaration.** ⌘B on `'author'` in `->relationship('author')` or
+  `'author.name'` opens the model's `author()` method.
+- **Warnings.** A relationship name that the model doesn't define is
+  underlined as you type.
+- **Links between files.** A resource shows links to its model, pages, and
+  relation managers above the class. Pages, schemas, tables, and relation
+  managers link back to their resource, and a model links to its resources.
+
+Forms and tables in a relation manager use the related model. For example,
+fields in `PostsRelationManager` on `AuthorResource` complete `Post` columns.
+
+Columns come from the database when the app can boot and connect. Otherwise
+they come from the model's `$fillable`, casts, primary key, and timestamps.
 
 ## Tests and commands
 
@@ -231,6 +258,9 @@ committed.
 | `src-tauri/src/search.rs` | Project file listing and text search |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
+| `filament-lsp/server.php` | Filament language server |
+| `filament-lsp/introspect.php` | Reads resources and models from the project |
+| `filament-lsp/tests.php` | Filament server tests |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |

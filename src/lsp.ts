@@ -17,6 +17,8 @@ export type Host = {
   markSaved(path: string): void;
   /** Moves an open tab after a file is renamed on disk. */
   renamed(from: string, to: string): void;
+  /** Opens a file at a 1-based line. */
+  openAt(path: string, line: number): void;
   status(text: string): void;
 };
 
@@ -86,6 +88,9 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
     }
   }
 }
+
+// Servers can link to a location with this command, for example in code lenses.
+monaco.editor.registerCommand("phpEditor.open", (_, uri: string, line: number) => host.openAt(pathOf(uri), line));
 
 // Code actions carry the function that runs them, so each one goes back to the server that made it.
 monaco.editor.registerCommand("lsp.codeAction", (_, run: (a: L.CodeAction | L.Command) => Promise<void>, action) => run(action));
@@ -455,6 +460,26 @@ async function startServer(name: string, root: string, langs: string[], initiali
       }));
     }
 
+    if (c.codeLensProvider) {
+      reg(ml.registerCodeLensProvider(langs, {
+        async provideCodeLenses(model) {
+          const lenses = await request<L.CodeLens[] | null>("textDocument/codeLens", doc(model));
+          return {
+            lenses: (lenses ?? [])
+              .filter((l) => l.command)
+              .map((l) => ({
+                range: toRange(l.range),
+                command:
+                  l.command!.command === "phpEditor.open"
+                    ? { id: "phpEditor.open", title: l.command!.title, arguments: l.command!.arguments }
+                    : { id: "lsp.codeAction", title: l.command!.title, arguments: [runCodeAction, l.command] },
+              })),
+            dispose() {},
+          };
+        },
+      }));
+    }
+
     if (c.documentLinkProvider) {
       reg(ml.registerLinkProvider(langs, {
         async provideLinks(model) {
@@ -485,7 +510,8 @@ export async function startLsp(root: string, h: Host) {
   const laravel = (await exists("artisan"))
     ? startServer("laravel", root, ["php", "blade"], {})
     : null;
-  for (const s of await Promise.allSettled([phpactor, laravel])) {
+  const filament = (await exists("vendor/filament/filament")) ? startServer("filament", root, ["php"], {}) : null;
+  for (const s of await Promise.allSettled([phpactor, laravel, filament])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
