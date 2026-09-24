@@ -196,6 +196,21 @@ watcher reports a change, `reindex()` sends Phpactor's
 and rebuilds it. The first time a project opens, there's no hash yet, so it
 reindexes once.
 
+### Files changed by other programs
+
+Phpactor's index doesn't pick up PHP files that another program creates or
+changes, such as `php artisan make:model` or a `git checkout`. The editor sends
+`workspace/didChangeWatchedFiles` for them, and Phpactor registers for those
+events, but in testing the classes stayed out of the index until a reindex; the
+cause, somewhere in Phpactor's watcher, wasn't found. So `filesChanged` also
+asks for a soft reindex (`soft: true`), which indexes only files modified since
+the last pass, 2 seconds after the last such change. It skips files open in the
+editor, which Phpactor already gets through the editor, and files in the
+folders the index excludes (`vendor`, `node_modules`, `storage`,
+`bootstrap/cache`, and hidden folders), so Laravel's own writes to `storage`
+don't trigger it. A new class is in the index about 3 seconds after its file
+appears.
+
 ### Diagnostics run in the server process
 
 By default, Phpactor runs its own diagnostics in a child process,

@@ -757,8 +757,11 @@ async function startFrontendServersLazily(root: string) {
 }
 
 /** Starts the language servers for a project, stopping those of the previous project. */
+let projectRoot = "";
+
 export async function startLsp(root: string, h: Host) {
   host = h;
+  projectRoot = root;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
   builtInTypeScript(true);
@@ -846,25 +849,36 @@ export async function updateReferences(renames: { from: string; to: string }[]) 
   }
 }
 
-/**
- * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
- * package's old modification times, so Phpactor's update pass takes them for already indexed.
- */
 /** Sends a request to Phpactor, or returns null when it isn't running. */
 export async function phpactorRequest<T>(method: string, params: unknown): Promise<T | null> {
   const phpactor = servers.find((s) => s.name === "phpactor");
   return phpactor ? phpactor.request<T>(method, params) : null;
 }
 
-export function reindex() {
+/**
+ * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
+ * package's old modification times, so Phpactor's update pass takes them for already indexed. A soft
+ * reindex only indexes files modified since the last pass.
+ */
+export function reindex(soft = false) {
   const phpactor = servers.find((s) => s.name === "phpactor");
-  phpactor?.request("phpactor/indexer/reindex", { soft: false }).catch((e) => host.status(`Can't reindex: ${e}`));
+  phpactor?.request("phpactor/indexer/reindex", { soft }).catch((e) => host.status(`Can't reindex: ${e}`));
 }
+
+let reindexTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Tells the servers which PHP files changed on disk. `exists` false means deleted. */
 export function filesChanged(files: { path: string; exists: boolean }[]) {
-  const changes = files
-    .filter((f) => f.path.endsWith(".php"))
-    .map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
+  const php = files.filter((f) => f.path.endsWith(".php"));
+  const changes = php.map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
   if (changes.length) servers.forEach((s) => s.filesChanged(changes));
+  // Phpactor's index misses PHP files that another program creates or changes, such as make:model or a git
+  // checkout, even with the events above. Files open in the editor reach it through the editor, so only
+  // files without a model, outside the folders the index skips, need a (soft) reindex.
+  const external = php.some(
+    (f) => f.exists && !monaco.editor.getModel(monaco.Uri.file(f.path)) && !/\/(vendor|node_modules|storage|bootstrap\/cache|\.[^/]+)\//.test(f.path.slice(projectRoot.length)),
+  );
+  if (!external) return;
+  clearTimeout(reindexTimer);
+  reindexTimer = setTimeout(() => reindex(true), 2000);
 }

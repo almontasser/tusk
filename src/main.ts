@@ -820,7 +820,7 @@ const actions: Action[] = [
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Show Local History", run: () => active && showLocalHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
-  { label: "Reindex Project", run: reindex },
+  { label: "Reindex Project", run: () => reindex() },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   { label: "Composer", run: () => showView("composer") },
