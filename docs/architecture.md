@@ -1390,6 +1390,35 @@ project.
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 
+## Profiler
+
+`src/profiler.ts` runs PHP with `XDEBUG_MODE=profile`, `XDEBUG_TRIGGER=1`, and
+`XDEBUG_CONFIG=output_dir=<app cache>/profiles
+profiler_output_name=cachegrind.out.%t.%p`. The environment reaches child
+processes, which matters because `php artisan test` runs PHPUnit in a new
+process. That writes two profiles, so after a run, the editor opens the
+largest one written since the run started. The profiling server runs PHP's
+built-in server with Laravel's `server.php`, as `artisan serve` does, instead
+of `artisan serve` itself, because `serve` passes only some variables to the
+server it starts and `XDEBUG_TRIGGER` isn't one of them. `server.php` finds
+`public` from the working directory, so the server runs there.
+
+Xdebug gzips profiles by default. macOS's `/usr/bin/gzip -dc` decompresses them
+through `run_capture`, so no Rust crate was added. `stat -f "%m %z %N"` lists
+profiles with their time and size.
+
+`parseCachegrind` in `src/cachegrind.ts` reads the format line by line. Xdebug
+writes one block per call, after the call returns, so blocks come in post-order:
+a block's callees are the last blocks no caller has claimed yet, one per
+`calls=` line. That rebuilds the call tree without keeping it. Each block
+carries a map from function to the time of that function's outermost calls in
+its subtree. A caller merges its callees' maps (into the largest one) and sets
+its own entry, which replaces any nested calls to itself. The roots' maps give
+each function's total time with recursion counted once, direct or through other
+functions, such as Laravel's middleware pipeline. On a real Laravel request,
+every function's own time adds up to exactly the total, and a 700,000-line
+profile parses in about 100 ms.
+
 ## Database
 
 `src-tauri/src/db.rs` has one command, `db_query`, which runs one statement and
@@ -1731,4 +1760,11 @@ PHPUnit and Pest write Clover, Cobertura, PHP, HTML, and text coverage. Clover
 is flat (a file, then its lines with hit counts), so the same regex approach
 as the JUnit report reads it without an XML parser. The PHP format would need
 PHP to read it back, and HTML and text are for people.
+
+### 2026-09-25: A function table for profiles, not a call graph
+
+PhpStorm's profiler shows execution statistics (a function table) and a call
+tree. The table answers the common question, "where does the time go?", in one
+sortable list, and fits the bottom panel. Callers and callees would need the
+call tree kept in memory, which for a large request is millions of calls.
 

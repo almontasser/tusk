@@ -11,23 +11,28 @@ import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
+import { openNewestProfile, profileDir, profileEnv } from "./profiler";
 import { methodLine, routeTarget } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
 let status: (text: string) => void;
-let last: { title: string; command: string[]; tests: boolean; coverage: boolean } | undefined;
+/** How a test run goes: plainly, in the debugger, with code coverage, or with Xdebug's profiler. */
+type Mode = "run" | "debug" | "coverage" | "profile";
+let last: { title: string; command: string[]; tests: boolean; mode: Mode } | undefined;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
 const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
 
 /**
  * Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. With
- * `coverage`, PHPUnit also writes a Clover report, and the editor shows it in the gutter.
+ * coverage, PHPUnit also writes a Clover report, and the editor shows it in the gutter. With the profiler,
+ * the Profiler tab shows the run's profile.
  */
-async function run(title: string, command: string[], tests = false, coverage = false) {
-  last = { title, command, tests, coverage };
+async function run(title: string, command: string[], tests = false, mode: Mode = "run") {
+  last = { title, command, tests, mode };
+  const coverage = mode === "coverage";
   if (!tests) return openTerminal(getRoot(), title, command);
   // In Sail, the report has to be somewhere the container can write: storage/logs, which git ignores.
   const inSail = command[0] === sail();
@@ -43,12 +48,15 @@ async function run(title: string, command: string[], tests = false, coverage = f
   const clover = inSail ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
   if (coverage) await invoke("remove_path", { path: clover }).catch(() => {});
   // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In Sail, the container's settings apply.
-  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : [];
+  const profiles = mode === "profile" ? await profileDir() : "";
+  const started = Math.floor(Date.now() / 1000);
+  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiles ? ["/usr/bin/env", ...profileEnv(profiles)] : [];
   const coverageArgs = coverage ? ["--coverage-clover", inSail ? "storage/logs/editor-clover.xml" : clover] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
     if (coverage) showCoverage(clover);
+    if (profiles) openNewestProfile(profiles, started);
   });
 }
 
@@ -82,22 +90,26 @@ async function testRunner(debug = false) {
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
 const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", line]);
 
+const titles: Record<Mode, string> = { run: "Test", debug: "Debug", coverage: "Test with coverage", profile: "Profile" };
+
 /**
  * Runs one test, or the whole file when the test has no filter, through `php artisan test` or
- * the test binary. With `debug`, it starts the debugger and runs the test with Xdebug enabled.
+ * the test binary. In debug mode, it starts the debugger and runs the test with Xdebug enabled.
  */
-export async function runTest(path: string, test: TestCase, debug = false, coverage = false) {
+export async function runTest(path: string, test: TestCase, mode: Mode = "run") {
   const file = path.slice(getRoot().length + 1);
-  const runner = await testRunner(debug);
+  const runner = await testRunner(mode === "debug");
+  // The profile would be written inside the container, where the editor can't find it.
+  if (mode === "profile" && runner[0] === sail()) return status("Profiling runs tests on this Mac, not in Sail. Stop Sail's containers to profile.");
   const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${debug ? "Debug" : coverage ? "Test with coverage" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
-  if (debug) await startDebugging();
-  return run(title, [...runner, file, ...filter], true, coverage);
+  const title = `${titles[mode]}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
+  if (mode === "debug") await startDebugging();
+  return run(title, [...runner, file, ...filter], true, mode);
 }
 
 export const runAllTests = async (coverage = false) => {
   const runner = await testRunner();
-  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage);
+  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage ? "coverage" : "run");
 };
 
 async function rerunFailed(failed: TestResult[]) {
@@ -106,14 +118,14 @@ async function rerunFailed(failed: TestResult[]) {
 }
 
 /** Runs the test around the cursor, or all tests in the file. */
-export function runTestAtCursor(editor: monaco.editor.ICodeEditor, debug = false, coverage = false) {
+export function runTestAtCursor(editor: monaco.editor.ICodeEditor, mode: Mode = "run") {
   const model = editor.getModel();
   if (!model || !isTestFile(model.uri.fsPath)) return;
   const test = testAt(findTests(model.getValue()), editor.getPosition()?.lineNumber ?? 1);
-  if (test) runTest(model.uri.fsPath, test, debug, coverage);
+  if (test) runTest(model.uri.fsPath, test, mode);
 }
 
-export const rerun = () => last && run(last.title, last.command, last.tests, last.coverage);
+export const rerun = () => last && run(last.title, last.command, last.tests, last.mode);
 
 type ArtisanList = { commands: { name: string; description: string; hidden?: boolean }[] };
 let artisanCache: { root: string; items: { name: string; description: string }[] } | undefined;
@@ -208,7 +220,7 @@ export function initRunner(root: () => string, open: (path: string, line: number
   status = showStatus;
   initTestResults({ root, openAt: open, rerun, rerunFailed });
   initCoverage({ openAt: open, rerun });
-  monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, debug?: boolean) => runTest(path, test, debug));
+  monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, mode?: Mode) => runTest(path, test, mode));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {
       const path = model.uri.fsPath;
@@ -218,7 +230,7 @@ export function initRunner(root: () => string, open: (path: string, line: number
             const range = new monaco.Range(test.line, 1, test.line, 1);
             return [
               { range, command: { id: "tests.run", title: test.filter ? "▶ Run test" : "▶ Run all tests in file", arguments: [path, test] } },
-              { range, command: { id: "tests.run", title: "Debug", arguments: [path, test, true] } },
+              { range, command: { id: "tests.run", title: "Debug", arguments: [path, test, "debug"] } },
             ];
           });
       return { lenses, dispose() {} };

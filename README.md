@@ -58,7 +58,7 @@ file to change when you add it.
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
-| Profiler | There's no viewer for Xdebug profiles (Cachegrind files). |
+| Profiler | The Profiler tab lists functions, not callers and callees or a call graph. It shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
@@ -860,6 +860,32 @@ Xdebug in the container must connect back to your Mac. With Sail, set
 `SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail
 already points Xdebug at `host.docker.internal`.
 
+## Profiling
+
+The editor runs Xdebug's profiler and shows the result in the **Profiler** tab
+of the bottom panel. Run these from ⌘⇧A:
+
+- **Profile Test at Cursor** runs the test at the cursor with the profiler,
+  and opens its profile when the run ends.
+- **Start Profiling Server (PHP's server with the Xdebug profiler)** serves the
+  app at `http://127.0.0.1:8000`, as `php artisan serve` does. Each request
+  writes a profile.
+- **Open Xdebug Profile…** lists profiles from the editor's runs and from
+  Xdebug's own `xdebug.output_dir`, newest first, with their time and size.
+  **Choose File…** opens any other `cachegrind.out` file, compressed or not.
+
+The Profiler tab lists every function with its calls, its own time, and its
+total time, which includes the functions it called. Both times also show as a
+share of the whole run, and a line under the own time shows that share at a
+glance. Click a column header to sort by it, type in the filter to find
+functions, and click a function to open it. Recursive functions count their
+nested calls once.
+
+Profiling needs Xdebug. The editor sets `XDEBUG_MODE=profile` and
+`XDEBUG_TRIGGER`, so it works whether your `php.ini` starts Xdebug always or on
+a trigger. Profiles from the editor go to the app's cache folder. Profiling
+doesn't run in Sail's containers.
+
 ## Database
 
 The **Database** tool window (the cylinder icon) connects to the database in
@@ -944,6 +970,8 @@ committed.
 | `src/testresults.ts` | The Tests tab: live progress and the results tree |
 | `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, and Clover coverage reports, and builds rerun filters |
 | `src/coverage.ts` | Code coverage marks in the gutter and the Coverage tab |
+| `src/profiler.ts` | Profiling runs, the profile list, and the Profiler tab |
+| `src/cachegrind.ts` | Reads Xdebug's Cachegrind profiles |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
 | `src/files.ts` | File operations and the tree's context menu |

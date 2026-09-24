@@ -662,6 +662,19 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .coverage-list, .coverage-list ul { list-style: none; margin: 0; padding: 0; }
 .coverage-list { flex: 1; overflow: auto; }
 .coverage .find-match { cursor: pointer; }
+.profiler-filter { width: 220px; margin-left: 6px; }
+.profiler-body { flex: 1; overflow: auto; }
+.profiler table { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.profiler th { position: sticky; top: 0; background: var(--panel); text-align: left; font: 600 12px var(--ui-family); padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.profiler th.sorted::after { content: " ↓"; }
+.profiler td { padding: 2px 10px; white-space: nowrap; }
+.profiler tr[title] { cursor: pointer; }
+.profiler tbody tr:hover { background: var(--hover); }
+.profiler .num { text-align: right; }
+.profiler .name { max-width: 0; width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.profiler .where { color: var(--faint); margin-left: 10px; font-family: var(--ui-family); }
+/* Own time's share of the run, as a line under the number. */
+.profiler .bar { background: linear-gradient(#e5c07b, #e5c07b) no-repeat right bottom / var(--share) 2px; }
 .tests-body { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border-subtle); }
 .tests-tree, .tests-tree ul { list-style: none; margin: 0; padding: 0; }
 .tests-tree { width: 45%; min-width: 220px; overflow: auto; border-right: 1px solid var(--border-subtle); padding: 4px 0; }
