@@ -41,7 +41,7 @@ file to change when you add it.
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. You can edit cells of a table's data, but not add or delete rows. |
-| Pull requests | Descriptions and comments show as plain text, not rendered Markdown, and there are no comments on specific lines (`src/prs.ts`). |
+| Pull requests | There are no comments on specific lines of the diff, and GitHub references such as `#123` and `@name` aren't links (`src/prs.ts`). |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ### Missing
@@ -488,7 +488,8 @@ your review. Each row shows check status (✓ passed, ✗ failed, ● running) a
 the review decision.
 
 Click a pull request to see its checks, changed files, description, reviews,
-and comments. Click a changed file to see its diff without checking out the
+and comments. Descriptions and comments render as GitHub Markdown, and their
+links open in your browser. Click a changed file to see its diff without checking out the
 branch. Click **Check Out** to switch to the branch. When the current branch
 has a pull request, its number and check status appear next to the branch name
 in the status bar.

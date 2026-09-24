@@ -1,6 +1,8 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, and diffs.
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { git, showDiff } from "./git";
 import { type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
@@ -42,6 +44,23 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
   e.className = className;
   e.textContent = text;
   return e;
+}
+
+/**
+ * Renders GitHub Markdown. Pull request text comes from other people, and this page can call the app's
+ * commands, so the HTML is sanitized, and links open in the browser instead of the app.
+ */
+function markdown(text: string): HTMLElement {
+  const div = el("div", "pr-body markdown");
+  const html = marked.parse(text, { async: false, gfm: true, breaks: true });
+  div.innerHTML = DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "button", "iframe"], FORBID_ATTR: ["style"] });
+  for (const a of div.querySelectorAll("a")) {
+    a.onclick = (e) => {
+      e.preventDefault();
+      if (/^https?:/.test(a.href)) openUrl(a.href);
+    };
+  }
+  return div;
 }
 
 // ---- List ----
@@ -127,7 +146,7 @@ export async function showPullRequest(number: number) {
   const conversation = el("div", "pr-conversation");
   const entry = (author: string, label: string, body: string) => {
     const item = el("div", "pr-comment");
-    item.append(el("div", "pr-meta", `${author}${label ? ` · ${label}` : ""}`), el("div", "pr-body", body));
+    item.append(el("div", "pr-meta", `${author}${label ? ` · ${label}` : ""}`), markdown(body));
     conversation.append(item);
   };
   if (pr.body) entry(pr.author.login, "description", pr.body);

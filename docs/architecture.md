@@ -680,6 +680,12 @@ local name contains a slash. Checking out a remote branch runs
 
 ### Pull requests
 
+Descriptions and comments are Markdown from other people, and the webview can
+call the app's commands, such as `run_capture`, so rendered HTML is a way to
+run commands on your Mac. `marked` renders them, and DOMPurify removes scripts,
+event handlers, `javascript:` links, iframes, forms, and inline styles. Links
+open in the browser through `open`, never in the webview.
+
 Comments, reviews, and merges are `gh pr comment`, `gh pr review --approve` or
 `--request-changes`, and `gh pr merge` with `--merge`, `--squash`, or
 `--rebase`. A merge always asks for confirmation first, because it changes
@@ -1233,3 +1239,9 @@ including the index path. Passing them through the XDG config folder would
 hide your own global Phpactor config, and writing `.phpactor.json` would change
 the project. Running diagnostics in the server process can delay other
 requests while a large file is checked, which is the cost.
+
+### 2026-09-24: Sanitize Markdown with DOMPurify
+
+Rendering Markdown needs a parser and an HTML sanitizer. A hand-written
+sanitizer is a security boundary that's easy to get wrong, and DOMPurify is the
+widely reviewed one, so the editor takes two small dependencies instead.

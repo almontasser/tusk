@@ -484,7 +484,21 @@ button.link:hover { text-decoration: underline; }
 .pr-files .added { color: var(--green); }
 .pr-files .deleted { color: var(--red); }
 .pr-comment { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
-.pr-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; user-select: text; }
+.pr-body { overflow-wrap: anywhere; margin-top: 4px; user-select: text; line-height: 1.5; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote, .markdown table { margin: 0 0 8px; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 12px 0 6px; font-size: 13px; }
+.markdown ul, .markdown ol { padding-left: 20px; }
+.markdown code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--hover); }
+.markdown pre { padding: 8px; border-radius: var(--radius); background: var(--hover); overflow-x: auto; }
+.markdown pre code { padding: 0; background: none; }
+.markdown blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--muted); }
+.markdown a { color: var(--blue); }
+.markdown img { max-width: 100%; }
+.markdown table { border-collapse: collapse; }
+.markdown th, .markdown td { padding: 3px 8px; border: 1px solid var(--border-subtle); }
+.markdown input[type="checkbox"] { margin: 0 4px 0 0; }
 
 /* ==========================================================================
    History and diff views
