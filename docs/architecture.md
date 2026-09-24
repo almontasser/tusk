@@ -436,15 +436,27 @@ when the project installs it.
 
 ### Blade
 
-Monaco has no Blade language. `editor.ts` registers `blade` for `.blade.php`
-files, which takes precedence over `php` because the extension is longer. The
-grammar is Monaco's PHP grammar with rules for Blade comments, echo delimiters,
-and directives added in front. The PHP grammar's plain-text rule would consume
-Blade syntax, so the Blade grammar replaces it with one that stops at `@`, `{`,
-`}`, and `!`. Blade rules apply in HTML text, not inside tags or attributes.
+Blade has its own Monaco language (`blade`), so PHP-only servers skip it. Its
+grammar starts from Monaco's PHP grammar, which already handles HTML, `<script>`,
+and `<style>`, and adds Blade states in front of it:
 
-Because Blade files have their own language, Phpactor doesn't receive them and
-can't report PHP errors in template markup.
+| State | Holds | Ends at |
+| --- | --- | --- |
+| `bladeEcho` | PHP in `{{ }}` and `{!! !!}` | `}}` or `!!}` |
+| `bladeArgs` | PHP in a directive's parentheses, nested | the matching `)` |
+| `bladePhp` | PHP between `@php` and `@endphp` | `@endphp` |
+| `bladeTag` | A tag's attributes, with Blade in them | `>` or `/>` |
+| `bladeBound` | PHP in a bound attribute, such as `:title="…"` | `"` |
+
+The PHP inside uses the PHP grammar's own `phpRoot` rules. Monarch reads `@name`
+in a regex as a reference to a grammar attribute, so the regexes spell the at
+sign `[@]` before `php` and `endphp`. Tag names allow `-`, `.`, and `:` for
+components, except `script` and `style`, which keep the PHP grammar's
+embedded JavaScript and CSS.
+
+Laravel LSP answers definitions and completions for component tags with the
+component's view. A definition provider in `main.ts` adds the class of a
+class-based component, from `componentClassPath` in `src/phptypes.ts`.
 
 ## Search and navigation (milestone 4)
 

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deletionLines, laravelNames, parseTypeDeclaration } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, parseTypeDeclaration } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -64,4 +64,10 @@ test("derives the names Laravel calls methods by", () => {
   assert.deepEqual(laravelNames("scopePublished"), ["scopePublished", "published"]);
   assert.deepEqual(laravelNames("getFullNameAttribute"), ["getFullNameAttribute", "full_name"]);
   assert.deepEqual(laravelNames("fullName"), ["fullName", "full_name"]);
+});
+
+test("maps component tags to their classes", () => {
+  assert.equal(componentClassPath("x-alert"), "app/View/Components/Alert.php");
+  assert.equal(componentClassPath("x-forms.input-text"), "app/View/Components/Forms/InputText.php");
+  assert.equal(componentClassPath("x-filament::button"), null);
 });

@@ -34,7 +34,7 @@ file to change when you add it.
 | Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
 | Test results | While tests run, the tree can't open tests yet (PHPUnit's event stream has no file paths); that works once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
-| Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
+| Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
 | Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
@@ -373,6 +373,16 @@ LSP. It adds completion, hover, go to definition, links, and diagnostics for
 config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
+
+### Blade
+
+Blade files highlight their HTML, the PHP inside `{{ }}`, `{!! !!}`,
+directive arguments such as `@if (…)` and `@class([…])`, and `@php` blocks,
+also inside tags and attribute values. Component tags such as
+`<x-card.header>` and bound attributes such as `:title="$post->title"` are
+recognized. Laravel LSP completes component names after `<x-`. ⌘B on a
+component tag opens its view, and for a class-based component also its class
+in `app/View/Components`.
 
 ## Filament features
 

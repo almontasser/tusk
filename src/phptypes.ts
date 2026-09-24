@@ -82,3 +82,14 @@ export function laravelNames(method: string): string[] {
   if (/[a-z][A-Z]/.test(method) && !scope && !accessor) names.add(snake(method));
   return [...names];
 }
+
+/**
+ * Where Laravel looks for a class-based Blade component: <x-forms.input-text> is
+ * app/View/Components/Forms/InputText.php. Package components (x-package::name) have no such path.
+ */
+export function componentClassPath(tag: string): string | null {
+  const name = tag.replace(/^x-/, "");
+  if (!name || name.includes("::")) return null;
+  const studly = (s: string) => s.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
+  return `app/View/Components/${name.split(".").map(studly).join("/")}.php`;
+}

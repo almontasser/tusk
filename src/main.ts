@@ -9,6 +9,7 @@ import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
+import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
@@ -489,6 +490,26 @@ async function closeTab(path: string) {
 }
 
 /** Saves one tab's file if it has unsaved changes. */
+// ---- Blade components ----
+
+// Laravel LSP takes <x-alert> to the component's view; this adds its class, when it has one.
+monaco.languages.registerDefinitionProvider("blade", {
+  async provideDefinition(model, position) {
+    const line = model.getLineContent(position.lineNumber);
+    for (const m of line.matchAll(/<\/?(x-[\w\-.:]+)/g)) {
+      const start = m.index! + m[0].length - m[1].length + 1;
+      if (position.column < start || position.column > start + m[1].length) continue;
+      const rel = componentClassPath(m[1]);
+      if (!rel || !root) return null;
+      const source = await invoke<string>("read_file", { path: `${root}/${rel}` }).catch(() => null);
+      if (source === null) return null;
+      const classLine = source.split("\n").findIndex((l) => /^\s*(final\s+)?class\s/.test(l)) + 1 || 1;
+      return { uri: monaco.Uri.file(`${root}/${rel}`), range: new monaco.Range(classLine, 1, classLine, 1) };
+    }
+    return null;
+  },
+});
+
 // ---- EditorConfig ----
 
 const editorConfigs = new Map<string, Promise<string | null>>(); // folder → its .editorconfig, or null
