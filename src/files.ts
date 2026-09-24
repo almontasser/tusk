@@ -1,7 +1,7 @@
 // File operations in the project tree: create, rename, move, delete, and a context menu.
 import { invoke } from "@tauri-apps/api/core";
 import { showFileHistory } from "./history";
-import { showLocalHistory } from "./localhistory";
+import { recordBeforeDelete, showLocalHistory } from "./localhistory";
 import { updateReferences } from "./lsp";
 import { confirm, pick } from "./palette";
 import { newFileContent, psr4From } from "./psr4";
@@ -116,6 +116,7 @@ export async function remove(path = selected || host.active()) {
   const what = isDir(path) ? "folder" : "file";
   if (!(await confirm(`Move the ${what} ${relative(path)} to the Trash? Unsaved changes in it are lost.`, "Move to Trash"))) return;
   await attempt("Delete", async () => {
+    await recordBeforeDelete(path, isDir(path));
     host.forget(path);
     await invoke("trash_path", { path });
     selected = "";

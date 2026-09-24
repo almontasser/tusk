@@ -1,5 +1,6 @@
-// Local history: a copy of each file every time you save it, kept outside the project in the
-// app's data folder, so you can compare with or restore a version that was never committed.
+// Local history: a copy of each file every time you save it, before another program changes an open file,
+// and before you delete it, kept outside the project in the app's data folder, so you can compare with or
+// restore a version that was never committed, even of a deleted file.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { age } from "./gitparse";
@@ -37,6 +38,31 @@ export async function recordVersion(path: string, text: string) {
   }
 }
 
+/** Keeps a version of a file, or of each file in a folder, before it's deleted. */
+export async function recordBeforeDelete(path: string, isDir: boolean) {
+  // ponytail: a folder's first 500 files (ignored ones, such as vendor, left out), which covers typical deletes.
+  const files = isDir ? (await invoke<string[]>("list_files", { root: path }).catch(() => [])).slice(0, 500).map((f) => `${path}/${f.replace(/^\//, "")}`) : [path];
+  for (const file of files) {
+    const text = await invoke<string>("read_file", { path: file }).catch(() => null);
+    if (text !== null) await recordVersion(file, text);
+  }
+}
+
+/** Lists files that have local history but no longer exist; choosing one shows its versions. */
+export async function showDeletedFiles() {
+  if (!host.root()) return;
+  const entries = await invoke<Entry[]>("read_dir", { path: await projectDir() }).catch(() => []);
+  const deleted: string[] = [];
+  for (const e of entries) {
+    const path = `${host.root()}/${decodeURIComponent(e.name)}`;
+    if (e.is_dir && !(await invoke<boolean>("path_exists", { path }))) deleted.push(path);
+  }
+  if (!deleted.length) return host.status("No deleted files have local history.");
+  pick("Deleted files with local history. Choose one to see its versions", () =>
+    deleted.sort().map((path) => ({ label: relative(path), run: () => showLocalHistory(path) })),
+  );
+}
+
 /** Lists a file's saved versions; choosing one shows it next to the current file, with a button to restore it. */
 export async function showLocalHistory(path: string) {
   if (!path.startsWith(host.root() + "/")) return host.status("Local history covers files in the project.");
@@ -51,11 +77,14 @@ export async function showLocalHistory(path: string) {
         detail: age(time / 1000),
         run: async () => {
           const version = await invoke<string>("read_file", { path: `${dir}/${name}` });
-          const current = await invoke<string>("read_file", { path }).catch(() => "");
-          host.showDiff(relative(path), version, current, `${new Date(time).toLocaleString()} ↔ Current`, {
+          // null when the file was deleted.
+          const current = await invoke<string>("read_file", { path }).catch(() => null);
+          host.showDiff(relative(path), version, current ?? "", `${new Date(time).toLocaleString()} ↔ ${current === null ? "Deleted" : "Current"}`, {
             label: "Restore This Version",
             run: async () => {
-              await recordVersion(path, current); // So the restore can be undone from the history too.
+              if (current !== null) await recordVersion(path, current); // So the restore can be undone from the history too.
+              // A deleted file's folder may be gone too.
+              await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
               await invoke("write_file", { path, contents: version });
               host.status(`Restored ${relative(path)} from ${new Date(time).toLocaleString()}`);
             },

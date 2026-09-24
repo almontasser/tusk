@@ -17,7 +17,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
+import { initLocalHistory, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
@@ -676,6 +676,8 @@ listen<string[]>("fs-change", ({ payload }) => {
       if (model && !(tab && isDirty(tab))) {
         const text = await invoke<string>("read_file", { path }).catch(() => null);
         if (text !== null && text !== model.getValue()) {
+          // Another program changed it, such as a git checkout: keep what the editor had first.
+          await recordVersion(path, model.getValue());
           model.setValue(text);
           if (tab) tab.saved = model.getAlternativeVersionId();
         }
@@ -819,6 +821,7 @@ const actions: Action[] = [
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Show Local History", run: () => active && showLocalHistory(active) },
+  { label: "Local History: Deleted Files…", run: showDeletedFiles },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Pull Requests", run: () => showView("prs") },

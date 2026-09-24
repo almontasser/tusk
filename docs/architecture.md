@@ -778,6 +778,17 @@ cost small, with no sweep over the whole history.
 Viewing a version reuses the git diff view. `showDiff` takes an optional header
 action, which **Stage Selected** also uses.
 
+Two more moments add a version. When the file watcher reports that an open,
+unmodified file changed on disk, the editor records the model's text before
+reloading it. Deleting from the tree records the file, or each file in the
+folder that `list_files` returns (ignored files left out, at most 500), before
+moving it to the Trash. Only open files are covered for outside changes: the
+editor has no earlier copy of the others to keep.
+
+A deleted file's history stays in its folder. **Deleted Files** lists the
+history folders whose project path no longer exists, and restoring creates the
+missing parent folders.
+
 ### Interactive rebase
 
 `src/rebase.ts` runs git's own `rebase -i` rather than replaying commits
@@ -1415,8 +1426,8 @@ and from Mago.
 
 ### 2026-09-24: Delete to the Trash
 
-PhpStorm deletes permanently but keeps a local history. This editor has no
-local history, so the Trash is the undo. Discarding an untracked file in the
+PhpStorm deletes permanently but keeps a local history. This editor moves files
+to the Trash and also keeps a local history version of each deleted file. Discarding an untracked file in the
 commit view also moves it to the Trash.
 
 ### 2026-09-24: Rename prompts in the palette
