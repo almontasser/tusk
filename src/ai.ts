@@ -54,8 +54,20 @@ const curl = (args: string[], input?: string) => run("/usr/bin/curl", args, inpu
 const modelPath = async (m: Model) => `${await appDataDir()}/models/${m.file}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Downloads running, by file. A download can't be stopped, so switching models away and back must
+ * wait for the one still running: a second curl appending to the same .part file damages it.
+ * ponytail: kept in memory, so a page reload forgets a download that's still running.
+ */
+const downloads = new Map<string, Promise<void>>();
+
 /** Downloads a model unless it's already there, resuming a partial download, and checks it. */
-async function download(m: Model, path: string) {
+function download(m: Model, path: string) {
+  if (!downloads.has(path)) downloads.set(path, fetchModel(m, path).finally(() => downloads.delete(path)));
+  return downloads.get(path)!;
+}
+
+async function fetchModel(m: Model, path: string) {
   if (await invoke<boolean>("path_exists", { path })) return;
   const part = `${path}.part`;
   await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
