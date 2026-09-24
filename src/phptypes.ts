@@ -13,17 +13,27 @@ export type TypeDeclaration = {
 };
 
 // ponytail: regexes over the source; grouped use statements (use A\{B, C}) aren't resolved.
-export function parseTypeDeclarations(source: string): TypeDeclaration[] {
-  const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|#(?!\[)[^\n]*/g, (m) => " ".repeat(m.length));
+/** The source with comments blanked out, keeping offsets. */
+export const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|#(?!\[)[^\n]*/g, (m) => " ".repeat(m.length));
+
+/** The file's namespace, and a function that turns a class name used in it into a full name, through its use statements. */
+export function nameResolver(code: string) {
   const namespace = code.match(/^\s*namespace\s+([\w\\]+)\s*;/m)?.[1] ?? "";
   const aliases = new Map<string, string>();
-  for (const [, name, alias] of code.matchAll(/^\s*use\s+([\w\\]+)(?:\s+as\s+(\w+))?\s*;/gm)) aliases.set(alias ?? name.split("\\").pop()!, name);
+  // Imports start at the line's start; indented "use X;" lines in a class body are trait uses.
+  for (const [, name, alias] of code.matchAll(/^use\s+([\w\\]+)(?:\s+as\s+(\w+))?\s*;/gm)) aliases.set(alias ?? name.split("\\").pop()!, name);
   const resolve = (name: string) => {
     if (name.startsWith("\\")) return name.slice(1);
     const [first, ...rest] = name.split("\\");
     if (aliases.has(first)) return [aliases.get(first)!, ...rest].join("\\");
     return namespace ? `${namespace}\\${name}` : name;
   };
+  return { namespace, resolve };
+}
+
+export function parseTypeDeclarations(source: string): TypeDeclaration[] {
+  const code = withoutComments(source);
+  const { namespace, resolve } = nameResolver(code);
   const names = (text: string) => text.split(",").map((s) => s.trim()).filter(Boolean).map(resolve);
   // Anonymous classes (new class extends X) have no name of their own.
   const found = [...code.matchAll(/(?:^|[\s;}])((?:(?:abstract|final|readonly)\s+)*)(class|interface|trait|enum)\s+(\w+)([^{]*)\{/g)].filter(

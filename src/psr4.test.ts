@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { namespaceFor, newFileContent, psr4From } from "./psr4.ts";
+import { namespaceFor, newFileContent, pathsFor, psr4From } from "./psr4.ts";
 
 const psr4 = psr4From(
   JSON.stringify({
@@ -27,4 +27,10 @@ test("creates class skeletons for PHP files", () => {
   assert.equal(newFileContent("resources/views/post.blade.php", psr4), "");
   assert.equal(newFileContent("notes.md", psr4), "");
   assert.deepEqual(psr4From("not json"), {});
+});
+
+test("finds the files that could declare a class", () => {
+  assert.deepEqual(pathsFor("App\\Models\\Post", psr4), ["app/Models/Post.php"]);
+  assert.deepEqual(pathsFor("Modules\\Blog\\Post", psr4), ["modules/Blog/Post.php", "extra/modules/Blog/Post.php"]);
+  assert.deepEqual(pathsFor("Illuminate\\Support\\Str", psr4), []);
 });

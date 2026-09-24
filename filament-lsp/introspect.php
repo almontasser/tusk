@@ -5,10 +5,13 @@
  *
  *   php introspect.php <project root> resource <Resource class> [<context class>]
  *   php introspect.php <project root> resources
+ *   php introspect.php <project root> models
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
  * related model of its relationship. `resources` maps each model to its resources.
+ * `models` describes every model under app/ for AI completion: columns with their
+ * database types, casts, and relationships.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -103,13 +106,18 @@ function describeModel(string $class, bool $withRelated = true): ?array
 /** Resource classes declared under app/Filament, found by file name. */
 function resourceClasses(string $root): array
 {
+    return classesIn($root . '/app/Filament', 'Resource.php');
+}
+
+/** Classes declared in files under $dir whose names end with $suffix, read from the source. */
+function classesIn(string $dir, string $suffix = '.php'): array
+{
     $classes = [];
-    $dir = $root . '/app/Filament';
     if (!is_dir($dir)) {
         return [];
     }
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file) {
-        if (!str_ends_with($file->getFilename(), 'Resource.php')) {
+        if (!str_ends_with($file->getFilename(), $suffix)) {
             continue;
         }
         $source = file_get_contents($file->getPathname());
@@ -118,6 +126,25 @@ function resourceClasses(string $root): array
         }
     }
     return $classes;
+}
+
+/** Columns with their database type and whether they can be null, or with null when the database can't be read. */
+function columnDetails(Model $model): array
+{
+    global $booted;
+    if ($booted) {
+        try {
+            $details = [];
+            foreach ($model->getConnection()->getSchemaBuilder()->getColumns($model->getTable()) as $column) {
+                $details[$column['name']] = ['type' => $column['type_name'], 'nullable' => $column['nullable']];
+            }
+            if ($details) {
+                return $details;
+            }
+        } catch (Throwable) {
+        }
+    }
+    return array_fill_keys(columns($model), null);
 }
 
 function describeResource(string $resource, ?string $context): array
@@ -163,6 +190,19 @@ try {
                 }
             }
             return $map;
+        })(),
+        'models' => (function () use ($root) {
+            $models = [];
+            foreach (classesIn($root . '/app') as $class) {
+                try {
+                    if (is_a($class, Model::class, true) && !(new ReflectionClass($class))->isAbstract()) {
+                        $model = new $class();
+                        $models[$class] = ['class' => $class, 'table' => $model->getTable(), 'columns' => columnDetails($model), 'casts' => $model->getCasts(), 'relations' => array_map(fn ($r) => ['name' => $r['name'], 'type' => $r['type'], 'related' => $r['related']], relations($model))];
+                    }
+                } catch (Throwable) {
+                }
+            }
+            return $models;
         })(),
         default => throw new InvalidArgumentException("Unknown mode: $mode"),
     };

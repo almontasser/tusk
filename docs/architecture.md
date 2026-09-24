@@ -449,23 +449,83 @@ Each suggestion is a request to `/infill`, sent through `curl` from
 where the page's origin might block a request to `http://127.0.0.1`. The
 request carries:
 
-- The 200 lines before the cursor, the text before the cursor on its line, and
-  the rest of the line plus 60 lines after it.
-- The first 2,000 characters of up to five other open files, as
-  `input_extra`, which gives the model their imports and class declarations.
+- The 150 lines before the cursor, the text before the cursor on its line, and
+  the rest of the line plus 40 lines after it. The server keeps at most 3/4 of
+  its batch size (`-b 2048`) in tokens before the cursor and 1/4 after it.
+- Extra files (`input_extra`) from the project, described in the next section.
+  Qwen2.5-Coder was trained on repositories laid out as files separated by
+  `<|file_sep|>` and a path, and the server formats extra files that way, so
+  each carries its path relative to the project root.
 - `n_indent`, which stops the suggestion at a line indented less than the
   cursor's line, so a suggestion stays inside its block.
-- Time limits of 1 second for reading the prompt and 1.5 seconds for writing,
-  and a limit of 128 tokens.
+- A limit of 1.5 seconds and 128 tokens for writing.
 
-The server runs with `--cache-reuse 256` and a single slot. It keeps the
-processed prompt from the last request and reuses the parts that didn't
-change, even when text before the cursor moved, so a request after a
-keystroke only processes the new text. The provider waits 250 ms after typing
-stops, skips the middle of a word, and drops a reply whose request Monaco
-cancelled. When a suggestion's first line ends with the rest of the current
-line, such as a closing bracket, it replaces that text instead of adding a
-second copy.
+The provider waits 250 ms after typing stops, skips the middle of a word, and
+drops a reply whose request Monaco cancelled. When a suggestion's first line
+ends with the rest of the current line, such as a closing bracket, it replaces
+that text instead of adding a second copy.
+
+### Context for AI completion
+
+Autocomplete context follows what Copilot and llama.vim do rather than
+embeddings. The query is the code before the cursor, not a question, and
+comparing names finds the same code an embedding search would. That takes
+milliseconds with no second model to run, and no minutes spent embedding the
+project. Embeddings would pay off for a chat that answers questions about the
+codebase.
+
+`ai.ts` keeps an index of the project when completion is on: the text of up to
+3,000 source files (`list_files`, so `.gitignore` applies, without `vendor`,
+`node_modules`, `storage`, and `public`), each cut into 30-line chunks every 15
+lines with the set of names in each. The file watcher updates changed files.
+`aicontext.ts` holds the logic, free of editor imports so Node can test it.
+Each request gets up to about 13,500 characters (about 4,000 tokens) of
+extra files, in this order:
+
+1. **Definitions, up to 7,000 characters.** `referencedClasses` finds the
+   capitalized names in a PHP file outside strings, comments, and imports,
+   resolves them through the file's imports and namespace, and orders them by
+   distance from the cursor. The eight nearest that map to an indexed file
+   through PSR-4 (`pathsFor`) are sent as outlines: the file without imports,
+   with each method body replaced by `{ … }`, cut at 2,500 characters. Open
+   files are outlined from their unsaved text.
+2. **Models.** `introspect.php models` boots the app once, and describes
+   every model under `app/`: columns from `Schema::getColumns` (or the model's
+   fillable, casts, and timestamps without a database), casts, and
+   relationships. It takes about 0.3 seconds, and runs again 5 seconds after a
+   PHP file under `app/` or `database/migrations/` changes. The current class
+   and the referenced classes that are models go first, as an
+   `_ide_helper_models.php` file of ide-helper docblocks, because models learned
+   `@property` lines from real projects. Casts win over database types, and
+   `tinyint` counts as `bool`, which is what Laravel's `boolean()` creates in
+   MySQL and SQLite.
+3. **Recent code, up to 3,000 characters.** When an editor loses focus, the 30
+   lines around its cursor join a list of the last six places, replacing a
+   place in the same file within 20 lines. Places in the current file are left
+   out.
+4. **Similar code, up to 3,500 characters.** The chunks whose names overlap
+   most (Jaccard similarity) with the 20 lines before the cursor, at least 10%
+   and never two that overlap. The current file's own chunks come from its
+   live text, except those already in the prompt. Chunks from outlined files,
+   and ones that overlap the recent code, are left out. A search over 15,000
+   chunks takes about 10 ms.
+
+The order and the rules around it serve the server's prompt cache.
+Processing the prompt runs at about 1,800 tokens a second for the 1.5B model on
+an M4 Pro, whatever the batch or flash-attention settings, so a full prompt
+takes 2 seconds cold. With the prompt cached, a request after a keystroke
+takes about 0.1–0.3 seconds. The server reuses the prompt only up to the first
+change, so the parts that change least come first. The classes are sorted by
+file name, not by distance, so moving the cursor changes them only when the
+set changes. Similar code is searched again only when the cursor moves to
+another block of 10 lines. The recent code changes only when you leave an
+editor.
+
+When the prompt does change, the editor sends a request with `n_predict: 0`
+beforehand, which processes the prompt without writing anything, as llama.vim
+does. That happens 500 ms after an editor gains focus, and 1 second after the
+cursor settles in a new block of 10 lines. A suggestion after that takes about
+0.2 seconds instead of 1–2.
 
 ## Laravel, diagnostics, and formatting (milestone 3)
 

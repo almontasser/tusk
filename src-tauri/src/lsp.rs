@@ -87,8 +87,9 @@ pub fn ai_start(app: AppHandle, state: State<LspState>, model: String, key: Stri
         .args(["-c", WATCHDOG, "sh"])
         .arg(tools_dir(&app)?.join("llama/llama-server"))
         // --cache-reuse lets a request reuse the processed prompt even after text before the cursor shifts.
+        // The server keeps up to 3/4 of -b tokens before the cursor, so 2048 allows about 150 lines.
         .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string(), "--api-key", &key])
-        .args(["-ngl", "99", "-c", "8192", "-np", "1", "-b", "1024", "-ub", "1024", "--cache-reuse", "256"])
+        .args(["-ngl", "99", "-c", "8192", "-np", "1", "-b", "2048", "-ub", "1024", "--cache-reuse", "256"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -55,7 +55,7 @@ file to change when you add it.
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. Suggestions take their context from the current file and the start of other open files, not from the whole project. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -217,7 +217,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
-| AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+| AI code completion, and its model | Off, Qwen2.5-Coder 1.5B |
 
 ### EditorConfig
 
@@ -414,15 +414,48 @@ Choose the model in **AI completion model**:
 
 | Model | Download | Notes |
 | --- | --- | --- |
-| Qwen2.5-Coder 1.5B | 1.6 GB | Fastest, good at finishing a line |
-| Qwen2.5-Coder 3B | 3.3 GB | The default: fast, with better multi-line suggestions |
+| Qwen2.5-Coder 1.5B | 1.6 GB | The default: fast, good at finishing a line |
+| Qwen2.5-Coder 3B | 3.3 GB | Better multi-line suggestions, a little slower |
 | Qwen2.5-Coder 7B | 8.1 GB | The best suggestions, but slower, and needs 16 GB of memory or more |
 
 The first start takes about 15 seconds while macOS prepares the GPU code;
-later starts take a second or two. On an M4 Pro, the 1.5B model returns a
-suggestion in about 0.1–0.3 seconds. The model uses a little more memory than
-its download size while completion is on (1.9 GB for the 1.5B model). Turning completion off stops it and frees that memory. To delete a
-downloaded model, remove its file from the `models` folder.
+later starts take a second or two. The model uses a little more memory than
+its download size while completion is on (1.9 GB for the 1.5B model). Turning
+completion off stops it and frees that memory. To delete a downloaded model,
+remove its file from the `models` folder.
+
+### What the model sees
+
+Besides the code around the cursor, each suggestion draws on the rest of the
+project, so the model uses your classes, methods, and columns instead of
+guessing:
+
+- **Classes used near the cursor:** the declarations, properties, and method
+  signatures of up to eight of the project's classes that the code near the
+  cursor refers to, found through the PSR-4 folders in `composer.json`.
+- **Model columns:** each referenced Eloquent model's columns, with their types
+  from the database and the model's casts, and its relationships, written the
+  way Laravel IDE Helper writes them. They update a few seconds after you save
+  a model or a migration.
+- **What you worked on lately:** the code around the cursor in the last six
+  places you left in other files.
+- **Similar code:** the parts of the project that share the most names with the
+  lines before the cursor, such as another controller that does the same thing.
+
+For example, in a controller that uses a `PostPublisher` service,
+`$this->publisher->` completes to `publishNow($post)` from that class, where
+without the project the model guessed a `publish()` method that doesn't
+exist.
+
+The editor keeps the project's source files in memory for this: up to 3,000
+PHP, JavaScript, TypeScript, and Vue files, leaving out `vendor`,
+`node_modules`, and files that `.gitignore` excludes. Indexing 1,500 files takes
+under half a second.
+
+A suggestion usually appears about 0.4 seconds after you stop typing. When you
+open a file or move to another part of it, the model needs up to 2 seconds to
+read the new context, so the editor has it read the context as soon as you
+arrive, before you type.
 
 ## Laravel features
 

@@ -40,3 +40,12 @@ export function newFileContent(rel: string, psr4: Psr4): string {
   const kind = type.endsWith("Interface") ? "interface" : type.endsWith("Trait") ? "trait" : type.endsWith("Enum") ? "enum" : "class";
   return `<?php\n\n${ns ? `namespace ${ns};\n\n` : ""}${kind} ${type}\n{\n}\n`;
 }
+
+/** Files that could declare the class `fqn` under the PSR-4 mappings, relative to the project root. */
+export function pathsFor(fqn: string, psr4: Psr4): string[] {
+  return Object.entries(psr4)
+    .filter(([prefix]) => fqn.startsWith(prefix))
+    .flatMap(([prefix, folders]) =>
+      [folders].flat().map((f) => [f.replace(/^\.\//, "").replace(/\/$/, ""), fqn.slice(prefix.length).replaceAll("\\", "/") + ".php"].filter(Boolean).join("/")),
+    );
+}

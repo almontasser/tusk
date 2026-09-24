@@ -24,7 +24,7 @@ import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
-import { initAi } from "./ai";
+import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
@@ -685,6 +685,7 @@ listen<string[]>("fs-change", ({ payload }) => {
       }
     }
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
+    aiFilesChanged([...paths]);
     const php = [...paths].filter((p) => p.endsWith(".php"));
     filesChanged(await Promise.all(php.map(async (path) => ({ path, exists: await invoke<boolean>("path_exists", { path }) }))));
     for (const dir of new Set([...paths].map(parentOf))) {
@@ -1006,7 +1007,7 @@ window.addEventListener(
 
 initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }));
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
-initAi({ status });
+initAi({ status, root: () => root });
 initSettings();
 initFormatting({ root: () => root, status });
 initConflicts();
