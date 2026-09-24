@@ -27,6 +27,7 @@ tauri-plugin-mcp-bridge = "0.13"
 ignore = "0.4.33"
 grep = "0.4.1"
 portable-pty = "0.9.0"
+trash = "5.2.9"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

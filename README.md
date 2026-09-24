@@ -144,6 +144,8 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘⌫ | Delete the line |
 | ⌃⌥O | Optimize imports |
 | ⌥⌘L | Reformat the file with Mago |
+| ⌘N | New file in the selected folder |
+| ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
@@ -161,6 +163,29 @@ Folder…** action. The app reopens the last folder when it starts. If a project
 `.phpactor.json` file, Phpactor asks whether to trust it, because the file can
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.
+
+## Files
+
+Right-click the project tree for **New File…**, **New Folder…**, **Rename…**,
+**Move to Trash**, **Copy Path**, **Copy Relative Path**, and **Reveal in
+Finder**. In the tree, you can also press:
+
+- ↑ and ↓ to move between rows, and ⏎ to open a file or folder.
+- F2 or ⇧F6 to rename.
+- ⌘⌫ or Delete to move to the Trash.
+
+Drag a file or folder onto a folder to move it there.
+
+- **New PHP files** get a class skeleton with the namespace from your
+  `composer.json` PSR-4 mappings. A name ending in `Interface`, `Trait`, or
+  `Enum` creates that kind of type instead. Type `Support/Money.php` to create
+  folders too.
+- **Renaming or moving a PHP file** renames its class to match the file name,
+  updates its namespace, and updates every reference to it, as in PhpStorm.
+  Moving a folder does this for every PHP file inside it. Open tabs follow
+  their files and keep unsaved changes.
+- **Deleting** moves files to the macOS Trash, so you can restore them.
+- **No overwrites.** Renaming or creating never replaces an existing file.
 
 ## Laravel features
 
@@ -275,6 +300,8 @@ committed.
 | `src/prs.ts` | Pull requests through the GitHub CLI |
 | `src/runner.ts` | Test runner, run links, and Run Anything |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
+| `src/files.ts` | File operations and the tree's context menu |
+| `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

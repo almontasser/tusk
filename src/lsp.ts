@@ -94,6 +94,8 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       model.pushEditOperations([], op.edits.map((e) => ({ range: toRange(e.range), text: "newText" in e ? e.newText : "" })), () => null);
       await invoke("write_file", { path, contents: model.getValue() });
       host.markSaved(path);
+      // Servers update their index for open files on save, so reference lookups see these edits.
+      didSave(model);
     } else if (op.kind === "create") {
       await invoke("write_file", { path: pathOf(op.uri), contents: "" });
     } else if (op.kind === "rename") {
@@ -115,6 +117,7 @@ monaco.editor.registerCommand("lsp.codeAction", (_, run: (a: L.CodeAction | L.Co
 const clientCapabilities: L.ClientCapabilities = {
   workspace: {
     applyEdit: true,
+    didChangeWatchedFiles: { dynamicRegistration: true },
     configuration: true,
     workspaceFolders: true,
     workspaceEdit: { documentChanges: true, resourceOperations: ["create", "rename", "delete"] },
@@ -150,6 +153,8 @@ type Server = {
   stop(): void;
   didSave(model: monaco.editor.ITextModel): void;
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
+  willRename(files: L.FileRename[]): Promise<L.WorkspaceEdit | null>;
+  filesChanged(changes: L.FileEvent[]): void;
 };
 
 /** Starts the bundled server `name` for the given Monaco languages. */
@@ -208,7 +213,10 @@ async function startServer(name: string, root: string, langs: string[], initiali
         return params.items.map(() => null);
       case "window/showMessageRequest":
         return askUser(name, params);
-      default: // client/registerCapability, window/workDoneProgress/create, and others need no work.
+      case "client/registerCapability":
+        if (params.registrations.some((r: L.Registration) => r.method === "workspace/didChangeWatchedFiles")) watchesFiles = true;
+        return null;
+      default: // window/workDoneProgress/create and others need no work.
         return null;
     }
   }
@@ -227,6 +235,9 @@ async function startServer(name: string, root: string, langs: string[], initiali
   }
 
   const progressTitles = new Map<string | number, string>();
+  // Set when the server asks to hear about file changes. Phpactor then relies on the editor
+  // instead of polling the disk every few seconds, so its index follows moves and edits at once.
+  let watchesFiles = false;
 
   /**
    * Files opened during indexing were checked against a partial index, so names defined in
@@ -273,6 +284,13 @@ async function startServer(name: string, root: string, langs: string[], initiali
     },
     didSave(model) {
       if (serves(model)) notify("textDocument/didSave", { textDocument: { uri: model.uri.toString() } });
+    },
+    filesChanged(changes) {
+      if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
+    },
+    async willRename(files) {
+      if (!c.workspace?.fileOperations?.willRename) return null;
+      return request<L.WorkspaceEdit | null>("workspace/willRenameFiles", { files });
     },
     async symbols(query) {
       if (!c.workspaceSymbolProvider) return [];
@@ -585,4 +603,25 @@ export async function workspaceSymbols(query: string): Promise<Symbol[]> {
     path: pathOf(s.location.uri),
     range: "range" in s.location ? toRange(s.location.range) : undefined,
   }));
+}
+
+/**
+ * Asks the servers what to change after files moved, such as a PHP class's namespace and
+ * the references to it, and applies those edits. The LSP method is `workspace/willRenameFiles`,
+ * but Phpactor reads each file at its new path, so call this after the move on disk.
+ */
+export async function updateReferences(renames: { from: string; to: string }[]) {
+  const files = renames.map((r) => ({ oldUri: monaco.Uri.file(r.from).toString(), newUri: monaco.Uri.file(r.to).toString() }));
+  for (const server of servers) {
+    const edit = await server.willRename(files).catch(() => null);
+    if (edit) await applyWorkspaceEdit(edit);
+  }
+}
+
+/** Tells the servers which PHP files changed on disk. `exists` false means deleted. */
+export function filesChanged(files: { path: string; exists: boolean }[]) {
+  const changes = files
+    .filter((f) => f.path.endsWith(".php"))
+    .map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
+  if (changes.length) servers.forEach((s) => s.filesChanged(changes));
 }

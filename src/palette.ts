@@ -39,8 +39,11 @@ export function rank(query: string, items: Item[]): Item[] {
 
 let close: (() => void) | null = null;
 
-/** Opens the picker. `source` runs on every query change, after `delay` ms for slow sources. */
-export function pick(placeholder: string, source: Source, delay = 0) {
+/**
+ * Opens the picker. `source` runs on every query change, after `delay` ms for slow sources.
+ * `initial` prefills the input, optionally selecting part of it (such as a file name without its extension).
+ */
+export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number] }) {
   close?.();
   const overlay = document.createElement("div");
   overlay.id = "palette";
@@ -119,6 +122,8 @@ export function pick(placeholder: string, source: Source, delay = 0) {
     e.preventDefault();
   };
   input.onblur = () => dismiss(false);
+  input.value = initial?.value ?? "";
   input.focus();
+  if (initial?.select) input.setSelectionRange(...initial.select);
   update();
 }

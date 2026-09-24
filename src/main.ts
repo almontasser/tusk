@@ -2,10 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
-import { didSave, startLsp, workspaceSymbols } from "./lsp";
+import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
+import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
@@ -67,11 +68,45 @@ function markSaved(path: string) {
   renderTabs();
 }
 
+/** Moves a file's tab after the file moved on disk, keeping its place and any unsaved edits. */
 async function renamed(from: string, to: string) {
-  const wasActive = active === from;
-  if (tabs.has(from)) await closeTab(from);
-  else monaco.editor.getModel(monaco.Uri.file(from))?.dispose();
-  if (wasActive) await openFile(to);
+  const old = monaco.editor.getModel(monaco.Uri.file(from));
+  const tab = tabs.get(from);
+  if (!tab) return old?.dispose();
+  const unsaved = isDirty(tab) ? tab.model.getValue() : null;
+  const model = await ensureModel(to);
+  if (unsaved !== null) model.setValue(unsaved);
+  // Rebuild the map so the tab keeps its position.
+  const entries = [...tabs].map(([p, t]): [string, Tab] =>
+    p === from ? [to, { model, saved: unsaved === null ? model.getAlternativeVersionId() : -1 }] : [p, t],
+  );
+  tabs.clear();
+  entries.forEach(([p, t]) => tabs.set(p, t));
+  model.onDidChangeContent(renderTabs);
+  if (active === from) {
+    active = to;
+    editor.setModel(model);
+  }
+  old?.dispose();
+  renderTabs();
+  markActiveInTree();
+}
+
+/** Closes tabs and drops models for a deleted file, or for everything inside a deleted folder. */
+function forget(path: string) {
+  const inside = (p: string) => p === path || p.startsWith(path + "/");
+  for (const [p, tab] of [...tabs]) {
+    if (!inside(p)) continue;
+    tabs.delete(p);
+    tab.model.dispose();
+  }
+  monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && inside(m.uri.fsPath)).forEach((m) => m.dispose());
+  if (inside(active)) {
+    active = [...tabs.keys()].pop() ?? "";
+    editor.setModel(tabs.get(active)?.model ?? null);
+  }
+  renderTabs();
+  markActiveInTree();
 }
 
 /**
@@ -95,6 +130,8 @@ async function renderDir(ul: HTMLUListElement, dir: string) {
       row.className = `row ${e.is_dir ? "dir" : "file"}`;
       row.textContent = e.name;
       row.dataset.path = e.path;
+      row.tabIndex = -1;
+      row.draggable = true;
       li.append(row);
       if (e.is_dir) {
         const children = document.createElement("ul");
@@ -208,6 +245,8 @@ listen<string[]>("fs-change", ({ payload }) => {
         }
       }
     }
+    const php = [...paths].filter((p) => p.endsWith(".php"));
+    filesChanged(await Promise.all(php.map(async (path) => ({ path, exists: await invoke<boolean>("path_exists", { path }) }))));
     for (const dir of new Set([...paths].map(parentOf))) {
       const ul = renderedDirs.get(dir);
       if (ul) renderDir(ul, dir);
@@ -306,6 +345,12 @@ const editorAction = (label: string, keys: string, id: string): Action => ({
 // Shortcuts follow PhpStorm's macOS keymap.
 const actions: Action[] = [
   { label: "Open Folder…", run: () => openFolder() },
+  { label: "New File…", keys: "Meta+N", run: () => root && newFile() },
+  { label: "New Folder…", run: () => root && newFolder() },
+  { label: "Rename File…", run: () => rename() },
+  { label: "Move File to Trash", run: () => remove() },
+  { label: "Copy Path", keys: "Meta+Shift+C", run: () => copyPath() },
+  { label: "Reveal in Finder", run: () => revealInFinder() },
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
@@ -411,6 +456,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */
 function showView(name: string) {

@@ -503,6 +503,52 @@ Code lenses carry the command `phpEditor.open` with a file URI and a line.
 `lsp.ts` registers that command and opens the file. Any other code lens
 command goes back to its server through `workspace/executeCommand`.
 
+## File operations
+
+`src/files.ts` handles creating, renaming, moving, and deleting from the tree.
+The Rust side protects your files:
+
+| Command | Behavior |
+| --- | --- |
+| `create_file` | Creates missing parent folders and fails if the file exists (`create_new`). |
+| `rename_path` | Fails if the target exists, because `std::fs::rename` would replace it silently. A change of case only is allowed. Creates missing parent folders. |
+| `trash_path` | Moves to the macOS Trash with the `trash` crate, instead of deleting. |
+
+### Moving PHP files
+
+Phpactor implements `workspace/willRenameFiles`: given the old and new paths,
+it returns edits for the class name, the namespace, and every reference. It
+reads each file at its new path, so the editor moves the file on disk first,
+then asks for the edits and applies them (`updateReferences` in `lsp.ts`). For
+a folder, it sends one rename for each PHP file inside.
+
+Two protocol details keep Phpactor's index current, so a second move right
+after the first still finds every reference:
+
+- **`didSave` after refactoring edits.** Phpactor reindexes open files when
+  they're saved. `applyWorkspaceEdit` writes each edited file and then sends
+  `didSave`.
+- **File events.** The client declares support for
+  `workspace/didChangeWatchedFiles`. Phpactor then stops polling the disk (every
+  5 seconds) and relies on the editor, and Laravel LSP also registers for
+  events. The file watcher's changes to PHP files go to every registered
+  server: a file that exists is reported as changed, and a missing file as
+  deleted.
+
+### New PHP files
+
+`newFileContent` in `src/psr4.ts` reads the `autoload` and `autoload-dev`
+PSR-4 mappings from `composer.json`, picks the mapping whose folder is the
+longest match for the new file, and builds the namespace from the remaining
+folders. `src/psr4.test.ts` covers it.
+
+### Tabs
+
+When a file moves, its tab moves in place (`renamed` in `main.ts`): the tab
+keeps its position, and any unsaved text carries over to the new path. When a
+file or folder goes to the Trash, `forget` closes its tabs and drops their
+models.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -619,6 +665,18 @@ project. Each worktree is a full copy with its own `vendor`, so indexing it
 multiplies the work and duplicates every class. Hidden folders rarely hold PHP
 that belongs to the project, so the editor excludes them from Phpactor's index
 and from Mago.
+
+### 2026-09-24: Delete to the Trash
+
+PhpStorm deletes permanently but keeps a local history. This editor has no
+local history, so the Trash is the undo. Discarding an untracked file in the
+commit view also moves it to the Trash.
+
+### 2026-09-24: Rename prompts in the palette
+
+Rename, new file, and new folder reuse the palette as a text prompt, with the
+file name preselected up to its extension. Inline editing in the tree would need
+its own input handling for little gain.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

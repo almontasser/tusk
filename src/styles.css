@@ -126,3 +126,11 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .pr-files .deleted { color: #e06c75; }
 .pr-comment { border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; }
 .pr-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+
+#tree .row.selected { outline: 1px solid #3574f080; outline-offset: -1px; }
+#tree .row:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+#tree .row.drop-target { background: #3574f055; }
+#menu { position: fixed; z-index: 200; list-style: none; margin: 0; padding: 4px 0; min-width: 180px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px #0008; }
+#menu li { padding: 4px 14px; cursor: default; }
+#menu li[role="menuitem"]:hover { background: var(--accent); color: white; }
+#menu li.separator { height: 1px; padding: 0; margin: 4px 0; background: var(--border); }

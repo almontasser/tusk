@@ -110,9 +110,9 @@ function fileRow(f: FileStatus, inIndex: boolean) {
 
 async function discard(f: FileStatus) {
   const untracked = f.worktree === "?";
-  const ok = await ask(untracked ? `Delete the new file ${f.path}?` : `Discard your changes to ${f.path}?`, { kind: "warning" });
+  const ok = await ask(untracked ? `Move the new file ${f.path} to the Trash?` : `Discard your changes to ${f.path}?`, { kind: "warning" });
   if (!ok) return;
-  if (untracked) await invoke("remove_path", { path: `${host.root()}/${f.path}` });
+  if (untracked) await invoke("trash_path", { path: `${host.root()}/${f.path}` });
   else await change("restore", "--", f.path);
   await refreshGit();
 }
