@@ -48,6 +48,7 @@ pub fn run() {
             tools::tool_path,
             tools::path_exists,
             tools::format_php,
+            tools::run_capture,
             search::list_files,
             search::search_text,
             pty::pty_spawn,

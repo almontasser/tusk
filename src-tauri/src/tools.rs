@@ -32,3 +32,14 @@ pub fn format_php(app: AppHandle, root: String, path: String, contents: String) 
     }
     String::from_utf8(out.stdout).map_err(|e| e.to_string())
 }
+
+/// Runs a program in `cwd` and returns its standard output, for short queries such as
+/// `php artisan list --format=json`. Fails with standard error if the program fails.
+#[tauri::command]
+pub async fn run_capture(cwd: String, program: String, args: Vec<String>) -> Result<String, String> {
+    let out = Command::new(program).args(args).current_dir(cwd).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into())
+}

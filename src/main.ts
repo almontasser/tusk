@@ -4,6 +4,7 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
+import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -308,13 +309,16 @@ const actions: Action[] = [
   { label: "Find in Files", keys: "Meta+Shift+F", run: findInFiles },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
+  { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
+  { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
+  { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
 const symbolsFor = (keys?: string) =>
-  keys?.replace("Shift Shift", "⇧⇧").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
+  keys?.replace("Shift Shift", "⇧⇧").replace("Ctrl Ctrl", "⌃⌃").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
 const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
@@ -350,6 +354,9 @@ window.addEventListener(
     const combo = comboOf(e);
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
     if (!action || (action.editorOnly && !editor.hasTextFocus())) return;
+    // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
+    const inTerminal = document.activeElement?.closest("#terminals");
+    if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
     e.preventDefault();
     e.stopPropagation();
     action.run();
@@ -357,21 +364,22 @@ window.addEventListener(
   true,
 );
 
-// Double Shift: two Shift presses within 350 ms with no other key between them.
-let lastShift = 0;
+// Double Shift and double Ctrl: two presses within 350 ms with no other key between them.
+let lastTap = { key: "", time: 0 };
 window.addEventListener(
   "keydown",
   (e) => {
-    if (e.key !== "Shift") return (lastShift = 0);
     if (e.repeat) return;
     const now = performance.now();
-    if (now - lastShift < 350) {
-      lastShift = 0;
-      searchEverywhere();
-    } else lastShift = now;
+    if ((e.key === "Shift" || e.key === "Control") && lastTap.key === e.key && now - lastTap.time < 350) {
+      lastTap = { key: "", time: 0 };
+      actions.find((a) => a.keys === (e.key === "Shift" ? "Shift Shift" : "Ctrl Ctrl"))?.run();
+    } else lastTap = { key: e.key, time: now };
   },
   true,
 );
+
+initRunner(() => root);
 
 $("open-folder").onclick = () => openFolder();
 

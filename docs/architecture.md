@@ -285,6 +285,28 @@ When the app exits, the operating system closes the pseudo-terminals, and the
 processes in them receive `SIGHUP`. Terminal processes don't need the language
 server watchdog.
 
+### Tests and Run Anything
+
+`src/phptests.ts` finds tests with line-based patterns: `test*` methods,
+methods after `#[Test]` or `@test`, and top-level Pest `it()` and `test()`
+calls. Each test gets a `--filter` value. PHPUnit filters match
+`::method` at the end of the name, with an optional data set suffix, so
+`test_a` doesn't also run `test_a_twice`. Pest filters are the escaped
+description. The module has no editor imports, so `src/phptests.test.ts` runs
+under Node.
+
+`src/runner.ts` registers a Monaco code lens provider for files under `tests/`
+or named `*Test.php`, and runs tests and commands in terminal tabs through
+`openTerminal`. It remembers the last run for ⌃R.
+
+Run Anything loads `php artisan list --format=json` once per project through
+the `run_capture` command, and ranks command names against the first word you
+type. The rest of the line becomes the command's arguments. Commands run
+through `/bin/sh -c`, so quoting and pipes work.
+
+While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
+⌃R searches shell history), except ⌥F12, which hides the panel.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -368,6 +390,13 @@ button and an action.
 Node 24 runs TypeScript directly, so `node --test` covers pure frontend logic
 without a test framework. Test files reference Node's types on their own, so
 the app code keeps browser types.
+
+### 2026-09-24: Tests and commands run in terminal tabs
+
+PhpStorm has a separate Run tool window. A terminal tab shows the same colored
+output, accepts input for interactive Artisan prompts, and needs no second
+output view. A structured test tree, which parses JUnit output, can come later
+if you want it.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

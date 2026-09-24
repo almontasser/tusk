@@ -13,7 +13,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | 1. Editor shell: folders, file tree, tabs, save, highlighting, file watcher | Done |
 | 2. PHP intelligence through Phpactor | Done |
 | 3. Laravel LSP, Mago, and Larastan diagnostics | Done |
-| 4. Terminal, Artisan, test runner, search | Not started |
+| 4. Terminal, Artisan, test runner, search | Done |
 | 5. Git, blame, and pull requests | Not started |
 | 6. Filament language server | Not started |
 
@@ -100,6 +100,9 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃⌥O | Optimize imports |
 | ⌥⌘L | Reformat the file with Mago |
 | ⌥F12 | Show or hide the terminal |
+| ⌃⌃ | Run anything: Artisan commands or shell commands |
+| ⌃⇧R | Run the test at the cursor, or all tests in the file |
+| ⌃R | Rerun the last test or command |
 | ⌘S | Save |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
@@ -115,6 +118,18 @@ LSP. It adds completion, hover, go to definition, links, and diagnostics for
 config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
+
+## Tests and commands
+
+In test files, **▶ Run test** and **▶ Run all tests in file** links appear above
+PHPUnit test methods (`test*` methods, `#[Test]`, and `@test`) and Pest `it()`
+and `test()` calls. Tests run through `php artisan test` in Laravel projects,
+and through `vendor/bin/pest` or `vendor/bin/phpunit` otherwise.
+
+Press ⌃⌃ and type an Artisan command with its arguments, such as
+`make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
+works. To run any other command, choose the last item. Tests and commands run
+in terminal tabs, and ⌃R reruns the last one.
 
 ## Diagnostics and formatting
 
@@ -143,6 +158,8 @@ committed.
 | `src/editor.ts` | Monaco setup, web workers, and the Blade language |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/terminal.ts` | Terminal panel |
+| `src/runner.ts` | Test runner, run links, and Run Anything |
+| `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |
