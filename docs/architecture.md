@@ -1002,6 +1002,17 @@ Monaco has no Vue grammar. `editor.ts` registers `vue` for `.vue` files with
 Monaco's HTML grammar, which highlights `<script>` as JavaScript and `<style>`
 as CSS.
 
+
+### Component file grammars
+
+Vue, Svelte, and Astro share `componentGrammar` in `editor.ts`: Monaco's HTML
+grammar, which already embeds JavaScript in `<script>` and CSS in `<style>`,
+with two rules in front. `lang="ts"` switches to the grammar's
+`scriptWithCustomType` state with `typescript`, and `lang="scss"` or `"less"`
+to `styleWithCustomType`, the states the grammar uses for `type="…"`. Astro
+adds a `frontmatter` state for the `---` fence, embedding TypeScript; the
+closing fence uses `switchTo`, not `next`, so popping it returns to the root
+state.
 ## Debugging
 
 The debugger is the Xdebug adapter from VS Code's PHP Debug extension. It

@@ -51,7 +51,7 @@ file to change when you add it.
 | Split editors | Up to four panes, side by side only, sharing one tab bar. |
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
-| Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
+| Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. In the merge tool, a block that only one side has doesn't get blank space on the other sides, as PhpStorm draws; while you scroll through it, the other panes hold still at the nearest matching line. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change signature and inline aren't available. Safe Delete can't see calls made through dynamic names, such as `$this->$method()`. |
@@ -443,6 +443,12 @@ The servers start the first time you open a JavaScript, TypeScript, or Vue
 file, so PHP-only work doesn't pay for them. They use the project's own
 TypeScript version when `node_modules/typescript` exists.
 
+
+Vue, Svelte, and Astro files highlight their HTML, `<script lang="ts">` as
+TypeScript, `<style lang="scss">` or `lang="less"` as those languages, and an
+Astro file's `---` frontmatter as TypeScript. Svelte and Astro get
+highlighting, spell checking, and Tailwind completion, but no language server
+of their own.
 ## Tests and commands
 
 In test files, **▶ Run test** and **▶ Run all tests in file** links appear above

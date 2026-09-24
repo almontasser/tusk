@@ -636,7 +636,7 @@ const phpactorIndexer = {
   "indexer.index_path": "%cache%/index/%project_id%-editor-1",
 };
 
-const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
+const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
 /** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
 const tailwindSettings = {
@@ -782,7 +782,7 @@ export async function startLsp(root: string, h: Host) {
   const filament = (await exists("vendor/filament/filament")) ? startServer("filament", root, ["php"], {}) : null;
   const packageJson = await invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => "");
   const tailwind = packageJson.includes('"tailwindcss"')
-    ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue"], {}, tailwindSettings)
+    ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue", "svelte", "astro"], {}, tailwindSettings)
     : null;
   // Spelling in comments, strings, and names. Words the project uses on purpose go in _typos.toml.
   const typos = settings.spellCheck

@@ -97,11 +97,31 @@ monaco.languages.onLanguage("blade", async () => {
   });
 });
 
-// Vue single-file components use Monaco's HTML grammar, which already highlights
-// <script> as JavaScript and <style> as CSS. The Vue and TypeScript servers add the rest.
-monaco.languages.register({ id: "vue", extensions: [".vue"], aliases: ["Vue"] });
-monaco.languages.onLanguage("vue", async () => {
+// Vue, Svelte, and Astro components use Monaco's HTML grammar, which highlights <script> as JavaScript
+// and <style> as CSS. They pick the language with lang="ts" or lang="scss" rather than type, so those
+// rules switch to the grammar's custom-type states. The Vue and TypeScript servers add the rest for Vue.
+/** Monaco's HTML grammar, with lang="ts" and lang="scss" choosing the script and style languages. */
+async function componentGrammar(frontmatter: boolean): Promise<monaco.languages.IMonarchLanguage> {
   const html = await import("monaco-editor/languages/definitions/html/html.js");
-  monaco.languages.setLanguageConfiguration("vue", html.conf);
-  monaco.languages.setMonarchTokensProvider("vue", html.language);
-});
+  const t = html.language.tokenizer;
+  return {
+    ...html.language,
+    tokenizer: {
+      ...t,
+      // Astro's --- fence at the top of the file holds TypeScript.
+      root: frontmatter ? [[/^---\s*$/, { token: "delimiter", next: "@frontmatter", nextEmbedded: "typescript" }], ...t.root] : t.root,
+      frontmatter: [[/^---\s*$/, { token: "@rematch", switchTo: "@frontmatterEnd", nextEmbedded: "@pop" }]],
+      frontmatterEnd: [[/^---\s*$/, "delimiter", "@pop"]],
+      script: [[/lang\s*=\s*["'](?:ts|tsx|typescript)["']/, { token: "attribute.value", switchTo: "@scriptWithCustomType.typescript" }], ...t.script],
+      style: [[/lang\s*=\s*["'](scss|less)["']/, { token: "attribute.value", switchTo: "@styleWithCustomType.$1" }], ...t.style],
+    },
+  };
+}
+for (const [id, extension, alias] of [["vue", ".vue", "Vue"], ["svelte", ".svelte", "Svelte"], ["astro", ".astro", "Astro"]]) {
+  monaco.languages.register({ id, extensions: [extension], aliases: [alias] });
+  monaco.languages.onLanguage(id, async () => {
+    const html = await import("monaco-editor/languages/definitions/html/html.js");
+    monaco.languages.setLanguageConfiguration(id, html.conf);
+    monaco.languages.setMonarchTokensProvider(id, await componentGrammar(id === "astro"));
+  });
+}

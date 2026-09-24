@@ -22,6 +22,7 @@ const byExtension: [RegExp, Icon][] = [
   [/\.(ts|tsx|mts|cts)$/, { codicon: "file-code", color: "icon-ts" }],
   [/\.(js|jsx|mjs|cjs)$/, { codicon: "file-code", color: "icon-js" }],
   [/\.vue$/, { codicon: "file-code", color: "icon-vue" }],
+  [/\.(svelte|astro)$/, { codicon: "file-code", color: "icon-blade" }],
   [/\.json$/, { codicon: "json", color: "icon-json" }],
   [/\.(css|scss|sass|less)$/, { codicon: "symbol-color", color: "icon-css" }],
   [/\.(md|markdown)$/, { codicon: "markdown", color: "icon-md" }],
