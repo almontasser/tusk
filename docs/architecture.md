@@ -334,6 +334,17 @@ the HTTP client. Commands that change packages run in terminal tabs, and the
 tab's exit reloads the list. The `composer.lock` change they cause also
 reindexes Phpactor.
 
+### Spell checking
+
+Spelling comes from `typos-lsp`, a language server for the `typos` checker,
+bundled per architecture like Mago. `typos` checks words against a list of
+known misspellings, not a dictionary, so it doesn't flag names, jargon, or
+abbreviations, and it understands `camelCase` and `snake_case`. The server
+reports misspellings as information, with a fix and an "ignore in the project"
+code action, which writes `typos.toml`. It's a native binary, so the bridge
+runs it without a runtime (an empty runtime in `lsp.rs`). Changing the
+**Check spelling** setting restarts the servers, which starts or stops it.
+
 ## Laravel, diagnostics, and formatting (milestone 3)
 
 ### Several language servers
@@ -1256,3 +1267,10 @@ requests while a large file is checked, which is the cost.
 Rendering Markdown needs a parser and an HTML sanitizer. A hand-written
 sanitizer is a security boundary that's easy to get wrong, and DOMPurify is the
 widely reviewed one, so the editor takes two small dependencies instead.
+
+### 2026-09-24: typos instead of a dictionary spell checker
+
+A dictionary checker such as Hunspell flags every identifier, abbreviation,
+and package name in code unless it has large custom word lists. `typos` looks
+only for known misspellings, which fits code with few false positives. The
+cost is that a rare misspelling that isn't on its list goes unnoticed.

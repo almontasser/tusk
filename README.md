@@ -56,7 +56,7 @@ file to change when you add it.
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
-| Tools | There's no spell checking. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -213,6 +213,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Show inlay hints | On |
 | Save files automatically | On |
 | Format files when saving | Off |
+| Check spelling | On |
 
 ### EditorConfig
 
@@ -338,6 +339,16 @@ An update shows in green when it fits the version constraint in
 
 Commands run in terminal tabs with the Composer that ships with the editor, and
 the list reloads when they finish.
+
+## Spell checking
+
+The editor marks misspellings in comments, strings, and names with a blue
+underline, in PHP, Blade, JavaScript, TypeScript, Vue, Markdown, and more. It
+splits names such as `$userAdress` and `get_adress` into words. Press ⌥⏎ on a
+misspelling to replace it with the suggestion, or to ignore the word in the
+project, which adds it to `typos.toml` in the project root. Commit that file
+so the rest of the team skips the word too. To turn spell checking off, clear
+**Check spelling** in Settings.
 
 ## Laravel features
 

@@ -7,6 +7,7 @@ import { message } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
+import { settings } from "./settings";
 
 type M = typeof monaco.languages;
 
@@ -635,6 +636,8 @@ const phpactorIndexer = {
   "indexer.index_path": "%cache%/index/%project_id%-editor-1",
 };
 
+const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
+
 /** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
 const tailwindSettings = {
   editor: { tabSize: 4 },
@@ -781,8 +784,12 @@ export async function startLsp(root: string, h: Host) {
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue"], {}, tailwindSettings)
     : null;
+  // Spelling in comments, strings, and names. Words the project uses on purpose go in _typos.toml.
+  const typos = settings.spellCheck
+    ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
+    : null;
   startFrontendServersLazily(root);
-  for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind])) {
+  for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }

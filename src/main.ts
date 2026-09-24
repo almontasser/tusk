@@ -807,6 +807,12 @@ onSettings((s) =>
 );
 setKeymapEditor(() => editKeymap());
 
+// Turning spell checking on or off starts or stops its language server.
+let spellCheck = settings.spellCheck;
+onSettings((s) => {
+  if (s.spellCheck !== spellCheck) (spellCheck = s.spellCheck), restartServers();
+});
+
 function editKeymap() {
   pick("Keymap: choose an action to change its shortcut", (q) =>
     rank(

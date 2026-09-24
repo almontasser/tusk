@@ -38,14 +38,20 @@ fetch composer-2.10.2.phar \
 cp "$cache/composer-2.10.2.phar" "$dest/composer.phar"
 
 case "$(uname -m)" in
-  arm64) arch=aarch64; mago_sha=99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd ;;
-  x86_64) arch=x86_64; mago_sha=b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa ;;
+  arm64) arch=aarch64; mago_sha=99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd; typos_sha=c57edf504147dc74dab985f3b56170969e2ab00d4b1b1f1dcb5fb7eb0e3c9b89 ;;
+  x86_64) arch=x86_64; mago_sha=b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa; typos_sha=e9069658eedfc575033451bf146980b05fe911e357f8013672d1a375f49bc0a1 ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 fetch "mago-1.50.0-$arch.tar.gz" \
   "https://github.com/carthage-software/mago/releases/download/1.50.0/mago-1.50.0-$arch-apple-darwin.tar.gz" \
   "$mago_sha"
 tar -xzf "$cache/mago-1.50.0-$arch.tar.gz" -C "$dest" --strip-components 1 "mago-1.50.0-$arch-apple-darwin/mago"
+
+# Spell checking: typos-lsp, a language server for the typos checker, which knows code's naming styles.
+fetch "typos-lsp-0.1.56-$arch.tar.gz" \
+  "https://github.com/tekumara/typos-lsp/releases/download/v0.1.56/typos-lsp-v0.1.56-$arch-apple-darwin.tar.gz" \
+  "$typos_sha"
+tar -xzf "$cache/typos-lsp-0.1.56-$arch.tar.gz" -C "$dest" typos-lsp
 
 # Node-based language servers, pinned by node-tools/package-lock.json. npm ci checks every
 # package against the lockfile's integrity hashes. Install scripts are skipped, since the

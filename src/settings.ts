@@ -15,6 +15,7 @@ export type Settings = {
   inlayHints: boolean;
   autoSave: boolean;
   formatOnSave: boolean;
+  spellCheck: boolean;
   /** Shortcut overrides by action name, such as { "Go to File": "Meta+P" }. "" removes the shortcut. */
   keymap: Record<string, string>;
 };
@@ -28,6 +29,7 @@ const defaults: Settings = {
   inlayHints: true,
   autoSave: true,
   formatOnSave: false,
+  spellCheck: true,
   keymap: {},
 };
 
@@ -48,6 +50,7 @@ const fields: Field[] = [
   { key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
+  { key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
 ];
 
 export const settings: Settings = { ...defaults };

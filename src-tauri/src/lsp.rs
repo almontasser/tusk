@@ -42,13 +42,16 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
         "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         "typescript" => ("node", "node/node_modules/@vtsls/language-server/bin/vtsls.js", &["--stdio"]),
         "vue" => ("node", "node/node_modules/@vue/language-server/bin/vue-language-server.js", &["--stdio"]),
+        // A native binary: the watchdog execs it directly (the runtime is the program itself).
+        "typos" => ("", "typos-lsp", &[]),
         // Not a language server: the Xdebug debug adapter. DAP frames messages the same way.
         "xdebug" => ("node", "php-debug/out/phpDebug.js", &[]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
     let tools = tools_dir(&app)?;
     let mut child = Command::new("/bin/sh")
-        .args(["-c", WATCHDOG, "sh", runtime])
+        .args(["-c", WATCHDOG, "sh"])
+        .args((!runtime.is_empty()).then_some(runtime))
         .arg(tools.join(script))
         .args(args)
         .current_dir(&root)
@@ -56,7 +59,7 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Could not start {runtime}. Is it installed? ({e})"))?;
+        .map_err(|e| format!("Could not start {name}. Is {runtime} installed? ({e})"))?;
     let stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
     let event = format!("lsp:{name}");
