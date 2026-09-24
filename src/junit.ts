@@ -55,7 +55,7 @@ export function parseJUnit(xml: string): TestResult[] {
 }
 
 // ponytail: assumes Laravel's autoload-dev mapping of Tests\ to tests/.
-const classFile = (className: string) => `${className.replace(/^(P\\)?Tests\\/, "tests/").replace(/\\/g, "/")}.php`;
+export const classFile = (className: string) => `${className.replace(/^(P\\)?Tests\\/, "tests/").replace(/\\/g, "/")}.php`;
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
@@ -63,14 +63,17 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 export const baseName = (name: string) => name.replace(/ with data set .*$/, "").replace(/^.* → /, "");
 
 /**
- * A --filter that matches the given tests. PHPUnit reports method names. Pest reports descriptions, and a
- * readable label for PHPUnit-style methods ("Fails" for test_fails), so words may be joined by "_" or a space.
+ * A --filter that matches exactly the given tests. PHPUnit matches "Class::method". Pest matches "Class::description",
+ * with describe() blocks in front, but reports a readable label for PHPUnit-style methods ("Fails" for test_fails),
+ * so words may be joined by "_" or a space and a "test" prefix may come first. Pest's filter ignores case.
  * The filter must not start with "(", or PHP reads the parentheses as delimiters and matches case-sensitively.
  */
 export function filterFor(tests: TestResult[], pest: boolean): string {
-  const names = [...new Set(tests.map((t) => baseName(t.name)))];
-  if (!pest) return `::(${names.map(escapeRegex).join("|")})( with data set .*)?$`;
-  return names.map((n) => n.split(/\s+/).map(escapeRegex).join("[_ ]?")).join("|");
+  if (!pest) return `::(${[...new Set(tests.map((t) => baseName(t.name)))].map(escapeRegex).join("|")})( with data set .*)?$`;
+  const classes = new Map<string, Set<string>>();
+  for (const t of tests) classes.set(t.className, (classes.get(t.className) ?? new Set()).add(t.name.replace(/ with data set .*$/, "")));
+  const words = (n: string) => n.split(/\s+/).map(escapeRegex).join("[_ ]?");
+  return [...classes].map(([c, names]) => `${escapeRegex(c)}::(?:test_?)?(?:${[...names].map(words).join("|")})( with data set .*)?$`).join("|");
 }
 
 /** Whether a name from a report is the test that findTests calls `name`, ignoring Pest's readable labels. */

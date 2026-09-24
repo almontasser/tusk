@@ -42,8 +42,35 @@ test("finds PHPUnit test methods", () => {
 test("finds Pest tests and escapes their names", () => {
   const tests = findTests(pest);
   assert.deepEqual(tests.map((t) => t.name), ["all tests in file", "it creates a post (with title)", "deletes posts"]);
-  assert.equal(tests[1].filter, "creates a post \\(with title\\)");
+  // Pest matches "Class::description", with describe() blocks in front.
+  const filter = new RegExp(tests[1].filter!);
+  assert.ok(filter.test("P\\Tests\\PostTest::it creates a post (with title)"));
+  assert.ok(filter.test('P\\Tests\\PostTest::`group` → it creates a post (with title) with data set "(1)"'));
+  assert.ok(!filter.test("P\\Tests\\PostTest::it creates a post (with title) twice"));
   assert.equal(findTests("<?php\ndescribe('group', function () {\n    it('nests', fn () => 1);\n});")[1]?.name, "it nests");
+});
+
+test("finds declarations that span several lines", () => {
+  const source = `<?php
+class SplitTest extends TestCase
+{
+    #[Test]
+    public
+        function hides_drafts(): void {}
+
+    protected function testHelper() {}
+}
+
+it(
+    'wraps its name',
+    function () {},
+);
+`;
+  assert.deepEqual(findTests(source).map((t) => [t.line, t.name]), [
+    [2, "all tests in file"],
+    [5, "hides_drafts"],
+    [11, "it wraps its name"],
+  ]);
 });
 
 test("picks the test around the cursor", () => {

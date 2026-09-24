@@ -779,7 +779,7 @@ const actions: Action[] = [
   { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
   { label: "Inline Variable", keys: "Alt+Meta+N", run: () => inlineVariable(editor), editorOnly: true },
   { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
-  { label: "Type Hierarchy", keys: "Ctrl+H", run: () => active.endsWith(".php") && showTypeHierarchy(active) },
+  { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
   editorAction("Parameter Info", "Meta+P", "editor.action.triggerParameterHints"),

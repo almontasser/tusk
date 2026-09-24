@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentClassPath, deletionLines, laravelNames, parseTypeDeclaration } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, parseTypeDeclaration, parseTypeDeclarations } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -30,6 +30,29 @@ test("reads interfaces that extend several interfaces", () => {
   assert.equal(t.kind, "interface");
   assert.deepEqual(t.extends, ["Countable", "A\\Base"]);
   assert.deepEqual(t.implements, []);
+});
+
+test("reads every type in a file, with the traits each uses", () => {
+  const source = `<?php
+namespace App;
+
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+
+class Post extends Model
+{
+    use HasFactory, Concerns\\HasSlug;
+    use \\Illuminate\\Notifications\\Notifiable { notify as protected; }
+
+    public function scope() { return function () use ($x) { return new class extends Base {}; }; }
+}
+
+trait Publishes {}
+`;
+  const types = parseTypeDeclarations(source);
+  assert.deepEqual(types.map((t) => t.fqn), ["App\\Post", "App\\Publishes"]);
+  assert.deepEqual(types[0].uses, ["Illuminate\\Database\\Eloquent\\Factories\\HasFactory", "App\\Concerns\\HasSlug", "Illuminate\\Notifications\\Notifiable"]);
+  assert.deepEqual(types[1].uses, []);
+  assert.equal(source.slice(types[1].offset, types[1].offset + 9), "Publishes");
 });
 
 test("returns null without a type", () => {

@@ -13,26 +13,28 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 /**
  * Returns the tests in a file, with a whole-file entry first. PHPUnit tests are
  * `test*` methods or methods marked `#[Test]` or `@test`. Pest tests are
- * `it(...)` and `test(...)` calls, also inside `describe(...)`.
- * ponytail: line-based regexes; a PHP parser would catch multi-line declarations.
+ * `it(...)` and `test(...)` calls, also inside `describe(...)`. A declaration may
+ * span several lines; its line is where it starts.
+ * ponytail: regexes over the source, so tests inside block comments are found too.
  */
 export function findTests(source: string): TestCase[] {
-  const lines = source.split("\n");
+  const lineOf = (offset: number) => source.slice(0, offset).split("\n").length;
   const tests: TestCase[] = [];
-  let marked = false; // A #[Test] attribute or @test tag appeared since the last method.
-  lines.forEach((text, i) => {
-    const line = i + 1;
-    if (/#\[(\\?PHPUnit\\Framework\\Attributes\\)?Test\]|@test\b/.test(text)) marked = true;
-    const method = text.match(/^\s*public function (\w+)\s*\(/);
-    if (method) {
-      if (method[1].startsWith("test") || marked) tests.push({ line, name: method[1], filter: `::${method[1]}( with data set .*)?$` });
-      marked = false;
-    }
-    const pest = text.match(/^\s*(it|test)\(\s*(['"])(.*?)\2/);
-    if (pest) tests.push({ line, name: `${pest[1] === "it" ? "it " : ""}${pest[3]}`, filter: escapeRegex(pest[3]) });
-  });
+  let previous = 0; // Where the last method ended, so a #[Test] or @test between them marks this one.
+  for (const m of source.matchAll(/^[ \t]*((?:(?:final|abstract|static|public|protected|private)\s+)*)function\s+(\w+)\s*\(/gm)) {
+    const marked = /#\[(\\?PHPUnit\\Framework\\Attributes\\)?Test\]|@test\b/.test(source.slice(previous, m.index));
+    previous = m.index! + m[0].length;
+    if (/\bpublic\b/.test(m[1]) && (m[2].startsWith("test") || marked))
+      tests.push({ line: lineOf(m.index!), name: m[2], filter: `::${m[2]}( with data set .*)?$` });
+  }
+  // Pest matches "Class::description", with any describe() blocks in front joined by " → ".
+  for (const m of source.matchAll(/^[ \t]*(it|test)\(\s*(['"])(.*?)\2/gm)) {
+    const name = `${m[1] === "it" ? "it " : ""}${m[3]}`;
+    tests.push({ line: lineOf(m.index!), name, filter: `::(?:.* → )?${escapeRegex(name)}( with data set .*)?$` });
+  }
   if (!tests.length) return [];
-  const classLine = lines.findIndex((l) => /^\s*(final\s+|abstract\s+)*class\s+\w+/.test(l)) + 1;
+  tests.sort((a, b) => a.line - b.line);
+  const classLine = source.split("\n").findIndex((l) => /^\s*(final\s+|abstract\s+)*class\s+\w+/.test(l)) + 1;
   return [{ line: classLine || 1, name: "all tests in file" }, ...tests];
 }
 

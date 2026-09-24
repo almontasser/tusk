@@ -26,7 +26,7 @@ test("points failures at the failing line", () => {
 test("builds a filter for failed tests", () => {
   const failed = results.filter((r) => r.status === "failed");
   assert.equal(filterFor(failed, false), "::(test_fails|test_errors|test_data)( with data set .*)?$");
-  assert.equal(filterFor([{ ...failed[0], name: "`g` → it adds (1 + 1)" }], true), "it[_ ]?adds[_ ]?\\(1[_ ]?\\+[_ ]?1\\)");
+  assert.equal(filterFor([{ ...failed[0], name: "`g` → it adds (1 + 1)" }], true), "Tests\\\\Unit\\\\ScratchTest::(?:test_?)?(?:`g`[_ ]?→[_ ]?it[_ ]?adds[_ ]?\\(1[_ ]?\\+[_ ]?1\\))( with data set .*)?$");
 });
 
 test("reads Pest reports", () => {
@@ -52,7 +52,12 @@ test("reads PHPUnit-style classes run by Pest", () => {
   assert.match(fails.message, /^Letters <differ>/);
   assert.equal(mixed.find((r) => r.name === "Passes")!.file, "tests/Unit/ScratchTest.php");
   const failed = mixed.filter((r) => r.status === "failed");
-  assert.equal(filterFor(failed, true), "Fails|Errors|Data|it[_ ]?fails[_ ]?on[_ ]?purpose");
+  // Pest matches the filter, case-insensitively, against "Class::method" or "Class::description".
+  const filter = new RegExp(filterFor(failed, true), "i");
+  assert.ok(filter.test("P\\Tests\\Unit\\ScratchTest::test_fails"));
+  assert.ok(filter.test('Tests\\Unit\\ScratchTest::test_data with data set "two"'));
+  assert.ok(!filter.test("Tests\\Unit\\ScratchTest::test_fails_twice"));
+  assert.ok(!filter.test("Tests\\Unit\\OtherTest::test_fails"));
 });
 
 test("matches reported names to declarations", () => {

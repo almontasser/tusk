@@ -1,7 +1,7 @@
 // The Tests tab: a tree of the last run's results, read from the JUnit report the run wrote.
 import { invoke } from "@tauri-apps/api/core";
 import { findTests } from "./phptests";
-import { type LiveTest, parseEvents, parseJUnit, sameTest, type TestResult } from "./junit";
+import { classFile, type LiveTest, parseEvents, parseJUnit, sameTest, type TestResult } from "./junit";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; rerun(): unknown; rerunFailed(failed: TestResult[]): unknown };
@@ -98,8 +98,8 @@ export async function showResults(report: string): Promise<boolean> {
 }
 
 /**
- * Shows progress while tests run, from PHPUnit's event stream. Rows can't be opened yet, because the stream
- * has no file paths; the JUnit report replaces this view when the run ends.
+ * Shows progress while tests run, from PHPUnit's event stream. The stream has no file paths, so rows open the
+ * file their class name maps to. The JUnit report replaces this view when the run ends.
  */
 export async function showLive(events: string, running: boolean) {
   const text = await invoke<string>("read_file", { path: events }).catch(() => "");
@@ -109,7 +109,7 @@ export async function showLive(events: string, running: boolean) {
   const summary = q(".tests-summary");
   summary.textContent = `${running ? "Running" : "Stopped"}: ${done.length}${total ? ` of ${total}` : ""}${failures ? ` · ${failures} failed` : ""}`;
   summary.className = `tests-summary ${failures ? "test-failed" : ""}`;
-  q(".tests-detail").textContent = running ? "Results open when the run ends." : "The run ended without a report. Its terminal tab has the output.";
+  q(".tests-detail").textContent = running ? "Failure details show when the run ends." : "The run ended without a report. Its terminal tab has the output.";
   const classes = new Map<string, LiveTest[]>();
   for (const t of tests) classes.set(t.className, [...(classes.get(t.className) ?? []), t]);
   q(".tests-tree").replaceChildren(
@@ -118,10 +118,13 @@ export async function showLive(events: string, running: boolean) {
       const status = cases.some((c) => c.status === "failed") ? "failed" : cases.some((c) => c.status === "running") ? "running" : "passed";
       const row = el("div", "test-row");
       row.append(icon(status), el("span", "name", className.replace(/^Tests\\/, "")));
+      const file = classFile(className);
+      row.ondblclick = () => host.openAt(absolute(file), 1);
       const children = el("ul");
       for (const c of cases) {
         const item = el("li", "test-row test-case");
         item.append(icon(c.status), el("span", "name", c.name));
+        item.onclick = () => open({ name: c.name, className, file, line: 0, time: 0, status: "passed", message: "" });
         children.append(item);
       }
       li.append(row, children);

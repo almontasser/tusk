@@ -29,10 +29,10 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Type hierarchy | It shows the type that the current file declares, not the type under the cursor. Traits aren't shown. A file declaring several types shows the first. |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
-| Test results | While tests run, the tree can't open tests yet (PHPUnit's event stream has no file paths); that works once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
-| Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
+| Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
+| Type hierarchy | A trait's users are found in project files, not in `vendor`. |
+| Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
 | Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
@@ -155,7 +155,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
-| ⌃H | Type hierarchy of the current file's class |
+| ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
 | ⌘⌦ | Safe delete the class, method, or function at the cursor |
 | ⌥⌘N | Inline the variable at the cursor |
 | ⌘F6 | Change the signature of the method or function at the cursor |
@@ -322,13 +322,16 @@ such as ones that spread `...$args`, are listed and left unchanged.
 
 ## Type hierarchy
 
-Press ⌃H in a PHP file to open the **Hierarchy** tab for the class,
-interface, trait, or enum that the file declares.
+Press ⌃H in a PHP file to open the **Hierarchy** tab. With the cursor on a
+type's name, such as `Model` in `extends Model` or a trait in `use HasFactory;`,
+the tab shows that type. Otherwise, it shows the class, interface, trait, or
+enum that the cursor is in.
 
 - **Subtypes** lists the classes that extend it or implement it, including
-  classes in `vendor`. Expand one to see its own subtypes.
-- **Supertypes** lists its parent class and its interfaces. Expand one to go
-  further up.
+  classes in `vendor`. For a trait, it lists the types that use it, in project
+  files only. Expand one to see its own subtypes.
+- **Supertypes** lists its parent class, its interfaces, and its traits.
+  Expand one to go further up.
 
 Click a type to open it. Types that Phpactor's index doesn't know are listed
 without a file.
@@ -478,13 +481,15 @@ and `test()` calls, including those inside `describe()`. Tests run through
 from ⌘⇧A.
 
 While tests run, the **Tests** tab shows progress: how many tests have run,
-how many failed, and a spinner on the test in progress. When the run ends, it
-shows the results as a tree of test classes and files. Classes with failures start expanded.
+how many failed, and a spinner on the test in progress. Click a test to open
+it. When the run ends, the tab shows the results as a tree of test classes and
+files. Classes with failures start expanded.
 
 - Click a test to see its failure message and open it at the failing line, or
   at its declaration when it passed.
 - Click **Rerun failed tests** (next to **Rerun**) to run only the tests that
-  failed.
+  failed. A test whose name contains a failed test's name doesn't run with
+  them.
 
 The terminal tab keeps the runner's full output.
 

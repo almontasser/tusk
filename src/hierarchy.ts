@@ -1,10 +1,11 @@
-// Type hierarchy (⌃H): a class's parents and interfaces, or the classes that extend or implement it.
+// Type hierarchy (⌃H): a type's parents, interfaces, and traits, or the types that extend, implement, or use it.
 // Phpactor has no type hierarchy requests, so supertypes come from reading declarations and finding
-// each parent with a workspace symbol search, and subtypes from Phpactor's Go to Implementation.
+// each parent with a workspace symbol search, subtypes from Phpactor's Go to Implementation, and a
+// trait's users from a text search.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { phpactorRequest, workspaceSymbols } from "./lsp";
-import { parseTypeDeclaration, type TypeDeclaration } from "./phptypes";
+import { parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { showPanelView } from "./terminal";
 
 type Host = {
@@ -24,11 +25,12 @@ let current: Type | null = null;
 const icons = { class: "symbol-class", interface: "symbol-interface", trait: "symbol-method", enum: "symbol-enum", unknown: "symbol-class" };
 const pathOf = (uri: string) => monaco.Uri.parse(uri).fsPath;
 
-async function typeAt(path: string, line?: number): Promise<Type | null> {
-  const source = await invoke<string>("read_file", { path }).catch(() => "");
-  const decl = parseTypeDeclaration(source);
-  if (!decl) return null;
-  return { fqn: decl.fqn, kind: decl.kind, path, decl, line: line ?? source.slice(0, decl.offset).split("\n").length };
+/** The type declared at a line of a file: the last one starting at or before it, or the file's first. */
+async function typeAt(path: string, line = 1): Promise<Type | null> {
+  const source = monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? (await invoke<string>("read_file", { path }).catch(() => ""));
+  const types = parseTypeDeclarations(source).map((decl) => ({ decl, line: source.slice(0, decl.offset).split("\n").length }));
+  const found = types.filter((t) => t.line <= line).at(-1) ?? types[0];
+  return found ? { fqn: found.decl.fqn, kind: found.decl.kind, path, decl: found.decl, line: found.line } : null;
 }
 
 /** Finds a type's file through Phpactor's workspace symbols. */
@@ -43,11 +45,20 @@ async function locate(fqn: string): Promise<Type> {
 
 async function supertypes(t: Type): Promise<Type[]> {
   if (!t.decl) return [];
-  return Promise.all([...t.decl.extends, ...t.decl.implements].map(locate));
+  return Promise.all([...t.decl.extends, ...t.decl.implements, ...t.decl.uses].map(locate));
 }
+
+type Match = { path: string; line: number };
 
 async function subtypes(t: Type): Promise<Type[]> {
   if (!t.path || !t.decl) return [];
+  if (t.kind === "trait") {
+    const short = t.fqn.split("\\").pop()!;
+    const query = { text: `^\\s*use\\s+[^;{]*\\b${short}\\b`, regex: true, caseSensitive: true, wholeWord: false };
+    const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
+    const users = await Promise.all(matches.map((m) => typeAt(m.path, m.line)));
+    return direct(t, users);
+  }
   const model = await host.ensureModel(t.path);
   const position = model.getPositionAt(t.decl.offset);
   const locations =
@@ -55,11 +66,14 @@ async function subtypes(t: Type): Promise<Type[]> {
       textDocument: { uri: model.uri.toString() },
       position: { line: position.lineNumber - 1, character: position.column - 1 },
     }).catch(() => null)) ?? [];
-  const found = await Promise.all((Array.isArray(locations) ? locations : [locations]).map((l) => typeAt(pathOf(l.uri), l.range.start.line + 1)));
-  // Phpactor returns every descendant; keep the direct ones, so deeper ones appear under their parents.
-  const direct = new Map<string, Type>();
-  for (const s of found) if (s?.decl && [...s.decl.extends, ...s.decl.implements].includes(t.fqn)) direct.set(s.fqn, s);
-  return [...direct.values()].sort((a, b) => a.fqn.localeCompare(b.fqn));
+  return direct(t, await Promise.all((Array.isArray(locations) ? locations : [locations]).map((l) => typeAt(pathOf(l.uri), l.range.start.line + 1))));
+}
+
+/** The types that name `t` as a parent, interface, or trait. Phpactor returns every descendant; deeper ones appear under their parents. */
+function direct(t: Type, found: (Type | null)[]): Type[] {
+  const types = new Map<string, Type>();
+  for (const s of found) if (s?.decl && [...s.decl.extends, ...s.decl.implements, ...s.decl.uses].includes(t.fqn)) types.set(s.fqn, s);
+  return [...types.values()].sort((a, b) => a.fqn.localeCompare(b.fqn));
 }
 
 // ---- Panel ----
@@ -120,10 +134,29 @@ function render() {
   tree.replaceChildren(row(current, 0, true));
 }
 
-/** Shows the hierarchy of the type declared in a file. */
-export async function showTypeHierarchy(path: string) {
-  const t = await typeAt(path);
-  if (!t) return host.status("This file doesn't declare a class, interface, trait, or enum.");
+/**
+ * Shows the hierarchy of the type named under the cursor, found through Go to Definition, or else of the type
+ * the cursor is in.
+ */
+export async function showTypeHierarchy(editor: monaco.editor.ICodeEditor) {
+  const model = editor.getModel();
+  const pos = editor.getPosition();
+  if (!model || !pos || model.getLanguageId() !== "php") return host.status("Type Hierarchy works in PHP files.");
+  let t: Type | null = null;
+  const word = model.getWordAtPosition(pos)?.word;
+  if (word && /^[A-Z]/.test(word)) {
+    const found = await phpactorRequest<Location[] | Location | null>("textDocument/definition", {
+      textDocument: { uri: model.uri.toString() },
+      position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+    }).catch(() => null);
+    const at = Array.isArray(found) ? found[0] : found;
+    if (at) t = await typeAt(pathOf(at.uri), at.range.start.line + 1);
+    // A constant or a method named with a capital leads to its class, which isn't what's under the cursor.
+    if (t && t.fqn.split("\\").pop() !== word) t = null;
+    if (!t) t = await locate(word).then((l) => (l.path ? l : null));
+  }
+  t ??= await typeAt(model.uri.fsPath, pos.lineNumber);
+  if (!t) return host.status("Put the cursor in or on a class, interface, trait, or enum.");
   current = t;
   render();
   showPanelView("Hierarchy", panel);

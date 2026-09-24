@@ -334,17 +334,25 @@ the command doesn't cover, still use the language server.
 ### Type hierarchy
 
 Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
-builds the tree from requests it does support:
+builds the tree from requests it does support.
 
-- **Supertypes**: `parseTypeDeclaration` in `src/phptypes.ts` reads a file's
-  declaration and resolves the names after `extends` and `implements` through
-  its `namespace` and `use` statements. Each parent's file comes from a
+The starting type comes from the cursor. On a capitalized word, the view asks
+Phpactor for its definition and reads the type declared at that line; the name
+must match the word, so a constant or method doesn't count. Otherwise it takes
+the type declared at or above the cursor line in the current file.
+
+- **Supertypes**: `parseTypeDeclarations` in `src/phptypes.ts` reads every
+  type a file declares and resolves the names after `extends` and `implements`,
+  and the traits in `use` lines inside its body, through the file's
+  `namespace` and `use` statements. Each parent's file comes from a
   workspace symbol search, matched on name and namespace.
 - **Subtypes**: `textDocument/implementation` at the type's name. Phpactor
   answers from its index with every descendant, so the tree keeps the ones
   whose own declaration names the type, and deeper ones appear when you expand
   their parent. The request needs the file open in Phpactor, so the file gets a
-  model (without a tab).
+  model (without a tab). Phpactor doesn't list a trait's users, so for a trait
+  a text search finds `use` lines naming it, and the tree keeps the types
+  whose declaration really uses it.
 
 Children load when a row expands, so a large hierarchy, such as `Model`'s,
 costs nothing until you open it.
@@ -567,12 +575,13 @@ server watchdog.
 
 ### Tests and Run Anything
 
-`src/phptests.ts` finds tests with line-based patterns: `test*` methods,
-methods after `#[Test]` or `@test`, and top-level Pest `it()` and `test()`
-calls. Each test gets a `--filter` value. PHPUnit filters match
-`::method` at the end of the name, with an optional data set suffix, so
-`test_a` doesn't also run `test_a_twice`. Pest filters are the escaped
-description. The module has no editor imports, so `src/phptests.test.ts` runs
+`src/phptests.ts` finds tests with regexes over the whole source, so a
+declaration can span several lines: public `test*` methods, methods after
+`#[Test]` or `@test`, and Pest `it()` and `test()` calls. Each test gets a
+`--filter` value that matches its name at the end, with an optional data set
+suffix, so `test_a` doesn't also run `test_a_twice`. PHPUnit filters are
+`::method`. Pest matches `Class::description`, where `describe()` blocks come
+first as `` `group` → ``, so Pest filters are `::(?:.* → )?description`. The module has no editor imports, so `src/phptests.test.ts` runs
 under Node.
 
 `src/runner.ts` registers a Monaco code lens provider for files under `tests/`
@@ -596,7 +605,9 @@ For progress during the run, the command also gets `--log-events-text`, which
 PHPUnit 10 and later write as events happen (`Test Prepared`, `Test Passed`,
 and so on). The runner checks for `vendor/phpunit/phpunit/src/Event`, which
 PHPUnit 10 added, since older versions reject the option. Every 500 ms,
-`showLive` reads the file and redraws the tree with `parseEvents`. When the
+`showLive` reads the file and redraws the tree with `parseEvents`. The events
+name classes, not files, so a row opens the file the class name maps to
+(`classFile`) and finds the test in it with `findTests`. When the
 process exits, the JUnit report replaces the live tree. If there's no report,
 for example because the run crashed, the live tree stays with its last state.
 
@@ -618,9 +629,13 @@ line, the tab finds the declaration with `findTests`, comparing names without
 case, punctuation, or a `test` prefix (`sameTest`).
 
 **Rerun failed tests** passes a `--filter` built from the failed names. For
-PHPUnit, it's `::(names)( with data set .*)?$`. Pest matches a filter against
-method names for PHPUnit-style classes and against descriptions for Pest tests,
-so each name's words are joined with `[_ ]?` to match both. The filter never
+PHPUnit, it's `::(names)( with data set .*)?$`. For Pest, it's one alternative
+per class: `Class::(?:test_?)?(?:names)( with data set .*)?$`, with the full
+reported name, `describe()` blocks included. Pest matches a filter,
+case-insensitively, against method names for PHPUnit-style classes and against
+descriptions for Pest tests, so each name's words are joined with `[_ ]?` and
+an optional `test` prefix is allowed, to match both. The class and the `$`
+anchor keep a failed `it works` from also running `it works fast`. The filter never
 starts with `(`: PHP would read the parentheses as regex delimiters, and the
 match would become case-sensitive.
 
