@@ -735,3 +735,8 @@ button.link:hover { text-decoration: underline; }
 .merge-theirs { background: #5fb86526; }
 .merge-ours-gutter { border-left: 3px solid var(--blue); }
 .merge-theirs-gutter { border-left: 3px solid var(--green); }
+.find-file { cursor: default; }
+.find-file .chevron { width: 14px; color: var(--faint); font-size: 14px !important; margin-left: -6px; }
+.find-match button { display: none; margin-left: auto; flex-shrink: 0; border: 0; background: none; color: var(--muted); font-size: 13px !important; padding: 0 2px; }
+.find-match:hover button { display: inline; }
+.find-match button:hover { color: var(--text); }

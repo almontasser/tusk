@@ -507,6 +507,17 @@ files are read and rewritten on disk.
 Go to class hides symbols inside the bundled `phpactor.phar`, because Phpactor
 also indexes the PHP stubs it ships and those files can't be opened.
 
+
+Results stop at 20,000 matches (`MAX_MATCHES` in `search.rs`). To keep the
+sidebar fast, files render their matches only when expanded, and they start
+expanded while the total stays under 2,000 rows. Replace All asks
+`files_matching` for every file with a match, with no limit, so it doesn't
+depend on what's listed. A single match is replaced by running its text through
+`replace_text`, so regex groups behave as in Replace All, after checking that
+the file still holds the match where the search found it.
+
+`list_files` takes `all`, which turns off `.gitignore` for Go to File's second
+press.
 ### Actions and shortcuts
 
 `main.ts` keeps one list of actions. Each action has a label, an optional

@@ -15,7 +15,9 @@ type Host = {
 type Match = { path: string; line: number; column: number; end: number; text: string };
 type Query = { text: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
 
-const MAX_MATCHES = 2000;
+const MAX_MATCHES = 20_000;
+/** Files start expanded until this many rows are shown; the rest render their matches when expanded. */
+const EXPANDED_ROWS = 2000;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let host: Host;
 let matches: Match[] = [];
@@ -76,6 +78,7 @@ function render(error: string) {
       : query().text
         ? "No matches"
         : "");
+  let shown = 0;
   $("find-results").replaceChildren(
     ...[...groups].map(([path, list]) => {
       const group = document.createElement("li");
@@ -84,28 +87,79 @@ function render(error: string) {
       const rel = path.slice(root.length + 1);
       const name = rel.split("/").pop()!;
       const icon = fileIcon(name);
-      header.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span><button title="Replace in this file">Replace</button>`;
+      header.innerHTML = `<span class="chevron codicon codicon-chevron-down"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span><button title="Replace in this file">Replace</button>`;
       header.querySelector(".name")!.textContent = name;
       header.querySelector(".dir")!.textContent = rel.slice(0, -name.length - 1);
       header.querySelector(".count")!.textContent = String(list.length);
-      header.querySelector("button")!.onclick = () => replaceIn([path]);
+      header.querySelector("button")!.onclick = (e) => (e.stopPropagation(), replaceIn([path]));
       const rows = document.createElement("ul");
-      rows.append(
-        ...list.map((m) => {
-          const li = document.createElement("li");
-          li.className = "find-match";
-          const line = document.createElement("span");
-          line.className = "line";
-          line.textContent = String(m.line);
-          li.append(line, preview(m));
-          li.onclick = () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end));
-          return li;
-        }),
-      );
+      const chevron = header.querySelector(".chevron")!;
+      const fill = () => rows.childElementCount || rows.append(...list.map(matchRow));
+      const setOpen = (open: boolean) => {
+        rows.hidden = !open;
+        chevron.classList.toggle("codicon-chevron-down", open);
+        chevron.classList.toggle("codicon-chevron-right", !open);
+        if (open) fill();
+      };
+      const open = shown + list.length <= EXPANDED_ROWS;
+      setOpen(open);
+      if (open) shown += list.length;
+      header.onclick = () => setOpen(!!rows.hidden);
       group.append(header, rows);
       return group;
     }),
   );
+}
+
+function matchRow(m: Match) {
+  const li = document.createElement("li");
+  li.className = "find-match";
+  const line = document.createElement("span");
+  line.className = "line";
+  line.textContent = String(m.line);
+  const replace = document.createElement("button");
+  replace.className = "codicon codicon-replace";
+  replace.title = "Replace this match";
+  replace.onclick = (e) => (e.stopPropagation(), replaceOne(m));
+  li.append(line, preview(m), replace);
+  li.onclick = () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end));
+  return li;
+}
+
+/** Replaces one match: its text runs through the same replace as Replace All, so regex groups work. */
+async function replaceOne(m: Match) {
+  const q = query();
+  const found = m.text.slice(m.column - 1, m.end - 1);
+  try {
+    const { text } = await invoke<{ text: string; count: number }>("replace_text", { text: found, query: q, replacement: replacement() });
+    const model = monaco.editor.getModel(monaco.Uri.file(m.path));
+    if (model) {
+      // Only if the line still holds the match where the search found it.
+      if (model.getValueInRange(new monaco.Range(m.line, m.column, m.line, m.end)) !== found) return host.status("The file changed; search again.");
+      model.pushEditOperations([], [{ range: new monaco.Range(m.line, m.column, m.line, m.end), text }], () => null);
+      await invoke("write_file", { path: m.path, contents: model.getValue() });
+      host.markSaved(m.path);
+      didSave(model);
+    } else {
+      const lines = (await invoke<string>("read_file", { path: m.path })).split("\n");
+      const line = lines[m.line - 1];
+      if (line === undefined || !line.startsWith(m.text.slice(0, m.end - 1))) return host.status("The file changed; search again.");
+      // Columns are UTF-16 code units, the same units JavaScript strings index by.
+      lines[m.line - 1] = line.slice(0, m.column - 1) + text + line.slice(m.end - 1);
+      await invoke("write_file", { path: m.path, contents: lines.join("\n") });
+    }
+  } catch (e) {
+    return host.status(`Replace failed: ${String(e)}`);
+  }
+  await search();
+}
+
+/** Replace All covers every matching file, including ones beyond the listed results. */
+async function replaceAll() {
+  const q = query();
+  if (!q.text) return;
+  const paths = await invoke<string[]>("files_matching", { root: host.root(), query: q, include: include() }).catch(() => [...byFile().keys()]);
+  replaceIn(paths);
 }
 
 /**
@@ -114,11 +168,11 @@ function render(error: string) {
  */
 async function replaceIn(paths: string[]) {
   const q = query();
-  const count = matches.filter((m) => paths.includes(m.path)).length;
-  if (!q.text || !count) return;
-  const more = matches.length >= MAX_MATCHES && paths.length > 1 ? " Only the first 2000 matches are listed; files beyond them aren't changed." : "";
+  if (!q.text || !paths.length) return;
+  const listed = matches.filter((m) => paths.includes(m.path)).length;
+  const count = matches.length >= MAX_MATCHES && paths.length > 1 ? "all" : String(listed);
   const where = paths.length === 1 ? paths[0].slice(host.root().length + 1) : `${paths.length} files`;
-  if (!(await ask(`Replace ${count} matches in ${where} with "${replacement()}"?${more}`, { kind: "warning" }))) return;
+  if (!(await ask(`Replace ${count} matches in ${where} with "${replacement()}"?`, { kind: "warning" }))) return;
   let replaced = 0;
   for (const path of paths) {
     try {
@@ -169,8 +223,8 @@ export function initSearch(h: Host) {
   $("find-query").oninput = searchSoon;
   $("find-include").oninput = searchSoon;
   $("find-query").onkeydown = (e) => e.key === "Enter" && search();
-  $("replace-with").onkeydown = (e) => e.key === "Enter" && replaceIn([...byFile().keys()]);
-  $("replace-all").onclick = () => replaceIn([...byFile().keys()]);
+  $("replace-with").onkeydown = (e) => e.key === "Enter" && replaceAll();
+  $("replace-all").onclick = replaceAll;
 }
 
 /** Reruns the search after files change, so results stay current. */

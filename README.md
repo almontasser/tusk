@@ -30,8 +30,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Type hierarchy | It shows the type that the current file declares, not the type under the cursor. Traits aren't shown. A file declaring several types shows the first. |
-| Find in files | Results stop at 2,000 matches, and Replace All changes only the files in those results. There's no replace for a single match. |
-| Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
+| Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | While tests run, the tree can't open tests yet (PHPUnit's event stream has no file paths); that works once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
@@ -150,7 +149,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⇧⇧ | Search everywhere: classes, files, and actions |
 | ⌘⇧A | Find action |
 | ⌘O | Go to class |
-| ⌘⇧O | Go to file |
+| ⌘⇧O | Go to file (press again to include ignored files, such as `vendor`) |
 | ⌥⌘O | Go to symbol in the project |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
@@ -277,10 +276,13 @@ becomes the query.
   `*.php, *.blade.php` or `app/**`. Files ignored by `.gitignore` are never
   searched.
 - Results are grouped by file, with each match highlighted. Click a match to
-  open it.
-- **Replace All**, or ⏎ in the replace field, replaces every listed match after
-  you confirm. Hover over a file for **Replace** to change only that file. In
-  regex mode, `$1` or `${name}` inserts a captured group.
+  open it. Files start expanded until about 2,000 matches show; click a file
+  to expand or collapse it.
+- **Replace All**, or ⏎ in the replace field, replaces every match in every
+  matching file after you confirm, including files beyond the listed results.
+  Hover over a file for **Replace** to change only that file, or over a match
+  for its replace button to change only that match. In regex mode, `$1` or
+  `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
 

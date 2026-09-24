@@ -716,10 +716,14 @@ const fileItem = (path: string): Item => {
   return { label: relative(path), icon: `codicon-${icon.codicon} ${icon.color}`, run: () => openFile(path) };
 };
 
+/** Go to File lists project files. Pressed again while open, it adds files that .gitignore excludes, such as vendor. */
 async function goToFile() {
   if (!root) return;
-  const files = (await invoke<string[]>("list_files", { root })).map((f) => fileItem(`${root}/${f}`));
-  pick("Go to file", (q) => rank(q, files));
+  const open = document.querySelector<HTMLInputElement>("#palette input");
+  const all = open?.placeholder === "Go to file";
+  const query = all ? open.value : "";
+  const files = (await invoke<string[]>("list_files", { root, all })).map((f) => fileItem(`${root}/${f}`));
+  pick(all ? "Go to file, including ignored files such as vendor" : "Go to file", (q) => rank(q, files), 0, all ? { value: query } : undefined);
 }
 
 // LSP symbol kinds that name types: Class, Enum, Interface, Struct.

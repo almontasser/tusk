@@ -4,12 +4,13 @@ use grep::searcher::{sinks::UTF8, Searcher};
 use ignore::{overrides::OverrideBuilder, WalkBuilder};
 use serde::{Deserialize, Serialize};
 
-const MAX_MATCHES: usize = 2000;
+const MAX_MATCHES: usize = 20_000;
 
 /// Walks the project like ripgrep: respects .gitignore (even outside a git repo),
 /// includes dotfiles, and skips .git. `include` is a comma-separated list of globs,
-/// such as `*.php, *.blade.php`; empty means every file.
-fn walk(root: &str, include: &str) -> Result<impl Iterator<Item = ignore::DirEntry>, String> {
+/// such as `*.php, *.blade.php`; empty means every file. With `all`, ignored files
+/// such as vendor count too.
+fn walk(root: &str, include: &str, all: bool) -> Result<impl Iterator<Item = ignore::DirEntry>, String> {
     let mut overrides = OverrideBuilder::new(root);
     for glob in include.split(',').map(str::trim).filter(|g| !g.is_empty()) {
         overrides.add(glob).map_err(|e| e.to_string())?;
@@ -17,6 +18,9 @@ fn walk(root: &str, include: &str) -> Result<impl Iterator<Item = ignore::DirEnt
     Ok(WalkBuilder::new(root)
         .hidden(false)
         .require_git(false)
+        .git_ignore(!all)
+        .git_exclude(!all)
+        .ignore(!all)
         .overrides(overrides.build().map_err(|e| e.to_string())?)
         .filter_entry(|e| e.file_name() != ".git")
         .build()
@@ -24,10 +28,10 @@ fn walk(root: &str, include: &str) -> Result<impl Iterator<Item = ignore::DirEnt
         .filter(|e| e.file_type().is_some_and(|t| t.is_file())))
 }
 
-/// Project files as paths relative to `root`.
+/// Project files as paths relative to `root`. With `all`, files that .gitignore excludes too.
 #[tauri::command]
-pub async fn list_files(root: String) -> Vec<String> {
-    walk(&root, "")
+pub async fn list_files(root: String, all: Option<bool>) -> Vec<String> {
+    walk(&root, "", all.unwrap_or(false))
         .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into())).collect())
         .unwrap_or_default()
 }
@@ -81,7 +85,7 @@ pub async fn search_text(root: String, query: Query, include: String) -> Result<
     let matcher = query.matcher()?;
     let mut searcher = Searcher::new();
     let mut matches = Vec::new();
-    for entry in walk(&root, &include)? {
+    for entry in walk(&root, &include, false)? {
         let path = entry.path();
         let _ = searcher.search_path(
             &matcher,
@@ -106,6 +110,29 @@ pub async fn search_text(root: String, query: Query, include: String) -> Result<
         }
     }
     Ok(matches)
+}
+
+/// Every file with at least one match, with no limit, for Replace All.
+#[tauri::command]
+pub async fn files_matching(root: String, query: Query, include: String) -> Result<Vec<String>, String> {
+    let matcher = query.matcher()?;
+    let mut searcher = Searcher::new();
+    let mut files = Vec::new();
+    for entry in walk(&root, &include, false)? {
+        let mut found = false;
+        let _ = searcher.search_path(
+            &matcher,
+            entry.path(),
+            UTF8(|_, _| {
+                found = true;
+                Ok(false) // One match is enough.
+            }),
+        );
+        if found {
+            files.push(entry.path().to_string_lossy().into());
+        }
+    }
+    Ok(files)
 }
 
 #[derive(Serialize)]
@@ -157,8 +184,12 @@ mod tests {
         assert_eq!(search(q("Need", false, false, true), "").len(), 0);
         assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into())).is_err());
 
-        let files = tauri::async_runtime::block_on(list_files(root));
+        let files = tauri::async_runtime::block_on(list_files(root.clone(), None));
         assert!(files.contains(&"a.php".to_string()) && !files.iter().any(|f| f.starts_with("vendor")));
+        let all = tauri::async_runtime::block_on(list_files(root.clone(), Some(true)));
+        assert!(all.iter().any(|f| f.starts_with("vendor")));
+        let matching = tauri::async_runtime::block_on(files_matching(root.clone(), q("needle", false, false, false), "".into())).unwrap();
+        assert_eq!(matching.len(), 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
