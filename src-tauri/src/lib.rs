@@ -50,7 +50,6 @@ pub fn run() {
             lsp::lsp_send,
             tools::tool_path,
             tools::path_exists,
-            tools::format_php,
             tools::run_capture,
             search::list_files,
             search::search_text,

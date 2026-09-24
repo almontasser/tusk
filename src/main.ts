@@ -9,6 +9,7 @@ import { afterSave, annotate, branchListeners, branches, closeDiff, focusCommit,
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
+import { detectFormatters, initFormatting } from "./format";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
@@ -53,6 +54,7 @@ async function openFolder(dir: unknown = null) {
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
+  detectFormatters();
   if (session) await restoreSession(session);
   restartServers();
 }
@@ -329,17 +331,6 @@ listen<string[]>("fs-change", ({ payload }) => {
   }, 150);
 });
 
-// Mago formats PHP. Monaco turns the whole-file result into minimal edits, so the cursor stays put.
-monaco.languages.registerDocumentFormattingEditProvider("php", {
-  async provideDocumentFormattingEdits(model) {
-    const text = await invoke<string>("format_php", { root, path: model.uri.fsPath, contents: model.getValue() }).catch((e) => {
-      status(`Format failed: ${e}`);
-      return null;
-    });
-    return text === null ? [] : [{ range: model.getFullModelRange(), text }];
-  },
-});
-
 /** Opens a file and moves the cursor to a position or selects a range. */
 async function openAt(path: string, target?: monaco.IRange | monaco.IPosition) {
   await openFile(path);
@@ -519,6 +510,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initFormatting({ root: () => root, status });
 initConflicts(editor);
 initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });

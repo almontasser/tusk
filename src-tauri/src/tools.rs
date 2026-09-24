@@ -14,25 +14,6 @@ pub fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
-/// Formats PHP source with the bundled Mago. Mago reads the project's `mago.toml` from `root`.
-#[tauri::command]
-pub fn format_php(app: AppHandle, root: String, path: String, contents: String) -> Result<String, String> {
-    let mut child = Command::new(tools_dir(&app)?.join("mago"))
-        .args(["format", "--stdin-input", "--stdin-filepath", &path])
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    child.stdin.take().unwrap().write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).into());
-    }
-    String::from_utf8(out.stdout).map_err(|e| e.to_string())
-}
-
 /// Runs a program in `cwd` and returns its standard output, for short queries such as
 /// `php artisan list --format=json`. `input`, if given, is written to standard input.
 /// Fails with standard error if the program fails.

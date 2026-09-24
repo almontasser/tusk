@@ -243,10 +243,7 @@ Phpactor has a built-in Mago integration. The client turns it on and points it
 at the bundled binary, so Mago's static analysis and lint results arrive as
 Phpactor diagnostics while you type.
 
-Formatting doesn't go through a language server. The `format_php` command pipes
-the file through `mago format --stdin-input` in the project folder. Monaco
-turns the whole-file result into minimal edits, so the cursor and undo history
-stay useful.
+Formatting doesn't go through a language server; see the next section.
 
 ### Default Mago configuration
 
@@ -665,6 +662,26 @@ Two client features were added for it, and any server can use them:
 - **`textDocument/documentColor`** and **`textDocument/colorPresentation`**,
   mapped to a Monaco color provider, which draws swatches and a color picker.
 
+## Formatting (frontend step 2)
+
+`src/format.ts` registers one formatting provider for PHP, Blade, JavaScript,
+TypeScript, CSS, SCSS, Less, JSON, HTML, Markdown, YAML, and Vue. It pipes the
+file's text through a formatter with `run_capture` in the project folder, so
+each formatter finds the project's configuration:
+
+1. Prettier (`node node_modules/prettier/bin/prettier.cjs --stdin-filepath`),
+   when the project has it. If Prettier reports that no parser could be inferred
+   for the file, the next step runs.
+2. For PHP, Laravel Pint (`vendor/bin/pint - --stdin-filename`), when the
+   project has it.
+3. For PHP, the bundled Mago (`mago format --stdin-input`).
+
+`detectFormatters` looks for Prettier and Pint when a folder opens. When a
+project has Prettier, it turns off Monaco's own formatters for CSS, HTML, JSON,
+and TypeScript (`setModeConfiguration`), which would otherwise compete for those
+languages. Monaco turns each whole-file result into minimal edits, so the cursor
+and undo history stay useful.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -805,6 +822,12 @@ aren't saved, because their processes can't be restored.
 Bundling a Node runtime would add about 100 MB per architecture. Laravel
 projects that use Vite already need Node, so the editor runs the bundled
 JavaScript servers with the `node` on your `PATH`, as it does with `php`.
+
+### 2026-09-24: Format with the project's tools
+
+Projects choose their formatter, often in `lint-staged` or CI. Formatting with a
+different tool than the project uses creates noisy diffs. The editor prefers
+Prettier and Pint from the project, and uses Mago only when neither is there.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

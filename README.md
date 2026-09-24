@@ -35,7 +35,7 @@ file to change when you add it.
 | Test results | Tests print to a terminal tab. There's no tree of passed and failed tests (it would parse JUnit output in `src/runner.ts`). |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
 | Blade | Blade rules color HTML text only, not tags or attributes. PHP inside Blade gets no Phpactor diagnostics. |
-| Formatting | Only PHP files format (through Mago). |
+| Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
@@ -144,7 +144,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘D | Duplicate the line |
 | ⌘⌫ | Delete the line |
 | ⌃⌥O | Optimize imports |
-| ⌥⌘L | Reformat the file with Mago |
+| ⌥⌘L | Reformat the file with the project's formatter |
 | ⌘N | New file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
@@ -334,7 +334,18 @@ Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 
 ## Diagnostics and formatting
 
-Mago checks PHP files as you type (static analysis and lint) and formats them.
+**Formatting** (⌥⌘L) uses your project's own tools:
+
+1. **Prettier**, when the project has it in `node_modules`, for every file its
+   configuration can parse. With `@prettier/plugin-php` or a Blade plugin, that
+   includes PHP and Blade files.
+2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
+   `vendor/bin/pint`.
+3. **Mago**, the bundled fallback for PHP.
+
+Prettier and Pint read the project's own configuration files.
+
+Mago checks PHP files as you type (static analysis and lint).
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
 defaults tuned for Laravel, in `src-tauri/resources/mago.toml`: the analyzer
 reads the project and `vendor` but skips hidden folders, `node_modules`, and
