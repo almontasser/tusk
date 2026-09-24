@@ -1,5 +1,6 @@
 mod fs;
 mod lsp;
+mod pty;
 mod search;
 mod tools;
 
@@ -34,6 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(fs::WatchState::default())
         .manage(lsp::LspState::default())
+        .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             fs::read_dir,
             fs::read_file,
@@ -48,6 +50,10 @@ pub fn run() {
             tools::format_php,
             search::list_files,
             search::search_text,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

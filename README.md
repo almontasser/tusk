@@ -99,6 +99,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘⌫ | Delete the line |
 | ⌃⌥O | Optimize imports |
 | ⌥⌘L | Reformat the file with Mago |
+| ⌥F12 | Show or hide the terminal |
 | ⌘S | Save |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
@@ -141,12 +142,14 @@ committed.
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
 | `src/editor.ts` | Monaco setup, web workers, and the Blade language |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
+| `src/terminal.ts` | Terminal panel |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |
 | `src-tauri/src/lsp.rs` | Starts the language servers and relays their messages |
 | `src-tauri/src/tools.rs` | Tool paths and Mago formatting |
 | `src-tauri/src/search.rs` | Project file listing and text search |
+| `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |

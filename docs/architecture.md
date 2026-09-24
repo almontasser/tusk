@@ -268,6 +268,23 @@ Monaco's quick outline). Editor actions, such as ⌘D, run only while the editor
 has focus, so they don't fire while you type in the palette. Double Shift is
 two Shift presses within 350 ms with no other key between them.
 
+### Terminal
+
+`pty.rs` opens a pseudo-terminal with `portable-pty` and runs your login shell
+(`$SHELL -l`) or a given command in the project folder. A thread reads output
+and emits it as `pty:<id>` events, then emits `pty-exit:<id>` when the process
+ends. The reader keeps a UTF-8 character that is split across two reads until
+the rest arrives, so multibyte text never turns into replacement characters.
+
+`src/terminal.ts` shows each session as a tab in a bottom panel, rendered by
+`xterm.js`. Keystrokes go to `pty_write`, and the fit add-on resizes the
+pseudo-terminal whenever the panel changes size. You can drag the top edge of
+the panel to resize it.
+
+When the app exits, the operating system closes the pseudo-terminals, and the
+processes in them receive `SIGHUP`. Terminal processes don't need the language
+server watchdog.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one

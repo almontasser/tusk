@@ -4,6 +4,7 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
+import { openTerminal, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -307,6 +308,8 @@ const actions: Action[] = [
   { label: "Find in Files", keys: "Meta+Shift+F", run: findInFiles },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
+  { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
+  { label: "New Terminal", run: () => openTerminal(root || "/") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
