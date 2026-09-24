@@ -1,6 +1,6 @@
 // Find and replace in files: the Search view in the sidebar.
 import { invoke } from "@tauri-apps/api/core";
-import { confirm } from "./palette";
+import { confirm, pick, rank } from "./palette";
 import { monaco } from "./editor";
 import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
@@ -229,3 +229,19 @@ export function initSearch(h: Host) {
 
 /** Reruns the search after files change, so results stay current. */
 export const refreshSearch = () => $<HTMLInputElement>("find-query").value && searchSoon();
+
+/** Lists TODO, FIXME, and XXX comments in project files, as PhpStorm's TODO window does. Ignored files, such as vendor, are skipped. */
+export async function showTodos() {
+  const root = host.root();
+  if (!root) return;
+  const query: Query = { text: String.raw`\b(TODO|FIXME|XXX)\b`, regex: true, caseSensitive: true, wholeWord: false };
+  const found = await invoke<Match[]>("search_text", { root, query, include: "" }).catch(() => [] as Match[]);
+  const items = found.map((m) => ({
+    label: m.text.slice(m.column - 1).trim().slice(0, 200),
+    detail: `${m.path.slice(root.length + 1)}:${m.line}`,
+    icon: m.text.slice(m.column - 1).startsWith("TODO") ? "codicon-check" : "codicon-warning icon-warning",
+    run: () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end)),
+  }));
+  const count = `${items.length}${items.length >= MAX_MATCHES ? "+" : ""}`;
+  pick(items.length ? `${count} TODO comments: search by text` : "No TODO, FIXME, or XXX comments in project files", (q) => rank(q, items));
+}

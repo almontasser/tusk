@@ -111,3 +111,16 @@ export function componentClassPath(tag: string): string | null {
   const studly = (s: string) => s.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
   return `app/View/Components/${name.split(".").map(studly).join("/")}.php`;
 }
+
+/**
+ * The class and method an `artisan route:list --json` action names, such as `App\Http\Controllers\PostController@index`.
+ * An invokable controller has no method, so it's `__invoke`. Closures and views have no class: null.
+ */
+export function routeTarget(action: string): { fqn: string; method: string } | null {
+  const [fqn, method = "__invoke"] = action.split("@");
+  return /^\\?[A-Za-z_]\w*(\\[A-Za-z_]\w*)+$/.test(fqn) ? { fqn: fqn.replace(/^\\/, ""), method } : null;
+}
+
+/** The 1-based line that declares `method` in PHP source, or 0 when there's none. */
+export const methodLine = (source: string, method: string) =>
+  source.split("\n").findIndex((l) => new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`, "i").test(l)) + 1;

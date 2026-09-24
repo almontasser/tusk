@@ -32,6 +32,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
+| TODO comments | The list finds `TODO`, `FIXME`, and `XXX` anywhere in a file, including strings, not only in comments. Results stop at 20,000. |
 | Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
 | Formatting | Without Prettier, only PHP files format. |
@@ -56,6 +57,11 @@ file to change when you add it.
 | Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Coverage | Tests can't show code coverage in the gutter. PHPUnit and Pest can write a Clover report with `--coverage-clover`; `src/runner.ts` would pass it, and a new module would read it and decorate lines. |
+| Profiler | There's no viewer for Xdebug profiles (Cachegrind files). |
+| Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
+| Deployment | There's no remote deployment or sync over SFTP or FTP. |
+| Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -163,6 +169,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
+| F3 | Toggle a bookmark on the current line |
+| ⌘F3 | Show bookmarks |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
 | ⌃⇧B | Go to type declaration |
@@ -290,6 +298,52 @@ becomes the query.
   `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
+
+### TODO comments
+
+Run **TODO** from ⌘⇧A to list every `TODO`, `FIXME`, and `XXX` in the
+project's files. Type to filter the list, and choose one to open it. Files
+that `.gitignore` excludes, such as `vendor`, aren't searched.
+
+## Bookmarks
+
+Press F3 to bookmark the current line, and F3 again to remove the bookmark. A
+bookmark shows as a blue marker in the gutter and moves with its line as you
+edit. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved per
+project.
+
+## Snippets
+
+Snippets work like PhpStorm's live templates: type a snippet's prefix, choose
+it from the completion list, and press Tab to move between its placeholders.
+
+Run **Edit Snippets (Live Templates)** from ⌘⇧A to open `snippets.json`. The
+first time, the file is created with two examples. It uses VS Code's snippet
+format, so you can paste snippets from VS Code:
+
+```json
+{
+  "Laravel route": {
+    "scope": "php",
+    "prefix": "rget",
+    "body": ["Route::get('/${1:path}', [${2:Controller}::class, '${3:index}']);"],
+    "description": "A GET route to a controller method"
+  }
+}
+```
+
+`scope` lists language IDs, such as `php,blade`. Leave it out to offer the
+snippet in every file. Changes apply as you type in the file.
+
+## Compare files
+
+With a file open, run one of these from ⌘⇧A to open the diff view:
+
+- **Compare with Clipboard** compares the file with the clipboard's text.
+- **Compare with File…** compares it with another project file that you
+  choose.
+
+The diff shows the editor's text, including unsaved changes.
 
 ## Safe delete
 
@@ -472,6 +526,15 @@ LSP. It adds completion, hover, go to definition, links, and diagnostics for
 config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
+
+- **Routes**, from ⌘⇧A, lists the app's routes from `php artisan route:list`.
+  Search by method, path, route name, or controller, and choose a route to
+  open its controller method. Routes to classes in `vendor`, such as Filament
+  pages, open once Phpactor has indexed them. If `route:list` fails, it runs in
+  a terminal tab so you can see the error.
+- **Laravel Tinker**, from ⌘⇧A, opens `php artisan tinker` in a terminal tab.
+
+When Sail's containers are running, both commands run in the container.
 
 ### Blade
 
@@ -855,14 +918,16 @@ committed.
 | `src/rebase.ts` | Interactive rebase |
 | `src/gitparse.ts` | Parsers for git output, line diffs, partial staging, merge alignment, and rebase todo lists |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
-| `src/runner.ts` | Test runner, run links, and Run Anything |
+| `src/runner.ts` | Test runner, run links, Run Anything, routes, and Tinker |
 | `src/testresults.ts` | The Tests tab: live progress and the results tree |
 | `src/junit.ts` | Reads JUnit reports and PHPUnit's event stream, and builds rerun filters |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
-| `src/search.ts` | The Find view: find and replace in files |
+| `src/search.ts` | The Find view: find and replace in files, and TODO comments |
+| `src/bookmarks.ts` | Bookmarks |
+| `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
 | `src/localhistory.ts` | Local history of saved, changed, and deleted files |
 | `src/retention.ts` | Which local history versions to delete |
@@ -879,7 +944,7 @@ committed.
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
 | `src/refactorparse.ts` | Argument, parameter, and assignment parsing for the refactorings |
-| `src/phptypes.ts` | Reads PHP declarations, and Laravel's names for methods and components |
+| `src/phptypes.ts` | Reads PHP declarations, Laravel's names for methods and components, and route actions |
 | `src/icons.ts` | File and folder icons |
 | `src/themes.ts` | Monaco color themes |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |

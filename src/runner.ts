@@ -9,8 +9,13 @@ import { filterFor, type TestResult } from "./junit";
 import { sailRunning } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
+import { workspaceSymbols } from "./lsp";
+import { methodLine, routeTarget } from "./phptypes";
+import { pathsFor, psr4From } from "./psr4";
 
 let getRoot: () => string;
+let openAt: (path: string, line: number) => Promise<unknown>;
+let status: (text: string) => void;
 let last: { title: string; command: string[]; tests: boolean } | undefined;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
@@ -129,10 +134,62 @@ export async function runAnything() {
   });
 }
 
+/** Opens Laravel Tinker in a terminal tab, in Sail's container when it's up. */
+export const tinker = async () =>
+  openTerminal(getRoot(), "Tinker", (await sailRunning(getRoot())) ? [sail(), "artisan", "tinker"] : ["php", "artisan", "tinker"]);
+
+type Route = { method: string; uri: string; name: string | null; action: string };
+
+/** Lists the app's routes from `artisan route:list`; choosing one opens its controller method. */
+export async function showRoutes() {
+  const root = getRoot();
+  const artisan = (await sailRunning(root)) ? [sail(), "artisan"] : ["php", "artisan"];
+  let routes: Route[];
+  try {
+    routes = JSON.parse(await invoke<string>("run_capture", { cwd: root, program: artisan[0], args: [...artisan.slice(1), "route:list", "--json"], input: null }));
+  } catch {
+    // Run it in a terminal, which shows why it failed, such as a syntax error in a routes file.
+    return openTerminal(root, "Routes", [...artisan, "route:list"]);
+  }
+  const items = routes.map((r) => ({
+    label: `${r.method.replace("|HEAD", "")} /${r.uri.replace(/^\//, "")}`,
+    detail: [r.name, r.action.replace(/^App\\Http\\Controllers\\/, "")].filter(Boolean).join(" · "),
+    icon: "codicon-link",
+    run: () => openRoute(r.action),
+  }));
+  pick("Routes: search by method, path, name, or controller", (q) => {
+    if (!q.trim()) return items;
+    // Match the name and controller too, not only the path.
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter((i) => words.every((w) => `${i.label} ${i.detail}`.toLowerCase().includes(w)));
+  });
+}
+
+/** Opens the class and method a route runs: from composer.json's PSR-4 folders, or else from the PHP index (for vendor). */
+async function openRoute(action: string) {
+  const target = routeTarget(action);
+  if (!target) return status(`This route runs ${action === "Closure" ? "a closure in a routes file" : action}, not a class.`);
+  const root = getRoot();
+  const psr4 = psr4From(await invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"));
+  let path: string | undefined;
+  for (const rel of pathsFor(target.fqn, psr4)) if (await exists(rel)) path ??= `${root}/${rel}`;
+  if (!path) {
+    const short = target.fqn.split("\\").pop()!;
+    const namespace = target.fqn.slice(0, -short.length - 1);
+    const symbols = (await workspaceSymbols(short)).filter((s) => s.name === short && !s.path.includes(".phar/"));
+    path = (symbols.find((s) => s.container === namespace) ?? symbols[0])?.path;
+  }
+  if (!path) return status(`${target.fqn} isn't in the project's PSR-4 folders or the PHP index yet. If indexing is running, try again when it ends.`);
+  const source = await invoke<string>("read_file", { path }).catch(() => "");
+  openAt(path, methodLine(source, target.method) || 1);
+}
+
 /** Adds run links above tests in test files. */
-export function initRunner(root: () => string, openAt: (path: string, line: number) => Promise<unknown>) {
+export function initRunner(root: () => string, open: (path: string, line: number) => Promise<unknown>, showStatus: (text: string) => void) {
   getRoot = root;
-  initTestResults({ root, openAt, rerun, rerunFailed });
+  openAt = open;
+  status = showStatus;
+  initTestResults({ root, openAt: open, rerun, rerunFailed });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, debug?: boolean) => runTest(path, test, debug));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {

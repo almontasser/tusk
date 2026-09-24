@@ -1407,6 +1407,30 @@ show the result.
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.
 
+## Bookmarks, snippets, and other small tools
+
+- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: lines per file,
+  saved in `localStorage` under `bookmarks:<project>`, and drawn as decorations
+  on open models so they follow edits. They sit in the glyph margin's left lane,
+  so a line can show a bookmark and a breakpoint together. Line changes from
+  edits are saved on each change.
+- **Snippets** (`src/snippets.ts`) come from `snippets.json` in the app's
+  config folder, in VS Code's format. One completion provider for every
+  language (`"*"`) filters them by `scope`. While the file is open in a tab, the
+  provider reads the tab's text, so changes apply without a save or reload.
+- **TODO** (`showTodos` in `src/search.ts`) reuses `search_text` with a
+  case-sensitive regex, so it respects `.gitignore` and the 20,000-match limit.
+  It shows results in the palette rather than a new sidebar view.
+- **Routes** (`showRoutes` in `src/runner.ts`) parse `artisan route:list
+  --json`. `routeTarget` in `src/phptypes.ts` reads the action; the class is
+  found through composer.json's PSR-4 folders first (fast, and works before
+  indexing ends), then through Phpactor's workspace symbols for `vendor`
+  classes.
+- **Tinker** is a terminal tab running `artisan tinker`, in Sail when it's up.
+- **Compare with Clipboard** reads the clipboard with `pbpaste` through
+  `run_capture`, because WebKit asks for permission on
+  `navigator.clipboard.readText`. Both comparisons use the git diff view.
+
 ## Interface
 
 ### Layout
@@ -1665,3 +1689,10 @@ A dictionary checker such as Hunspell flags every identifier, abbreviation,
 and package name in code unless it has large custom word lists. `typos` looks
 only for known misspellings, which fits code with few false positives. The
 cost is that a rare misspelling that isn't on its list goes unnoticed.
+
+### 2026-09-25: Small tools in the palette, not new tool windows
+
+TODO comments, bookmarks, and routes list in the palette instead of sidebar
+views. The palette already filters, ranks, and opens results, so each tool is
+a few lines. A persistent tool window would cost more layout code and state
+for a list you usually glance at and leave.
