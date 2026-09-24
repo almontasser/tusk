@@ -227,6 +227,47 @@ Blade syntax, so the Blade grammar replaces it with one that stops at `@`, `{`,
 Because Blade files have their own language, Phpactor doesn't receive them and
 can't report PHP errors in template markup.
 
+## Search and navigation (milestone 4)
+
+### Palette
+
+`src/palette.ts` has one picker, `pick`, used by every search. It takes a
+source function that returns items for a query. Slow sources (language server
+and disk searches) run after a short delay, and results from an older query are
+dropped if a newer one already ran. `fuzzy` scores a subsequence match and
+favors consecutive letters and letters that start a word, such as the `P` and
+`C` in `PostController`. `src/palette.test.ts` covers it.
+
+### Searches
+
+| Search | Source |
+| --- | --- |
+| Go to file | `list_files` in `search.rs` |
+| Go to class and go to symbol | `workspace/symbol` from every server that supports it |
+| Find in files | `search_text` in `search.rs` |
+| Search everywhere | Classes, files, and actions together |
+
+`search.rs` uses ripgrep's crates (`ignore` and `grep`). Both commands respect
+`.gitignore` files, even outside a git repository, so `vendor` and
+`node_modules` are skipped in Laravel projects. Find in files returns at most
+2000 matches and is case-sensitive only when the query has a capital letter.
+Both commands are `async`, so Tauri runs them off the main thread.
+
+Go to class hides symbols inside the bundled `phpactor.phar`, because Phpactor
+also indexes the PHP stubs it ships and those files can't be opened.
+
+### Actions and shortcuts
+
+`main.ts` keeps one list of actions. Each action has a label, an optional
+shortcut, and a function. The keyboard handler, **Find Action**, and **Search
+Everywhere** all read this list, so a new action needs one line.
+
+The handler listens in the capture phase and stops matched events, so these
+shortcuts win over Monaco's defaults (for example, ⌘⇧O is **Go to File**, not
+Monaco's quick outline). Editor actions, such as ⌘D, run only while the editor
+has focus, so they don't fire while you type in the palette. Double Shift is
+two Shift presses within 350 ms with no other key between them.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -298,6 +339,18 @@ Mago's defaults suit strict libraries, not Laravel apps. Without a
 configuration, the editor showed false errors on every facade call. A small
 bundled default makes Mago useful without setup, and a project's own
 `mago.toml` always wins.
+
+### 2026-09-24: PhpStorm keymap
+
+You use PhpStorm, so the editor adopts its macOS keymap instead of Monaco's.
+⌘O is **Go to Class**, as in PhpStorm, so opening a folder moved to a sidebar
+button and an action.
+
+### 2026-09-24: Node's test runner for frontend logic
+
+Node 24 runs TypeScript directly, so `node --test` covers pure frontend logic
+without a test framework. Test files reference Node's types on their own, so
+the app code keeps browser types.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

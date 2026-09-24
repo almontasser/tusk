@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test src/*.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^26.6.2",
     "typescript": "~6.0.3",
     "vite": "^8.0.16",
     "vscode-languageserver-protocol": "^3.18.3"

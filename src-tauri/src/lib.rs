@@ -1,5 +1,6 @@
 mod fs;
 mod lsp;
+mod search;
 mod tools;
 
 use tauri::Manager;
@@ -45,6 +46,8 @@ pub fn run() {
             tools::tool_path,
             tools::path_exists,
             tools::format_php,
+            search::list_files,
+            search::search_text,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

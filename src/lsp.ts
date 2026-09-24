@@ -124,7 +124,11 @@ const clientCapabilities: L.ClientCapabilities = {
   window: { workDoneProgress: true },
 };
 
-type Server = { stop(): void; didSave(model: monaco.editor.ITextModel): void };
+type Server = {
+  stop(): void;
+  didSave(model: monaco.editor.ITextModel): void;
+  symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
+};
 
 /** Starts the bundled server `name` for the given Monaco languages. */
 async function startServer(name: string, root: string, langs: string[], initializationOptions: object): Promise<Server> {
@@ -233,6 +237,10 @@ async function startServer(name: string, root: string, langs: string[], initiali
     },
     didSave(model) {
       if (serves(model)) notify("textDocument/didSave", { textDocument: { uri: model.uri.toString() } });
+    },
+    async symbols(query) {
+      if (!c.workspaceSymbolProvider) return [];
+      return (await request<(L.SymbolInformation | L.WorkspaceSymbol)[] | null>("workspace/symbol", { query })) ?? [];
     },
   };
 
@@ -484,3 +492,17 @@ export async function startLsp(root: string, h: Host) {
 }
 
 export const didSave = (model: monaco.editor.ITextModel) => servers.forEach((s) => s.didSave(model));
+
+export type Symbol = { name: string; kind: L.SymbolKind; container?: string; path: string; range?: monaco.IRange };
+
+/** Searches symbols across the project in every server that supports it. */
+export async function workspaceSymbols(query: string): Promise<Symbol[]> {
+  const results = await Promise.all(servers.map((s) => s.symbols(query).catch(() => [])));
+  return results.flat().map((s) => ({
+    name: s.name,
+    kind: s.kind,
+    container: s.containerName,
+    path: pathOf(s.location.uri),
+    range: "range" in s.location ? toRange(s.location.range) : undefined,
+  }));
+}

@@ -54,6 +54,13 @@ checks each download against its SHA-256 checksum.
 
    The first build compiles the Rust dependencies and takes a few minutes.
 
+## Run the tests
+
+```sh
+pnpm test                          # Frontend logic, with Node's test runner
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust
+```
+
 ## Build a release
 
 ```sh
@@ -65,22 +72,39 @@ The `.app` bundle and the `.dmg` file are written to
 
 ## Keyboard shortcuts
 
+Shortcuts follow PhpStorm's macOS keymap. To see every action and its
+shortcut, press ⌘⇧A (**Find Action**).
+
 | Shortcut | Action |
 | --- | --- |
-| ⌘O | Open a folder |
-| ⌘S | Save the current file |
-| ⌘W | Close the current tab |
-| F12 or ⌘-click | Go to definition |
-| ⇧F12 | Find references |
-| ⌘F12 | Go to implementations |
-| F2 | Rename symbol (also renames the file for a class) |
-| ⌘. | Show quick fixes and code actions |
-| ⌃⇧⌘→ and ⌃⇧⌘← | Expand and shrink the selection |
-| ⇧⌘O | Go to a symbol in the file |
+| ⇧⇧ | Search everywhere: classes, files, and actions |
+| ⌘⇧A | Find action |
+| ⌘O | Go to class |
+| ⌘⇧O | Go to file |
+| ⌥⌘O | Go to symbol in the project |
+| ⌘E | Recent files |
+| ⌘⇧F | Find in files |
+| ⌘F12 | File structure |
+| ⌘B or ⌘-click | Go to declaration |
+| ⌥⌘B | Go to implementation |
+| ⌃⇧B | Go to type declaration |
+| ⌥F7 | Find usages |
+| ⇧F6 | Rename (also renames the file for a class) |
+| ⌥⏎ | Show context actions and quick fixes |
+| ⌘P | Parameter info |
+| F1 | Quick documentation |
+| ⌥↑ and ⌥↓ | Extend and shrink the selection |
+| ⌥⇧↑ and ⌥⇧↓ | Move the line up or down |
+| ⌘D | Duplicate the line |
+| ⌘⌫ | Delete the line |
+| ⌃⌥O | Optimize imports |
+| ⌥⌘L | Reformat the file with Mago |
+| ⌘S | Save |
+| ⌘W | Close the tab |
 | ⌃Space | Show completions |
-| ⌥⌘L or ⇧⌥F | Format the file with Mago |
 
-The app reopens the last folder when it starts. Refactorings such as rename
+To open a folder, click **Open Folder…** in the sidebar or run the **Open
+Folder…** action. The app reopens the last folder when it starts. Refactorings such as rename
 save every file they change.
 
 ## Laravel features
@@ -117,10 +141,12 @@ committed.
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
 | `src/editor.ts` | Monaco setup, web workers, and the Blade language |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
+| `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |
 | `src-tauri/src/lsp.rs` | Starts the language servers and relays their messages |
 | `src-tauri/src/tools.rs` | Tool paths and Mago formatting |
+| `src-tauri/src/search.rs` | Project file listing and text search |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |

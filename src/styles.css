@@ -33,3 +33,13 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabs .tab.dirty .close::before { content: "● "; }
 #editor { flex: 1; min-height: 0; }
 #status { display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; overflow: hidden; padding: 2px 12px; background: var(--panel); border-top: 1px solid var(--border); color: var(--muted); min-height: 22px; }
+
+#open-folder { margin: 0 12px; padding: 4px 10px; background: var(--accent); color: white; border: 0; border-radius: 4px; font: inherit; }
+
+#palette { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); width: min(720px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 40px #0008; z-index: 100; overflow: hidden; }
+#palette input { width: 100%; padding: 10px 12px; background: var(--bg); color: var(--text); border: 0; border-bottom: 1px solid var(--border); font: 14px -apple-system, sans-serif; outline: none; }
+#palette ul { list-style: none; margin: 0; padding: 4px 0; max-height: 420px; overflow-y: auto; }
+#palette li { display: flex; gap: 12px; justify-content: space-between; padding: 4px 12px; white-space: nowrap; cursor: default; }
+#palette li span:first-child { overflow: hidden; text-overflow: ellipsis; font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 12px; }
+#palette li .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; direction: rtl; }
+#palette li.selected { background: #3574f055; }
