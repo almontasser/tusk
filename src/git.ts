@@ -309,6 +309,8 @@ export async function branches() {
     { label: "Update Project (git pull)", detail: "⌘T", run: updateProject },
     { label: "Push (git push)", detail: "⌘⇧K", run: pushBranch },
     { label: "Fetch (git fetch)", run: () => openTerminal(host.root(), "git fetch", ["git", "fetch", "--prune"]) },
+    { label: "Stash Changes…", run: stashChanges },
+    { label: "Stashes…", run: stashes },
   ];
   // Checking out a remote branch such as origin/feature creates a local tracking branch.
   const branchItems: Item[] = refs.map((r) => ({
@@ -437,4 +439,61 @@ export function focusCommit() {
   host.showView("commit");
   refreshGit();
   $("commit-message").focus();
+}
+
+// ---- Stash ----
+
+/** Stashes uncommitted changes to tracked files, with an optional message. */
+export function stashChanges() {
+  if (!current) return host.status("This folder isn't a git repository.");
+  pick("Stash changes: type a message, or press ⏎ for none", (q) => [
+    {
+      label: q.trim() ? `Stash with message "${q.trim()}"` : "Stash without a message",
+      detail: "git stash push",
+      run: () => change("stash", "push", ...(q.trim() ? ["-m", q.trim()] : [])),
+    },
+    {
+      label: "Stash, including new files",
+      detail: "git stash push --include-untracked",
+      run: () => change("stash", "push", "--include-untracked", ...(q.trim() ? ["-m", q.trim()] : [])),
+    },
+  ]);
+}
+
+/** Lists stashes; choosing one offers to apply, pop, drop, or show its files. */
+export async function stashes() {
+  if (!current) return host.status("This folder isn't a git repository.");
+  const out = await git("stash", "list", "--format=%gd%x1f%s%x1f%cr").catch(() => "");
+  const list = out.split("\n").filter(Boolean).map((l) => l.split("\x1f"));
+  if (!list.length) return host.status("There are no stashes.");
+  pick("Stashes", (q) =>
+    rank(q, list.map(([ref, subject, when]) => ({ label: subject, detail: `${ref} · ${when}`, run: () => stashActions(ref, subject) }))),
+  );
+}
+
+function stashActions(ref: string, subject: string) {
+  const items: Item[] = [
+    { label: "Apply", detail: "Keep the stash", run: () => change("stash", "apply", ref) },
+    { label: "Pop", detail: "Apply, then drop the stash", run: () => change("stash", "pop", ref) },
+    { label: "Show Files", detail: "Diff each file", run: () => stashFiles(ref) },
+    {
+      label: "Drop",
+      detail: "Delete the stash",
+      run: async () => (await ask(`Delete the stash "${subject}"? This can't be undone.`, { kind: "warning" })) && change("stash", "drop", ref),
+    },
+  ];
+  pick(`${ref}: ${subject}`, (q) => rank(q, items));
+}
+
+async function stashFiles(ref: string) {
+  const out = await git("stash", "show", "--include-untracked", "--name-only", ref).catch(() => git("stash", "show", "--name-only", ref));
+  const files = out.split("\n").filter(Boolean);
+  const show = (spec: string) => git("show", spec).catch(() => "");
+  pick(`Files in ${ref}`, (q) =>
+    rank(q, files.map((path) => ({
+      label: path,
+      // Untracked files live in the stash's third parent.
+      run: async () => showDiff(path, await show(`${ref}^1:${path}`), (await show(`${ref}:${path}`)) || (await show(`${ref}^3:${path}`)), `${ref} ↔ its base`),
+    }))),
+  );
 }

@@ -485,6 +485,14 @@ parent (using the old path for a rename) with it at the commit.
 A diff opened from the history view returns there when it closes: `showDiff`
 takes a function to run on close.
 
+### Stash
+
+Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
+`--include-untracked` as a second choice. **Stashes…** reads `git stash list`
+and offers apply, pop, drop, and show files for the chosen stash. A stashed
+file's diff compares the stash's first parent (the commit it was made on) with
+the stash; untracked files come from the stash's third parent.
+
 ### Merge conflicts
 
 `isConflict` in `gitparse.ts` recognizes the status pairs git uses for

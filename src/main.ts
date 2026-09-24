@@ -5,7 +5,7 @@ import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { initConflicts } from "./conflicts";
-import { afterSave, annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
@@ -462,6 +462,8 @@ const actions: Action[] = [
   { label: "Push…", keys: "Meta+Shift+K", run: () => root && pushBranch() },
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
   { label: "Branches…", run: branches },
+  { label: "Stash Changes…", run: stashChanges },
+  { label: "Stashes…", run: stashes },
   { label: "Annotate with Git Blame", run: annotate },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },

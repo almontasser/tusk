@@ -53,7 +53,7 @@ file to change when you add it.
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
-| Git | There's no stash, interactive rebase, or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
+| Git | There's no interactive rebase or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
 | Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
@@ -330,6 +330,13 @@ its hash, check it out, create a branch at it, cherry-pick it onto the current
 branch, or revert it. To see the commits that changed one file, run **Show File
 History**, or right-click the file in the tree and choose **Show History**. File
 history follows renames.
+
+### Stash
+
+Run **Stash Changes…** (from ⌘⇧A or the branch menu) to set your uncommitted
+changes aside, optionally with a message and including new files. **Stashes…**
+lists them: choose one to **Apply** it, **Pop** it (apply, then delete), **Drop**
+it, or **Show Files** to see each file's diff.
 
 ### Merge conflicts
 
