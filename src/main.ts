@@ -187,6 +187,18 @@ listen<string[]>("fs-change", ({ payload }) => {
   }, 150);
 });
 
+// Mago formats PHP. Monaco turns the whole-file result into minimal edits, so the cursor stays put.
+monaco.languages.registerDocumentFormattingEditProvider("php", {
+  async provideDocumentFormattingEdits(model) {
+    const text = await invoke<string>("format_php", { root, path: model.uri.fsPath, contents: model.getValue() }).catch((e) => {
+      status(`Format failed: ${e}`);
+      return null;
+    });
+    return text === null ? [] : [{ range: model.getFullModelRange(), text }];
+  },
+});
+editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyL, () => editor.getAction("editor.action.formatDocument")?.run());
+
 // Go to definition, references, and similar features open other files through this hook.
 monaco.editor.registerEditorOpener({
   openCodeEditor(_, resource, selection) {

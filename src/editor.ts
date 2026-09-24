@@ -27,3 +27,27 @@ export function createEditor(el: HTMLElement) {
     model: null,
   });
 }
+
+// Blade templates get their own language, so PHP-only servers skip them. The grammar is
+// Monaco's PHP/HTML grammar with Blade comments, echoes, and directives in front.
+// ponytail: Blade rules apply in HTML text only, not inside tags or attributes.
+monaco.languages.register({ id: "blade", extensions: [".blade.php"], aliases: ["Blade"] });
+monaco.languages.onLanguage("blade", async () => {
+  const php = await import("monaco-editor/languages/definitions/php/php.js");
+  const t = php.language.tokenizer;
+  monaco.languages.setLanguageConfiguration("blade", php.conf);
+  monaco.languages.setMonarchTokensProvider("blade", {
+    ...php.language,
+    tokenizer: {
+      ...t,
+      root: [
+        [/\{\{--/, "comment.blade", "@bladeComment"],
+        [/\{\{|\}\}|\{!!|!!\}/, "delimiter.blade"],
+        [/@[a-zA-Z]+/, "keyword.blade"],
+        // The PHP grammar's text rule would swallow Blade syntax, so stop text at `@`, `{`, `}`, and `!`.
+        ...t.root.map((rule) => (Array.isArray(rule) && String(rule[0]) === String(/[^<]+/) ? ([/[^<@{}!]+|[@{}!]/, ""] as monaco.languages.IMonarchLanguageRule) : rule)),
+      ],
+      bladeComment: [[/--\}\}/, "comment.blade", "@pop"], [/./, "comment.blade"]],
+    },
+  });
+});

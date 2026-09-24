@@ -12,7 +12,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | --- | --- |
 | 1. Editor shell: folders, file tree, tabs, save, highlighting, file watcher | Done |
 | 2. PHP intelligence through Phpactor | Done |
-| 3. Laravel LSP, Mago, and Larastan diagnostics | Not started |
+| 3. Laravel LSP, Mago, and Larastan diagnostics | Done |
 | 4. Terminal, Artisan, test runner, search | Not started |
 | 5. Git, blame, and pull requests | Not started |
 | 6. Filament language server | Not started |
@@ -33,8 +33,9 @@ To build the app, you also need:
 - Rust 1.97 or later
 - Node.js 24 or later, and pnpm
 
-The app bundles its language tools, so you don't install Phpactor or other tools
-yourself. The build downloads pinned versions with `scripts/fetch-tools.sh` and
+The app bundles its language tools (Phpactor, Laravel LSP, and Mago), so you
+don't install them yourself. If your project has PHPStan or Larastan in
+`vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
 checks each download against its SHA-256 checksum.
 
 ## Run in development
@@ -77,9 +78,26 @@ The `.app` bundle and the `.dmg` file are written to
 | ⌃⇧⌘→ and ⌃⇧⌘← | Expand and shrink the selection |
 | ⇧⌘O | Go to a symbol in the file |
 | ⌃Space | Show completions |
+| ⌥⌘L or ⇧⌥F | Format the file with Mago |
 
 The app reopens the last folder when it starts. Refactorings such as rename
 save every file they change.
+
+## Laravel features
+
+In Laravel projects (folders with an `artisan` file), the app also runs Laravel
+LSP. It adds completion, hover, go to definition, links, and diagnostics for
+config keys, routes, views, translations, environment variables, middleware,
+and container bindings, in PHP and Blade files. For example, ⌘-click on
+`view('welcome')` opens `resources/views/welcome.blade.php`.
+
+## Diagnostics and formatting
+
+Mago checks PHP files as you type (static analysis and lint) and formats them.
+If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
+defaults tuned for Laravel, in `src-tauri/resources/mago.toml`: the analyzer
+reads `vendor`, and two rules that flag normal Laravel code on nearly every file
+(`strict-types` and `literal-named-argument`) are off.
 
 ## Test app
 
@@ -97,11 +115,13 @@ committed.
 | Path | Contents |
 | --- | --- |
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
-| `src/editor.ts` | Monaco setup and web workers |
+| `src/editor.ts` | Monaco setup, web workers, and the Blade language |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |
-| `src-tauri/src/lsp.rs` | Starts the language server and relays its messages |
+| `src-tauri/src/lsp.rs` | Starts the language servers and relays their messages |
+| `src-tauri/src/tools.rs` | Tool paths and Mago formatting |
+| `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |

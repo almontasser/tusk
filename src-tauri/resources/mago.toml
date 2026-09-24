@@ -1,0 +1,14 @@
+# Default Mago configuration for projects without their own mago.toml.
+# A project's mago.toml replaces this file completely.
+
+[source]
+# Let the analyzer see framework and package classes, such as Laravel facades.
+includes = ["vendor"]
+
+[linter]
+integrations = ["laravel"]
+
+# Rules that flag idiomatic Laravel code on almost every file.
+[linter.rules]
+strict-types = { enabled = false }
+literal-named-argument = { enabled = false }

@@ -33,7 +33,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/tools/": "tools/"
+      "resources/tools/": "tools/",
+      "resources/mago.toml": "tools/mago.toml"
     }
   }
 }

@@ -27,9 +27,8 @@ pushes events to the frontend with Tauri events (`emit`).
 | Git and pull requests | The `git` and `gh` command-line tools | 5 |
 | Filament intelligence | A custom language server written in PHP | 6 |
 
-The backend plans to run every language server as a child process and merge
-their answers, so the frontend sees one language server. Milestone 2 builds
-this multiplexer.
+The backend runs each language server as a child process. The frontend starts
+one client per server, and Monaco merges their results.
 
 ## Editor shell (milestone 1)
 
@@ -76,9 +75,14 @@ Tauri runs the script before `dev` and `build`, and copies the folder into the
 app bundle as `tools/`. To upgrade a tool, change its URL and checksum in the
 script.
 
-| Tool | Version |
-| --- | --- |
-| Phpactor | 2026.06.23.0 |
+| Tool | Version | Form |
+| --- | --- | --- |
+| Phpactor | 2026.06.23.0 | PHP archive (`.phar`) |
+| Laravel LSP | 0.0.32 | PHP archive (`.phar`) |
+| Mago | 1.50.0 | Native binary for the build machine's architecture |
+
+Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
+download again.
 
 ### Finding PHP
 
@@ -148,6 +152,81 @@ them, and saves the file. It also runs file operations (create, rename, and
 delete) through Rust commands. When a class rename renames its file, the open
 tab moves to the new path.
 
+## Laravel, diagnostics, and formatting (milestone 3)
+
+### Several language servers
+
+`lsp.rs` keeps running servers by name. `lsp_start` accepts only known names
+(`phpactor` and `laravel`), so the frontend can't start arbitrary commands.
+Each server's messages arrive as a separate event (`lsp:phpactor` and
+`lsp:laravel`).
+
+In `lsp.ts`, `startServer` creates one client per server with its own request
+IDs, diagnostics, and Monaco providers. It passes the server's language list to
+every provider registration:
+
+| Server | Languages | Starts when |
+| --- | --- | --- |
+| Phpactor | `php` | Always |
+| Laravel LSP | `php`, `blade` | The folder has an `artisan` file |
+
+Monaco combines providers for the same language: it merges completion lists,
+definitions, references, hovers, code actions, and links. Each server writes
+its markers under its own owner (`lsp:phpactor` or `lsp:laravel`), so one
+server's diagnostics never replace another's. A code action carries the
+function that runs it, so it goes back to the server that created it.
+
+### Server lifetime
+
+Opening another folder stops the old clients and servers. Quitting the app
+stops all servers through `LspState::stop_all`.
+
+If the app crashes or is force-quit, that code never runs. Phpactor ignores the
+LSP `processId` and keeps running, so each server starts through a small shell
+watchdog (`WATCHDOG` in `lsp.rs`). The shell starts a loop that checks the
+app's process ID every 2 seconds, then replaces itself with the server through
+`exec`. The server keeps the shell's process ID, so stopping it normally still
+works, and the loop kills it within 2 seconds after the app dies.
+
+### Mago
+
+Phpactor has a built-in Mago integration. The client turns it on and points it
+at the bundled binary, so Mago's static analysis and lint results arrive as
+Phpactor diagnostics while you type.
+
+Formatting doesn't go through a language server. The `format_php` command pipes
+the file through `mago format --stdin-input` in the project folder. Monaco
+turns the whole-file result into minimal edits, so the cursor and undo history
+stay useful.
+
+### Default Mago configuration
+
+Without a project `mago.toml`, Mago doesn't read `vendor`. The analyzer then
+reports every facade method and framework helper as missing. On the test app,
+Mago's default lint rules also produced 124 `literal-named-argument` warnings
+and 30 `strict-types` warnings on standard Laravel code. The bundled
+`resources/mago.toml` includes `vendor`, turns on the Laravel lint integration,
+and turns those two rules off. The client passes it to Phpactor only when the
+project has no `mago.toml`.
+
+### PHPStan and Larastan
+
+If the project has `vendor/bin/phpstan`, the client turns on Phpactor's PHPStan
+integration. PHPStan reads the project's own configuration, so Larastan works
+when the project installs it.
+
+### Blade
+
+Monaco has no Blade language. `editor.ts` registers `blade` for `.blade.php`
+files, which takes precedence over `php` because the extension is longer. The
+grammar is Monaco's PHP grammar with rules for Blade comments, echo delimiters,
+and directives added in front. The PHP grammar's plain-text rule would consume
+Blade syntax, so the Blade grammar replaces it with one that stops at `@`, `{`,
+`}`, and `!`. Blade rules apply in HTML text, not inside tags or attributes.
+
+Because Blade files have their own language, Phpactor doesn't receive them and
+can't report PHP errors in template markup.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -199,11 +278,26 @@ also renames the file on disk. If the edits stayed unsaved in memory, the file
 rename would move the old contents. Saving every touched file avoids that, and
 matches how PhpStorm behaves.
 
-### 2026-09-24: One language server until milestone 3
+### 2026-09-24: Monaco merges language servers instead of a Rust multiplexer
 
-The multiplexer that merges several language servers arrives with the second
-server (Laravel LSP) in milestone 3. Building it earlier would mean designing
-merge rules without a second server to test them against.
+The plan was a Rust multiplexer that merged several servers into one. Monaco
+already merges results from several providers for the same language, and it
+keeps markers apart by owner. One client per server needs no merge rules and
+no protocol parsing in Rust.
+
+### 2026-09-24: Watchdog shell instead of relying on `processId`
+
+The LSP `processId` field asks servers to exit when the editor dies. Laravel LSP
+does; Phpactor doesn't. Leaked servers keep indexing and using memory. A shell
+loop that checks the app's process ID works for every server, and `exec` keeps
+the server's process ID stable.
+
+### 2026-09-24: Bundled default Mago configuration
+
+Mago's defaults suit strict libraries, not Laravel apps. Without a
+configuration, the editor showed false errors on every facade call. A small
+bundled default makes Mago useful without setup, and a project's own
+`mago.toml` always wins.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

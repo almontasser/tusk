@@ -1,5 +1,8 @@
 mod fs;
 mod lsp;
+mod tools;
+
+use tauri::Manager;
 
 /// Apps opened from Finder get a minimal PATH, so tools installed through
 /// Homebrew, Herd, or Composer are missing. Adopt the login shell's PATH instead.
@@ -39,7 +42,16 @@ pub fn run() {
             fs::watch,
             lsp::lsp_start,
             lsp::lsp_send,
+            tools::tool_path,
+            tools::path_exists,
+            tools::format_php,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Language servers keep running when their parent dies, so stop them on quit.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<lsp::LspState>().stop_all();
+            }
+        });
 }
