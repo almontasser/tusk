@@ -12,6 +12,7 @@
         <button role="tab" data-view="project" class="active">Project</button>
         <button role="tab" data-view="commit">Commit</button>
         <button role="tab" data-view="prs">Pull Requests</button>
+        <button role="tab" data-view="search">Find</button>
       </nav>
       <section id="view-project">
         <div id="project">No folder open.</div>
@@ -32,6 +33,23 @@
             <button id="commit-push">Commit and Push</button>
           </div>
         </div>
+      </section>
+      <section id="view-search" hidden>
+        <div class="search-form">
+          <div class="search-row">
+            <input id="find-query" placeholder="Find in files" aria-label="Find in files" spellcheck="false" />
+            <button id="opt-case" title="Match case" aria-pressed="false">Aa</button>
+            <button id="opt-word" title="Whole words" aria-pressed="false">W</button>
+            <button id="opt-regex" title="Regular expression" aria-pressed="false">.*</button>
+          </div>
+          <div class="search-row">
+            <input id="replace-with" placeholder="Replace with ($1 in regex mode)" aria-label="Replace with" spellcheck="false" />
+            <button id="replace-all" title="Replace all matches">Replace All</button>
+          </div>
+          <input id="find-include" placeholder="Files to include, such as *.php, app/**" aria-label="Files to include" spellcheck="false" />
+        </div>
+        <p id="find-summary"></p>
+        <ul id="find-results"></ul>
       </section>
       <section id="view-prs" hidden>
         <div id="pr-list-view">

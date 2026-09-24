@@ -296,14 +296,34 @@ favors consecutive letters and letters that start a word, such as the `P` and
 | --- | --- |
 | Go to file | `list_files` in `search.rs` |
 | Go to class and go to symbol | `workspace/symbol` from every server that supports it |
-| Find in files | `search_text` in `search.rs` |
+| Find in files | `search_text` in `search.rs`, shown in the Find view (`src/search.ts`) |
 | Search everywhere | Classes, files, and actions together |
 
 `search.rs` uses ripgrep's crates (`ignore` and `grep`). Both commands respect
 `.gitignore` files, even outside a git repository, so `vendor` and
-`node_modules` are skipped in Laravel projects. Find in files returns at most
-2000 matches and is case-sensitive only when the query has a capital letter.
-Both commands are `async`, so Tauri runs them off the main thread.
+`node_modules` are skipped in Laravel projects. Both are `async`, so Tauri runs
+them off the main thread.
+
+### Find and replace in files
+
+A `Query` holds the text and three options: case-sensitive, whole word, and
+regex. `Query::pattern` builds one regular expression from it (the text is
+escaped unless it's a regex, and whole words wrap it in `\b`). Search compiles
+that pattern with `grep`'s matcher, and `replace_text` compiles the same
+pattern with the `regex` crate, which uses the same syntax. So the matches the
+Find view shows are exactly the text that Replace changes.
+
+`search_text` returns one result per occurrence, up to 2000, with start and
+end columns in UTF-16 code units, which are also JavaScript string indexes. The
+include field becomes `ignore` overrides, so `*.php` limits the walk to PHP
+files.
+
+`replace_text` takes a file's text and returns the new text and a count. In
+regex mode, the replacement can use `$1` and `${name}`; otherwise it's literal
+(`NoExpand`), so a `$` in the replacement stays a `$`. The Find view reads open
+files from their Monaco models, so unsaved text is included. It applies the
+result with `pushEditOperations`, which you can undo, and saves the file. Other
+files are read and rewritten on disk.
 
 Go to class hides symbols inside the bundled `phpactor.phar`, because Phpactor
 also indexes the PHP stubs it ships and those files can't be opened.

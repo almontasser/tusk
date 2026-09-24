@@ -1,61 +1,102 @@
 use grep::matcher::Matcher;
-use grep::regex::RegexMatcherBuilder;
+use grep::regex::{RegexMatcher, RegexMatcherBuilder};
 use grep::searcher::{sinks::UTF8, Searcher};
-use ignore::WalkBuilder;
-use serde::Serialize;
+use ignore::{overrides::OverrideBuilder, WalkBuilder};
+use serde::{Deserialize, Serialize};
 
 const MAX_MATCHES: usize = 2000;
 
 /// Walks the project like ripgrep: respects .gitignore (even outside a git repo),
-/// includes dotfiles, and skips .git.
-fn walk(root: &str) -> impl Iterator<Item = ignore::DirEntry> {
-    WalkBuilder::new(root)
+/// includes dotfiles, and skips .git. `include` is a comma-separated list of globs,
+/// such as `*.php, *.blade.php`; empty means every file.
+fn walk(root: &str, include: &str) -> Result<impl Iterator<Item = ignore::DirEntry>, String> {
+    let mut overrides = OverrideBuilder::new(root);
+    for glob in include.split(',').map(str::trim).filter(|g| !g.is_empty()) {
+        overrides.add(glob).map_err(|e| e.to_string())?;
+    }
+    Ok(WalkBuilder::new(root)
         .hidden(false)
         .require_git(false)
+        .overrides(overrides.build().map_err(|e| e.to_string())?)
         .filter_entry(|e| e.file_name() != ".git")
         .build()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file())))
 }
 
 /// Project files as paths relative to `root`.
 #[tauri::command]
 pub async fn list_files(root: String) -> Vec<String> {
-    walk(&root)
-        .filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into()))
-        .collect()
+    walk(&root, "")
+        .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into())).collect())
+        .unwrap_or_default()
+}
+
+/// Search options, shared by search and replace so both match exactly the same text.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Query {
+    text: String,
+    regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+}
+
+impl Query {
+    /// The regular expression: the text escaped unless it's a regex, wrapped in word boundaries if asked.
+    fn pattern(&self) -> String {
+        let p = if self.regex { self.text.clone() } else { regex::escape(&self.text) };
+        if self.whole_word { format!(r"\b(?:{p})\b") } else { p }
+    }
+
+    fn matcher(&self) -> Result<RegexMatcher, String> {
+        RegexMatcherBuilder::new().case_insensitive(!self.case_sensitive).build(&self.pattern()).map_err(|e| e.to_string())
+    }
+
+    fn regex(&self) -> Result<regex::Regex, String> {
+        regex::RegexBuilder::new(&self.pattern())
+            .case_insensitive(!self.case_sensitive)
+            .multi_line(true)
+            .build()
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Serialize)]
 pub struct Match {
     path: String,
     line: u64,
-    /// 1-based column in UTF-16 code units, as Monaco counts them.
+    /// 1-based start and end columns in UTF-16 code units, as Monaco counts them.
     column: usize,
+    end: usize,
     text: String,
 }
 
+/// Every occurrence of the query in the project, up to 2000.
 #[tauri::command]
-pub async fn search_text(root: String, query: String, regex: bool, case_sensitive: bool) -> Result<Vec<Match>, String> {
-    let matcher = RegexMatcherBuilder::new()
-        .fixed_strings(!regex)
-        .case_insensitive(!case_sensitive)
-        .build(&query)
-        .map_err(|e| e.to_string())?;
+pub async fn search_text(root: String, query: Query, include: String) -> Result<Vec<Match>, String> {
+    if query.text.is_empty() {
+        return Ok(vec![]);
+    }
+    let matcher = query.matcher()?;
     let mut searcher = Searcher::new();
     let mut matches = Vec::new();
-    for entry in walk(&root) {
+    for entry in walk(&root, &include)? {
         let path = entry.path();
         let _ = searcher.search_path(
             &matcher,
             path,
             UTF8(|line, text| {
-                let start = matcher.find(text.as_bytes()).ok().flatten().map_or(0, |m| m.start());
-                matches.push(Match {
-                    path: path.to_string_lossy().into(),
-                    line,
-                    column: text[..start].encode_utf16().count() + 1,
-                    text: text.trim_end().into(),
+                let utf16 = |byte: usize| text[..byte].encode_utf16().count() + 1;
+                let _ = matcher.find_iter(text.as_bytes(), |m| {
+                    matches.push(Match {
+                        path: path.to_string_lossy().into(),
+                        line,
+                        column: utf16(m.start()),
+                        end: utf16(m.end()),
+                        text: text.trim_end().into(),
+                    });
+                    matches.len() < MAX_MATCHES
                 });
                 Ok(matches.len() < MAX_MATCHES)
             }),
@@ -67,27 +108,70 @@ pub async fn search_text(root: String, query: String, regex: bool, case_sensitiv
     Ok(matches)
 }
 
+#[derive(Serialize)]
+pub struct Replaced {
+    text: String,
+    count: usize,
+}
+
+/// Replaces every occurrence of the query in `text`. In regex mode, `$1` and `${name}` in the
+/// replacement refer to capture groups; otherwise the replacement is literal.
+#[tauri::command]
+pub fn replace_text(text: String, query: Query, replacement: String) -> Result<Replaced, String> {
+    let re = query.regex()?;
+    let count = re.find_iter(&text).count();
+    let text = if query.regex {
+        re.replace_all(&text, replacement.as_str()).into_owned()
+    } else {
+        re.replace_all(&text, regex::NoExpand(&replacement)).into_owned()
+    };
+    Ok(Replaced { text, count })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn q(text: &str, regex: bool, case_sensitive: bool, whole_word: bool) -> Query {
+        Query { text: text.into(), regex, case_sensitive, whole_word }
+    }
+
     #[test]
-    fn finds_text_and_respects_gitignore() {
+    fn finds_every_occurrence_and_respects_gitignore_and_include() {
         let dir = std::env::temp_dir().join(format!("php-editor-search-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("vendor")).unwrap();
         std::fs::write(dir.join(".gitignore"), "vendor/\n").unwrap();
-        std::fs::write(dir.join("a.php"), "<?php\n$x = 'Café Needle';\n").unwrap();
-        std::fs::write(dir.join("vendor/b.php"), "needle").unwrap();
+        std::fs::write(dir.join("a.php"), "<?php\n$x = 'Café Needle needle';\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "needle").unwrap();
+        std::fs::write(dir.join("vendor/c.php"), "needle").unwrap();
         let root = dir.to_string_lossy().to_string();
+        let search = |query: Query, include: &str| tauri::async_runtime::block_on(search_text(root.clone(), query, include.into())).unwrap();
 
-        let found = tauri::async_runtime::block_on(search_text(root.clone(), "needle".into(), false, false)).unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!((found[0].line, found[0].column), (2, 12));
+        let found = search(q("needle", false, false, false), "");
+        assert_eq!(found.len(), 3); // Two in a.php, one in b.txt; vendor is ignored.
+        let first = found.iter().find(|m| m.path.ends_with("a.php")).unwrap();
+        assert_eq!((first.line, first.column, first.end), (2, 12, 18));
 
-        let files = tauri::async_runtime::block_on(list_files(root.clone()));
+        assert_eq!(search(q("needle", false, true, false), "").len(), 2);
+        assert_eq!(search(q("needle", false, false, false), "*.php").len(), 2);
+        assert_eq!(search(q("Need", false, false, true), "").len(), 0);
+        assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into())).is_err());
+
+        let files = tauri::async_runtime::block_on(list_files(root));
         assert!(files.contains(&"a.php".to_string()) && !files.iter().any(|f| f.starts_with("vendor")));
-
-        assert!(tauri::async_runtime::block_on(search_text(root, "Needle".into(), false, true)).unwrap().len() == 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn replaces_literally_or_with_capture_groups() {
+        let text = "$a = 1; $ab = 2; $A = 3;\n";
+        let r = replace_text(text.into(), q("$a", false, true, false), "$1".into()).unwrap();
+        assert_eq!((r.text.as_str(), r.count), ("$1 = 1; $1b = 2; $A = 3;\n", 2));
+
+        let r = replace_text(text.into(), q("a", false, false, true), "x".into()).unwrap();
+        assert_eq!(r.text, "$x = 1; $ab = 2; $x = 3;\n");
+
+        let r = replace_text("foo(1, 2)".into(), q(r"foo\((\d), (\d)\)", true, true, false), "bar($2, $1)".into()).unwrap();
+        assert_eq!(r.text, "bar(2, 1)");
     }
 }

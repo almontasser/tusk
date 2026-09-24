@@ -54,6 +54,7 @@ pub fn run() {
             tools::run_capture,
             search::list_files,
             search::search_text,
+            search::replace_text,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

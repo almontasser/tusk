@@ -7,6 +7,7 @@ import { type Item, pick, rank } from "./palette";
 import { annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
+import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
@@ -320,6 +321,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     }
     renderTabs();
     refreshGit();
+    refreshSearch();
   }, 150);
 });
 
@@ -381,19 +383,6 @@ async function symbolItems(query: string, typesOnly: boolean): Promise<Item[]> {
 const goToClass = () => pick("Go to class", (q) => symbolItems(q, true), 150);
 const goToSymbol = () => pick("Go to symbol", (q) => symbolItems(q, false), 150);
 
-function findInFiles() {
-  pick("Find in files (case-sensitive when the text has capitals)", async (query) => {
-    if (query.length < 2) return [];
-    type Match = { path: string; line: number; column: number; text: string };
-    const matches = await invoke<Match[]>("search_text", { root, query, regex: false, caseSensitive: /[A-Z]/.test(query) });
-    return matches.map((m) => ({
-      label: m.text.trim().slice(0, 200),
-      detail: `${relative(m.path)}:${m.line}`,
-      run: () => openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.column + query.length)),
-    }));
-  }, 200);
-}
-
 const recentFiles = () => pick("Recent files", (q) => rank(q, recent.filter((p) => p !== active).map(fileItem)));
 
 // ---- Actions and keyboard shortcuts ----
@@ -440,7 +429,8 @@ const actions: Action[] = [
   { label: "Go to File", keys: "Meta+Shift+O", run: goToFile },
   { label: "Go to Class", keys: "Meta+O", run: goToClass },
   { label: "Go to Symbol", keys: "Alt+Meta+O", run: goToSymbol },
-  { label: "Find in Files", keys: "Meta+Shift+F", run: findInFiles },
+  { label: "Find in Files", keys: "Meta+Shift+F", run: () => openSearch(editor) },
+  { label: "Replace in Files", keys: "Meta+Shift+R", run: () => openSearch(editor, true) },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
   { label: "Commit…", keys: "Meta+K", run: focusCommit },
@@ -523,6 +513,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initSearch({ root: () => root, openAt, markSaved, status, showView });
 editor.onDidChangeCursorPosition(saveSoon);
 editor.onDidScrollChange(saveSoon);
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });

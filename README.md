@@ -30,7 +30,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Type hierarchy | Phpactor can provide it, but Monaco has no view for it. It needs its own panel. |
-| Find in files | Plain text only. There's no regex option, and case sensitivity is automatic: the search is case-sensitive only when the query has a capital letter (`search_text` in `src-tauri/src/search.rs` already accepts both options; `findInFiles` in `src/main.ts` needs toggles). |
+| Find in files | Results stop at 2,000 matches, and Replace All changes only the files in those results. There's no replace for a single match. |
 | Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
 | Test results | Tests print to a terminal tab. There's no tree of passed and failed tests (it would parse JUnit output in `src/runner.ts`). |
 | Test detection | Line-based patterns in `src/phptests.ts` miss declarations split across lines. |
@@ -50,7 +50,6 @@ file to change when you add it.
 | --- | --- |
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | There's one editor pane. Only the diff view shows two files side by side. |
-| Replace in files | Find in files can't replace. |
 | Saving | There's no **Save All** and no auto-save. |
 | Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
 | Debugger | There's no Xdebug integration or step debugging. |
@@ -129,6 +128,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌥⌘O | Go to symbol in the project |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
+| ⌘⇧R | Replace in files |
 | ⌘F12 | File structure |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
@@ -189,6 +189,25 @@ Drag a file or folder onto a folder to move it there.
   their files and keep unsaved changes.
 - **Deleting** moves files to the macOS Trash, so you can restore them.
 - **No overwrites.** Renaming or creating never replaces an existing file.
+
+## Find and replace in files
+
+Press ⌘⇧F to open the **Find** view in the sidebar, or ⌘⇧R to go straight to
+the replace field. If you have a single line selected in the editor, it
+becomes the query.
+
+- Toggle **Aa** for a case-sensitive search, **W** for whole words, and **.\***
+  for a regular expression.
+- To limit the search, list globs in the include field, such as
+  `*.php, *.blade.php` or `app/**`. Files ignored by `.gitignore` are never
+  searched.
+- Results are grouped by file, with each match highlighted. Click a match to
+  open it.
+- **Replace All**, or ⏎ in the replace field, replaces every listed match after
+  you confirm. Hover over a file for **Replace** to change only that file. In
+  regex mode, `$1` or `${name}` inserts a captured group.
+- Files open in the editor change through an undoable edit, including any
+  unsaved text, and are saved. Other files are rewritten on disk.
 
 ## Laravel features
 
@@ -305,6 +324,7 @@ committed.
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
+| `src/search.ts` | The Find view: find and replace in files |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

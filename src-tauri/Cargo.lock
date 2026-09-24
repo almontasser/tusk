@@ -2811,6 +2811,7 @@ dependencies = [
  "ignore",
  "notify",
  "portable-pty",
+ "regex",
  "serde",
  "serde_json",
  "tauri",
