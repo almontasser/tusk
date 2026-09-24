@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
+import { didSave, startLsp } from "./lsp";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -30,7 +31,32 @@ async function openFolder(dir: unknown = null) {
   await renderDir($("tree") as HTMLUListElement, dir);
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
+  startLsp(dir, { ensureModel, markSaved, renamed, status }).catch((e) => status(`Language server failed: ${e}`));
 }
+
+async function ensureModel(path: string) {
+  const uri = monaco.Uri.file(path);
+  const existing = monaco.editor.getModel(uri);
+  if (existing) return existing;
+  const text = await invoke<string>("read_file", { path });
+  // Another caller may have created the model while the file was loading.
+  return monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, undefined, uri);
+}
+
+function markSaved(path: string) {
+  const tab = tabs.get(path);
+  if (tab) tab.saved = tab.model.getAlternativeVersionId();
+  renderTabs();
+}
+
+async function renamed(from: string, to: string) {
+  const wasActive = active === from;
+  if (tabs.has(from)) await closeTab(from);
+  else monaco.editor.getModel(monaco.Uri.file(from))?.dispose();
+  if (wasActive) await openFile(to);
+}
+
+const status = (text: string) => ($("lsp-status").textContent = text);
 
 async function renderDir(ul: HTMLUListElement, dir: string) {
   renderedDirs.set(dir, ul);
@@ -74,8 +100,7 @@ function toggleDir(path: string, row: HTMLElement, children: HTMLUListElement) {
 
 async function openFile(path: string) {
   if (!tabs.has(path)) {
-    const text = await invoke<string>("read_file", { path });
-    const model = monaco.editor.createModel(text, undefined, monaco.Uri.file(path));
+    const model = await ensureModel(path);
     tabs.set(path, { model, saved: model.getAlternativeVersionId() });
     model.onDidChangeContent(renderTabs);
   }
@@ -104,8 +129,8 @@ async function save() {
   const tab = tabs.get(active);
   if (!tab) return;
   await invoke("write_file", { path: active, contents: tab.model.getValue() });
-  tab.saved = tab.model.getAlternativeVersionId();
-  renderTabs();
+  markSaved(active);
+  didSave(tab.model);
 }
 
 function renderTabs() {
@@ -126,7 +151,7 @@ function renderTabs() {
       return el;
     }),
   );
-  $("status").textContent = active ? active.replace(root + "/", "") : "";
+  $("path").textContent = active ? active.replace(root + "/", "") : "";
 }
 
 function markActiveInTree() {
@@ -144,12 +169,13 @@ listen<string[]>("fs-change", ({ payload }) => {
     const paths = pending;
     pending = new Set();
     for (const path of paths) {
+      const model = monaco.editor.getModel(monaco.Uri.file(path));
       const tab = tabs.get(path);
-      if (tab && !isDirty(tab)) {
+      if (model && !(tab && isDirty(tab))) {
         const text = await invoke<string>("read_file", { path }).catch(() => null);
-        if (text !== null && text !== tab.model.getValue()) {
-          tab.model.setValue(text);
-          tab.saved = tab.model.getAlternativeVersionId();
+        if (text !== null && text !== model.getValue()) {
+          model.setValue(text);
+          if (tab) tab.saved = model.getAlternativeVersionId();
         }
       }
     }
@@ -159,6 +185,19 @@ listen<string[]>("fs-change", ({ payload }) => {
     }
     renderTabs();
   }, 150);
+});
+
+// Go to definition, references, and similar features open other files through this hook.
+monaco.editor.registerEditorOpener({
+  openCodeEditor(_, resource, selection) {
+    openFile(resource.fsPath).then(() => {
+      if (!selection) return;
+      if (monaco.Range.isIRange(selection)) editor.setSelection(selection);
+      else editor.setPosition(selection);
+      editor.revealRangeInCenterIfOutsideViewport(editor.getSelection()!);
+    });
+    return true;
+  },
 });
 
 window.addEventListener(

@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.almontasser.phpeditor",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "sh scripts/fetch-tools.sh && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "sh scripts/fetch-tools.sh && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -31,6 +31,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/tools/": "tools/"
+    }
   }
 }

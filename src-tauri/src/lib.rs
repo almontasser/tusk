@@ -1,7 +1,26 @@
 mod fs;
+mod lsp;
+
+/// Apps opened from Finder get a minimal PATH, so tools installed through
+/// Homebrew, Herd, or Composer are missing. Adopt the login shell's PATH instead.
+fn use_login_shell_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let Ok(out) = std::process::Command::new(shell)
+        .args(["-ilc", "printf '\\n__PATH__%s__PATH__' \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    let out = String::from_utf8_lossy(&out.stdout);
+    if let Some(path) = out.split("__PATH__").nth(1).filter(|p| !p.is_empty()) {
+        std::env::set_var("PATH", path);
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use_login_shell_path();
     let mut builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
     {
@@ -10,7 +29,17 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(fs::WatchState::default())
-        .invoke_handler(tauri::generate_handler![fs::read_dir, fs::read_file, fs::write_file, fs::watch])
+        .manage(lsp::LspState::default())
+        .invoke_handler(tauri::generate_handler![
+            fs::read_dir,
+            fs::read_file,
+            fs::write_file,
+            fs::rename_path,
+            fs::remove_path,
+            fs::watch,
+            lsp::lsp_start,
+            lsp::lsp_send,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

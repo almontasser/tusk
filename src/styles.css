@@ -32,4 +32,4 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabs .tab .close:hover { opacity: 1; }
 #tabs .tab.dirty .close::before { content: "● "; }
 #editor { flex: 1; min-height: 0; }
-#status { padding: 2px 12px; background: var(--panel); border-top: 1px solid var(--border); color: var(--muted); min-height: 22px; }
+#status { display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; overflow: hidden; padding: 2px 12px; background: var(--panel); border-top: 1px solid var(--border); color: var(--muted); min-height: 22px; }

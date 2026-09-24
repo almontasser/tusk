@@ -39,6 +39,17 @@ pub fn write_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn rename_path(from: String, to: String) -> Result<(), String> {
+    std::fs::rename(from, to).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map_err(|e| e.to_string())
+}
+
 /// Watches `path` recursively and emits `fs-change` with the changed paths.
 /// Replaces any previous watcher, so only one project is watched at a time.
 #[tauri::command]
