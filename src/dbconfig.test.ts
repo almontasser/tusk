@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionFromEnv, literal, parseEnv, quoteIdentifier, statementAt, updateStatement } from "./dbconfig.ts";
+import { connectionFromEnv, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, statementAt, updateStatement } from "./dbconfig.ts";
 
 test("parses .env values", () => {
   const env = parseEnv(`# comment\nDB_CONNECTION=mysql\nDB_PASSWORD="se#cret"\nDB_HOST=db # the host\n# DB_PORT=1\nexport DB_USERNAME='sail'\n`);
@@ -41,4 +41,11 @@ test("builds cell updates", () => {
   assert.equal(literal("pgsql", "a\\b"), "'a\\b'");
   assert.equal(updateStatement("sqlite", "posts", "title", null, { id: "7" }), `UPDATE "posts" SET "title" = NULL WHERE "id" = '7'`);
   assert.equal(updateStatement("mysql", "t", "v", "x", { a: "1", b: null }), "UPDATE `t` SET `v` = 'x' WHERE `a` = '1' AND `b` IS NULL");
+});
+
+test("builds row inserts and deletes", () => {
+  assert.equal(deleteStatement("pgsql", "posts", { id: "7" }), `DELETE FROM "posts" WHERE "id" = '7'`);
+  assert.equal(insertStatement("sqlite", "posts", { title: "Hi", body: null }), `INSERT INTO "posts" ("title", "body") VALUES ('Hi', NULL)`);
+  assert.equal(insertStatement("mysql", "t", {}), "INSERT INTO `t` () VALUES ()");
+  assert.equal(insertStatement("pgsql", "t", {}), `INSERT INTO "t" DEFAULT VALUES`);
 });

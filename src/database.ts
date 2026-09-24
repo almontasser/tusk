@@ -6,7 +6,9 @@ import {
   columnsQuery,
   type Connection,
   connectionFromEnv,
+  deleteStatement,
   hasCode,
+  insertStatement,
   parseEnv,
   primaryKeyQuery,
   quoteIdentifier,
@@ -16,6 +18,7 @@ import {
   updateStatement,
 } from "./dbconfig";
 import { monaco } from "./editor";
+import { pick } from "./palette";
 import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
@@ -191,7 +194,7 @@ async function run(sql: string, table?: string) {
   const scroll = el("div", "db-grid");
   scroll.append(grid);
   results.append(scroll);
-  if (table) makeEditable(table, result, rows, summary);
+  if (table) makeEditable(sql, table, result, rows, summary, body);
 }
 
 function cell(td: HTMLElement, value: string | null) {
@@ -200,8 +203,11 @@ function cell(td: HTMLElement, value: string | null) {
   return td;
 }
 
-/** Double-click a cell to edit it. Enter saves the change to the database at once, and Escape cancels. */
-async function makeEditable(table: string, result: Result, rows: HTMLElement[], summary: HTMLElement) {
+/**
+ * Double-click a cell to edit it. Enter saves the change to the database at once, and Escape cancels.
+ * Click a row's number to select it (⌘-click for several), to delete the selected rows.
+ */
+async function makeEditable(sql: string, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
   const driver = connection!.driver;
   const keys = (await query(primaryKeyQuery(driver, table)).catch(() => ({ rows: [] }))).rows.map((r) => r[0]!);
   const keyIndexes = keys.map((k) => result.columns.indexOf(k));
@@ -209,6 +215,81 @@ async function makeEditable(table: string, result: Result, rows: HTMLElement[], 
     summary.append(" · read-only, because the table has no primary key");
     return;
   }
+  const keyOf = (cells: (string | null)[]) => Object.fromEntries(keys.map((k, i) => [k, cells[keyIndexes[i]]]));
+  const button = (label: string, name: string, onclick: () => unknown) => {
+    const b = el("button", "db-action");
+    b.append(icon(name), label);
+    b.onclick = onclick;
+    summary.append(b);
+    return b;
+  };
+
+  button("Add Row", "add", () => {
+    if (body.querySelector(".new-row")) return;
+    const tr = el("tr", "new-row");
+    const inputs = result.columns.map((c) => {
+      const input = el("input");
+      input.placeholder = "default";
+      input.title = `${c}: leave empty for the column's default, or type NULL`;
+      const td = el("td", "editing");
+      td.append(input);
+      return { c, input, td };
+    });
+    tr.append(el("td", "index", "new"), ...inputs.map((i) => i.td));
+    body.prepend(tr);
+    tr.parentElement!.parentElement!.parentElement!.scrollTop = 0;
+    inputs[0]?.input.focus();
+    tr.onkeydown = async (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") tr.remove();
+      if (e.key !== "Enter") return;
+      const values = Object.fromEntries(inputs.filter((i) => i.input.value !== "").map((i) => [i.c, i.input.value === "NULL" ? null : i.input.value]));
+      try {
+        await query(insertStatement(driver, table, values));
+        host.status(`Added a row to ${table}`);
+        run(sql, table);
+      } catch (e) {
+        host.status(`Can't add the row to ${table}: ${String(e)}`);
+      }
+    };
+  });
+
+  const selected = new Set<number>();
+  const remove = button("Delete Rows", "trash", () => {
+    const count = selected.size;
+    const label = `Delete ${count} ${count === 1 ? "row" : "rows"} from ${table}`;
+    // Confirmed in the palette rather than a native dialog, which a page reload could leave stuck on screen.
+    pick(`${label}? This can't be undone.`, () => [
+      {
+        label,
+        run: async () => {
+          let deleted = 0;
+          try {
+            for (const r of selected) deleted += (await query(deleteStatement(driver, table, keyOf(result.rows[r])))).affected;
+            host.status(`Deleted ${deleted} ${deleted === 1 ? "row" : "rows"} from ${table}`);
+          } catch (e) {
+            host.status(`Deleted ${deleted}, then stopped: ${String(e)}`);
+          }
+          run(sql, table);
+        },
+      },
+      { label: "Cancel", run: () => {} },
+    ]);
+  });
+  remove.disabled = true;
+  rows.forEach((tr, r) => {
+    const index = tr.children[0] as HTMLElement;
+    index.title = "Click to select the row, ⌘-click to select several";
+    index.onclick = (e) => {
+      if (!e.metaKey) {
+        if (!selected.has(r) || selected.size > 1) selected.clear();
+        rows.forEach((row) => row.classList.remove("selected"));
+      }
+      selected.has(r) ? selected.delete(r) : selected.add(r);
+      for (const i of selected) rows[i].classList.add("selected");
+      remove.disabled = !selected.size;
+    };
+  });
   rows.forEach((tr, r) =>
     result.columns.forEach((column, c) => {
       const td = tr.children[c + 1] as HTMLElement;
@@ -227,9 +308,8 @@ async function makeEditable(table: string, result: Result, rows: HTMLElement[], 
           done = true;
           const value = input.value === "NULL" ? null : input.value;
           if (save && value !== cells[c]) {
-            const key = Object.fromEntries(keys.map((k, i) => [k, cells[keyIndexes[i]]]));
             try {
-              const { affected } = await query(updateStatement(driver, table, column, value, key));
+              const { affected } = await query(updateStatement(driver, table, column, value, keyOf(cells)));
               if (affected !== 1) throw new Error(`${affected} rows matched the row's key`);
               cells[c] = value;
               host.status(`Updated ${table}.${column}`);

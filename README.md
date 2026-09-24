@@ -34,12 +34,12 @@ file to change when you add it.
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
 | Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
-| Formatting | Formatting runs only when you ask (⌥⌘L), not on save. Without Prettier, only PHP files format. |
+| Formatting | Without Prettier, only PHP files format. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
-| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. You can edit cells of a table's data, but not add or delete rows. |
+| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
 | Pull requests | There are no comments on specific lines of the diff, and GitHub references such as `#123` and `@name` aren't links (`src/prs.ts`). |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
@@ -689,6 +689,10 @@ installing a client, because the drivers are built into the app.
   edit it, and press Enter to save the change to the database, or Escape to
   cancel. Type `NULL` for a null value. Tables without a primary key are
   read-only.
+- To add a row, click **Add Row**, fill in the values, and press Enter. Leave a
+  value empty to use the column's default.
+- To delete rows, click a row's number to select it (⌘-click to select
+  several), click **Delete Rows**, and confirm.
 - Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then
   press ⌘⏎ to run the statement under the caret, or the selection. ⌘⏎ also runs
   SQL in any `.sql` file.

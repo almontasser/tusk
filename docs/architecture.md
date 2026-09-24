@@ -1168,6 +1168,11 @@ literal that the database converts to the column's type. The row is found by
 its primary key (`primaryKeyQuery`), using the values shown in the grid. If
 the update doesn't change exactly one row, the editor reports it and keeps the
 old value. There's no batch of pending edits to submit, as PhpStorm has.
+**Add Row** runs one `INSERT` with only the columns you filled in, so the rest
+get their defaults (`DEFAULT VALUES`, or `() VALUES ()` on MySQL, when none
+are filled in). **Delete Rows** runs one `DELETE` per selected row, by primary
+key, after a confirmation in the palette. Both run the grid's query again to
+show the result.
 `statementAt` finds the statement around the caret by splitting on semicolons,
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.

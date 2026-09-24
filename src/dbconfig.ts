@@ -89,9 +89,26 @@ export function literal(driver: string, value: string | null): string {
   return quote(driver === "mysql" || driver === "mariadb" ? value.replace(/\\/g, "\\\\") : value);
 }
 
+/** The WHERE condition for the row whose primary key has the given values. */
+function whereKey(driver: string, key: Record<string, string | null>): string {
+  const id = (name: string) => quoteIdentifier(driver, name);
+  return Object.entries(key).map(([k, v]) => (v === null ? `${id(k)} IS NULL` : `${id(k)} = ${literal(driver, v)}`)).join(" AND ");
+}
+
 /** Updates one cell of the row whose primary key has the given values. */
 export function updateStatement(driver: string, table: string, column: string, value: string | null, key: Record<string, string | null>): string {
   const id = (name: string) => quoteIdentifier(driver, name);
-  const where = Object.entries(key).map(([k, v]) => (v === null ? `${id(k)} IS NULL` : `${id(k)} = ${literal(driver, v)}`));
-  return `UPDATE ${id(table)} SET ${id(column)} = ${literal(driver, value)} WHERE ${where.join(" AND ")}`;
+  return `UPDATE ${id(table)} SET ${id(column)} = ${literal(driver, value)} WHERE ${whereKey(driver, key)}`;
+}
+
+/** Deletes the row whose primary key has the given values. */
+export const deleteStatement = (driver: string, table: string, key: Record<string, string | null>) =>
+  `DELETE FROM ${quoteIdentifier(driver, table)} WHERE ${whereKey(driver, key)}`;
+
+/** Inserts a row. Columns left out get their default values. */
+export function insertStatement(driver: string, table: string, values: Record<string, string | null>): string {
+  const id = (name: string) => quoteIdentifier(driver, name);
+  const columns = Object.keys(values);
+  if (!columns.length) return driver === "mysql" || driver === "mariadb" ? `INSERT INTO ${id(table)} () VALUES ()` : `INSERT INTO ${id(table)} DEFAULT VALUES`;
+  return `INSERT INTO ${id(table)} (${columns.map(id).join(", ")}) VALUES (${columns.map((c) => literal(driver, values[c])).join(", ")})`;
 }
