@@ -4,6 +4,7 @@ import { message, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
+import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, initDebugger, isPaused, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
@@ -41,6 +42,8 @@ function addPane(): Pane {
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
   ed.onDidFocusEditorText(() => focusPane(pane));
+  ed.onDidChangeCursorPosition(() => pane.editor === editor && updateStatusItems());
+  ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
   return pane;
 }
 
@@ -123,7 +126,10 @@ async function openFolder(dir: unknown = null) {
   viewStates.clear();
   Object.entries(session?.views ?? {}).forEach(([p, v]) => viewStates.set(p, v));
   $("project").textContent = nameOf(dir);
-  $("open-folder").hidden = true;
+  $("project-name").textContent = nameOf(dir);
+  $("project-badge").textContent = initials(nameOf(dir));
+  $("welcome").hidden = true;
+  rememberProject(dir);
   await renderDir($("tree") as HTMLUListElement, dir);
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
@@ -262,10 +268,125 @@ function forget(path: string) {
  * progress. The status bar shows the most recent message that is still set.
  */
 const statuses = new Map<string, string>();
+const statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Shows a status message. Sources ending in ":progress" are background work and show a
+ * spinner until cleared; other messages clear themselves after 8 seconds.
+ */
 function status(text: string, source = "app") {
   statuses.delete(source);
   if (text) statuses.set(source, text);
-  $("lsp-status").textContent = [...statuses.values()].at(-1) ?? "";
+  clearTimeout(statusTimers.get(source));
+  if (text && !source.endsWith(":progress")) statusTimers.set(source, setTimeout(() => status("", source), 8000));
+  const [latestSource, latest] = [...statuses].at(-1) ?? ["", ""];
+  $("lsp-status").textContent = latest;
+  $("lsp-status").classList.toggle("busy", latestSource.endsWith(":progress"));
+  // Failures also show as a toast, so they aren't missed in the status bar.
+  if (/\b(failed|error|fatal|can't|couldn't|invalid)\b/i.test(text)) toast(text);
+}
+
+/** Shows an error message in the corner for a few seconds. */
+function toast(text: string) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = `<span class="codicon codicon-error"></span><p></p><button class="codicon codicon-close" aria-label="Dismiss"></button>`;
+  // Git's "hint:" lines repeat advice; the first lines carry the error.
+  el.querySelector("p")!.textContent = text.split("\n").filter((l) => l.trim() && !l.startsWith("hint:")).join(" ");
+  const close = () => el.remove();
+  el.querySelector("button")!.onclick = close;
+  $("toasts").append(el);
+  setTimeout(close, 6000);
+}
+
+// ---- Status bar items for the focused editor ----
+
+function updateStatusItems() {
+  const model = editor.getModel();
+  const pos = editor.getPosition();
+  const selection = editor.getSelection();
+  const selected = selection && model && !selection.isEmpty() ? model.getValueInRange(selection).length : 0;
+  $("cursor-position").textContent = model && pos ? `${pos.lineNumber}:${pos.column}${selected ? ` (${selected} chars)` : ""}` : "";
+  const options = model?.getOptions();
+  $("indentation").textContent = options ? (options.insertSpaces ? `${options.tabSize} spaces` : `Tab size ${options.tabSize}`) : "";
+  $("encoding").textContent = model ? `UTF-8 · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
+  const language = model && monaco.languages.getLanguages().find((l) => l.id === model.getLanguageId());
+  $("language").textContent = language ? (language.aliases?.[0] ?? language.id) : "";
+}
+
+/** Error and warning counts across open files; clicking lists them. */
+function updateProblems() {
+  const markers = monaco.editor.getModelMarkers({}).filter((m) => tabs.has(m.resource.fsPath));
+  $("error-count").textContent = String(markers.filter((m) => m.severity === monaco.MarkerSeverity.Error).length);
+  $("warning-count").textContent = String(markers.filter((m) => m.severity === monaco.MarkerSeverity.Warning).length);
+}
+monaco.editor.onDidChangeMarkers(updateProblems);
+$("problems").onclick = () => {
+  const markers = monaco.editor
+    .getModelMarkers({})
+    .filter((m) => tabs.has(m.resource.fsPath) && m.severity >= monaco.MarkerSeverity.Warning)
+    .sort((a, b) => b.severity - a.severity);
+  pick("Problems in open files", (q) =>
+    rank(q, markers.map((m) => ({
+      label: m.message.split("\n")[0],
+      detail: `${relative(m.resource.fsPath)}:${m.startLineNumber}`,
+      icon: m.severity === monaco.MarkerSeverity.Error ? "codicon-error icon-error" : "codicon-warning icon-warning",
+      run: () => openAt(m.resource.fsPath, new monaco.Range(m.startLineNumber, m.startColumn, m.endLineNumber, m.endColumn)),
+    }))),
+  );
+};
+
+// ---- Recent projects and the welcome screen ----
+
+const recentProjects = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem("recentProjects") ?? "[]");
+  } catch {
+    return [];
+  }
+};
+
+function rememberProject(dir: string) {
+  try {
+    localStorage.setItem("recentProjects", JSON.stringify([dir, ...recentProjects().filter((d) => d !== dir)].slice(0, 12)));
+  } catch {}
+}
+
+function projectItem(dir: string): Item {
+  return { label: nameOf(dir), detail: dir.replace(/^\/Users\/[^/]+/, "~"), icon: "codicon-folder icon-folder", run: () => openFolder(dir) };
+}
+
+/** The project name in the title bar: switch to a recent project or open a folder. */
+function projectMenu() {
+  const items = [{ label: "Open Folder…", icon: "codicon-folder-opened", run: () => openFolder() }, ...recentProjects().filter((d) => d !== root).map(projectItem)];
+  pick("Open a recent project", (q) => rank(q, items));
+}
+
+function showWelcome() {
+  const recent = recentProjects();
+  $("recent-heading").hidden = !recent.length;
+  $("recent-projects").replaceChildren(
+    ...recent.map((dir) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="project-badge"></span><span class="text"><span class="name"></span><span class="dir"></span></span>`;
+      li.querySelector(".project-badge")!.textContent = initials(nameOf(dir));
+      li.querySelector(".name")!.textContent = nameOf(dir);
+      li.querySelector(".dir")!.textContent = dir.replace(/^\/Users\/[^/]+/, "~");
+      li.onclick = () => openFolder(dir);
+      return li;
+    }),
+  );
+  $("welcome").hidden = false;
+}
+
+/** Draws a tree row: chevron (folders), icon, and name, indented by depth. */
+function paintRow(row: HTMLElement, name: string, isDir: boolean) {
+  const open = row.classList.contains("open");
+  const icon = isDir ? folderIcon(name, open) : fileIcon(name);
+  const depth = relative(row.dataset.path!).split("/").length - 1;
+  row.style.paddingLeft = `${6 + depth * 14}px`;
+  row.innerHTML = `<span class="chevron codicon ${isDir ? (open ? "codicon-chevron-down" : "codicon-chevron-right") : ""}"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
+  row.querySelector(".name")!.textContent = name;
 }
 
 async function renderDir(ul: HTMLUListElement, dir: string) {
@@ -275,9 +396,11 @@ async function renderDir(ul: HTMLUListElement, dir: string) {
     ...entries.map((e) => {
       const li = document.createElement("li");
       const row = document.createElement("div");
-      row.className = `row ${e.is_dir ? "dir" : "file"}`;
-      row.textContent = e.name;
+      row.className = `row ${e.is_dir ? "dir" : "file"}${e.is_dir && EXCLUDED_FOLDERS.has(e.name) ? " excluded" : ""}`;
       row.dataset.path = e.path;
+      row.role = "treeitem";
+      if (e.is_dir && openDirs.has(e.path)) row.classList.add("open");
+      paintRow(row, e.name, e.is_dir);
       row.tabIndex = -1;
       row.draggable = true;
       li.append(row);
@@ -285,10 +408,7 @@ async function renderDir(ul: HTMLUListElement, dir: string) {
         const children = document.createElement("ul");
         li.append(children);
         row.onclick = () => toggleDir(e.path, row, children);
-        if (openDirs.has(e.path)) {
-          row.classList.add("open");
-          renderDir(children, e.path);
-        }
+        if (openDirs.has(e.path)) renderDir(children, e.path);
       } else {
         row.onclick = () => openFile(e.path);
       }
@@ -308,6 +428,14 @@ function toggleDir(path: string, row: HTMLElement, children: HTMLUListElement) {
     row.classList.add("open");
     renderDir(children, path);
   }
+  paintRow(row, nameOf(path), true);
+  saveSoon();
+}
+
+function collapseAll() {
+  openDirs.clear();
+  renderedDirs.clear();
+  renderDir($("tree") as HTMLUListElement, root);
   saveSoon();
 }
 
@@ -386,19 +514,24 @@ function renderTabs() {
       const shown = panes.some((p) => p.editor !== editor && p.active === path);
       el.className = `tab${path === active ? " active" : ""}${shown ? " shown" : ""}${isDirty(tab) ? " dirty" : ""}`;
       el.role = "tab";
-      el.title = path;
-      el.textContent = nameOf(path);
+      el.title = relative(path);
+      const icon = fileIcon(nameOf(path));
+      el.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
+      el.querySelector(".name")!.textContent = nameOf(path);
       el.onclick = () => openFile(path);
       el.onauxclick = (e) => e.button === 1 && closeTab(path);
       const close = document.createElement("span");
       close.className = "close";
-      close.textContent = "×";
+      close.title = "Close (⌘W)";
       close.onclick = (e) => (e.stopPropagation(), closeTab(path));
       el.append(close);
       return el;
     }),
   );
   $("path").textContent = active ? relative(active) : "";
+  $("empty-editor").hidden = tabs.size > 0 || !root;
+  $("editor").style.display = tabs.size ? "" : "none";
+  updateStatusItems();
 }
 
 function markActiveInTree() {
@@ -457,7 +590,10 @@ monaco.editor.registerEditorOpener({
 
 // ---- Navigation and search ----
 
-const fileItem = (path: string): Item => ({ label: relative(path), run: () => openFile(path) });
+const fileItem = (path: string): Item => {
+  const icon = fileIcon(nameOf(path));
+  return { label: relative(path), icon: `codicon-${icon.codicon} ${icon.color}`, run: () => openFile(path) };
+};
 
 async function goToFile() {
   if (!root) return;
@@ -653,19 +789,66 @@ initFiles({ root: () => root, active: () => active, openFile, renamed, forget, s
 function showView(name: string) {
   currentView = name;
   saveSoon();
-  document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  $("sidebar").classList.remove("collapsed");
+  document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
   if (name === "commit") refreshGit();
   if (name === "prs") loadPullRequests();
 }
-document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view!)));
+// Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
+document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
+  (b) =>
+    (b.onclick = () => {
+      const collapse = b.classList.contains("active") && !$("sidebar").classList.contains("collapsed");
+      if (collapse) {
+        $("sidebar").classList.add("collapsed");
+        b.classList.remove("active");
+      } else showView(b.dataset.view!);
+    }),
+);
+const panelButtons: Record<string, () => unknown> = {
+  log: () => showLog(),
+  debug: showDebugPanel,
+  terminal: () => toggleTerminal(root || "/"),
+};
+document.querySelectorAll<HTMLElement>("#activitybar [data-panel]").forEach((b) => (b.onclick = () => panelButtons[b.dataset.panel!]()));
+$("tb-search").onclick = () => searchEverywhere();
+$("tb-terminal").onclick = () => toggleTerminal(root || "/");
+$("tb-settings").onclick = () => openSettings();
+$("tb-debug-server").onclick = () => actions.find((a) => a.label.startsWith("Start Debug Server"))?.run();
+$("project-menu").onclick = () => projectMenu();
+$("welcome-open").onclick = () => openFolder();
+$("tree-new-file").onclick = () => root && newFile(root);
+$("tree-new-folder").onclick = () => root && newFolder(root);
+$("tree-collapse").onclick = () => root && collapseAll();
+
+// Drag the sidebar's right edge to resize it; the width is remembered.
+try {
+  const width = localStorage.getItem("sidebarWidth");
+  if (width) $("sidebar").style.width = `${width}px`;
+} catch {}
+$("sidebar-resize").onmousedown = (down) => {
+  const start = $("sidebar").offsetWidth;
+  const move = (e: MouseEvent) => ($("sidebar").style.width = `${Math.max(180, start + e.clientX - down.clientX)}px`);
+  const up = () => {
+    removeEventListener("mousemove", move);
+    removeEventListener("mouseup", up);
+    try {
+      localStorage.setItem("sidebarWidth", String($("sidebar").offsetWidth));
+    } catch {}
+  };
+  addEventListener("mousemove", move);
+  addEventListener("mouseup", up);
+};
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 branchListeners.push(updateBranchPullRequest);
 
 $("open-folder").onclick = () => openFolder();
 
+let last: string | null = null;
 try {
-  const last = localStorage.getItem("lastFolder");
-  if (last) openFolder(last);
+  last = localStorage.getItem("lastFolder");
 } catch {}
+if (last) openFolder(last).catch(showWelcome);
+else showWelcome();

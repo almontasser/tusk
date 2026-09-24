@@ -228,17 +228,18 @@ const panel = document.createElement("div");
 panel.className = "debug";
 panel.innerHTML = `
   <div class="debug-toolbar">
-    <button data-run="listen" title="Start listening for Xdebug connections">Listen</button>
-    <button data-run="resume" title="Resume (F9)">▶ Resume</button>
-    <button data-run="over" title="Step Over (F8)">Step Over</button>
-    <button data-run="into" title="Step Into (F7)">Step Into</button>
-    <button data-run="out" title="Step Out (⇧F8)">Step Out</button>
-    <button data-run="stop" title="Stop listening (⌘F2)">■ Stop</button>
+    <button data-run="listen" title="Start listening for Xdebug connections" aria-label="Listen"><span class="codicon codicon-debug-start"></span></button>
+    <button data-run="stop" title="Stop listening (⌘F2)" aria-label="Stop"><span class="codicon codicon-debug-stop"></span></button>
+    <span class="sep"></span>
+    <button data-run="resume" title="Resume (F9)" aria-label="Resume"><span class="codicon codicon-debug-continue"></span></button>
+    <button data-run="over" title="Step Over (F8)" aria-label="Step Over"><span class="codicon codicon-debug-step-over"></span></button>
+    <button data-run="into" title="Step Into (F7)" aria-label="Step Into"><span class="codicon codicon-debug-step-into"></span></button>
+    <button data-run="out" title="Step Out (⇧F8)" aria-label="Step Out"><span class="codicon codicon-debug-step-out"></span></button>
     <span class="debug-state"></span>
   </div>
   <div class="debug-body">
-    <ul class="debug-frames" aria-label="Call stack"></ul>
-    <ul class="debug-vars" aria-label="Variables"></ul>
+    <ul class="debug-frames" aria-label="Call stack" data-empty="The call stack appears here when execution pauses."></ul>
+    <ul class="debug-vars" aria-label="Variables" data-empty="Variables appear here when execution pauses."></ul>
   </div>
   <div class="debug-console">
     <pre></pre>

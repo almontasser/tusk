@@ -7,99 +7,182 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <aside id="sidebar">
-      <nav id="side-tabs" role="tablist">
-        <button role="tab" data-view="project" class="active">Project</button>
-        <button role="tab" data-view="commit">Commit</button>
-        <button role="tab" data-view="prs">Pull Requests</button>
-        <button role="tab" data-view="search">Find</button>
+    <!-- The window's own title bar is hidden; macOS draws its buttons over this bar's left edge. -->
+    <header id="titlebar" data-tauri-drag-region>
+      <button id="project-menu" class="tb-button" title="Recent projects and Open Folder…">
+        <span class="project-badge" id="project-badge"></span><span id="project-name">No project</span><span class="codicon codicon-chevron-down"></span>
+      </button>
+      <button id="branch" class="tb-button" hidden></button>
+      <button id="branch-pr" class="tb-button" hidden></button>
+      <div class="tb-spacer" data-tauri-drag-region></div>
+      <button id="tb-search" class="tb-search" title="Search Everywhere">
+        <span class="codicon codicon-search"></span><span>Search everywhere</span><kbd>⇧⇧</kbd>
+      </button>
+      <div class="tb-spacer" data-tauri-drag-region></div>
+      <button id="tb-debug-server" class="tb-icon" title="Start Debug Server"><span class="codicon codicon-debug-alt"></span></button>
+      <button id="tb-terminal" class="tb-icon" title="Terminal (⌥F12)"><span class="codicon codicon-terminal"></span></button>
+      <button id="tb-settings" class="tb-icon" title="Settings (⌘,)"><span class="codicon codicon-settings-gear"></span></button>
+    </header>
+
+    <div id="workbench">
+      <nav id="activitybar" aria-label="Tool windows">
+        <button data-view="project" class="active" title="Project (⌘1)"><span class="codicon codicon-files"></span></button>
+        <button data-view="commit" title="Commit (⌘K)"><span class="codicon codicon-git-commit"></span></button>
+        <button data-view="prs" title="Pull Requests"><span class="codicon codicon-git-pull-request"></span></button>
+        <button data-view="search" title="Find in Files (⌘⇧F)"><span class="codicon codicon-search"></span></button>
+        <div class="spacer"></div>
+        <button data-panel="log" title="Git Log (⌘9)"><span class="codicon codicon-history"></span></button>
+        <button data-panel="debug" title="Debug"><span class="codicon codicon-bug"></span></button>
+        <button data-panel="terminal" title="Terminal (⌥F12)"><span class="codicon codicon-terminal"></span></button>
       </nav>
-      <section id="view-project">
-        <div id="project">No folder open.</div>
-        <button id="open-folder">Open Folder…</button>
-        <ul id="tree" role="tree"></ul>
-      </section>
-      <section id="view-commit" hidden>
-        <p id="git-empty">This folder isn't a git repository.</p>
-        <div id="git-changes">
-          <div id="git-operation" hidden><span></span><button id="operation-continue">Continue</button><button id="operation-abort">Abort</button></div>
-          <div id="conflicts-group" hidden>
-            <header class="git-group">Merge Conflicts <span id="conflicts-count"></span></header>
-            <ul id="conflicts" class="git-files"></ul>
+
+      <aside id="sidebar">
+        <section id="view-project">
+          <header class="view-header">
+            <span id="project">Project</span>
+            <div class="view-actions">
+              <button class="icon-button" id="tree-new-file" title="New File (⌘N)"><span class="codicon codicon-new-file"></span></button>
+              <button class="icon-button" id="tree-new-folder" title="New Folder"><span class="codicon codicon-new-folder"></span></button>
+              <button class="icon-button" id="tree-collapse" title="Collapse All"><span class="codicon codicon-collapse-all"></span></button>
+            </div>
+          </header>
+          <button id="open-folder" hidden>Open Folder…</button>
+          <ul id="tree" role="tree"></ul>
+        </section>
+
+        <section id="view-commit" hidden>
+          <header class="view-header"><span>Commit</span></header>
+          <p id="git-empty" class="empty-note">This folder isn't a git repository.</p>
+          <div id="git-changes">
+            <div id="git-operation" hidden><span></span><button id="operation-continue">Continue</button><button id="operation-abort">Abort</button></div>
+            <div id="conflicts-group" hidden>
+              <header class="git-group">Merge Conflicts <span class="count" id="conflicts-count"></span></header>
+              <ul id="conflicts" class="git-files"></ul>
+            </div>
+            <header class="git-group">Staged <span class="count" id="staged-count"></span><button class="icon-button" id="unstage-all" title="Unstage all"><span class="codicon codicon-remove"></span></button></header>
+            <ul id="staged" class="git-files"></ul>
+            <header class="git-group">Changes <span class="count" id="changes-count"></span><button class="icon-button" id="stage-all" title="Stage all"><span class="codicon codicon-add"></span></button></header>
+            <ul id="changes" class="git-files"></ul>
+            <div class="commit-box">
+              <textarea id="commit-message" placeholder="Commit message" aria-label="Commit message"></textarea>
+              <label class="amend"><input type="checkbox" id="amend" /> Amend the last commit</label>
+              <div class="commit-buttons">
+                <button id="commit" class="primary" title="Commit (⌘⏎ in the message)">Commit</button>
+                <button id="commit-push">Commit and Push</button>
+              </div>
+            </div>
           </div>
-          <header class="git-group">Staged <span id="staged-count"></span><button id="unstage-all" title="Unstage all">−</button></header>
-          <ul id="staged" class="git-files"></ul>
-          <header class="git-group">Changes <span id="changes-count"></span><button id="stage-all" title="Stage all">+</button></header>
-          <ul id="changes" class="git-files"></ul>
-          <textarea id="commit-message" placeholder="Commit message (⌘⏎ to commit)" aria-label="Commit message"></textarea>
-          <label class="amend"><input type="checkbox" id="amend" /> Amend the last commit</label>
-          <div class="commit-buttons">
-            <button id="commit">Commit</button>
-            <button id="commit-push">Commit and Push</button>
+        </section>
+
+        <section id="view-search" hidden>
+          <header class="view-header"><span>Find in Files</span></header>
+          <div class="search-form">
+            <div class="search-field">
+              <input id="find-query" placeholder="Search" aria-label="Find in files" spellcheck="false" />
+              <button id="opt-case" title="Match case" aria-pressed="false"><span class="codicon codicon-case-sensitive"></span></button>
+              <button id="opt-word" title="Whole words" aria-pressed="false"><span class="codicon codicon-whole-word"></span></button>
+              <button id="opt-regex" title="Regular expression" aria-pressed="false"><span class="codicon codicon-regex"></span></button>
+            </div>
+            <div class="search-field">
+              <input id="replace-with" placeholder="Replace ($1 in regex mode)" aria-label="Replace with" spellcheck="false" />
+              <button id="replace-all" title="Replace all matches"><span class="codicon codicon-replace-all"></span></button>
+            </div>
+            <div class="search-field">
+              <input id="find-include" placeholder="Files to include, such as *.php, app/**" aria-label="Files to include" spellcheck="false" />
+            </div>
+          </div>
+          <p id="find-summary"></p>
+          <ul id="find-results"></ul>
+        </section>
+
+        <section id="view-prs" hidden>
+          <header class="view-header">
+            <span>Pull Requests</span>
+            <div class="view-actions">
+              <button class="icon-button" id="pr-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+              <button class="icon-button" id="pr-create" title="Create a pull request"><span class="codicon codicon-add"></span></button>
+            </div>
+          </header>
+          <div id="pr-list-view">
+            <div class="pr-toolbar">
+              <select id="pr-filter" aria-label="Filter pull requests">
+                <option value="open">Open</option>
+                <option value="mine">Created by me</option>
+                <option value="review">Review requested</option>
+              </select>
+            </div>
+            <ul id="pr-list"></ul>
+          </div>
+          <div id="pr-detail" hidden></div>
+        </section>
+        <div id="sidebar-resize" aria-hidden="true"></div>
+      </aside>
+
+      <main>
+        <nav id="tabs" role="tablist"></nav>
+        <div id="editor"></div>
+        <div id="empty-editor" hidden>
+          <dl>
+            <dt>Search everywhere</dt><dd><kbd>⇧</kbd><kbd>⇧</kbd></dd>
+            <dt>Go to file</dt><dd><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd></dd>
+            <dt>Go to class</dt><dd><kbd>⌘</kbd><kbd>O</kbd></dd>
+            <dt>Recent files</dt><dd><kbd>⌘</kbd><kbd>E</kbd></dd>
+            <dt>Find in files</dt><dd><kbd>⌘</kbd><kbd>⇧</kbd><kbd>F</kbd></dd>
+            <dt>Run anything</dt><dd><kbd>⌃</kbd><kbd>⌃</kbd></dd>
+          </dl>
+        </div>
+        <div id="history" hidden>
+          <header>
+            <span id="history-title">Git Log</span>
+            <input id="history-filter" placeholder="Filter by message, author, hash, or branch" aria-label="Filter commits" spellcheck="false" />
+            <label><input type="checkbox" id="history-all" /> All branches</label>
+            <button class="icon-button" id="history-close" aria-label="Close history" title="Close"><span class="codicon codicon-close"></span></button>
+          </header>
+          <div class="history-body">
+            <div class="history-commits">
+              <ul id="history-list"></ul>
+              <button id="history-more" hidden>Load More</button>
+            </div>
+            <div id="history-detail"></div>
           </div>
         </div>
-      </section>
-      <section id="view-search" hidden>
-        <div class="search-form">
-          <div class="search-row">
-            <input id="find-query" placeholder="Find in files" aria-label="Find in files" spellcheck="false" />
-            <button id="opt-case" title="Match case" aria-pressed="false">Aa</button>
-            <button id="opt-word" title="Whole words" aria-pressed="false">W</button>
-            <button id="opt-regex" title="Regular expression" aria-pressed="false">.*</button>
-          </div>
-          <div class="search-row">
-            <input id="replace-with" placeholder="Replace with ($1 in regex mode)" aria-label="Replace with" spellcheck="false" />
-            <button id="replace-all" title="Replace all matches">Replace All</button>
-          </div>
-          <input id="find-include" placeholder="Files to include, such as *.php, app/**" aria-label="Files to include" spellcheck="false" />
+        <div id="diff" hidden>
+          <header>
+            <span class="codicon codicon-diff"></span><span id="diff-path"></span><span id="diff-label"></span>
+            <button id="diff-open">Open File</button>
+            <button class="icon-button" id="diff-close" aria-label="Close diff" title="Close"><span class="codicon codicon-close"></span></button>
+          </header>
+          <div id="diff-editor"></div>
         </div>
-        <p id="find-summary"></p>
-        <ul id="find-results"></ul>
-      </section>
-      <section id="view-prs" hidden>
-        <div id="pr-list-view">
-          <div class="pr-toolbar">
-            <select id="pr-filter" aria-label="Filter pull requests">
-              <option value="open">Open</option>
-              <option value="mine">Created by me</option>
-              <option value="review">Review requested</option>
-            </select>
-            <button id="pr-refresh" title="Refresh">↻</button>
-            <button id="pr-create" title="Create a pull request">New</button>
-          </div>
-          <ul id="pr-list"></ul>
-        </div>
-        <div id="pr-detail" hidden></div>
-      </section>
-    </aside>
-    <main>
-      <nav id="tabs" role="tablist"></nav>
-      <div id="editor"></div>
-      <div id="history" hidden>
-        <header>
-          <span id="history-title">Git Log</span>
-          <input id="history-filter" placeholder="Filter by message, author, hash, or branch" aria-label="Filter commits" spellcheck="false" />
-          <label><input type="checkbox" id="history-all" /> All branches</label>
-          <button id="history-close" aria-label="Close history">×</button>
-        </header>
-        <div class="history-body">
-          <div class="history-commits">
-            <ul id="history-list"></ul>
-            <button id="history-more" hidden>Load More</button>
-          </div>
-          <div id="history-detail"></div>
-        </div>
+        <section id="panel" hidden>
+          <div id="panel-resize"></div>
+          <nav id="terminal-tabs" role="tablist"></nav>
+          <div id="terminals"></div>
+        </section>
+      </main>
+    </div>
+
+    <footer id="status">
+      <button id="problems" class="status-item" title="Problems in open files"><span class="codicon codicon-error"></span><span id="error-count">0</span><span class="codicon codicon-warning"></span><span id="warning-count">0</span></button>
+      <span id="path" class="status-item"></span>
+      <span id="lsp-status" class="status-item"></span>
+      <span class="status-spacer"></span>
+      <span id="cursor-position" class="status-item"></span>
+      <span id="indentation" class="status-item"></span>
+      <span id="encoding" class="status-item"></span>
+      <span id="language" class="status-item"></span>
+    </footer>
+
+    <div id="welcome" hidden>
+      <div class="welcome-card">
+        <div class="welcome-logo"><span class="codicon codicon-code"></span></div>
+        <h1>PHP Editor</h1>
+        <p class="welcome-sub">For Laravel and Filament</p>
+        <button id="welcome-open" class="primary"><span class="codicon codicon-folder-opened"></span> Open Folder…</button>
+        <h2 id="recent-heading" hidden>Recent projects</h2>
+        <ul id="recent-projects"></ul>
       </div>
-      <div id="diff" hidden>
-        <header><span id="diff-path"></span><span id="diff-label"></span><button id="diff-open">Open File</button><button id="diff-close" aria-label="Close diff">×</button></header>
-        <div id="diff-editor"></div>
-      </div>
-      <section id="panel" hidden>
-        <div id="panel-resize"></div>
-        <nav id="terminal-tabs" role="tablist"></nav>
-        <div id="terminals"></div>
-      </section>
-      <footer id="status"><span id="path"></span><span id="lsp-status"></span><button id="branch-pr" hidden></button><button id="branch" hidden></button></footer>
-    </main>
+    </div>
+    <div id="toasts" aria-live="polite"></div>
   </body>
 </html>

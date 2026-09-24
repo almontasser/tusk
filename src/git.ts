@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
+import { fileIcon } from "./icons";
 import { age, type BlameLine, type FileStatus, isConflict, lineChanges, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
@@ -62,7 +63,8 @@ function renderBranch() {
   el.hidden = !current;
   if (!current) return;
   const sync = [current.ahead && `↑${current.ahead}`, current.behind && `↓${current.behind}`].filter(Boolean).join(" ");
-  el.textContent = `⎇ ${current.branch}${sync ? ` ${sync}` : ""}`;
+  el.innerHTML = `<span class="codicon codicon-git-branch"></span><span class="label"></span><span class="codicon codicon-chevron-down"></span>`;
+  el.querySelector(".label")!.textContent = `${current.branch}${sync ? ` ${sync}` : ""}`;
   el.title = current.upstream ? `Tracking ${current.upstream}` : "No upstream branch";
 }
 
@@ -181,7 +183,8 @@ function fileRow(f: FileStatus, inIndex: boolean) {
   li.title = f.from ? `${f.from} → ${f.path}` : f.path;
   const name = f.path.split("/").pop()!;
   const dir = f.path.slice(0, -name.length - 1);
-  li.innerHTML = `<span class="letter"></span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
+  const icon = fileIcon(name);
+  li.innerHTML = `<span class="letter"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
   li.querySelector(".letter")!.textContent = letter;
   li.querySelector(".name")!.textContent = name;
   li.querySelector(".dir")!.textContent = dir;

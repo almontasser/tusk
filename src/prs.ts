@@ -173,7 +173,8 @@ export async function updateBranchPullRequest() {
   try {
     const pr: PullRequest = JSON.parse(await gh("pr", "view", "--json", FIELDS));
     const checks = checksSummary(pr.statusCheckRollup);
-    button.textContent = `#${pr.number} ${icons[checks]}`;
+    button.innerHTML = `<span class="codicon codicon-git-pull-request"></span><span class="label"></span>`;
+    button.querySelector(".label")!.textContent = `#${pr.number} ${icons[checks]}`;
     button.title = `${pr.title} (checks ${checks})`;
     button.onclick = () => showPullRequest(pr.number);
     button.hidden = false;

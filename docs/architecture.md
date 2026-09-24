@@ -786,6 +786,47 @@ project in `localStorage`.
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 
+## Interface
+
+### Layout
+
+`index.html` lays out a title bar, a workbench (the tool bar, the sidebar, and
+the editor area), and a status bar. The window has no native title bar
+(`titleBarStyle: "Overlay"` in `tauri.conf.json`): macOS draws its window
+buttons over the left edge of `#titlebar`, which starts its content 80 px in.
+Empty parts of the title bar carry `data-tauri-drag-region`, so dragging them
+moves the window; that needs the `core:window:allow-start-dragging` permission.
+
+### Styles and themes
+
+`styles.css` defines colors, sizes, and fonts as variables on `:root`, with a
+light set under `data-theme="light"`. Components use only the variables, so a
+theme is one block of values. `src/themes.ts` defines matching Monaco themes,
+`editor-dark` and `editor-light`, with syntax colors close to PhpStorm's schemes.
+
+Icons come from Monaco's icon font (codicons), which the page already loads, so
+there's no icon dependency. Monaco's `.codicon[class*='codicon-']` rule sets
+the icon size with high specificity, so the stylesheet uses `!important` where
+it changes a size. `src/icons.ts` maps file and folder names to a codicon and a
+color class; `src/icons.test.ts` covers it. Folders such as `vendor`,
+`node_modules`, and `storage` are dimmed, as PhpStorm marks excluded folders.
+
+### Status and errors
+
+The status bar shows the latest message from each source. Language server
+progress uses a `<server>:progress` source, which shows a spinner and appears
+only after the task has run for 800 ms, so short tasks such as resolving code
+actions don't flash. Other messages clear themselves after 8 seconds. Messages
+that report a failure (they contain words such as "failed", "error", or
+"fatal") also appear as a toast.
+
+### Palette
+
+`matchPositions` in `palette.ts` finds the letters to highlight: the query as
+one block where it appears whole (its last occurrence, which is usually in the
+file name), or else the letters of a fuzzy match. The folder part of a path is
+dimmed.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -947,6 +988,13 @@ Xdebug speaks DBGp, an XML protocol over TCP. The PHP Debug adapter already
 turns DBGp into the Debug Adapter Protocol and handles its details (connection
 per request, property paging, evaluation). It runs over the same bridge as the
 language servers.
+
+### 2026-09-24: A PhpStorm-like interface
+
+You come from PhpStorm, so the interface follows its new UI: a tool bar with
+icons instead of text tabs, a title bar with the project and branch, file icons,
+and syntax colors close to its schemes. The window's own title bar is hidden,
+so the app's title bar can use that space.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

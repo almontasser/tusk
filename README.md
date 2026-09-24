@@ -115,6 +115,24 @@ pnpm tauri build
 The `.app` bundle and the `.dmg` file are written to
 `src-tauri/target/release/bundle/`.
 
+## The window
+
+- **Title bar:** the project name (click it to switch to a recent project or open
+  a folder), the current branch and its pull request, a **Search everywhere**
+  box, and buttons for the debug server, the terminal, and settings.
+- **Tool bar on the left:** icons for the **Project**, **Commit**, **Pull
+  Requests**, and **Find** views. Click the active icon to hide the sidebar,
+  and drag the sidebar's edge to resize it. The icons at the bottom open the
+  **Git Log**, the **Debug** panel, and the terminal.
+- **Status bar:** error and warning counts for open files (click them to list
+  the problems), background work such as indexing, the cursor position,
+  indentation, line endings, and the file's language.
+- **Welcome screen:** without an open folder, the window lists your recent
+  projects.
+
+Errors, such as a failed git command, also appear briefly in the lower-right
+corner.
+
 ## Keyboard shortcuts
 
 Shortcuts follow PhpStorm's macOS keymap. To see every action and its
@@ -457,6 +475,8 @@ committed.
 | `src/search.ts` | The Find view: find and replace in files |
 | `src/settings.ts` | Settings, the settings dialog, and the theme |
 | `src/debug.ts` | The Xdebug debugger: breakpoints, stepping, and the Debug panel |
+| `src/icons.ts` | File and folder icons |
+| `src/themes.ts` | Monaco color themes |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

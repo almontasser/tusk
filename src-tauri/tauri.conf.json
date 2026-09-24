@@ -15,7 +15,15 @@
       {
         "title": "PHP Editor",
         "width": 1400,
-        "height": 900
+        "height": 900,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "minWidth": 800,
+        "minHeight": 500,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 20
+        }
       }
     ],
     "security": {

@@ -2,6 +2,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
+import { defineThemes } from "./themes";
+
+defineThemes();
 
 export type Settings = {
   theme: "dark" | "light" | "system";
@@ -63,7 +66,7 @@ export const isDark = () => (settings.theme === "system" ? systemDark.matches : 
 function apply() {
   const dark = isDark();
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  monaco.editor.setTheme(dark ? "vs-dark" : "vs");
+  monaco.editor.setTheme(dark ? "editor-dark" : "editor-light");
   for (const ed of editors) {
     ed.updateOptions({
       fontFamily: settings.fontFamily,

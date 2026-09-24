@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
+import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
 
 type Host = {
@@ -82,7 +83,8 @@ function render(error: string) {
       header.className = "find-file";
       const rel = path.slice(root.length + 1);
       const name = rel.split("/").pop()!;
-      header.innerHTML = `<span class="name"></span><span class="dir"></span><span class="count"></span><button title="Replace in this file">Replace</button>`;
+      const icon = fileIcon(name);
+      header.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span><button title="Replace in this file">Replace</button>`;
       header.querySelector(".name")!.textContent = name;
       header.querySelector(".dir")!.textContent = rel.slice(0, -name.length - 1);
       header.querySelector(".count")!.textContent = String(list.length);

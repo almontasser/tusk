@@ -1,6 +1,7 @@
 // A keyboard-driven picker used by go to file, go to class, find in files, and actions.
 
-export type Item = { label: string; detail?: string; run(): unknown };
+/** A palette row. `icon` is codicon and color classes, such as "codicon-file-code icon-php". */
+export type Item = { label: string; detail?: string; icon?: string; run(): unknown };
 type Source = (query: string) => Item[] | Promise<Item[]>;
 
 const MAX_ROWS = 200;
@@ -25,6 +26,25 @@ export function fuzzy(query: string, text: string): number {
     t = i + 1;
   }
   return score - text.length / 100; // Prefer shorter texts on ties.
+}
+
+/** Indexes of `text` that a fuzzy match of `query` uses, for highlighting; empty if it doesn't match. */
+export function matchPositions(query: string, text: string): number[] {
+  const lower = text.toLowerCase();
+  // Prefer the query as one block, and its last occurrence, which is usually in the file name.
+  const whole = query.toLowerCase().replace(/\s/g, "");
+  const at = whole ? lower.lastIndexOf(whole) : -1;
+  if (at >= 0) return [...whole].map((_, i) => at + i);
+  const positions: number[] = [];
+  let t = 0;
+  for (const ch of query.toLowerCase()) {
+    if (ch === " ") continue;
+    const i = lower.indexOf(ch, t);
+    if (i < 0) return [];
+    positions.push(i);
+    t = i + 1;
+  }
+  return positions;
 }
 
 /** Filters and sorts items by fuzzy score against their label. */
@@ -68,8 +88,30 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
         li.role = "option";
         li.ariaSelected = String(i === selected);
         li.className = i === selected ? "selected" : "";
+        if (item.icon) {
+          const icon = document.createElement("span");
+          icon.className = `file-icon codicon ${item.icon}`;
+          li.append(icon);
+        }
         const label = document.createElement("span");
-        label.textContent = item.label;
+        label.className = "label";
+        // Bold the letters the query matched, and dim the folder part of a path.
+        const hits = new Set(matchPositions(input.value, item.label));
+        const folderEnd = item.label.includes("/") ? item.label.lastIndexOf("/") + 1 : 0;
+        let run = "";
+        let style = "";
+        const flush = () => {
+          if (!run) return;
+          if (!style) label.append(run);
+          else label.append(Object.assign(document.createElement(style === "hit" ? "b" : "span"), { textContent: run, className: style === "dir" ? "dir" : "" }));
+          run = "";
+        };
+        item.label.split("").forEach((ch, i) => {
+          const next = hits.has(i) ? "hit" : i < folderEnd ? "dir" : "";
+          if (next !== style) (flush(), (style = next));
+          run += ch;
+        });
+        flush();
         li.append(label);
         if (item.detail) {
           const detail = document.createElement("span");

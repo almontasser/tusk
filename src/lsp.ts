@@ -212,10 +212,21 @@ async function startServer(
       onNotification(msg.method, msg.params, notify);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
-      host.status(v.kind === "end" ? "" : [v.title, v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" "), name);
-      if (v.kind === "begin") progressTitles.set(msg.params.token, v.title);
-      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(msg.params.token) ?? "")) recheckOpenFiles();
-      if (v.kind === "end") progressTitles.delete(msg.params.token);
+      const token = msg.params.token;
+      if (v.kind === "begin") progressTitles.set(token, v.title);
+      // Show progress only after it runs for a moment, so quick tasks such as resolving code
+      // actions don't flash in the status bar.
+      const text = [progressTitles.get(token), v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" ");
+      if (v.kind === "end") {
+        clearTimeout(progressTimers.get(token));
+        progressTimers.delete(token);
+        host.status("", `${name}:progress`);
+      } else if (progressShown.has(token)) host.status(text, `${name}:progress`);
+      else if (!progressTimers.has(token)) {
+        progressTimers.set(token, setTimeout(() => (progressShown.add(token), host.status(text, `${name}:progress`)), 800));
+      }
+      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) recheckOpenFiles();
+      if (v.kind === "end") (progressTitles.delete(token), progressShown.delete(token));
     }
   });
 
@@ -250,6 +261,8 @@ async function startServer(
   }
 
   const progressTitles = new Map<string | number, string>();
+  const progressTimers = new Map<string | number, ReturnType<typeof setTimeout>>();
+  const progressShown = new Set<string | number>();
   // Set when the server asks to hear about file changes. Phpactor then relies on the editor
   // instead of polling the disk every few seconds, so its index follows moves and edits at once.
   let watchesFiles = false;
