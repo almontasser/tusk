@@ -4,6 +4,7 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
+import { branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
 
@@ -38,6 +39,7 @@ async function openFolder(dir: unknown = null) {
   await renderDir($("tree") as HTMLUListElement, dir);
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
+  refreshGit();
   startLsp(dir, { ensureModel, markSaved, renamed, status }).catch((e) => status(`Language server failed: ${e}`));
 }
 
@@ -111,6 +113,7 @@ async function openFile(path: string) {
     tabs.set(path, { model, saved: model.getAlternativeVersionId() });
     model.onDidChangeContent(renderTabs);
   }
+  closeDiff();
   active = path;
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   editor.setModel(tabs.get(path)!.model);
@@ -192,6 +195,7 @@ listen<string[]>("fs-change", ({ payload }) => {
       if (ul) renderDir(ul, dir);
     }
     renderTabs();
+    refreshGit();
   }, 150);
 });
 
@@ -309,6 +313,11 @@ const actions: Action[] = [
   { label: "Find in Files", keys: "Meta+Shift+F", run: findInFiles },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
+  { label: "Commit…", keys: "Meta+K", run: focusCommit },
+  { label: "Push…", keys: "Meta+Shift+K", run: () => root && pushBranch() },
+  { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
+  { label: "Branches…", run: branches },
+  { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
@@ -380,6 +389,15 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+
+/** Switches the sidebar between the project tree and the commit view. */
+function showView(name: string) {
+  document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
+  if (name === "commit") refreshGit();
+}
+document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view!)));
+initGit({ root: () => root, openFile, status, showView });
 
 $("open-folder").onclick = () => openFolder();
 

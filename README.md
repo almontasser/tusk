@@ -121,6 +121,10 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |
+| ⌘K | Commit |
+| ⌘⇧K | Push |
+| ⌘T | Update the project (`git pull`) |
+| ⌘1 | Show the project tree |
 | ⌘S | Save |
 | ⌘W | Close the tab |
 | ⌃Space | Show completions |
@@ -149,6 +153,19 @@ Press ⌃⌃ and type an Artisan command with its arguments, such as
 works. To run any other command, choose the last item. Tests and commands run
 in terminal tabs, and ⌃R reruns the last one.
 
+## Git
+
+The **Commit** tab in the sidebar lists staged changes and unstaged changes,
+including new files. Click a file to see its diff. Hover over a file for
+buttons to open, stage, unstage, or discard it. Write a message and press ⌘⏎
+or click **Commit**. **Commit and Push** also pushes, and sets the upstream
+branch on the first push.
+
+The branch name in the status bar shows commits ahead (↑) and behind (↓) the
+upstream branch. Click it to check out a local or remote branch, create a
+branch from the name you type, or pull, push, and fetch. Pull, push, and fetch
+run in a terminal tab, so you can answer credential prompts.
+
 ## Diagnostics and formatting
 
 Mago checks PHP files as you type (static analysis and lint) and formats them.
@@ -176,6 +193,8 @@ committed.
 | `src/editor.ts` | Monaco setup, web workers, and the Blade language |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/terminal.ts` | Terminal panel |
+| `src/git.ts` | Commit view, diff view, and branches |
+| `src/gitparse.ts` | Parsers for git status, diff, and blame output |
 | `src/runner.ts` | Test runner, run links, and Run Anything |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |

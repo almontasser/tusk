@@ -307,6 +307,46 @@ through `/bin/sh -c`, so quoting and pipes work.
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
 
+## Git (milestone 5)
+
+### Commands
+
+`src/git.ts` runs `git` through the `run_capture` command in the project
+folder. Commands that can prompt for credentials (`pull`, `push`, and `fetch`)
+run in terminal tabs instead. `src/gitparse.ts` parses the machine-readable
+output, and `src/gitparse.test.ts` covers it:
+
+| Parser | Input |
+| --- | --- |
+| `parseStatus` | `git status --porcelain=v1 -z --branch` |
+| `parseHunks` | `git diff -U0` |
+| `parseBlame` | `git blame --porcelain` |
+
+### Refreshing
+
+The app reruns `git status` when you open a folder, show the commit view, or
+change git state, and after each batch of file watcher events. The watcher
+also reports changes inside `.git`, so commits and checkouts made in a
+terminal show up too.
+
+### Commit view and diffs
+
+The commit view splits files by `git status` letter: a file with an index
+letter is staged, and a file with a working tree letter has unstaged changes.
+A file can be in both lists.
+
+The diff view is a Monaco diff editor that replaces the code editor until you
+close it or open a file. A staged change compares `HEAD` with the index, and an
+unstaged change compares the index with the file on disk. Both sides are
+read-only models with a `git` URI scheme, so the language servers ignore them.
+
+### Branches
+
+The branch picker reads `git for-each-ref` with full ref names, which tell
+local branches (`refs/heads/`) from remote ones (`refs/remotes/`) even when a
+local name contains a slash. Checking out a remote branch runs
+`git checkout --track`.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one

@@ -8,19 +8,44 @@
   </head>
   <body>
     <aside id="sidebar">
-      <div id="project">No folder open.</div>
-      <button id="open-folder">Open Folder…</button>
-      <ul id="tree" role="tree"></ul>
+      <nav id="side-tabs" role="tablist">
+        <button role="tab" data-view="project" class="active">Project</button>
+        <button role="tab" data-view="commit">Commit</button>
+      </nav>
+      <section id="view-project">
+        <div id="project">No folder open.</div>
+        <button id="open-folder">Open Folder…</button>
+        <ul id="tree" role="tree"></ul>
+      </section>
+      <section id="view-commit" hidden>
+        <p id="git-empty">This folder isn't a git repository.</p>
+        <div id="git-changes">
+          <header class="git-group">Staged <span id="staged-count"></span><button id="unstage-all" title="Unstage all">−</button></header>
+          <ul id="staged" class="git-files"></ul>
+          <header class="git-group">Changes <span id="changes-count"></span><button id="stage-all" title="Stage all">+</button></header>
+          <ul id="changes" class="git-files"></ul>
+          <textarea id="commit-message" placeholder="Commit message (⌘⏎ to commit)" aria-label="Commit message"></textarea>
+          <label class="amend"><input type="checkbox" id="amend" /> Amend the last commit</label>
+          <div class="commit-buttons">
+            <button id="commit">Commit</button>
+            <button id="commit-push">Commit and Push</button>
+          </div>
+        </div>
+      </section>
     </aside>
     <main>
       <nav id="tabs" role="tablist"></nav>
       <div id="editor"></div>
+      <div id="diff" hidden>
+        <header><span id="diff-path"></span><span id="diff-label"></span><button id="diff-open">Open File</button><button id="diff-close" aria-label="Close diff">×</button></header>
+        <div id="diff-editor"></div>
+      </div>
       <section id="panel" hidden>
         <div id="panel-resize"></div>
         <nav id="terminal-tabs" role="tablist"></nav>
         <div id="terminals"></div>
       </section>
-      <footer id="status"><span id="path"></span><span id="lsp-status"></span></footer>
+      <footer id="status"><span id="path"></span><span id="lsp-status"></span><button id="branch" hidden></button></footer>
     </main>
   </body>
 </html>

@@ -84,3 +84,8 @@ PHP
 
 php artisan migrate --no-interaction
 php artisan make:filament-resource Post --generate --no-interaction
+
+# Its own repository, for testing the git features.
+git init --quiet --initial-branch=main
+git add --all
+git -c user.name="Fixture" -c user.email="fixture@example.com" commit --quiet -m "Initial commit"

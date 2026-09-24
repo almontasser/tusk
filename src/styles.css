@@ -13,7 +13,9 @@
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: flex; overflow: hidden; }
 
-#sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); overflow: auto; flex-shrink: 0; }
+#sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; }
+#sidebar > section { flex: 1; overflow: auto; min-height: 0; }
+#sidebar > section[hidden] { display: none; }
 #project { padding: 8px 12px; font-weight: 600; color: var(--muted); }
 #tree, #tree ul { list-style: none; margin: 0; padding: 0; }
 #tree ul { padding-left: 12px; }
@@ -32,7 +34,9 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabs .tab .close:hover, #terminal-tabs .tab .close:hover { opacity: 1; }
 #tabs .tab.dirty .close::before { content: "● "; }
 #editor { flex: 1; min-height: 0; }
-#status { display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; overflow: hidden; padding: 2px 12px; background: var(--panel); border-top: 1px solid var(--border); color: var(--muted); min-height: 22px; }
+#editor[hidden] { display: none; }
+#lsp-status { flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+#status { display: flex; align-items: center; gap: 16px; white-space: nowrap; overflow: hidden; padding: 2px 12px; background: var(--panel); border-top: 1px solid var(--border); color: var(--muted); min-height: 22px; }
 
 #open-folder { margin: 0 12px; padding: 4px 10px; background: var(--accent); color: white; border: 0; border-radius: 4px; font: inherit; }
 
@@ -51,3 +55,41 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #terminal-tabs .tab.exited { font-style: italic; }
 #terminals { flex: 1; min-height: 0; padding: 4px 0 0 8px; background: var(--bg); }
 #terminals .term { height: 100%; }
+
+button { font: inherit; color: inherit; }
+#side-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#side-tabs button { flex: 1; padding: 6px; background: none; border: 0; color: var(--muted); cursor: default; }
+#side-tabs button.active { color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+
+#view-commit { padding: 0 0 12px; }
+#git-empty { padding: 12px; color: var(--muted); }
+.git-group { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; font-weight: 600; color: var(--muted); }
+.git-group span { font-weight: normal; }
+.git-group button, .git-files button { margin-left: auto; background: none; border: 0; color: var(--muted); padding: 0 4px; cursor: default; }
+.git-group button:hover, .git-files button:hover { color: var(--text); }
+.git-files { list-style: none; margin: 0; padding: 0; }
+.git-files li { display: flex; align-items: baseline; gap: 6px; padding: 2px 12px; white-space: nowrap; cursor: default; }
+.git-files li:hover { background: #ffffff10; }
+.git-files .letter { width: 1ch; font-family: monospace; }
+.git-files .dir { color: var(--muted); overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.git-files .buttons { margin-left: auto; display: none; }
+.git-files li:hover .buttons { display: flex; }
+.git-files .buttons button { margin: 0; }
+.status-M .letter, .status-R .letter { color: #6aa7f8; }
+.status-A .letter, .status-U .letter { color: #73bd79; }
+.status-D .letter { color: #e06c75; }
+#commit-message { display: block; width: calc(100% - 24px); margin: 12px 12px 6px; min-height: 70px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px; font: inherit; }
+.amend { display: block; padding: 0 12px 8px; color: var(--muted); }
+.commit-buttons { display: flex; gap: 8px; padding: 0 12px; }
+.commit-buttons button { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); }
+#commit { background: var(--accent) !important; border-color: var(--accent) !important; color: white; }
+
+#diff { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#diff[hidden] { display: none; }
+#diff header { display: flex; align-items: center; gap: 12px; padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+#diff-label { color: var(--muted); }
+#diff header button { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; }
+#diff-open { margin-left: auto; }
+#diff-editor { flex: 1; min-height: 0; }
+#branch { background: none; border: 0; color: var(--muted); padding: 0 0 0 12px; cursor: default; }
+#branch:hover { color: var(--text); }
