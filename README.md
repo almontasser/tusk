@@ -48,7 +48,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Session restore | Open tabs, cursor positions, and the panel layout aren't restored. Only the last folder is. |
+| Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | There's one editor pane. Only the diff view shows two files side by side. |
 | Replace in files | Find in files can't replace. |
 | Saving | There's no **Save All** and no auto-save. |
@@ -159,7 +159,10 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action. The app reopens the last folder when it starts. If a project has a
+Folder…** action. The app reopens the last folder when it starts, with the tabs you had open in
+it. Each tab keeps its cursor, selection, scroll position, and folded code, both
+when you switch tabs and when you reopen the project. Expanded folders in the
+tree and the sidebar view come back too. If a project has a
 `.phpactor.json` file, Phpactor asks whether to trust it, because the file can
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.

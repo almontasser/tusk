@@ -549,6 +549,29 @@ keeps its position, and any unsaved text carries over to the new path. When a
 file or folder goes to the Trash, `forget` closes its tabs and drops their
 models.
 
+## Sessions
+
+Monaco keeps one editor and swaps models when you switch tabs, and swapping
+drops the cursor, selection, scroll position, and folds. `showModel` in
+`main.ts` saves the outgoing tab's view state (`saveViewState`) and restores the
+incoming tab's (`restoreViewState`). Every tab switch goes through it, including
+closing, deleting, and moving files.
+
+Each project's session is saved in `localStorage` under `session:<root>`:
+
+| Field | Contents |
+| --- | --- |
+| `tabs` | Open file paths, in tab order |
+| `active` | The active tab |
+| `views` | Monaco view state for each open tab |
+| `dirs` | Expanded folders in the tree |
+| `view` | The sidebar view: project, commit, or pull requests |
+
+The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
+sidebar view), when the page unloads, and before it opens another folder. When
+it opens a folder, it expands the saved folders, reopens the tabs, and skips
+files that no longer exist.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -677,6 +700,12 @@ commit view also moves it to the Trash.
 Rename, new file, and new folder reuse the palette as a text prompt, with the
 file name preselected up to its extension. Inline editing in the tree would need
 its own input handling for little gain.
+
+### 2026-09-24: Sessions in localStorage
+
+A session is a convenience: if it's lost, you reopen a few tabs. `localStorage`
+survives app restarts and needs no Rust command or file format. Terminal tabs
+aren't saved, because their processes can't be restored.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

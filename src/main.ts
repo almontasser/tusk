@@ -21,6 +21,9 @@ const openDirs = new Set<string>();
 let root = "";
 let active = "";
 let recent: string[] = [];
+let currentView = "project";
+/** Cursor, selection, scroll, and folds of each tab, which Monaco drops when it switches models. */
+const viewStates = new Map<string, monaco.editor.ICodeEditorViewState>();
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
 const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(root.length + 1) : path);
@@ -30,19 +33,77 @@ const isDirty = (t: Tab) => t.model.getAlternativeVersionId() !== t.saved;
 async function openFolder(dir: unknown = null) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
+  saveSession();
   for (const path of [...tabs.keys()]) await closeTab(path);
   if (tabs.size) return; // user kept unsaved changes
   root = dir;
   recent = [];
+  const session = loadSession();
   openDirs.clear();
+  session?.dirs.forEach((d) => openDirs.add(d));
   renderedDirs.clear();
+  viewStates.clear();
+  Object.entries(session?.views ?? {}).forEach(([p, v]) => viewStates.set(p, v));
   $("project").textContent = nameOf(dir);
   $("open-folder").hidden = true;
   await renderDir($("tree") as HTMLUListElement, dir);
   await invoke("watch", { path: dir });
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
+  if (session) await restoreSession(session);
   restartServers();
+}
+
+// ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
+
+type Session = { tabs: string[]; active: string; views: Record<string, monaco.editor.ICodeEditorViewState>; dirs: string[]; view: string };
+const sessionKey = () => `session:${root}`;
+
+function loadSession(): Session | null {
+  try {
+    return JSON.parse(localStorage.getItem(sessionKey()) ?? "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveSession() {
+  if (!root) return;
+  if (active && tabs.has(active)) viewStates.set(active, editor.saveViewState()!);
+  const paths = [...tabs.keys()];
+  const session: Session = {
+    tabs: paths,
+    active,
+    views: Object.fromEntries(paths.filter((p) => viewStates.has(p)).map((p) => [p, viewStates.get(p)!])),
+    dirs: [...openDirs],
+    view: currentView,
+  };
+  try {
+    localStorage.setItem(sessionKey(), JSON.stringify(session));
+  } catch {
+    // Storage can be unavailable or full; a lost session only costs the open tabs.
+  }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const saveSoon = () => (clearTimeout(saveTimer), (saveTimer = setTimeout(saveSession, 500)));
+window.addEventListener("beforeunload", saveSession);
+
+async function restoreSession(session: Session) {
+  // Files deleted since the last session are skipped.
+  for (const path of session.tabs) await openFile(path).catch(() => viewStates.delete(path));
+  if (tabs.has(session.active)) await openFile(session.active);
+  if (session.view && session.view !== "project") showView(session.view);
+}
+
+/** Shows a tab's model in the editor, saving the view state of the tab it replaces. */
+function showModel(path: string) {
+  if (active && tabs.has(active) && editor.getModel()) viewStates.set(active, editor.saveViewState()!);
+  active = path;
+  editor.setModel(tabs.get(path)?.model ?? null);
+  const view = viewStates.get(path);
+  if (view && tabs.has(path)) editor.restoreViewState(view);
+  saveSoon();
 }
 
 /** Starts (or restarts) the language servers for the open folder. */
@@ -83,9 +144,12 @@ async function renamed(from: string, to: string) {
   tabs.clear();
   entries.forEach(([p, t]) => tabs.set(p, t));
   model.onDidChangeContent(renderTabs);
+  const view = active === from ? editor.saveViewState() : viewStates.get(from);
+  viewStates.delete(from);
+  if (view) viewStates.set(to, view);
   if (active === from) {
-    active = to;
-    editor.setModel(model);
+    active = "";
+    showModel(to);
   }
   old?.dispose();
   renderTabs();
@@ -101,9 +165,10 @@ function forget(path: string) {
     tab.model.dispose();
   }
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && inside(m.uri.fsPath)).forEach((m) => m.dispose());
+  [...viewStates.keys()].filter(inside).forEach((p) => viewStates.delete(p));
   if (inside(active)) {
-    active = [...tabs.keys()].pop() ?? "";
-    editor.setModel(tabs.get(active)?.model ?? null);
+    active = "";
+    showModel([...tabs.keys()].pop() ?? "");
   }
   renderTabs();
   markActiveInTree();
@@ -160,6 +225,7 @@ function toggleDir(path: string, row: HTMLElement, children: HTMLUListElement) {
     row.classList.add("open");
     renderDir(children, path);
   }
+  saveSoon();
 }
 
 async function openFile(path: string) {
@@ -169,9 +235,8 @@ async function openFile(path: string) {
     model.onDidChangeContent(renderTabs);
   }
   closeDiff();
-  active = path;
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
-  editor.setModel(tabs.get(path)!.model);
+  showModel(path);
   editor.focus();
   renderTabs();
   markActiveInTree();
@@ -183,10 +248,12 @@ async function closeTab(path: string) {
   if (isDirty(tab) && !(await ask(`Discard unsaved changes to ${nameOf(path)}?`, { kind: "warning" }))) return;
   tab.model.dispose();
   tabs.delete(path);
+  viewStates.delete(path);
   if (active === path) {
-    active = [...tabs.keys()].pop() ?? "";
-    editor.setModel(tabs.get(active)?.model ?? null);
+    active = "";
+    showModel([...tabs.keys()].pop() ?? "");
   }
+  saveSoon();
   renderTabs();
   markActiveInTree();
 }
@@ -456,10 +523,14 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+editor.onDidChangeCursorPosition(saveSoon);
+editor.onDidScrollChange(saveSoon);
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */
 function showView(name: string) {
+  currentView = name;
+  saveSoon();
   document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
   if (name === "commit") refreshGit();
