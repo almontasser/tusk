@@ -83,9 +83,17 @@ async function persist() {
   await invoke("write_file", { path, contents: JSON.stringify(settings, null, 2) + "\n" });
 }
 
-/** Loads settings from disk and applies them to the given editors. Unknown or invalid values fall back to defaults. */
-export async function initSettings(eds: monaco.editor.ICodeEditor[]) {
-  editors = eds;
+/** Applies the settings to an editor now and after every change. */
+export function addEditor(ed: monaco.editor.ICodeEditor) {
+  editors.push(ed);
+  apply();
+}
+
+/** Stops applying settings to a disposed editor. */
+export const removeEditor = (ed: monaco.editor.ICodeEditor) => (editors = editors.filter((e) => e !== ed));
+
+/** Loads settings from disk and applies them. Unknown or invalid values fall back to defaults. */
+export async function initSettings() {
   try {
     const saved = JSON.parse(await invoke<string>("read_file", { path: await file() }));
     for (const key of Object.keys(defaults) as (keyof Settings)[]) {

@@ -59,6 +59,17 @@ same URI, so milestone 2 needs no path translation.
 A tab is dirty when the model's alternative version ID differs from the ID
 recorded at the last save. Undoing back to the saved text clears the dirty mark.
 
+### Split panes
+
+`main.ts` keeps a list of panes. Each pane has its own Monaco editor and shows
+one of the shared tabs. `editor` and `active` always refer to the focused pane,
+so actions, the opener, and saving work on whichever pane you're in. Other panes
+remember their file in `Pane.active`. `addPane` sets up everything an editor
+needs: settings (`addEditor`), git markers and blame (`trackEditor`), conflict
+shading (`decorateConflicts`), session saving, and focus tracking. When a tab
+closes, moves, or is deleted, `updateOtherPanes` points other panes at another
+tab, and a pane left with nothing to show closes.
+
 ### Saving
 
 `saveFile` writes one tab if it has unsaved changes, then marks it saved, sends

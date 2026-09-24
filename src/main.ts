@@ -4,13 +4,13 @@ import { message, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
-import { initConflicts } from "./conflicts";
-import { afterSave, annotate, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { decorateConflicts, initConflicts } from "./conflicts";
+import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
-import { initSettings, openSettings, settings } from "./settings";
+import { addEditor, initSettings, openSettings, removeEditor, settings } from "./settings";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
@@ -19,7 +19,78 @@ type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
 
 const $ = (id: string) => document.getElementById(id)!;
-const editor = createEditor($("editor"));
+// ---- Editor panes ----
+// Panes share one set of tabs. Each pane shows one of them; `editor` and `active` are the
+// focused pane's editor and file, and other panes keep theirs in `Pane.active`.
+
+type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; active: string };
+const panes: Pane[] = [];
+
+function addPane(): Pane {
+  const el = document.createElement("div");
+  el.className = "pane";
+  $("editor").append(el);
+  const ed = createEditor(el);
+  const pane: Pane = { editor: ed, el, active: "" };
+  panes.push(pane);
+  addEditor(ed);
+  trackEditor(ed);
+  decorateConflicts(ed);
+  ed.onDidChangeCursorPosition(() => saveSoon());
+  ed.onDidScrollChange(() => saveSoon());
+  ed.onDidFocusEditorText(() => focusPane(pane));
+  return pane;
+}
+
+let editor = addPane().editor;
+const currentPane = () => panes.find((p) => p.editor === editor)!;
+
+function focusPane(pane: Pane) {
+  const current = currentPane();
+  if (current === pane) return;
+  current.active = active;
+  active = pane.active;
+  editor = pane.editor;
+  panes.forEach((p) => p.el.classList.toggle("focused", p === pane && panes.length > 1));
+  renderTabs();
+  markActiveInTree();
+}
+
+/** Opens a pane on the right with the current file (two panes at most). */
+function splitRight() {
+  if (panes.length > 1) return focusPane(panes.find((p) => p !== currentPane())!), editor.focus();
+  const path = active;
+  const view = editor.saveViewState();
+  const pane = addPane();
+  pane.active = path;
+  pane.editor.setModel(tabs.get(path)?.model ?? null);
+  if (view) pane.editor.restoreViewState(view);
+  focusPane(pane);
+  editor.focus();
+}
+
+/** Closes the focused pane, keeping its tabs. */
+function unsplit(pane = currentPane()) {
+  if (panes.length < 2) return;
+  if (pane.editor === editor) focusPane(panes.find((p) => p !== pane)!);
+  panes.splice(panes.indexOf(pane), 1);
+  removeEditor(pane.editor);
+  pane.editor.dispose();
+  pane.el.remove();
+  panes.forEach((p) => p.el.classList.remove("focused"));
+  renderTabs();
+}
+
+/** Points unfocused panes away from a file that closed or moved. A pane left empty closes. */
+function updateOtherPanes(change: (path: string) => string | null) {
+  for (const pane of panes.filter((p) => p !== currentPane())) {
+    const next = change(pane.active);
+    if (next === null) continue;
+    pane.active = next;
+    pane.editor.setModel(tabs.get(next)?.model ?? null);
+    if (!next) unsplit(pane);
+  }
+}
 const tabs = new Map<string, Tab>();
 const renderedDirs = new Map<string, HTMLUListElement>();
 const openDirs = new Set<string>();
@@ -158,6 +229,7 @@ async function renamed(from: string, to: string) {
     active = "";
     showModel(to);
   }
+  updateOtherPanes((p) => (p === from ? to : null));
   old?.dispose();
   renderTabs();
   markActiveInTree();
@@ -177,6 +249,7 @@ function forget(path: string) {
     active = "";
     showModel([...tabs.keys()].pop() ?? "");
   }
+  updateOtherPanes((p) => (p && inside(p) ? ([...tabs.keys()].pop() ?? "") : null));
   renderTabs();
   markActiveInTree();
 }
@@ -271,6 +344,7 @@ async function closeTab(path: string) {
     active = "";
     showModel([...tabs.keys()].pop() ?? "");
   }
+  updateOtherPanes((p) => (p === path ? ([...tabs.keys()].pop() ?? "") : null));
   saveSoon();
   renderTabs();
   markActiveInTree();
@@ -306,7 +380,8 @@ function renderTabs() {
   $("tabs").replaceChildren(
     ...[...tabs].map(([path, tab]) => {
       const el = document.createElement("div");
-      el.className = `tab${path === active ? " active" : ""}${isDirty(tab) ? " dirty" : ""}`;
+      const shown = panes.some((p) => p.editor !== editor && p.active === path);
+      el.className = `tab${path === active ? " active" : ""}${shown ? " shown" : ""}${isDirty(tab) ? " dirty" : ""}`;
       el.role = "tab";
       el.title = path;
       el.textContent = nameOf(path);
@@ -464,7 +539,9 @@ const actions: Action[] = [
   { label: "Branches…", run: branches },
   { label: "Stash Changes…", run: stashChanges },
   { label: "Stashes…", run: stashes },
-  { label: "Annotate with Git Blame", run: annotate },
+  { label: "Annotate with Git Blame", run: () => annotate(editor) },
+  { label: "Split Right", keys: "Meta+Backslash", run: splitRight },
+  { label: "Unsplit", run: () => unsplit() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
@@ -542,13 +619,12 @@ window.addEventListener(
 );
 
 initRunner(() => root);
-initSettings([editor]);
+initSettings();
 initFormatting({ root: () => root, status });
-initConflicts(editor);
+initConflicts();
 initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
-editor.onDidChangeCursorPosition(saveSoon);
-editor.onDidScrollChange(saveSoon);
+
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */
@@ -561,7 +637,7 @@ function showView(name: string) {
   if (name === "prs") loadPullRequests();
 }
 document.querySelectorAll<HTMLElement>("#side-tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view!)));
-initGit({ root: () => root, openFile, status, showView }, editor);
+initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 branchListeners.push(updateBranchPullRequest);
 

@@ -54,7 +54,7 @@ export async function refreshGit() {
   }
   renderBranch();
   renderCommitView();
-  onRefresh();
+  refreshers.forEach((r) => r());
 }
 
 function renderBranch() {
@@ -328,7 +328,8 @@ export async function branches() {
 // ---- Editor: change markers, inline blame, and blame annotations ----
 
 const headCache = new Map<string, Promise<string | null>>();
-let onRefresh = () => {};
+/** Per-editor refreshers, run after each git refresh. */
+const refreshers: (() => void)[] = [];
 
 /** The file's content at HEAD, or null for files git doesn't track. */
 function headOf(rel: string) {
@@ -337,13 +338,13 @@ function headOf(rel: string) {
 }
 
 const annotated = new Set<string>();
-let toggleAnnotations = () => {};
+const togglers = new WeakMap<monaco.editor.ICodeEditor, () => void>();
 
 /** Toggles blame annotations (commit, age, and author) in place of line numbers. */
-export const annotate = () => toggleAnnotations();
+export const annotate = (editor: monaco.editor.ICodeEditor) => togglers.get(editor)?.();
 
 /** Adds change markers, inline blame for the cursor line, and blame annotations to an editor. */
-function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
+export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const markers = editor.createDecorationsCollection();
   const inline = editor.createDecorationsCollection();
   let blame: { version: number; lines: Promise<BlameLine[]> } | undefined;
@@ -405,23 +406,22 @@ function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     };
     editor.updateOptions({ lineNumbers: label, lineNumbersMinChars: 24 });
   };
-  toggleAnnotations = () => {
+  togglers.set(editor, () => {
     const model = editor.getModel();
     const rel = model && relOf(model);
     if (!rel) return;
     annotated.has(rel) ? annotated.delete(rel) : annotated.add(rel);
     applyAnnotations();
-  };
+  });
 
   const updateAnnotations = debounce(applyAnnotations, 300);
   editor.onDidChangeModel(() => (blame = undefined, updateMarkers(), updateInline(), applyAnnotations()));
   editor.onDidChangeModelContent(() => (updateMarkers(), updateInline(), updateAnnotations()));
   editor.onDidChangeCursorPosition(updateInline);
-  onRefresh = () => (blame = undefined, updateMarkers(), updateInline(), updateAnnotations());
+  refreshers.push(() => (blame = undefined, updateMarkers(), updateInline(), updateAnnotations()));
 }
 
-export function initGit(h: Host, editor: monaco.editor.IStandaloneCodeEditor) {
-  trackEditor(editor);
+export function initGit(h: Host) {
   host = h;
   $("branch").onclick = () => branches();
   $("commit").onclick = () => commit(false);

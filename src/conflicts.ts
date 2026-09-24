@@ -25,7 +25,8 @@ function accept(model: monaco.editor.ITextModel, start: number, choice: Choice) 
   model.pushEditOperations([], [{ range, text }], () => null);
 }
 
-export function initConflicts(editor: monaco.editor.IStandaloneCodeEditor) {
+/** Registers the accept command and the links above conflict blocks. Call once. */
+export function initConflicts() {
   monaco.editor.registerCommand("conflict.accept", (_, uri: string, start: number, choice: Choice) => {
     const model = monaco.editor.getModel(monaco.Uri.parse(uri));
     if (model) accept(model, start, choice);
@@ -45,8 +46,10 @@ export function initConflicts(editor: monaco.editor.IStandaloneCodeEditor) {
       return { lenses, dispose() {} };
     },
   });
+}
 
-  // Color the two sides and dim the marker lines.
+/** Colors the two sides of each conflict and dims the marker lines in an editor. */
+export function decorateConflicts(editor: monaco.editor.IStandaloneCodeEditor) {
   const decorations = editor.createDecorationsCollection();
   const update = () => {
     const model = editor.getModel();

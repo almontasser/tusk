@@ -48,7 +48,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
-| Split editors | There's one editor pane. Only the diff view shows two files side by side. |
+| Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
 | Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
@@ -155,6 +155,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
 | ⌘1 | Show the project tree |
+| ⌘\ | Split the editor, or move to the other pane |
 | ⌘9 | Git log |
 | ⌘S | Save all files |
 | ⌘, | Settings |
@@ -176,6 +177,11 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Show inlay hints | On |
 | Save files automatically | On |
 | Format files when saving | Off |
+
+Press ⌘\ to split the editor: the current file opens in a second pane on the
+right. Clicking a tab opens it in the focused pane, and a tab shown in the other
+pane is underlined in gray. Press ⌘\ again to move between panes, and run
+**Unsplit** to close the focused pane.
 
 Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving
