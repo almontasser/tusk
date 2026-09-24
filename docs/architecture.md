@@ -783,6 +783,22 @@ Breakpoints are model decorations with a glyph in the gutter, so they show in
 every pane and move with the lines as you edit. The line numbers are saved per
 project in `localStorage`.
 
+Each breakpoint has a condition, an empty string when there's none. The
+decorations map each decoration id to its condition, so a condition moves with
+its line as you edit. Saved breakpoints are `[line, condition]` pairs; the
+older format, a list of line numbers, still loads.
+
+Pause on exceptions sends the exception filters `Exception` and `Error`. The
+adapter passes them to Xdebug as exception breakpoints, and Xdebug also matches
+subclasses, so the two cover every `Throwable`. The setting is app-wide, in
+`localStorage`.
+
+A path mapping goes in the `launch` request as `pathMappings`, with one entry
+from the server's project path to the local one. The adapter translates
+breakpoint paths and stack frames, so the rest of the client sees local paths
+only. The server path is saved per project in `localStorage`. Without one, a
+`docker-compose.yml` that mentions Laravel Sail maps `/var/www/html`.
+
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 

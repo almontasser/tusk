@@ -6,7 +6,7 @@ import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, initDebugger, isPaused, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -696,6 +696,9 @@ const actions: Action[] = [
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Edit Breakpoint Condition…", keys: "Meta+Shift+F8", run: () => active && editBreakpointCondition(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Toggle Pause on Exceptions", run: togglePauseOnExceptions },
+  { label: "Set Server Path for Debugging…", run: () => root && setServerRoot() },
   { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },
   { label: "Stop Debugging", keys: "Meta+F2", run: stopDebugging },
   { label: "Resume Program", keys: "F9", run: () => isPaused() && resume() },

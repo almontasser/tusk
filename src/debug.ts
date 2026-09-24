@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
+import { pick } from "./palette";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -38,39 +39,47 @@ listen<string>("lsp:xdebug", ({ payload }) => {
 });
 
 // ---- Breakpoints ----
-// Lines are kept per file. For files with an open model, decorations track the lines as you
-// edit, so the model is the source of truth there.
+// Each breakpoint is a line and a condition ("" for none), kept per file. For files with an open
+// model, decorations track the lines as you edit, so the model is the source of truth there.
 
-const breakpoints = new Map<string, Set<number>>();
-const decorations = new Map<string, string[]>();
+type Breakpoints = Map<number, string>;
+const breakpoints = new Map<string, Breakpoints>();
+const decorations = new Map<string, Map<string, string>>(); // path → decoration id → condition
 const modelFor = (path: string) => monaco.editor.getModel(monaco.Uri.file(path));
 const storageKey = () => `breakpoints:${host.root()}`;
 
-function linesOf(path: string): number[] {
+function breakpointsOf(path: string): Breakpoints {
   const model = modelFor(path);
   const ids = decorations.get(path);
-  if (model && ids) return [...new Set(ids.map((id) => model.getDecorationRange(id)?.startLineNumber).filter((l): l is number => !!l))].sort((a, b) => a - b);
-  return [...(breakpoints.get(path) ?? [])].sort((a, b) => a - b);
+  if (!model || !ids) return breakpoints.get(path) ?? new Map();
+  const result: Breakpoints = new Map();
+  for (const [id, condition] of ids) {
+    const line = model.getDecorationRange(id)?.startLineNumber;
+    if (line) result.set(line, condition);
+  }
+  return result;
 }
 
 function renderBreakpoints(path: string) {
   const model = modelFor(path);
   if (!model) return;
-  const lines = [...(breakpoints.get(path) ?? [])];
-  decorations.set(
-    path,
-    model.deltaDecorations(
-      decorations.get(path) ?? [],
-      lines.map((line) => ({
-        range: new monaco.Range(line, 1, line, 1),
-        options: { glyphMarginClassName: "breakpoint", glyphMarginHoverMessage: { value: "Breakpoint (click to remove)" }, stickiness: 1 },
-      })),
-    ),
+  const entries = [...(breakpoints.get(path) ?? [])];
+  const ids = model.deltaDecorations(
+    [...(decorations.get(path)?.keys() ?? [])],
+    entries.map(([line, condition]) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        glyphMarginClassName: condition ? "breakpoint conditional" : "breakpoint",
+        glyphMarginHoverMessage: { value: condition ? `Breakpoint when \`${condition}\` (right-click to edit)` : "Breakpoint (right-click to add a condition)" },
+        stickiness: 1,
+      },
+    })),
   );
+  decorations.set(path, new Map(ids.map((id, i) => [id, entries[i][1]])));
 }
 
 function persist() {
-  const data = Object.fromEntries([...breakpoints].filter(([, l]) => l.size).map(([p, l]) => [p, [...l]]));
+  const data = Object.fromEntries([...breakpoints].filter(([, b]) => b.size).map(([p, b]) => [p, [...b]]));
   try {
     localStorage.setItem(storageKey(), JSON.stringify(data));
   } catch {
@@ -82,32 +91,59 @@ function persist() {
 export function loadBreakpoints() {
   breakpoints.clear();
   try {
-    for (const [path, lines] of Object.entries<number[]>(JSON.parse(localStorage.getItem(storageKey()) ?? "{}"))) breakpoints.set(path, new Set(lines));
+    // Older versions saved a list of line numbers per file.
+    for (const [path, list] of Object.entries<(number | [number, string])[]>(JSON.parse(localStorage.getItem(storageKey()) ?? "{}")))
+      breakpoints.set(path, new Map(list.map((b) => (typeof b === "number" ? [b, ""] : b))));
   } catch {
     // No saved breakpoints.
   }
   for (const path of breakpoints.keys()) renderBreakpoints(path);
 }
 
-export function toggleBreakpoint(path: string, line: number) {
-  const lines = new Set(linesOf(path));
-  lines.has(line) ? lines.delete(line) : lines.add(line);
-  breakpoints.set(path, lines);
+function update(path: string, change: (b: Breakpoints) => void) {
+  const b = breakpointsOf(path);
+  change(b);
+  breakpoints.set(path, b);
   renderBreakpoints(path);
   persist();
   if (running) sendBreakpoints(path);
 }
 
-const sendBreakpoints = (path: string) =>
-  request("setBreakpoints", { source: { path }, breakpoints: linesOf(path).map((line) => ({ line })) }).catch(() => {});
+export function toggleBreakpoint(path: string, line: number) {
+  update(path, (b) => (b.has(line) ? b.delete(line) : b.set(line, "")));
+}
 
-/** Adds breakpoint toggling on the gutter to an editor. */
+/** Asks for a PHP expression; the breakpoint then pauses only when it's true. Adds the breakpoint if there's none. */
+export function editBreakpointCondition(path: string, line: number) {
+  const current = breakpointsOf(path).get(line) ?? "";
+  pick(
+    `Condition for the breakpoint on line ${line}, such as $user->id === 5`,
+    (q) => [
+      {
+        label: q.trim() ? `Pause when ${q.trim()}` : "Pause every time (no condition)",
+        run: () => update(path, (b) => b.set(line, q.trim())),
+      },
+    ],
+    0,
+    { value: current },
+  );
+}
+
+const sendBreakpoints = (path: string) =>
+  request("setBreakpoints", {
+    source: { path },
+    breakpoints: [...breakpointsOf(path)].sort(([a], [b]) => a - b).map(([line, condition]) => (condition ? { line, condition } : { line })),
+  }).catch(() => {});
+
+/** Adds breakpoints to an editor's gutter: click toggles one, and right-click edits its condition. */
 export function attachDebugger(editor: monaco.editor.IStandaloneCodeEditor) {
   editor.updateOptions({ glyphMargin: true });
   editor.onMouseDown((e) => {
     const model = editor.getModel();
     if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !model || model.uri.scheme !== "file") return;
-    toggleBreakpoint(model.uri.fsPath, e.target.position!.lineNumber);
+    const line = e.target.position!.lineNumber;
+    if (e.event.rightButton) editBreakpointCondition(model.uri.fsPath, line);
+    else toggleBreakpoint(model.uri.fsPath, line);
   });
 }
 
@@ -117,9 +153,63 @@ monaco.editor.onDidCreateModel((model) => {
   renderBreakpoints(path);
   renderCurrentLine();
   // Keep the saved lines in step with edits that move breakpoints.
-  model.onDidChangeContent(() => decorations.has(path) && breakpoints.set(path, new Set(linesOf(path))));
+  model.onDidChangeContent(() => decorations.has(path) && breakpoints.set(path, breakpointsOf(path)));
   model.onWillDispose(() => decorations.delete(path));
 });
+
+// ---- Exceptions and path mappings ----
+
+const readSetting = (key: string) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+const writeSetting = (key: string, value: string | null) => {
+  try {
+    value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value);
+  } catch {
+    // Lasts for this session only.
+  }
+};
+
+let pauseOnExceptions = readSetting("debug:exceptions") === "1";
+// Xdebug matches subclasses, so these two cover every Throwable.
+const exceptionFilters = () => (pauseOnExceptions ? ["Exception", "Error"] : []);
+
+export function togglePauseOnExceptions() {
+  pauseOnExceptions = !pauseOnExceptions;
+  writeSetting("debug:exceptions", pauseOnExceptions ? "1" : null);
+  if (running) request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
+  render();
+}
+
+/** Where the project lives on the server, for code that runs in Docker: set by you, or /var/www/html for Sail. */
+async function serverRoot(): Promise<string | null> {
+  const saved = readSetting(`debug:serverRoot:${host.root()}`);
+  if (saved !== null) return saved || null;
+  for (const file of ["docker-compose.yml", "compose.yaml", "docker-compose.yaml", "compose.yml"]) {
+    const text = await invoke<string>("read_file", { path: `${host.root()}/${file}` }).catch(() => "");
+    if (/laravel\/sail|sail-\d/.test(text)) return "/var/www/html";
+  }
+  return null;
+}
+
+export async function setServerRoot() {
+  const current = (await serverRoot()) ?? "";
+  pick(
+    "The project's path on the server, such as /var/www/html (leave empty when PHP runs on this Mac)",
+    (q) => [
+      {
+        label: q.trim() ? `Map ${q.trim()} to ${host.root()}` : "No mapping: PHP runs on this Mac",
+        run: () => writeSetting(`debug:serverRoot:${host.root()}`, q.trim().replace(/\/$/, "")),
+      },
+    ],
+    0,
+    { value: current },
+  );
+}
 
 // ---- Session ----
 
@@ -138,8 +228,11 @@ export async function startDebugging() {
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
     await request("initialize", { adapterID: "php", clientID: "php-editor", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
-    await request("launch", { port: PORT, stopOnEntry: false, xdebugSettings: { max_children: 128, max_depth: 1, max_data: 2048 } });
+    const remote = await serverRoot();
+    const pathMappings = remote ? { [remote]: host.root() } : undefined;
+    await request("launch", { port: PORT, stopOnEntry: false, pathMappings, xdebugSettings: { max_children: 128, max_depth: 1, max_data: 2048 } });
     log(`Listening for Xdebug on port ${PORT}. Start a request or test with Xdebug enabled.`);
+    if (remote) log(`Mapping ${remote} on the server to ${host.root()}.`);
   } catch (e) {
     log(`Couldn't start the debugger: ${e}`);
     stopDebugging();
@@ -161,14 +254,14 @@ export async function stopDebugging() {
 async function onEvent(event: string, body: any) {
   if (event === "initialized") {
     for (const path of breakpoints.keys()) await sendBreakpoints(path);
-    await request("setExceptionBreakpoints", { filters: [] }).catch(() => {});
+    await request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
     await request("configurationDone").catch(() => {});
   } else if (event === "stopped") {
     stoppedThread = body.threadId;
     const trace = await request<{ stackFrames: Frame[] }>("stackTrace", { threadId: body.threadId, startFrame: 0, levels: 50 });
     frames = trace.stackFrames;
     showPanel();
-    log(`Paused (${body.reason ?? "breakpoint"}).`);
+    log(`Paused (${body.reason ?? "breakpoint"})${body.text ? `: ${body.text}` : "."}`);
     await selectFrame(frames[0]);
   } else if (event === "continued" || (event === "thread" && body.reason === "exited" && body.threadId === stoppedThread)) {
     stoppedThread = null;
@@ -231,6 +324,8 @@ panel.innerHTML = `
     <button data-run="listen" title="Start listening for Xdebug connections" aria-label="Listen"><span class="codicon codicon-debug-start"></span></button>
     <button data-run="stop" title="Stop listening (⌘F2)" aria-label="Stop"><span class="codicon codicon-debug-stop"></span></button>
     <span class="sep"></span>
+    <button data-run="exceptions" title="Pause on exceptions" aria-label="Pause on exceptions"><span class="codicon codicon-zap"></span></button>
+    <span class="sep"></span>
     <button data-run="resume" title="Resume (F9)" aria-label="Resume"><span class="codicon codicon-debug-continue"></span></button>
     <button data-run="over" title="Step Over (F8)" aria-label="Step Over"><span class="codicon codicon-debug-step-over"></span></button>
     <button data-run="into" title="Step Into (F7)" aria-label="Step Into"><span class="codicon codicon-debug-step-into"></span></button>
@@ -247,7 +342,7 @@ panel.innerHTML = `
   </div>`;
 const q = <T extends HTMLElement>(sel: string) => panel.querySelector(sel) as T;
 
-const runs: Record<string, () => unknown> = { listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
+const runs: Record<string, () => unknown> = { exceptions: togglePauseOnExceptions, listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
 panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.onclick = () => runs[b.dataset.run!]()));
 
 function showPanel() {
@@ -257,7 +352,10 @@ export const showDebugPanel = showPanel;
 
 function render() {
   q<HTMLElement>(".debug-state").textContent = !running ? "Not listening" : stoppedThread !== null ? "Paused" : "Listening";
-  const enabled: Record<string, boolean> = { listen: !running, resume: isPaused(), over: isPaused(), into: isPaused(), out: isPaused(), stop: running };
+  const exceptions = q<HTMLElement>('[data-run="exceptions"]');
+  exceptions.setAttribute("aria-pressed", String(pauseOnExceptions));
+  exceptions.classList.toggle("on", pauseOnExceptions);
+  const enabled: Record<string, boolean> = { exceptions: true, listen: !running, resume: isPaused(), over: isPaused(), into: isPaused(), out: isPaused(), stop: running };
   panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.disabled = !enabled[b.dataset.run!]));
   q<HTMLElement>(".debug-frames").replaceChildren(
     ...frames.map((f) => {

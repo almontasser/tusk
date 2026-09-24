@@ -51,7 +51,7 @@ file to change when you add it.
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
 | Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
-| Debugger | Breakpoints have no conditions or hit counts, and there's no option to pause on exceptions. Projects in Docker or Sail need path mappings, which aren't supported yet. |
+| Debugger | Breakpoints have no hit counts or log messages, and there's no watch list. Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
@@ -174,6 +174,7 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃R | Rerun the last test or command |
 | ⌃⇧D | Debug the test at the cursor |
 | ⌘F8 | Toggle a breakpoint on the current line |
+| ⇧⌘F8 | Edit the condition of the breakpoint on the current line |
 | F9 | Resume (while debugging) |
 | F8, F7, ⇧F8 | Step over, step into, step out |
 | ⌘F2 | Stop debugging |
@@ -426,6 +427,27 @@ debugging on for the processes it starts.
    arrays, and type an expression, such as `$request->all()`, to evaluate it.
    Use F9 to resume, F8 to step over, F7 to step into, ⇧F8 to step out, and ⌘F2
    to stop.
+
+### Conditions and exceptions
+
+- To pause only when a PHP expression is true, such as `$user->id === 5`,
+  right-click the gutter at the breakpoint's line, or press ⇧⌘F8. A breakpoint
+  with a condition shows a `?`.
+- To pause wherever an exception is thrown, even if the code catches it, turn
+  on **Pause on exceptions** (the lightning icon in the Debug tab). The log
+  shows the exception's class and message.
+
+### Docker and Sail
+
+When PHP runs in a container, its paths differ from yours, so the debugger has
+to map them. For a Sail project (its `docker-compose.yml` uses Laravel Sail),
+the editor maps `/var/www/html` to the project folder on its own. For another
+setup, run **Set Server Path for Debugging…** from ⌘⇧A and enter the project's
+path in the container.
+
+Xdebug in the container must connect back to your Mac. With Sail, set
+`SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail
+already points Xdebug at `host.docker.internal`.
 
 ## Database
 
