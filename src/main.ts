@@ -8,13 +8,14 @@ import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
-import { addEditor, initSettings, openSettings, removeEditor, settings } from "./settings";
+import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
 import { initSearch, openSearch, refreshSearch } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
 import { openTerminal, toggleTerminal } from "./terminal";
@@ -484,6 +485,52 @@ async function closeTab(path: string) {
 }
 
 /** Saves one tab's file if it has unsaved changes. */
+// ---- EditorConfig ----
+
+const editorConfigs = new Map<string, Promise<string | null>>(); // folder → its .editorconfig, or null
+
+/** The .editorconfig files that apply to a project file, from the project root down to its folder. */
+async function editorConfigFor(path: string): Promise<Properties> {
+  if (!root || !path.startsWith(root + "/")) return {};
+  const dirs = [root];
+  for (const part of relative(parentOf(path)).split("/").filter(Boolean)) dirs.push(`${dirs.at(-1)}/${part}`);
+  const configs = [];
+  for (const dir of dirs) {
+    if (!editorConfigs.has(dir)) editorConfigs.set(dir, invoke<string>("read_file", { path: `${dir}/.editorconfig` }).catch(() => null));
+    const text = await editorConfigs.get(dir)!;
+    if (text !== null) configs.push({ dir, text });
+  }
+  return propertiesFor(path, configs);
+}
+
+/** Sets a model's indentation from .editorconfig. Without one, Monaco's detection from the file's content stays. */
+async function applyEditorConfig(model: monaco.editor.ITextModel) {
+  const options = Object.fromEntries(Object.entries(indentation(await editorConfigFor(model.uri.fsPath))).filter(([, v]) => v !== undefined));
+  if (Object.keys(options).length && !model.isDisposed()) model.updateOptions(options);
+  if (model === editor.getModel()) updateStatusItems();
+}
+monaco.editor.onDidCreateModel((model) => model.uri.scheme === "file" && applyEditorConfig(model));
+
+/** Trims trailing whitespace and adds or removes the final newline, as .editorconfig asks, as one undoable edit. */
+async function applySaveRules(model: monaco.editor.ITextModel) {
+  const props = await editorConfigFor(model.uri.fsPath);
+  const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
+  const last = model.getLineCount();
+  if (props.trim_trailing_whitespace === "true") {
+    for (let line = 1; line <= last; line++) {
+      const text = model.getLineContent(line);
+      const trimmed = text.trimEnd().length;
+      if (trimmed < text.length) edits.push({ range: new monaco.Range(line, trimmed + 1, line, text.length + 1), text: "" });
+    }
+  }
+  const endsWithNewline = last > 1 && model.getLineContent(last) === "";
+  if (props.insert_final_newline === "true" && !endsWithNewline && model.getValueLength())
+    edits.push({ range: new monaco.Range(last, model.getLineMaxColumn(last), last, model.getLineMaxColumn(last)), text: model.getEOL() });
+  if (props.insert_final_newline === "false" && endsWithNewline)
+    edits.push({ range: new monaco.Range(last - 1, model.getLineMaxColumn(last - 1), last, 1), text: "" });
+  if (edits.length) model.pushEditOperations(null, edits, () => null);
+}
+
 async function saveFile(path: string) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
@@ -492,6 +539,7 @@ async function saveFile(path: string) {
     if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
     else await formatModel(tab.model);
   }
+  await applySaveRules(tab.model);
   const text = tab.model.getValue();
   try {
     await invoke("write_file", { path, contents: text });
@@ -548,6 +596,10 @@ let pending = new Set<string>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 listen<string[]>("fs-change", ({ payload }) => {
   payload.forEach((p) => pending.add(p));
+  if (payload.some((p) => p.endsWith("/.editorconfig"))) {
+    editorConfigs.clear();
+    monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach(applyEditorConfig);
+  }
   clearTimeout(timer);
   timer = setTimeout(async () => {
     const paths = pending;
@@ -667,6 +719,7 @@ const actions: Action[] = [
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
   { label: "Save All", keys: "Meta+S", run: saveAll },
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
+  { label: "Keymap…", run: () => editKeymap() },
   { label: "Close Tab", keys: "Meta+W", run: () => closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },
@@ -734,6 +787,75 @@ const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsF
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
 
+// ---- Keymap ----
+
+// Shortcuts you change are saved as overrides of these defaults, by action name.
+const defaultKeys = new Map(actions.map((a) => [a.label, a.keys]));
+onSettings((s) =>
+  actions.forEach((a) => {
+    const custom = s.keymap[a.label];
+    a.keys = custom === undefined ? defaultKeys.get(a.label) : custom || undefined;
+  }),
+);
+setKeymapEditor(() => editKeymap());
+
+function editKeymap() {
+  pick("Keymap: choose an action to change its shortcut", (q) =>
+    rank(
+      q,
+      actions.map((a) => ({
+        label: a.label,
+        detail: `${symbolsFor(a.keys) || "No shortcut"}${a.label in settings.keymap ? " (changed)" : ""}`,
+        run: () => recordShortcut(a),
+      })),
+    ),
+  );
+}
+
+let recording = false;
+
+/** Waits for a key combination and makes it the action's shortcut. */
+function recordShortcut(action: Action) {
+  recording = true;
+  const overlay = document.createElement("div");
+  overlay.id = "shortcut-recorder";
+  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, or a function key. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
+  overlay.querySelector("h2")!.textContent = action.label;
+  document.body.append(overlay);
+  const save = (keys: string | undefined) => {
+    const keymap = { ...settings.keymap };
+    if (keys === undefined || keys === defaultKeys.get(action.label)) delete keymap[action.label];
+    else keymap[action.label] = keys;
+    // A shortcut belongs to one action, so take it from any other.
+    const taken = keys && actions.find((a) => a !== action && a.keys && canonical(a.keys) === keys);
+    if (taken) keymap[taken.label] = "";
+    updateSetting("keymap", keymap);
+    status(`${action.label}: ${symbolsFor(action.keys) || "no shortcut"}${taken ? `. Removed it from ${taken.label}.` : ""}`);
+  };
+  const finish = () => {
+    recording = false;
+    window.removeEventListener("keydown", onKey, true);
+    overlay.remove();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
+    const plain = !(e.metaKey || e.ctrlKey || e.altKey);
+    if (plain && e.key === "Escape") return finish();
+    if (plain && e.key === "Backspace") return save(""), finish();
+    if (plain && !/^F\d+$/.test(e.code)) {
+      overlay.querySelector(".combo")!.textContent = "Add ⌘, ⌃, or ⌥";
+      return;
+    }
+    save(comboOf(e));
+    finish();
+  };
+  window.addEventListener("keydown", onKey, true);
+  overlay.querySelector<HTMLElement>("[data-reset]")!.onclick = () => (save(undefined), finish());
+  overlay.querySelector<HTMLElement>("[data-cancel]")!.onclick = finish;
+}
+
 async function searchEverywhere() {
   const files = root ? (await invoke<string[]>("list_files", { root })).map((f) => fileItem(`${root}/${f}`)) : [];
   pick("Search everywhere: classes, files, and actions", async (q) => {
@@ -761,7 +883,7 @@ function comboOf(e: KeyboardEvent) {
 window.addEventListener(
   "keydown",
   (e) => {
-    if (!(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
+    if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
     const combo = comboOf(e);
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
     if (!action || (action.editorOnly && !editor.hasTextFocus())) return;
@@ -780,7 +902,7 @@ let lastTap = { key: "", time: 0 };
 window.addEventListener(
   "keydown",
   (e) => {
-    if (e.repeat) return;
+    if (e.repeat || recording) return;
     const now = performance.now();
     if ((e.key === "Shift" || e.key === "Control") && lastTap.key === e.key && now - lastTap.time < 350) {
       lastTap = { key: "", time: 0 };

@@ -15,6 +15,8 @@ export type Settings = {
   inlayHints: boolean;
   autoSave: boolean;
   formatOnSave: boolean;
+  /** Shortcut overrides by action name, such as { "Go to File": "Meta+P" }. "" removes the shortcut. */
+  keymap: Record<string, string>;
 };
 
 const defaults: Settings = {
@@ -26,6 +28,7 @@ const defaults: Settings = {
   inlayHints: true,
   autoSave: true,
   formatOnSave: false,
+  keymap: {},
 };
 
 type Field = { key: keyof Settings; label: string; help?: string } & (
@@ -86,6 +89,17 @@ async function persist() {
   await invoke("write_file", { path, contents: JSON.stringify(settings, null, 2) + "\n" });
 }
 
+/** Changes one setting, applies it, and saves. */
+export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
+  settings[key] = value;
+  apply();
+  persist();
+}
+
+let keymapEditor = () => {};
+/** Sets what the Keymap button in the dialog opens. */
+export const setKeymapEditor = (open: () => void) => (keymapEditor = open);
+
 /** Applies the settings to an editor now and after every change. */
 export function addEditor(ed: monaco.editor.ICodeEditor) {
   editors.push(ed);
@@ -100,7 +114,7 @@ export async function initSettings() {
   try {
     const saved = JSON.parse(await invoke<string>("read_file", { path: await file() }));
     for (const key of Object.keys(defaults) as (keyof Settings)[]) {
-      if (typeof saved[key] === typeof defaults[key]) (settings as Record<string, unknown>)[key] = saved[key];
+      if (typeof saved[key] === typeof defaults[key] && saved[key] !== null) (settings as Record<string, unknown>)[key] = saved[key];
     }
   } catch {
     // No settings file yet: use the defaults.
@@ -152,9 +166,13 @@ export function openSettings() {
     form.append(row);
   }
 
+  const keymap = document.createElement("button");
+  keymap.type = "button";
+  keymap.textContent = "Keymap…";
+  keymap.onclick = () => (dialog.close(), keymapEditor());
   const done = document.createElement("button");
   done.textContent = "Done";
-  form.append(done);
+  form.append(keymap, done);
   dialog.append(form);
   document.body.append(dialog);
   dialog.addEventListener("close", () => dialog.remove());

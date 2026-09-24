@@ -50,7 +50,7 @@ file to change when you add it.
 | --- | --- |
 | Session restore | Terminal tabs and the terminal panel aren't restored. |
 | Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
-| Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
+| Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Breakpoints have no hit counts or log messages, and there's no watch list. Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
@@ -139,6 +139,12 @@ corner.
 Shortcuts follow PhpStorm's macOS keymap. To see every action and its
 shortcut, press ⌘⇧A (**Find Action**).
 
+To change a shortcut, run **Keymap…** from ⌘⇧A (or click **Keymap…** in
+Settings), choose the action, and press the new shortcut. Backspace removes the
+shortcut, and **Reset to Default** restores it. If another action had that
+shortcut, the other action loses it. Changes are saved in `settings.json` as
+`keymap`.
+
 | Shortcut | Action |
 | --- | --- |
 | ⇧⇧ | Search everywhere: classes, files, and actions |
@@ -190,7 +196,9 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action. ## Settings
+Folder…** action.
+
+## Settings
 
 Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 `~/Library/Application Support/dev.almontasser.phpeditor/settings.json`.
@@ -204,6 +212,14 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Show inlay hints | On |
 | Save files automatically | On |
 | Format files when saving | Off |
+
+### EditorConfig
+
+If the project has `.editorconfig` files, the editor follows them:
+`indent_style`, `indent_size`, and `tab_width` set each file's indentation (the
+status bar shows it), and saving applies `trim_trailing_whitespace` and
+`insert_final_newline`. Without one, the editor detects indentation from each
+file's content. Changes to `.editorconfig` apply to open files at once.
 
 Press ⌘\ to split the editor: the current file opens in a second pane on the
 right. Clicking a tab opens it in the focused pane, and a tab shown in the other

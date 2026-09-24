@@ -96,6 +96,27 @@ Format on save formats the active editor through Monaco's format action, which
 applies minimal edits and keeps the cursor in place, and formats other files
 with one undoable edit.
 
+### Keymap
+
+Each action has a default shortcut in `main.ts`. `settings.keymap` overrides
+them by action name, and an empty string removes a shortcut. An `onSettings`
+listener sets each action's `keys` from the defaults and the overrides, so the
+key handler, the palette, and Find Action all see the current shortcuts. The
+recorder listens in the capture phase and sets `recording`, which the global
+key handlers check, so the combination you press doesn't also run an action.
+
+### EditorConfig
+
+`src/editorconfig.ts` parses `.editorconfig` files and turns their section
+globs into regexes (`*`, `**`, `?`, `[...]`, `{a,b}`, and `{1..3}`). A glob
+without a slash matches the file name in any folder. For a file, `main.ts`
+reads the `.editorconfig` of each folder from the project root down, cached
+per folder, and applies the sections in order, so closer files and later
+sections win, and `root = true` ignores the files above. A new model gets
+`insertSpaces`, `tabSize`, and `indentSize` from them. Saving trims trailing
+whitespace and fixes the final newline as one undoable edit, before the text is
+written.
+
 ### External changes
 
 The frontend batches `fs-change` events for 150 ms. For each changed file that

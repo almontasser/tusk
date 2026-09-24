@@ -631,3 +631,9 @@ button.link:hover { text-decoration: underline; }
 .tests-detail { flex: 1; min-width: 0; margin: 0; padding: 8px 12px; overflow: auto; font-family: var(--mono); white-space: pre-wrap; color: var(--text); }
 .pr-review { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .pr-review textarea { min-height: 70px; resize: vertical; }
+
+#shortcut-recorder { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: #0006; }
+#shortcut-recorder .card { width: 380px; padding: 18px 20px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); box-shadow: 0 12px 40px #0006; }
+#shortcut-recorder h2 { margin: 0 0 12px; font-size: 14px; }
+#shortcut-recorder .combo { margin: 0 0 10px; padding: 10px; text-align: center; font-size: 16px; border: 1px dashed var(--border); border-radius: var(--radius); }
+#shortcut-recorder .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
