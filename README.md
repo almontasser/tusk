@@ -54,7 +54,7 @@ file to change when you add it.
 | Debugger | Breakpoints have no hit counts or log messages, and there's no watch list. Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase. Partial staging works per change block, not per single line within a block. Conflicts resolve inline, not in a three-pane merge tool. |
-| Local history | There's no history of saved versions outside git. |
+| Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
 | Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
@@ -384,6 +384,16 @@ its hash, check it out, create a branch at it, cherry-pick it onto the current
 branch, or revert it. To see the commits that changed one file, run **Show File
 History**, or right-click the file in the tree and choose **Show History**. File
 history follows renames.
+
+### Local history
+
+Each time you save a file, the editor keeps a copy of it, outside the project
+and outside git. To see a file's versions, run **Show Local History** from
+⌘⇧A, or right-click the file in the tree. Choose a version to compare it with
+the file as it is now, and click **Restore This Version** to put it back. The
+current text is kept as a version first, so a restore can be undone the same
+way. Versions older than 14 days are deleted, and each file keeps at most 100.
+Files over 1 MB aren't kept.
 
 ### Stash
 

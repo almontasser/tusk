@@ -249,12 +249,13 @@ async function showChange(f: FileStatus, inIndex: boolean) {
   const modified = inIndex
     ? await show(`:${f.path}`)
     : await invoke<string>("read_file", { path: `${host.root()}/${f.path}` }).catch(() => "");
-  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree");
+  const action = {
+    label: inIndex ? "Unstage Selected" : "Stage Selected",
+    title: `${inIndex ? "Unstage" : "Stage"} the changes that the selection touches (select lines on either side)`,
+    run: stageSelected,
+  };
+  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree", undefined, action);
   staging = { f, inIndex, original, modified };
-  const button = $("diff-stage");
-  button.textContent = inIndex ? "Unstage Selected" : "Stage Selected";
-  button.title = `${inIndex ? "Unstage" : "Stage"} the changes that the selection touches (select lines on either side)`;
-  button.hidden = false;
 }
 
 /** The diff's change blocks that the selection touches, on the side you last clicked. */
@@ -294,10 +295,20 @@ export async function stageSelected() {
 
 let diffBack: (() => void) | undefined;
 
-/** Shows a diff in place of the editor. `back` runs when the diff closes, instead of showing the editor. */
-export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void) {
+export type DiffAction = { label: string; title?: string; run(): unknown };
+
+/**
+ * Shows a diff in place of the editor. `back` runs when the diff closes, instead of showing the editor.
+ * `action` adds a button to the header, such as Stage Selected.
+ */
+export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void, action?: DiffAction) {
   closeDiff(false);
   diffBack = back;
+  const button = $("diff-action");
+  button.hidden = !action;
+  button.textContent = action?.label ?? "";
+  button.title = action?.title ?? "";
+  button.onclick = () => action?.run();
   // No theme option here: it would reset Monaco's global theme. The Theme setting sets it.
   if (!diffEditor) {
     diffEditor = monaco.editor.createDiffEditor($("diff-editor"), {
@@ -327,7 +338,7 @@ export function showDiff(path: string, original: string, modified: string, label
 /** Closes the diff. By default it returns to where the diff came from, such as the history view. */
 export function closeDiff(goBack = true) {
   staging = undefined;
-  $("diff-stage").hidden = true;
+  $("diff-action").hidden = true;
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
   model?.original.dispose();
@@ -482,7 +493,6 @@ export function initGit(h: Host) {
   $("stage-all").onclick = () => change("add", "--all");
   $("unstage-all").onclick = () => change("reset", "--quiet");
   $("diff-close").onclick = () => closeDiff();
-  $("diff-stage").onclick = stageSelected;
   $("commit-message").onkeydown = (e) => {
     if (e.key === "Enter" && e.metaKey) commit(false);
   };

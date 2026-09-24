@@ -7,7 +7,8 @@ import { type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
@@ -500,6 +501,7 @@ async function saveFile(path: string) {
   markSaved(path);
   didSave(tab.model);
   afterSave(path, text);
+  recordVersion(path, text);
 }
 
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
@@ -687,6 +689,7 @@ const actions: Action[] = [
   { label: "Unsplit", run: () => unsplit() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
+  { label: "Show Local History", run: () => active && showLocalHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: reindex },
   { label: "Pull Requests", run: () => showView("prs") },
@@ -856,6 +859,19 @@ $("sidebar-resize").onmousedown = (down) => {
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initLocalHistory({
+  root: () => root,
+  status,
+  showDiff: (path, original, modified, label, action) =>
+    showDiff(path, original, modified, label, undefined, {
+      label: action.label,
+      run: async () => {
+        await action.run();
+        closeDiff(false);
+        openFile(`${root}/${path}`);
+      },
+    }),
+});
 branchListeners.push(updateBranchPullRequest);
 
 $("open-folder").onclick = () => openFolder();

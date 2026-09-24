@@ -564,6 +564,18 @@ parent (using the old path for a rename) with it at the commit.
 A diff opened from the history view returns there when it closes: `showDiff`
 takes a function to run on close.
 
+### Local history
+
+`src/localhistory.ts` writes each saved file to
+`<app data>/history/<project path>/<encoded relative path>/<milliseconds>.txt`.
+A save that matches the newest version adds nothing. After each write,
+`toPrune` in `src/retention.ts` picks the versions to delete: older than 14
+days, or beyond the newest 100. Pruning a file's own folder on save keeps the
+cost small, with no sweep over the whole history.
+
+Viewing a version reuses the git diff view. `showDiff` takes an optional header
+action, which **Stage Selected** also uses.
+
 ### Stash
 
 Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
