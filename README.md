@@ -149,6 +149,8 @@ shortcut, press ⌘⇧A (**Find Action**).
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
+| ⌘⇧F10 | Open the query console |
+| ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
