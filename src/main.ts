@@ -8,6 +8,7 @@ import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, initDebugger, isPaused, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
@@ -686,6 +687,9 @@ const actions: Action[] = [
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Pull Requests", run: () => showView("prs") },
+  { label: "Database", run: () => showView("database") },
+  editorAction("Execute Query", "", "phpEditor.runSql"),
+  { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
@@ -795,6 +799,7 @@ function showView(name: string) {
   document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
   if (name === "commit") refreshGit();
   if (name === "prs") loadPullRequests();
+  if (name === "database") loadTables();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -843,6 +848,7 @@ $("sidebar-resize").onmousedown = (down) => {
 };
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
+initDatabase({ root: () => root, openFile, status });
 branchListeners.push(updateBranchPullRequest);
 
 $("open-folder").onclick = () => openFolder();

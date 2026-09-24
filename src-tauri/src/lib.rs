@@ -1,3 +1,4 @@
+mod db;
 mod fs;
 mod lsp;
 mod pty;
@@ -37,6 +38,7 @@ pub fn run() {
         .manage(lsp::LspState::default())
         .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
+            db::db_query,
             fs::read_dir,
             fs::read_file,
             fs::write_file,

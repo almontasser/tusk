@@ -29,6 +29,9 @@ grep = "0.4.1"
 portable-pty = "0.9.0"
 trash = "5.2.9"
 regex = "1.13.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+postgres = "0.19.14"
+mysql = { version = "28.0.2", default-features = false, features = ["minimal"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

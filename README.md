@@ -40,6 +40,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
+| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results are read-only (no editing cells), stop at 1,000 rows, and there's no SQL completion from the schema. |
 | Pull requests | You can read pull requests but not comment, approve, or merge from the editor. Descriptions and comments show as plain text, not rendered Markdown (`src/prs.ts`). |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
@@ -51,7 +52,6 @@ file to change when you add it.
 | Split editors | Two panes at most, side by side, sharing one tab bar. The split isn't restored when the project reopens. |
 | Settings | Shortcuts can't be customized, and `.editorconfig` isn't read (the editor detects each file's indentation). |
 | Debugger | Breakpoints have no conditions or hit counts, and there's no option to pause on exceptions. Projects in Docker or Sail need path mappings, which aren't supported yet. |
-| Database | There's no database browser or query console. |
 | Frontend languages | Svelte, Astro, and Angular templates have no language server. Vue files use HTML highlighting, so `<script lang="ts">` is colored as JavaScript. |
 | Git | There's no interactive rebase or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
@@ -103,6 +103,7 @@ checks each download against its SHA-256 checksum.
 ```sh
 pnpm test                          # Frontend logic, with Node's test runner
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust
+cargo test --manifest-path src-tauri/Cargo.toml db -- --ignored   # MySQL and PostgreSQL, needs the servers in src-tauri/src/db.rs
 php -d zend.assertions=1 filament-lsp/tests.php fixtures/demo   # Filament server, needs the test app
 ```
 
@@ -423,6 +424,23 @@ debugging on for the processes it starts.
    arrays, and type an expression, such as `$request->all()`, to evaluate it.
    Use F9 to resume, F8 to step over, F7 to step into, ⇧F8 to step out, and ⌘F2
    to stop.
+
+## Database
+
+The **Database** tool window (the cylinder icon) connects to the database in
+your project's `.env`, as Laravel does: `DB_CONNECTION`, `DB_HOST`, `DB_PORT`,
+`DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD`, with Laravel's defaults for
+anything missing. SQLite, MySQL, MariaDB, and PostgreSQL work without
+installing a client, because the drivers are built into the app.
+
+- Click a table to see its columns. A `?` after a type marks a nullable column.
+- Double-click a table to show its first 500 rows.
+- Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then
+  press ⌘⏎ to run the statement under the caret, or the selection. ⌘⏎ also runs
+  SQL in any `.sql` file.
+
+Results show in the **Database** tab of the bottom panel. After you change
+`.env`, click **Refresh** in the tool window.
 
 ## Diagnostics and formatting
 

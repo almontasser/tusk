@@ -786,6 +786,35 @@ project in `localStorage`.
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 
+## Database
+
+`src-tauri/src/db.rs` has one command, `db_query`, which runs one statement and
+returns column names, rows, and the number of changed rows. Every value comes
+back as text or null, which is all the grid needs, so no driver's type mapping
+leaks into the frontend:
+
+| Driver | Crate | How values become text |
+| --- | --- | --- |
+| SQLite | `rusqlite` with its bundled SQLite | Each `ValueRef` is formatted. Blobs show their size. |
+| MySQL, MariaDB | `mysql`, without TLS | The text protocol (`query_iter`) returns every value as bytes. |
+| PostgreSQL | `postgres`, without TLS | The simple query protocol returns every value as text. |
+
+Each query opens a new connection, and results stop at 1,000 rows. The query
+runs on a blocking thread, so a slow server doesn't stall the app.
+
+`src/dbconfig.ts` reads `.env` and fills in Laravel's defaults from
+`config/database.php`. It also holds the schema queries: `sqlite_master` and
+`pragma_table_info` for SQLite, and `information_schema` for the others. It's
+free of editor imports, so Node tests it.
+
+The query console is `console.sql` in the app's data folder, in a folder named
+after the project path, so it never shows up in the project's git status. It
+opens as a normal tab, so saving and session restore work unchanged. **Execute
+Query** is a Monaco action bound to ⌘⏎ when the editor's language is SQL.
+`statementAt` finds the statement around the caret by splitting on semicolons,
+and skips statements that are only comments. Results use `showPanelView`, like
+the debugger.
+
 ## Interface
 
 ### Layout
@@ -1007,3 +1036,11 @@ so the app's title bar can use that space.
 `tauri-plugin-mcp-bridge` lets automated tools drive the app for testing. It
 can run JavaScript in the webview, so it's compiled only into debug builds and
 listens only on `127.0.0.1`.
+
+### 2026-09-24: Database drivers compiled in
+
+The editor must work on any Mac without global installs, so it can't rely on
+the `mysql`, `psql`, or `sqlite3` clients. Laravel's own `php artisan db`
+needs those clients too. Three small synchronous driver crates add a few
+megabytes to the app. `sqlx` would cover all three, but it needs a Rust type per
+column, and the grid only needs text.

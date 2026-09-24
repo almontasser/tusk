@@ -30,6 +30,7 @@
         <button data-view="commit" title="Commit (⌘K)"><span class="codicon codicon-git-commit"></span></button>
         <button data-view="prs" title="Pull Requests"><span class="codicon codicon-git-pull-request"></span></button>
         <button data-view="search" title="Find in Files (⌘⇧F)"><span class="codicon codicon-search"></span></button>
+        <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
         <div class="spacer"></div>
         <button data-panel="log" title="Git Log (⌘9)"><span class="codicon codicon-history"></span></button>
         <button data-panel="debug" title="Debug"><span class="codicon codicon-bug"></span></button>
@@ -114,6 +115,17 @@
             <ul id="pr-list"></ul>
           </div>
           <div id="pr-detail" hidden></div>
+        </section>
+        <section id="view-database" hidden>
+          <header class="view-header">
+            <span>Database</span>
+            <div class="view-actions">
+              <button class="icon-button" id="db-console" title="Query Console"><span class="codicon codicon-terminal"></span></button>
+              <button class="icon-button" id="db-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+            </div>
+          </header>
+          <p id="db-connection" class="db-connection muted" title="From the project's .env file"></p>
+          <ul id="db-tables"></ul>
         </section>
         <div id="sidebar-resize" aria-hidden="true"></div>
       </aside>
