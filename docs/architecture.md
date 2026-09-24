@@ -510,7 +510,7 @@ that pattern with `grep`'s matcher, and `replace_text` compiles the same
 pattern with the `regex` crate, which uses the same syntax. So the matches the
 Find view shows are exactly the text that Replace changes.
 
-`search_text` returns one result per occurrence, up to 2000, with start and
+`search_text` returns one result per occurrence, up to 20,000, with start and
 end columns in UTF-16 code units, which are also JavaScript string indexes. The
 include field becomes `ignore` overrides, so `*.php` limits the walk to PHP
 files.

@@ -75,9 +75,10 @@ To build the app, you also need:
 - Rust 1.97 or later
 - Node.js 24 or later, and pnpm
 
-The app bundles its language tools (Phpactor, Laravel LSP, Mago, and the
-Tailwind CSS, TypeScript, and Vue language servers), so you don't install them
-yourself. If your project has PHPStan or Larastan in
+The app bundles its tools (Phpactor, Laravel LSP, Mago, Composer, `typos-lsp`,
+the Xdebug adapter, and the Tailwind CSS, TypeScript, and Vue language
+servers), and compiles in the database drivers, so you don't install them
+yourself. Sail support needs Docker, which Sail itself needs. If your project has PHPStan or Larastan in
 `vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
 checks each download against its SHA-256 checksum.
 
@@ -734,29 +735,50 @@ committed.
 | Path | Contents |
 | --- | --- |
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
-| `src/editor.ts` | Monaco setup, web workers, and the Blade language |
+| `src/editor.ts` | Monaco setup, web workers, and the Blade, Vue, Svelte, and Astro grammars |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/terminal.ts` | Terminal panel |
-| `src/git.ts` | Commit view, diff view, and branches |
+| `src/git.ts` | Commit view, diff view, partial staging, branches, and stash |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |
-| `src/gitparse.ts` | Parsers for git output, line diffs, and check summaries |
+| `src/merge.ts` | The three-pane merge tool |
+| `src/rebase.ts` | Interactive rebase |
+| `src/gitparse.ts` | Parsers for git output, line diffs, partial staging, merge alignment, and rebase todo lists |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
 | `src/runner.ts` | Test runner, run links, and Run Anything |
+| `src/testresults.ts` | The Tests tab: live progress and the results tree |
+| `src/junit.ts` | Reads JUnit reports and PHPUnit's event stream, and builds rerun filters |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
+| `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files |
+| `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
+| `src/localhistory.ts` | Local history of saved files |
+| `src/retention.ts` | Which local history versions to delete |
+| `src/editorconfig.ts` | Reads `.editorconfig` files |
 | `src/settings.ts` | Settings, the settings dialog, and the theme |
-| `src/debug.ts` | The Xdebug debugger: breakpoints, stepping, and the Debug panel |
+| `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
+| `src/database.ts` | The Database tool window, query console, and results grid |
+| `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
+| `src/composer.ts` | The Composer tool window |
+| `src/composerdata.ts` | Joins `composer show` and `composer outdated` output |
+| `src/httpclient.ts` | The HTTP client for `.http` files |
+| `src/httpfile.ts` | Reads `.http` files and curl's output |
+| `src/hierarchy.ts` | The type hierarchy view |
+| `src/safedelete.ts` | Safe Delete |
+| `src/refactor.ts` | Inline Variable and Change Signature |
+| `src/refactorparse.ts` | Argument, parameter, and assignment parsing for the refactorings |
+| `src/phptypes.ts` | Reads PHP declarations, and Laravel's names for methods and components |
 | `src/icons.ts` | File and folder icons |
 | `src/themes.ts` | Monaco color themes |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |
 | `src-tauri/src/lsp.rs` | Starts the language servers and relays their messages |
-| `src-tauri/src/tools.rs` | Tool paths and Mago formatting |
-| `src-tauri/src/search.rs` | Project file listing and text search |
+| `src-tauri/src/tools.rs` | Tool paths and running commands |
+| `src-tauri/src/search.rs` | Project file listing, text search, and replace |
+| `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, and PostgreSQL |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `filament-lsp/server.php` | Filament language server |
