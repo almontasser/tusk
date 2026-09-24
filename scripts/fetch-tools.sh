@@ -40,3 +40,15 @@ fetch "mago-1.50.0-$arch.tar.gz" \
   "https://github.com/carthage-software/mago/releases/download/1.50.0/mago-1.50.0-$arch-apple-darwin.tar.gz" \
   "$mago_sha"
 tar -xzf "$cache/mago-1.50.0-$arch.tar.gz" -C "$dest" --strip-components 1 "mago-1.50.0-$arch-apple-darwin/mago"
+
+# Node-based language servers, pinned by node-tools/package-lock.json. npm ci checks every
+# package against the lockfile's integrity hashes. Install scripts are skipped, since the
+# servers are plain JavaScript. Reinstall only when the lockfile changes.
+node_dest="$dest/node"
+if ! cmp -s "$root/node-tools/package-lock.json" "$node_dest/package-lock.json"; then
+  echo "Installing Node language servers"
+  rm -rf "$node_dest"
+  mkdir -p "$node_dest"
+  cp "$root/node-tools/package.json" "$root/node-tools/package-lock.json" "$node_dest/"
+  (cd "$node_dest" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
+fi

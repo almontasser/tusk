@@ -28,29 +28,31 @@ pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools"))
 }
 
-/// Starts the bundled language server `name` (`phpactor`, `laravel`, or `filament`) for `root`, replacing a running one with the
+/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, or `tailwind`) for `root`, replacing a running one with the
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
 #[tauri::command]
 pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: String) -> Result<u32, String> {
-    let args = match name.as_str() {
-        "phpactor" => vec!["phpactor.phar", "language-server"],
-        "laravel" => vec!["laravel-lsp.phar"],
-        "filament" => vec!["filament-lsp/server.php"],
+    // (runtime, script inside the tools folder, arguments)
+    let (runtime, script, args): (&str, &str, &[&str]) = match name.as_str() {
+        "phpactor" => ("php", "phpactor.phar", &["language-server"]),
+        "laravel" => ("php", "laravel-lsp.phar", &[]),
+        "filament" => ("php", "filament-lsp/server.php", &[]),
+        "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
     let tools = tools_dir(&app)?;
     let mut child = Command::new("/bin/sh")
-        .args(["-c", WATCHDOG, "sh", "php"])
-        .arg(tools.join(args[0]))
-        .args(&args[1..])
+        .args(["-c", WATCHDOG, "sh", runtime])
+        .arg(tools.join(script))
+        .args(args)
         .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Could not start PHP. Is `php` installed? ({e})"))?;
+        .map_err(|e| format!("Could not start {runtime}. Is it installed? ({e})"))?;
     let stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
     let event = format!("lsp:{name}");

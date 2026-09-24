@@ -53,7 +53,7 @@ file to change when you add it.
 | Settings | Font, font size, theme, and shortcuts are fixed in the code. There's no settings screen and no light theme. |
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
-| Frontend languages | JavaScript, TypeScript, Vue, Tailwind, and CSS get only Monaco's built-in support, with no language server. |
+| Frontend languages | JavaScript, TypeScript, and Vue get only Monaco's built-in support, with no language server. |
 | Git | There's no stash, interactive rebase, or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
@@ -69,14 +69,16 @@ To use the app, you need:
 - PHP 8.1 or later on your `PATH`. The app finds PHP through your login shell,
   so installs from Homebrew and Laravel Herd work.
 - Git, and optionally the GitHub CLI (`gh`) for pull requests.
+- Node.js, for Tailwind CSS support. Laravel projects that use Vite already need
+  it.
 
 To build the app, you also need:
 
 - Rust 1.97 or later
 - Node.js 24 or later, and pnpm
 
-The app bundles its language tools (Phpactor, Laravel LSP, and Mago), so you
-don't install them yourself. If your project has PHPStan or Larastan in
+The app bundles its language tools (Phpactor, Laravel LSP, Mago, and the
+Tailwind CSS language server), so you don't install them yourself. If your project has PHPStan or Larastan in
 `vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
 checks each download against its SHA-256 checksum.
 
@@ -242,6 +244,24 @@ fields in `PostsRelationManager` on `AuthorResource` complete `Post` columns.
 Columns come from the database when the app can boot and connect. Otherwise
 they come from the model's `$fillable`, casts, primary key, and timestamps.
 
+## Tailwind CSS
+
+In projects whose `package.json` lists `tailwindcss`, the Tailwind CSS language
+server adds:
+
+- Class name completion, showing each class's CSS, in Blade, PHP, HTML, CSS,
+  and JavaScript files.
+- The generated CSS when you hover over a class.
+- Color swatches next to color classes. Click a swatch to pick a new color.
+- Warnings for conflicting classes, such as `flex` with `grid`, and for invalid
+  `@apply` and `@variant` use.
+
+Classes are recognized in `class` attributes, in PHP arrays such as Filament's
+`->extraAttributes(['class' => '…'])`, and in Blade's `@class([...])`. The
+server reads your Tailwind setup from your CSS entry file (Tailwind 4) or
+`tailwind.config.js` (Tailwind 3), and uses the project's installed
+`tailwindcss` when `node_modules` exists.
+
 ## Tests and commands
 
 In test files, **▶ Run test** and **▶ Run all tests in file** links appear above
@@ -361,6 +381,7 @@ committed.
 | `filament-lsp/server.php` | Filament language server |
 | `filament-lsp/introspect.php` | Reads resources and models from the project |
 | `filament-lsp/tests.php` | Filament server tests |
+| `node-tools/` | The pinned Node language servers (`package.json` and lockfile) |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |

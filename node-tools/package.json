@@ -1,0 +1,8 @@
+{
+  "name": "php-editor-node-tools",
+  "private": true,
+  "description": "Node-based language servers bundled with the editor. scripts/fetch-tools.sh installs them with npm ci.",
+  "dependencies": {
+    "@tailwindcss/language-server": "0.16.0"
+  }
+}

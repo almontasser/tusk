@@ -80,9 +80,17 @@ script.
 | Phpactor | 2026.06.23.0 | PHP archive (`.phar`) |
 | Laravel LSP | 0.0.32 | PHP archive (`.phar`) |
 | Mago | 1.50.0 | Native binary for the build machine's architecture |
+| Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 
 Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.
+
+Node-based servers are listed in `node-tools/package.json` with a committed
+lockfile. The fetch script copies both into `resources/tools/node/` and runs
+`npm ci --omit=dev --ignore-scripts`, which checks every package against the
+lockfile's integrity hashes and runs no install scripts. It reinstalls only when
+the lockfile changes. To upgrade, change the version in `node-tools/package.json`
+and run `npm install --package-lock-only` in that folder.
 
 ### Finding PHP
 
@@ -633,6 +641,30 @@ sidebar view), when the page unloads, and before it opens another folder. When
 it opens a folder, it expands the saved folders, reopens the tabs, and skips
 files that no longer exist.
 
+## Tailwind CSS (frontend step 1)
+
+The client starts the Tailwind CSS language server with `node` when the
+project's `package.json` mentions `tailwindcss`, for the `blade`, `php`,
+`html`, `css`, `javascript`, `typescript`, and `vue` languages.
+
+The server asks for its settings with `workspace/configuration` (the `editor`
+and `tailwindCSS` sections). `startServer` accepts a settings object and
+answers each request by section. `tailwindSettings` in `lsp.ts` sets:
+
+- `experimental.classRegex` patterns for `'class' => '…'` in PHP arrays
+  (Filament's `extraAttributes`) and for Blade's `@class([...])`.
+- `files.exclude` for `.git`, `node_modules`, `vendor`, `storage`, and hidden
+  folders, so git worktrees in `.claude/` aren't scanned.
+- The defaults for lint rules, hovers, and color decorators.
+
+Two client features were added for it, and any server can use them:
+
+- **`completionItem/resolve`.** Tailwind sends a class's CSS only for the
+  selected suggestion. The client keeps each server item in a `WeakMap` keyed by
+  the Monaco suggestion and resolves it when Monaco asks.
+- **`textDocument/documentColor`** and **`textDocument/colorPresentation`**,
+  mapped to a Monaco color provider, which draws swatches and a color picker.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -767,6 +799,12 @@ its own input handling for little gain.
 A session is a convenience: if it's lost, you reopen a few tabs. `localStorage`
 survives app restarts and needs no Rust command or file format. Terminal tabs
 aren't saved, because their processes can't be restored.
+
+### 2026-09-24: Node-based servers use the system Node
+
+Bundling a Node runtime would add about 100 MB per architecture. Laravel
+projects that use Vite already need Node, so the editor runs the bundled
+JavaScript servers with the `node` on your `PATH`, as it does with `php`.
 
 ### 2026-09-24: MCP bridge in debug builds only
 

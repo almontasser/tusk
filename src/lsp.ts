@@ -124,7 +124,8 @@ const clientCapabilities: L.ClientCapabilities = {
   },
   textDocument: {
     synchronization: { didSave: true },
-    completion: { completionItem: { snippetSupport: true, documentationFormat: ["markdown", "plaintext"] } },
+    completion: { completionItem: { snippetSupport: true, documentationFormat: ["markdown", "plaintext"], resolveSupport: { properties: ["documentation", "detail", "additionalTextEdits"] } } },
+    colorProvider: {},
     hover: { contentFormat: ["markdown", "plaintext"] },
     signatureHelp: { signatureInformation: { documentationFormat: ["markdown", "plaintext"] } },
     definition: {},
@@ -158,7 +159,11 @@ type Server = {
 };
 
 /** Starts the bundled server `name` for the given Monaco languages. */
-async function startServer(name: string, root: string, langs: string[], initializationOptions: object): Promise<Server> {
+/**
+ * Starts the bundled server `name` for the given Monaco languages. `settings` answers the
+ * server's `workspace/configuration` requests, by section name.
+ */
+async function startServer(name: string, root: string, langs: string[], initializationOptions: object, settings: Record<string, unknown> = {}): Promise<Server> {
   let nextId = 1;
   const pending = new Map<number, { resolve(v: any): void; reject(e: any): void }>();
   const diagnostics = new Map<string, L.Diagnostic[]>();
@@ -210,7 +215,7 @@ async function startServer(name: string, root: string, langs: string[], initiali
         await applyWorkspaceEdit(params.edit);
         return { applied: true };
       case "workspace/configuration":
-        return params.items.map(() => null);
+        return params.items.map((item: L.ConfigurationItem) => (item.section ? settings[item.section] ?? null : settings));
       case "window/showMessageRequest":
         return askUser(name, params);
       case "client/registerCapability":
@@ -299,6 +304,8 @@ async function startServer(name: string, root: string, langs: string[], initiali
   };
 
   function registerProviders(ml: M) {
+    // The server's original item for each suggestion, sent back to resolve its details.
+    const originals = new WeakMap<monaco.languages.CompletionItem, L.CompletionItem>();
 
     if (c.completionProvider) {
       reg(ml.registerCompletionItemProvider(langs, {
@@ -312,7 +319,7 @@ async function startServer(name: string, root: string, langs: string[], initiali
             incomplete: !Array.isArray(res) && !!res?.isIncomplete,
             suggestions: items.map((i) => {
               const edit = i.textEdit && ("range" in i.textEdit ? i.textEdit.range : i.textEdit.replace);
-              return {
+              const suggestion: monaco.languages.CompletionItem = {
                 label: i.label,
                 kind: ml.CompletionItemKind[completionKinds[(i.kind ?? 1) - 1] as keyof typeof ml.CompletionItemKind],
                 detail: i.detail,
@@ -324,8 +331,38 @@ async function startServer(name: string, root: string, langs: string[], initiali
                 filterText: i.filterText,
                 additionalTextEdits: i.additionalTextEdits?.map((e) => ({ range: toRange(e.range), text: e.newText })),
               };
+              originals.set(suggestion, i);
+              return suggestion;
             }),
           };
+        },
+        // Servers such as Tailwind send documentation (the generated CSS) only for the selected item.
+        resolveCompletionItem: c.completionProvider.resolveProvider
+          ? async (item) => {
+              const original = originals.get(item);
+              if (!original) return item;
+              const r = await request<L.CompletionItem>("completionItem/resolve", original).catch(() => null);
+              if (!r) return item;
+              return {
+                ...item,
+                detail: r.detail ?? item.detail,
+                documentation: r.documentation ? markdown(r.documentation) : item.documentation,
+                additionalTextEdits: r.additionalTextEdits?.map((e) => ({ range: toRange(e.range), text: e.newText })) ?? item.additionalTextEdits,
+              };
+            }
+          : undefined,
+      }));
+    }
+
+    if (c.colorProvider) {
+      reg(ml.registerColorProvider(langs, {
+        async provideDocumentColors(model) {
+          const colors = await request<L.ColorInformation[] | null>("textDocument/documentColor", doc(model));
+          return (colors ?? []).map((ci) => ({ range: toRange(ci.range), color: ci.color }));
+        },
+        async provideColorPresentations(model, info) {
+          const res = await request<L.ColorPresentation[] | null>("textDocument/colorPresentation", { ...doc(model), color: info.color, range: fromRange(info.range) });
+          return (res ?? []).map((p) => ({ label: p.label, textEdit: p.textEdit && { range: toRange(p.textEdit.range), text: p.textEdit.newText } }));
         },
       }));
     }
@@ -562,6 +599,46 @@ const phpactorIndexer = {
   "indexer.index_path": "%cache%/index/%project_id%-editor-1",
 };
 
+/** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
+const tailwindSettings = {
+  editor: { tabSize: 4 },
+  tailwindCSS: {
+    emmetCompletions: false,
+    includeLanguages: {},
+    classAttributes: ["class", "className", "ngClass", "class:list", ":class"],
+    classFunctions: [],
+    colorDecorators: true,
+    showPixelEquivalents: true,
+    rootFontSize: 16,
+    hovers: true,
+    suggestions: true,
+    codeActions: true,
+    validate: true,
+    lint: {
+      cssConflict: "warning",
+      invalidApply: "error",
+      invalidScreen: "error",
+      invalidVariant: "error",
+      invalidConfigPath: "error",
+      invalidTailwindDirective: "error",
+      invalidSourceDirective: "error",
+      recommendedVariantOrder: "warning",
+      usedBlocklistedClass: "warning",
+      suggestCanonicalClasses: "warning",
+    },
+    experimental: {
+      // Classes in PHP arrays, as in Filament's ->extraAttributes(['class' => '...']), and in Blade's @class([...]).
+      classRegex: [
+        "'class'\\s*=>\\s*'([^']*)'",
+        '"class"\\s*=>\\s*"([^"]*)"',
+        ["@class\\(([\\s\\S]*?)\\)", "'([^']*)'"],
+      ],
+    },
+    // Skip dependencies and hidden folders, such as git worktrees in .claude/.
+    files: { exclude: ["**/.git/**", "**/node_modules/**", "**/vendor/**", "**/storage/**", "**/.*/**"] },
+  },
+};
+
 /** Starts the language servers for a project, stopping those of the previous project. */
 export async function startLsp(root: string, h: Host) {
   host = h;
@@ -583,7 +660,11 @@ export async function startLsp(root: string, h: Host) {
     ? startServer("laravel", root, ["php", "blade"], {})
     : null;
   const filament = (await exists("vendor/filament/filament")) ? startServer("filament", root, ["php"], {}) : null;
-  for (const s of await Promise.allSettled([phpactor, laravel, filament])) {
+  const packageJson = await invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => "");
+  const tailwind = packageJson.includes('"tailwindcss"')
+    ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue"], {}, tailwindSettings)
+    : null;
+  for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
