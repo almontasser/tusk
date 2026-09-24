@@ -54,7 +54,7 @@ file to change when you add it.
 | Debugger | There's no Xdebug integration or step debugging. |
 | Database | There's no database browser or query console. |
 | Frontend languages | JavaScript, TypeScript, Vue, Tailwind, and CSS get only Monaco's built-in support, with no language server. |
-| Git | There's no stash, rebase, cherry-pick, merge conflict resolution, or line-by-line staging. |
+| Git | There's no stash, interactive rebase, or line-by-line staging. Conflicts resolve inline, not in a three-pane merge tool. |
 | Local history | There's no history of saved versions outside git. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Move class, change signature, inline, and safe delete aren't available. |
 | Tools | There's no HTTP client, Composer UI, Docker or Sail support, or spell checking. |
@@ -278,6 +278,20 @@ branch, or revert it. To see the commits that changed one file, run **Show File
 History**, or right-click the file in the tree and choose **Show History**. File
 history follows renames.
 
+### Merge conflicts
+
+When a merge, rebase, cherry-pick, or revert stops for conflicts, the
+**Commit** view shows a banner with **Abort**, plus **Continue** for a rebase,
+cherry-pick, or revert. Conflicted files are listed under **Merge Conflicts**.
+Hover over a file to keep **Yours** or **Theirs** for the whole file, or ✓ to
+mark it resolved as it is.
+
+Click a conflicted file to resolve it in the editor. Above each conflict,
+choose **Accept Current**, **Accept Incoming**, or **Accept Both**. Your side is
+shaded green, and the incoming side blue. When you save the file with no
+conflicts left, it's marked as resolved. For a merge, the commit message is
+filled in, so you can click **Commit** to finish.
+
 The branch name in the status bar shows commits ahead (↑) and behind (↓) the
 upstream branch. Click it to check out a local or remote branch, create a
 branch from the name you type, or pull, push, and fetch. Pull, push, and fetch
@@ -328,6 +342,7 @@ committed.
 | `src/terminal.ts` | Terminal panel |
 | `src/git.ts` | Commit view, diff view, and branches |
 | `src/history.ts` | Git log, file history, and commit actions |
+| `src/conflicts.ts` | Inline merge conflict resolution |
 | `src/gitparse.ts` | Parsers for git output, line diffs, and check summaries |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
 | `src/runner.ts` | Test runner, run links, and Run Anything |

@@ -4,7 +4,8 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { didSave, filesChanged, startLsp, workspaceSymbols } from "./lsp";
 import { type Item, pick, rank } from "./palette";
-import { annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { initConflicts } from "./conflicts";
+import { afterSave, annotate, branchListeners, branches, closeDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
@@ -267,6 +268,7 @@ async function save() {
   await invoke("write_file", { path: active, contents: tab.model.getValue() });
   markSaved(active);
   didSave(tab.model);
+  afterSave(active, tab.model.getValue());
 }
 
 function renderTabs() {
@@ -517,6 +519,7 @@ window.addEventListener(
 );
 
 initRunner(() => root);
+initConflicts(editor);
 initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
 editor.onDidChangeCursorPosition(saveSoon);

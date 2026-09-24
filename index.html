@@ -22,6 +22,11 @@
       <section id="view-commit" hidden>
         <p id="git-empty">This folder isn't a git repository.</p>
         <div id="git-changes">
+          <div id="git-operation" hidden><span></span><button id="operation-continue">Continue</button><button id="operation-abort">Abort</button></div>
+          <div id="conflicts-group" hidden>
+            <header class="git-group">Merge Conflicts <span id="conflicts-count"></span></header>
+            <ul id="conflicts" class="git-files"></ul>
+          </div>
           <header class="git-group">Staged <span id="staged-count"></span><button id="unstage-all" title="Unstage all">−</button></header>
           <ul id="staged" class="git-files"></ul>
           <header class="git-group">Changes <span id="changes-count"></span><button id="stage-all" title="Stage all">+</button></header>

@@ -2,7 +2,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
-import { age, type BlameLine, type FileStatus, lineChanges, parseBlame, parseStatus, type Status } from "./gitparse";
+import { hasConflicts } from "./conflicts";
+import { age, type BlameLine, type FileStatus, isConflict, lineChanges, parseBlame, parseStatus, type Status } from "./gitparse";
 import { type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -44,6 +45,7 @@ export async function change(...args: string[]) {
 export async function refreshGit() {
   if (!host.root()) return;
   current = await git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined);
+  operation = current ? await detectOperation() : null;
   headCache.clear(); // HEAD may have moved.
   const branch = current && `${host.root()}:${current.branch}`;
   if (branch !== lastBranch) {
@@ -64,19 +66,112 @@ function renderBranch() {
   el.title = current.upstream ? `Tracking ${current.upstream}` : "No upstream branch";
 }
 
-const staged = (f: FileStatus) => f.index !== " " && f.index !== "?";
-const unstaged = (f: FileStatus) => f.worktree !== " ";
+const staged = (f: FileStatus) => !isConflict(f) && f.index !== " " && f.index !== "?";
+const unstaged = (f: FileStatus) => !isConflict(f) && f.worktree !== " ";
+
+// ---- Merges, rebases, cherry-picks, and reverts in progress ----
+
+type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string };
+let operation: Operation | null = null;
+let gitDir: { root: string; path: string } | undefined;
+
+/** Reads git's state files to find an operation that stopped, usually for conflicts. */
+async function detectOperation(): Promise<Operation | null> {
+  if (gitDir?.root !== host.root()) {
+    const path = (await git("rev-parse", "--absolute-git-dir").catch(() => "")).trim();
+    gitDir = { root: host.root(), path };
+  }
+  const dir = gitDir.path;
+  if (!dir) return null;
+  const exists = (name: string) => invoke<boolean>("path_exists", { path: `${dir}/${name}` });
+  for (const [name, kind] of [["rebase-merge", "rebase"], ["rebase-apply", "rebase"], ["MERGE_HEAD", "merge"], ["CHERRY_PICK_HEAD", "cherry-pick"], ["REVERT_HEAD", "revert"]] as const) {
+    if (await exists(name)) return { kind, gitDir: dir };
+  }
+  return null;
+}
+
+function renderOperation() {
+  const banner = $("git-operation");
+  banner.hidden = !operation;
+  if (!operation) return;
+  const { kind, gitDir: dir } = operation;
+  const conflicts = current?.files.filter(isConflict).length ?? 0;
+  const next = kind === "merge" ? "commit" : "continue";
+  banner.querySelector("span")!.textContent =
+    `${kind[0].toUpperCase() + kind.slice(1)} in progress. ` + (conflicts ? `Resolve ${conflicts} conflict${conflicts > 1 ? "s" : ""}, then ${next}.` : `No conflicts left: ${next} when ready.`);
+  $("operation-abort").onclick = async () => {
+    if (await ask(`Abort the ${kind} and return to the state before it? Conflict resolutions are lost.`, { kind: "warning" })) change(kind, "--abort");
+  };
+  const continueButton = $("operation-continue");
+  continueButton.hidden = kind === "merge"; // A merge finishes with a normal commit.
+  // GIT_EDITOR=true accepts git's prepared message instead of opening an editor.
+  continueButton.onclick = () => openTerminal(host.root(), `${kind} --continue`, ["/bin/sh", "-c", `GIT_EDITOR=true git ${kind} --continue`]);
+  // Offer git's prepared merge message, such as "Merge branch 'feature'".
+  const message = $("commit-message") as HTMLTextAreaElement;
+  if (kind === "merge" && !message.value) invoke<string>("read_file", { path: `${dir}/MERGE_MSG` }).then((m) => (message.value ||= m.replace(/^#.*$/gm, "").trim()), () => {});
+}
+
+function conflictRow(f: FileStatus) {
+  const li = document.createElement("li");
+  li.className = "status-C";
+  const name = f.path.split("/").pop()!;
+  li.innerHTML = `<span class="letter">!</span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
+  li.querySelector(".name")!.textContent = name;
+  li.querySelector(".dir")!.textContent = f.path.slice(0, -name.length - 1);
+  li.title = "Open the file to resolve each conflict, or accept one side";
+  li.onclick = () => host.openFile(`${host.root()}/${f.path}`);
+  const buttons = li.querySelector(".buttons")!;
+  const button = (label: string, title: string, run: () => unknown) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.title = title;
+    b.onclick = (e) => (e.stopPropagation(), run());
+    buttons.append(b);
+  };
+  button("Yours", "Keep your version of the whole file", () => acceptSide(f, "ours"));
+  button("Theirs", "Keep their version of the whole file", () => acceptSide(f, "theirs"));
+  button("✓", "Mark as resolved (stage the file as it is)", () => change("add", "--", f.path));
+  return li;
+}
+
+/** Resolves a whole file with one side. If that side deleted the file, resolving deletes it. */
+async function acceptSide(f: FileStatus, side: "ours" | "theirs") {
+  const deleted = side === "ours" ? f.index === "D" : f.worktree === "D";
+  const what = deleted ? `delete ${f.path}, as ${side === "ours" ? "your" : "their"} side did` : `replace ${f.path} with ${side === "ours" ? "your" : "their"} version`;
+  if (!(await ask(`Resolve the conflict and ${what}? Other changes to the file are lost.`, { kind: "warning" }))) return;
+  if (deleted) return change("rm", "--quiet", "--", f.path);
+  try {
+    await git("checkout", `--${side}`, "--", f.path);
+  } catch (e) {
+    host.status(`git checkout: ${String(e).trim()}`);
+  }
+  await change("add", "--", f.path);
+}
+
+/** Stages a conflicted file once it's saved without conflict markers, as PhpStorm does. */
+export async function afterSave(path: string, text: string) {
+  const rel = path.slice(host.root().length + 1);
+  const f = current?.files.find((x) => x.path === rel && isConflict(x));
+  if (!f || hasConflicts(text)) return;
+  await change("add", "--", rel);
+  host.status(`Marked ${rel} as resolved.`);
+}
 
 function renderCommitView() {
   $("git-empty").hidden = !!current;
   $("git-changes").hidden = !current;
   if (!current) return;
+  const conflicted = current.files.filter(isConflict);
   const stagedFiles = current.files.filter(staged);
   const changedFiles = current.files.filter(unstaged);
+  $("conflicts-group").hidden = !conflicted.length;
+  $("conflicts-count").textContent = String(conflicted.length);
+  $("conflicts").replaceChildren(...conflicted.map(conflictRow));
   $("staged-count").textContent = String(stagedFiles.length);
   $("changes-count").textContent = String(changedFiles.length);
   $("staged").replaceChildren(...stagedFiles.map((f) => fileRow(f, true)));
   $("changes").replaceChildren(...changedFiles.map((f) => fileRow(f, false)));
+  renderOperation();
 }
 
 function fileRow(f: FileStatus, inIndex: boolean) {
@@ -121,7 +216,8 @@ async function commit(push: boolean) {
   const message = ($("commit-message") as HTMLTextAreaElement).value.trim();
   const amend = ($("amend") as HTMLInputElement).checked;
   if (!message && !amend) return host.status("Write a commit message first.");
-  if (!current?.files.some(staged) && !amend) return host.status("Stage the changes to commit first.");
+  if (current?.files.some(isConflict)) return host.status("Resolve the merge conflicts first.");
+  if (!current?.files.some(staged) && !amend && operation?.kind !== "merge") return host.status("Stage the changes to commit first.");
   const args = ["commit", ...(amend ? ["--amend"] : []), ...(message ? ["-m", message] : ["--no-edit"])];
   try {
     await git(...args);

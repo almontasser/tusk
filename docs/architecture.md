@@ -452,6 +452,31 @@ parent (using the old path for a rename) with it at the commit.
 A diff opened from the history view returns there when it closes: `showDiff`
 takes a function to run on close.
 
+### Merge conflicts
+
+`isConflict` in `gitparse.ts` recognizes the status pairs git uses for
+unmerged files (`UU`, `AA`, `DD`, `AU`, `UA`, `DU`, `UD`). The commit view
+lists those files on their own and leaves them out of staged and unstaged
+changes.
+
+`detectOperation` finds the operation in progress from git's state files in
+the git folder (`git rev-parse --absolute-git-dir`): `rebase-merge` or
+`rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, and `REVERT_HEAD`. **Abort**
+runs `git <operation> --abort`. **Continue** runs `git <operation> --continue`
+in a terminal with `GIT_EDITOR=true`, so git keeps its prepared message instead
+of opening an editor. A merge finishes with a normal commit, and the message
+box is prefilled from `MERGE_MSG`.
+
+Accepting one side for a whole file runs `git checkout --ours` or `--theirs`,
+then `git add`. If that side deleted the file, it runs `git rm` instead.
+
+`src/conflicts.ts` handles conflicts inside a file. `parseConflicts` finds
+blocks between `<<<<<<<` and `>>>>>>>`, including the base section that
+`diff3` and `zdiff3` styles add. A code lens provider for every language adds
+the three choices above each block, and decorations shade each side. A choice
+replaces the whole block with an undoable edit. After a save, `afterSave` in
+`git.ts` stages a conflicted file if it has no conflict blocks left.
+
 ### Branches
 
 The branch picker reads `git for-each-ref` with full ref names, which tell

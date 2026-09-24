@@ -183,3 +183,13 @@ button.link { background: none; border: 0; color: var(--accent); padding: 0; }
 .history-files li:hover { background: #ffffff10; }
 .history-files li.tracked .name { font-weight: 700; }
 .history-files .letter { width: 1ch; }
+
+#git-operation { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid #e5c07b88; border-radius: 4px; background: #e5c07b1a; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#git-operation span { flex-basis: 100%; }
+#git-operation button { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; }
+#git-operation[hidden], #conflicts-group[hidden] { display: none; }
+.status-C .letter { color: #e06c75; font-weight: 700; }
+.conflict-current { background: #73bd7926; }
+.conflict-incoming { background: #6aa7f826; }
+.conflict-base { background: #8c8f941f; }
+.conflict-marker { background: #ffffff0d; opacity: 0.7; }
