@@ -196,7 +196,7 @@ Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 Mago checks PHP files as you type (static analysis and lint) and formats them.
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
 defaults tuned for Laravel, in `src-tauri/resources/mago.toml`: the analyzer
-reads `vendor`, and two rules that flag normal Laravel code on nearly every file
+reads the whole project, including `vendor`, and two rules that flag normal Laravel code on nearly every file
 (`strict-types` and `literal-named-argument`) are off.
 
 ## Test app

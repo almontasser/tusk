@@ -2,8 +2,10 @@
 # A project's mago.toml replaces this file completely.
 
 [source]
-# Let the analyzer see framework and package classes, such as Laravel facades.
-includes = ["vendor"]
+# The editor analyzes one file at a time. Include the whole project as context, so the
+# analyzer sees the project's own classes and framework classes such as Laravel facades.
+includes = ["."]
+excludes = ["node_modules", "storage", "bootstrap/cache"]
 
 [linter]
 integrations = ["laravel"]

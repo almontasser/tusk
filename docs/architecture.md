@@ -201,11 +201,14 @@ stay useful.
 
 ### Default Mago configuration
 
-Without a project `mago.toml`, Mago doesn't read `vendor`. The analyzer then
-reports every facade method and framework helper as missing. On the test app,
+The editor analyzes one file at a time, and Mago then reads only that file and
+the paths in `includes`. Without a configuration, the analyzer reports every
+facade method, framework helper, and project class that the file uses as
+missing. On the test app,
 Mago's default lint rules also produced 124 `literal-named-argument` warnings
 and 30 `strict-types` warnings on standard Laravel code. The bundled
-`resources/mago.toml` includes `vendor`, turns on the Laravel lint integration,
+`resources/mago.toml` includes the whole project (except `node_modules`,
+`storage`, and `bootstrap/cache`) as context, turns on the Laravel lint integration,
 and turns those two rules off. The client passes it to Phpactor only when the
 project has no `mago.toml`.
 
