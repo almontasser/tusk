@@ -9,6 +9,7 @@ import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpointCondition, initDebugger, isPaused, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
+import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordVersion, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -706,6 +707,7 @@ const actions: Action[] = [
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
   editorAction("Find Usages", "Alt+F7", "editor.action.goToReferences"),
+  { label: "Type Hierarchy", keys: "Ctrl+H", run: () => active.endsWith(".php") && showTypeHierarchy(active) },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
   editorAction("Parameter Info", "Meta+P", "editor.action.triggerParameterHints"),
@@ -981,6 +983,7 @@ $("sidebar-resize").onmousedown = (down) => {
 initGit({ root: () => root, openFile, status, showView });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,
   status,

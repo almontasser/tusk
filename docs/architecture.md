@@ -295,6 +295,24 @@ them, and saves the file. It also runs file operations (create, rename, and
 delete) through Rust commands. When a class rename renames its file, the open
 tab moves to the new path.
 
+### Type hierarchy
+
+Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
+builds the tree from requests it does support:
+
+- **Supertypes**: `parseTypeDeclaration` in `src/phptypes.ts` reads a file's
+  declaration and resolves the names after `extends` and `implements` through
+  its `namespace` and `use` statements. Each parent's file comes from a
+  workspace symbol search, matched on name and namespace.
+- **Subtypes**: `textDocument/implementation` at the type's name. Phpactor
+  answers from its index with every descendant, so the tree keeps the ones
+  whose own declaration names the type, and deeper ones appear when you expand
+  their parent. The request needs the file open in Phpactor, so the file gets a
+  model (without a tab).
+
+Children load when a row expands, so a large hierarchy, such as `Model`'s,
+costs nothing until you open it.
+
 ## Laravel, diagnostics, and formatting (milestone 3)
 
 ### Several language servers

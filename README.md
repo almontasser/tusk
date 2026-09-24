@@ -29,7 +29,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Type hierarchy | Phpactor can provide it, but Monaco has no view for it. It needs its own panel. |
+| Type hierarchy | It shows the type that the current file declares, not the type under the cursor. Traits aren't shown. A file declaring several types shows the first. |
 | Find in files | Results stop at 2,000 matches, and Replace All changes only the files in those results. There's no replace for a single match. |
 | Go to file | Files ignored by `.gitignore`, such as `vendor`, aren't listed. Go to class still finds `vendor` classes. |
 | Test results | Results appear when a run ends, not live. Test lines without a failure come from the patterns in `src/phptests.ts`. Rerun Failed matches names as patterns, so it can also run other tests whose names contain a failed one's. |
@@ -155,6 +155,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
+| ⌃H | Type hierarchy of the current file's class |
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
@@ -279,6 +280,19 @@ becomes the query.
   regex mode, `$1` or `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
+
+## Type hierarchy
+
+Press ⌃H in a PHP file to open the **Hierarchy** tab for the class,
+interface, trait, or enum that the file declares.
+
+- **Subtypes** lists the classes that extend it or implement it, including
+  classes in `vendor`. Expand one to see its own subtypes.
+- **Supertypes** lists its parent class and its interfaces. Expand one to go
+  further up.
+
+Click a type to open it. Types that Phpactor's index doesn't know are listed
+without a file.
 
 ## Laravel features
 

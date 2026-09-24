@@ -841,6 +841,12 @@ export async function updateReferences(renames: { from: string; to: string }[]) 
  * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
  * package's old modification times, so Phpactor's update pass takes them for already indexed.
  */
+/** Sends a request to Phpactor, or returns null when it isn't running. */
+export async function phpactorRequest<T>(method: string, params: unknown): Promise<T | null> {
+  const phpactor = servers.find((s) => s.name === "phpactor");
+  return phpactor ? phpactor.request<T>(method, params) : null;
+}
+
 export function reindex() {
   const phpactor = servers.find((s) => s.name === "phpactor");
   phpactor?.request("phpactor/indexer/reindex", { soft: false }).catch((e) => host.status(`Can't reindex: ${e}`));
