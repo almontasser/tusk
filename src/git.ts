@@ -323,7 +323,7 @@ export type DiffAction = { label: string; title?: string; run(): unknown };
  * Shows a diff in place of the editor. `back` runs when the diff closes, instead of showing the editor.
  * `action` adds a button to the header, such as Stage Selected.
  */
-export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void, action?: DiffAction) {
+export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void, action?: DiffAction): monaco.editor.IStandaloneDiffEditor {
   closeDiff(false);
   diffBack = back;
   const button = $("diff-action");
@@ -355,6 +355,14 @@ export function showDiff(path: string, original: string, modified: string, label
   $("diff-open").onclick = () => (closeDiff(false), host.openFile(`${host.root()}/${path}`));
   document.querySelectorAll<HTMLElement>("#editor, #history").forEach((e) => (e.hidden = true));
   $("diff").hidden = false;
+  return diffEditor;
+}
+
+/** The side of the diff on screen that you last clicked, and the line the cursor is on there. */
+export function diffCursor(): { side: "original" | "modified"; line: number } | null {
+  if (!diffEditor?.getModel()) return null;
+  const side = lastSide === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
+  return { side: lastSide, line: side.getPosition()?.lineNumber ?? 1 };
 }
 
 /** Closes the diff. By default it returns to where the diff came from, such as the history view. */

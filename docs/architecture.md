@@ -835,8 +835,32 @@ open in the browser through `open`, never in the webview.
 
 Comments, reviews, and merges are `gh pr comment`, `gh pr review --approve` or
 `--request-changes`, and `gh pr merge` with `--merge`, `--squash`, or
-`--rebase`. A merge always asks for confirmation first, because it changes
-the repository on GitHub.
+`--rebase`. A merge always asks for confirmation first, in the palette, because
+it changes the repository on GitHub.
+
+`gh pr view` has no line comments, so they come from
+`gh api repos/{owner}/{repo}/pulls/<n>/comments`, with `--jq` printing one
+object per line (`--paginate` would otherwise print one JSON array per page).
+GitHub points every reply at the thread's first comment (`in_reply_to_id`),
+which groups them into threads. A comment whose `line` is null is outdated:
+the code it was on changed, so it shows in the conversation only.
+
+In the diff, each thread is a view zone under its line, on the old side for
+`side: LEFT` and the new side for `RIGHT`. A view zone needs its height when
+it's added, so the thread is rendered into the page at the editor's visible
+width, measured, and then moved into the zone. The diff is laid out first,
+because it was hidden until then and has no width. Monaco stretches a zone to
+the width of the longest line, so the thread keeps its own width inside it.
+Clicks don't reach view zones, which is why threads are read-only.
+
+**Comment on Line** uses `diffCursor()` from `git.ts`, the side and line you
+last clicked. A new comment is a POST to the same endpoint with `commit_id`
+(the head commit, `headRefOid`), `path`, `line`, and `side`; a reply is a POST
+to `comments/<id>/replies`. Both post at once, without a pending review.
+
+`markdown()` turns `#123` and `@name` in text into links after sanitizing,
+walking the text nodes and skipping links and code, so a reference inside a
+URL or code sample stays as it is.
 
 `src/prs.ts` runs the GitHub CLI (`gh pr list`, `gh pr view`) through
 `run_capture` and reads its JSON output. `checksSummary` in `gitparse.ts`
@@ -852,9 +876,6 @@ touch your working tree or current branch.
 The pull request for the current branch (`gh pr view` without a number) loads
 when the branch or project changes, through `branchListeners` in `git.ts`.
 It makes a network call, so it doesn't run on every refresh.
-
-Descriptions and comments render as plain text (`textContent`), so content
-from GitHub can't inject HTML into the editor.
 
 ## Filament language server (milestone 6)
 
