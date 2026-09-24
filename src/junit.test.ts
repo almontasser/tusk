@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseEvents, parseJUnit, sameTest } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -84,4 +84,10 @@ Test Prepared (Tests\\Unit\\ExampleTest::test_two)
     ["Tests\\Feature\\PostTest", "home page → it loads", "failed"],
     ["Tests\\Unit\\ExampleTest", "test two", "running"],
   ]);
+});
+
+test("reads statement coverage from a Clover report", () => {
+  const coverage = parseClover(readFileSync(new URL("./clover.fixture.xml", import.meta.url), "utf8"));
+  assert.deepEqual([...coverage.keys()], ["/var/www/html/app/Models/Post.php"]);
+  assert.deepEqual([...coverage.get("/var/www/html/app/Models/Post.php")!], [[16, 1], [21, 0], [22, 3]]);
 });

@@ -10,20 +10,24 @@ import { sailRunning } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
+import { loadCoverage } from "./coverage";
 import { methodLine, routeTarget } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
 let status: (text: string) => void;
-let last: { title: string; command: string[]; tests: boolean } | undefined;
+let last: { title: string; command: string[]; tests: boolean; coverage: boolean } | undefined;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
 const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
 
-/** Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. */
-async function run(title: string, command: string[], tests = false) {
-  last = { title, command, tests };
+/**
+ * Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. With
+ * `coverage`, PHPUnit also writes a Clover report, and the editor shows it in the gutter.
+ */
+async function run(title: string, command: string[], tests = false, coverage = false) {
+  last = { title, command, tests, coverage };
   if (!tests) return openTerminal(getRoot(), title, command);
   // In Sail, the report has to be somewhere the container can write: storage/logs, which git ignores.
   const inSail = command[0] === sail();
@@ -36,10 +40,23 @@ async function run(title: string, command: string[], tests = false) {
   const liveArgs = live ? ["--log-events-text", inSail ? "storage/logs/editor-events.txt" : events] : [];
   if (live) await invoke("remove_path", { path: events }).catch(() => {});
   const timer = live ? setInterval(() => showLive(events, true), 500) : undefined;
-  return openTerminal(getRoot(), title, [...command, "--log-junit", reportArg, ...liveArgs], async () => {
+  const clover = inSail ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
+  if (coverage) await invoke("remove_path", { path: clover }).catch(() => {});
+  // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In Sail, the container's settings apply.
+  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : [];
+  const coverageArgs = coverage ? ["--coverage-clover", inSail ? "storage/logs/editor-clover.xml" : clover] : [];
+  return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
+    if (coverage) showCoverage(clover);
   });
+}
+
+async function showCoverage(clover: string) {
+  const result = await loadCoverage(clover, getRoot());
+  if (!result) return status("Coverage failed: no report. Install PCOV or Xdebug for PHP, or see the test output.");
+  const percent = result.total ? Math.floor((result.covered / result.total) * 100) : 0;
+  status(`Coverage: ${percent}% of lines (${result.covered} of ${result.total}) in ${result.files} files`);
 }
 
 async function reportPath() {
@@ -69,18 +86,18 @@ const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", li
  * Runs one test, or the whole file when the test has no filter, through `php artisan test` or
  * the test binary. With `debug`, it starts the debugger and runs the test with Xdebug enabled.
  */
-export async function runTest(path: string, test: TestCase, debug = false) {
+export async function runTest(path: string, test: TestCase, debug = false, coverage = false) {
   const file = path.slice(getRoot().length + 1);
   const runner = await testRunner(debug);
   const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${debug ? "Debug" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
+  const title = `${debug ? "Debug" : coverage ? "Coverage" : "Test"}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
   if (debug) await startDebugging();
-  return run(title, [...runner, file, ...filter], true);
+  return run(title, [...runner, file, ...filter], true, coverage);
 }
 
-export const runAllTests = async () => {
+export const runAllTests = async (coverage = false) => {
   const runner = await testRunner();
-  return run(runner[0] === sail() ? "Tests (Sail)" : "Tests", runner, true);
+  return run(`${coverage ? "Coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage);
 };
 
 async function rerunFailed(failed: TestResult[]) {
@@ -89,14 +106,14 @@ async function rerunFailed(failed: TestResult[]) {
 }
 
 /** Runs the test around the cursor, or all tests in the file. */
-export function runTestAtCursor(editor: monaco.editor.ICodeEditor, debug = false) {
+export function runTestAtCursor(editor: monaco.editor.ICodeEditor, debug = false, coverage = false) {
   const model = editor.getModel();
   if (!model || !isTestFile(model.uri.fsPath)) return;
   const test = testAt(findTests(model.getValue()), editor.getPosition()?.lineNumber ?? 1);
-  if (test) runTest(model.uri.fsPath, test, debug);
+  if (test) runTest(model.uri.fsPath, test, debug, coverage);
 }
 
-export const rerun = () => last && run(last.title, last.command, last.tests);
+export const rerun = () => last && run(last.title, last.command, last.tests, last.coverage);
 
 type ArtisanList = { commands: { name: string; description: string; hidden?: boolean }[] };
 let artisanCache: { root: string; items: { name: string; description: string }[] } | undefined;

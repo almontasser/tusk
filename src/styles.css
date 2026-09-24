@@ -545,6 +545,10 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
    Editor decorations: git, blame, conflicts, breakpoints
    ========================================================================== */
 
+/* Coverage sits left of the git change markers, so both show on a changed line. */
+.coverage-hit, .coverage-miss { width: 3px !important; margin-left: 1px; }
+.coverage-hit { background: #62c073cc; }
+.coverage-miss { background: #e5656bcc; }
 .gutter-added, .gutter-modified { width: 3px !important; margin-left: 5px; border-radius: 1px; }
 .gutter-added { background: #549159; }
 .gutter-modified { background: #375fad; }

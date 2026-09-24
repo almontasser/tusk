@@ -29,6 +29,7 @@ import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
+import { hideCoverage } from "./coverage";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -862,6 +863,9 @@ const actions: Action[] = [
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run All Tests", run: () => root && runAllTests() },
+  { label: "Run All Tests with Coverage", run: () => root && runAllTests(true) },
+  { label: "Run Test at Cursor with Coverage", run: () => runTestAtCursor(editor, false, true) },
+  { label: "Hide Coverage", run: hideCoverage },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },

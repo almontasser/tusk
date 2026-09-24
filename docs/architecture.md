@@ -821,6 +821,26 @@ anchor keep a failed `it works` from also running `it works fast`. The filter ne
 starts with `(`: PHP would read the parentheses as regex delimiters, and the
 match would become case-sensitive.
 
+### Code coverage
+
+A coverage run adds `--coverage-clover <app cache>/clover.xml` (in Sail,
+`storage/logs/editor-clover.xml`) and, outside Sail, runs the command through
+`/usr/bin/env XDEBUG_MODE=coverage`. PHPUnit picks PCOV when it's loaded, so
+the variable only matters with Xdebug. The report is deleted before the run,
+like the JUnit one. When the process exits, `loadCoverage` in
+`src/coverage.ts` reads it with `parseClover` from `src/junit.ts` and maps
+Sail's `/var/www/html` back to the project.
+
+Only `type="stmt"` lines count. Clover also lists each method's declaration
+line, which is covered whenever any statement in the method ran, so showing it
+would paint a green mark above an uncovered first statement.
+
+Marks are model decorations with `linesDecorationsClassName`, the same strip
+as the git change markers. Coverage takes the first 3 pixels and git markers
+start at 5, so both show on a changed line. Decorations stick to their lines
+as you edit, and models created later, such as a file opened after the run,
+get their marks in `onDidCreateModel`.
+
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
 
@@ -1697,3 +1717,11 @@ Bookmarks and routes list in the palette instead of sidebar views. The palette
 already filters, ranks, and opens results, so each tool is a few lines, and
 you usually glance at these lists and leave. TODO comments get a sidebar view,
 because you work through them one by one and want the list to stay open.
+
+### 2026-09-25: Clover for coverage, regex-parsed
+
+PHPUnit and Pest write Clover, Cobertura, PHP, HTML, and text coverage. Clover
+is flat (a file, then its lines with hit counts), so the same regex approach
+as the JUnit report reads it without an XML parser. The PHP format would need
+PHP to read it back, and HTML and text are for people.
+
