@@ -202,35 +202,83 @@ const writeSetting = (key: string, value: string | null) => {
 };
 
 let pauseOnExceptions = readSetting("debug:exceptions") === "1";
-// Xdebug matches subclasses, so these two cover every Throwable.
-const exceptionFilters = () => (pauseOnExceptions ? ["Exception", "Error"] : []);
+/** The classes to pause on, per project. Empty means every exception and error. */
+const exceptionClasses = (): string[] => (readSetting(`debug:exceptionClasses:${host.root()}`) ?? "").split(",").filter(Boolean);
+// The adapter makes each filter an Xdebug exception breakpoint on that class name, and Xdebug also matches
+// subclasses, so Exception and Error cover every Throwable.
+const exceptionFilters = () => (pauseOnExceptions ? (exceptionClasses().length ? exceptionClasses() : ["Exception", "Error"]) : []);
+
+const sendExceptionFilters = () => running && request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
 
 export function togglePauseOnExceptions() {
   pauseOnExceptions = !pauseOnExceptions;
   writeSetting("debug:exceptions", pauseOnExceptions ? "1" : null);
-  if (running) request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
+  sendExceptionFilters();
   render();
 }
 
-/** Where the project lives on the server, for code that runs in Docker: set by you, or /var/www/html for Sail. */
-async function serverRoot(): Promise<string | null> {
+/** Asks which exception classes to pause on, and turns pausing on exceptions on. */
+export function setExceptionClasses() {
+  pick(
+    "Exception classes to pause on, separated by commas, such as App\\Exceptions\\PaymentFailed (leave empty for every exception)",
+    (q) => {
+      const classes = q.split(",").map((c) => c.trim().replace(/^\\/, "")).filter(Boolean);
+      return [
+        {
+          label: classes.length ? `Pause on ${classes.join(", ")} and their subclasses` : "Pause on every exception and error",
+          run: () => {
+            writeSetting(`debug:exceptionClasses:${host.root()}`, classes.length ? classes.join(",") : null);
+            pauseOnExceptions = true;
+            writeSetting("debug:exceptions", "1");
+            sendExceptionFilters();
+            render();
+          },
+        },
+      ];
+    },
+    0,
+    { value: exceptionClasses().join(", ") },
+  );
+}
+
+/**
+ * Server paths and the local folders they map to, for code that runs in Docker, as typed: comma-separated
+ * entries, each `/server/path` (the project folder) or `/server/path=/local/path`. Set by you, or
+ * /var/www/html for Sail.
+ */
+async function serverPaths(): Promise<string> {
   const saved = readSetting(`debug:serverRoot:${host.root()}`);
-  if (saved !== null) return saved || null;
-  return (await usesSail(host.root())) ? "/var/www/html" : null;
+  if (saved !== null) return saved;
+  return (await usesSail(host.root())) ? "/var/www/html" : "";
+}
+
+const trimSlash = (p: string) => p.trim().replace(/(.)\/$/, "$1");
+
+/** The mappings, server path to local path. A local path without a leading / is inside the project. */
+function parseMappings(text: string): Record<string, string> {
+  const mappings: Record<string, string> = {};
+  for (const entry of text.split(",").filter((e) => e.trim())) {
+    const [server, local = ""] = entry.split("=");
+    const to = trimSlash(local);
+    mappings[trimSlash(server)] = !to ? host.root() : to.startsWith("/") ? to : `${host.root()}/${to}`;
+  }
+  return mappings;
 }
 
 export async function setServerRoot() {
-  const current = (await serverRoot()) ?? "";
   pick(
-    "The project's path on the server, such as /var/www/html (leave empty when PHP runs on this Mac)",
-    (q) => [
-      {
-        label: q.trim() ? `Map ${q.trim()} to ${host.root()}` : "No mapping: PHP runs on this Mac",
-        run: () => writeSetting(`debug:serverRoot:${host.root()}`, q.trim().replace(/\/$/, "")),
-      },
-    ],
+    "Server paths, such as /var/www/html, or /server/path=/local/path for other folders, separated by commas (empty when PHP runs on this Mac)",
+    (q) => {
+      const mappings = Object.entries(parseMappings(q));
+      return [
+        {
+          label: mappings.length ? mappings.map(([from, to]) => `${from} → ${to}`).join(", ") : "No mapping: PHP runs on this Mac",
+          run: () => writeSetting(`debug:serverRoot:${host.root()}`, q.trim()),
+        },
+      ];
+    },
     0,
-    { value: current },
+    { value: await serverPaths() },
   );
 }
 
@@ -251,11 +299,11 @@ export async function startDebugging() {
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
     await request("initialize", { adapterID: "php", clientID: "php-editor", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
-    const remote = await serverRoot();
-    const pathMappings = remote ? { [remote]: host.root() } : undefined;
+    const mappings = parseMappings(await serverPaths());
+    const pathMappings = Object.keys(mappings).length ? mappings : undefined;
     await request("launch", { port: PORT, stopOnEntry: false, pathMappings, xdebugSettings: { max_children: 128, max_depth: 1, max_data: 2048 } });
     log(`Listening for Xdebug on port ${PORT}. Start a request or test with Xdebug enabled.`);
-    if (remote) log(`Mapping ${remote} on the server to ${host.root()}.`);
+    for (const [from, to] of Object.entries(mappings)) log(`Mapping ${from} on the server to ${to}.`);
   } catch (e) {
     log(`Couldn't start the debugger: ${e}`);
     stopDebugging();
@@ -373,6 +421,7 @@ const q = <T extends HTMLElement>(sel: string) => panel.querySelector(sel) as T;
 
 const runs: Record<string, () => unknown> = { exceptions: togglePauseOnExceptions, listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
 panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.onclick = () => runs[b.dataset.run!]()));
+q<HTMLElement>('[data-run="exceptions"]').oncontextmenu = (e) => (e.preventDefault(), setExceptionClasses());
 
 function showPanel() {
   showPanelView("Debug", panel, () => stopDebugging());
@@ -383,6 +432,8 @@ function render() {
   q<HTMLElement>(".debug-state").textContent = !running ? "Not listening" : stoppedThread !== null ? "Paused" : "Listening";
   const exceptions = q<HTMLElement>('[data-run="exceptions"]');
   exceptions.setAttribute("aria-pressed", String(pauseOnExceptions));
+  const classes = host?.root() ? exceptionClasses() : [];
+  exceptions.title = `Pause on ${classes.length ? classes.join(", ") : "exceptions"}. Right-click to choose classes`;
   exceptions.classList.toggle("on", pauseOnExceptions);
   const enabled: Record<string, boolean> = { exceptions: true, listen: !running, resume: isPaused(), over: isPaused(), into: isPaused(), out: isPaused(), stop: running };
   panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.disabled = !enabled[b.dataset.run!]));
@@ -461,13 +512,16 @@ async function selectFrame(frame: Frame | undefined) {
   render();
   const { scopes } = await request<{ scopes: { name: string; variablesReference: number; expensive?: boolean }[] }>("scopes", { frameId: frame.id });
   q<HTMLElement>(".debug-vars").replaceChildren(
-    ...scopes.map((s, i) => variableRow({ name: s.name, value: "", variablesReference: s.variablesReference }, i === 0)),
+    ...scopes.map((s, i) => variableRow({ name: s.name, value: "", variablesReference: s.variablesReference }, undefined, i === 0)),
   );
   renderWatches();
 }
 
-/** A tree row for a variable; rows with children expand on click, loading them on demand. */
-function variableRow(v: Variable, open = false): HTMLLIElement {
+/**
+ * A tree row for a variable; rows with children expand on click, loading them on demand. With `parent`, the
+ * reference of the scope or value holding it, double-clicking the value edits it.
+ */
+function variableRow(v: Variable, parent?: number, open = false): HTMLLIElement {
   const li = document.createElement("li");
   const row = document.createElement("div");
   row.className = `var${v.variablesReference ? " expandable" : ""}`;
@@ -482,11 +536,51 @@ function variableRow(v: Variable, open = false): HTMLLIElement {
     const toggle = async () => {
       if (row.classList.toggle("open")) {
         const { variables } = await request<{ variables: Variable[] }>("variables", { variablesReference: v.variablesReference });
-        children.replaceChildren(...variables.map((c) => variableRow(c)));
+        children.replaceChildren(...variables.map((c) => variableRow(c, v.variablesReference)));
       } else children.replaceChildren();
     };
     row.onclick = toggle;
     if (open) toggle();
+  }
+  if (parent !== undefined) {
+    const value = row.querySelector<HTMLElement>(".value")!;
+    value.title = "Double-click to change the value";
+    value.ondblclick = (e) => {
+      e.stopPropagation();
+      const input = document.createElement("input");
+      input.className = "var-edit";
+      input.value = v.value;
+      input.title = "A PHP expression, such as 'text' in quotes, 42, or null";
+      value.replaceChildren(" = ", input);
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = async (save: boolean) => {
+        if (done) return;
+        done = true;
+        if (save && input.value !== v.value) {
+          try {
+            // The adapter evaluates the text as PHP, so strings need quotes.
+            await request("setVariable", { variablesReference: parent, name: v.name, value: input.value });
+            // The reply echoes the text typed, so the value as PHP now shows it comes from the parent again.
+            const { variables } = await request<{ variables: Variable[] }>("variables", { variablesReference: parent });
+            const updated = variables.find((c) => c.name === v.name);
+            if (updated) li.replaceWith(variableRow(updated, parent));
+            return;
+          } catch (err) {
+            log(`Can't set ${v.name}: ${err}`);
+          }
+        }
+        value.textContent = v.value ? ` = ${v.value}` : "";
+      };
+      input.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") finish(true);
+        if (e.key === "Escape") finish(false);
+      };
+      input.onblur = () => finish(false);
+      input.onclick = (e) => e.stopPropagation();
+    };
   }
   return li;
 }

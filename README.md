@@ -50,7 +50,7 @@ file to change when you add it.
 | Session restore | Shells come back fresh, without their history, and command tabs (tests, servers) aren't re-run. |
 | Split editors | Up to four panes, side by side only, sharing one tab bar. |
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
-| Debugger | Pause on exceptions stops on every exception, with no filter by class. A path mapping covers the project folder only. You can't change a variable's value while paused. |
+| Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
 | Git | Interactive rebase can't edit a commit's content partway (the `edit` action) or rebase merge commits. |
 | Local history | Versions are kept on save only, not before external changes such as `git checkout`, and there's no history of deleted files (they go to the Trash). |
@@ -642,6 +642,8 @@ debugging on for the processes it starts.
 3. When execution stops, the **Debug** tab in the bottom panel shows the call
    stack and variables. Click a frame to see its variables, expand objects and
    arrays, and type an expression, such as `$request->all()`, to evaluate it.
+   To change a variable, double-click its value, type a PHP expression, such as
+   `'text'` (with quotes), `42`, or `null`, and press Enter.
    Use F9 to resume, F8 to step over, F7 to step into, ⇧F8 to step out, and ⌘F2
    to stop.
 
@@ -665,7 +667,11 @@ execution pauses, expand like variables, and are saved with the project.
 
 To pause wherever an exception is thrown, even if the code catches it, turn
 on **Pause on exceptions** (the lightning icon in the Debug tab). The log
-shows the exception's class and message.
+shows the exception's class and message. To pause only on some classes,
+right-click the icon, or run **Pause on Exception Classes…** from ⌘⇧A, and
+enter them separated by commas, such as `App\Exceptions\PaymentFailed`. Their
+subclasses count too. Leave the field empty to pause on every exception again.
+The classes are saved per project.
 
 ### Docker and Sail
 
@@ -679,8 +685,11 @@ tool connects through the port Sail forwards (`FORWARD_DB_PORT`, or
 When PHP runs in a container, its paths differ from yours, so the debugger has
 to map them. For a Sail project (its `docker-compose.yml` uses Laravel Sail),
 the editor maps `/var/www/html` to the project folder on its own. For another
-setup, run **Set Server Path for Debugging…** from ⌘⇧A and enter the project's
-path in the container.
+setup, run **Set Server Paths for Debugging…** from ⌘⇧A and enter the
+project's path in the container. When other folders are mounted elsewhere, add
+them after a comma as `server path=local path`, such as
+`/var/www/html, /opt/shared=packages/shared`. A local path without a leading
+`/` is inside the project.
 
 Xdebug in the container must connect back to your Mac. With Sail, set
 `SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail

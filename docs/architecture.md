@@ -1158,16 +1158,25 @@ Watches are a list of expressions per project in `localStorage`. After a frame
 is selected, each one goes to `evaluate` with the `watch` context, and the
 result renders with the same row as a variable, so objects expand.
 
-Pause on exceptions sends the exception filters `Exception` and `Error`. The
-adapter passes them to Xdebug as exception breakpoints, and Xdebug also matches
-subclasses, so the two cover every `Throwable`. The setting is app-wide, in
-`localStorage`.
+Pause on exceptions sends exception filters. The adapter makes each filter an
+Xdebug exception breakpoint on that class name, whatever the name (its own
+filter list, such as `Notice`, is only what it suggests), and Xdebug also
+matches subclasses. Without chosen classes the filters are `Exception` and
+`Error`, which cover every `Throwable`. Turning it on or off is app-wide; the
+classes are per project, both in `localStorage`.
 
-A path mapping goes in the `launch` request as `pathMappings`, with one entry
-from the server's project path to the local one. The adapter translates
-breakpoint paths and stack frames, so the rest of the client sees local paths
-only. The server path is saved per project in `localStorage`. Without one, a
-`docker-compose.yml` that mentions Laravel Sail maps `/var/www/html`.
+Changing a variable sends `setVariable` with the reference of the scope or
+value that holds it. The adapter sets it through Xdebug's `property_set`, which
+evaluates the text as PHP, and replies with the text as typed, so the row
+reloads its parent's variables to show the value as PHP sees it.
+
+Path mappings go in the `launch` request as `pathMappings`, from server paths
+to local ones. The adapter translates breakpoint paths and stack frames, so the
+rest of the client sees local paths only. The mappings are saved per project in
+`localStorage` as typed (`/var/www/html, /opt/shared=packages/shared`), and
+`parseMappings` reads them: an entry without `=` maps to the project folder,
+and a relative local path is inside it. Without any, a `docker-compose.yml`
+that mentions Laravel Sail maps `/var/www/html`.
 
 `src/sail.ts` decides where commands run. A project uses Sail when
 `vendor/bin/sail` exists and a compose file mentions Sail's images, and Sail is
