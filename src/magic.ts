@@ -4,13 +4,15 @@
 type Position = { line: number; character: number };
 type Diagnostic = { range: { start: Position }; source?: string; code?: string | number };
 
+const isMixed = (d: Diagnostic) => /^mago/.test(d.source ?? "") && String(d.code ?? "").startsWith("mixed-");
+
 /**
- * `list` without the issues `isMagic` accepts, and without the `mixed-*` issues that follow from them, or from
- * magic at `anchors` (offsets, such as facade calls, which report nothing themselves): those in the same statement,
- * and those in later statements that use a variable such a statement assigned (`$post = Post::create(…)`), down
- * the chain, up to the end of the function (the next named function).
+ * `list` without the issues `isMagic` accepts, and without the issues that follow from them (`follows`, by default
+ * Mago's `mixed-*` ones), or from magic at `anchors` (offsets, such as facade calls, which report nothing
+ * themselves): those in the same statement, and those in later statements that use a variable such a statement
+ * assigned (`$post = Post::create(…)`), down the chain, up to the end of the function (the next named function).
  */
-export function withoutMagic<D extends Diagnostic>(text: string, list: D[], anchors: number[], isMagic: (d: D) => boolean): D[] {
+export function withoutMagic<D extends Diagnostic>(text: string, list: D[], anchors: number[], isMagic: (d: D) => boolean, follows: (d: D) => boolean = isMixed): D[] {
   const lineStarts = [0];
   for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) lineStarts.push(i + 1);
   const offset = (p: Position) => (lineStarts[p.line] ?? text.length) + p.character;
@@ -37,7 +39,7 @@ export function withoutMagic<D extends Diagnostic>(text: string, list: D[], anch
     return resolved.some(([s, e]) => at >= s && at <= e) || typed.some((t) => at > t.from && at < t.to && new RegExp(`\\$${t.name}\\b`).test(text.slice(start, end)));
   };
   // In order of position, so a variable assigned from another's value is known before its own uses.
-  const mixed = kept.filter((d) => /^mago/.test(d.source ?? "") && String(d.code ?? "").startsWith("mixed-")).sort((a, b) => offset(a.range.start) - offset(b.range.start));
+  const mixed = kept.filter(follows).sort((a, b) => offset(a.range.start) - offset(b.range.start));
   const dropped = new Set<D>();
   for (const d of mixed) {
     const at = offset(d.range.start);

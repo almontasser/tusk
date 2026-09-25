@@ -1182,17 +1182,25 @@ Mago checks PHP files as you type (static analysis and lint).
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
 defaults tuned for Laravel, in `src-tauri/resources/mago.toml`: the analyzer
 reads the project and `vendor` but skips hidden folders, `node_modules`, and
-`storage`, two rules that flag normal Laravel code on nearly every file
-(`strict-types` and `literal-named-argument`) are off, and rules about code
-size and complexity (such as `cyclomatic-complexity` and `too-many-methods`)
-show as warnings rather than errors. Mago's analyzer doesn't know Laravel's
+`storage`, rules that flag normal Laravel code (`strict-types`,
+`literal-named-argument`, and `prefer-first-class-callable`, since Filament
+fills closure parameters by name) are off, rules about code size and
+complexity (such as `cyclomatic-complexity` and `too-many-methods`) and style
+show as warnings rather than errors, and tests, factories, and seeders may
+set literal passwords. Mago checks against the lowest PHP version your
+`composer.json` allows. Mago's analyzer doesn't know Laravel's
 magic, such as Eloquent attributes and relationships (`$post->author`),
 forwarded calls (`Post::create()`), or request input (`$request->email`). The
 editor reads your models' columns, relationships, accessors, and scopes, and
 hides those reports, and the ones they cause further on, when Laravel really
 has the member; anything left shows as a hint (dots you can hover), not as a
 problem. Laravel's root aliases, such as `use DB;`, resolve too: the editor
-writes stubs for them that Phpactor and Mago read.
+writes stubs for them that Phpactor and Mago read. It also gives Mago corrected
+copies of the Laravel and Pest files whose types are wider than what your code
+gets back, as Larastan does: `__()` returns a string, `auth()->user()` your
+user model, a test's `$this` your test case, and `shouldReceive()` takes
+arguments. Problems Mago can't prove, such as a value that may be null, show
+as warnings; using a value of unknown type shows as a hint.
 
 ## Test app
 

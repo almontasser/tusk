@@ -9,9 +9,8 @@ import { monaco } from "./editor";
 import { choose } from "./palette";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
-import { aliasStubs, isFacade, isModelMethod, isModelProperty, onModelsRead, readModels, rereadModels } from "./eloquent";
-import { withoutMagic } from "./magic";
-import { docblockHasParam } from "./phptypes";
+import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
+import { magoConfigText, realProblems, severityOf } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -74,71 +73,6 @@ const markdown = (c: L.MarkupContent | L.MarkedString | string): monaco.IMarkdow
 const completionKinds = "Text Method Function Constructor Field Variable Class Interface Module Property Unit Value Enum Keyword Snippet Color File Reference Folder EnumMember Constant Struct Event Operator TypeParameter".split(" ");
 const severity = [0, 8, 4, 2, 1]; // Error, Warning, Information, Hint
 
-/** Library code you don't edit. PhpStorm doesn't report problems there either. */
-const isLibrary = (model: monaco.editor.ITextModel) => /\/(vendor|node_modules)\//.test(model.uri.path);
-
-/**
- * Pest binds each test closure to the project's test case, so `$this->get()` works, but Phpactor and Mago
- * can't see that. In Pest files, drop their complaints about `$this` lines, and the hint to add a namespace.
- */
-// ponytail: drops every such problem on a `$this` line; reading tests/Pest.php could type `$this` instead.
-const isPestFile = (model: monaco.editor.ITextModel) => /\/tests\//.test(model.uri.path) && /^\s*(it|test|describe)\(/m.test(textOf(model));
-
-function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): boolean {
-  const message = typeof d.message === "string" ? d.message : d.message.value;
-  if (message.startsWith("Namespace should probably be")) return true;
-  const line = d.range.start.line + 1;
-  return line <= model.getLineCount() && model.getLineContent(line).includes("$this") && /\$this|TestCase|`mixed`/.test(message);
-}
-
-/**
- * Mago analyzer rules that Laravel's magic sets off on correct code: a property or method Eloquent, a request, or
- * a facade resolves at runtime (`$post->author`, `$request->email`) has no declaration, and every call on the value
- * it returns is then on `mixed`. PhpStorm flags the first only faintly and the rest not at all, so these show as
- * hints: dots under the code, explained on hover, and not counted as problems.
- */
-const magicNoise = (d: L.Diagnostic) => /^mago/.test(d.source ?? "") && /^(non-documented-(property|method)|mixed-)/.test(String(d.code ?? ""));
-
-/** A request's input reads as properties (`$request->email`), so any name is valid on a request. */
-const isRequest = (className: string) => /^\\?(Illuminate\\Http\\Request|App\\Http\\Requests\\.+)$/.test(className);
-
-/**
- * Drops Mago's "ambiguous property access" and "ambiguous method call", and Phpactor's "does not exist", where Laravel really answers them: a model's
- * column, relationship, or accessor, a local scope or query builder method it forwards (`create`, `where`), or a
- * request's input. `withoutMagic` then drops the `mixed-*` issues that follow from them. Anything Laravel doesn't
- * have keeps its hint.
- */
-function withoutEloquentMagic(model: monaco.editor.ITextModel, list: L.Diagnostic[]): L.Diagnostic[] {
-  const text = textOf(model);
-  // A facade's methods return `mixed` in its docblock, such as DB::transaction(), so its calls are magic too.
-  const facadeCalls = [...text.matchAll(/\b([A-Z]\w*)::\w+\s*\(/g)].filter((m) => isFacade(m[1], text)).map((m) => m.index!);
-  return withoutMagic(text, list, facadeCalls, (d) => {
-    const message = typeof d.message === "string" ? d.message : d.message.value;
-    let property: RegExpMatchArray | null | false = false;
-    let method: RegExpMatchArray | null | false = false;
-    if (/^mago/.test(d.source ?? "")) {
-      property = d.code === "non-documented-property" && message.match(/\$(\w+) on class `([^`]+)`/);
-      method = d.code === "non-documented-method" && message.match(/call to `(\w+)` on class `([^`]+)`/);
-    } else if (d.code === "worse.missing_member") {
-      // Phpactor: Method "create" does not exist on class "App\Models\Message", and the same for properties.
-      property = message.match(/^Property "(\w+)" does not exist on class "([^"]+)"/);
-      method = message.match(/^Method "(\w+)" does not exist on class "([^"]+)"/);
-    }
-    return !!((property && (isRequest(property[2]) || isModelProperty(property[2], property[1]))) || (method && isModelMethod(method[2], method[1])));
-  });
-}
-
-/**
- * Phpactor's "Method "send" is missing @param $body" when the docblock has it: Phpactor's docblock parser drops a
- * `@param` whose type it can't read, such as a PHPStan array shape with quoted keys (`array{'code': string}`).
- */
-function documentedAfterAll(model: monaco.editor.ITextModel, d: L.Diagnostic): boolean {
-  if (d.code !== "worse.docblock_missing_param") return false;
-  const name = (typeof d.message === "string" ? d.message : d.message.value).match(/@param \$(\w+)/)?.[1];
-  const at = model.getOffsetAt({ lineNumber: d.range.start.line + 1, column: d.range.start.character + 1 });
-  return !!name && docblockHasParam(textOf(model), at, name);
-}
-
 /** The last diagnostics each server sent for each model, so they can be filtered again once the models are read. */
 const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[] }>();
 onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
@@ -147,16 +81,14 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
   const key = `${owner} ${model.uri}`;
   if (!lastDiagnostics.has(key)) model.onWillDispose(() => lastDiagnostics.delete(key));
   lastDiagnostics.set(key, { model, owner, list });
-  if (isLibrary(model)) list = [];
-  if (list.length && isPestFile(model)) list = list.filter((d) => !pestFalsePositive(model, d));
-  if (list.length && model.getLanguageId() === "php") list = withoutEloquentMagic(model, list).filter((d) => !documentedAfterAll(model, d));
+  list = realProblems(model.uri.path, textOf(model), model.getLanguageId(), list, facts);
   monaco.editor.setModelMarkers(
     model,
     owner,
     list.map((d) => ({
       ...toRange(d.range),
       message: typeof d.message === "string" ? d.message : d.message.value,
-      severity: magicNoise(d) ? monaco.MarkerSeverity.Hint : severity[d.severity ?? 1],
+      severity: severity[severityOf(d)],
       source: d.source,
       code: d.code?.toString(),
     })),
@@ -897,6 +829,7 @@ export async function startLsp(root: string, h: Host) {
   readModels(root);
   starts++;
   projectRoot = root;
+  magoConfigPath = undefined;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
   builtInTypeScript(true);
@@ -928,7 +861,7 @@ export async function startLsp(root: string, h: Host) {
     "language_server_mago.enabled": true,
     "language_server_mago.bin": magoBin,
     // Without a project mago.toml, use defaults tuned for Laravel (src-tauri/resources/mago.toml).
-    ...(!hasMagoToml && { "language_server_mago.config": aliasDir ? await magoConfigWith(magoConfig, aliasDir.dir) : magoConfig }),
+    ...(!hasMagoToml && { "language_server_mago.config": (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir)) }),
     "language_server_phpstan.enabled": hasPhpstan,
   });
   const laravel = hasArtisan ? startServer("laravel", root, ["php", "blade"], {}) : null;
@@ -950,14 +883,33 @@ export async function startLsp(root: string, h: Host) {
   else checkComposerLock(root);
 }
 
+/** The Mago settings the servers use, or undefined when the project has its own mago.toml. */
+export let magoConfigPath: string | undefined;
+
 /**
- * The editor's Mago settings with Laravel's alias stubs added to `includes`, written next to the stubs, so Mago
- * knows `use DB;` too. Relative paths in it, such as `vendor`, still mean the project's, since Mago runs there.
+ * The editor's Mago settings for a project (src-tauri/resources/mago.toml), written to the app's cache with the
+ * project's PHP version, Laravel's alias stubs (`use DB;`), and copies of vendor files with the types Mago reads
+ * wrong fixed (introspect.php mago-stubs) in place of the originals. Relative paths, such as `vendor`, still mean
+ * the project's, since Mago runs there. The copies are made again in the background at each start, as packages
+ * change; until then, the last start's are used.
  */
-async function magoConfigWith(bundled: string, stubs: string): Promise<string> {
-  const text = await invoke<string>("read_file", { path: bundled });
-  const config = `${stubs}/mago.toml`;
-  await invoke("write_file", { path: config, contents: text.replace(/^includes = \[(.*)\]$/m, (_, list) => `includes = [${list}, ${JSON.stringify(stubs)}]`) });
+async function projectMagoConfig(root: string, bundled: string, aliasDir: string | undefined): Promise<string> {
+  const dir = await projectCache("mago-stubs", root);
+  const [text, composer, previous] = await Promise.all([
+    invoke<string>("read_file", { path: bundled }),
+    invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"),
+    invoke<string>("read_file", { path: `${dir}/replaced.json` }).then(JSON.parse, () => []),
+  ]);
+  const config = `${dir}/mago.toml`;
+  const write = (replaced: string[]) =>
+    invoke("write_file", { path: config, contents: magoConfigText(text, composer, [...(aliasDir ? [aliasDir] : []), ...(replaced.length ? [dir] : [])], replaced) });
+  await invoke("create_dir", { path: dir });
+  await write(previous);
+  introspect(root, "mago-stubs", dir).then(async (replaced) => {
+    if (!Array.isArray(replaced)) return;
+    await write(replaced);
+    await invoke("write_file", { path: `${dir}/replaced.json`, contents: JSON.stringify(replaced) });
+  });
   return config;
 }
 

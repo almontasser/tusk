@@ -9,7 +9,8 @@
 paths = ["."]
 # The editor adds Laravel's alias stubs (`use DB;`) to this list, so keep it on one line.
 includes = ["vendor"]
-# Hidden folders can hold whole copies of the project, such as git worktrees in .claude/.
+# Hidden folders can hold whole copies of the project, such as git worktrees in .claude/. The editor adds
+# vendor files it gives Mago corrected copies of, so keep this on one line too.
 excludes = [".*", "node_modules", "storage", "bootstrap/cache"]
 
 [linter]
@@ -19,6 +20,9 @@ integrations = ["laravel"]
 [linter.rules]
 strict-types = { enabled = false }
 literal-named-argument = { enabled = false }
+# Filament and the container fill a closure's parameters by name (`$record`, `$livewire`), which a first-class
+# callable such as `$this->print(...)` renames to the method's.
+prefer-first-class-callable = { enabled = false }
 # Code size and complexity are hints to refactor, not errors: warnings, as PhpStorm shows them.
 cyclomatic-complexity = { level = "warning" }
 kan-defect = { level = "warning" }
@@ -26,3 +30,10 @@ too-many-methods = { level = "warning" }
 too-many-properties = { level = "warning" }
 too-many-enum-cases = { level = "warning" }
 excessive-parameter-list = { level = "warning" }
+# Style and hardening advice rather than mistakes.
+no-empty = { level = "warning" }
+no-error-control-operator = { level = "warning" }
+final-controller = { level = "warning" }
+sensitive-parameter = { level = "warning" }
+# Tests, factories, and seeders set passwords for fake users.
+no-literal-password = { exclude = ["tests/", "database/factories/", "database/seeders/"] }

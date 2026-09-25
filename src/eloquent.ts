@@ -2,14 +2,15 @@
 // read by introspect.php. Diagnostics use them to tell Laravel's magic from a real mistake.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
+import { phpVersionOf, type Facts } from "./diagnostics";
 
 type ModelFacts = { columns: Record<string, unknown>; relations: { name: string }[]; accessors?: string[]; scopes?: string[] };
 
 /**
  * For the open project, once read: property names by model class (columns, relationships, accessors), method names
- * by model class (local scopes), and the query builder methods every model forwards calls to.
+ * by model class (local scopes), the query builder methods every model forwards calls to, and the view names.
  */
-let properties: { root: string; byClass: Map<string, Set<string>>; methods: Map<string, Set<string>>; builder: Set<string> } | undefined;
+let properties: { root: string; byClass: Map<string, Set<string>>; methods: Map<string, Set<string>>; builder: Set<string>; views?: Set<string> } | undefined;
 let reading: { root: string; done: Promise<void> } | undefined;
 /** Each read's number, so a slower, older read doesn't replace a newer one. */
 let reads = 0;
@@ -23,10 +24,15 @@ export function readModels(root: string) {
   if (reading?.root === root) return reading.done;
   const read = ++reads;
   const done = (async () => {
+    facts.phpVersion = phpVersionOf(await invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => ""));
     if (!(await invoke<boolean>("path_exists", { path: `${root}/artisan` }))) return;
     const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
     const introspect = (mode: string) => invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
-    const [models, builder]: [Record<string, ModelFacts> | { error: string }, string[] | { error: string }] = await Promise.all([introspect("models"), introspect("builder")]);
+    const [models, builder, views]: [Record<string, ModelFacts> | { error: string }, string[] | { error: string }, string[] | { error: string }] = await Promise.all([
+      introspect("models"),
+      introspect("builder"),
+      introspect("views"),
+    ]);
     if ("error" in models) return;
     const byClass = new Map<string, Set<string>>();
     const methods = new Map<string, Set<string>>();
@@ -35,7 +41,7 @@ export function readModels(root: string) {
       methods.set(name, new Set(m.scopes ?? []));
     }
     if (read !== reads) return; // Another project, or a newer read, took over.
-    properties = { root, byClass, methods, builder: new Set(Array.isArray(builder) ? builder : []) };
+    properties = { root, byClass, methods, builder: new Set(Array.isArray(builder) ? builder : []), views: Array.isArray(views) ? new Set(views) : undefined };
     listeners.forEach((l) => l());
   })().catch(() => {});
   reading = { root, done };
@@ -67,10 +73,13 @@ export function isModelMethod(className: string, method: string): boolean | unde
   return scopes ? scopes.has(method) || properties!.builder.has(method) : undefined;
 }
 
-const introspect = async (root: string, mode: string) => {
+export const introspect = async (root: string, mode: string, ...args: string[]) => {
   const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
-  return invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
+  return invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode, ...args], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
 };
+
+/** The folder for the editor's files about a project, such as `alias-stubs`, in the app's cache. */
+export const projectCache = async (kind: string, root: string) => `${await appCacheDir()}/${kind}/${root.replace(/[^A-Za-z0-9]+/g, "_")}`;
 
 /** The project's root aliases (`DB`), for telling a facade call when the file doesn't import the facade. */
 let aliases: { root: string; names: Set<string> } | undefined;
@@ -84,7 +93,7 @@ let aliases: { root: string; names: Set<string> } | undefined;
  */
 export async function aliasStubs(root: string, changed: () => void): Promise<{ dir: string; fresh: boolean } | null> {
   if (!(await invoke<boolean>("path_exists", { path: `${root}/artisan` }))) return null;
-  const dir = `${await appCacheDir()}/alias-stubs/${root.replace(/[^A-Za-z0-9]+/g, "_")}`;
+  const dir = await projectCache("alias-stubs", root);
   const file = `${dir}/aliases.php`;
   const previous = await invoke<string>("read_file", { path: file }).catch(() => null);
   const write = async () => {
@@ -108,3 +117,9 @@ export async function aliasStubs(root: string, changed: () => void): Promise<{ d
 export function isFacade(name: string, fileText: string): boolean {
   return !!aliases?.names.has(name) || new RegExp(`^use\\s+[\\w\\\\]+\\\\Facades\\\\${name}\\s*;`, "m").test(fileText);
 }
+
+/** Whether the app or a package has a view by this name, or undefined while the views haven't been read. */
+const isView = (name: string) => properties?.views?.has(name);
+
+/** What the diagnostics filters need to know about the project (diagnostics.ts). */
+export const facts: Facts = { isModelProperty, isModelMethod, isFacade, isView };

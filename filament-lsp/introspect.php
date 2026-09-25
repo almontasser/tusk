@@ -9,6 +9,8 @@
  *   php introspect.php <project root> enum <Enum class>
  *   php introspect.php <project root> builder
  *   php introspect.php <project root> aliases
+ *   php introspect.php <project root> mago-stubs <folder>
+ *   php introspect.php <project root> views
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
@@ -16,6 +18,8 @@
  * `models` describes every model under app/ for AI completion: columns with their
  * database types, casts, and relationships. `enum` lists an enum's cases with their values. `builder` lists the query builder methods models
  * forward static and instance calls to. `aliases` maps root class aliases, such as `DB`, to their classes.
+ * `mago-stubs` writes vendor files with corrected types for Mago into <folder>, and lists them. `views` lists
+ * the names of the app's and packages' views.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -227,6 +231,155 @@ function describeResource(string $resource, ?string $context): array
     ];
 }
 
+/**
+ * Writes copies of vendor files into $dir with the types Mago reads wrong fixed, for the editor to give Mago in
+ * place of the originals. Returns the replaced files, relative to the project. A copy is made only when a patch
+ * applies, so another Laravel version just keeps its own files.
+ */
+function magoStubs(string $root, string $dir): array
+{
+    // Pest runs each test closure bound to the test case tests/Pest.php extends, not to the TestCall its docblocks say.
+    $pest = @file_get_contents("$root/tests/Pest.php") ?: '';
+    $testCase = preg_match('/(?:extend|uses)\(\s*\\\\?([\w\\\\]+)::class/', $pest, $m) ? $m[1] : null;
+    // auth()->user() and Auth::user() ask the default guard, whose users are config/auth.php's model for it.
+    global $booted;
+    $user = $booted ? config('auth.providers.' . config('auth.guards.' . config('auth.defaults.guard') . '.provider') . '.model') : null;
+    $user = is_string($user) && class_exists($user) ? $user : null;
+    // A collection with `non-negative-int` keys is one with `int` keys, but Laravel declares TKey invariant.
+    $covariantKeys = ["\n * @template TKey of array-key" => "\n * @template-covariant TKey of array-key"];
+    $plucked = ['@return static<array-key, mixed>' => '@return \\Illuminate\\Support\\Collection<array-key, mixed>'];
+    $laravel = 'vendor/laravel/framework/src/Illuminate/';
+    // Larastan's narrower types, for what Laravel's docblocks leave wide: the value code gets back in practice.
+    $patches = [
+        $laravel . 'Foundation/helpers.php' => [
+            // A translation key gives a string; only a key for a whole file gives an array.
+            '@return ($key is null ? \\Illuminate\\Contracts\\Translation\\Translator : array|string)' => '@return ($key is null ? \\Illuminate\\Contracts\\Translation\\Translator : string)',
+            '@return ($key is null ? null : array|string)' => '@return string',
+            // The auth manager passes calls such as user() on to the default guard.
+            '@return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory :' => '@return ($guard is null ? \\Illuminate\\Auth\\AuthManager :',
+        ],
+        // Artisan calls in tests return a pending command unless output mocking is off.
+        $laravel . 'Foundation/Testing/Concerns/InteractsWithConsole.php' => ['@return \\Illuminate\\Testing\\PendingCommand|int' => '@return \\Illuminate\\Testing\\PendingCommand'],
+        'vendor/pestphp/pest-plugin-laravel/src/Console.php' => ['@return PendingCommand|int' => '@return PendingCommand'],
+        // A service provider's $app is the application, not only its contract.
+        $laravel . 'Support/ServiceProvider.php' => ['@var \\Illuminate\\Contracts\\Foundation\\Application' => '@var \\Illuminate\\Foundation\\Application'],
+        // Disks are filesystem adapters, which add assertExists(), url(), and more to the contract.
+        $laravel . 'Support/Facades/Storage.php' => ['@method static \\Illuminate\\Contracts\\Filesystem\\Filesystem' => '@method static \\Illuminate\\Filesystem\\FilesystemAdapter'],
+        'vendor/pestphp/pest/src/Functions.php' => $testCase ? ['@param-closure-this TestCall' => "@param-closure-this \\$testCase"] : [],
+        $laravel . 'Auth/AuthManager.php' => $user ? ["\n * @mixin \\Illuminate\\Contracts\\Auth\\Guard\n * @mixin \\Illuminate\\Contracts\\Auth\\StatefulGuard" => "\n * @mixin \\EditorStubs\\DefaultGuard"] : [],
+        $laravel . 'Support/Facades/Auth.php' => $user ? ['@method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user()' => "@method static \\$user|null user()"] : [],
+        // pluck() gives a collection of other values; Mago keeps the original values' type for `static<…>`.
+        $laravel . 'Collections/Collection.php' => $covariantKeys + $plucked,
+        $laravel . 'Collections/Enumerable.php' => $covariantKeys + $plucked,
+        $laravel . 'Collections/LazyCollection.php' => $covariantKeys,
+        $laravel . 'Collections/Traits/EnumeratesValues.php' => $covariantKeys,
+        $laravel . 'Database/Eloquent/Collection.php' => $covariantKeys,
+        // A query builder of posts is a query builder of models, as Filament's getEloquentQuery() returns.
+        $laravel . 'Database/Eloquent/Builder.php' => ["\n * @template TModel of \\Illuminate\\Database\\Eloquent\\Model" => "\n * @template-covariant TModel of \\Illuminate\\Database\\Eloquent\\Model"],
+    ];
+    $sources = [];
+    foreach ($patches as $file => $replacements) {
+        if (is_file("$root/$file") && $replacements) {
+            $sources[$file] = strtr($original = file_get_contents("$root/$file"), $replacements);
+            if ($sources[$file] === $original) {
+                unset($sources[$file]);
+            }
+        }
+    }
+    // Methods that read their arguments with func_get_args(), such as Facade::shouldReceive(), take any number.
+    exec('grep -rl --include=*.php func_get_args vendor', $files);
+    foreach ($files as $file) {
+        $source = $sources[$file] ?? file_get_contents("$root/$file");
+        $variadic = variadicFuncGetArgs($source);
+        if ($variadic !== $source) {
+            $sources[$file] = $variadic;
+        }
+    }
+    // Copies from an earlier run that no longer apply would stand beside the originals.
+    exec('rm -rf ' . escapeshellarg("$dir/vendor"));
+    foreach ($sources as $file => $source) {
+        @mkdir(dirname("$dir/$file"), 0777, true);
+        file_put_contents("$dir/$file", $source);
+    }
+    if (isset($sources[$laravel . 'Auth/AuthManager.php'])) {
+        file_put_contents("$dir/vendor/DefaultGuard.php", "<?php\n\nnamespace EditorStubs;\n\n/** The default guard, which the auth manager passes calls on to. */\ninterface DefaultGuard extends \\Illuminate\\Contracts\\Auth\\StatefulGuard\n{\n    /** @return \\$user|null */\n    public function user();\n}\n");
+    }
+    return array_keys($sources);
+}
+
+/** $source with `...$arguments` added to each function that takes more arguments than it declares, with func_get_args(). */
+function variadicFuncGetArgs(string $source): string
+{
+    $tokens = token_get_all($source);
+    $code = fn ($t) => !is_array($t) || !in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true);
+    $inserts = [];
+    foreach ($tokens as $i => $token) {
+        if (!is_array($token) || $token[0] !== T_FUNCTION) {
+            continue;
+        }
+        // The parameter list: the `(` after the name (none for `use function`), to its match.
+        for ($open = $i + 1; $open < count($tokens) && (!$code($tokens[$open]) || $tokens[$open] === '&' || (is_array($tokens[$open]) && $tokens[$open][0] === T_STRING)); $open++);
+        if (($tokens[$open] ?? null) !== '(') {
+            continue;
+        }
+        for ($depth = 0, $close = $open; $close < count($tokens); $close++) {
+            $depth += $tokens[$close] === '(' ? 1 : ($tokens[$close] === ')' ? -1 : 0);
+            if ($depth === 0) {
+                break;
+            }
+        }
+        // The body, if any: from the next `{` (before any `;`) to its match.
+        for ($body = $close; $body < count($tokens) && $tokens[$body] !== '{' && $tokens[$body] !== ';'; $body++);
+        if (($tokens[$body] ?? ';') !== '{') {
+            continue;
+        }
+        for ($depth = 0, $end = $body; $end < count($tokens); $end++) {
+            $t = $tokens[$end];
+            $depth += $t === '{' || (is_array($t) && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) ? 1 : ($t === '}' ? -1 : 0);
+            if ($depth === 0) {
+                break;
+            }
+        }
+        $text = implode('', array_map(fn ($t) => is_array($t) ? $t[1] : $t, array_slice($tokens, $body, $end - $body)));
+        $params = array_values(array_filter(array_slice($tokens, $open + 1, $close - $open - 1), $code));
+        // Only functions that take their arguments this way: with no parameters (`shouldReceive()`), or with an array
+        // or a list of arguments (`is_array($columns) ? $columns : func_get_args()`, or the other way round); others
+        // only pass theirs on.
+        $takesMore = !$params ? str_contains($text, 'func_get_args') : preg_match('/\?\s*(\$\w+\s*:\s*func_get_args\(\)|func_get_args\(\)\s*:)/', $text);
+        if ($takesMore && !in_array(T_ELLIPSIS, array_map(fn ($t) => is_array($t) ? $t[0] : null, $params), true)) {
+            // After no parameters or a trailing comma, no comma of its own.
+            $inserts[$close] = !$params || end($params) === ',' ? '...$arguments' : ', ...$arguments';
+        }
+    }
+    $out = '';
+    foreach ($tokens as $i => $token) {
+        $out .= ($inserts[$i] ?? '') . (is_array($token) ? $token[1] : $token);
+    }
+    return $out;
+}
+
+/** Names of the app's views, such as `filament.widgets.stats`, and of packages' (`filament::page`). */
+function viewNames(string $root): array
+{
+    global $booted;
+    $finder = $booted ? app('view')->getFinder() : null;
+    $folders = ['' => $finder ? $finder->getPaths() : [$root . '/resources/views']] + array_map(fn ($paths) => (array) $paths, $finder ? $finder->getHints() : []);
+    $names = [];
+    foreach ($folders as $namespace => $paths) {
+        foreach ($paths as $path) {
+            if (!is_dir($path)) {
+                continue;
+            }
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS)) as $file) {
+                if (preg_match('/^(.*?)(\.blade)?\.php$/', substr($file->getPathname(), strlen($path) + 1), $m)) {
+                    $names[] = ($namespace === '' ? '' : "$namespace::") . str_replace('/', '.', $m[1]);
+                }
+            }
+        }
+    }
+    return array_values(array_unique($names));
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -245,6 +398,8 @@ try {
             return $map;
         })(),
         'builder' => builderMethods(),
+        'mago-stubs' => magoStubs($root, $argv[3]),
+        'views' => viewNames($root),
         // Root aliases such as `DB` for Illuminate\Support\Facades\DB: Laravel's defaults, config/app.php's, and packages'.
         'aliases' => $booted ? Illuminate\Foundation\AliasLoader::getInstance()->getAliases() : Illuminate\Support\Facades\Facade::defaultAliases()->all(),
         'models' => (function () use ($root) {

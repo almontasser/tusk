@@ -326,9 +326,7 @@ Mago's `non-documented-property` when the class is a model that has the
 property, or a request (`Illuminate\Http\Request`, or a class in
 `App\Http\Requests`, whose input reads as properties), and
 `non-documented-method` when the model has the scope or the builder has the
-method. Phpactor's `worse.missing_member` (`Method "create" does not exist on
-class "App\Models\Message"`, or `Property "…"`) goes through the same checks,
-since it doesn't know about Eloquent's forwarding either. `withoutMagic` in `src/magic.ts` then drops the `mixed-*` issues that
+method. `withoutMagic` in `src/magic.ts` then drops the `mixed-*` issues that
 follow: those in the same statement, from after the previous `;`, `{`, or `}`
 to the next `;`, and those in later statements that use a variable such a
 statement assigned, down the chain, until the next named function. Each
@@ -348,10 +346,9 @@ folder in `indexer.stub_paths`, after PHP's own stubs, which the setting
 replaces; `worse_reflection.additive_stubs` doesn't resolve them. Phpactor
 indexes stub paths only in a full build, so new stubs are followed by a full
 reindex, and later starts check the aliases in the background and reindex only
-if they changed. For projects without their own `mago.toml`, the editor writes
-a copy of its Mago settings next to the stubs with the folder added to
-`includes` (the bundled file keeps that list on one line for this), so Mago
-reads the facades' `@method` docs through the stubs. A facade call
+if they changed. For projects without their own `mago.toml`, the editor's Mago
+settings for the project (see "Types Mago reads wrong") add the folder to
+`includes`, so Mago reads the facades' `@method` docs through the stubs. A facade call
 (`DB::transaction(…)`, by alias or by an import from a `Facades` namespace)
 also counts as magic for `withoutMagic`, since its documented return type is
 often `mixed`.
@@ -359,6 +356,87 @@ often `mixed`.
 In development, Tauri copies `filament-lsp/` into `target/debug/tools/` only
 when the Rust side rebuilds, so a change to `introspect.php` reaches the running
 app after the next Rust rebuild.
+
+### Types Mago reads wrong
+
+Laravel's docblocks are often wider than what code gets back, and Larastan
+narrows them with PHPStan extensions that Mago can't load. A check of a whole
+project (lamah-sms-gateway, about 950 files) found most of its 5,700 problems
+came from a few such types. `introspect.php mago-stubs <folder>` writes copies
+of those vendor files with the types fixed into the app's cache
+(`mago-stubs/<project>/vendor/…`), and lists them; the editor adds the folder to
+Mago's `includes` and the originals to its `excludes`. A copy is made only when
+its patch applies, so another Laravel version keeps its own files. The patches:
+
+- `__()` and `trans()` with a key return `string`, not `array|string`.
+- `auth()` returns the `AuthManager`, and the manager's `@mixin` is a generated
+  `EditorStubs\DefaultGuard` whose `user()` returns the default guard's model
+  from `config/auth.php`; `Auth::user()` returns it too. (`Request::user()`
+  stays `mixed`: an API guard, such as Sanctum's, can sign in another model.)
+- `artisan()` in tests returns a `PendingCommand`, not `PendingCommand|int`.
+- A service provider's `$app` is `Illuminate\Foundation\Application`, and
+  `Storage::disk()` a `FilesystemAdapter` (with `assertExists()` and `url()`).
+- Pest's `it()`, `test()`, and `beforeEach()` bind their closure to the test
+  case `tests/Pest.php` extends, not to `TestCall` as Pest's
+  `@param-closure-this` says.
+- Collections' `TKey` and Eloquent's builder `TModel` are covariant, so
+  `Collection<non-negative-int, X>` passes as `Collection<int, X>`, and
+  `Builder<Post>` as `Builder<Model>` (Filament's `getEloquentQuery()`).
+- `pluck()` returns `Collection<array-key, mixed>`: for `static<array-key,
+  mixed>`, Mago keeps the original values' type.
+- Methods that take more arguments than they declare, through
+  `func_get_args()`, get a variadic `...$arguments`: those with no parameters
+  (`Facade::shouldReceive()`), and those that take an array or a list
+  (`is_array($columns) ? $columns : func_get_args()`, as `loadMissing()`).
+  Others only pass their arguments on, so they keep their count.
+
+The settings also get `php-version`: the lowest version composer.json allows
+(`config.platform.php`, or else `require.php`), as PhpStorm sets its language
+level. Mago otherwise assumes its newest (8.5). `magoConfigText` in
+`src/diagnostics.ts` writes them; the bundled `mago.toml` keeps `includes` and
+`excludes` on one line each for it. The copies are made again in the background
+at each start, and the last start's list (`replaced.json`) is used until then.
+
+### False problems the filters drop
+
+`realProblems` in `src/diagnostics.ts` filters every server's diagnostics
+before they become markers, for open files and the project's problems alike.
+It has no editor imports, so `src/diagnostics.test.ts` runs it in Node. Besides
+Laravel's magic (above), it drops:
+
+- Phpactor's checks that Mago's analyzer makes too and gets right where
+  Phpactor doesn't: members that don't exist (Phpactor misses facades, macros,
+  typed class constants such as `const string A`, and methods declared without
+  `public`, as Livewire's `Testable::set()`), undefined variables (`new
+  readonly class`), unresolved names (trait `insteadof` rules), missing
+  interface methods (it compares names with case, and misses a trait's
+  traits), and missing generic tags (it ignores defaults, such as Filament's
+  `@template TModel of Model = Model`).
+- Phpactor's unused import that a docblock uses (`@use
+  HasFactory<UserFactory>`), or that Mago reports on the same line; its "has
+  not been defined" for a model's column set in the model; and its namespace
+  hint in a file with no named class.
+- A factory's `Model|Collection<int, Model>` (see `factoryUnion`), and the
+  issues that follow from a factory call's value.
+- A member used in a trait (the classes that use it have it), and a member of a
+  Mockery mock.
+- A view name given to a `view-string` property or parameter when the view
+  exists (`introspect.php views` lists them): Mago doesn't know Larastan's type.
+- An inherited docblock type (Filament's `getFilters()`), `'password' =>
+  'hashed'` in casts, too few arguments where an array is spread, `$this` in
+  `routes/console.php`, and PHP deprecations newer than the project's version
+  (`ReflectionMethod::setAccessible()` in 8.5).
+- A variable a closure captures by reference (`use (&$payload)`) taken for null
+  or for the empty array it starts as: Mago doesn't see the closure assign it.
+
+`severityOf` shows Mago's issues about types it can't prove as warnings rather
+than errors: `possibly-*`, `less-specific-*`, a closure parameter narrower than
+the callable asks for, a missing template argument, and a class named by a
+variable. Issues about using a `mixed` value, such as a `foreach` over one,
+show as hints, like the `mixed-*` ones. After these, the remaining errors in
+that project were all real: wrong `@var` and `@return` types, a package in
+composer.json that `vendor` didn't have, a test calling `addMonth(3)`, and the
+like.
 
 ### Docblocks Phpactor can't read
 
@@ -432,11 +510,15 @@ server process with the editor's settings.
 ### Pest in diagnostics
 
 Pest binds test closures to the test case that `tests/Pest.php` sets, so
-`$this->get()` works in a Pest test. Phpactor reports `$this` as undefined, and
-Mago types it as `PHPUnit\Framework\TestCase`. In files under `tests/` that
-call `it()`, `test()`, or `describe()`, `setMarkers` drops problems that mention
-`$this`, `TestCase`, or `mixed` on lines that use `$this`, and Phpactor's hint
-to add a namespace.
+`$this->get()` works in a Pest test. Mago reads the type from the corrected
+copy of Pest's functions (see "Types Mago reads wrong"). Phpactor reports
+`$this` as undefined, so in files under `tests/` that call `it()`, `test()`,
+`describe()`, or `arch()`, the filters drop problems that mention `$this`,
+`TestCase`, or `mixed` on lines that use `$this`, and Phpactor's hint to add a
+namespace. They also drop Mago's issues about Pest's own classes, which answer
+through magic (`->not`, higher-order expectations such as `->name->toBe()`),
+and calls on null along an `expect()` chain: `expect()` returns an
+`Expectation<TValue|null>`.
 
 ### Rechecking after indexing
 
