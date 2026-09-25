@@ -1213,6 +1213,12 @@ dropped if a newer one already ran. `fuzzy` scores a subsequence match and
 favors consecutive letters and letters that start a word, such as the `P` and
 `C` in `PostController`. `src/palette.test.ts` covers it.
 
+Go to file, Search everywhere, and Compare with file open the picker at once
+and fill it in when `list_files` returns, instead of waiting for the project
+walk first. The Pull Requests, Composer, and Database views keep their last
+list on screen while they refresh, and show "Loading…" only for a new project
+or filter.
+
 ### Searches
 
 | Search | Source |
@@ -2747,6 +2753,18 @@ role (keyword, string, variable) rather than scope by scope. Using TextMate
 grammars in Monaco instead (with Shiki or vscode-textmate and Oniguruma) would
 match VS Code's colors exactly, but would replace every language's grammar,
 including the Blade and HTTP grammars, and add a WebAssembly regex engine.
+
+### 2026-09-25: Instant feedback over animation
+
+To make the app feel quicker, the editor scrolls and moves the caret without
+animation (Monaco's `smoothScrolling` and `cursorSmoothCaretAnimation` are
+off), as in PhpStorm; the animated caret trailed each keystroke. Buttons shade
+while pressed. Measured in the dev app on a 1,400-file project, startup to a
+restored session took about 170 ms and a tab switch about 20 ms, so neither
+changed. Go to file took about 55 ms to appear, waiting on the project walk; it
+now appears in 1 to 2 ms. The file list isn't cached: the watcher doesn't say
+whether a change added or removed a file, and Laravel's log writes would clear
+a cache constantly.
 
 ### Editor font and ligatures
 

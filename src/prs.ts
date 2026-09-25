@@ -103,7 +103,9 @@ export async function loadPullRequests() {
   const args = { open: [], mine: ["--author", "@me"], review: ["--search", "review-requested:@me"] }[filter] ?? [];
   $("pr-detail").hidden = true;
   $("pr-list-view").hidden = false;
-  $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
+  // Switching back to the view keeps the last list while it refreshes; a new project or filter starts over.
+  const key = `${host.root()}\0${filter}`;
+  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
     const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", "50", "--json", FIELDS, ...args));
     $("pr-list").replaceChildren(...(prs.length ? prs.map(prRow) : [el("li", "muted", "No pull requests.")]));

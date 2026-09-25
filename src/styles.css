@@ -109,6 +109,9 @@ button:disabled { opacity: 0.4; }
 
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius); color: var(--muted); }
 .icon-button:hover { background: var(--hover); color: var(--text); }
+/* Pressed buttons shade at once, so a click shows before the work it starts finishes. */
+.icon-button:active, .tb-button:active, .tb-icon:active, .tb-search:active, #activitybar button:not(.active):active, button:not(:disabled):active:is(#commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button) { background: color-mix(in srgb, var(--hover), var(--text) 12%); }
+.primary:not(:disabled):active { background: color-mix(in srgb, var(--accent), #000 15%); }
 
 /* Monaco's `.codicon[class*='codicon-']` rule sets the size with higher specificity, so sizes below use !important. */
 .codicon { line-height: 1; }

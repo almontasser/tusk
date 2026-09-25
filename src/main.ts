@@ -986,13 +986,14 @@ const fileItem = (path: string): Item => {
 };
 
 /** Go to File lists project files. Pressed again while open, it adds files that .gitignore excludes, such as vendor. */
-async function goToFile() {
+function goToFile() {
   if (!root) return;
   const open = document.querySelector<HTMLInputElement>("#palette input");
   const all = open?.placeholder === "Go to file";
   const query = all ? open.value : "";
-  const files = (await invoke<string[]>("list_files", { root, all })).map((f) => fileItem(`${root}/${f}`));
-  pick(all ? "Go to file, including ignored files such as vendor" : "Go to file", (q) => rank(q, files), 0, all ? { value: query } : undefined);
+  // The picker opens at once and fills in when the project walk returns.
+  const files = invoke<string[]>("list_files", { root, all }).then((list) => list.map((f) => fileItem(`${root}/${f}`)));
+  pick(all ? "Go to file, including ignored files such as vendor" : "Go to file", async (q) => rank(q, await files), 0, all ? { value: query } : undefined);
 }
 
 // LSP symbol kinds that name types: Class, Enum, Interface, Struct.
@@ -1022,12 +1023,12 @@ async function compareWithClipboard() {
   showDiff(relative(active), clipboard, editor.getValue(), "Clipboard ↔ Current file");
 }
 
-async function compareWithFile() {
+function compareWithFile() {
   if (!active || !root) return;
   const current = active;
-  const files = await invoke<string[]>("list_files", { root });
-  pick(`Compare ${nameOf(current)} with`, (q) =>
-    rank(q, files.filter((f) => `${root}/${f}` !== current).map((f) => ({
+  const list = invoke<string[]>("list_files", { root });
+  pick(`Compare ${nameOf(current)} with`, async (q) =>
+    rank(q, (await list).filter((f) => `${root}/${f}` !== current).map((f) => ({
       ...fileItem(`${root}/${f}`),
       run: async () => showDiff(relative(current), await invoke<string>("read_file", { path: `${root}/${f}` }), tabs.get(current)?.model.getValue() ?? "", `${f} ↔ ${relative(current)}`),
     }))),
@@ -1269,12 +1270,12 @@ function recordShortcut(action: Action) {
   overlay.querySelector<HTMLElement>("[data-cancel]")!.onclick = finish;
 }
 
-async function searchEverywhere() {
-  const files = root ? (await invoke<string[]>("list_files", { root })).map((f) => fileItem(`${root}/${f}`)) : [];
+function searchEverywhere() {
+  const files = root ? invoke<string[]>("list_files", { root }).then((list) => list.map((f) => fileItem(`${root}/${f}`))) : Promise.resolve([]);
   pick("Search everywhere: classes, files, and actions", async (q) => {
     if (!q.trim()) return recent.map(fileItem);
-    const classes = await symbolItems(q, true);
-    return [...classes.slice(0, 10), ...rank(q, files).slice(0, 30), ...rank(q, actionItems()).slice(0, 5)];
+    const [classes, items] = await Promise.all([symbolItems(q, true), files]);
+    return [...classes.slice(0, 10), ...rank(q, items).slice(0, 30), ...rank(q, actionItems()).slice(0, 5)];
   }, 150);
 }
 

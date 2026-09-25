@@ -26,8 +26,6 @@ export function createEditor(el: HTMLElement) {
     lineHeight: 1.6,
     minimap: { enabled: false },
     padding: { top: 8 },
-    smoothScrolling: true,
-    cursorSmoothCaretAnimation: "on",
     cursorBlinking: "smooth",
     renderLineHighlight: "all",
     scrollBeyondLastLine: false,

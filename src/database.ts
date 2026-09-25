@@ -93,7 +93,8 @@ export function connectOverSsh() {
 export async function loadTables() {
   if (!host.root()) return;
   const list = $("db-tables");
-  list.replaceChildren(el("li", "muted", "Loading…"));
+  // Switching back to the view keeps the last tables while they refresh; a new project starts over.
+  if (list.dataset.root !== host.root()) (list.dataset.root = host.root()), list.replaceChildren(el("li", "muted", "Loading…"));
   try {
     await loadConnection();
     const tables = (await query(tablesQuery(connection!.driver))).rows.map((r) => r[0] ?? "");

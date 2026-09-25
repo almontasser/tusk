@@ -37,9 +37,11 @@ export async function loadPackages() {
   const list = $("composer-list");
   const json = await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => null);
   if (json === null) return list.replaceChildren(el("li", "muted", "This project has no composer.json."));
-  list.replaceChildren(el("li", "muted", "Loading…"));
   // Everything installed includes the packages your dependencies need.
   const scope = ($("composer-filter") as HTMLSelectElement).value === "all" ? [] : ["--direct"];
+  // Switching back to the view keeps the last list while it refreshes; a new project or filter starts over.
+  const key = `${host.root()}\0${scope}`;
+  if (list.dataset.key !== key) (list.dataset.key = key), list.replaceChildren(el("li", "muted", "Loading…"));
   let show: string;
   try {
     show = await capture("show", ...scope, "--format=json");
