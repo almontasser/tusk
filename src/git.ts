@@ -4,7 +4,7 @@ import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
-import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, type Status } from "./gitparse";
+import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -13,6 +13,7 @@ type Host = {
   openFile(path: string): unknown;
   status(text: string): void;
   showView(name: "commit"): void;
+  openFolder(path: string): unknown;
 };
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -412,6 +413,7 @@ export async function branches() {
     { label: "Fetch (git fetch)", run: () => openTerminal(host.root(), "git fetch", ["git", "fetch", "--prune"]) },
     { label: "Stash Changes…", run: stashChanges },
     { label: "Stashes…", run: stashes },
+    { label: "Worktrees…", run: worktrees },
   ];
   // Checking out a remote branch such as origin/feature creates a local tracking branch.
   const branchItems: Item[] = refs.map((r) => ({
@@ -424,6 +426,55 @@ export async function branches() {
     const create: Item[] = name && !names.has(name) ? [{ label: `New branch "${name}"`, detail: "from HEAD", run: () => change("checkout", "-b", name) }] : [];
     return [...create, ...rank(q, branchItems), ...rank(q, fixed)];
   });
+}
+
+// ---- Worktrees ----
+
+/** Lists worktrees to open or remove, and creates one for the branch you type, beside the main worktree. */
+export async function worktrees() {
+  if (!current) return host.status("This folder isn't a git repository.");
+  const list = parseWorktrees(await git("worktree", "list", "--porcelain"));
+  const refs = (await git("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads", "refs/remotes")).split("\n");
+  const taken = new Set(list.map((w) => w.branch));
+  const items: Item[] = list.map((w) => ({
+    label: w.branch || w.path,
+    detail: `${w.path.replace(/^\/Users\/[^/]+/, "~")}${w.path === host.root() ? " · open" : w.main ? " · main" : ""}`,
+    run: () => worktreeActions(w.path, w.branch, w.main),
+  }));
+  pick("Worktrees. Type a branch name to create a worktree for it.", (q) => {
+    const name = q.trim().replace(/\s+/g, "-");
+    const main = list[0]?.path ?? host.root();
+    const path = `${main}-${name.replace(/\//g, "-")}`;
+    // An existing branch, local or on a remote, is checked out; otherwise the branch is created from HEAD.
+    const exists = refs.some((r) => r === name || r.endsWith(`/${name}`));
+    const args = exists ? ["worktree", "add", path, name] : ["worktree", "add", "-b", name, path];
+    const create: Item[] =
+      name && !taken.has(name)
+        ? [{ label: `New worktree for "${name}"`, detail: `${exists ? "existing branch" : "new branch from HEAD"} · ${path.replace(/^\/Users\/[^/]+/, "~")}`, run: () => addWorktree(args, path) }]
+        : [];
+    return [...create, ...rank(q, items)];
+  });
+}
+
+async function addWorktree(args: string[], path: string) {
+  try {
+    await git(...args);
+  } catch (e) {
+    return host.status(`git worktree: ${String(e).trim()}`);
+  }
+  host.openFolder(path);
+}
+
+function worktreeActions(path: string, branch: string, main: boolean) {
+  const items: Item[] = [{ label: "Open", detail: "In this window", run: () => host.openFolder(path) }];
+  // Git refuses to remove the main worktree, and removing the open one would pull the folder out from under the editor.
+  if (!main && path !== host.root())
+    items.push({
+      label: "Remove",
+      detail: "Delete the folder; the branch stays",
+      run: async () => (await confirm(`Remove the worktree at ${path}? Uncommitted changes in it are lost.`, "Remove Worktree")) && change("worktree", "remove", "--force", path),
+    });
+  pick(branch || path, (q) => rank(q, items));
 }
 
 // ---- Editor: change markers, inline blame, and blame annotations ----

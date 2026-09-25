@@ -61,14 +61,27 @@ recorded at the last save. Undoing back to the saved text clears the dirty mark.
 
 ### Split panes
 
-`main.ts` keeps a list of panes. Each pane has its own Monaco editor and shows
-one of the shared tabs. `editor` and `active` always refer to the focused pane,
-so actions, the opener, and saving work on whichever pane you're in. Other panes
-remember their file in `Pane.active`. `addPane` sets up everything an editor
-needs: settings (`addEditor`), git markers and blame (`trackEditor`), conflict
-shading (`decorateConflicts`), session saving, and focus tracking. When a tab
-closes, moves, or is deleted, `updateOtherPanes` points other panes at another
-tab, and a pane left with nothing to show closes.
+`main.ts` keeps a list of panes. Each pane has its own Monaco editor, tab bar,
+and list of tabs (`Pane.paths`). `tabs` holds one model per open file, shared by
+every pane that shows it, so an edit in one pane shows in the other at once.
+`editor` and `active` always refer to the focused pane, so actions, the opener,
+and saving work on whichever pane you're in. Other panes remember their file in
+`Pane.active`. `addPane` sets up everything an editor needs: settings
+(`addEditor`), git markers and blame (`trackEditor`), conflict shading
+(`decorateConflicts`), session saving, and focus tracking.
+
+The layout is the DOM itself. `#editor` is a `.split.row`; splitting a pane in
+the direction of its group adds a sibling, and splitting across it wraps the
+pane in a new `.split.row` or `.split.col` group. When a pane closes, a group
+left with one child is replaced by that child. The session stores the tree
+(`layoutOf`) and `buildLayout` rebuilds it. Older sessions without a layout open
+every tab in one pane.
+
+Closing a tab removes it from that pane only; the file closes, saving first,
+when no other pane has it (`closeFile`). Renames and deletions go through
+`retarget`, which updates every pane's tabs and shows another tab where the
+current one went away. A pane left with no tabs closes, and Unsplit moves a
+pane's tabs to the pane beside it.
 
 ### Saving
 
@@ -1116,6 +1129,17 @@ Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
 and offers apply, pop, drop, and show files for the chosen stash. A stashed
 file's diff compares the stash's first parent (the commit it was made on) with
 the stash; untracked files come from the stash's third parent.
+
+### Worktrees
+
+**Worktrees…** reads `git worktree list --porcelain` (`parseWorktrees`, which
+skips bare repositories). A new worktree goes beside the main one, named
+`<main folder>-<branch>` with `/` turned into `-`. If a local or remote branch
+has the typed name, `git worktree add <path> <branch>` checks it out (git sets
+up tracking for a remote branch); otherwise `-b` creates the branch from HEAD.
+Opening a worktree calls `openFolder`, so it replaces the project in the window,
+with its own session. **Remove** runs `git worktree remove --force` after a
+confirmation, and isn't offered for the main worktree or the open one.
 
 ### Merge conflicts
 

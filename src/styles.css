@@ -266,9 +266,9 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
    Editor tabs and panes
    ========================================================================== */
 
-#tabs, #terminal-tabs { display: flex; height: 36px; flex-shrink: 0; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); scrollbar-width: none; }
-#tabs::-webkit-scrollbar, #terminal-tabs::-webkit-scrollbar { display: none; }
-#tabs .tab, #terminal-tabs .tab {
+.tabs, #terminal-tabs { display: flex; height: 36px; flex-shrink: 0; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); scrollbar-width: none; }
+.tabs::-webkit-scrollbar, #terminal-tabs::-webkit-scrollbar { display: none; }
+.tabs .tab, #terminal-tabs .tab {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -278,24 +278,29 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   border-right: 1px solid var(--border-subtle);
   position: relative;
 }
-#tabs .tab:hover, #terminal-tabs .tab:hover { background: var(--hover); color: var(--text); }
-#tabs .tab.active, #terminal-tabs .tab.active { color: var(--text); background: var(--bg); }
-#tabs .tab.active::after, #terminal-tabs .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
-#tabs .tab.shown::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--faint); }
-#tabs .tab .close, #terminal-tabs .tab .close { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; font-size: 0; color: var(--faint); visibility: hidden; }
-#tabs .tab .close::before, #terminal-tabs .tab .close::before { font: 14px/1 codicon; content: "\ea76"; }
-#tabs .tab:hover .close, #tabs .tab.active .close, #terminal-tabs .tab:hover .close, #terminal-tabs .tab.active .close { visibility: visible; }
-#tabs .tab .close:hover, #terminal-tabs .tab .close:hover { background: var(--hover); color: var(--text); }
+.tabs .tab:hover, #terminal-tabs .tab:hover { background: var(--hover); color: var(--text); }
+.tabs .tab.active, #terminal-tabs .tab.active { color: var(--text); background: var(--bg); }
+.tabs .tab.active::after, #terminal-tabs .tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.tabs .tab .close, #terminal-tabs .tab .close { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; font-size: 0; color: var(--faint); visibility: hidden; }
+.tabs .tab .close::before, #terminal-tabs .tab .close::before { font: 14px/1 codicon; content: "\ea76"; }
+.tabs .tab:hover .close, .tabs .tab.active .close, #terminal-tabs .tab:hover .close, #terminal-tabs .tab.active .close { visibility: visible; }
+.tabs .tab .close:hover, #terminal-tabs .tab .close:hover { background: var(--hover); color: var(--text); }
 /* A dot marks unsaved changes; it turns into the close button on hover. */
-#tabs .tab.dirty .close { visibility: visible; }
-#tabs .tab.dirty .close::before { content: "\ea71"; font-size: 10px; color: var(--text); }
-#tabs .tab.dirty:hover .close::before { content: "\ea76"; font-size: 14px; color: inherit; }
+.tabs .tab.dirty .close { visibility: visible; }
+.tabs .tab.dirty .close::before { content: "\ea71"; font-size: 10px; color: var(--text); }
+.tabs .tab.dirty:hover .close::before { content: "\ea76"; font-size: 14px; color: inherit; }
 #terminal-tabs .tab.exited { font-style: italic; }
 
-#editor { flex: 1; min-height: 0; display: flex; }
-#editor .pane { flex: 1; min-width: 0; position: relative; }
-#editor .pane + .pane { border-left: 1px solid var(--border); }
-#editor .pane.focused::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); z-index: 5; }
+#editor { flex: 1; min-height: 0; }
+.split { display: flex; min-width: 0; min-height: 0; }
+.split.col { flex-direction: column; }
+.split > * { flex: 1; min-width: 0; min-height: 0; }
+.split.row > * + * { border-left: 1px solid var(--border); }
+.split.col > * + * { border-top: 1px solid var(--border); }
+#editor .pane { display: flex; flex-direction: column; }
+.pane-editor { flex: 1; min-height: 0; position: relative; }
+/* The focused pane's current tab is underlined in the accent color; other panes' in gray. */
+.pane:not(.focused) .tabs .tab.active::after { background: var(--faint); }
 
 #empty-editor { flex: 1; display: grid; place-items: center; background: var(--bg); }
 #empty-editor dl { display: grid; grid-template-columns: auto auto; gap: 14px 28px; margin: 0; align-items: center; color: var(--faint); font-size: 14px; }

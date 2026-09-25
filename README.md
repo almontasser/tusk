@@ -42,6 +42,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
 | Pull requests | You write a line comment in a one-line box, on one line at a time (not a range), and each comment posts at once rather than as part of a pending review. Comments on lines outside the diff's changes are rejected by GitHub. Comment threads in the diff are read-only, so reply through **Comment on Line**. |
+| Split editors | Up to four panes. You can't drag tabs between panes or resize panes. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ### Missing
@@ -49,7 +50,6 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Session restore | Shells come back fresh, without their history, and command tabs (tests, servers) aren't re-run. |
-| Split editors | Up to four panes, side by side only, sharing one tab bar. |
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
@@ -61,7 +61,6 @@ file to change when you add it.
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
-| Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -201,7 +200,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
 | ⌘1 | Show the project tree |
-| ⌘\ | Split the editor, or move to the other pane |
+| ⌘\ | Split the editor to the right, or move to the next pane |
+| ⌘⇧\ | Split the editor down |
 | ⌘9 | Git log |
 | ⌘S | Save all files |
 | ⌘, | Settings |
@@ -236,11 +236,13 @@ status bar shows it), and saving applies `trim_trailing_whitespace` and
 `insert_final_newline`. Without one, the editor detects indentation from each
 file's content. Changes to `.editorconfig` apply to open files at once.
 
-Press ⌘\ to split the editor: the current file opens in a new pane on the
-right, up to four panes. With four, ⌘\ moves to the next pane. Clicking a tab
-opens it in the focused pane, and a tab shown in another pane is underlined in
-gray. Run **Unsplit** to close the focused pane. The panes, and the shell
-terminals, come back when the project reopens.
+Press ⌘\ to split the editor to the right, or ⌘⇧\ to split it down: the
+current file opens in a new pane, up to four panes. With four, ⌘\ moves to the
+next pane. Each pane has its own tabs, and a file open in two panes shows your
+edits in both. Closing a pane's last tab closes the pane. Run **Move Tab to Next
+Pane** to move the current tab, or **Unsplit** to close the focused pane and
+move its tabs to the pane beside it. The panes, and the shell terminals, come
+back when the project reopens.
 
 Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving
@@ -749,6 +751,16 @@ Run **Stash Changes…** (from ⌘⇧A or the branch menu) to set your uncommitt
 changes aside, optionally with a message and including new files. **Stashes…**
 lists them: choose one to **Apply** it, **Pop** it (apply, then delete), **Drop**
 it, or **Show Files** to see each file's diff.
+
+### Worktrees
+
+Run **Worktrees…** (from ⌘⇧A or the branch menu) to list the repository's
+worktrees. Choose one to **Open** it in this window, or **Remove** it (the
+folder is deleted, and the branch stays). To create one, type a branch name and
+press ⏎: the worktree goes in a folder beside the main one, named after the
+branch, such as `app-fix-login` for `fix/login`. An existing branch is checked
+out; otherwise a new branch starts from HEAD. A new worktree has no `vendor` or
+`node_modules`, so run `composer install` and your package manager in it.
 
 ### Merge conflicts
 

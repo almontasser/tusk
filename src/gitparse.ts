@@ -426,3 +426,17 @@ export function applyLines(from: string, to: string, blocks: Block[], selectedFr
   }
   return lines.join("\n");
 }
+
+export type Worktree = { path: string; branch: string; main: boolean };
+
+/** Parses `git worktree list --porcelain`. The first entry is the main worktree; bare ones are skipped. */
+export function parseWorktrees(out: string): Worktree[] {
+  return out
+    .split("\n\n")
+    .filter((block) => block.startsWith("worktree ") && !/^bare$/m.test(block))
+    .map((block, i) => {
+      const path = block.match(/^worktree (.*)$/m)![1];
+      const branch = block.match(/^branch refs\/heads\/(.*)$/m)?.[1] ?? (/^detached$/m.test(block) ? "detached" : "");
+      return { path, branch, main: i === 0 };
+    });
+}

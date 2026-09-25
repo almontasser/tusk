@@ -7,7 +7,7 @@ import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties, propertiesFor } from "./editorconfig";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
@@ -38,18 +38,19 @@ type Tab = { model: monaco.editor.ITextModel; saved: number };
 
 const $ = (id: string) => document.getElementById(id)!;
 // ---- Editor panes ----
-// Panes share one set of tabs. Each pane shows one of them; `editor` and `active` are the
-// focused pane's editor and file, and other panes keep theirs in `Pane.active`.
+// Each pane has its own tabs (`Pane.paths`); `tabs` holds every open file's model, shared by
+// panes that show it. `editor` and `active` are the focused pane's editor and file. Panes nest in
+// `.split.row` and `.split.col` groups inside #editor, which is itself a row.
 
-type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; active: string };
+type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; bar: HTMLElement; paths: string[]; active: string };
 const panes: Pane[] = [];
 
 function addPane(): Pane {
   const el = document.createElement("div");
   el.className = "pane";
-  $("editor").append(el);
-  const ed = createEditor(el);
-  const pane: Pane = { editor: ed, el, active: "" };
+  el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-editor"></div>`;
+  const ed = createEditor(el.querySelector<HTMLElement>(".pane-editor")!);
+  const pane: Pane = { editor: ed, el, bar: el.querySelector("nav")!, paths: [], active: "" };
   panes.push(pane);
   addEditor(ed);
   trackEditor(ed);
@@ -63,8 +64,13 @@ function addPane(): Pane {
   return pane;
 }
 
-let editor = addPane().editor;
+const firstPane = addPane();
+$("editor").append(firstPane.el);
+firstPane.el.classList.add("focused");
+let editor = firstPane.editor;
 const currentPane = () => panes.find((p) => p.editor === editor)!;
+/** Panes in screen order: left to right, top to bottom within a group. */
+const paneOrder = () => [...document.querySelectorAll("#editor .pane")].map((el) => panes.find((p) => p.el === el)!);
 
 function focusPane(pane: Pane) {
   const current = currentPane();
@@ -72,47 +78,114 @@ function focusPane(pane: Pane) {
   current.active = active;
   active = pane.active;
   editor = pane.editor;
-  panes.forEach((p) => p.el.classList.toggle("focused", p === pane && panes.length > 1));
+  panes.forEach((p) => p.el.classList.toggle("focused", p === pane));
   renderTabs();
   markActiveInTree();
 }
 
 const MAX_PANES = 4;
 
-/** Opens a pane on the right with the current file. With four panes, it moves to the next pane instead. */
-function splitRight() {
+/** Opens the current file in a new pane to the right (`row`) or below (`col`). With four panes, it moves to the next pane instead. */
+function split(dir: "row" | "col") {
   if (panes.length >= MAX_PANES) return focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]), editor.focus();
-  const path = active;
+  const current = currentPane();
   const view = editor.saveViewState();
   const pane = addPane();
-  pane.active = path;
-  pane.editor.setModel(tabs.get(path)?.model ?? null);
+  const parent = current.el.parentElement!;
+  if (parent.classList.contains(dir)) current.el.after(pane.el);
+  else {
+    const group = document.createElement("div");
+    group.className = `split ${dir}`;
+    current.el.replaceWith(group);
+    group.append(current.el, pane.el);
+  }
+  pane.paths = active ? [active] : [];
+  pane.active = active;
+  pane.editor.setModel(tabs.get(active)?.model ?? null);
   if (view) pane.editor.restoreViewState(view);
   focusPane(pane);
   editor.focus();
 }
 
-/** Closes the focused pane, keeping its tabs. */
+/** Closes a pane, moving its tabs to the pane beside it. */
 function unsplit(pane = currentPane()) {
   if (panes.length < 2) return;
-  if (pane.editor === editor) focusPane(panes.find((p) => p !== pane)!);
+  const sibling = pane.el.previousElementSibling ?? pane.el.nextElementSibling;
+  const nearest = sibling?.matches(".pane") ? sibling : sibling?.querySelector(".pane");
+  const target = panes.find((p) => p !== pane && p.el === nearest) ?? panes.find((p) => p !== pane)!;
+  target.paths.push(...pane.paths.filter((p) => !target.paths.includes(p)));
+  if (pane.editor === editor) focusPane(target);
   panes.splice(panes.indexOf(pane), 1);
   removeEditor(pane.editor);
   pane.editor.dispose();
+  const group = pane.el.parentElement!;
   pane.el.remove();
-  panes.forEach((p) => p.el.classList.remove("focused"));
+  // A group left with one child is replaced by that child.
+  if (group !== $("editor") && group.children.length === 1) group.replaceWith(group.firstElementChild!);
   renderTabs();
 }
 
-/** Points unfocused panes away from a file that closed or moved. A pane left empty closes. */
-function updateOtherPanes(change: (path: string) => string | null) {
-  for (const pane of panes.filter((p) => p !== currentPane())) {
-    const next = change(pane.active);
-    if (next === null) continue;
-    pane.active = next;
-    pane.editor.setModel(tabs.get(next)?.model ?? null);
-    if (!next) unsplit(pane);
+/** Shows a file in a pane, or nothing for "". */
+function showIn(pane: Pane, path: string) {
+  if (pane === currentPane()) return (active = ""), showModel(path);
+  pane.active = path;
+  pane.editor.setModel(tabs.get(path)?.model ?? null);
+  const view = viewStates.get(path);
+  if (view && path) pane.editor.restoreViewState(view);
+}
+
+/**
+ * Applies a rename (a new path) or a close (null) to every pane's tabs. A pane whose file closed
+ * shows its last tab; a pane left without tabs closes, unless it's the only one.
+ */
+function retarget(change: (path: string) => string | null) {
+  for (const pane of [...panes]) {
+    const shown = pane === currentPane() ? active : pane.active;
+    pane.paths = [...new Set(pane.paths.map(change).filter((p): p is string => p !== null))];
+    const next = shown ? change(shown) : shown;
+    if (next !== shown) showIn(pane, next ?? pane.paths.at(-1) ?? "");
+    if (!pane.paths.length) unsplit(pane);
   }
+}
+
+/** Moves the current tab to the next pane, splitting right when there's only one. */
+function moveTabToNextPane() {
+  if (!active) return;
+  const from = currentPane();
+  const path = active;
+  if (panes.length < 2) split("row");
+  else {
+    const to = panes[(panes.indexOf(from) + 1) % panes.length];
+    focusPane(to);
+    openFile(path);
+  }
+  from.paths = from.paths.filter((p) => p !== path);
+  showIn(from, from.paths.at(-1) ?? "");
+  if (!from.paths.length) unsplit(from);
+  renderTabs();
+}
+
+type Layout = { paths: string[]; active: string } | { dir: "row" | "col"; children: Layout[] };
+
+/** The panes' arrangement and tabs, for the session. */
+function layoutOf(el: Element): Layout {
+  const pane = panes.find((p) => p.el === el);
+  if (pane) return { paths: pane.paths, active: pane === currentPane() ? active : pane.active };
+  return { dir: el.classList.contains("col") ? "col" : "row", children: [...el.children].map(layoutOf) };
+}
+
+/** Rebuilds saved panes inside a group; `take` gives each leaf its pane. Files that no longer open are skipped. */
+function buildLayout(layout: Layout, into: HTMLElement, take: () => Pane) {
+  if ("paths" in layout) {
+    const pane = take();
+    into.append(pane.el);
+    pane.paths = layout.paths.filter((p) => tabs.has(p));
+    showIn(pane, pane.paths.includes(layout.active) ? layout.active : (pane.paths.at(-1) ?? ""));
+    return;
+  }
+  const group = into === $("editor") && layout.dir === "row" ? into : document.createElement("div");
+  if (group !== into) (group.className = `split ${layout.dir}`), into.append(group);
+  layout.children.forEach((child) => buildLayout(child, group, take));
 }
 const tabs = new Map<string, Tab>();
 const renderedDirs = new Map<string, HTMLUListElement>();
@@ -133,7 +206,7 @@ async function openFolder(dir: unknown = null) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
   saveSession();
-  for (const path of [...tabs.keys()]) await closeTab(path);
+  for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
   root = dir;
   recent = [];
@@ -167,8 +240,8 @@ type Session = {
   views: Record<string, monaco.editor.ICodeEditorViewState>;
   dirs: string[];
   view: string;
-  /** Each pane's file, left to right, and the focused pane. */
-  panes?: string[];
+  /** The panes and their tabs, and the focused pane's position among them. */
+  layout?: Layout;
   focused?: number;
   /** How many shell terminals were open, and whether the panel showed. */
   shells?: number;
@@ -194,8 +267,8 @@ function saveSession() {
     views: Object.fromEntries(paths.filter((p) => viewStates.has(p)).map((p) => [p, viewStates.get(p)!])),
     dirs: [...openDirs],
     view: currentView,
-    panes: panes.map((p) => (p.editor === editor ? active : p.active)),
-    focused: panes.indexOf(currentPane()),
+    layout: layoutOf($("editor")),
+    focused: paneOrder().indexOf(currentPane()),
     shells: shellCount(),
     panel: panelShown(),
   };
@@ -213,15 +286,16 @@ window.addEventListener("beforeunload", saveSession);
 async function restoreSession(session: Session) {
   // Files deleted since the last session are skipped.
   for (const path of session.tabs) await openFile(path).catch(() => viewStates.delete(path));
-  const [first, ...others] = session.panes ?? [session.active];
-  if (tabs.has(first)) await openFile(first);
-  // Split panes, left to right; the first pane already shows its file.
-  for (const path of others) {
-    if (!tabs.has(path) || panes.length >= MAX_PANES) continue;
-    splitRight();
-    showModel(path);
-  }
-  const focused = panes[session.focused ?? 0];
+  if (session.layout) {
+    // The one pane left after the previous project closed takes the first leaf; later leaves get new panes.
+    const [spare] = panes;
+    spare.el.remove();
+    buildLayout(session.layout, $("editor"), () => (spare.el.isConnected ? addPane() : spare));
+    // A file whose pane was lost goes to the first pane.
+    const orphans = [...tabs.keys()].filter((p) => !panes.some((pane) => pane.paths.includes(p)));
+    spare.paths.push(...orphans);
+  } else if (tabs.has(session.active)) await openFile(session.active);
+  const focused = paneOrder()[session.focused ?? 0];
   if (focused) focusPane(focused), editor.focus();
   if (session.view && session.view !== "project") showView(session.view);
   // Shells come back fresh in the project folder; command tabs, such as a server, aren't re-run.
@@ -234,6 +308,8 @@ function showModel(path: string) {
   if (settings.autoSave && active && active !== path && tabs.has(active)) saveFile(active);
   if (active && tabs.has(active) && editor.getModel()) viewStates.set(active, editor.saveViewState()!);
   active = path;
+  const pane = currentPane();
+  if (path && !pane.paths.includes(path)) pane.paths.push(path);
   editor.setModel(tabs.get(path)?.model ?? null);
   const view = viewStates.get(path);
   if (view && tabs.has(path)) editor.restoreViewState(view);
@@ -281,11 +357,7 @@ async function renamed(from: string, to: string) {
   const view = active === from ? editor.saveViewState() : viewStates.get(from);
   viewStates.delete(from);
   if (view) viewStates.set(to, view);
-  if (active === from) {
-    active = "";
-    showModel(to);
-  }
-  updateOtherPanes((p) => (p === from ? to : null));
+  retarget((p) => (p === from ? to : p));
   old?.dispose();
   renderTabs();
   markActiveInTree();
@@ -301,11 +373,7 @@ function forget(path: string) {
   }
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && inside(m.uri.fsPath)).forEach((m) => m.dispose());
   [...viewStates.keys()].filter(inside).forEach((p) => viewStates.delete(p));
-  if (inside(active)) {
-    active = "";
-    showModel([...tabs.keys()].pop() ?? "");
-  }
-  updateOtherPanes((p) => (p && inside(p) ? ([...tabs.keys()].pop() ?? "") : null));
+  retarget((p) => (inside(p) ? null : p));
   renderTabs();
   markActiveInTree();
 }
@@ -503,7 +571,19 @@ async function openFile(path: string) {
   markActiveInTree();
 }
 
-async function closeTab(path: string) {
+/** Closes a tab in one pane. The file stays open if another pane has it; otherwise it closes, saving first. */
+async function closeTab(path: string, pane = currentPane()) {
+  if (!panes.some((p) => p !== pane && p.paths.includes(path))) return closeFile(path);
+  pane.paths = pane.paths.filter((p) => p !== path);
+  if ((pane === currentPane() ? active : pane.active) === path) showIn(pane, pane.paths.at(-1) ?? "");
+  if (!pane.paths.length) unsplit(pane);
+  saveSoon();
+  renderTabs();
+  markActiveInTree();
+}
+
+/** Closes a file in every pane. With unsaved changes, it saves or asks first. */
+async function closeFile(path: string) {
   const tab = tabs.get(path);
   if (!tab) return;
   // With auto-save, closing saves, as in PhpStorm; otherwise it asks. If a save fails, the tab stays open.
@@ -520,11 +600,7 @@ async function closeTab(path: string) {
   tab.model.dispose();
   tabs.delete(path);
   viewStates.delete(path);
-  if (active === path) {
-    active = "";
-    showModel([...tabs.keys()].pop() ?? "");
-  }
-  updateOtherPanes((p) => (p === path ? ([...tabs.keys()].pop() ?? "") : null));
+  retarget((p) => (p === path ? null : p));
   saveSoon();
   renderTabs();
   markActiveInTree();
@@ -631,26 +707,30 @@ const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
 
 function renderTabs() {
-  $("tabs").replaceChildren(
-    ...[...tabs].map(([path, tab]) => {
-      const el = document.createElement("div");
-      const shown = panes.some((p) => p.editor !== editor && p.active === path);
-      el.className = `tab${path === active ? " active" : ""}${shown ? " shown" : ""}${isDirty(tab) ? " dirty" : ""}`;
-      el.role = "tab";
-      el.title = relative(path);
-      const icon = fileIcon(nameOf(path));
-      el.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
-      el.querySelector(".name")!.textContent = nameOf(path);
-      el.onclick = () => openFile(path);
-      el.onauxclick = (e) => e.button === 1 && closeTab(path);
-      const close = document.createElement("span");
-      close.className = "close";
-      close.title = "Close (⌘W)";
-      close.onclick = (e) => (e.stopPropagation(), closeTab(path));
-      el.append(close);
-      return el;
-    }),
-  );
+  for (const pane of panes) {
+    const shown = pane === currentPane() ? active : pane.active;
+    pane.bar.replaceChildren(
+      ...pane.paths.map((path) => {
+        const tab = tabs.get(path)!;
+        const el = document.createElement("div");
+        el.className = `tab${path === shown ? " active" : ""}${isDirty(tab) ? " dirty" : ""}`;
+        el.role = "tab";
+        el.title = relative(path);
+        const icon = fileIcon(nameOf(path));
+        el.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
+        el.querySelector(".name")!.textContent = nameOf(path);
+        el.onclick = () => (focusPane(pane), openFile(path));
+        el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
+        const close = document.createElement("span");
+        close.className = "close";
+        close.title = "Close (⌘W)";
+        close.onclick = (e) => (e.stopPropagation(), closeTab(path, pane));
+        el.append(close);
+        return el;
+      }),
+    );
+    pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
   $("path").textContent = active ? relative(active) : "";
   $("empty-editor").hidden = tabs.size > 0 || !root;
   updateProblems();
@@ -842,8 +922,11 @@ const actions: Action[] = [
   { label: "Resolve Conflicts in Merge Tool", run: () => active && openMerge(relative(active)) },
   { label: "Stage Selected Changes (in a diff)", run: stageSelected },
   { label: "Stashes…", run: stashes },
+  { label: "Worktrees…", run: worktrees },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
-  { label: "Split Right", keys: "Meta+Backslash", run: splitRight },
+  { label: "Split Right", keys: "Meta+Backslash", run: () => split("row") },
+  { label: "Split Down", keys: "Meta+Shift+Backslash", run: () => split("col") },
+  { label: "Move Tab to Next Pane", run: moveTabToNextPane },
   { label: "Unsplit", run: () => unsplit() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
@@ -1118,7 +1201,7 @@ $("sidebar-resize").onmousedown = (down) => {
   addEventListener("mousemove", move);
   addEventListener("mouseup", up);
 };
-initGit({ root: () => root, openFile, status, showView });
+initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
 initRebase({ root: () => root, status });

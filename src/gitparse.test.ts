@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -175,4 +175,13 @@ test("pads three versions so shared lines line up", () => {
   assert.deepEqual(long.result, [[3, 1]]);
   // A line of buttons above the conflict makes that segment one line taller in the result.
   assert.deepEqual(alignmentGaps(ours, result, theirs, [2]).ours, [[3, 5], [4, 1]]);
+});
+
+test("parses worktrees, skipping bare repositories", () => {
+  const out = "worktree /code/app\nHEAD abc\nbranch refs/heads/main\n\nworktree /code/app-fix\nHEAD def\nbranch refs/heads/fix/login\n\nworktree /code/app-old\nHEAD 123\ndetached\nprunable gitdir file points to non-existent location\n\nworktree /code/bare.git\nbare\n";
+  assert.deepEqual(parseWorktrees(out), [
+    { path: "/code/app", branch: "main", main: true },
+    { path: "/code/app-fix", branch: "fix/login", main: false },
+    { path: "/code/app-old", branch: "detached", main: false },
+  ]);
 });
