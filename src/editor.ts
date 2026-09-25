@@ -21,7 +21,7 @@ export function createEditor(el: HTMLElement) {
   return monaco.editor.create(el, {
     automaticLayout: true,
     fontSize: 13,
-    fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
+    fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
     fontLigatures: true,
     lineHeight: 1.6,
     minimap: { enabled: false },

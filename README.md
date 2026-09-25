@@ -238,7 +238,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | --- | --- |
 | Theme: one of about 110 color themes, or match the system | Dark |
 | Dark and light themes for Match the system | Dark, Light |
-| Editor font and font size | JetBrains Mono, SF Mono, or Menlo at 13 |
+| Editor font and font size | JetBrains Mono (or its Nerd Font build), or else Menlo, at 13; ligatures are on only with a font that has them |
 | Wrap long lines | Off |
 | Show the minimap | Off |
 | Show inlay hints | On |

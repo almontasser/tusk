@@ -269,6 +269,8 @@ function magoStubs(string $root, string $dir): array
         $laravel . 'Auth/AuthManager.php' => $user ? ["\n * @mixin \\Illuminate\\Contracts\\Auth\\Guard\n * @mixin \\Illuminate\\Contracts\\Auth\\StatefulGuard" => "\n * @mixin \\EditorStubs\\DefaultGuard"] : [],
         $laravel . 'Support/Facades/Auth.php' => $user ? ['@method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user()' => "@method static \\$user|null user()"] : [],
         // pluck() gives a collection of other values; Mago keeps the original values' type for `static<…>`.
+        // Sanctum's token model, which Mago otherwise reads as the HasAbilities interface its template is bound by.
+        'vendor/laravel/sanctum/src/Sanctum.php' => class_exists('Laravel\Sanctum\Sanctum') ? ['class-string<TToken>' => 'class-string<\\' . ltrim(Laravel\Sanctum\Sanctum::$personalAccessTokenModel, '\\') . '>'] : [],
         $laravel . 'Collections/Collection.php' => $covariantKeys + $plucked,
         $laravel . 'Collections/Enumerable.php' => $covariantKeys + $plucked,
         $laravel . 'Collections/LazyCollection.php' => $covariantKeys,

@@ -384,6 +384,9 @@ its patch applies, so another Laravel version keeps its own files. The patches:
   `Builder<Post>` as `Builder<Model>` (Filament's `getEloquentQuery()`).
 - `pluck()` returns `Collection<array-key, mixed>`: for `static<array-key,
   mixed>`, Mago keeps the original values' type.
+- `Sanctum::$personalAccessTokenModel` is a `class-string` of the app's token
+  model (read from the booted app), not of the `HasAbilities` interface its
+  template is bound by, so `$model::findToken()` resolves.
 - Methods that take more arguments than they declare, through
   `func_get_args()`, get a variadic `...$arguments`: those with no parameters
   (`Facade::shouldReceive()`), and those that take an array or a list
@@ -2711,3 +2714,16 @@ role (keyword, string, variable) rather than scope by scope. Using TextMate
 grammars in Monaco instead (with Shiki or vscode-textmate and Oniguruma) would
 match VS Code's colors exactly, but would replace every language's grammar,
 including the Blade and HTTP grammars, and add a WebAssembly regex engine.
+
+### Editor font and ligatures
+
+The default font list is JetBrains Mono under its own name and the Nerd Font
+build's names (`JetBrainsMono Nerd Font Mono`), then SF Mono and Menlo. The
+system's SF Mono isn't available to web content by that name, so without
+JetBrains Mono the editor draws in Menlo. With ligatures on, WebKit drew `::` in
+Menlo narrower than Monaco's character grid, which left a gap after it
+(`$model::findToken ($token)`). `installedFont` in `settings.ts` finds the first
+font of the list that's installed (its text measures differently from both the
+serif and sans-serif fallbacks), and ligatures are on only when that isn't a
+system fallback. A settings file that still has the old default list gets the
+new one.

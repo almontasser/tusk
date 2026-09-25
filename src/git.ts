@@ -372,7 +372,7 @@ export function showDiff(path: string, original: string, modified: string, label
       readOnly: true,
       originalEditable: false,
       fontSize: 13,
-      fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
+      fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
       minimap: { enabled: false },
     });
     diffEditor.getOriginalEditor().onDidFocusEditorText(() => (lastSide = "original"));

@@ -30,7 +30,8 @@ const defaults: Settings = {
   theme: "dark",
   darkTheme: "dark",
   lightTheme: "light",
-  fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
+  // JetBrains Mono, as its own release or the Nerd Font build names it.
+  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
   fontSize: 13,
   wordWrap: false,
   minimap: false,
@@ -98,11 +99,35 @@ const themeOptions = (dark?: boolean): [string, string, string][] =>
 /** The theme in use, resolving "system". */
 const themeId = () => (settings.theme === "system" ? (systemDark.matches ? settings.darkTheme : settings.lightTheme) : settings.theme);
 
+/** The first font of a CSS font list that's installed: text in it measures differently from both fallbacks. */
+function installedFont(list: string): string | undefined {
+  const span = document.createElement("span");
+  span.style.cssText = "position: absolute; visibility: hidden; white-space: pre; font-size: 40px";
+  span.textContent = "iiiWWW->::";
+  document.body.append(span);
+  const width = (family: string) => ((span.style.fontFamily = family), span.getBoundingClientRect().width);
+  const [serif, sans] = [width("serif"), width("sans-serif")];
+  const found = list
+    .split(",")
+    .map((f) => f.trim().replace(/^["']|["']$/g, ""))
+    .find((f) => /^(monospace|ui-monospace|serif|sans-serif)$/.test(f) || (width(`"${f}", serif`) !== serif && width(`"${f}", sans-serif`) !== sans));
+  span.remove();
+  return found;
+}
+
+/**
+ * Ligatures only with a font that has them. The fallbacks, such as Menlo, don't, and WebKit then draws `::`
+ * narrower than Monaco's grid, which leaves a gap after it (`$model::findToken ($token)`).
+ */
+const ligatures = (list: string) => !/^(menlo|monaco|courier|courier new|monospace|ui-monospace|sf mono)$/i.test(installedFont(list) ?? "monospace");
+
 function apply() {
   applyTheme(themeId());
+  const fontLigatures = ligatures(settings.fontFamily);
   for (const ed of editors) {
     ed.updateOptions({
       fontFamily: settings.fontFamily,
+      fontLigatures,
       fontSize: settings.fontSize,
       wordWrap: settings.wordWrap ? "on" : "off",
       minimap: { enabled: settings.minimap },
@@ -147,6 +172,8 @@ export async function initSettings() {
     for (const key of Object.keys(defaults) as (keyof Settings)[]) {
       if (typeof saved[key] === typeof defaults[key] && saved[key] !== null) (settings as Record<string, unknown>)[key] = saved[key];
     }
+    // The file keeps every value, so the default font list from before the Nerd Font names came along stays in it.
+    if (settings.fontFamily === "JetBrains Mono, SF Mono, Menlo, monospace") settings.fontFamily = defaults.fontFamily;
   } catch {
     // No settings file yet: use the defaults.
   }
