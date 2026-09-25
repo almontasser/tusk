@@ -223,6 +223,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘S | Save all files |
 | ⌘, | Settings |
 | ⌘W | Close the tab |
+| ⌃\` | Color theme |
 | ⌃Space | Show completions |
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
@@ -235,7 +236,8 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 
 | Setting | Default |
 | --- | --- |
-| Theme: dark, light, or match the system | Dark |
+| Theme: one of about 110 color themes, or match the system | Dark |
+| Dark and light themes for Match the system | Dark, Light |
 | Editor font and font size | JetBrains Mono, SF Mono, or Menlo at 13 |
 | Wrap long lines | Off |
 | Show the minimap | Off |
@@ -244,6 +246,34 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+
+### Color themes
+
+The editor comes with about 110 color themes, and you can import more:
+
+- **Dark** and **Light**, built in, with syntax colors close to PhpStorm's.
+- 65 VS Code themes from [tm-themes](https://github.com/shikijs/textmate-grammars-themes),
+  such as One Dark Pro, Dracula, GitHub, Catppuccin, Tokyo Night, Nord, Gruvbox,
+  Rosé Pine, Solarized, Night Owl, Material, Ayu, Kanagawa, and Everforest.
+- 45 classic TextMate themes from [monaco-themes](https://github.com/brijeshb42/monaco-themes),
+  such as Cobalt, Monokai Bright, Tomorrow Night, Twilight, Oceanic Next, and Xcode.
+
+A theme colors the code, the interface, and the terminal. To choose one, press
+⌃\` or run **Color Theme…**. Use the arrow keys to preview each theme, Enter
+to keep one, and Escape to go back. You can also choose a theme in Settings,
+where **Match the system** switches between a dark and a light theme with
+macOS.
+
+To use any other theme, run **Import Color Theme…** (or click **Import Theme…**
+in Settings) and choose one of these files:
+
+- A VS Code theme (`.json`). In a VS Code extension, themes are in the
+  `themes` folder; to get the files from a `.vsix`, unzip it.
+- A TextMate or Sublime Text theme (`.tmTheme`).
+
+Imported themes are saved in the `themes` folder next to `settings.json`, and
+you can copy theme files there too. To delete one, run **Remove Imported Color
+Theme…**.
 
 ### EditorConfig
 
@@ -1208,7 +1238,7 @@ committed.
 | `src/localhistory.ts` | Local history of saved, changed, and deleted files |
 | `src/retention.ts` | Which local history versions to delete |
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
-| `src/settings.ts` | Settings, the settings dialog, and the theme |
+| `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |
 | `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
 | `src/database.ts` | The Database tool window, query console, and results grid |
 | `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
@@ -1222,7 +1252,8 @@ committed.
 | `src/refactorparse.ts` | Argument, parameter, and assignment parsing for the refactorings |
 | `src/phptypes.ts` | Reads PHP declarations, Laravel's names for methods and components, and route actions |
 | `src/icons.ts` | File and folder icons |
-| `src/themes.ts` | Monaco color themes |
+| `src/themes.ts` | The color theme list, imported themes, and applying a theme |
+| `src/colortheme.ts` | Converts VS Code, TextMate, and Monaco themes for the editor, interface, and terminal |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

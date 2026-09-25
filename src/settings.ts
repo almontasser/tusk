@@ -1,13 +1,16 @@
 // User settings: stored in settings.json in the app's config folder and applied live.
 import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
-import { defineThemes } from "./themes";
-
-defineThemes();
+import { choose, pick, rank } from "./palette";
+import { applyTheme, importThemeFile, loadImportedThemes, removeImportedTheme, themeList } from "./themes";
 
 export type Settings = {
-  theme: "dark" | "light" | "system";
+  /** A theme id from themes.ts, or "system" for darkTheme or lightTheme to match macOS. */
+  theme: string;
+  darkTheme: string;
+  lightTheme: string;
   fontFamily: string;
   fontSize: number;
   wordWrap: boolean;
@@ -25,6 +28,8 @@ export type Settings = {
 
 const defaults: Settings = {
   theme: "dark",
+  darkTheme: "dark",
+  lightTheme: "light",
   fontFamily: "JetBrains Mono, SF Mono, Menlo, monospace",
   fontSize: 13,
   wordWrap: false,
@@ -42,12 +47,14 @@ type Field = { key: keyof Settings; label: string; help?: string } & (
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
   | { type: "text" }
-  | { type: "select"; options: [string, string][] }
+  | { type: "select"; options: [string, string][] | (() => [value: string, text: string, group: string][]) }
 );
 
 /** The settings form, in order. */
 const fields: Field[] = [
-  { key: "theme", label: "Theme", type: "select", options: [["dark", "Dark"], ["light", "Light"], ["system", "Match the system"]] },
+  { key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
+  { key: "darkTheme", label: "Dark theme for Match the system", type: "select", options: () => themeOptions(true) },
+  { key: "lightTheme", label: "Light theme for Match the system", type: "select", options: () => themeOptions(false) },
   { key: "fontFamily", label: "Editor font", type: "text", help: "A CSS font list; the first installed font is used." },
   { key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
   { key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
@@ -82,13 +89,17 @@ export function onSettings(fn: (s: Settings) => void) {
 const file = async () => `${await appConfigDir()}/settings.json`;
 const systemDark = matchMedia("(prefers-color-scheme: dark)");
 
-/** Whether the effective theme is dark, resolving "system". */
-export const isDark = () => (settings.theme === "system" ? systemDark.matches : settings.theme === "dark");
+/** Themes for a select, grouped by dark and light, optionally only dark or only light ones. */
+const themeOptions = (dark?: boolean): [string, string, string][] =>
+  themeList()
+    .filter((t) => dark === undefined || t.dark === dark)
+    .map((t) => [t.id, t.source === "Built-in" ? `${t.name} (built-in)` : t.name, t.source === "Imported" ? "Imported" : t.dark ? "Dark" : "Light"]);
+
+/** The theme in use, resolving "system". */
+const themeId = () => (settings.theme === "system" ? (systemDark.matches ? settings.darkTheme : settings.lightTheme) : settings.theme);
 
 function apply() {
-  const dark = isDark();
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
-  monaco.editor.setTheme(dark ? "editor-dark" : "editor-light");
+  applyTheme(themeId());
   for (const ed of editors) {
     ed.updateOptions({
       fontFamily: settings.fontFamily,
@@ -130,6 +141,7 @@ export const removeEditor = (ed: monaco.editor.ICodeEditor) => (editors = editor
 
 /** Loads settings from disk and applies them. Unknown or invalid values fall back to defaults. */
 export async function initSettings() {
+  await loadImportedThemes();
   try {
     const saved = JSON.parse(await invoke<string>("read_file", { path: await file() }));
     for (const key of Object.keys(defaults) as (keyof Settings)[]) {
@@ -160,7 +172,15 @@ export function openSettings() {
     let input: HTMLInputElement | HTMLSelectElement;
     if (f.type === "select") {
       input = document.createElement("select");
-      for (const [value, text] of f.options) input.append(new Option(text, value, false, settings[f.key] === value));
+      const groups = new Map<string, HTMLElement>();
+      for (const [value, text, group] of typeof f.options === "function" ? f.options() : f.options) {
+        let parent: HTMLElement = input;
+        if (group) {
+          if (!groups.has(group)) groups.set(group, input.appendChild(Object.assign(document.createElement("optgroup"), { label: group })));
+          parent = groups.get(group)!;
+        }
+        parent.append(new Option(text, value, false, settings[f.key] === value));
+      }
     } else {
       input = document.createElement("input");
       input.type = f.type;
@@ -185,15 +205,69 @@ export function openSettings() {
     form.append(row);
   }
 
+  const button = (text: string, run: () => void) =>
+    Object.assign(document.createElement("button"), { type: "button", textContent: text, onclick: () => (dialog.close(), run()) });
+  const themes = button("Browse Themes…", pickTheme);
+  const importButton = button("Import Theme…", importTheme);
   const keymap = document.createElement("button");
   keymap.type = "button";
   keymap.textContent = "Keymap…";
   keymap.onclick = () => (dialog.close(), keymapEditor());
   const done = document.createElement("button");
   done.textContent = "Done";
-  form.append(keymap, done);
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+  actions.append(themes, importButton, keymap, done);
+  form.append(actions);
   dialog.append(form);
   document.body.append(dialog);
   dialog.addEventListener("close", () => dialog.remove());
   dialog.showModal();
+}
+
+/** Opens a picker of color themes that previews each one as you move through the list. Escape restores the theme. */
+export function pickTheme() {
+  const before = themeId();
+  const themes = themeList();
+  const items = themes.map((t) => ({
+    label: t.name,
+    detail: `${t.dark ? "Dark" : "Light"} · ${t.source}${t.id === before ? " · Current" : ""}`,
+    icon: t.dark ? "codicon-color-mode" : "codicon-lightbulb",
+    preview: () => applyTheme(t.id),
+    run: () => updateSetting("theme", t.id),
+  }));
+  const start = themes.findIndex((t) => t.id === before);
+  // The current theme comes first, so the picker opens on it.
+  if (start > 0) items.unshift(...items.splice(start, 1));
+  pick("Color theme (↑↓ to preview)", (q) => rank(q, items), 0, { value: "", onCancel: () => applyTheme(themeId()) });
+}
+
+/** Imports a VS Code (.json) or TextMate (.tmTheme) theme file and switches to it. */
+export async function importTheme() {
+  const path = await open({ title: "Import Color Theme", filters: [{ name: "Color themes", extensions: ["json", "jsonc", "tmTheme", "xml"] }] });
+  if (typeof path !== "string") return;
+  try {
+    updateSetting("theme", await importThemeFile(path));
+  } catch (err) {
+    await choose(`Couldn't import the theme: ${err instanceof Error ? err.message : err}`, ["OK"]);
+  }
+}
+
+/** Picks an imported theme to move to the Trash. */
+export function removeTheme() {
+  const imported = themeList().filter((t) => t.source === "Imported");
+  pick(imported.length ? "Remove an imported color theme" : "No imported themes", (q) =>
+    rank(
+      q,
+      imported.map((t) => ({
+        label: t.name,
+        run: async () => {
+          await removeImportedTheme(t.id);
+          for (const key of ["theme", "darkTheme", "lightTheme"] as const) if (settings[key] === t.id) settings[key] = key === "lightTheme" ? "light" : "dark";
+          apply();
+          persist();
+        },
+      })),
+    ),
+  );
 }

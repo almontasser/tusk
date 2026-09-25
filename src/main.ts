@@ -24,7 +24,7 @@ import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPull
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
-import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
+import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
@@ -1089,6 +1089,9 @@ const actions: Action[] = [
   { label: "Save All", keys: "Meta+S", run: saveAll },
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
   { label: "Keymap…", run: () => editKeymap() },
+  { label: "Color Theme…", keys: "Ctrl+Backquote", run: pickTheme },
+  { label: "Import Color Theme…", run: importTheme },
+  { label: "Remove Imported Color Theme…", run: removeTheme },
   { label: "Close Tab", keys: "Meta+W", run: () => closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },

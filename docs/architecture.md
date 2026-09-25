@@ -117,12 +117,58 @@ the app's config folder (`appConfigDir`), and ignores unknown keys and values of
 the wrong type. The dialog is built from one list of fields. Each change applies
 at once (`apply`) and writes the file.
 
-`apply` updates Monaco's editor options, calls `monaco.editor.setTheme`, and sets
-`data-theme` on the root element. The stylesheet defines colors as variables,
-with a light set under `:root[data-theme="light"]`. Other modules react through
-`onSettings`, as the terminal does to switch its colors. No editor is created
-with a `theme` option, because that would reset Monaco's global theme. The
-"system" theme follows `prefers-color-scheme` as it changes.
+`apply` updates Monaco's editor options and calls `applyTheme` in
+`src/themes.ts` with the theme in use: `theme`, or `darkTheme` or `lightTheme`
+when `theme` is `system`, which follows `prefers-color-scheme` as it changes.
+Other modules react through `onSettings`. No editor is created with a `theme`
+option, because that would reset Monaco's global theme.
+
+### Color themes
+
+`src/themes.ts` lists every theme (`themeList`) and applies one
+(`applyTheme`). The built-in `dark` and `light` themes are Monaco themes
+defined in the same file, and use the stylesheet's own variables. The others
+come from three places, all converted by `src/colortheme.ts`:
+
+- **tm-themes**: 65 VS Code themes as JSON. Its index gives each theme's name
+  and type, so the list needs no theme files.
+- **monaco-themes**: about 50 TextMate themes in Monaco's format, with
+  TextMate scopes as token names. Themes that tm-themes also has are left
+  out, and the light ones are listed by hand.
+- **Imported themes**: JSON files in the `themes` folder of the app's config
+  folder, read when settings load.
+
+Theme files are loaded with `import.meta.glob`, so each is its own chunk that
+loads when you first choose it. A converted theme is cached, and a newer choice
+wins over one still loading, so previewing in the picker stays quick.
+
+`convert` turns a theme into three things:
+
+- **Monaco rules.** Monaco's grammars emit their own tokens (`keyword.php`,
+  `variable.php`), not TextMate scopes, so a theme's scopes can't be used as
+  they are. Each role (keyword, string, variable, type, and so on) has a list
+  of TextMate scopes, most specific first, such as `keyword.control.php`, then
+  `keyword`. `styleOf` finds the style TextMate would give that scope, and
+  `rules` turns the colors by role into Monaco rules. The built-in themes use
+  the same `rules`. VS Code colors (`editor.*`, `editorWidget.*`, and so on) have
+  the same names in Monaco and pass through.
+- **Interface variables.** Each CSS variable in `styles.css` comes from the
+  VS Code colors that mean the same (`sideBar.background` for `--panel`,
+  `list.activeSelectionBackground` for `--selected`), or is mixed from the
+  editor's background and text when the theme doesn't set them, as TextMate
+  themes never do. They're set on the root element's style, and `data-theme`
+  follows the theme's type, for the light-only rules.
+- **Terminal colors** from `terminal.*`, for xterm.js. The terminal listens
+  with `onTheme`.
+
+Importing reads a VS Code theme (JSON with comments), following `include` and
+a `tokenColors` file path, or a TextMate plist. `parsePlist` is a small parser
+for the plist subset themes use. The theme is saved in VS Code's format, so the
+folder holds one format. `src/colortheme.test.ts` converts every bundled theme.
+
+The picker (`pickTheme` in `src/settings.ts`) is the palette with a `preview`
+on each item, which runs as the selection moves. Escape applies the saved
+theme again.
 
 Format on save formats the active editor through Monaco's format action, which
 applies minimal edits and keeps the cursor in place, and formats other files
@@ -2159,8 +2205,10 @@ a leading dot to the end (`.env.example` showed as `env.example.`).
 
 `styles.css` defines colors, sizes, and fonts as variables on `:root`, with a
 light set under `data-theme="light"`. Components use only the variables, so a
-theme is one block of values. `src/themes.ts` defines matching Monaco themes,
-`editor-dark` and `editor-light`, with syntax colors close to PhpStorm's schemes.
+theme is one block of values, and other color themes override them on the
+root element (see [Color themes](#color-themes)). `src/themes.ts` defines
+matching Monaco themes, `editor-dark` and `editor-light`, with syntax colors
+close to PhpStorm's schemes.
 
 Icons come from Monaco's icon font (codicons), which the page already loads, so
 there's no icon dependency. Monaco's `.codicon[class*='codicon-']` rule sets
@@ -2506,3 +2554,16 @@ large file, and the blocking write then froze the window. Holding edits until a
 150 ms pause, and sending them before any other message, keeps every answer
 current while sending a fraction of the text. Servers that accept ranges get
 each edit as it happens.
+
+### 2026-09-25: Bundle converted VS Code and TextMate themes
+
+VS Code has the largest set of color themes, and their format (UI colors plus
+TextMate token scopes) also covers TextMate and Sublime Text themes.
+tm-themes (from Shiki) collects 65 popular ones with their licenses, and
+monaco-themes adds the classic TextMate themes, so the app bundles both
+instead of downloading themes. Importing a file covers every other theme.
+Monaco's grammars don't emit TextMate scopes, so each theme is converted by
+role (keyword, string, variable) rather than scope by scope. Using TextMate
+grammars in Monaco instead (with Shiki or vscode-textmate and Oniguruma) would
+match VS Code's colors exactly, but would replace every language's grammar,
+including the Blade and HTTP grammars, and add a WebAssembly regex engine.

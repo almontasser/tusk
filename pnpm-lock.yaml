@@ -29,6 +29,12 @@ importers:
       monaco-editor:
         specifier: ^0.56.0
         version: 0.56.0
+      monaco-themes:
+        specifier: ^0.4.8
+        version: 0.4.8
+      tm-themes:
+        specifier: ^1.12.12
+        version: 1.12.12
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2
@@ -254,6 +260,9 @@ packages:
   dompurify@3.4.8:
     resolution: {integrity: sha512-yb1cEmaOum7wFvOCSQxyfgVlv5D47Rc30iZWoMpbDIWTnJ6grDDQyu2KFJzB2k7u0pMuJcQ1zphH//fFnw2tjQ==}
 
+  fast-plist@0.1.3:
+    resolution: {integrity: sha512-d9cEfo/WcOezgPLAC/8t8wGb6YOD6JTCPMw2QcG2nAdFmyY+9rTUizCTaGjIZAloWENTEUMAPpkUAIJJJ0i96A==}
+
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
@@ -355,6 +364,10 @@ packages:
   monaco-editor@0.56.0:
     resolution: {integrity: sha512-sXboRm3BeBeLm938eaiyLMe0OxzfXIlZvbv4ir/jVgQy1zDhWjgmny0WoN45fuDKhCCQsYMbBJrv/A6jd8aCUg==}
 
+  monaco-themes@0.4.8:
+    resolution: {integrity: sha512-QEDCwl5XUMPPpsg8TVNfi1VKIDtMsMTJAhUfxHSZ6hzkEfZgfTK2hicwyzkDKhAhrpMkHkwMtG13ynvdztJesw==}
+    engines: {node: '>=22.0.0'}
+
   nanoid@3.3.19:
     resolution: {integrity: sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -383,6 +396,9 @@ packages:
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
+
+  tm-themes@1.12.12:
+    resolution: {integrity: sha512-okyxQlASpDOtUA40+ZT0IGQyfObGOknntHY3kujfUlD8lj3ERMObDJNRgvlc/baVMsnJVQmtAB2nE7LFGTo0qQ==}
 
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
@@ -570,6 +586,8 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
+  fast-plist@0.1.3: {}
+
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -635,6 +653,10 @@ snapshots:
       dompurify: 3.4.8
       marked: 14.0.0
 
+  monaco-themes@0.4.8:
+    dependencies:
+      fast-plist: 0.1.3
+
   nanoid@3.3.19: {}
 
   picocolors@1.1.1: {}
@@ -674,6 +696,8 @@ snapshots:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
+
+  tm-themes@1.12.12: {}
 
   typescript@6.0.3: {}
 

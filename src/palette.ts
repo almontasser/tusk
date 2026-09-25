@@ -1,7 +1,10 @@
 // A keyboard-driven picker used by go to file, go to class, find in files, and actions.
 
-/** A palette row. `icon` is codicon and color classes, such as "codicon-file-code icon-php". */
-export type Item = { label: string; detail?: string; icon?: string; run(): unknown };
+/**
+ * A palette row. `icon` is codicon and color classes, such as "codicon-file-code icon-php".
+ * `preview` runs when the row becomes selected, such as to try a color theme.
+ */
+export type Item = { label: string; detail?: string; icon?: string; run(): unknown; preview?(): unknown };
 type Source = (query: string) => Item[] | Promise<Item[]>;
 
 const MAX_ROWS = 200;
@@ -132,6 +135,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
       }),
     );
     list.children[selected]?.scrollIntoView({ block: "nearest" });
+    items[selected]?.preview?.();
   };
 
   const update = () => {
@@ -174,6 +178,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
       rows[selected]?.classList.add("selected");
       rows[selected]?.setAttribute("aria-selected", "true");
       rows[selected]?.scrollIntoView({ block: "nearest" });
+      items[selected]?.preview?.();
     } else if (e.key === "Enter") choose(selected);
     else if (e.key === "Escape") dismiss();
     else return;

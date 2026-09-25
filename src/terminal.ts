@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
-import { isDark, onSettings } from "./settings";
+import { onTheme } from "./themes";
 
 /** What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again. */
 export type Restore = { title: string; cwd: string; command?: string[] };
@@ -16,12 +16,16 @@ const sessions: Session[] = [];
 let active: Session | undefined;
 let panelVisible = false;
 
-const themes = {
+// The built-in themes' terminal colors; other themes bring their own.
+const builtIn = {
   dark: { background: "#1e1f22", foreground: "#dfe1e5", cursor: "#dfe1e5", selectionBackground: "#3574f066" },
   light: { background: "#ffffff", foreground: "#1e1f22", cursor: "#1e1f22", selectionBackground: "#3574f040", black: "#1e1f22", white: "#6c707e", brightWhite: "#8c8f94", yellow: "#a8781f", brightYellow: "#c9951f" },
 };
-const theme = () => themes[isDark() ? "dark" : "light"];
-onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme())));
+let theme = () => builtIn.dark as Record<string, string>;
+onTheme((t) => {
+  theme = () => t.terminal ?? builtIn[t.dark ? "dark" : "light"];
+  sessions.forEach((s) => s.term && (s.term.options.theme = theme()));
+});
 
 /** The shells and restorable commands that are still running, in tab order, for the session. */
 export const runningTerminals = () => sessions.filter((s) => s.restore && !s.exited).map((s) => s.restore!);
