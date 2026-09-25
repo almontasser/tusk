@@ -1161,7 +1161,8 @@ forwarded calls (`Post::create()`), or request input (`$request->email`). The
 editor reads your models' columns, relationships, accessors, and scopes, and
 hides those reports, and the ones they cause further on, when Laravel really
 has the member; anything left shows as a hint (dots you can hover), not as a
-problem.
+problem. Laravel's root aliases, such as `use DB;`, resolve too: the editor
+writes stubs for them that Phpactor and Mago read.
 
 ## Test app
 

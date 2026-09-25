@@ -30,7 +30,13 @@ function b() {
     at(text, "$unrelated", "mixed-method-access"),
     at(text, "$message->save", "mixed-method-access"),
   ];
-  const kept = withoutMagic(text, list, (d) => d.code === "non-documented-method");
+  const kept = withoutMagic(text, list, [], (d) => d.code === "non-documented-method");
   // Only the unrelated call, and the same name in another function, keep their issues.
   assert.deepEqual(kept, [list[5], list[6]]);
+});
+
+test("drops the mixed-type issues of a facade call", () => {
+  const text = "<?php\nfunction a(): string {\n    return DB::transaction(fn () => 'x');\n}\n";
+  const issue = at(text, "DB::", "mixed-return-statement");
+  assert.deepEqual(withoutMagic(text, [issue], [text.indexOf("DB::")], () => false), []);
 });

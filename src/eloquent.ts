@@ -1,6 +1,7 @@
 // The properties Eloquent resolves at runtime on the project's models: columns, relationships, and accessors,
 // read by introspect.php. Diagnostics use them to tell Laravel's magic from a real mistake.
 import { invoke } from "@tauri-apps/api/core";
+import { appCacheDir } from "@tauri-apps/api/path";
 
 type ModelFacts = { columns: Record<string, unknown>; relations: { name: string }[]; accessors?: string[]; scopes?: string[] };
 
@@ -64,4 +65,46 @@ export function isModelProperty(className: string, property: string): boolean | 
 export function isModelMethod(className: string, method: string): boolean | undefined {
   const scopes = properties?.methods.get(className.replace(/^\\/, ""));
   return scopes ? scopes.has(method) || properties!.builder.has(method) : undefined;
+}
+
+const introspect = async (root: string, mode: string) => {
+  const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
+  return invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
+};
+
+/** The project's root aliases (`DB`), for telling a facade call when the file doesn't import the facade. */
+let aliases: { root: string; names: Set<string> } | undefined;
+
+/**
+ * Stubs for Laravel's root aliases, such as `class DB extends \Illuminate\Support\Facades\DB {}`: Laravel makes
+ * them with class_alias() at runtime, so Phpactor otherwise reports `use DB;` as a class it can't find. Returns the
+ * folder to give Phpactor as a stub path, and whether the stubs are new, which needs a full reindex: Phpactor
+ * indexes stub paths only in a full build. The first time, it waits for the aliases; later, it returns the folder
+ * at once and checks in the background, calling `changed` if they differ.
+ */
+export async function aliasStubs(root: string, changed: () => void): Promise<{ dir: string; fresh: boolean } | null> {
+  if (!(await invoke<boolean>("path_exists", { path: `${root}/artisan` }))) return null;
+  const dir = `${await appCacheDir()}/alias-stubs/${root.replace(/[^A-Za-z0-9]+/g, "_")}`;
+  const file = `${dir}/aliases.php`;
+  const previous = await invoke<string>("read_file", { path: file }).catch(() => null);
+  const write = async () => {
+    const map: Record<string, string> = await introspect(root, "aliases");
+    if ("error" in map) return false;
+    // Root names only; a namespaced alias is rare and would need a namespace block of its own.
+    const entries = Object.entries(map).filter(([alias, target]) => /^\w+$/.test(alias) && /^[\w\\]+$/.test(target));
+    aliases = { root, names: new Set(entries.filter(([, target]) => /\\Facades\\/.test(target)).map(([alias]) => alias)) };
+    const text = `<?php\n\n// Laravel's root aliases, which it makes with class_alias() at runtime. Written by the editor for Phpactor.\n\n${entries.map(([alias, target]) => `class ${alias} extends \\${target} {}`).join("\n")}\n`;
+    if (text === previous) return false;
+    await invoke("create_dir", { path: dir });
+    await invoke("write_file", { path: file, contents: text });
+    return true;
+  };
+  if (previous === null) return { dir, fresh: await write().catch(() => false) };
+  write().then((differ) => differ && changed(), () => {});
+  return { dir, fresh: false };
+}
+
+/** Whether a class name used in a file is a facade: a root alias such as `DB`, or a class the file imports from a Facades namespace. */
+export function isFacade(name: string, fileText: string): boolean {
+  return !!aliases?.names.has(name) || new RegExp(`^use\\s+[\\w\\\\]+\\\\Facades\\\\${name}\\s*;`, "m").test(fileText);
 }

@@ -7,6 +7,7 @@
 # framework classes such as Laravel facades resolve. Don't list project folders in
 # `includes`: Mago never lints included files.
 paths = ["."]
+# The editor adds Laravel's alias stubs (`use DB;`) to this list, so keep it on one line.
 includes = ["vendor"]
 # Hidden folders can hold whole copies of the project, such as git worktrees in .claude/.
 excludes = [".*", "node_modules", "storage", "bootstrap/cache"]

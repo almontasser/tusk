@@ -5,11 +5,12 @@ type Position = { line: number; character: number };
 type Diagnostic = { range: { start: Position }; source?: string; code?: string | number };
 
 /**
- * `list` without the issues `isMagic` accepts, and without the `mixed-*` issues that follow from them: those in
- * the same statement, and those in later statements that use a variable such a statement assigned
- * (`$post = Post::create(…)`), down the chain, up to the end of the function (the next named function).
+ * `list` without the issues `isMagic` accepts, and without the `mixed-*` issues that follow from them, or from
+ * magic at `anchors` (offsets, such as facade calls, which report nothing themselves): those in the same statement,
+ * and those in later statements that use a variable such a statement assigned (`$post = Post::create(…)`), down
+ * the chain, up to the end of the function (the next named function).
  */
-export function withoutMagic<D extends Diagnostic>(text: string, list: D[], isMagic: (d: D) => boolean): D[] {
+export function withoutMagic<D extends Diagnostic>(text: string, list: D[], anchors: number[], isMagic: (d: D) => boolean): D[] {
   const lineStarts = [0];
   for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) lineStarts.push(i + 1);
   const offset = (p: Position) => (lineStarts[p.line] ?? text.length) + p.character;
@@ -20,6 +21,7 @@ export function withoutMagic<D extends Diagnostic>(text: string, list: D[], isMa
   };
   const resolved: [number, number][] = [];
   const kept = list.filter((d) => !(isMagic(d) && resolved.push(statement(offset(d.range.start)))));
+  for (const at of anchors) resolved.push(statement(at));
   if (!resolved.length) return kept;
   // Variables those statements assign; they hold a value of the right type too.
   const typed: { name: string; from: number; to: number }[] = [];

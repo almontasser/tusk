@@ -9,7 +9,7 @@ import { monaco } from "./editor";
 import { choose } from "./palette";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
-import { isModelMethod, isModelProperty, onModelsRead, readModels, rereadModels } from "./eloquent";
+import { aliasStubs, isFacade, isModelMethod, isModelProperty, onModelsRead, readModels, rereadModels } from "./eloquent";
 import { withoutMagic } from "./magic";
 
 type M = typeof monaco.languages;
@@ -108,7 +108,10 @@ const isRequest = (className: string) => /^\\?(Illuminate\\Http\\Request|App\\Ht
  * have keeps its hint.
  */
 function withoutEloquentMagic(model: monaco.editor.ITextModel, list: L.Diagnostic[]): L.Diagnostic[] {
-  return withoutMagic(textOf(model), list, (d) => {
+  const text = textOf(model);
+  // A facade's methods return `mixed` in its docblock, such as DB::transaction(), so its calls are magic too.
+  const facadeCalls = [...text.matchAll(/\b([A-Z]\w*)::\w+\s*\(/g)].filter((m) => isFacade(m[1], text)).map((m) => m.index!);
+  return withoutMagic(text, list, facadeCalls, (d) => {
     if (!/^mago/.test(d.source ?? "")) return false;
     const message = typeof d.message === "string" ? d.message : d.message.value;
     const property = d.code === "non-documented-property" && message.match(/\$(\w+) on class `([^`]+)`/);
@@ -881,7 +884,7 @@ export async function startLsp(root: string, h: Host) {
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = (name: string) => invoke<string>("tool_path", { name });
   // Every check at once, rather than one round trip after another before the first server starts.
-  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson] = await Promise.all([
+  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson, phar, aliasDir] = await Promise.all([
     tool("mago"),
     tool("mago.toml"),
     exists("mago.toml"),
@@ -889,9 +892,14 @@ export async function startLsp(root: string, h: Host) {
     exists("artisan"),
     exists("vendor/filament/filament"),
     invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => ""),
+    tool("phpactor.phar"),
+    // Phpactor indexes stub paths only once, so a changed alias list needs a full reindex.
+    aliasStubs(root, () => reindex()).catch(() => null),
   ]);
   const phpactor = startServer("phpactor", root, ["php"], {
     ...phpactorIndexer,
+    // PHP's own stubs, which this list replaces, and Laravel's root aliases (`use DB;`).
+    "indexer.stub_paths": [`phar://${phar}/vendor/jetbrains/phpstorm-stubs`, ...(aliasDir ? [aliasDir.dir] : [])],
     // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
     // settings, so it would use the default index path and report functions from newer packages as not found.
     "language_server.diagnostic_outsource": false,
@@ -901,7 +909,7 @@ export async function startLsp(root: string, h: Host) {
     "language_server_mago.enabled": true,
     "language_server_mago.bin": magoBin,
     // Without a project mago.toml, use defaults tuned for Laravel (src-tauri/resources/mago.toml).
-    ...(!hasMagoToml && { "language_server_mago.config": magoConfig }),
+    ...(!hasMagoToml && { "language_server_mago.config": aliasDir ? await magoConfigWith(magoConfig, aliasDir.dir) : magoConfig }),
     "language_server_phpstan.enabled": hasPhpstan,
   });
   const laravel = hasArtisan ? startServer("laravel", root, ["php", "blade"], {}) : null;
@@ -918,7 +926,20 @@ export async function startLsp(root: string, h: Host) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
-  checkComposerLock(root);
+  // New alias stubs get into the index only with a full build.
+  if (aliasDir?.fresh) reindex();
+  else checkComposerLock(root);
+}
+
+/**
+ * The editor's Mago settings with Laravel's alias stubs added to `includes`, written next to the stubs, so Mago
+ * knows `use DB;` too. Relative paths in it, such as `vendor`, still mean the project's, since Mago runs there.
+ */
+async function magoConfigWith(bundled: string, stubs: string): Promise<string> {
+  const text = await invoke<string>("read_file", { path: bundled });
+  const config = `${stubs}/mago.toml`;
+  await invoke("write_file", { path: config, contents: text.replace(/^includes = \[(.*)\]$/m, (_, list) => `includes = [${list}, ${JSON.stringify(stubs)}]`) });
+  return config;
 }
 
 /**

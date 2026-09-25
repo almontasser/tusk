@@ -8,13 +8,14 @@
  *   php introspect.php <project root> models
  *   php introspect.php <project root> enum <Enum class>
  *   php introspect.php <project root> builder
+ *   php introspect.php <project root> aliases
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
  * related model of its relationship. `resources` maps each model to its resources.
  * `models` describes every model under app/ for AI completion: columns with their
  * database types, casts, and relationships. `enum` lists an enum's cases with their values. `builder` lists the query builder methods models
- * forward static and instance calls to.
+ * forward static and instance calls to. `aliases` maps root class aliases, such as `DB`, to their classes.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -244,6 +245,8 @@ try {
             return $map;
         })(),
         'builder' => builderMethods(),
+        // Root aliases such as `DB` for Illuminate\Support\Facades\DB: Laravel's defaults, config/app.php's, and packages'.
+        'aliases' => $booted ? Illuminate\Foundation\AliasLoader::getInstance()->getAliases() : Illuminate\Support\Facades\Facade::defaultAliases()->all(),
         'models' => (function () use ($root) {
             $models = [];
             foreach (classesIn($root . '/app') as $class) {

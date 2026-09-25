@@ -283,6 +283,25 @@ models are read. Anything left, such as a property a model doesn't have, or a
 facade's `mixed` return, shows as a hint (`magicNoise`) rather than a problem,
 as PhpStorm reports magic access only as a weak warning.
 
+Laravel's root aliases (`use DB;`, `Route`, `Cache`, and the rest in
+`config/app.php`) exist only at runtime, through `class_alias()`, so Phpactor
+reported `Class "DB" not found` and Mago that its methods don't exist.
+`aliasStubs` in `eloquent.ts` writes a stub file per project in the app's cache
+folder (`alias-stubs/<project>/aliases.php`), one `class DB extends
+\Illuminate\Support\Facades\DB {}` per alias, from `introspect.php aliases`
+(Laravel's `AliasLoader`, so package aliases count too). Phpactor gets the
+folder in `indexer.stub_paths`, after PHP's own stubs, which the setting
+replaces; `worse_reflection.additive_stubs` doesn't resolve them. Phpactor
+indexes stub paths only in a full build, so new stubs are followed by a full
+reindex, and later starts check the aliases in the background and reindex only
+if they changed. For projects without their own `mago.toml`, the editor writes
+a copy of its Mago settings next to the stubs with the folder added to
+`includes` (the bundled file keeps that list on one line for this), so Mago
+reads the facades' `@method` docs through the stubs. A facade call
+(`DB::transaction(…)`, by alias or by an import from a `Facades` namespace)
+also counts as magic for `withoutMagic`, since its documented return type is
+often `mixed`.
+
 In development, Tauri copies `filament-lsp/` into `target/debug/tools/` only
 when the Rust side rebuilds, so a change to `introspect.php` reaches the running
 app after the next Rust rebuild.
