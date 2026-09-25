@@ -18,7 +18,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { closeProblemPage, followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
+import { closeProblemPage, followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -60,6 +60,7 @@ function addPane(): Pane {
   trackEditor(ed);
   decorateConflicts(ed);
   attachDebugger(ed);
+  showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
   ed.onDidFocusEditorText(() => focusPane(pane));
@@ -1144,6 +1145,7 @@ const actions: Action[] = [
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
+  { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   { label: "Database: Connect over SSH…", run: () => (showView("database"), connectOverSsh()) },

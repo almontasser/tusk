@@ -4,10 +4,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { facts, projectCache, readModels } from "./eloquent";
-import { formatType, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
+import { formatType, inlineProblem, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
+import { settings, onSettings } from "./settings";
 import { showPanelView } from "./terminal";
 
 type Host = {
@@ -429,6 +430,31 @@ export async function scanProject(useCache = false) {
   }
 }
 
+/**
+ * With the Inline Problems setting on, shows the worst problem on the cursor line after the line's end, as Error Lens
+ * does for the cursor line only. Typing hides it until you pause.
+ */
+export function showInlineProblems(ed: monaco.editor.ICodeEditor) {
+  const inline = ed.createDecorationsCollection();
+  const update = () => {
+    const model = ed.getModel();
+    const line = ed.getPosition()?.lineNumber;
+    const markers = model && line && settings.inlineProblems ? monaco.editor.getModelMarkers({ resource: model.uri }) : [];
+    const shown = inlineProblem(markers.filter((m) => isShown(m.severity) && m.startLineNumber === line));
+    if (!model || !line || !shown) return inline.clear();
+    const col = model.getLineMaxColumn(line);
+    inline.set([{ range: new monaco.Range(line, col, line, col), options: { after: { content: `    ${shown.text}`, inlineClassName: `inline-problem inline-problem-${level(shown.severity)}` } } }]);
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const soon = () => (clearTimeout(timer), (timer = setTimeout(update, 250)));
+  const markers = monaco.editor.onDidChangeMarkers(soon);
+  ed.onDidChangeModelContent(() => (inline.clear(), soon()));
+  ed.onDidChangeCursorPosition(soon);
+  ed.onDidChangeModel(soon);
+  ed.onDidDispose(() => (markers.dispose(), clearTimeout(timer)));
+  onSettings(soon);
+}
+
 export function initProblems(h: Host) {
   host = h;
 }
@@ -462,6 +488,21 @@ function messageLine(line: string, className: string) {
   return el;
 }
 
+/** Mago's linter rules' descriptions by code, read once for each project and config with `mago lint --list-rules --json`. */
+let rules: { key: string; descriptions: Promise<Map<string, string>> } | undefined;
+function ruleDescription(code: string) {
+  const key = `${host.root()}\0${magoConfigPath ?? ""}`;
+  if (rules?.key !== key) {
+    const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "lint", "--list-rules", "--json"];
+    const descriptions = invoke<string>("tool_path", { name: "mago" })
+      .then((mago) => invoke<string>("run_capture", { cwd: host.root(), program: mago, args, input: null, anyStatus: true }))
+      .then((json) => new Map((JSON.parse(json) as { code: string; description: string }[]).map((r) => [r.code, r.description])))
+      .catch(() => new Map<string, string>());
+    rules = { key, descriptions };
+  }
+  return rules.descriptions.then((d) => d.get(code));
+}
+
 /** Shows a problem on a page in the editor area: its whole message, the code around it, and a link to the code. */
 export async function showProblemPage(p: Problem & { path: string }) {
   if (!page.isConnected) {
@@ -493,6 +534,13 @@ export async function showProblemPage(p: Problem & { path: string }) {
   const code = document.createElement("div");
   code.className = "problem-page-code";
   body.append(messageLine(title ?? "", "problem-page-title"), code, ...notes.map((n) => messageLine(n, "problem-page-note")));
+  // Mago's explanation of a linter rule. Its paragraphs are wrapped, so join each one's lines.
+  if (p.source === "mago-lint" && p.code)
+    ruleDescription(p.code).then((about) => {
+      if (!about || !body.isConnected) return;
+      const heading = Object.assign(document.createElement("h3"), { className: "problem-page-about", textContent: "About this rule" });
+      body.append(heading, ...about.split(/\n\s*\n/).map((para) => messageLine(para.replace(/\s*\n\s*/g, " ").trim(), "problem-page-note")));
+    });
   page.replaceChildren(header, body);
   const views = [...document.querySelectorAll<HTMLElement>("#editor, #diff, #history, #merge")];
   if (page.hidden) covered = views.filter((e) => !e.hidden);

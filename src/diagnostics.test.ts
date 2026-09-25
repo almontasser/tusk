@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, matchesFilter, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, inlineProblem, matchesFilter, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -189,4 +189,10 @@ test("the Problems panel's filter matches every word in the message, rule, or pa
   assert.ok(matchesFilter("USER controller", p));
   assert.ok(matchesFilter("mago(undefined", p));
   assert.ok(!matchesFilter("user missing", p));
+});
+
+test("inlineProblem shows the worst problem's first line and counts the others", () => {
+  assert.equal(inlineProblem([]), undefined);
+  assert.deepEqual(inlineProblem([{ severity: 4, message: "Unused" }, { severity: 8, message: "Undefined method.\nHelp: add it." }]), { text: "Undefined method.  +1", severity: 8 });
+  assert.equal(inlineProblem([{ severity: 4, message: "x".repeat(200) }])!.text, `${"x".repeat(119)}…`);
 });

@@ -243,6 +243,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Wrap long lines | Off |
 | Show the minimap | Off |
 | Show inlay hints | On |
+| Show the cursor line's problem at the end of the line | Off |
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
@@ -1189,7 +1190,16 @@ and the line and column. **Show Details** in that popup, or the button at the
 end of a row in the Problems panel, shows the problem on a page of its own: the
 whole message, with long types such as array shapes laid out one key per line,
 the code around the problem, and **Go to Code**. Escape closes the page and
-brings back the view it covered, such as a diff. The first time you open it, it scans the project:
+brings back the view it covered, such as a diff. For a Mago lint problem, the page
+also shows Mago's explanation of the rule under **About this rule**.
+
+To see the cursor line's worst problem at the end of the line, as the Error Lens
+extension does, turn on **Show the cursor line's problem at the end of the
+line** in Settings, or run **Toggle Inline Problems** from ⌘⇧A. Long messages
+are cut short, and `+2` counts the line's other problems. The message hides
+while you type and comes back when you pause.
+
+The first time you open the Problems panel, it scans the project:
 Mago checks every file in a few seconds, and then Phpactor's own checks, such
 as deprecated classes and unused imports, run file by file in the background
 (a few minutes for about 1,000 files, using half the cores). Phpactor's results

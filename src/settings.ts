@@ -16,6 +16,8 @@ export type Settings = {
   wordWrap: boolean;
   minimap: boolean;
   inlayHints: boolean;
+  /** The worst problem on the cursor line, after the line's end. */
+  inlineProblems: boolean;
   autoSave: boolean;
   formatOnSave: boolean;
   spellCheck: boolean;
@@ -36,6 +38,7 @@ const defaults: Settings = {
   wordWrap: false,
   minimap: false,
   inlayHints: true,
+  inlineProblems: false,
   autoSave: true,
   formatOnSave: false,
   spellCheck: true,
@@ -61,6 +64,7 @@ const fields: Field[] = [
   { key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
   { key: "minimap", label: "Show the minimap", type: "checkbox" },
   { key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
+  { key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
   { key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },

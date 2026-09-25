@@ -594,6 +594,9 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .gutter-modified { background: var(--gutter-modified, #375fad); }
 .gutter-deleted { width: 0 !important; height: 0 !important; margin-left: 5px; margin-top: -4px; border: 4px solid transparent; border-left-color: var(--gutter-deleted, #868a91); }
 .inline-blame { color: var(--faint); font-style: italic; }
+.inline-problem { font-style: italic; opacity: 0.7; }
+.inline-problem-error { color: var(--red); }
+.inline-problem-warning { color: var(--yellow); }
 .conflict-current { background: #73bd7926; }
 .conflict-incoming { background: #6aa7f826; }
 .conflict-base { background: #8c8f941f; }
@@ -967,6 +970,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .problem-page-body { flex: 1; overflow: auto; padding: 24px 32px 40px; max-width: 980px; -webkit-user-select: text; user-select: text; line-height: 1.6; }
 .problem-page-title { font-size: 16px; font-weight: 600; margin: 0 0 18px; line-height: 1.6; }
 .problem-page-note { margin: 14px 0; color: var(--muted); }
+.problem-page-about { font-size: 13px; font-weight: 600; margin: 28px 0 0; }
 .problem-page-body code, .problem-page-body pre { font-family: var(--mono, "JetBrains Mono", Menlo, monospace); font-size: 12px; background: var(--hover); border-radius: 4px; }
 .problem-page-body code { padding: 1px 5px; }
 .problem-page-body pre { display: block; margin: 8px 0; padding: 10px 12px; white-space: pre-wrap; font-weight: normal; line-height: 1.5; color: var(--text, inherit); }

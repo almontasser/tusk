@@ -463,6 +463,18 @@ export function problemMarkdown(message: string): string {
 /** Which checker and rule reported a problem, as VS Code shows it: `mago-lint(no-redundant-use)`, or whichever is known. */
 export const ruleLabel = (source?: string, code?: string) => (source && code ? `${source}(${code})` : source || code || "");
 
+/**
+ * The message to show after the end of a line with problems: the worst one's first line, cut to 120 characters, and
+ * how many others the line has. Severities are Monaco's, where a higher number is worse.
+ */
+export function inlineProblem(problems: { severity: number; message: string }[]): { text: string; severity: number } | undefined {
+  const [worst, ...others] = [...problems].sort((a, b) => b.severity - a.severity);
+  if (!worst) return undefined;
+  const first = worst.message.trim().split("\n")[0];
+  const text = first.length > 120 ? `${first.slice(0, 119)}…` : first;
+  return { text: others.length ? `${text}  +${others.length}` : text, severity: worst.severity };
+}
+
 /** Whether a problem matches the Problems panel's filter: every word in its message, rule, or relative path, ignoring case. */
 export const matchesFilter = (filter: string, p: { message: string; source?: string; code?: string; path: string }) => {
   const text = `${p.message} ${ruleLabel(p.source, p.code)} ${p.path}`.toLowerCase();

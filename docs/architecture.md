@@ -564,7 +564,25 @@ handles: a page in the editor area, like the diff view, with the message
 four lines around the problem with its range underlined (a `problem` scheme
 keeps it from the language servers), and Go to Code. Opening a file closes it.
 The page remembers which of the editor, diff, history, and merge views it hid,
-and closing it shows those again.
+and closing it shows those again. For a `mago-lint` problem, the page adds an
+**About this rule** section with the rule's description from
+`mago lint --list-rules --json`. `ruleDescription` runs it once for each
+project and Mago config and keeps the descriptions by rule code. The command
+takes a few milliseconds, and it lists only the enabled rules, which include
+every rule that can report a problem. The analyzer's codes have no
+descriptions, so `mago` problems get no section.
+
+### The cursor line's problem
+
+With the `inlineProblems` setting on (off by default), `showInlineProblems` in
+`problems.ts` adds an `after` decoration at the end of each pane editor's
+cursor line, as the inline blame does. `inlineProblem` in `diagnostics.ts`
+picks the line's worst error or warning, takes its message's first line, cuts
+it at 120 characters, and appends `+n` for the line's other problems. The
+decoration updates 250 ms after the cursor, the model, the markers, or the
+settings change. An edit clears it at once, so it doesn't jump while you type.
+Monaco keeps a marker's range fixed until the server publishes again, and the
+wait covers that.
 
 ### Mago's fixes and suppressions
 
@@ -2947,6 +2965,14 @@ The filter matches plain words against the message, rule label, and path. It
 has no `@source:` or `!exclude` syntax, no Info toggle, no Collapse All, and no
 cap on rendered rows: add them when someone asks. Quick Fix isn't in the row's
 context menu, since Enter and then ⌥⏎ do the same.
+
+### 2026-09-25: The inline problem shows on the cursor line only, and is opt-in
+
+Error Lens draws every line's problems, which clutters code with many
+warnings. The editor shows only the cursor line's worst problem, and only with
+the setting on, since the hover and F2 already show messages. The problem page
+shows Mago's rule description only: no good and bad examples, and no link on
+the rule code in the hover.
 
 ### Editor font and ligatures
 
