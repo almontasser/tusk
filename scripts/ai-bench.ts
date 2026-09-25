@@ -62,7 +62,12 @@ const cases = candidates.slice(0, Number(count));
 
 // ---- The server, started as ai_start in src-tauri/src/lsp.rs starts it ----
 const port = 18000 + Math.floor(Math.random() * 1000);
-const server = spawn(`${tools}llama/llama-server`, ["-m", modelPath, "--host", "127.0.0.1", "--port", String(port), "-ngl", "99", "-c", "8192", "-np", "1", "-b", "2048", "-ub", "1024", "--cache-reuse", "256"], { stdio: "ignore" });
+// LLAMA_ARGS adds options to try, such as speculative decoding: LLAMA_ARGS="--spec-type ngram-simple".
+const server = spawn(
+  `${tools}llama/llama-server`,
+  ["-m", modelPath, "--host", "127.0.0.1", "--port", String(port), "-ngl", "99", "-c", "8192", "-np", "1", "-b", "2048", "-ub", "1024", "--cache-reuse", "256", ...(process.env.LLAMA_ARGS?.split(" ").filter(Boolean) ?? [])],
+  { stdio: "ignore" },
+);
 process.on("exit", () => server.kill());
 for (let i = 0; ; i++) {
   if (await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false)) break;

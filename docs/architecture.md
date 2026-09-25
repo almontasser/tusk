@@ -600,6 +600,17 @@ tokens a second against 123. Over 120 cases, a suggestion after typing a
 character, with the prompt ready, took 372 ms against 199 ms (the median, before
 the editor's 250 ms pause), and a cold prompt 2.4 seconds against 1.3.
 
+Speculative decoding doesn't speed up the 3B model here. With the 0.5B model
+drafting (`-md`, `--spec-type draft-simple`), suggestions were the same but
+slower: 452–472 ms after typing instead of 372, and 2.8 seconds cold instead of
+2.4. Drafting from the prompt's own n-grams (`--spec-type ngram-simple` or
+`ngram-mod`) saved under 10 ms. Suggestions are short, about 10–20 tokens, and
+the draft model has to read each new prompt as well, which costs more than it
+saves. Without `--spec-type`, the server loads a draft model but never uses it.
+To try other server options, set `LLAMA_ARGS`, for example
+`LLAMA_ARGS="--spec-type ngram-simple"`; it's split on spaces, so model paths
+in it can't contain spaces.
+
 The `types` configuration adds the classes Phpactor finds for the names before
 `->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
 the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
