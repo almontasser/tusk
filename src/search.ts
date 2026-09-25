@@ -4,6 +4,7 @@ import { confirm } from "./palette";
 import { monaco } from "./editor";
 import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
+import { inComment } from "./comments";
 
 type Host = {
   root(): string;
@@ -248,17 +249,22 @@ export const refreshSearch = (paths?: Iterable<string>) => !onlyGit(paths) && $<
 const TODO_QUERY: Query = { text: String.raw`\b(TODO|FIXME|XXX)\b`, regex: true, caseSensitive: true, wholeWord: false };
 let todoGeneration = 0;
 
-/** Lists TODO, FIXME, and XXX comments in project files, grouped by file, as PhpStorm's TODO window does. Ignored files, such as vendor, are skipped. */
+/**
+ * Lists TODO, FIXME, and XXX comments in project files, grouped by file, as PhpStorm's TODO window does. Ignored
+ * files, such as vendor, are skipped. The search finds the words anywhere, and `inComment` keeps those in comments.
+ */
 export async function loadTodos() {
   const root = host.root();
   if (!root) return;
   const current = ++todoGeneration;
-  const found = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
+  const matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
   if (current !== todoGeneration) return; // A newer load already started.
+  // Only keywords in comments, not in strings or names such as TODO_LIMIT.
+  const found = matches.filter((m) => inComment(m.text, m.column));
   const groups = new Map<string, Match[]>();
   for (const m of found) (groups.get(m.path) ?? groups.set(m.path, []).get(m.path)!).push(m);
   $("todo-summary").textContent = found.length
-    ? `${found.length}${found.length >= MAX_MATCHES ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
+    ? `${found.length}${matches.length >= MAX_MATCHES ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
     : "No TODO, FIXME, or XXX comments in project files.";
   let shown = 0;
   $("todo-results").replaceChildren(

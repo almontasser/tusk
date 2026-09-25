@@ -1,5 +1,6 @@
 // Reads a PHP file's type declarations: their full names, and the full names of their parents, interfaces,
 // and traits. Free of editor imports so Node can test it.
+import { commentMask } from "./comments.ts";
 
 export type TypeDeclaration = {
   fqn: string;
@@ -13,8 +14,6 @@ export type TypeDeclaration = {
 };
 
 // ponytail: regexes over the source; grouped use statements (use A\{B, C}) aren't resolved.
-/** The source with comments blanked out, keeping offsets. */
-export const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|#(?!\[)[^\n]*/g, (m) => " ".repeat(m.length));
 
 /** The file's namespace, and a function that turns a class name used in it into a full name, through its use statements. */
 export function nameResolver(code: string) {
@@ -32,7 +31,7 @@ export function nameResolver(code: string) {
 }
 
 export function parseTypeDeclarations(source: string): TypeDeclaration[] {
-  const code = withoutComments(source);
+  const code = commentMask(source);
   const { namespace, resolve } = nameResolver(code);
   const names = (text: string) => text.split(",").map((s) => s.trim()).filter(Boolean).map(resolve);
   // Anonymous classes (new class extends X) have no name of their own.

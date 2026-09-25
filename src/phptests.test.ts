@@ -80,3 +80,9 @@ test("picks the test around the cursor", () => {
   assert.equal(testAt(tests, 2)?.name, "all tests in file");
   assert.deepEqual(findTests("<?php\nclass Foo {}"), []);
 });
+
+test("skips tests that are commented out", () => {
+  const source = "<?php\nclass ATest {\n  /* public function test_old() {} */\n  // public function test_older() {}\n  public function test_new() {}\n}\n";
+  assert.deepEqual(findTests(source).map((t) => t.name), ["all tests in file", "test_new"]);
+  assert.deepEqual(findTests("<?php\n/*\nit('was removed', fn () => 1);\n*/\nit('runs', fn () => 1);\n").map((t) => t.name), ["all tests in file", "it runs"]);
+});

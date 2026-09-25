@@ -939,10 +939,24 @@ When the app exits, the operating system closes the pseudo-terminals, and the
 processes in them receive `SIGHUP`. Terminal processes don't need the language
 server watchdog.
 
+### Comments
+
+`src/comments.ts` scans text for comments while skipping strings, so
+`"http://…"` and `'# not a comment'` stay code. It knows `//`, `#` (first on a
+line or before a space, so a CSS `#fff` and `#[Attribute]` don't count),
+`/* */`, `<!-- -->`, and Blade's `{{-- --}}`. `commentMask` blanks every
+comment and keeps offsets, for patterns that should only see code: test
+detection, type declarations (`phptypes.ts`), and AI context
+(`aicontext.ts`). `inComment` judges one line alone, for search matches that
+come without their file: it also counts a line that starts with `*`, as inside
+a docblock. The scanner doesn't know heredocs or JavaScript regex literals,
+whose text counts as code.
+
 ### Tests and Run Anything
 
-`src/phptests.ts` finds tests with regexes over the whole source, so a
-declaration can span several lines: public `test*` methods, methods after
+`src/phptests.ts` finds tests with regexes over the whole source with its
+comments blanked out (`commentMask`), so a declaration can span several lines,
+and a commented-out test gets no link: public `test*` methods, methods after
 `#[Test]` or `@test`, and Pest `it()` and `test()` calls. Each test gets a
 `--filter` value that matches its name at the end, with an optional data set
 suffix, so `test_a` doesn't also run `test_a_twice`. PHPUnit filters are
@@ -1863,7 +1877,8 @@ the debugger.
   provider reads the tab's text, so changes apply without a save or reload.
 - **TODO** (`loadTodos` in `src/search.ts`) is a sidebar view that reuses
   `search_text` with a case-sensitive regex, so it respects `.gitignore` and
-  the 20,000-match limit. It shares the Find view's file groups
+  the 20,000-match limit. `inComment` from `src/comments.ts` then keeps the
+  matches that start inside a comment on their line. It shares the Find view's file groups
   (`fileGroup`), and reloads after file changes while it shows.
 - **Routes** (`showRoutes` in `src/runner.ts`) parse `artisan route:list
   --json`. `routeTarget` in `src/phptypes.ts` reads the action; the class is

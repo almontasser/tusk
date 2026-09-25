@@ -1,6 +1,7 @@
 // Context for AI completion: code from other files that helps the model complete the current one.
 // Free of editor imports so Node can test it.
-import { componentClassPath, nameResolver, withoutComments } from "./phptypes.ts";
+import { componentClassPath, nameResolver } from "./phptypes.ts";
+import { commentMask } from "./comments.ts";
 import { pathsFor, type Psr4 } from "./psr4.ts";
 import { matchBracket } from "./refactorparse.ts";
 
@@ -12,7 +13,7 @@ import { matchBracket } from "./refactorparse.ts";
  */
 export function outline(source: string, max = 2500): string {
   // Brackets are matched in the source with comments blanked out (same offsets), so an apostrophe in a comment is harmless.
-  const code = withoutComments(source);
+  const code = commentMask(source);
   const fn = /\bfunction\s+&?\w+\s*\(/g;
   let out = "";
   let from = 0;
@@ -123,11 +124,11 @@ export function importedFiles(index: Index, rel: string, source: string, offset:
  * say) come through too; callers keep only names that have a file.
  */
 export function referencedClasses(source: string, offset: number): string[] {
-  const code = withoutComments(source)
+  const code = commentMask(source)
     .replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, (m) => " ".repeat(m.length))
     // The namespace and imports hold full names already; the uses elsewhere count. Trait uses are indented and stay.
     .replace(/^(namespace|use)\s[^;]*;/gm, (m) => " ".repeat(m.length));
-  const { resolve } = nameResolver(withoutComments(source));
+  const { resolve } = nameResolver(commentMask(source));
   const distance = new Map<string, number>();
   for (const m of code.matchAll(/(?<![\w\\$>:])\\?[A-Z]\w*(?:\\\w+)*(?![\w\\])/g)) {
     const fqn = resolve(m[0]);
