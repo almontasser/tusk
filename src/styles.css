@@ -1156,3 +1156,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+
+/* HTTP client: teams */
+.http-secrets { margin-bottom: 8px; }
+.http-runner-table .http-runner-file td { padding-top: 10px; font-weight: 600; color: var(--muted); }

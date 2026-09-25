@@ -16,7 +16,8 @@ import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
 import { httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
-import "./httpload";
+import { runAllRequests } from "./httpload";
+import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
@@ -1161,6 +1162,9 @@ const actions: Action[] = [
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
   { label: "HTTP Client: Global Variables…", run: () => root && showGlobals() },
   { label: "HTTP Client: Clear Cookies", run: () => root && clearCookies() },
+  { label: "HTTP Client: Import…", run: () => root && importRequests() },
+  { label: "HTTP Client: Export to OpenAPI…", run: () => root && exportOpenApi() },
+  { label: "HTTP Client: Run All Requests in Project", run: () => root && runAllRequests() },
   { label: "Select HTTP Environment…", run: () => root && selectEnvironment(active ?? "") },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },

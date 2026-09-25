@@ -8,6 +8,9 @@ import {
   bodyFromRules,
   fromCurl,
   graphqlParts,
+  hasSecrets,
+  redact,
+  redactHeader,
   jsonQuery,
   laravelException,
   matchRoute,
@@ -316,4 +319,24 @@ test("reads Laravel exceptions from JSON and HTML error pages", () => {
   const html = `<html><title>Division by zero</title><script>window.data = {"report":{"exception_class":"DivisionByZeroError","message":"Division by zero","stacktrace":[{"file":"\\/var\\/www\\/html\\/app\\/Math.php","line_number":7}]}}</script>`;
   assert.deepEqual(laravelException(html, 500), { className: "DivisionByZeroError", message: "Division by zero", frames: [{ file: "/var/www/html/app/Math.php", line: 7 }] });
   assert.equal(laravelException("<html>Server Error</html>", 500), null);
+});
+
+test("hides secrets in headers, the query, and bodies", () => {
+  const base = { method: "POST", followRedirects: true, timeout: 60, insecure: false };
+  const p = redact({
+    ...base,
+    url: "https://app.test/api?page=2&api_key=abcdefghijklmnop&author=me#top",
+    headers: [["Authorization", "Bearer 1|abcdefghijklmnopWXYZ"], ["Cookie", "laravel_session=abc; XSRF-TOKEN=def"], ["X-XSRF-TOKEN", "short"], ["Accept", "application/json"], ["X-Api-Key", "{{key}}"]],
+    body: '{\n  "email": "a@b.c",\n  "password": "hunter22",\n  "card": {"number": 1},\n  "client_secret": {"v": "x"}\n}',
+  });
+  assert.equal(p.url, "https://app.test/api?page=2&api_key=••••mnop&author=me#top");
+  assert.deepEqual(p.headers, [["Authorization", "Bearer ••••WXYZ"], ["Cookie", "laravel_session=••••; XSRF-TOKEN=••••"], ["X-XSRF-TOKEN", "••••"], ["Accept", "application/json"], ["X-Api-Key", "{{key}}"]]);
+  assert.deepEqual(JSON.parse(p.body!), { email: "a@b.c", password: "••••", card: { number: 1 }, client_secret: { v: "••••" } });
+  // Hiding twice changes nothing more.
+  assert.deepEqual(redact(p), p);
+  assert.equal(redact({ ...base, url: "/", headers: [["Content-Type", "application/x-www-form-urlencoded"]], body: "user=a&password=b" }).body, "user=a&password=••••");
+  assert.equal(redact({ ...base, url: "/", headers: [], form: [{ name: "token", value: "x" }, { name: "file", file: "/a" }] }).form![0].value, "••••");
+  assert.equal(redactHeader("Set-Cookie", "laravel_session=abc; path=/; httponly"), "laravel_session=••••; path=/; httponly");
+  assert.equal(redactHeader("Authorization", "Basic dXNlcjpwYXNz"), "Basic ••••");
+  assert.equal(hasSecrets({ ...base, url: "/posts?page=1", headers: [["Accept", "*/*"]], body: '{"title": "x"}' }), false);
 });
