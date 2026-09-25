@@ -495,12 +495,22 @@ font, with the checker's name (`mago(non-existent-method)`). `registerProblemHov
 in `lsp.ts` adds a hover for the markers under the pointer, rendered as
 Markdown by `problemMarkdown` in `diagnostics.ts`: the first line in bold,
 backticked and quoted names as code, notes as paragraphs, code past 100
-characters cut short, and an **Open in Editor** command link.
+characters cut short, then the checker and rule (`ruleLabel`, such as
+`mago-lint(no-redundant-use)`) and a **Show Details** command link.
 `styles.css` hides Monaco's message row (`:has(> .marker.hover-contents)`) and
 keeps its View Problem and Quick Fix links. Monaco lists the newest hover
 provider first, so the hover is registered again after each server's
-providers. Markers no longer carry a source; the rule's code stays, for
-turning a rule off in `mago.toml`.
+providers. It's registered for the `**` pattern rather than a list of language
+IDs, so languages registered later get it too; a matching pattern scores as
+high as a matching language. `setMarkers` sets each marker's source to the
+diagnostic's (Mago sends `mago` and `mago-lint`) or else the server's name, and
+the Problems panel shows the same label with the line and column.
+
+The client advertises `publishDiagnostics.tagSupport`, and `setMarkers` merges
+the diagnostic's own tags, whose numbers match `MarkerTag`'s, with the ones
+`isDeprecation` and `isUnused` infer, so servers such as vtsls fade unused code
+and strike through deprecated code. Stopping a server removes its entries from
+`lastDiagnostics`, so `onModelsRead` doesn't bring back its markers.
 
 Phpactor's hover over a docblock returns its parser's node name, such as
 `ClassMembersNode`; the hover provider drops a hover that's only such a name.
@@ -511,6 +521,8 @@ handles: a page in the editor area, like the diff view, with the message
 `formatType` with one array-shape key per line), a read-only editor showing
 four lines around the problem with its range underlined (a `problem` scheme
 keeps it from the language servers), and Go to Code. Opening a file closes it.
+The page remembers which of the editor, diff, history, and merge views it hid,
+and closing it shows those again.
 
 ### Next and previous problem
 
@@ -2790,6 +2802,14 @@ markers by position, and a wrapper that skips warnings can wait until the plain
 order proves insufficient. Spelling problems don't get a squiggle of their own,
 because Monaco styles markers by severity only, and a separate decoration layer
 would have to track every typos marker.
+
+### 2026-09-25: Problems show their checker and rule
+
+Problem popups and Problems panel rows show `source(code)`, as VS Code does,
+which reverses the earlier choice to show only the code. The label tells Mago's
+analyzer from its linter and names the rule to turn off in `mago.toml`. It
+shows even when only one checker reports, since `mago` and `mago-lint` would
+make most PHP files count as several checkers anyway.
 
 ### Editor font and ligatures
 

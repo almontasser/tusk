@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { facts, projectCache, readModels } from "./eloquent";
-import { formatType, magoIssuesByFile, messageParts, realProblems, severityOf, type Diagnostic } from "./diagnostics";
+import { formatType, magoIssuesByFile, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
 import { showPanelView } from "./terminal";
 
@@ -70,6 +70,8 @@ panel.append(toolbar, list);
 const collapsed = new Set<string>();
 
 const MARKER = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warning } as Record<number, monaco.MarkerSeverity>;
+/** A severity's name in the icon and squiggle classes. */
+const level = (s: monaco.MarkerSeverity) => (s === monaco.MarkerSeverity.Error ? "error" : s === monaco.MarkerSeverity.Warning ? "warning" : "info");
 const isShown = (severity: monaco.MarkerSeverity) => severity >= monaco.MarkerSeverity.Warning;
 const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path));
 
@@ -139,18 +141,17 @@ function render() {
           ...sorted.map((p) => {
             const li = document.createElement("li");
             li.className = "problems-row problems-item";
-            const error = p.severity === monaco.MarkerSeverity.Error;
-            li.innerHTML = `<span class="codicon ${error ? "codicon-error icon-error" : "codicon-warning icon-warning"}"></span>`;
+            li.innerHTML = `<span class="codicon codicon-${level(p.severity)} icon-${level(p.severity)}"></span>`;
             const message = document.createElement("span");
             message.className = "problems-message";
             message.textContent = p.message.split("\n")[0];
             message.title = p.message;
             const where = document.createElement("span");
             where.className = "problems-muted";
-            where.textContent = `${p.code ?? ""} :${p.range.startLineNumber}`;
+            where.textContent = [ruleLabel(p.source, p.code), `Ln ${p.range.startLineNumber}, Col ${p.range.startColumn}`].filter(Boolean).join(" ");
             const page = document.createElement("button");
             page.className = "icon-button problems-page-button";
-            page.title = "Open in Editor";
+            page.title = "Show Details";
             page.innerHTML = '<span class="codicon codicon-open-preview"></span>';
             page.onclick = (e) => (e.stopPropagation(), showProblemPage({ ...p, path }));
             li.append(message, where, page);
@@ -333,15 +334,14 @@ export async function showProblemPage(p: Problem & { path: string }) {
     addEventListener("keydown", (e) => e.key === "Escape" && !page.hidden && closeProblemPage(), true);
   }
   const root = host.root();
-  const error = p.severity === monaco.MarkerSeverity.Error;
   const header = document.createElement("header");
-  header.innerHTML = `<span class="codicon ${error ? "codicon-error icon-error" : "codicon-warning icon-warning"}"></span>`;
+  header.innerHTML = `<span class="codicon codicon-${level(p.severity)} icon-${level(p.severity)}"></span>`;
   const where = document.createElement("span");
   where.className = "problem-page-path";
   where.textContent = `${p.path.startsWith(`${root}/`) ? p.path.slice(root.length + 1) : p.path}:${p.range.startLineNumber}`;
   const rule = document.createElement("span");
   rule.className = "problem-page-rule";
-  rule.textContent = p.code ?? "";
+  rule.textContent = ruleLabel(p.source, p.code);
   const go = document.createElement("button");
   go.textContent = "Go to Code";
   go.onclick = () => (closeProblemPage(), host.openAt(p.path, p.range));
@@ -359,7 +359,9 @@ export async function showProblemPage(p: Problem & { path: string }) {
   code.className = "problem-page-code";
   body.append(messageLine(title ?? "", "problem-page-title"), code, ...notes.map((n) => messageLine(n, "problem-page-note")));
   page.replaceChildren(header, body);
-  document.querySelectorAll<HTMLElement>("#editor, #diff, #history, #merge").forEach((e) => (e.hidden = true));
+  const views = [...document.querySelectorAll<HTMLElement>("#editor, #diff, #history, #merge")];
+  if (page.hidden) covered = views.filter((e) => !e.hidden);
+  views.forEach((e) => (e.hidden = true));
   page.hidden = false;
 
   // The code around the problem, read only, with the problem's range highlighted. A separate scheme keeps the
@@ -393,7 +395,7 @@ export async function showProblemPage(p: Problem & { path: string }) {
   excerptDecorations = excerpt.createDecorationsCollection([
     {
       range: new monaco.Range(p.range.startLineNumber - shift, p.range.startColumn, p.range.endLineNumber - shift, p.range.endColumn),
-      options: { inlineClassName: error ? "problem-page-range-error" : "problem-page-range-warning" },
+      options: { inlineClassName: `problem-page-range-${level(p.severity)}` },
     },
     { range: new monaco.Range(p.range.startLineNumber - shift, 1, p.range.startLineNumber - shift, 1), options: { isWholeLine: true, className: "problem-page-line" } },
   ]);
@@ -406,9 +408,10 @@ export function closeProblemPage() {
   excerpt?.getModel()?.dispose();
   excerpt?.dispose();
   excerpt = undefined;
-  $editor().hidden = false;
+  covered.forEach((e) => (e.hidden = false));
 }
-const $editor = () => document.getElementById("editor")!;
+/** The views the problem page hid, which closing it shows again. */
+let covered: HTMLElement[] = [];
 
-// The hover's Open in Editor link (lsp.ts).
+// The hover's Show Details link (lsp.ts).
 monaco.editor.registerCommand("problems.openPage", (_, p: Problem & { path: string }) => showProblemPage(p));

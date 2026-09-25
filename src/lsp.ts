@@ -11,7 +11,7 @@ import { formatHoverMarkdown } from "./phptypes";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { isDeprecation, isUnused, magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
+import { isDeprecation, isUnused, magoConfigText, problemMarkdown, realProblems, ruleLabel, severityOf } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -101,7 +101,9 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
       ...toRange(d.range),
       message: typeof d.message === "string" ? d.message : d.message.value,
       severity: severity[severityOf(d)],
-      tags: isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : undefined,
+      // LSP's diagnostic tags have MarkerTag's numbers.
+      tags: [...new Set([...(d.tags ?? []), ...(isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : [])])],
+      source: d.source ?? owner.slice(4),
       code: d.code?.toString(),
     })),
   );
@@ -111,18 +113,19 @@ const problemIcons: Record<number, string> = {
   [monaco.MarkerSeverity.Error]: "$(error)",
   [monaco.MarkerSeverity.Warning]: "$(warning)",
   [monaco.MarkerSeverity.Info]: "$(info)",
-  [monaco.MarkerSeverity.Hint]: "$(lightbulb)",
+  [monaco.MarkerSeverity.Hint]: "$(info)",
 };
 let problemHover: monaco.IDisposable | undefined;
 
 /**
  * Shows the problems under the pointer as formatted text. Monaco's own problem hover shows plain text in the
  * editor's font, so styles.css hides its message and keeps its View Problem and Quick Fix links. This is
- * registered again after each server's providers, since Monaco lists the newest provider's hover first.
+ * registered again after each server's providers, since Monaco lists the newest provider's hover first. The `**`
+ * pattern matches every file, in languages registered later too, as highly as a server's own language does.
  */
 function registerProblemHover() {
   problemHover?.dispose();
-  problemHover = monaco.languages.registerHoverProvider(monaco.languages.getLanguages().map((l) => l.id), {
+  problemHover = monaco.languages.registerHoverProvider({ pattern: "**" }, {
     provideHover(model, pos) {
       const markers = monaco.editor
         .getModelMarkers({ resource: model.uri })
@@ -132,10 +135,11 @@ function registerProblemHover() {
       return {
         range: markers.reduce((r, m) => r.plusRange(m), monaco.Range.lift(markers[0])),
         contents: markers.map((m) => {
-          const problem = { path: model.uri.fsPath, range: monaco.Range.lift(m), message: m.message, severity: m.severity, code: typeof m.code === "string" ? m.code : m.code?.value };
+          const problem = { path: model.uri.fsPath, range: monaco.Range.lift(m), message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value };
+          const rule = ruleLabel(problem.source, problem.code);
           // problems.ts handles the command, which opens the problem on a page of its own.
-          const open = `[Open in Editor](command:problems.openPage?${encodeURIComponent(JSON.stringify([problem]))} "Show the whole problem on a page")`;
-          return { value: `${problemIcons[m.severity]} ${problemMarkdown(m.message)}\n\n${open}`, supportThemeIcons: true, isTrusted: true };
+          const open = `[Show Details](command:problems.openPage?${encodeURIComponent(JSON.stringify([problem]))} "Show the whole problem on a page")`;
+          return { value: `${problemIcons[m.severity]} ${problemMarkdown(m.message)}\n\n${rule ? `\`${rule}\` · ` : ""}${open}`, supportThemeIcons: true, isTrusted: true };
         }),
       };
     },
@@ -211,7 +215,7 @@ const clientCapabilities: L.ClientCapabilities = {
       resolveSupport: { properties: ["edit"] },
     },
     rename: { prepareSupport: true },
-    publishDiagnostics: {},
+    publishDiagnostics: { tagSupport: { valueSet: [1, 2] } },
     foldingRange: {},
     selectionRange: {},
     inlayHint: {},
@@ -460,6 +464,8 @@ async function startServer(
       unlisten();
       disposables.forEach((d) => d.dispose());
       monaco.editor.getModels().forEach((m) => monaco.editor.setModelMarkers(m, owner, []));
+      // So onModelsRead can't bring back the stopped server's markers.
+      [...lastDiagnostics.keys()].filter((k) => k.startsWith(`${owner} `)).forEach((k) => lastDiagnostics.delete(k));
     },
     didSave(model) {
       if (serves(model)) notify("textDocument/didSave", { textDocument: { uri: model.uri.toString() } });

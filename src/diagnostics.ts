@@ -396,6 +396,9 @@ export function problemMarkdown(message: string): string {
   return [`**${format(first ?? "")}**`, ...rest.map(format)].join("\n\n");
 }
 
+/** Which checker and rule reported a problem, as VS Code shows it: `mago-lint(no-redundant-use)`, or whichever is known. */
+export const ruleLabel = (source?: string, code?: string) => (source && code ? `${source}(${code})` : source || code || "");
+
 /** A long type, such as an array shape, laid out with one key per line: `array{'a': int, 'b': string}`. */
 export function formatType(type: string): string {
   let out = "";

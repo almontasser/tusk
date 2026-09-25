@@ -591,7 +591,6 @@ function updateProblems() {
   $("warning-count").textContent = String(warnings);
   $("problems").title = project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)";
 }
-monaco.editor.onDidChangeMarkers(updateProblems);
 $("problems").onclick = () => root && showProblems();
 
 // ---- Recent projects and the welcome screen ----
@@ -713,10 +712,11 @@ function addTab(path: string, model: monaco.editor.ITextModel) {
 
 async function openFile(path: string) {
   if (!tabs.has(path)) addTab(path, await ensureModel(path));
+  // First, since it shows the view it covered, which the next lines then close.
+  closeProblemPage();
   closeDiff(false);
   closeMerge();
   hideHistory();
-  closeProblemPage();
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
   editor.focus();

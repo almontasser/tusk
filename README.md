@@ -1173,11 +1173,13 @@ other files. In the Dark and Light themes, squiggles use the interface's red,
 yellow, and blue.
 
 Pointing at a problem in the editor shows it with code formatted as code, and
-the checker's notes as paragraphs. **Open in Editor** in that popup, or the
-button at the end of a row in the Problems panel, shows the problem on a page
-of its own: the whole message, with long types such as array shapes laid out
-one key per line, the code around the problem, and **Go to Code**. Escape
-closes the page. The first time you open it, it scans the project:
+the checker's notes as paragraphs, and the checker and rule below it, such as
+`mago-lint(no-redundant-use)`. Rows in the Problems panel show the same label
+and the line and column. **Show Details** in that popup, or the button at the
+end of a row in the Problems panel, shows the problem on a page of its own: the
+whole message, with long types such as array shapes laid out one key per line,
+the code around the problem, and **Go to Code**. Escape closes the page and
+brings back the view it covered, such as a diff. The first time you open it, it scans the project:
 Mago checks every file in a few seconds, and then Phpactor's own checks, such
 as deprecated classes and unused imports, run file by file in the background
 (a few minutes for about 1,000 files, using half the cores). Phpactor's results

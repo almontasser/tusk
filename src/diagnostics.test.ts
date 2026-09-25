@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, magoConfigText, problemMarkdown, magoIssuesByFile, realProblems, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, magoConfigText, problemMarkdown, magoIssuesByFile, realProblems, ruleLabel, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -102,6 +102,8 @@ test("formats messages for hovers and the problem page", () => {
     problemMarkdown('Method "App\\Models\\Post::save" is <wrong>.\nUse `array<int>` or *this*.'),
     "**Method `App\\Models\\Post::save` is \\<wrong\\>.**\n\nUse `array<int>` or \\*this\\*.",
   );
+  assert.equal(ruleLabel("mago-lint", "no-redundant-use"), "mago-lint(no-redundant-use)");
+  assert.equal(ruleLabel("typos", undefined), "typos");
   assert.equal(formatType("array{'a': array<int, string>, 'b': list{int}}"), "array{\n  'a': array<int, string>,\n  'b': list{\n    int\n  }\n}");
 });
 

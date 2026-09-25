@@ -265,6 +265,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .icon-folder-excluded { color: var(--orange); }
 .icon-error { color: var(--red); }
 .icon-warning { color: var(--yellow); }
+.icon-info { color: var(--blue); }
 :root[data-theme="light"] .icon-php { color: #6a5acd; }
 :root[data-theme="light"] .icon-js, :root[data-theme="light"] .icon-json { color: #b8931a; }
 :root[data-theme="light"] .icon-folder { color: #7c8aa5; }
@@ -961,5 +962,6 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .problem-page-line { background: var(--hover); }
 .problem-page-range-error { text-decoration: underline wavy var(--red); text-underline-offset: 3px; }
 .problem-page-range-warning { text-decoration: underline wavy var(--yellow); text-underline-offset: 3px; }
+.problem-page-range-info { text-decoration: underline wavy var(--blue); text-underline-offset: 3px; }
 .problems-page-button { visibility: hidden; margin-left: auto; flex-shrink: 0; }
 .problems-row:hover .problems-page-button { visibility: visible; }
