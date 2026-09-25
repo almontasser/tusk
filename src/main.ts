@@ -30,6 +30,7 @@ import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoute
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage } from "./coverage";
+import { showBreadcrumbs } from "./breadcrumbs";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -60,6 +61,7 @@ function addPane(): Pane {
   ed.onDidFocusEditorText(() => focusPane(pane));
   // Moving the cursor changes the selection too, so this one event covers both.
   ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
+  ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
   return pane;
 }
 
@@ -897,7 +899,7 @@ function renderTabs() {
     );
     pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
-  $("path").textContent = active ? relative(active) : "";
+  showBreadcrumbs($("path"), active ? relative(active) : "", editor);
   $("empty-editor").hidden = tabs.size > 0 || !root;
   updateProblems();
   $("editor").style.display = tabs.size ? "" : "none";

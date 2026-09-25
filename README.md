@@ -64,7 +64,6 @@ file to change when you add it.
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
-| Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
@@ -137,7 +136,9 @@ The `.app` bundle and the `.dmg` file are written to
   and drag the sidebar's edge to resize it. The icons at the bottom open the
   **Git Log**, the **Debug** panel, and the terminal.
 - **Status bar:** error and warning counts for open files (click them to list
-  the problems), background work such as indexing, the cursor position,
+  the problems), the file's path followed by breadcrumbs for the class and
+  method at the cursor (click one to go to it), background work such as
+  indexing, the cursor position,
   indentation, line endings, and the file's language.
 - **Welcome screen:** without an open folder, the window lists your recent
   projects.

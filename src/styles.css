@@ -882,3 +882,9 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .merge-conflict-actions button { border: 0; background: none; padding: 0; margin-right: 14px; color: var(--blue); cursor: pointer; pointer-events: auto; }
 .merge-conflict-actions button:hover { text-decoration: underline; }
 #ai-status.loading { opacity: 0.5; }
+
+/* Breadcrumbs in the status bar's path: the symbols around the cursor. */
+#path .crumb { display: inline-flex; align-items: center; gap: 3px; padding: 0 4px; margin-left: 2px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+#path .crumb::before { content: "›"; margin-right: 4px; opacity: 0.6; }
+#path .crumb:hover { background: var(--hover); color: var(--text); }
+#path .crumb .codicon { font-size: 12px !important; }

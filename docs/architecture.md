@@ -1783,6 +1783,19 @@ it changes a size. `src/icons.ts` maps file and folder names to a codicon and a
 color class; `src/icons.test.ts` covers it. Folders such as `vendor`,
 `node_modules`, and `storage` are dimmed, as PhpStorm marks excluded folders.
 
+### Breadcrumbs
+
+`src/breadcrumbs.ts` follows the file's path in the status bar with the
+symbols that enclose the cursor, outermost first. It asks Monaco's
+`IOutlineModelService`, the internal service that sticky scroll uses, for the
+file's outline. The service caches one outline per model version and merges
+every server's document symbols, so breadcrumbs usually cost no request of
+their own. The bar redraws 100 ms after the cursor stops moving, or 600 ms
+after an edit: a new outline is a `textDocument/documentSymbol` request to
+every server, and Phpactor first gets the whole file (see
+[Full-document syncs](#performance)), so the longer wait keeps typing from
+triggering one on every pause.
+
 ### Status and errors
 
 The status bar shows the latest message from each source. Language server
