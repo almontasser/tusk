@@ -1181,3 +1181,15 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-query-time { font: 12px var(--mono); min-width: 64px; text-align: right; }
 .http-query-run { display: flex; justify-content: space-between; gap: 12px; padding: 2px 2px 2px 20px; font: 12px var(--mono); }
 .http-query-run span:first-child { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+
+/* HTTP client: less typing */
+.http-check-row > select { flex: none; width: 190px; }
+.http-check-row > input.unused { visibility: hidden; }
+.http-env-list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+.http-env-table td, .http-env-table th { padding: 2px 4px; vertical-align: middle; }
+.http-env-table th { position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.http-env-table th .icon-button { width: 18px; height: 18px; margin-left: 2px; vertical-align: middle; }
+.http-env-table td:first-child { width: auto; }
+.http-env-table input:not([type="checkbox"]) { width: 100%; min-width: 110px; font: 12px var(--mono); padding: 3px 7px; }
+.http-env-table input.missing { border-color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, var(--input-bg)); }
+.http-env-private { text-align: center !important; width: 1%; }

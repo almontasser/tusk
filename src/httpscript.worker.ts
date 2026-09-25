@@ -8,7 +8,7 @@ type Input = {
   variables: Record<string, string>;
   environment: Record<string, string>;
   request: { method: string; url: string; headers: [string, string][]; body: string };
-  response?: { status: number; headers: [string, string][]; body: string; contentType: string };
+  response?: { status: number; headers: [string, string][]; body: string; contentType: string; time?: number };
 };
 export type Test = { name: string; passed: boolean; message?: string };
 export type Output = { globals: Record<string, string>; variables: Record<string, string>; tests: Test[]; logs: string[]; error?: string };
@@ -68,6 +68,8 @@ self.onmessage = ({ data }: MessageEvent<Input>) => {
   };
   const response = data.response && {
     status: data.response.status,
+    /** Milliseconds from sending the request to the end of the response. */
+    time: data.response.time ?? 0,
     body,
     headers: headers(data.response.headers),
     contentType: { mimeType: data.response.contentType.split(";")[0].trim(), charset: data.response.contentType.match(/charset=([^;]+)/)?.[1] ?? "utf-8" },
