@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Call, Profile, ProfiledFunction } from "./cachegrind";
+import type { Call, CallNode, Profile, ProfiledFunction } from "./cachegrind";
 import ParseWorker from "./cachegrind.worker?worker";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
@@ -25,7 +25,13 @@ export async function profileDir() {
  * Environment that profiles a PHP run, including processes it starts, such as `artisan test` running PHPUnit.
  * The trigger covers setups with `xdebug.start_with_request=trigger`. Names carry the start time and process ID.
  */
-export const profileEnv = (dir: string) => ["XDEBUG_MODE=profile", "XDEBUG_TRIGGER=1", `XDEBUG_CONFIG=output_dir=${dir} profiler_output_name=cachegrind.out.%t.%p`];
+export const profileEnv = (dir: string) => ["XDEBUG_MODE=profile", "XDEBUG_TRIGGER=1", `XDEBUG_CONFIG=output_dir=${dir} profiler_output_name=cachegrind.out.%t.%p.%R`];
+
+/**
+ * A web request's path from its profile's name, which Xdebug's %R fills with the request URI, turning `/`, `.`,
+ * `?`, and `&` into `_`. Putting slashes back is right for plain paths such as /admin/login, and close otherwise.
+ */
+const requestPath = (path: string) => path.match(/cachegrind\.out\.\d+\.\d+\.(_[^/]*?)(\.gz)?$/)?.[1].replaceAll("_", "/");
 
 const KEEP_PROFILES = 50;
 
@@ -170,8 +176,8 @@ export async function chooseProfile(title = "Open an Xdebug profile", chosen: (p
       const when = `${new Date(f.time * 1000).toLocaleString()} · ${kb(f.size)}`;
       const from = f.path.startsWith(editorDir) ? "" : " · Xdebug folder";
       return {
-        label: names[f.path] ?? when,
-        detail: names[f.path] ? `${when}${from}` : `${f.path.split("/").pop()}${from}`,
+        label: names[f.path] ?? (requestPath(f.path) ? `Request ${requestPath(f.path)}` : when),
+        detail: names[f.path] || requestPath(f.path) ? `${when}${from}` : `${f.path.split("/").pop()}${from}`,
         icon: f.path === currentPath ? "codicon-eye" : "codicon-pulse",
         run: () => chosen(f.path),
       };
@@ -202,7 +208,9 @@ export async function openProfile(path: string, label?: string) {
   for (const f of profile.functions) functionsByFile.set(f.file, [...(functionsByFile.get(f.file) ?? []), f]);
   selected = undefined;
   expanded = hotPath();
-  q(".tests-summary").textContent = `${label ?? labels()[path] ?? relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
+  const request = requestPath(path);
+  q(".tests-summary").textContent = `${label ?? labels()[path] ?? (request ? `Request ${request}` : relative(profile.command))} · ${ms(profile.total)} · ${profile.functions.length} functions`;
+  flamePath = [];
   q(".tests-summary").title = path;
   render();
   showInsights();
@@ -242,7 +250,8 @@ export function compareWith() {
   chooseProfile("Compare with: choose the profile from before your change", async (path) => {
     const parsed = await load(path);
     if (!parsed) return;
-    baseline = { functions: new Map(parsed.functions.map((f) => [f.name, f])), label: labels()[path] ?? path.split("/").pop()!, total: parsed.total };
+    const request = requestPath(path);
+    baseline = { functions: new Map(parsed.functions.map((f) => [f.name, f])), label: labels()[path] ?? (request ? `Request ${request}` : path.split("/").pop()!), total: parsed.total };
     view = "functions";
     sort = "dinclusive"; // The biggest slowdowns first.
     panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v.dataset.view === view)));
@@ -329,14 +338,14 @@ function parse(text: string) {
 // ---- The Profiler tab ----
 
 const MAX_ROWS = 500;
-let profile: Profile = { command: "", functions: [], total: 0, sites: new Map() };
-let view: "functions" | "tree" = "functions";
+let profile: Profile = { command: "", functions: [], total: 0, sites: new Map(), tree: [] };
+let view: "functions" | "tree" | "flame" = "functions";
 let sort: "name" | "calls" | "self" | "inclusive" | "memory" | "dself" | "dinclusive" = "self";
 let selected: ProfiledFunction | undefined;
 /** The rows the table shows, in order, so the arrow keys can move through them. */
 let shown: Row[] = [];
 /** A table row: a function, or in the call tree, a function under its caller, with the calls on that path. */
-type Row = { fn: ProfiledFunction; key: string; depth: number; calls: number; time: number; recursive?: boolean; match?: boolean };
+type Row = { fn: ProfiledFunction; key: string; depth: number; calls: number; time: number; recursive?: boolean; match?: boolean; node?: CallNode };
 /** Call tree nodes that are open, by their path of function names from the root. */
 let expanded = new Set<string>();
 
@@ -380,6 +389,7 @@ panel.innerHTML = `
     <div class="segmented" role="group" aria-label="View">
       <button data-view="functions" aria-pressed="true">Functions</button>
       <button data-view="tree" aria-pressed="false">Call tree</button>
+      <button data-view="flame" aria-pressed="false">Flame graph</button>
     </div>
     <input class="profiler-filter" placeholder="Filter functions" aria-label="Filter functions" spellcheck="false" />
     <label class="profiler-check" data-option="project" title="Hide vendor packages and PHP's own functions"><input type="checkbox" /> Project code only</label>
@@ -394,6 +404,7 @@ panel.innerHTML = `
         <tbody></tbody>
       </table>
     </div>
+    <div class="profiler-flame" tabindex="0" aria-label="Flame graph" hidden></div>
     <div class="profiler-resize" title="Drag to resize"></div>
     <div class="profiler-detail"></div>
   </div>`;
@@ -446,7 +457,7 @@ panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
       if (view === "tree") openBackTrace();
       panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v === b)));
       render();
-      tableEl.focus();
+      (view === "flame" ? flameEl : tableEl).focus();
     }),
 );
 
@@ -457,7 +468,7 @@ tableEl.onkeydown = (e) => {
   const row = shown[at];
   if (e.key in moves && shown.length) selectRow(shown[Math.max(0, Math.min(shown.length - 1, at + moves[e.key]))]);
   else if (e.key === "Enter" && selected) openSource(selected);
-  else if (view === "tree" && row && e.key === "ArrowRight" && !row.recursive && (filterWords().length ? row.fn.callers : row.fn.callees).length) {
+  else if (view === "tree" && row && e.key === "ArrowRight" && hasChildren(row)) {
     if (expanded.has(row.key)) selectRow(shown[at + 1]);
     else (expanded.add(row.key), render());
   } else if (view === "tree" && row && e.key === "ArrowLeft") {
@@ -490,14 +501,22 @@ const columns = {
     ["memory", "Memory", "How much memory in use grew over its calls, including what it called. Memory freed before a call returned doesn't count."],
   ],
   tree: [
-    ["name", "Call tree", "Each function under the function that called it. Type in the filter to see a function's callers instead."],
-    ["calls", "Calls", "How many times the caller called it"],
+    ["name", "Call tree", "Each function under the functions that called it, with its time on that path. Type in the filter to see a function's callers instead."],
+    ["calls", "Calls", "How many times it ran on this path"],
     ["inclusive", "Time", "Time in those calls, including what they called"],
   ],
 } as const;
 
 /** Shows the function table, or the call tree, with the chosen sort and filter. */
 function render() {
+  tableEl.hidden = view === "flame";
+  flameEl.hidden = view !== "flame";
+  project.disabled = view !== "functions";
+  panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v.dataset.view === view)));
+  if (view === "flame") {
+    filter.placeholder = "Highlight functions";
+    return renderFlame();
+  }
   const backTrace = view === "tree" && filterWords().length > 0;
   // While comparing, the change columns take Memory's place, so function names keep their room.
   const list = view === "tree" ? columns.tree : baseline ? [...columns.functions.filter(([key]) => key !== "memory"), ...columns.compare] : columns.functions;
@@ -513,7 +532,6 @@ function render() {
   tr.append(...heads);
   q("thead").replaceChildren(tr);
   panel.classList.toggle("tree-view", view === "tree");
-  project.disabled = view === "tree";
   filter.placeholder = view === "tree" ? "Find in the call tree" : "Filter functions";
   let note = "";
   if (view === "functions") {
@@ -561,43 +579,61 @@ function functionRow(r: Row) {
 }
 
 // ---- The call tree ----
-// Built from caller-to-callee totals, not from each call: a node's children are everything its function called,
-// from any caller. That keeps it small for millions of calls; the times under a node are its function's, overall.
+// The exact tree from the profile: a node is a function under one caller path, so its time is what it took there.
+// Finding a function shows back traces instead, built from caller totals: a function's callers from anywhere.
 
 const MAX_TREE_ROWS = 2000;
 
 /**
- * The rows of open nodes, depth first, children by time. A function already on the path isn't opened again.
- * With text in the filter, the matching functions are the roots instead, and each opens to the functions that
- * called it: a back trace, as PhpStorm calls it.
+ * The rows of open nodes, depth first, children by time. With text in the filter, the matching functions are the
+ * roots instead, and each opens to the functions that called it: a back trace, as PhpStorm calls it. A back trace
+ * doesn't open a function already on its path again.
  */
 function treeRows(): Row[] {
   const rows: Row[] = [];
-  const words = filterWords();
-  const up = words.length > 0;
+  const up = filterWords().length > 0;
   const walk = (row: Row, path: Set<ProfiledFunction>) => {
     if (rows.length >= MAX_TREE_ROWS) return;
     rows.push(row);
     if (row.recursive || !expanded.has(row.key)) return;
+    if (!up) {
+      for (const n of [...row.node!.children].sort((a, b) => b.time - a.time)) walk(nodeRow(n, row.key, row.depth + 1), path);
+      return;
+    }
     const next = new Set(path).add(row.fn);
-    for (const c of [...(up ? row.fn.callers : row.fn.callees)].sort((a, b) => b.time - a.time))
+    for (const c of [...row.fn.callers].sort((a, b) => b.time - a.time))
       walk({ fn: c.fn, key: `${row.key}\n${c.fn.name}`, depth: row.depth + 1, calls: c.calls, time: c.time, recursive: next.has(c.fn) }, next);
   };
-  for (const f of treeRoots()) walk({ fn: f, key: `${up ? "↑" : ""}${f.name}`, depth: 0, calls: f.calls, time: f.inclusive, match: up }, new Set());
+  if (up) for (const f of treeRoots()) walk({ fn: f, key: `↑${f.name}`, depth: 0, calls: f.calls, time: f.inclusive, match: true }, new Set());
+  else for (const n of [...profile.tree].sort((a, b) => b.time - a.time)) walk(nodeRow(n, "", 0), new Set());
   return rows;
 }
 
+const nodeRow = (n: CallNode, parentKey: string, depth: number): Row => ({
+  fn: n.fn,
+  key: parentKey ? `${parentKey}\n${n.fn.name}` : n.fn.name,
+  depth,
+  calls: n.calls,
+  time: n.time,
+  node: n,
+});
+
+const hasChildren = (r: Row) => (r.node ? r.node.children.length > 0 : !r.recursive && r.fn.callers.length > 0);
+
 const filterWords = () => filter.value.toLowerCase().split(/\s+/).filter(Boolean);
 
-/** The call tree's roots: where the run starts, or with text in the filter, the matching functions by total time. */
+/** The functions matching the filter, by total time: the roots of back traces. */
 function treeRoots() {
   const words = filterWords();
-  const roots = words.length ? profile.functions.filter((f) => words.every((w) => f.name.toLowerCase().includes(w))) : profile.functions.filter((f) => !f.callers.length);
-  return roots.sort((a, b) => b.inclusive - a.inclusive).slice(0, MAX_ROWS);
+  return profile.functions
+    .filter((f) => words.every((w) => f.name.toLowerCase().includes(w)))
+    .sort((a, b) => b.inclusive - a.inclusive)
+    .slice(0, MAX_ROWS);
 }
 
 /** Opens the busiest chain of callers above the first match, so its back trace shows at once. */
 function openBackTrace() {
+  if (!filterWords().length) return;
   const first = treeRoots()[0];
   if (!first) return;
   let key = `↑${first.name}`;
@@ -613,16 +649,13 @@ function openBackTrace() {
 /** Opens the busiest path from the root, as long as each step takes at least a tenth of the run. */
 function hotPath() {
   const open = new Set<string>();
-  let fn = profile.functions.find((f) => f.name === "{main}") ?? profile.functions.find((f) => !f.callers.length);
-  let key = fn?.name ?? "";
-  const seen = new Set<ProfiledFunction>();
-  while (fn && !seen.has(fn) && open.size < 40) {
-    seen.add(fn);
+  let node: CallNode | undefined = [...profile.tree].sort((a, b) => b.time - a.time)[0];
+  let key = node?.fn.name ?? "";
+  while (node && open.size < 60) {
     open.add(key);
-    const next = [...fn.callees].sort((a, b) => b.time - a.time)[0];
-    if (!next || next.time < profile.total / 10) break;
-    fn = next.fn;
-    key = `${key}\n${fn.name}`;
+    node = [...node.children].sort((a, b) => b.time - a.time)[0];
+    if (!node || node.time < profile.total / 10) break;
+    key = `${key}\n${node.fn.name}`;
   }
   return open;
 }
@@ -633,7 +666,7 @@ function treeRow(r: Row) {
   tr.classList.toggle("match", !!r.match);
   const name = cell("", "name");
   name.style.paddingLeft = `${6 + r.depth * 14}px`;
-  const canOpen = !r.recursive && (filterWords().length ? r.fn.callers : r.fn.callees).length > 0;
+  const canOpen = hasChildren(r);
   const chevron = Object.assign(document.createElement("span"), {
     className: `chevron codicon ${canOpen ? (expanded.has(r.key) ? "codicon-chevron-down" : "codicon-chevron-right") : ""}`,
   });
@@ -656,6 +689,76 @@ function treeRow(r: Row) {
   rowOf.set(r.key, tr);
   return tr;
 }
+
+// ---- The flame graph ----
+// The call tree as bars: each function's bar sits under its caller's and is as wide as its time there. The busiest
+// callees come first. Click a bar to zoom into it, and click a bar above to zoom back out.
+
+const FLAME_ROW = 18;
+const flameEl = q(".profiler-flame");
+/** The zoomed bar's ancestors, from the root, then the bar itself. Empty shows the whole run. */
+let flamePath: CallNode[] = [];
+
+function renderFlame() {
+  const width = flameEl.clientWidth || 800;
+  const words = filterWords();
+  const bars: HTMLElement[] = [];
+  let deepest = 0;
+  const bar = (n: CallNode, left: number, w: number, depth: number, path: CallNode[], ancestor = false) => {
+    deepest = Math.max(deepest, depth);
+    const f = n.fn;
+    const kind = isInternal(f) ? "php" : isProject(f) ? "project" : "vendor";
+    const matches = words.length > 0 && words.every((word) => f.name.toLowerCase().includes(word));
+    const el = document.createElement("div");
+    el.className = `flame-bar ${kind}${ancestor ? " ancestor" : ""}${matches ? " match" : words.length ? " dim" : ""}${f === selected ? " selected" : ""}`;
+    el.style.cssText = `left:${left}px;top:${depth * FLAME_ROW}px;width:${w}px`;
+    if (w > 36) el.textContent = displayName(f);
+    el.title = `${displayName(f)}\n${ms(n.time)} · ${share(n.time)} · ${n.calls} ${n.calls === 1 ? "call" : "calls"}\n${where(f)}\nClick to zoom in, double-click to open`;
+    el.onclick = () => {
+      flamePath = ancestor || flamePath.at(-1) === n ? path.slice(0, -1) : path;
+      selected = f;
+      renderFlame();
+      showDetail();
+    };
+    el.ondblclick = () => openSource(f);
+    bars.push(el);
+  };
+  // Ancestors of the zoomed bar span the width, so the path stays visible and each one zooms back out.
+  flamePath.slice(0, -1).forEach((n, depth) => bar(n, 0, width, depth, flamePath.slice(0, depth + 1), true));
+  const focus = flamePath.at(-1);
+  const top = focus ? [focus] : [...profile.tree].sort((a, b) => b.time - a.time);
+  const scale = width / Math.max(1e-9, top.reduce((t, n) => t + n.time, 0));
+  const place = (n: CallNode, left: number, depth: number, path: CallNode[]) => {
+    const w = n.time * scale;
+    if (w < 1) return; // Narrower than a pixel: too small to see or click.
+    bar(n, left, w, depth, path);
+    let x = left;
+    for (const c of [...n.children].sort((a, b) => b.time - a.time)) {
+      place(c, x, depth + 1, [...path, c]);
+      x += c.time * scale;
+    }
+  };
+  let x = 0;
+  const base = Math.max(0, flamePath.length - 1);
+  for (const n of top) {
+    place(n, x, base, focus ? flamePath : [n]);
+    x += n.time * scale;
+  }
+  const canvas = document.createElement("div");
+  canvas.className = "flame-canvas";
+  canvas.style.height = `${(deepest + 1) * FLAME_ROW}px`;
+  canvas.append(...bars);
+  flameEl.replaceChildren(canvas);
+}
+
+// Escape zooms out one level.
+flameEl.onkeydown = (e) => {
+  if (e.key !== "Escape" || !flamePath.length) return;
+  flamePath = flamePath.slice(0, -1);
+  renderFlame();
+  e.preventDefault();
+};
+new ResizeObserver(() => view === "flame" && !flameEl.hidden && renderFlame()).observe(flameEl);
 
 // ---- Selection and the side pane ----
 

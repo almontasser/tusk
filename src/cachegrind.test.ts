@@ -54,3 +54,17 @@ test("reads memory, and the time of calls made from each line", () => {
   close(line5.time, (42 + 146 + 8 + 4 + 4 + 1) / 100_000);
   assert.equal(profile.sites.get("/app/demo.php")!.get(9)!.calls, 3); // $g->greet() in the loop
 });
+
+test("keeps the call tree, merging calls along the same path", () => {
+  const [main] = profile.tree;
+  assert.equal(main.fn.name, "{main}");
+  assert.equal(profile.tree.length, 1);
+  const greet = main.children.find((n) => n.fn.name === "Greeter->greet")!;
+  assert.equal(greet.calls, 3);
+  close(greet.time, (658 + 42 + 146 + 158 + 8 + 4 + 53 + 4 + 1) / 100_000);
+  assert.deepEqual(greet.children.map((n) => [n.fn.name, n.calls]).sort(), [["php::str_repeat", 3], ["php::strtoupper", 3]]);
+  // fib(5) under {main}, then fib under fib, as deep as the recursion went.
+  let depth = 0;
+  for (let node = main.children.find((n) => n.fn.name === "fib"); node; node = node.children.find((n) => n.fn.name === "fib")) depth++;
+  assert.equal(depth, 5);
+});

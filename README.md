@@ -58,7 +58,7 @@ file to change when you add it.
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
-| Profiler | The call tree merges a function's calls from all its callers, so the times under a node are that function's overall, not only the ones under this caller. There's no graph view. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
+| Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
@@ -870,6 +870,9 @@ of the bottom panel. Run these from ⌘⇧A:
 - **Profile URL…** asks for a path, such as `/posts?page=2`, requests it
   through the profiling server (starting the server if needed), and opens that
   request's profile. The status bar shows the response code and time.
+- While the profiling server runs, pages you open in a browser, where you can
+  sign in, are profiled too. They're listed in **Open Xdebug Profile…** by
+  their URL.
 - **Start Profiling Server (PHP's server with the Xdebug profiler)** serves the
   app at `http://127.0.0.1:8000`, as `php artisan serve` does, or on the next
   free port if 8000 is taken. Each request writes a profile.
@@ -885,11 +888,17 @@ share at a glance. Recursive functions count their nested calls once. Memory is
 how much memory in use grew over the function's calls, as Xdebug measures it:
 memory freed before a call returns doesn't count.
 
-Click **Call tree** to see each function under the functions that called it.
-The tree opens along the busiest path. → and ← open and close a node, and a
-function that calls back into one of its callers isn't opened again. A node's
-children are everything its function called, from any caller, so the tree
-stays fast for millions of calls.
+Click **Call tree** to see each function under the function that called it,
+with its calls and time on that path. The tree opens along the busiest path,
+and → and ← open and close a node.
+
+Click **Flame graph** to see the same tree as bars: each function's bar sits
+under its caller's and is as wide as its time there, busiest first. Blue bars
+are your code, yellow are `vendor`, and gray are PHP's own functions. Hover
+over a bar for its time and calls, click it to zoom in (the bars above it stay,
+and clicking one zooms back out), press Escape to zoom out one level, and
+double-click to open the function. Type in the filter to highlight matching
+functions.
 
 Type in the filter while the call tree shows to find a function's back trace:
 the matching functions are listed first, each opening to the functions that

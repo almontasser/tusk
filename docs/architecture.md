@@ -1448,11 +1448,21 @@ profile didn't run counts in full, and one that only the other profile ran
 doesn't show. The editor names its profiles (the request or test) in
 `localStorage` by path, since the files only carry the script Xdebug saw.
 
-The call tree is built from the caller-to-callee pairs, not from each call: a
-node's children are everything its function called, from any caller. Keeping
-the real tree would cost memory for every call. A function already on a node's
-path isn't opened again, which ends recursion. When a profile opens, the tree
-opens along the busiest callee while it takes at least a tenth of the run.
+The call tree and the flame graph use the real tree of calls, with calls along
+the same path merged: a node is a function under one path from the root. The
+parser builds it with the same post-order claiming: a finished block becomes a
+node and adopts its callees' nodes, merging those of the same function (and
+their subtrees). A Laravel request has 20,000 to 30,000 such nodes, and every
+node's children add up to no more than the node. When a profile opens, the tree
+opens along the busiest child while it takes at least a tenth of the run.
+
+The flame graph draws each node wider than a pixel as an absolutely positioned
+`div`, about 1,300 for a Laravel request, and redraws when the panel resizes.
+Zooming keeps the zoomed node's ancestors as full-width bars above it.
+
+Profile names use Xdebug's `%R`, the request URI, which is empty on the command
+line. The editor turns its underscores back into slashes to name a browser
+request.
 
 After a profiling run, the editor keeps the newest 50 profiles in its folder and
 deletes older ones, since a Laravel request's profile can be several megabytes.
@@ -1466,7 +1476,7 @@ profiles with their time and size.
 `parseCachegrind` in `src/cachegrind.ts` reads the format line by line. Xdebug
 writes one block per call, after the call returns, so blocks come in post-order:
 a block's callees are the last blocks no caller has claimed yet, one per
-`calls=` line. That rebuilds the call tree without keeping it. Each block
+`calls=` line. Each block
 carries a map from function to the time of that function's outermost calls in
 its subtree. A caller merges its callees' maps (into the largest one) and sets
 its own entry, which replaces any nested calls to itself. The roots' maps give
@@ -1817,10 +1827,12 @@ is flat (a file, then its lines with hit counts), so the same regex approach
 as the JUnit report reads it without an XML parser. The PHP format would need
 PHP to read it back, and HTML and text are for people.
 
-### 2026-09-25: A function table for profiles, not a call graph
+### 2026-09-25: A function table first, then the merged call tree
 
 PhpStorm's profiler shows execution statistics (a function table) and a call
 tree. The table answers the common question, "where does the time go?", in one
-sortable list, and fits the bottom panel. Callers and callees would need the
-call tree kept in memory, which for a large request is millions of calls.
+sortable list, so it came first. Keeping every call would cost memory for
+millions of calls, but merging calls along the same path keeps the tree at tens
+of thousands of nodes for a Laravel request, which is small enough to keep for
+the call tree and the flame graph.
 

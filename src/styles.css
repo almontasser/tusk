@@ -694,6 +694,18 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler-insights .chip:hover { background: var(--hover); color: var(--text); }
 .profiler-insights .chip b { color: var(--text); font-weight: 600; }
 .profiler-insights .compare { margin-left: 6px; font-weight: 600; }
+/* The flame graph: bars colored by where the code lives. */
+.profiler-flame { flex: 1; overflow: auto; outline: none; padding: 4px 8px; }
+.flame-canvas { position: relative; min-width: 100%; }
+.flame-bar { position: absolute; height: 17px; box-sizing: border-box; padding: 0 4px; border-right: 1px solid var(--panel); border-radius: 2px; font: 11px/17px var(--mono); color: #1e1f22; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.flame-bar.project { background: #7fb2f5; }
+.flame-bar.vendor { background: #e2c283; }
+.flame-bar.php { background: #a9acb2; }
+.flame-bar:hover { filter: brightness(1.12); }
+.flame-bar.ancestor { opacity: 0.55; }
+.flame-bar.dim { opacity: 0.25; }
+.flame-bar.match { box-shadow: inset 0 0 0 2px var(--orange); }
+.flame-bar.selected { box-shadow: inset 0 0 0 2px var(--text); }
 .profiler .chevron { display: inline-block; width: 16px; vertical-align: -3px; color: var(--faint); font-size: 14px !important; }
 /* Times of the calls on each line, after the line in the editor. */
 .profile-time { color: var(--faint) !important; font-style: italic; }

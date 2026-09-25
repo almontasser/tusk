@@ -21,11 +21,19 @@ export type ProfiledFunction = {
 
 export type Call = { fn: ProfiledFunction; calls: number; time: number };
 
+/**
+ * A node of the call tree: a function called along one path from the root, with every call on that path merged.
+ * Unlike callers and callees, it keeps the path: `time` is the time of this function's calls under this parent only.
+ */
+export type CallNode = { fn: ProfiledFunction; calls: number; time: number; children: CallNode[] };
+
 export type Profile = {
   command: string;
   functions: ProfiledFunction[];
   /** The script's total time in milliseconds. */
   total: number;
+  /** The call tree's roots: {main}, and anything PHP ran after it, such as shutdown functions. */
+  tree: CallNode[];
   /** Time spent in calls made from each line, by file: where the run spent its time, line by line. */
   sites: Map<string, Map<number, { time: number; calls: number }>>;
 };
@@ -48,7 +56,7 @@ export function parseCachegrind(text: string): Profile {
   let scale = 1 / 1000; // microseconds to milliseconds
   let file = "";
   type Cost = { time: number; memory: number };
-  type Block = { fn: ProfiledFunction; time: number; memory: number; calls: number; totals?: Map<ProfiledFunction, Cost> };
+  type Block = { fn: ProfiledFunction; time: number; memory: number; calls: number; totals?: Map<ProfiledFunction, Cost>; node?: CallNode };
   const sites: Profile["sites"] = new Map();
   const unclaimed: Block[] = [];
   let block: Block | undefined;
@@ -66,6 +74,21 @@ export function parseCachegrind(text: string): Profile {
     if (m[2] !== undefined) names[kind].set(m[1], m[2]);
     return names[kind].get(m[1]) ?? "";
   };
+  /** Adds call nodes under a parent, merging each into the parent's node for the same function, if it has one. */
+  const adopt = (parent: CallNode, nodes: CallNode[]) => {
+    const byFn = new Map(parent.children.map((n) => [n.fn, n]));
+    for (const node of nodes) {
+      const same = byFn.get(node.fn);
+      if (!same) {
+        parent.children.push(node);
+        byFn.set(node.fn, node);
+        continue;
+      }
+      same.calls += node.calls;
+      same.time += node.time;
+      adopt(same, node.children);
+    }
+  };
   /** Claims the finished block's callees and records its function's time in its subtree. */
   const finish = () => {
     if (!block) return;
@@ -79,7 +102,9 @@ export function parseCachegrind(text: string): Profile {
         totals.set(fn, t ? { time: t.time + c.time, memory: t.memory + c.memory } : c);
       }
     totals.set(block.fn, { time: block.time, memory: block.memory });
-    for (const callee of callees) callee.totals = undefined;
+    block.node = { fn: block.fn, calls: 1, time: block.time, children: [] };
+    adopt(block.node, callees.map((c) => c.node!));
+    for (const callee of callees) callee.totals = callee.node = undefined;
     block.totals = totals;
     unclaimed.push(block);
     block = undefined;
@@ -132,6 +157,9 @@ export function parseCachegrind(text: string): Profile {
   }
   finish();
   // What's left unclaimed are the roots: {main}, and anything PHP ran after it, such as shutdown functions.
+  const tree: CallNode = { fn: get("{root}"), calls: 0, time: 0, children: [] };
+  byName.delete("{root}");
+  adopt(tree, unclaimed.map((b) => b.node!));
   for (const root of unclaimed)
     for (const [fn, c] of root.totals ?? []) {
       fn.inclusive += c.time;
@@ -149,5 +177,6 @@ export function parseCachegrind(text: string): Profile {
     functions,
     total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)),
     sites,
+    tree: tree.children,
   };
 }
