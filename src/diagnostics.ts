@@ -350,3 +350,50 @@ export function magoConfigText(bundled: string, composerJson: string, includes: 
   const text = add(add(bundled, "includes", includes), "excludes", excludes);
   return version ? `php-version = "${version.split(".").length === 2 ? `${version}.0` : version}"\n${text}` : text;
 }
+
+/**
+ * A message line split into text and code: code in backticks, and quoted class names such as Phpactor's
+ * `"App\Models\Post"`.
+ */
+export function messageParts(line: string): { text: string; code: boolean }[] {
+  return line
+    .replace(/"([\w\\$]+(?:::\w+)?)"/g, "`$1`")
+    .split(/`([^`]*)`/)
+    .map((text, i) => ({ text, code: i % 2 === 1 }))
+    .filter((p) => p.text);
+}
+
+/**
+ * A problem's message as Markdown for its hover: the first line in bold, and the checker's notes and advice as
+ * paragraphs after it. Code stays code, cut short past 100 characters (the problem page shows it whole), and the
+ * rest is escaped, so backslashes and generics such as `array<int>` show as written.
+ */
+export function problemMarkdown(message: string): string {
+  const format = (line: string) =>
+    messageParts(line)
+      .map((p) => (p.code ? `\`${p.text.length > 100 ? `${p.text.slice(0, 100)}…` : p.text}\`` : p.text.replace(/[\\`*_{}[\]<>()#+!|~]/g, "\\$&")))
+      .join("");
+  const [first, ...rest] = message.split("\n").map((l) => l.trim()).filter(Boolean);
+  return [`**${format(first ?? "")}**`, ...rest.map(format)].join("\n\n");
+}
+
+/** A long type, such as an array shape, laid out with one key per line: `array{'a': int, 'b': string}`. */
+export function formatType(type: string): string {
+  let out = "";
+  const open: string[] = [];
+  const pad = () => `\n${"  ".repeat(open.filter((o) => o === "{").length)}`;
+  for (let i = 0; i < type.length; i++) {
+    const c = type[i];
+    if ("{<(".includes(c)) {
+      open.push(c);
+      out += c === "{" ? `{${pad()}` : c;
+    } else if ("}>)".includes(c)) {
+      const was = open.pop();
+      out += was === "{" ? `${pad()}}` : c;
+    } else if (c === "," && open.at(-1) === "{") {
+      out += `,${pad()}`;
+      if (type[i + 1] === " ") i++;
+    } else out += c;
+  }
+  return out;
+}

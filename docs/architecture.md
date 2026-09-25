@@ -458,6 +458,42 @@ that closes keeps its last markers as its scan result. The panel's Errors and
 Warnings toggles filter the list, not the status bar counts, and are kept in
 `localStorage` (`problemsShown`).
 
+### Problem popups and the problem page
+
+Monaco's own problem hover shows the message as plain text in the editor's
+font, with the checker's name (`mago(non-existent-method)`). `registerProblemHover`
+in `lsp.ts` adds a hover for the markers under the pointer, rendered as
+Markdown by `problemMarkdown` in `diagnostics.ts`: the first line in bold,
+backticked and quoted names as code, notes as paragraphs, code past 100
+characters cut short, and an **Open in Editor** command link.
+`styles.css` hides Monaco's message row (`:has(> .marker.hover-contents)`) and
+keeps its View Problem and Quick Fix links. Monaco lists the newest hover
+provider first, so the hover is registered again after each server's
+providers. Markers no longer carry a source; the rule's code stays, for
+turning a rule off in `mago.toml`.
+
+The link runs `problems.openPage`, which `showProblemPage` in `problems.ts`
+handles: a page in the editor area, like the diff view, with the message
+(`messageParts`; code longer than 60 characters goes in a block, laid out by
+`formatType` with one array-shape key per line), a read-only editor showing
+four lines around the problem with its range underlined (a `problem` scheme
+keeps it from the language servers), and Go to Code. Opening a file closes it.
+
+### Checking open files one at a time
+
+Phpactor's diagnostics engine (`DiagnosticsEngine` in its language server
+library) keeps one waiting document: each document opened, changed, or saved
+replaces the one before, and it drops a document's results once another is
+waiting. So when a session reopened several files, or indexing ended and the
+editor asked for every open file again, only the last one got checked, and the
+others showed no problems until you edited them. `checkOneByOne` in `lsp.ts`
+sends `didSave` for one file at a time, the next once the last has published and
+been quiet for 3 seconds (Mago takes about 2), or after 30 seconds, when the
+server starts and when indexing ends. The client tracks the document Phpactor
+checks next (`lastEnqueued`), and a publish for it marks the file as checked
+(`diagnosed`). Until then, the Problems panel shows the scan's problems for an
+open PHP file: other servers, such as the spell checker, publish first.
+
 ### Docblocks Phpactor can't read
 
 Phpactor's docblock parser drops a `@param` whose type it can't read, such as a

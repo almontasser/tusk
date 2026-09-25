@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { magoConfigText, magoIssuesByFile, realProblems, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, magoConfigText, problemMarkdown, magoIssuesByFile, realProblems, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -94,4 +94,12 @@ test("writes the project's Mago settings", () => {
   const bundled = '[source]\nincludes = ["vendor"]\nexcludes = [".*"]\n';
   const text = magoConfigText(bundled, '{"require": {"php": "^8.2|^8.3"}}', ["/stubs"], ["vendor/a.php"]);
   assert.equal(text, 'php-version = "8.2.0"\n[source]\nincludes = ["vendor", "/stubs"]\nexcludes = [".*", "vendor/a.php"]\n');
+});
+
+test("formats messages for hovers and the problem page", () => {
+  assert.equal(
+    problemMarkdown('Method "App\\Models\\Post::save" is <wrong>.\nUse `array<int>` or *this*.'),
+    "**Method `App\\Models\\Post::save` is \\<wrong\\>.**\n\nUse `array<int>` or \\*this\\*.",
+  );
+  assert.equal(formatType("array{'a': array<int, string>, 'b': list{int}}"), "array{\n  'a': array<int, string>,\n  'b': list{\n    int\n  }\n}");
 });

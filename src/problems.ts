@@ -4,8 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { facts, projectCache, readModels } from "./eloquent";
-import { magoIssuesByFile, realProblems, severityOf, type Diagnostic } from "./diagnostics";
-import { magoConfigPath, PHPACTOR_INDEX } from "./lsp";
+import { formatType, magoIssuesByFile, messageParts, realProblems, severityOf, type Diagnostic } from "./diagnostics";
+import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
 import { showPanelView } from "./terminal";
 
 type Host = {
@@ -73,17 +73,20 @@ const MARKER = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warnin
 const isShown = (severity: monaco.MarkerSeverity) => severity >= monaco.MarkerSeverity.Warning;
 const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path));
 
-/** Every file's problems: live markers for open files, and the scan for the rest. */
+/**
+ * Every file's problems: live markers for open files, and the scan for the rest. An open PHP file shows the scan
+ * until Phpactor, which also runs Mago, has checked it.
+ */
 function allProblems(): Map<string, Problem[]> {
   const root = host.root();
-  const all = new Map([...scanned].filter(([path]) => !openModel(path)));
-  const live = new Map<string, Problem[]>();
+  const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || diagnosed.has(path));
+  const all = new Map([...scanned].filter(([path]) => !live(path)));
   for (const m of monaco.editor.getModelMarkers({})) {
-    if (m.resource.scheme !== "file" || !m.resource.fsPath.startsWith(`${root}/`) || !isShown(m.severity)) continue;
+    const path = m.resource.fsPath;
+    if (m.resource.scheme !== "file" || !path.startsWith(`${root}/`) || !isShown(m.severity) || !live(path)) continue;
     const problem = { range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value };
-    live.set(m.resource.fsPath, [...(live.get(m.resource.fsPath) ?? []), problem]);
+    all.set(path, [...(all.get(path) ?? []), problem]);
   }
-  for (const [path, problems] of live) all.set(path, problems);
   return all;
 }
 
@@ -144,8 +147,13 @@ function render() {
             message.title = p.message;
             const where = document.createElement("span");
             where.className = "problems-muted";
-            where.textContent = `${[p.source, p.code].filter(Boolean).join(" ")} :${p.range.startLineNumber}`;
-            li.append(message, where);
+            where.textContent = `${p.code ?? ""} :${p.range.startLineNumber}`;
+            const page = document.createElement("button");
+            page.className = "icon-button problems-page-button";
+            page.title = "Open in Editor";
+            page.innerHTML = '<span class="codicon codicon-open-preview"></span>';
+            page.onclick = (e) => (e.stopPropagation(), showProblemPage({ ...p, path }));
+            li.append(message, where, page);
             li.onclick = () => host.openAt(path, p.range);
             return li;
           }),
@@ -164,7 +172,7 @@ monaco.editor.onDidChangeMarkers(renderSoon);
 monaco.editor.onDidCreateModel((model) =>
   model.onWillDispose(() => {
     const path = model.uri.fsPath;
-    if (model.uri.scheme !== "file" || scan.root !== host.root()) return;
+    if (model.uri.scheme !== "file" || scan.root !== host.root() || !diagnosed.has(path)) return;
     const markers = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => isShown(m.severity));
     scanned.set(path, markers.map((m) => ({ range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value })));
     renderSoon();
@@ -288,3 +296,119 @@ export async function scanProject() {
 export function initProblems(h: Host) {
   host = h;
 }
+
+// ---- One problem on a page of its own, for messages too long to read in a hover ----
+
+const page = document.createElement("div");
+page.id = "problem-page";
+page.hidden = true;
+let excerpt: monaco.editor.IStandaloneCodeEditor | undefined;
+let excerptDecorations: monaco.editor.IEditorDecorationsCollection | undefined;
+
+/** A message line with its code in `code` elements, and long code, such as array shapes, laid out on its own lines. */
+function messageLine(line: string, className: string) {
+  const el = document.createElement("div");
+  el.className = className;
+  for (const part of messageParts(line)) {
+    // After a block, the sentence's comma or period on its own reads as a stray mark.
+    const afterBlock = el.lastChild instanceof HTMLPreElement;
+    if (!part.code) el.append(afterBlock ? part.text.replace(/^[,.;:]\s*/, "") : part.text);
+    else if (part.text.length > 60) {
+      const pre = document.createElement("pre");
+      pre.textContent = formatType(part.text);
+      el.append(pre);
+    } else {
+      const code = document.createElement("code");
+      code.textContent = part.text;
+      el.append(code);
+    }
+  }
+  return el;
+}
+
+/** Shows a problem on a page in the editor area: its whole message, the code around it, and a link to the code. */
+export async function showProblemPage(p: Problem & { path: string }) {
+  if (!page.isConnected) {
+    document.querySelector("#workbench main")!.insertBefore(page, document.getElementById("panel"));
+    addEventListener("keydown", (e) => e.key === "Escape" && !page.hidden && closeProblemPage(), true);
+  }
+  const root = host.root();
+  const error = p.severity === monaco.MarkerSeverity.Error;
+  const header = document.createElement("header");
+  header.innerHTML = `<span class="codicon ${error ? "codicon-error icon-error" : "codicon-warning icon-warning"}"></span>`;
+  const where = document.createElement("span");
+  where.className = "problem-page-path";
+  where.textContent = `${p.path.startsWith(`${root}/`) ? p.path.slice(root.length + 1) : p.path}:${p.range.startLineNumber}`;
+  const rule = document.createElement("span");
+  rule.className = "problem-page-rule";
+  rule.textContent = p.code ?? "";
+  const go = document.createElement("button");
+  go.textContent = "Go to Code";
+  go.onclick = () => (closeProblemPage(), host.openAt(p.path, p.range));
+  const close = document.createElement("button");
+  close.className = "icon-button";
+  close.title = "Close (Esc)";
+  close.innerHTML = '<span class="codicon codicon-close"></span>';
+  close.onclick = closeProblemPage;
+  header.append(where, rule, go, close);
+
+  const body = document.createElement("div");
+  body.className = "problem-page-body";
+  const [title, ...notes] = p.message.split("\n").map((l) => l.trim()).filter(Boolean);
+  const code = document.createElement("div");
+  code.className = "problem-page-code";
+  body.append(messageLine(title ?? "", "problem-page-title"), code, ...notes.map((n) => messageLine(n, "problem-page-note")));
+  page.replaceChildren(header, body);
+  document.querySelectorAll<HTMLElement>("#editor, #diff, #history, #merge").forEach((e) => (e.hidden = true));
+  page.hidden = false;
+
+  // The code around the problem, read only, with the problem's range highlighted. A separate scheme keeps the
+  // copy away from the language servers.
+  const text = monaco.editor.getModel(monaco.Uri.file(p.path))?.getValue() ?? (await invoke<string>("read_file", { path: p.path }).catch(() => ""));
+  const lines = text.split("\n");
+  const first = Math.max(1, p.range.startLineNumber - 4);
+  const last = Math.min(lines.length, p.range.endLineNumber + 4);
+  excerpt?.getModel()?.dispose();
+  excerpt?.dispose();
+  const language = monaco.editor.getModel(monaco.Uri.file(p.path))?.getLanguageId();
+  const model = monaco.editor.createModel(lines.slice(first - 1, last).join("\n"), language ?? (p.path.endsWith(".php") ? "php" : undefined), monaco.Uri.from({ scheme: "problem", path: p.path }));
+  code.style.height = `${(last - first + 1) * 20 + 12}px`;
+  excerpt = monaco.editor.create(code, {
+    model,
+    readOnly: true,
+    domReadOnly: true,
+    lineNumbers: (n) => String(n + first - 1),
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    renderLineHighlight: "none",
+    lineHeight: 20,
+    padding: { top: 6, bottom: 6 },
+    scrollbar: { vertical: "hidden", alwaysConsumeMouseWheel: false },
+    folding: false,
+    glyphMargin: false,
+    contextmenu: false,
+    automaticLayout: true,
+  });
+  const shift = first - 1;
+  excerptDecorations = excerpt.createDecorationsCollection([
+    {
+      range: new monaco.Range(p.range.startLineNumber - shift, p.range.startColumn, p.range.endLineNumber - shift, p.range.endColumn),
+      options: { inlineClassName: error ? "problem-page-range-error" : "problem-page-range-warning" },
+    },
+    { range: new monaco.Range(p.range.startLineNumber - shift, 1, p.range.startLineNumber - shift, 1), options: { isWholeLine: true, className: "problem-page-line" } },
+  ]);
+}
+
+export function closeProblemPage() {
+  if (page.hidden) return;
+  page.hidden = true;
+  excerptDecorations?.clear();
+  excerpt?.getModel()?.dispose();
+  excerpt?.dispose();
+  excerpt = undefined;
+  $editor().hidden = false;
+}
+const $editor = () => document.getElementById("editor")!;
+
+// The hover's Open in Editor link (lsp.ts).
+monaco.editor.registerCommand("problems.openPage", (_, p: Problem & { path: string }) => showProblemPage(p));

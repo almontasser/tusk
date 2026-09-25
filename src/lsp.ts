@@ -10,7 +10,7 @@ import { choose } from "./palette";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { magoConfigText, realProblems, severityOf } from "./diagnostics";
+import { magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -77,6 +77,17 @@ const severity = [0, 8, 4, 2, 1]; // Error, Warning, Information, Hint
 const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[] }>();
 onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
 
+/**
+ * Files Phpactor has checked since they opened, whose markers from it and Mago are current. The Problems panel
+ * (problems.ts) shows its scan for the others.
+ */
+export const diagnosed = new Set<string>();
+function markDiagnosed(model: monaco.editor.ITextModel) {
+  if (diagnosed.has(model.uri.fsPath)) return;
+  model.onWillDispose(() => diagnosed.delete(model.uri.fsPath));
+  diagnosed.add(model.uri.fsPath);
+}
+
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
   const key = `${owner} ${model.uri}`;
   if (!lastDiagnostics.has(key)) model.onWillDispose(() => lastDiagnostics.delete(key));
@@ -89,11 +100,46 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
       ...toRange(d.range),
       message: typeof d.message === "string" ? d.message : d.message.value,
       severity: severity[severityOf(d)],
-      source: d.source,
       code: d.code?.toString(),
     })),
   );
 }
+
+const problemIcons: Record<number, string> = {
+  [monaco.MarkerSeverity.Error]: "$(error)",
+  [monaco.MarkerSeverity.Warning]: "$(warning)",
+  [monaco.MarkerSeverity.Info]: "$(info)",
+  [monaco.MarkerSeverity.Hint]: "$(lightbulb)",
+};
+let problemHover: monaco.IDisposable | undefined;
+
+/**
+ * Shows the problems under the pointer as formatted text. Monaco's own problem hover shows plain text in the
+ * editor's font, so styles.css hides its message and keeps its View Problem and Quick Fix links. This is
+ * registered again after each server's providers, since Monaco lists the newest provider's hover first.
+ */
+function registerProblemHover() {
+  problemHover?.dispose();
+  problemHover = monaco.languages.registerHoverProvider(monaco.languages.getLanguages().map((l) => l.id), {
+    provideHover(model, pos) {
+      const markers = monaco.editor
+        .getModelMarkers({ resource: model.uri })
+        .filter((m) => monaco.Range.containsPosition(m, pos))
+        .sort((a, b) => b.severity - a.severity);
+      if (!markers.length) return null;
+      return {
+        range: markers.reduce((r, m) => r.plusRange(m), monaco.Range.lift(markers[0])),
+        contents: markers.map((m) => {
+          const problem = { path: model.uri.fsPath, range: monaco.Range.lift(m), message: m.message, severity: m.severity, code: typeof m.code === "string" ? m.code : m.code?.value };
+          // problems.ts handles the command, which opens the problem on a page of its own.
+          const open = `[Open in Editor](command:problems.openPage?${encodeURIComponent(JSON.stringify([problem]))} "Show the whole problem on a page")`;
+          return { value: `${problemIcons[m.severity]} ${problemMarkdown(m.message)}\n\n${open}`, supportThemeIcons: true, isTrusted: true };
+        }),
+      };
+    },
+  });
+}
+registerProblemHover();
 
 /** Converts locations and loads their files, because Monaco can only show locations in existing models. */
 async function locations(result: L.Location | L.Location[] | L.LocationLink[] | null): Promise<monaco.languages.Location[]> {
@@ -205,7 +251,13 @@ async function startServer(
 
   const send = (msg: object) => invoke("lsp_send", { name, msg: JSON.stringify({ jsonrpc: "2.0", ...msg }) });
   // Anything else sent to the server first sends edits it hasn't seen, so it always answers for the current text.
-  const notify = (method: string, params: unknown) => (method !== "textDocument/didChange" && flush(), send({ method, params }));
+  const notify = (method: string, params: any) => {
+    if (method !== "textDocument/didChange") flush();
+    if (/^textDocument\/did(Open|Change|Save)$/.test(method)) lastEnqueued = params.textDocument.uri;
+    return send({ method, params });
+  };
+  /** The document Phpactor checks next: the one its diagnostics engine keeps waiting (see checkOneByOne). */
+  let lastEnqueued = "";
   const call = <T>(method: string, params: unknown, token?: monaco.CancellationToken) => {
     flush();
     const id = nextId++;
@@ -240,7 +292,9 @@ async function startServer(
     } else if (msg.method === "textDocument/publishDiagnostics") {
       diagnostics.set(msg.params.uri, msg.params.diagnostics);
       const model = monaco.editor.getModel(monaco.Uri.parse(msg.params.uri));
+      if (model && name === "phpactor" && msg.params.uri === lastEnqueued) markDiagnosed(model);
       if (model) setMarkers(model, owner, msg.params.diagnostics);
+      published.get(msg.params.uri)?.();
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
       host.status(`${name}: ${msg.params.message}`, name);
       // Phpactor asks for a restart after you trust a project's .phpactor.json.
@@ -312,8 +366,31 @@ async function startServer(
    * files not yet indexed (such as Laravel's config() helper) show as not found. Phpactor
    * doesn't recheck them when indexing ends, so a save notification asks it to.
    */
-  const recheckOpenFiles = () =>
-    monaco.editor.getModels().filter(serves).forEach((m) => notify("textDocument/didSave", { textDocument: { uri: m.uri.toString() } }));
+  const recheckOpenFiles = () => checkOneByOne(monaco.editor.getModels().filter(serves));
+
+  /**
+   * Phpactor's diagnostics engine keeps one waiting document: each document opened, changed, or saved replaces
+   * the one before, and the engine drops a document's results once another is waiting. So when a session reopens
+   * several files, only the last got checked. This asks for one file at a time, each once the one before has
+   * published and then been quiet for 3 seconds (Mago takes about 2), or after 30 seconds. A newer pass stops an
+   * older one.
+   */
+  let checkRun = 0;
+  const published = new Map<string, () => void>();
+  async function checkOneByOne(models: monaco.editor.ITextModel[]) {
+    const run = ++checkRun;
+    for (const model of models) {
+      if (run !== checkRun) return;
+      if (model.isDisposed()) continue;
+      const uri = model.uri.toString();
+      await new Promise<void>((resolve) => {
+        const done = () => (clearTimeout(timer), published.delete(uri), resolve());
+        let timer = setTimeout(done, 30000);
+        published.set(uri, () => (clearTimeout(timer), (timer = setTimeout(done, 3000))));
+        notify("textDocument/didSave", { textDocument: { uri } });
+      });
+    }
+  }
 
   const serves = (model: monaco.editor.ITextModel) => langs.includes(model.getLanguageId()) && model.uri.scheme === "file";
 
@@ -369,7 +446,10 @@ async function startServer(
   await notify("initialized", {});
   monaco.editor.getModels().forEach(track);
   reg(monaco.editor.onDidCreateModel(track));
+  // A session's files open together, and Phpactor checks only the last of them (see checkOneByOne).
+  if (name === "phpactor") checkOneByOne(monaco.editor.getModels().filter(serves));
   registerProviders(monaco.languages);
+  registerProblemHover();
 
   return {
     name,

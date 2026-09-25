@@ -933,3 +933,30 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 #path .crumb::before { content: "›"; margin-right: 4px; opacity: 0.6; }
 #path .crumb:hover { background: var(--hover); color: var(--text); }
 #path .crumb .codicon { font-size: 12px !important; }
+
+/* Problem hovers: the formatted message from registerProblemHover (lsp.ts) replaces Monaco's plain one. */
+.monaco-hover .hover-row:has(> .marker.hover-contents) { display: none; }
+.monaco-hover .markdown-hover .codicon-error { color: var(--red) !important; }
+.monaco-hover .markdown-hover .codicon-warning { color: var(--yellow) !important; }
+.monaco-hover .markdown-hover .codicon-info { color: var(--blue) !important; }
+.monaco-hover .markdown-hover a[href^="command:problems.openPage"] { font-size: 12px; }
+
+/* One problem on a page of its own (problems.ts). */
+#problem-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#problem-page[hidden] { display: none; }
+#problem-page header { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.problem-page-path { font-weight: 600; }
+.problem-page-rule { color: var(--faint); margin-right: auto; }
+#problem-page header button:not(.icon-button) { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
+.problem-page-body { flex: 1; overflow: auto; padding: 24px 32px 40px; max-width: 980px; -webkit-user-select: text; user-select: text; line-height: 1.6; }
+.problem-page-title { font-size: 16px; font-weight: 600; margin: 0 0 18px; line-height: 1.6; }
+.problem-page-note { margin: 14px 0; color: var(--muted); }
+.problem-page-body code, .problem-page-body pre { font-family: var(--mono, "JetBrains Mono", Menlo, monospace); font-size: 12px; background: var(--hover); border-radius: 4px; }
+.problem-page-body code { padding: 1px 5px; }
+.problem-page-body pre { display: block; margin: 8px 0; padding: 10px 12px; white-space: pre-wrap; font-weight: normal; line-height: 1.5; color: var(--text, inherit); }
+.problem-page-code { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 0 0 18px; }
+.problem-page-line { background: var(--hover); }
+.problem-page-range-error { text-decoration: underline wavy var(--red); text-underline-offset: 3px; }
+.problem-page-range-warning { text-decoration: underline wavy var(--yellow); text-underline-offset: 3px; }
+.problems-page-button { visibility: hidden; margin-left: auto; flex-shrink: 0; }
+.problems-row:hover .problems-page-button { visibility: visible; }

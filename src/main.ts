@@ -18,7 +18,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
+import { closeProblemPage, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -716,6 +716,7 @@ async function openFile(path: string) {
   closeDiff(false);
   closeMerge();
   hideHistory();
+  closeProblemPage();
   recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
   editor.focus();
