@@ -4,14 +4,20 @@ use std::process::{Command, Stdio};
 use tauri::AppHandle;
 
 /// Path of a bundled tool, for tools the frontend passes to a language server.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tool_path(app: AppHandle, name: String) -> Result<String, String> {
     Ok(tools_dir(&app)?.join(name).to_string_lossy().into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
+}
+
+/// Whether each path exists, in one call for a batch of file-system events.
+#[tauri::command(async)]
+pub fn paths_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| std::path::Path::new(p).exists()).collect()
 }
 
 /// Runs a program in `cwd` and returns its standard output, for short queries such as
@@ -19,6 +25,11 @@ pub fn path_exists(path: String) -> bool {
 /// Fails with standard error if the program fails.
 #[tauri::command]
 pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input: Option<String>) -> Result<String, String> {
+    crate::blocking(move || capture(cwd, program, args, input)).await
+}
+
+fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>) -> Result<String, String> {
+    crate::login_path();
     let mut child = Command::new(program)
         .args(args)
         .current_dir(cwd)

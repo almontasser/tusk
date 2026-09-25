@@ -20,6 +20,11 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
 
+Typing stays at about 3 ms of work per keystroke, even in a 4,800-line PHP file
+with AI completion on, and language servers never block the window. For how
+that's kept, and how to measure it, see
+[Performance](docs/architecture.md#performance).
+
 ## Known gaps
 
 These PhpStorm features are missing or limited. Where it helps, a gap names the

@@ -41,14 +41,16 @@ one client per server, and Monaco merges their results.
 | `read_dir` | Lists one folder, folders first, sorted by name without regard to case. Hides `.git` and `.DS_Store`. |
 | `read_file` | Returns a file as UTF-8 text. |
 | `write_file` | Replaces a file's contents. |
-| `watch` | Watches a folder recursively and emits `fs-change` with the changed paths. |
+| `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. |
+| `paths_exist` | Whether each of a batch of paths exists, in one call. |
 
 ### File tree
 
 The tree loads each folder only when you expand it, so large folders such as
 `vendor` and `node_modules` cost nothing until opened. The frontend keeps a map
 from each rendered folder to its list element. When `fs-change` arrives, it
-re-renders only the parent folders of the changed paths.
+re-lists only the parent folders of the changed paths, and redraws one only if
+its entries changed (`listings`), so saving a file redraws nothing.
 
 ### Tabs and models
 
@@ -189,15 +191,20 @@ and run `npm install --package-lock-only` in that folder.
 Apps opened from Finder get a minimal `PATH`. At startup, `lib.rs` runs your
 login shell (`$SHELL -ilc`) once and adopts its `PATH`, so every tool the app
 starts later (`php`, and in later milestones `git` and `gh`) resolves the same
-way as in your terminal.
+way as in your terminal. It runs on a thread, because a shell with plugins can
+take a second or more, and the window shouldn't wait for it. Commands that start
+a program call `login_path()` first, which waits for that thread.
 
 ### Language server bridge
 
 `src-tauri/src/lsp.rs` starts `php tools/phpactor.phar language-server` in the
 project folder. A thread reads the server's `Content-Length` framed messages
 from standard output and emits each one as an `lsp` event. The `lsp_send`
-command writes a message to the server's standard input. Opening another folder
-stops the old server.
+command queues a message for a writer thread, one per server, which writes it to
+the server's standard input. A busy server stops reading, its pipe fills, and a
+write then blocks until it reads again; with the write on the main thread, that
+froze the whole window while Phpactor worked through a large file. Opening
+another folder stops the old server.
 
 The bridge doesn't parse messages. All protocol logic lives in `src/lsp.ts`.
 
@@ -297,7 +304,17 @@ would clear another server's indexing progress.
 - It sends `initialize` with the client capabilities, then registers a Monaco
   provider only for features the server reports.
 - It keeps the server in sync with every open PHP model through `didOpen`,
-  `didChange` (full text), `didSave`, and `didClose`.
+  `didChange`, `didSave`, and `didClose`. A server that takes changes
+  (sync kind 2, such as typos-lsp) gets each edit's ranges. A server that takes
+  only whole documents (Phpactor, Laravel LSP, Tailwind, the Filament server)
+  gets the full text once typing pauses for 150 ms, or before the next message
+  to it, whichever comes first, so every request is answered for the current
+  text. Sending the full text on every keystroke made Phpactor reparse a
+  4,800-line file for each one, and it fell minutes behind. One copy of the text
+  per version is shared by all servers (`textOf`).
+- Providers pass Monaco's cancellation token. When Monaco drops a request, such
+  as a completion list after the next keystroke, the client sends
+  `$/cancelRequest` and resolves the request with `null`.
 - It answers server requests: `workspace/applyEdit`, `workspace/configuration`,
   and the progress and registration requests.
 - It shows `$/progress` and `window/showMessage` in the status bar.
@@ -892,12 +909,16 @@ two Shift presses within 350 ms with no other key between them.
 
 `pty.rs` opens a pseudo-terminal with `portable-pty` and runs your login shell
 (`$SHELL -l`) or a given command in the project folder. A thread reads output
-and emits it as `pty:<id>` events, then emits `pty-exit:<id>` when the process
-ends. The reader keeps a UTF-8 character that is split across two reads until
+into a channel, and another emits it as `pty:<id>` events, then emits
+`pty-exit:<id>` when the process ends. The sender joins everything waiting in
+the channel into one event, so a command that prints a lot sends a few large
+events instead of thousands, and an echoed keystroke still goes out at once.
+Input goes through a writer thread, so pasting into a program that isn't
+reading can't block the app. The reader keeps a UTF-8 character that is split across two reads until
 the rest arrives, so multibyte text never turns into replacement characters.
 
 `src/terminal.ts` shows each session as a tab in a bottom panel, rendered by
-`xterm.js`. Keystrokes go to `pty_write`, and the fit add-on resizes the
+`xterm.js`, which loads with the first terminal rather than with the app. Keystrokes go to `pty_write`, and the fit add-on resizes the
 pseudo-terminal whenever the panel changes size. You can drag the top edge of
 the panel to resize it.
 
@@ -1063,14 +1084,15 @@ replacement without the added line.
 `trackEditor` in `git.ts` adds three things to the code editor:
 
 - **Change markers.** `lineChanges` in `gitparse.ts` compares the editor text
-  with the file at `HEAD` (`git show HEAD:<path>`, cached until the next git
-  refresh). It trims the lines both versions share at the start and end, then
+  with the file at `HEAD` (`git show HEAD:<path>`, kept as lines until `HEAD`
+  moves). It trims the lines both versions share at the start and end, then
   runs a longest common subsequence on the rest. It runs 200 ms after you stop
   typing, so the markers include unsaved edits.
 - **Inline blame.** For the cursor line, the editor shows the author, age, and
   commit message as text after the line. Blame runs `git blame --porcelain
   --contents -` with the editor text on standard input, so lines you haven't
-  saved show "Not committed yet". Results are cached per model version.
+  saved show "Not committed yet". Results are cached per file and version,
+  shared by panes, and only one blame runs per file at a time.
 - **Annotations.** **Annotate with Git Blame** swaps the line numbers for a
   function that returns the commit, age, and author of each line. Monaco's
   `lineNumbers` option accepts a function, so this needs no custom gutter.
@@ -1783,6 +1805,52 @@ one block where it appears whole (its last occurrence, which is usually in the
 file name), or else the letters of a fuzzy match. The folder part of a path is
 dimmed.
 
+## Performance
+
+These rules keep typing and file events cheap. Break one only with a
+measurement.
+
+- **Nothing blocking runs on the main thread.** In Tauri 2, a command that
+  isn't `async` runs on the main thread, which also draws the window and
+  handles every other command. File, process, and search commands run on the
+  blocking pool (`blocking` in `lib.rs`); quick checks use
+  `#[tauri::command(async)]`. Writes to a language server or a terminal go
+  through a writer thread per process (`lsp_send`, `pty_write`).
+- **Batch events at the source.** The watcher gathers paths for 50 ms, and the
+  terminal joins output that piles up while an event is sent.
+- **Per keystroke, do only what changed.** An edit updates its tab's unsaved
+  dot (`showDirty`) instead of redrawing every tab bar, and the status bar
+  listens to one cursor event and counts a selection with
+  `getValueLengthInRange`. Conflict shading, change markers, and blame wait
+  for a pause.
+- **Load rarely used code on first use.** `xterm.js`, `marked` and DOMPurify,
+  and the profiler are separate chunks, which took the main bundle from 4.53 MB
+  to 4.10 MB. Monaco is the rest of it.
+- **Open a project in parallel.** The tree and the watcher start together,
+  saved tabs are read at once, the language servers' setup checks run in one
+  `Promise.all`, and the servers start before saved terminals reopen. Settings
+  load before the project opens, so the servers start once, with the right
+  settings.
+
+### Measuring typing
+
+Measure in the running app with a large file, such as a copy of Laravel's
+4,800-line `Query/Builder.php`. Time `editor.trigger("keyboard", "type")` per
+character, and wait between characters with a `MessageChannel` loop rather than
+`setTimeout`. While the app is behind another window, macOS App Nap stretches
+its timers to a second or more, and animation frames stop entirely, so timers
+and `requestAnimationFrame` measure App Nap instead of the editor.
+
+| Per keystroke, 4,800-line PHP file | Before | After |
+| --- | --- | --- |
+| Synchronous work, median (AI on) | 18 ms | 3 ms |
+| Synchronous work, 95th percentile (AI on) | 26 ms | 9 ms |
+| Longest event-loop stall | about 1 s, repeatedly | 28 ms |
+| Whole-file copies sent to Phpactor per 55 keystrokes | 55 | 9 |
+
+A bare Monaco editor with the same file takes 2 to 7 ms per keystroke in
+development builds, so most of what's left is Monaco's own work.
+
 ## Decision log
 
 ### 2026-09-24: Build on free language servers instead of writing one
@@ -2028,3 +2096,11 @@ bindings, and time from outside the app, for web requests and tests alike. The
 cost is an `auto_prepend_file` during profiled runs, which replaces the
 project's own for those runs.
 
+### 2026-09-25: Coalesce full-document syncs instead of switching servers
+
+Phpactor, Laravel LSP, Tailwind, and the Filament server only accept whole
+documents. Sending one on every keystroke let Phpactor fall minutes behind on a
+large file, and the blocking write then froze the window. Holding edits until a
+150 ms pause, and sending them before any other message, keeps every answer
+current while sending a fraction of the text. Servers that accept ranges get
+each edit as it happens.

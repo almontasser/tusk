@@ -65,7 +65,7 @@ export async function showResults(report: string): Promise<boolean> {
   const detail = q(".tests-detail");
   detail.textContent = failed.length ? "Select a test to see its failure." : "All tests passed.";
   const classes = new Map<string, TestResult[]>();
-  for (const r of results) classes.set(r.className, [...(classes.get(r.className) ?? []), r]);
+  for (const r of results) (classes.get(r.className) ?? classes.set(r.className, []).get(r.className)!).push(r);
   const tree = q(".tests-tree");
   tree.replaceChildren(
     ...[...classes].map(([className, cases]) => {
@@ -101,8 +101,13 @@ export async function showResults(report: string): Promise<boolean> {
  * Shows progress while tests run, from PHPUnit's event stream. The stream has no file paths, so rows open the
  * file their class name maps to. The JUnit report replaces this view when the run ends.
  */
+/** The events file's length at the last live update, so a tick with nothing new skips redrawing. -1 between runs. */
+let liveLength = -1;
+
 export async function showLive(events: string, running: boolean) {
   const text = await invoke<string>("read_file", { path: events }).catch(() => "");
+  if (running && text.length === liveLength) return;
+  liveLength = running ? text.length : -1;
   const { total, tests } = parseEvents(text);
   const done = tests.filter((t) => t.status !== "running");
   const failures = tests.filter((t) => t.status === "failed").length;
@@ -111,7 +116,7 @@ export async function showLive(events: string, running: boolean) {
   summary.className = `tests-summary ${failures ? "test-failed" : ""}`;
   q(".tests-detail").textContent = running ? "Failure details show when the run ends." : "The run ended without a report. Its terminal tab has the output.";
   const classes = new Map<string, LiveTest[]>();
-  for (const t of tests) classes.set(t.className, [...(classes.get(t.className) ?? []), t]);
+  for (const t of tests) (classes.get(t.className) ?? classes.set(t.className, []).get(t.className)!).push(t);
   q(".tests-tree").replaceChildren(
     ...[...classes].map(([className, cases]) => {
       const li = el("li");

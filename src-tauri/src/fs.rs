@@ -14,7 +14,11 @@ pub struct Entry {
 pub struct WatchState(Mutex<Option<notify::RecommendedWatcher>>);
 
 #[tauri::command]
-pub fn read_dir(path: String) -> Result<Vec<Entry>, String> {
+pub async fn read_dir(path: String) -> Result<Vec<Entry>, String> {
+    crate::blocking(move || list_dir(&path)).await
+}
+
+fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
     let mut entries: Vec<Entry> = std::fs::read_dir(&path)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
@@ -25,21 +29,21 @@ pub fn read_dir(path: String) -> Result<Vec<Entry>, String> {
             is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
         })
         .collect();
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    entries.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
     Ok(entries)
 }
 
 #[tauri::command]
-pub fn read_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| e.to_string())
+pub async fn read_file(path: String) -> Result<String, String> {
+    crate::blocking(move || std::fs::read_to_string(path).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-pub fn write_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(path, contents).map_err(|e| e.to_string())
+pub async fn write_file(path: String, contents: String) -> Result<(), String> {
+    crate::blocking(move || std::fs::write(path, contents).map_err(|e| e.to_string())).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_path(from: String, to: String) -> Result<(), String> {
     // std::fs::rename silently replaces an existing file, so refuse instead.
     // Allow a change of case only, such as post.php to Post.php on a case-insensitive disk.
@@ -53,7 +57,7 @@ pub fn rename_path(from: String, to: String) -> Result<(), String> {
 }
 
 /// Creates a file with `contents`, and any missing parent folders. Fails if the file exists.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_file(path: String, contents: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     if let Some(parent) = p.parent() {
@@ -66,34 +70,51 @@ pub fn create_file(path: String, contents: String) -> Result<(), String> {
     std::io::Write::write_all(&mut file, contents.as_bytes()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_dir(path: String) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| e.to_string())
 }
 
 /// Moves a file or folder to the Trash, so a mistaken delete can be undone in Finder.
 #[tauri::command]
-pub fn trash_path(path: String) -> Result<(), String> {
-    trash::delete(path).map_err(|e| e.to_string())
+pub async fn trash_path(path: String) -> Result<(), String> {
+    crate::blocking(move || trash::delete(path).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-pub fn remove_path(path: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map_err(|e| e.to_string())
+pub async fn remove_path(path: String) -> Result<(), String> {
+    crate::blocking(move || {
+        let p = std::path::Path::new(&path);
+        if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Watches `path` recursively and emits `fs-change` with the changed paths.
 /// Replaces any previous watcher, so only one project is watched at a time.
-#[tauri::command]
-pub fn watch(app: AppHandle, state: State<WatchState>, path: String) -> Result<(), String> {
+/// Events are gathered for 50 ms and sent once without duplicates: `composer install` or a
+/// checkout makes thousands of events, and one IPC message each would flood the webview.
+#[tauri::command(async)]
+pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Result<(), String> {
+    let changed = std::sync::Arc::new(Mutex::new(std::collections::HashSet::<String>::new()));
+    let pending = std::sync::Arc::downgrade(&changed);
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            let paths: Vec<String> = event.paths.iter().map(|p| p.to_string_lossy().into()).collect();
-            let _ = app.emit("fs-change", paths);
+            changed.lock().unwrap().extend(event.paths.iter().map(|p| p.to_string_lossy().into_owned()));
         }
     })
     .map_err(|e| e.to_string())?;
+    // The watcher owns the only strong reference, so this thread ends when the watcher is replaced.
+    std::thread::spawn(move || {
+        while let Some(changed) = pending.upgrade() {
+            let paths: Vec<String> = changed.lock().unwrap().drain().collect();
+            drop(changed);
+            if !paths.is_empty() {
+                let _ = app.emit("fs-change", paths);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    });
     watcher.watch(path.as_ref(), RecursiveMode::Recursive).map_err(|e| e.to_string())?;
     *state.0.lock().unwrap() = Some(watcher);
     Ok(())

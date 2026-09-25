@@ -27,9 +27,11 @@ export async function detectFormatters() {
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${host.root()}/${path}` });
   // Prettier 3 and Prettier 2 keep their command-line entry in different files.
   const candidates = ["node_modules/prettier/bin/prettier.cjs", "node_modules/prettier/bin-prettier.js"];
-  let prettier: string | undefined;
-  for (const c of candidates) if (await exists(c)) prettier = `${host.root()}/${c}`;
-  tools = { prettier, pint: await exists("vendor/bin/pint") };
+  const [prettier3, prettier2, pint] = await Promise.all([...candidates, "vendor/bin/pint"].map(exists));
+  // The later candidate won when both existed.
+  const found = prettier2 ? candidates[1] : prettier3 ? candidates[0] : undefined;
+  const prettier = found && `${host.root()}/${found}`;
+  tools = { prettier, pint };
   builtInFormatters(!prettier);
 }
 

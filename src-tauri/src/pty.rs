@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
 struct Session {
-    writer: Box<dyn Write + Send>,
+    /// Input goes through a thread, so pasting into a program that isn't reading can't block the app.
+    writer: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
 }
@@ -20,15 +21,16 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Starts `command` (or a login shell) in a pseudo-terminal. Output arrives as
 /// `pty:<id>` events, and `pty-exit:<id>` fires when the process ends.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_spawn(
     app: AppHandle,
-    state: State<PtyState>,
+    state: State<'_, PtyState>,
     cwd: String,
     command: Option<Vec<String>>,
     rows: u16,
     cols: u16,
 ) -> Result<u32, String> {
+    crate::login_path();
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
@@ -51,21 +53,39 @@ pub fn pty_spawn(
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut input = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let (writer, keys) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        while let Ok(data) = keys.recv() {
+            if input.write_all(&data).and_then(|_| input.flush()).is_err() {
+                break;
+            }
+        }
+    });
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     state.0.lock().unwrap().insert(id, Session { writer, master: pair.master, child });
 
+    // One thread reads, and another sends: output that arrives while an event is being sent is
+    // joined into the next one, so a command that prints a lot sends a few large events, not
+    // thousands of small ones. Nothing waits, so an echoed keystroke goes out at once.
+    let (chunks, output) = std::sync::mpsc::channel::<Vec<u8>>();
     std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        let mut pending = Vec::new();
+        let mut buf = vec![0u8; 65536];
         while let Ok(n) = reader.read(&mut buf) {
-            if n == 0 {
+            if n == 0 || chunks.send(buf[..n].to_vec()).is_err() {
                 break;
             }
-            pending.extend_from_slice(&buf[..n]);
+        }
+    });
+    std::thread::spawn(move || {
+        let event = format!("pty:{id}");
+        let mut pending = Vec::new();
+        while let Ok(chunk) = output.recv() {
+            pending.extend_from_slice(&chunk);
+            pending.extend(output.try_iter().flatten());
             let text = take_utf8(&mut pending);
             if !text.is_empty() {
-                let _ = app.emit(&format!("pty:{id}"), text);
+                let _ = app.emit(&event, text);
             }
         }
         let _ = app.emit(&format!("pty-exit:{id}"), ());
@@ -75,9 +95,9 @@ pub fn pty_spawn(
 
 #[tauri::command]
 pub fn pty_write(state: State<PtyState>, id: u32, data: String) -> Result<(), String> {
-    let mut sessions = state.0.lock().unwrap();
-    let s = sessions.get_mut(&id).ok_or("Terminal is closed")?;
-    s.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())
+    let sessions = state.0.lock().unwrap();
+    let s = sessions.get(&id).ok_or("Terminal is closed")?;
+    s.writer.send(data.into_bytes()).map_err(|_| "Terminal is closed".to_string())
 }
 
 #[tauri::command]

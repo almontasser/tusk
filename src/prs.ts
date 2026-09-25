@@ -1,7 +1,5 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, line comments, and diffs.
 import { invoke } from "@tauri-apps/api/core";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import type { monaco } from "./editor";
 import { diffCursor, git, showDiff } from "./git";
 import { type Check, checkState, checksSummary } from "./gitparse";
@@ -52,12 +50,21 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
   return e;
 }
 
+// The Markdown parser and sanitizer load with the first pull request you open, not with the app.
+let markdownLibraries: { marked: typeof import("marked").marked; DOMPurify: typeof import("dompurify").default } | undefined;
+async function loadMarkdown() {
+  if (markdownLibraries) return;
+  const [{ marked }, { default: DOMPurify }] = await Promise.all([import("marked"), import("dompurify")]);
+  markdownLibraries = { marked, DOMPurify };
+}
+
 /**
  * Renders GitHub Markdown. Pull request text comes from other people, and this page can call the app's
  * commands, so the HTML is sanitized, and links open in the browser instead of the app. `#123` and `@name`
  * become links to the repository's issue or pull request and to the person's profile, as on GitHub.
  */
 function markdown(text: string, repo: string): HTMLElement {
+  const { marked, DOMPurify } = markdownLibraries!;
   const div = el("div", "pr-body markdown");
   const html = marked.parse(text, { async: false, gfm: true, breaks: true });
   div.innerHTML = DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "button", "iframe"], FORBID_ATTR: ["style"] });
@@ -121,6 +128,7 @@ function prRow(pr: PullRequest) {
 // ---- Details ----
 
 export async function showPullRequest(number: number) {
+  const libraries = loadMarkdown();
   host.showView("prs");
   $("pr-list-view").hidden = true;
   const detail = $("pr-detail");
@@ -137,6 +145,7 @@ export async function showPullRequest(number: number) {
     detail.replaceChildren(el("p", "muted", `Can't load #${number}: ${String(e).trim()}`));
     return;
   }
+  await libraries;
 
   const back = el("button", "link", "← All pull requests");
   back.onclick = loadPullRequests;
@@ -284,6 +293,7 @@ function merge(pr: Details) {
  * line comments under their lines. `at` scrolls to a thread.
  */
 async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: Thread) {
+  await loadMarkdown();
   const head = `refs/remotes/pr/${pr.number}`;
   const base = `refs/remotes/origin/${pr.baseRefName}`;
   let diff: monaco.editor.IStandaloneDiffEditor;

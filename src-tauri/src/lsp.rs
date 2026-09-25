@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -11,9 +12,23 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// the shell's PID and `Child::kill` still reaches it.
 const WATCHDOG: &str = r#"app=$PPID; (while kill -0 "$app" && kill -0 $$; do sleep 2; done; kill $$) >/dev/null 2>&1 </dev/null & exec "$@""#;
 
-/// Running language servers by name.
+/// Running language servers by name, each with a channel to the thread that writes its input.
 #[derive(Default)]
-pub struct LspState(Mutex<HashMap<String, (Child, ChildStdin)>>);
+pub struct LspState(Mutex<HashMap<String, (Child, Sender<Vec<u8>>)>>);
+
+/// Writes messages to a server's input on a thread of its own. A busy server stops reading, its
+/// pipe fills, and a write then blocks until it reads again; that must never be the main thread.
+fn writer(mut stdin: ChildStdin) -> Sender<Vec<u8>> {
+    let (tx, rx) = channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        while let Ok(msg) = rx.recv() {
+            if stdin.write_all(&msg).and_then(|_| stdin.flush()).is_err() {
+                break;
+            }
+        }
+    });
+    tx
+}
 
 impl LspState {
     pub fn stop_all(&self) {
@@ -32,8 +47,9 @@ pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
-#[tauri::command]
-pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: String) -> Result<u32, String> {
+#[tauri::command(async)]
+pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root: String) -> Result<u32, String> {
+    crate::login_path();
     // (runtime, script inside the tools folder, arguments)
     let (runtime, script, args): (&str, &str, &[&str]) = match name.as_str() {
         "phpactor" => ("php", "phpactor.phar", &["language-server"]),
@@ -60,7 +76,7 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| format!("Could not start {name}. Is {runtime} installed? ({e})"))?;
-    let stdin = child.stdin.take().unwrap();
+    let stdin = writer(child.stdin.take().unwrap());
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
     let event = format!("lsp:{name}");
     std::thread::spawn(move || {
@@ -68,7 +84,8 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
             let _ = app.emit(&event, msg);
         }
     });
-    if let Some((mut old, _)) = state.0.lock().unwrap().insert(name, (child, stdin)) {
+    let old = state.0.lock().unwrap().insert(name, (child, stdin));
+    if let Some((mut old, _)) = old {
         let _ = old.kill();
         let _ = old.wait();
     }
@@ -78,10 +95,10 @@ pub fn lsp_start(app: AppHandle, state: State<LspState>, name: String, root: Str
 /// Starts the bundled llama-server with the GGUF file `model` on a free local port, for
 /// AI code completion, and returns the port. It's kept with the language servers as
 /// `llama`, so `lsp_stop("llama")` and quitting the app stop it.
-#[tauri::command]
 /// `key` is required on every request except `/health`, so a web page in a browser can't use the
 /// server or read the code in its prompt cache.
-pub fn ai_start(app: AppHandle, state: State<LspState>, model: String, key: String) -> Result<u16, String> {
+#[tauri::command(async)]
+pub fn ai_start(app: AppHandle, state: State<'_, LspState>, model: String, key: String) -> Result<u16, String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
@@ -95,8 +112,9 @@ pub fn ai_start(app: AppHandle, state: State<LspState>, model: String, key: Stri
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("Could not start llama-server: {e}"))?;
-    let stdin = child.stdin.take().unwrap();
-    if let Some((mut old, _)) = state.0.lock().unwrap().insert("llama".into(), (child, stdin)) {
+    let stdin = writer(child.stdin.take().unwrap());
+    let old = state.0.lock().unwrap().insert("llama".into(), (child, stdin));
+    if let Some((mut old, _)) = old {
         let _ = old.kill();
         let _ = old.wait();
     }
@@ -151,28 +169,32 @@ pub fn ai_cancel(state: State<AiRequests>, id: u32) {
 }
 
 /// Stops the server (or debug adapter) `name`, if it's running.
-#[tauri::command]
-pub fn lsp_stop(state: State<LspState>, name: String) {
-    if let Some((mut child, _)) = state.0.lock().unwrap().remove(&name) {
+#[tauri::command(async)]
+pub fn lsp_stop(state: State<'_, LspState>, name: String) -> Result<(), String> {
+    let removed = state.0.lock().unwrap().remove(&name);
+    if let Some((mut child, _)) = removed {
         let _ = child.kill();
         let _ = child.wait();
     }
+    Ok(())
 }
 
+/// Queues a message for the server's writer thread, so it returns at once even when the server is busy.
 #[tauri::command]
 pub fn lsp_send(state: State<LspState>, name: String, msg: String) -> Result<(), String> {
-    let mut servers = state.0.lock().unwrap();
-    let (_, stdin) = servers.get_mut(&name).ok_or_else(|| format!("{name} is not running"))?;
-    write!(stdin, "Content-Length: {}\r\n\r\n{msg}", msg.len())
-        .and_then(|_| stdin.flush())
-        .map_err(|e| e.to_string())
+    let mut frame = format!("Content-Length: {}\r\n\r\n", msg.len()).into_bytes();
+    frame.extend_from_slice(msg.as_bytes());
+    let servers = state.0.lock().unwrap();
+    let (_, stdin) = servers.get(&name).ok_or_else(|| format!("{name} is not running"))?;
+    stdin.send(frame).map_err(|_| format!("{name} has stopped"))
 }
 
 /// Reads one `Content-Length`-framed JSON-RPC message. Returns `None` at end of stream.
 fn read_message(r: &mut impl BufRead) -> std::io::Result<Option<String>> {
     let mut len = None;
+    let mut line = String::new();
     loop {
-        let mut line = String::new();
+        line.clear();
         if r.read_line(&mut line)? == 0 {
             return Ok(None);
         }
@@ -186,7 +208,7 @@ fn read_message(r: &mut impl BufRead) -> std::io::Result<Option<String>> {
     }
     let mut body = vec![0; len.ok_or_else(|| std::io::Error::other("missing Content-Length"))?];
     r.read_exact(&mut body)?;
-    Ok(Some(String::from_utf8_lossy(&body).into()))
+    Ok(Some(String::from_utf8(body).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())))
 }
 
 #[cfg(test)]

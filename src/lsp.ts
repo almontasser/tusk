@@ -40,6 +40,15 @@ async function askUser(server: string, params: L.ShowMessageRequestParams): Prom
 
 // ---- Conversions between LSP (0-based) and Monaco (1-based) ----
 
+/** A model's text, read once per version and shared by every server that needs it. */
+const texts = new WeakMap<monaco.editor.ITextModel, { version: number; text: string }>();
+function textOf(model: monaco.editor.ITextModel) {
+  const version = model.getVersionId();
+  let cached = texts.get(model);
+  if (cached?.version !== version) texts.set(model, (cached = { version, text: model.getValue() }));
+  return cached.text;
+}
+
 const toPos = (p: monaco.IPosition): L.Position => ({ line: p.lineNumber - 1, character: p.column - 1 });
 const toRange = (r: L.Range): monaco.IRange => ({
   startLineNumber: r.start.line + 1,
@@ -69,8 +78,9 @@ const isLibrary = (model: monaco.editor.ITextModel) => /\/(vendor|node_modules)\
  * can't see that. In Pest files, drop their complaints about `$this` lines, and the hint to add a namespace.
  */
 // ponytail: drops every such problem on a `$this` line; reading tests/Pest.php could type `$this` instead.
+const isPestFile = (model: monaco.editor.ITextModel) => /\/tests\//.test(model.uri.path) && /^\s*(it|test|describe)\(/m.test(textOf(model));
+
 function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): boolean {
-  if (!/\/tests\//.test(model.uri.path) || !/^\s*(it|test|describe)\(/m.test(model.getValue())) return false;
   const message = typeof d.message === "string" ? d.message : d.message.value;
   if (message.startsWith("Namespace should probably be")) return true;
   const line = d.range.start.line + 1;
@@ -79,7 +89,7 @@ function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): bo
 
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
   if (isLibrary(model)) list = [];
-  list = list.filter((d) => !pestFalsePositive(model, d));
+  if (list.length && isPestFile(model)) list = list.filter((d) => !pestFalsePositive(model, d));
   monaco.editor.setModelMarkers(
     model,
     owner,
@@ -196,13 +206,27 @@ async function startServer(
   let ready: Promise<unknown> = Promise.resolve();
 
   const send = (msg: object) => invoke("lsp_send", { name, msg: JSON.stringify({ jsonrpc: "2.0", ...msg }) });
-  const notify = (method: string, params: unknown) => send({ method, params });
-  const call = <T>(method: string, params: unknown) => {
+  // Anything else sent to the server first sends edits it hasn't seen, so it always answers for the current text.
+  const notify = (method: string, params: unknown) => (method !== "textDocument/didChange" && flush(), send({ method, params }));
+  const call = <T>(method: string, params: unknown, token?: monaco.CancellationToken) => {
+    flush();
     const id = nextId++;
     const result = new Promise<T>((resolve, reject) => pending.set(id, { resolve, reject }));
-    return send({ id, method, params }).then(() => result);
+    // When Monaco no longer wants the answer, such as a completion list after the next keystroke,
+    // the server is told to drop the request, so a busy server gets to the current one sooner.
+    const cancel = token?.onCancellationRequested(() => {
+      const p = pending.get(id);
+      if (!p) return;
+      pending.delete(id);
+      notify("$/cancelRequest", { id });
+      p.resolve(null);
+    });
+    return send({ id, method, params }).then(() => result).finally(() => cancel?.dispose());
   };
-  const request = async <T>(method: string, params: unknown): Promise<T> => (await ready, call<T>(method, params));
+  const request = async <T>(method: string, params: unknown, token?: monaco.CancellationToken): Promise<T> => {
+    await ready;
+    return token?.isCancellationRequested ? (null as T) : call<T>(method, params, token);
+  };
 
   const unlisten = await listen<string>(owner, ({ payload }) => {
     const msg = JSON.parse(payload);
@@ -292,15 +316,42 @@ async function startServer(
 
   const serves = (model: monaco.editor.ITextModel) => langs.includes(model.getLanguageId()) && model.uri.scheme === "file";
 
+  /**
+   * Servers that take whole documents, such as Phpactor, would otherwise get the full text and
+   * reparse it on every keystroke, falling further behind on large files. Their edits wait here
+   * until typing pauses, or until the next message to the server, whichever comes first.
+   */
+  const unsent = new Map<string, monaco.editor.ITextModel>();
+  let unsentTimer: ReturnType<typeof setTimeout> | undefined;
+  function flush() {
+    clearTimeout(unsentTimer);
+    const models = [...unsent];
+    unsent.clear();
+    for (const [uri, model] of models)
+      if (!model.isDisposed()) notify("textDocument/didChange", { textDocument: { uri, version: model.getVersionId() }, contentChanges: [{ text: textOf(model) }] });
+  }
+
   function track(model: monaco.editor.ITextModel) {
     if (!serves(model)) return;
     const uri = model.uri.toString();
-    notify("textDocument/didOpen", { textDocument: { uri, languageId: model.getLanguageId(), version: model.getVersionId(), text: model.getValue() } });
-    // ponytail: full-text sync on every change; switch to incremental if large files lag.
-    reg(model.onDidChangeContent(() =>
-      notify("textDocument/didChange", { textDocument: { uri, version: model.getVersionId() }, contentChanges: [{ text: model.getValue() }] }),
-    ));
-    reg(model.onWillDispose(() => notify("textDocument/didClose", { textDocument: { uri } })));
+    const sync = typeof c.textDocumentSync === "number" ? c.textDocumentSync : c.textDocumentSync?.change;
+    notify("textDocument/didOpen", { textDocument: { uri, languageId: model.getLanguageId(), version: model.getVersionId(), text: textOf(model) } });
+    const listener = model.onDidChangeContent((e) => {
+      if (sync === 2 /* Incremental */ && !e.isFlush) {
+        // Monaco orders changes from the end of the document back, so the server can apply them in turn.
+        const contentChanges = e.changes.map((ch) => ({ range: fromRange(ch.range), rangeLength: ch.rangeLength, text: ch.text }));
+        return notify("textDocument/didChange", { textDocument: { uri, version: e.versionId }, contentChanges });
+      }
+      unsent.set(uri, model);
+      clearTimeout(unsentTimer);
+      unsentTimer = setTimeout(flush, 150);
+    });
+    reg(listener);
+    reg(model.onWillDispose(() => {
+      unsent.delete(uri);
+      listener.dispose();
+      notify("textDocument/didClose", { textDocument: { uri } });
+    }));
     setMarkers(model, owner, diagnostics.get(uri) ?? []);
   }
 
@@ -351,8 +402,8 @@ async function startServer(
     if (c.completionProvider) {
       reg(ml.registerCompletionItemProvider(langs, {
         triggerCharacters: c.completionProvider.triggerCharacters,
-        async provideCompletionItems(model, pos) {
-          const res = await request<L.CompletionList | L.CompletionItem[] | null>("textDocument/completion", at(model, pos));
+        async provideCompletionItems(model, pos, _context, token) {
+          const res = await request<L.CompletionList | L.CompletionItem[] | null>("textDocument/completion", at(model, pos), token);
           const items = Array.isArray(res) ? res : res?.items ?? [];
           const word = model.getWordUntilPosition(pos);
           const fallback = { startLineNumber: pos.lineNumber, endLineNumber: pos.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
@@ -397,8 +448,8 @@ async function startServer(
 
     if (c.colorProvider) {
       reg(ml.registerColorProvider(langs, {
-        async provideDocumentColors(model) {
-          const colors = await request<L.ColorInformation[] | null>("textDocument/documentColor", doc(model));
+        async provideDocumentColors(model, token) {
+          const colors = await request<L.ColorInformation[] | null>("textDocument/documentColor", doc(model), token);
           return (colors ?? []).map((ci) => ({ range: toRange(ci.range), color: ci.color }));
         },
         async provideColorPresentations(model, info) {
@@ -410,8 +461,8 @@ async function startServer(
 
     if (c.hoverProvider) {
       reg(ml.registerHoverProvider(langs, {
-        async provideHover(model, pos) {
-          const h = await request<L.Hover | null>("textDocument/hover", at(model, pos));
+        async provideHover(model, pos, token) {
+          const h = await request<L.Hover | null>("textDocument/hover", at(model, pos), token);
           if (!h) return null;
           const contents = Array.isArray(h.contents) ? h.contents : [h.contents];
           return { contents: contents.map(markdown), range: h.range && toRange(h.range) };
@@ -423,8 +474,8 @@ async function startServer(
       reg(ml.registerSignatureHelpProvider(langs, {
         signatureHelpTriggerCharacters: c.signatureHelpProvider.triggerCharacters,
         signatureHelpRetriggerCharacters: c.signatureHelpProvider.retriggerCharacters,
-        async provideSignatureHelp(model, pos) {
-          const s = await request<L.SignatureHelp | null>("textDocument/signatureHelp", at(model, pos));
+        async provideSignatureHelp(model, pos, token) {
+          const s = await request<L.SignatureHelp | null>("textDocument/signatureHelp", at(model, pos), token);
           if (!s) return null;
           return {
             value: {
@@ -463,8 +514,8 @@ async function startServer(
 
     if (c.documentHighlightProvider) {
       reg(ml.registerDocumentHighlightProvider(langs, {
-        async provideDocumentHighlights(model, pos) {
-          const hs = await request<L.DocumentHighlight[] | null>("textDocument/documentHighlight", at(model, pos));
+        async provideDocumentHighlights(model, pos, token) {
+          const hs = await request<L.DocumentHighlight[] | null>("textDocument/documentHighlight", at(model, pos), token);
           return (hs ?? []).map((h) => ({ range: toRange(h.range), kind: (h.kind ?? 1) - 1 }));
         },
       }));
@@ -472,8 +523,8 @@ async function startServer(
 
     if (c.documentSymbolProvider) {
       reg(ml.registerDocumentSymbolProvider(langs, {
-        async provideDocumentSymbols(model) {
-          const syms = await request<(L.DocumentSymbol | L.SymbolInformation)[] | null>("textDocument/documentSymbol", doc(model));
+        async provideDocumentSymbols(model, token) {
+          const syms = await request<(L.DocumentSymbol | L.SymbolInformation)[] | null>("textDocument/documentSymbol", doc(model), token);
           const convert = (s: L.DocumentSymbol | L.SymbolInformation): monaco.languages.DocumentSymbol => {
             const range = toRange("location" in s ? s.location.range : s.range);
             return {
@@ -493,14 +544,14 @@ async function startServer(
 
     if (c.codeActionProvider) {
       reg(ml.registerCodeActionProvider(langs, {
-        async provideCodeActions(model, range, context) {
+        async provideCodeActions(model, range, context, token) {
           const diags = diagnostics.get(model.uri.toString()) ?? [];
           const overlapping = diags.filter((d) => monaco.Range.areIntersectingOrTouching(toRange(d.range), range));
           const res = await request<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
             ...doc(model),
             range: fromRange(range),
             context: { diagnostics: overlapping, only: context.only ? [context.only] : undefined },
-          });
+          }, token);
           return {
             actions: (res ?? []).map((a) => ({
               title: a.title,
@@ -540,8 +591,8 @@ async function startServer(
 
     if (c.foldingRangeProvider) {
       reg(ml.registerFoldingRangeProvider(langs, {
-        async provideFoldingRanges(model) {
-          const fs = await request<L.FoldingRange[] | null>("textDocument/foldingRange", doc(model));
+        async provideFoldingRanges(model, _context, token) {
+          const fs = await request<L.FoldingRange[] | null>("textDocument/foldingRange", doc(model), token);
           return (fs ?? []).map((f) => ({ start: f.startLine + 1, end: f.endLine + 1, kind: f.kind ? new ml.FoldingRangeKind(f.kind) : undefined }));
         },
       }));
@@ -549,8 +600,8 @@ async function startServer(
 
     if (c.selectionRangeProvider) {
       reg(ml.registerSelectionRangeProvider(langs, {
-        async provideSelectionRanges(model, positions) {
-          const res = await request<L.SelectionRange[] | null>("textDocument/selectionRange", { ...doc(model), positions: positions.map(toPos) });
+        async provideSelectionRanges(model, positions, token) {
+          const res = await request<L.SelectionRange[] | null>("textDocument/selectionRange", { ...doc(model), positions: positions.map(toPos) }, token);
           return (res ?? []).map((s) => {
             const chain: monaco.languages.SelectionRange[] = [];
             for (let r: L.SelectionRange | undefined = s; r; r = r.parent) chain.push({ range: toRange(r.range) });
@@ -562,8 +613,8 @@ async function startServer(
 
     if (c.inlayHintProvider) {
       reg(ml.registerInlayHintsProvider(langs, {
-        async provideInlayHints(model, range) {
-          const hints = await request<L.InlayHint[] | null>("textDocument/inlayHint", { ...doc(model), range: fromRange(range) });
+        async provideInlayHints(model, range, token) {
+          const hints = await request<L.InlayHint[] | null>("textDocument/inlayHint", { ...doc(model), range: fromRange(range) }, token);
           return {
             hints: (hints ?? []).map((h) => ({
               label: typeof h.label === "string" ? h.label : h.label.map((p) => p.value).join(""),
@@ -580,8 +631,8 @@ async function startServer(
 
     if (c.codeLensProvider) {
       reg(ml.registerCodeLensProvider(langs, {
-        async provideCodeLenses(model) {
-          const lenses = await request<L.CodeLens[] | null>("textDocument/codeLens", doc(model));
+        async provideCodeLenses(model, token) {
+          const lenses = await request<L.CodeLens[] | null>("textDocument/codeLens", doc(model), token);
           return {
             lenses: (lenses ?? [])
               .filter((l) => l.command)
@@ -600,8 +651,8 @@ async function startServer(
 
     if (c.documentLinkProvider) {
       reg(ml.registerLinkProvider(langs, {
-        async provideLinks(model) {
-          const links = await request<L.DocumentLink[] | null>("textDocument/documentLink", doc(model));
+        async provideLinks(model, token) {
+          const links = await request<L.DocumentLink[] | null>("textDocument/documentLink", doc(model), token);
           return { links: (links ?? []).map((l) => ({ range: toRange(l.range), url: l.target, tooltip: l.tooltip })) };
         },
       }));
@@ -762,6 +813,16 @@ export async function startLsp(root: string, h: Host) {
   builtInTypeScript(true);
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = (name: string) => invoke<string>("tool_path", { name });
+  // Every check at once, rather than one round trip after another before the first server starts.
+  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson] = await Promise.all([
+    tool("mago"),
+    tool("mago.toml"),
+    exists("mago.toml"),
+    exists("vendor/bin/phpstan"),
+    exists("artisan"),
+    exists("vendor/filament/filament"),
+    invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => ""),
+  ]);
   const phpactor = startServer("phpactor", root, ["php"], {
     ...phpactorIndexer,
     // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
@@ -771,16 +832,13 @@ export async function startLsp(root: string, h: Host) {
     "language_server_worse_reflection.inlay_hints.types": true,
     "language_server_worse_reflection.inlay_hints.params": true,
     "language_server_mago.enabled": true,
-    "language_server_mago.bin": await tool("mago"),
+    "language_server_mago.bin": magoBin,
     // Without a project mago.toml, use defaults tuned for Laravel (src-tauri/resources/mago.toml).
-    ...(!(await exists("mago.toml")) && { "language_server_mago.config": await tool("mago.toml") }),
-    "language_server_phpstan.enabled": await exists("vendor/bin/phpstan"),
+    ...(!hasMagoToml && { "language_server_mago.config": magoConfig }),
+    "language_server_phpstan.enabled": hasPhpstan,
   });
-  const laravel = (await exists("artisan"))
-    ? startServer("laravel", root, ["php", "blade"], {})
-    : null;
-  const filament = (await exists("vendor/filament/filament")) ? startServer("filament", root, ["php"], {}) : null;
-  const packageJson = await invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => "");
+  const laravel = hasArtisan ? startServer("laravel", root, ["php", "blade"], {}) : null;
+  const filament = hasFilament ? startServer("filament", root, ["php"], {}) : null;
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue", "svelte", "astro"], {}, tailwindSettings)
     : null;

@@ -11,13 +11,13 @@ import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
-import { openNewestProfile, profileDir, profileEnv } from "./profiler";
 import { methodLine, routeTarget } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
 let status: (text: string) => void;
+let loadProfiler: () => Promise<typeof import("./profiler")>;
 /** How a test run goes: plainly, in the debugger, with code coverage, or with Xdebug's profiler. */
 type Mode = "run" | "debug" | "coverage" | "profile";
 let last: { title: string; command: string[]; tests: boolean; mode: Mode } | undefined;
@@ -48,16 +48,17 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   const clover = inSail ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
   if (coverage) await invoke("remove_path", { path: clover }).catch(() => {});
   // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In Sail, the container's settings apply.
-  const profiles = mode === "profile" ? await profileDir() : "";
+  const profiler = mode === "profile" ? await loadProfiler() : null;
+  const profiles = profiler ? await profiler.profileDir() : "";
   const started = Math.floor(Date.now() / 1000);
-  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiles ? ["/usr/bin/env", ...(await profileEnv(profiles, getRoot()))] : [];
+  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiler ? ["/usr/bin/env", ...(await profiler.profileEnv(profiles, getRoot()))] : [];
   const coverageArgs = coverage ? ["--coverage-clover", inSail ? "storage/logs/editor-clover.xml" : clover] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
     if (coverage) showCoverage(clover);
-    if (profiles) openNewestProfile(profiles, started, title);
-  });
+    if (profiler) profiler.openNewestProfile(profiles, started, title);
+  }, () => clearInterval(timer));
 }
 
 async function showCoverage(clover: string) {
@@ -214,7 +215,13 @@ async function openRoute(action: string) {
 }
 
 /** Adds run links above tests in test files. */
-export function initRunner(root: () => string, open: (path: string, line: number) => Promise<unknown>, showStatus: (text: string) => void) {
+export function initRunner(
+  root: () => string,
+  open: (path: string, line: number) => Promise<unknown>,
+  showStatus: (text: string) => void,
+  profiler: () => Promise<typeof import("./profiler")>,
+) {
+  loadProfiler = profiler;
   getRoot = root;
   openAt = open;
   status = showStatus;

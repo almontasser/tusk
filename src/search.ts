@@ -52,7 +52,7 @@ const searchSoon = () => (clearTimeout(timer), (timer = setTimeout(search, 250))
 
 function byFile() {
   const groups = new Map<string, Match[]>();
-  for (const m of matches) groups.set(m.path, [...(groups.get(m.path) ?? []), m]);
+  for (const m of matches) (groups.get(m.path) ?? groups.set(m.path, []).get(m.path)!).push(m);
   return groups;
 }
 
@@ -237,8 +237,11 @@ export function initSearch(h: Host) {
   $("replace-all").onclick = replaceAll;
 }
 
+/** True when every changed path is inside a `.git` folder, which searches skip, so results can't have changed. */
+const onlyGit = (paths?: Iterable<string>) => !!paths && [...paths].every((p) => p.includes("/.git/"));
+
 /** Reruns the search after files change, so results stay current. */
-export const refreshSearch = () => $<HTMLInputElement>("find-query").value && searchSoon();
+export const refreshSearch = (paths?: Iterable<string>) => !onlyGit(paths) && $<HTMLInputElement>("find-query").value && searchSoon();
 
 // ---- The TODO view ----
 
@@ -253,7 +256,7 @@ export async function loadTodos() {
   const found = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
   if (current !== todoGeneration) return; // A newer load already started.
   const groups = new Map<string, Match[]>();
-  for (const m of found) groups.set(m.path, [...(groups.get(m.path) ?? []), m]);
+  for (const m of found) (groups.get(m.path) ?? groups.set(m.path, []).get(m.path)!).push(m);
   $("todo-summary").textContent = found.length
     ? `${found.length}${found.length >= MAX_MATCHES ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
     : "No TODO, FIXME, or XXX comments in project files.";
@@ -286,4 +289,4 @@ function todoRow(m: Match) {
 
 let todoTimer: ReturnType<typeof setTimeout> | undefined;
 /** Reloads the TODO view after files change, while it shows. */
-export const refreshTodos = () => !$("view-todo").hidden && (clearTimeout(todoTimer), (todoTimer = setTimeout(loadTodos, 250)));
+export const refreshTodos = (paths?: Iterable<string>) => !onlyGit(paths) && !$("view-todo").hidden && (clearTimeout(todoTimer), (todoTimer = setTimeout(loadTodos, 250)));

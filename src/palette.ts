@@ -11,11 +11,10 @@ const MAX_ROWS = 200;
  * Returns -1 when `query` doesn't match. Consecutive letters and letters that start
  * a word (after `/`, `\`, `_`, `-`, `.`, a space, or a lowercase-to-uppercase change) score higher.
  */
-export function fuzzy(query: string, text: string): number {
+export function fuzzy(query: string, text: string, lower = text.toLowerCase()): number {
   let score = 0;
   let t = 0;
   let prev = -2;
-  const lower = text.toLowerCase();
   for (const ch of query.toLowerCase()) {
     if (ch === " ") continue;
     const i = lower.indexOf(ch, t);
@@ -47,11 +46,18 @@ export function matchPositions(query: string, text: string): number[] {
   return positions;
 }
 
+/**
+ * Lowercased labels, so ranking the same list again on the next keystroke (such as Go to File's
+ * 30,000 paths) doesn't lowercase every label again. Cleared when a picker opens.
+ */
+const lowered = new Map<string, string>();
+const lowerOf = (text: string) => lowered.get(text) ?? (lowered.set(text, text.toLowerCase()), text.toLowerCase());
+
 /** Filters and sorts items by fuzzy score against their label. */
 export function rank(query: string, items: Item[]): Item[] {
   if (!query.trim()) return items;
   return items
-    .map((item) => ({ item, score: fuzzy(query, item.label) }))
+    .map((item) => ({ item, score: fuzzy(query, item.label, lowerOf(item.label)) }))
     .filter((r) => r.score >= 0)
     .sort((a, b) => b.score - a.score)
     .map((r) => r.item);
@@ -66,6 +72,7 @@ let close: (() => void) | null = null;
  */
 export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number]; onCancel?: () => void }) {
   close?.();
+  lowered.clear();
   const overlay = document.createElement("div");
   overlay.id = "palette";
   const input = document.createElement("input");
@@ -159,8 +166,14 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
   input.onkeydown = (e) => {
     const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
     if (e.key in moves) {
+      // Only the two rows whose selection changes are touched, not the whole list.
+      const rows = list.children;
+      rows[selected]?.classList.remove("selected");
+      rows[selected]?.setAttribute("aria-selected", "false");
       selected = Math.max(0, Math.min(Math.min(items.length, MAX_ROWS) - 1, selected + moves[e.key]));
-      render();
+      rows[selected]?.classList.add("selected");
+      rows[selected]?.setAttribute("aria-selected", "true");
+      rows[selected]?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter") choose(selected);
     else if (e.key === "Escape") dismiss();
     else return;

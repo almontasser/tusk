@@ -77,7 +77,11 @@ async function load() {
   render();
 }
 
+/** The shown commits' rows, so selecting one only moves the highlight. */
+const rows = new Map<Commit, HTMLElement>();
+
 function render() {
+  rows.clear();
   const filter = $<HTMLInputElement>("history-filter").value.toLowerCase();
   const shown = filter
     ? commits.filter((c) => [c.subject, c.author, c.hash, ...c.refs].some((s) => s.toLowerCase().includes(filter)))
@@ -90,6 +94,7 @@ function render() {
       subject.append(c.subject);
       li.append(subject, el("div", "meta", `${c.short} · ${c.author} · ${age(c.time)} ago`));
       li.onclick = () => select(c);
+      rows.set(c, li);
       return li;
     }),
   );
@@ -98,8 +103,9 @@ function render() {
 // ---- Commit details ----
 
 async function select(c: Commit) {
+  if (selected) rows.get(selected)?.classList.remove("selected");
   selected = c;
-  render();
+  rows.get(c)?.classList.add("selected");
   const detail = $("history-detail");
   detail.replaceChildren(el("p", "muted", "Loading…"));
   const [message, files] = await Promise.all([
@@ -172,7 +178,8 @@ function newBranch(c: Commit) {
 export function initHistory(h: Host) {
   host = h;
   $("history-close").onclick = hideHistory;
-  $("history-filter").oninput = render;
+  let filterTimer: ReturnType<typeof setTimeout> | undefined;
+  $("history-filter").oninput = () => (clearTimeout(filterTimer), (filterTimer = setTimeout(render, 150)));
   $("history-all").onchange = () => ((commits = []), load());
   $("history-more").onclick = load;
 }

@@ -5,10 +5,25 @@ mod pty;
 mod search;
 mod tools;
 
+use std::sync::LazyLock;
 use tauri::Manager;
 
 /// Apps opened from Finder get a minimal PATH, so tools installed through
-/// Homebrew, Herd, or Composer are missing. Adopt the login shell's PATH instead.
+/// Homebrew, Herd, or Composer are missing. The login shell's PATH is read on a thread at launch,
+/// since an interactive shell with plugins can take a second or more; `login_path()` waits for it,
+/// so call it before starting any program.
+static LOGIN_PATH: LazyLock<()> = LazyLock::new(use_login_shell_path);
+
+pub fn login_path() {
+    LazyLock::force(&LOGIN_PATH);
+}
+
+/// Runs blocking work on Tauri's blocking thread pool, so it holds neither the main thread (which
+/// draws the window and handles every command) nor the async workers.
+pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
 fn use_login_shell_path() {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let Ok(out) = std::process::Command::new(shell)
@@ -26,7 +41,7 @@ fn use_login_shell_path() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use_login_shell_path();
+    std::thread::spawn(login_path);
     let mut builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
     {
@@ -57,6 +72,7 @@ pub fn run() {
             lsp::ai_cancel,
             tools::tool_path,
             tools::path_exists,
+            tools::paths_exist,
             tools::run_capture,
             search::list_files,
             search::search_text,

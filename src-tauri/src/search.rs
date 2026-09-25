@@ -31,9 +31,13 @@ fn walk(root: &str, include: &str, all: bool) -> Result<impl Iterator<Item = ign
 /// Project files as paths relative to `root`. With `all`, files that .gitignore excludes too.
 #[tauri::command]
 pub async fn list_files(root: String, all: Option<bool>) -> Vec<String> {
-    walk(&root, "", all.unwrap_or(false))
-        .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into())).collect())
-        .unwrap_or_default()
+    crate::blocking(move || {
+        Ok(walk(&root, "", all.unwrap_or(false))
+            .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into())).collect())
+            .unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Search options, shared by search and replace so both match exactly the same text.
@@ -76,9 +80,13 @@ pub struct Match {
     text: String,
 }
 
-/// Every occurrence of the query in the project, up to 2000.
+/// Every occurrence of the query in the project, up to 20,000.
 #[tauri::command]
 pub async fn search_text(root: String, query: Query, include: String) -> Result<Vec<Match>, String> {
+    crate::blocking(move || find_text(root, query, include)).await
+}
+
+fn find_text(root: String, query: Query, include: String) -> Result<Vec<Match>, String> {
     if query.text.is_empty() {
         return Ok(vec![]);
     }
@@ -115,6 +123,10 @@ pub async fn search_text(root: String, query: Query, include: String) -> Result<
 /// Every file with at least one match, with no limit, for Replace All.
 #[tauri::command]
 pub async fn files_matching(root: String, query: Query, include: String) -> Result<Vec<String>, String> {
+    crate::blocking(move || find_files(root, query, include)).await
+}
+
+fn find_files(root: String, query: Query, include: String) -> Result<Vec<String>, String> {
     let matcher = query.matcher()?;
     let mut searcher = Searcher::new();
     let mut files = Vec::new();
@@ -143,7 +155,7 @@ pub struct Replaced {
 
 /// Replaces every occurrence of the query in `text`. In regex mode, `$1` and `${name}` in the
 /// replacement refer to capture groups; otherwise the replacement is literal.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn replace_text(text: String, query: Query, replacement: String) -> Result<Replaced, String> {
     let re = query.regex()?;
     let count = re.find_iter(&text).count();

@@ -30,7 +30,6 @@ import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoute
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage } from "./coverage";
-import { chooseProfile, initProfiler, profileUrl, startProfilingServer } from "./profiler";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -59,7 +58,7 @@ function addPane(): Pane {
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
   ed.onDidFocusEditorText(() => focusPane(pane));
-  ed.onDidChangeCursorPosition(() => pane.editor === editor && updateStatusItems());
+  // Moving the cursor changes the selection too, so this one event covers both.
   ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
   return pane;
 }
@@ -333,6 +332,8 @@ async function openFolder(dir: unknown = null) {
   saveSession();
   for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
+  // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
+  monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
   recent = [];
   const session = loadSession();
@@ -346,8 +347,7 @@ async function openFolder(dir: unknown = null) {
   $("project-badge").textContent = initials(nameOf(dir));
   $("welcome").hidden = true;
   rememberProject(dir);
-  await renderDir($("tree") as HTMLUListElement, dir);
-  await invoke("watch", { path: dir });
+  await Promise.all([renderDir($("tree") as HTMLUListElement, dir), invoke("watch", { path: dir })]);
   try { localStorage.setItem("lastFolder", dir); } catch {}
   refreshGit();
   detectFormatters();
@@ -355,6 +355,10 @@ async function openFolder(dir: unknown = null) {
   loadBookmarks();
   if (session) await restoreSession(session);
   restartServers();
+  // Shells come back fresh in the project folder, after the language servers have started;
+  // command tabs, such as a server, aren't re-run.
+  for (let i = 0; i < (session?.shells ?? 0); i++) await openTerminal(root);
+  if ((session?.shells ?? 0) > 0 && !session?.panel) toggleTerminal(root);
 }
 
 // ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
@@ -409,8 +413,11 @@ const saveSoon = () => (clearTimeout(saveTimer), (saveTimer = setTimeout(saveSes
 window.addEventListener("beforeunload", saveSession);
 
 async function restoreSession(session: Session) {
-  // Files deleted since the last session are skipped.
-  for (const path of session.tabs) await openFile(path).catch(() => viewStates.delete(path));
+  // Read every tab's file at once. Files deleted since the last session are skipped.
+  const models = await Promise.all(session.tabs.map((path) => ensureModel(path).catch(() => (viewStates.delete(path), null))));
+  session.tabs.forEach((path, i) => models[i] && addTab(path, models[i]));
+  const opened = session.tabs.filter((path) => tabs.has(path));
+  recent = [...opened].reverse().slice(0, 30);
   if (session.layout) {
     // The one pane left after the previous project closed takes the first leaf; later leaves get new panes.
     const [spare] = panes;
@@ -419,13 +426,16 @@ async function restoreSession(session: Session) {
     // A file whose pane was lost goes to the first pane.
     const orphans = [...tabs.keys()].filter((p) => !panes.some((pane) => pane.paths.includes(p)));
     spare.paths.push(...orphans);
-  } else if (tabs.has(session.active)) await openFile(session.active);
+  } else {
+    currentPane().paths = opened;
+    const shown = tabs.has(session.active) ? session.active : opened.at(-1);
+    if (shown) await openFile(shown);
+  }
   const focused = paneOrder()[session.focused ?? 0];
   if (focused) focusPane(focused), editor.focus();
+  renderTabs();
+  markActiveInTree();
   if (session.view && session.view !== "project") showView(session.view);
-  // Shells come back fresh in the project folder; command tabs, such as a server, aren't re-run.
-  for (let i = 0; i < (session.shells ?? 0); i++) await openTerminal(root);
-  if ((session.shells ?? 0) > 0 && !session.panel) toggleTerminal(root);
 }
 
 /** Shows a tab's model in the editor, saving the view state of the tab it replaces. */
@@ -478,7 +488,7 @@ async function renamed(from: string, to: string) {
   );
   tabs.clear();
   entries.forEach(([p, t]) => tabs.set(p, t));
-  model.onDidChangeContent(renderTabs);
+  model.onDidChangeContent(() => showDirty(to));
   const view = active === from ? editor.saveViewState() : viewStates.get(from);
   viewStates.delete(from);
   if (view) viewStates.set(to, view);
@@ -546,13 +556,21 @@ function updateStatusItems() {
   const model = editor.getModel();
   const pos = editor.getPosition();
   const selection = editor.getSelection();
-  const selected = selection && model && !selection.isEmpty() ? model.getValueInRange(selection).length : 0;
+  const selected = selection && model && !selection.isEmpty() ? model.getValueLengthInRange(selection) : 0;
   $("cursor-position").textContent = model && pos ? `${pos.lineNumber}:${pos.column}${selected ? ` (${selected} chars)` : ""}` : "";
   const options = model?.getOptions();
   $("indentation").textContent = options ? (options.insertSpaces ? `${options.tabSize} spaces` : `Tab size ${options.tabSize}`) : "";
   $("encoding").textContent = model ? `UTF-8 · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
-  const language = model && monaco.languages.getLanguages().find((l) => l.id === model.getLanguageId());
-  $("language").textContent = language ? (language.aliases?.[0] ?? language.id) : "";
+  $("language").textContent = model ? languageName(model.getLanguageId()) : "";
+}
+
+const languageNames = new Map<string, string>();
+function languageName(id: string) {
+  if (!languageNames.has(id)) {
+    const language = monaco.languages.getLanguages().find((l) => l.id === id);
+    languageNames.set(id, language?.aliases?.[0] ?? id);
+  }
+  return languageNames.get(id)!;
 }
 
 /** Error and warning counts across open files; clicking lists them. */
@@ -630,9 +648,16 @@ function paintRow(row: HTMLElement, name: string, isDir: boolean) {
   row.querySelector(".name")!.textContent = name;
 }
 
-async function renderDir(ul: HTMLUListElement, dir: string) {
+/** Each rendered folder's entries, so a file-system event that didn't add, remove, or rename one redraws nothing. */
+const listings = new WeakMap<HTMLUListElement, string>();
+
+/** Lists a folder in the tree. With `onlyIfChanged`, the folder is left alone when its entries are the same. */
+async function renderDir(ul: HTMLUListElement, dir: string, onlyIfChanged = false) {
   renderedDirs.set(dir, ul);
   const entries = await invoke<Entry[]>("read_dir", { path: dir });
+  const listing = entries.map((e) => `${e.is_dir ? "d" : "f"}${e.name}`).join("\0");
+  if (onlyIfChanged && listings.get(ul) === listing) return;
+  listings.set(ul, listing);
   ul.replaceChildren(
     ...entries.map((e) => {
       const li = document.createElement("li");
@@ -680,12 +705,15 @@ function collapseAll() {
   saveSoon();
 }
 
+/** Registers an open file's model, without showing it. */
+function addTab(path: string, model: monaco.editor.ITextModel) {
+  if (tabs.has(path)) return;
+  tabs.set(path, { model, saved: model.getAlternativeVersionId() });
+  model.onDidChangeContent(() => showDirty(path));
+}
+
 async function openFile(path: string) {
-  if (!tabs.has(path)) {
-    const model = await ensureModel(path);
-    tabs.set(path, { model, saved: model.getAlternativeVersionId() });
-    model.onDidChangeContent(renderTabs);
-  }
+  if (!tabs.has(path)) addTab(path, await ensureModel(path));
   closeDiff(false);
   closeMerge();
   hideHistory();
@@ -829,6 +857,18 @@ const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
 window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
 
+/**
+ * Updates a file's unsaved-changes dot after an edit. Only the dot can change, and only when the
+ * text moves away from or back to what was saved, so most keystrokes touch nothing.
+ */
+function showDirty(path: string) {
+  const tab = tabs.get(path);
+  if (!tab) return;
+  const dirty = isDirty(tab);
+  for (const el of document.querySelectorAll<HTMLElement>(`#editor .tab[data-path="${CSS.escape(path)}"]`))
+    if (el.classList.contains("dirty") !== dirty) el.classList.toggle("dirty", dirty);
+}
+
 function renderTabs() {
   for (const pane of panes) {
     const shown = pane === currentPane() ? active : pane.active;
@@ -837,6 +877,7 @@ function renderTabs() {
         const tab = tabs.get(path)!;
         const el = document.createElement("div");
         el.className = `tab${path === shown ? " active" : ""}${isDirty(tab) ? " dirty" : ""}`;
+        el.dataset.path = path;
         el.role = "tab";
         el.title = relative(path);
         const icon = fileIcon(nameOf(path));
@@ -897,15 +938,16 @@ listen<string[]>("fs-change", ({ payload }) => {
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     aiFilesChanged([...paths]);
     const php = [...paths].filter((p) => p.endsWith(".php"));
-    filesChanged(await Promise.all(php.map(async (path) => ({ path, exists: await invoke<boolean>("path_exists", { path }) }))));
+    const exists = php.length ? await invoke<boolean[]>("paths_exist", { paths: php }) : [];
+    filesChanged(php.map((path, i) => ({ path, exists: exists[i] })));
     for (const dir of new Set([...paths].map(parentOf))) {
       const ul = renderedDirs.get(dir);
-      if (ul) renderDir(ul, dir);
+      if (ul) renderDir(ul, dir, true);
     }
     renderTabs();
     refreshGit();
-    refreshSearch();
-    refreshTodos();
+    refreshSearch(paths);
+    refreshTodos(paths);
   }, 150);
 });
 
@@ -1075,9 +1117,9 @@ const actions: Action[] = [
   { label: "Run All Tests with Coverage", run: () => root && runAllTests(true) },
   { label: "Run Test at Cursor with Coverage", run: () => runTestAtCursor(editor, "coverage") },
   { label: "Profile Test at Cursor", run: () => runTestAtCursor(editor, "profile") },
-  { label: "Open Xdebug Profile…", run: chooseProfile },
-  { label: "Profile URL…", run: () => root && profileUrl() },
-  { label: "Start Profiling Server (PHP's server with the Xdebug profiler)", run: () => root && startProfilingServer() },
+  { label: "Open Xdebug Profile…", run: () => loadProfiler().then((p) => p.chooseProfile()) },
+  { label: "Profile URL…", run: () => root && loadProfiler().then((p) => p.profileUrl()) },
+  { label: "Start Profiling Server (PHP's server with the Xdebug profiler)", run: () => root && loadProfiler().then((p) => p.startProfilingServer()) },
   { label: "Hide Coverage", run: hideCoverage },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, "debug") },
@@ -1253,12 +1295,14 @@ window.addEventListener(
   true,
 );
 
-initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status);
+// The profiler and its views load the first time you use them.
+const loadProfiler = () =>
+  import("./profiler").then((p) => (p.initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }), p));
+initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status, loadProfiler);
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initAi({ status, root: () => root });
-initSettings();
+const settingsLoaded = initSettings();
 initSnippets();
-initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initBookmarks({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initFormatting({ root: () => root, status });
 initConflicts();
@@ -1357,5 +1401,6 @@ let last: string | null = null;
 try {
   last = localStorage.getItem("lastFolder");
 } catch {}
-if (last) openFolder(last).catch(showWelcome);
-else showWelcome();
+// Settings load first, so the project opens with the right theme and servers, and spell checking's
+// language server isn't started and then restarted when the settings arrive.
+settingsLoaded.then(() => (last ? openFolder(last).catch(showWelcome) : showWelcome()));

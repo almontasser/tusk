@@ -56,9 +56,12 @@ export function initConflicts() {
 /** Colors the two sides of each conflict and dims the marker lines in an editor. */
 export function decorateConflicts(editor: monaco.editor.IStandaloneCodeEditor) {
   const decorations = editor.createDecorationsCollection();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const update = () => {
+    clearTimeout(timer);
     const model = editor.getModel();
     const conflicts = model ? parseConflicts(model.getLinesContent()) : [];
+    if (!conflicts.length && !decorations.length) return;
     const block = (from: number, to: number, className: string) =>
       from <= to ? [{ range: new monaco.Range(from, 1, to, 1), options: { isWholeLine: true, className } }] : [];
     decorations.set(
@@ -73,7 +76,9 @@ export function decorateConflicts(editor: monaco.editor.IStandaloneCodeEditor) {
     );
   };
   editor.onDidChangeModel(update);
-  editor.onDidChangeModelContent(update);
+  // Edits wait for a pause: scanning a large file on every keystroke costs more than a moment's lag in the colors.
+  editor.onDidChangeModelContent(() => (clearTimeout(timer), (timer = setTimeout(update, 100))));
+  editor.onDidDispose(() => clearTimeout(timer));
 }
 
 /** Whether text still contains a complete conflict block. */

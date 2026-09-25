@@ -51,12 +51,37 @@ export function change(...args: string[]) {
 
 // ---- Status ----
 
-/** Reloads `git status` and redraws the commit view and branch widget. */
-export async function refreshGit() {
+let refreshing: Promise<void> | undefined;
+let again: Promise<void> | undefined;
+
+/**
+ * Reloads `git status` and redraws the commit view and branch widget. One refresh runs at a time:
+ * calls made while one runs share a single follow-up refresh, which starts after it ends, so the
+ * status they see is never older than their call.
+ */
+export function refreshGit(): Promise<void> {
+  if (!refreshing) return (refreshing = loadStatus().finally(() => (refreshing = undefined)));
+  return (again ??= refreshing.then(() => ((again = undefined), refreshGit())));
+}
+
+/** HEAD's commit when the caches below were filled, with the project root. */
+let cachedHead: string | undefined;
+
+async function loadStatus() {
   if (!host.root()) return;
-  current = await git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined);
+  const [status, head] = await Promise.all([
+    git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined),
+    git("rev-parse", "HEAD").catch(() => ""),
+  ]);
+  current = status;
   operation = current ? await detectOperation() : null;
-  headCache.clear(); // HEAD may have moved.
+  // File contents at HEAD and blame only change when HEAD moves (a commit, checkout, reset, or rebase).
+  const headKey = `${host.root()}:${head.trim()}`;
+  if (headKey !== cachedHead) {
+    cachedHead = headKey;
+    headCache.clear();
+    blames.clear();
+  }
   const branch = current && `${host.root()}:${current.branch}`;
   if (branch !== lastBranch) {
     lastBranch = branch;
@@ -95,9 +120,10 @@ async function detectOperation(): Promise<Operation | null> {
   }
   const dir = gitDir.path;
   if (!dir) return null;
-  const exists = (name: string) => invoke<boolean>("path_exists", { path: `${dir}/${name}` });
-  for (const [name, kind] of [["rebase-merge", "rebase"], ["rebase-apply", "rebase"], ["MERGE_HEAD", "merge"], ["CHERRY_PICK_HEAD", "cherry-pick"], ["REVERT_HEAD", "revert"]] as const) {
-    if (!(await exists(name))) continue;
+  const kinds = [["rebase-merge", "rebase"], ["rebase-apply", "rebase"], ["MERGE_HEAD", "merge"], ["CHERRY_PICK_HEAD", "cherry-pick"], ["REVERT_HEAD", "revert"]] as const;
+  const found = await Promise.all(kinds.map(([name]) => invoke<boolean>("path_exists", { path: `${dir}/${name}` })));
+  for (const [i, [name, kind]] of kinds.entries()) {
+    if (!found[i]) continue;
     // git writes rebase-merge/amend when it stops at an edit step.
     const amend = name === "rebase-merge" ? await invoke<string>("read_file", { path: `${dir}/rebase-merge/amend` }).catch(() => "") : "";
     const editing = amend.trim() ? (await git("log", "-1", "--format=%h %s", amend.trim()).catch(() => amend.trim().slice(0, 7))).trim() : undefined;
@@ -479,14 +505,38 @@ function worktreeActions(path: string, branch: string, main: boolean) {
 
 // ---- Editor: change markers, inline blame, and blame annotations ----
 
-const headCache = new Map<string, Promise<string | null>>();
+/** Each file's lines at HEAD, or null for files git doesn't track. Cleared when HEAD moves. */
+const headCache = new Map<string, Promise<string[] | null>>();
 /** Per-editor refreshers, run after each git refresh. */
-const refreshers: (() => void)[] = [];
+const refreshers = new Set<() => void>();
 
-/** The file's content at HEAD, or null for files git doesn't track. */
-function headOf(rel: string) {
-  if (!headCache.has(rel)) headCache.set(rel, git("show", `HEAD:${rel}`).catch(() => null));
+function headLines(rel: string) {
+  if (!headCache.has(rel)) headCache.set(rel, git("show", `HEAD:${rel}`).then((t) => t.split("\n"), () => null));
   return headCache.get(rel)!;
+}
+
+/** Blame by model URI, for one version of its text, shared by every pane showing it. Cleared when HEAD moves. */
+const blames = new Map<string, { version: number; lines: Promise<BlameLine[]> }>();
+
+/**
+ * Blame for a model's current text, including unsaved edits. One `git blame` runs per file at a
+ * time: a request waits for the one before it, and if the text changed again meanwhile it skips
+ * git and reuses the earlier result, since the newer request will blame the newer text.
+ */
+function blameOf(model: monaco.editor.ITextModel, rel: string): Promise<BlameLine[]> {
+  const key = model.uri.toString();
+  const version = model.getAlternativeVersionId();
+  const previous = blames.get(key);
+  if (previous?.version === version) return previous.lines;
+  if (!previous) model.onWillDispose(() => blames.delete(key));
+  const before = previous?.lines ?? Promise.resolve<BlameLine[]>([]);
+  const lines = before.then((earlier) =>
+    model.isDisposed() || (previous && model.getAlternativeVersionId() !== version)
+      ? earlier
+      : gitWithInput(model.getValue(), "blame", "--porcelain", "--contents", "-", "--", rel).then(parseBlame, () => []),
+  );
+  blames.set(key, { version, lines });
+  return lines;
 }
 
 const annotated = new Set<string>();
@@ -499,7 +549,6 @@ export const annotate = (editor: monaco.editor.ICodeEditor) => togglers.get(edit
 export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const markers = editor.createDecorationsCollection();
   const inline = editor.createDecorationsCollection();
-  let blame: { version: number; lines: Promise<BlameLine[]> } | undefined;
   const debounce = (fn: () => unknown, ms: number) => {
     let t: ReturnType<typeof setTimeout>;
     return () => (clearTimeout(t), (t = setTimeout(fn, ms)));
@@ -512,26 +561,20 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const updateMarkers = debounce(async () => {
     const model = editor.getModel();
     const rel = model && relOf(model);
-    const head = rel ? await headOf(rel) : null;
+    const head = rel ? await headLines(rel) : null;
     if (!model || head === null || editor.getModel() !== model) return markers.clear();
     markers.set(
-      lineChanges(head.split("\n"), model.getLinesContent()).map((c) => ({
+      lineChanges(head, model.getLinesContent()).map((c) => ({
         range: new monaco.Range(c.start, 1, c.end, 1),
         options: { isWholeLine: true, linesDecorationsClassName: `gutter-${c.kind}` },
       })),
     );
   }, 200);
 
-  /** Blame for the editor's current text, including unsaved edits, cached per model version. */
   const blameLines = () => {
     const model = editor.getModel();
     const rel = model && relOf(model);
-    if (!model || !rel) return Promise.resolve([]);
-    const version = model.getAlternativeVersionId();
-    if (blame?.version !== version) {
-      blame = { version, lines: gitWithInput(model.getValue(), "blame", "--porcelain", "--contents", "-", "--", rel).then(parseBlame, () => []) };
-    }
-    return blame.lines;
+    return model && rel ? blameOf(model, rel) : Promise.resolve([]);
   };
   const describe = (b: BlameLine) =>
     /^0+$/.test(b.hash) ? "You · Not committed yet" : `${b.author}, ${age(b.time)} ago · ${b.summary}`;
@@ -567,10 +610,12 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   });
 
   const updateAnnotations = debounce(applyAnnotations, 300);
-  editor.onDidChangeModel(() => (blame = undefined, updateMarkers(), updateInline(), applyAnnotations()));
+  editor.onDidChangeModel(() => (updateMarkers(), updateInline(), applyAnnotations()));
   editor.onDidChangeModelContent(() => (updateMarkers(), updateInline(), updateAnnotations()));
   editor.onDidChangeCursorPosition(updateInline);
-  refreshers.push(() => (blame = undefined, updateMarkers(), updateInline(), updateAnnotations()));
+  const refresh = () => (updateMarkers(), updateInline(), updateAnnotations());
+  refreshers.add(refresh);
+  editor.onDidDispose(() => refreshers.delete(refresh));
 }
 
 export function initGit(h: Host) {

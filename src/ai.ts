@@ -186,16 +186,22 @@ let modelsTimer: ReturnType<typeof setTimeout> | undefined;
 export function aiFilesChanged(paths: string[]) {
   const p = project;
   if (!p) return;
+  const changed: string[] = [];
   for (const path of paths) {
     const rel = path.slice(p.root.length + 1);
     if (!path.startsWith(p.root + "/") || !INDEXED.test(rel) || SKIPPED.test(rel)) continue;
-    readFile(path).then((text) => indexFile(p, rel, text));
-    for (const key of types.keys()) if (key.startsWith(`${path}|`)) types.delete(key);
+    changed.push(rel);
+    types.delete(path);
     if (/^(app|database\/migrations)\/.*\.php$/.test(rel)) {
       clearTimeout(modelsTimer);
       modelsTimer = setTimeout(() => loadModels(p), 5000);
     }
   }
+  // Read in batches, as indexing does, so a checkout that changes thousands of files doesn't read them all at once.
+  (async () => {
+    for (let i = 0; i < changed.length && project === p; i += 32)
+      await Promise.all(changed.slice(i, i + 32).map(async (rel) => indexFile(p, rel, await readFile(`${p.root}/${rel}`))));
+  })();
 }
 
 /** Code the user worked on lately, oldest first: the lines around the cursor when they left an editor. */
@@ -214,12 +220,21 @@ function remember(ed: monaco.editor.ICodeEditor) {
 
 const relative = (p: Project, path: string) => (path.startsWith(p.root + "/") ? path.slice(p.root.length + 1) : path);
 
+/** Outlines of open files by model, kept until the text changes, since every request outlines them again. */
+const openOutlines = new WeakMap<monaco.editor.ITextModel, { version: number; rel: string; outline: string }>();
+
 /** The project for aicontext.ts: open files are outlined from their unsaved text. */
 const indexOf = (p: Project): Index => ({
   ...p,
   outline: (rel) => {
     const open = monaco.editor.getModel(monaco.Uri.file(`${p.root}/${rel}`));
-    if (open) return outlineFile(rel, open.getValue());
+    if (open) {
+      const cached = openOutlines.get(open);
+      if (cached?.version === open.getVersionId() && cached.rel === rel) return cached.outline;
+      const outline = outlineFile(rel, open.getValue());
+      openOutlines.set(open, { version: open.getVersionId(), rel, outline });
+      return outline;
+    }
     if (!p.outlines.has(rel)) p.outlines.set(rel, outlineFile(rel, p.files.get(rel)?.text ?? ""));
     return p.outlines.get(rel)!;
   },
@@ -229,8 +244,9 @@ let similarFor = { key: "", chunks: [] as Chunk[] };
 /** Similar code is searched again when the cursor moves 10 lines or more, so typing doesn't change the prompt. */
 const similarKey = (p: Project, model: monaco.editor.ITextModel, line: number) => `${relative(p, model.uri.path)}:${Math.floor(line / 10)}`;
 
-/** Types Phpactor found for names before `->`, by file path and name: a class, or null and when it was asked. */
-const types = new Map<string, { fqn: string | null; at: number }>();
+/** Types Phpactor found for names before `->`, by file path, then name: a class, or null and when it was asked. */
+const types = new Map<string, Map<string, { fqn: string | null; at: number }>>();
+const typesIn = (path: string) => types.get(path) ?? types.set(path, new Map()).get(path)!;
 const asking = new Set<string>();
 /** Readies the prompt for the focused editor again, after context arrives late. */
 let rewarm = () => {};
@@ -247,7 +263,7 @@ function typesNear(p: Project, model: monaco.editor.ITextModel, offset: number):
   const found: string[] = [];
   for (const { name, offset: at } of typedNames(model.getValue(), offset)) {
     const key = `${model.uri.path}|${name}`;
-    const known = types.get(key);
+    const known = types.get(model.uri.path)?.get(name);
     if (known?.fqn) found.push(known.fqn);
     if ((known && (known.fqn || Date.now() - known.at < 1000)) || asking.has(key)) continue;
     asking.add(key);
@@ -262,7 +278,7 @@ function typesNear(p: Project, model: monaco.editor.ITextModel, offset: number):
         const path = target && monaco.Uri.parse(target.targetUri ?? target.uri ?? "").path;
         const text = path?.startsWith(p.root + "/") ? (p.files.get(relative(p, path))?.text ?? null) : null;
         const fqn = (text && parseTypeDeclaration(text)?.fqn) || null;
-        types.set(key, { fqn, at: Date.now() });
+        typesIn(model.uri.path).set(name, { fqn, at: Date.now() });
         asking.delete(key);
         if (fqn) rewarm();
       });

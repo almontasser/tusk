@@ -2,9 +2,8 @@
 // views, such as the debugger, can add a tab with showPanelView.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
+import type { FitAddon } from "@xterm/addon-fit";
+import type { Terminal } from "@xterm/xterm";
 import { isDark, onSettings } from "./settings";
 
 /** A panel tab: a terminal, or another view (without `term`). `shell` marks a plain shell, not a command. */
@@ -26,9 +25,16 @@ onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme
 export const shellCount = () => sessions.filter((s) => s.shell && !s.exited).length;
 export const panelShown = () => panelVisible;
 
-/** Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process ends. */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void) {
+// xterm.js loads with the first terminal, not with the app.
+const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css")]);
+
+/**
+ * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
+ * ends; `onClose` runs when its tab closes, even while the process still runs.
+ */
+export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void) {
   showPanel(true);
+  const [{ Terminal }, { FitAddon }] = await loadXterm();
   const el = document.createElement("div");
   el.className = "term";
   $("terminals").append(el);
@@ -54,6 +60,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   const observer = new ResizeObserver(() => el.offsetParent && fit.fit());
   observer.observe(el);
   session.dispose = () => {
+    onClose?.();
     unlisteners.forEach((u) => u());
     input.dispose();
     resize.dispose();

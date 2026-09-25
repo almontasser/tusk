@@ -88,8 +88,11 @@ monaco.editor.onDidCreateModel((model) => {
   render(path);
   // Save lines that edits moved.
   model.onDidChangeContent(() => {
-    if (!bookmarks.get(path)?.size) return;
-    bookmarks.set(path, linesOf(path));
+    const before = bookmarks.get(path);
+    if (!before?.size) return;
+    const after = linesOf(path);
+    if (after.size === before.size && [...after].every((line) => before.has(line))) return;
+    bookmarks.set(path, after);
     persist();
   });
   model.onWillDispose(() => decorations.delete(path));
