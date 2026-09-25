@@ -254,6 +254,9 @@ async function startServer(
       const v = msg.params.value;
       const token = msg.params.token;
       if (v.kind === "begin") progressTitles.set(token, v.title);
+      // The first indexing run after a full reindex request is the full build; its end means the index is complete.
+      if (name === "phpactor" && v.kind === "begin" && awaitingFullIndex && /^indexing/i.test(v.title ?? "")) (fullIndexRun = token), (awaitingFullIndex = false);
+      if (name === "phpactor" && v.kind === "end" && token === fullIndexRun) (fullIndexRun = undefined), markIndexComplete(root);
       // Show progress only after it runs for a moment, so quick tasks such as resolving code
       // actions don't flash in the status bar.
       const text = [progressTitles.get(token), v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" ");
@@ -680,7 +683,8 @@ const phpactorIndexer = {
   ],
   // Phpactor keeps entries for files that later become excluded. Bump the suffix whenever
   // the patterns change, so projects get a fresh index instead of stale duplicates.
-  "indexer.index_path": "%cache%/index/%project_id%-editor-1",
+  // -editor-2: indexes built before full builds were tracked may be missing whole folders of vendor.
+  "indexer.index_path": "%cache%/index/%project_id%-editor-2",
 };
 /** The editor's index, for running Phpactor's command line against the same index as the server. */
 export const PHPACTOR_INDEX = { "indexer.index_path": phpactorIndexer["indexer.index_path"] };
@@ -878,6 +882,8 @@ export async function startLsp(root: string, h: Host) {
  * while the editor was closed. A simple hash of the file is kept per project.
  */
 export async function checkComposerLock(root: string) {
+  // An index whose full build never finished is missing files, and Phpactor's update pass won't add them.
+  if (!indexComplete(root)) return reindex();
   const lock = await invoke<string>("read_file", { path: `${root}/composer.lock` }).catch(() => null);
   if (lock === null) return;
   let hash = 0;
@@ -891,6 +897,29 @@ export async function checkComposerLock(root: string) {
   }
   reindex();
 }
+
+/**
+ * Whether Phpactor's index for a project was ever built to the end. Its first build takes minutes, and if the
+ * server stops partway (a restart, or opening another project), later starts only index files changed since
+ * the last update, which any change moves forward; the files the first build never reached stay missing, and
+ * functions such as Laravel's response() show as not found. So until a full build ends, each start asks for one.
+ */
+const indexedKey = (root: string) => `phpactorIndexed:${root}`;
+function indexComplete(root: string) {
+  try {
+    return localStorage.getItem(indexedKey(root)) === phpactorIndexer["indexer.index_path"];
+  } catch {
+    return true; // Without storage, don't rebuild on every start.
+  }
+}
+function markIndexComplete(root: string) {
+  try {
+    localStorage.setItem(indexedKey(root), phpactorIndexer["indexer.index_path"]);
+  } catch {}
+}
+/** A full reindex was asked for and hasn't started; then the progress token of the run that is the full build. */
+let awaitingFullIndex = false;
+let fullIndexRun: unknown;
 
 export const didSave = (model: monaco.editor.ITextModel) => servers.forEach((s) => s.didSave(model));
 
@@ -934,6 +963,7 @@ export async function phpactorRequest<T>(method: string, params: unknown): Promi
  */
 export function reindex(soft = false) {
   const phpactor = servers.find((s) => s.name === "phpactor");
+  if (!soft && phpactor) awaitingFullIndex = true;
   phpactor?.request("phpactor/indexer/reindex", { soft }).catch((e) => host.status(`Can't reindex: ${e}`));
 }
 
@@ -950,7 +980,9 @@ export function filesChanged(files: { path: string; exists: boolean }[]) {
   const external = php.some(
     (f) => f.exists && !monaco.editor.getModel(monaco.Uri.file(f.path)) && !/\/(vendor|node_modules|storage|bootstrap\/cache|\.[^/]+)\//.test(f.path.slice(projectRoot.length)),
   );
-  if (!external) return;
+  // Until a full build has finished, one is running or comes with the next start; an update pass would only
+  // move the index's timestamp past the files it's missing.
+  if (!external || !indexComplete(projectRoot)) return;
   clearTimeout(reindexTimer);
   reindexTimer = setTimeout(() => reindex(true), 2000);
 }

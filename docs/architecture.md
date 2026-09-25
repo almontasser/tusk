@@ -252,8 +252,28 @@ worktrees under `.claude/`, this cut the index from 125,859 files to about
 
 Phpactor keeps index entries for files that later become excluded, which
 would list classes twice. The client sets its own `indexer.index_path` with a
-version suffix (`%project_id%-editor-1`). When the patterns change, bump the
+version suffix (`%project_id%-editor-2`). When the patterns change, bump the
 suffix, and every project gets a fresh index.
+
+### Unfinished first builds
+
+Phpactor finds classes through Composer's autoloader even without an index,
+but functions only through the index. A first build takes minutes, and its
+update pass on later starts indexes only files newer than the index's last
+update, which every file change moves forward. So a first build that stops
+partway, because the server restarted or another project opened, leaves the
+files it never reached out of the index for good, and a helper such as
+Laravel's `response()` shows "Function not found" in every file. (One project
+had a 133 MB index where a complete one is 537 MB.)
+
+The client therefore records, per project in `localStorage`
+(`phpactorIndexed:<root>`, set to the index path), that a full build finished.
+Until it has, `checkComposerLock` asks for a full reindex at each start, and
+file changes don't trigger the update pass, which would only move the timestamp
+past the missing files. `reindex(false)` sets `awaitingFullIndex`; the next
+`$/progress` run titled "Indexing…" is the full build, and its end marks the
+index complete. `-editor-2` replaced `-editor-1`, whose indexes may be
+incomplete; the old folders under `~/.cache/phpactor/index` can be deleted.
 
 ### Reindexing after Composer changes
 
