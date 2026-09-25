@@ -228,6 +228,12 @@ Tauri runs the script before `dev` and `build`, and copies the folder into the
 app bundle as `tools/`. To upgrade a tool, change its URL and checksum in the
 script.
 
+In development, Tauri copies the tools into `target/debug/tools/` over the
+previous build's files. macOS caches a binary's code signature per file, so a
+tool rewritten in place after the app ran it fails its signature check, and
+macOS kills it partway through a large run, such as Mago analyzing a whole
+project. `build.rs` then writes each executable again as a new file.
+
 | Tool | Version | Form |
 | --- | --- | --- |
 | Phpactor | 2026.06.23.0 | PHP archive (`.phar`) |
