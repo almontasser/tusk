@@ -1,7 +1,11 @@
 // Tells comments from code and strings in PHP, JavaScript, CSS, HTML, and Blade. Free of editor imports so
-// Node can test it. ponytail: no heredocs, nowdocs, or regex literals; text in them counts as code.
+// Node can test it. ponytail: no JavaScript regex literals or template-literal nesting; their text counts as code.
 
-type State = "code" | "line" | "block" | "html" | "blade" | "'" | '"' | "`";
+/**
+ * `code` is PHP or JavaScript, `text` is HTML or Blade outside PHP tags (where quotes are just text), and
+ * `heredoc` is a PHP heredoc or nowdoc, which ends at a line holding its identifier.
+ */
+type State = "code" | "text" | "heredoc" | "line" | "block" | "html" | "blade" | "'" | '"' | "`";
 
 /** Where each comment kind ends. */
 const CLOSERS: Partial<Record<State, string>> = { block: "*/", html: "-->", blade: "--}}" };
@@ -12,6 +16,9 @@ const isComment = (state: State) => state === "line" || state in CLOSERS;
  * (including the comment's own markers). Returns the state at the end.
  */
 function scan(text: string, visit?: (i: number, comment: boolean) => void, state: State = "code"): State {
+  let heredocEnd: RegExp | null = null;
+  // A comment that ended in text, such as <!-- --> before <?php, returns to text rather than to code.
+  let outside: State = state === "text" ? "text" : "code";
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     const start = state;
@@ -25,12 +32,26 @@ function scan(text: string, visit?: (i: number, comment: boolean) => void, state
       else if (rest.startsWith("/*")) (state = "block"), (width = 2);
       else if (rest === "<!--") (state = "html"), (width = 4);
       else if (rest === "{{--") (state = "blade"), (width = 4);
-      else if (c === "'" || c === '"' || c === "`") state = c;
+      else if (rest.startsWith("?>")) (state = outside = "text"), (width = 2);
+      else if (rest.startsWith("<<<")) {
+        const opener = text.slice(i, i + 200).match(/^<<<[ \t]*(["']?)([A-Za-z_]\w*)\1/);
+        if (opener) (heredocEnd = new RegExp(`^[ \\t]*${opener[2]}(?!\\w)`)), (state = "heredoc"), (width = opener[0].length);
+      } else if (c === "'" || c === '"' || c === "`") state = c;
+    } else if (state === "text") {
+      const rest = text.slice(i, i + 5);
+      if (rest.startsWith("<!--")) (state = "html"), (width = 4);
+      else if (rest.startsWith("{{--")) (state = "blade"), (width = 4);
+      else if (rest.startsWith("<?")) (state = outside = "code"), (width = rest === "<?php" ? 5 : 2);
+    } else if (state === "heredoc") {
+      const closing = c === "\n" && text.slice(i + 1, i + 200).match(heredocEnd!);
+      if (closing) (state = "code"), (width = 1 + closing[0].length);
     } else if (state === "line") {
-      if (c === "\n") state = "code";
+      // A PHP line comment also ends at ?>, which closes the PHP tag.
+      if (c === "\n") state = outside;
+      else if (text.startsWith("?>", i)) (state = outside = "text"), (width = 2);
     } else if (state in CLOSERS) {
       const closer = CLOSERS[state]!;
-      if (text.startsWith(closer, i)) (width = closer.length), (state = "code");
+      if (text.startsWith(closer, i)) (width = closer.length), (state = outside);
     } else if (c === "\\") width = 2; // An escaped character inside a string.
     else if (c === state) state = "code";
     // A comment's opening and closing markers belong to it too.
@@ -41,10 +62,13 @@ function scan(text: string, visit?: (i: number, comment: boolean) => void, state
   return state;
 }
 
-/** `source` with every comment replaced by spaces, keeping offsets and line breaks, so patterns only see code and strings. */
-export function commentMask(source: string): string {
+/**
+ * `source` with every comment replaced by spaces, keeping offsets and line breaks, so patterns only see code and
+ * strings. A file that starts with `<?` (PHP), or `markup` (HTML, Blade), starts outside code, as text.
+ */
+export function commentMask(source: string, markup = false): string {
   const out = source.split("");
-  scan(source, (i, comment) => comment && (out[i] = " "));
+  scan(source, (i, comment) => comment && (out[i] = " "), markup || source.startsWith("<?") ? "text" : "code");
   return out.join("");
 }
 

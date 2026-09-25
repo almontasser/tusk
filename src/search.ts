@@ -4,7 +4,8 @@ import { confirm } from "./palette";
 import { monaco } from "./editor";
 import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
-import { inComment } from "./comments";
+import { commentMask, inComment } from "./comments";
+import { readText, writeText } from "./projectfiles";
 
 type Host = {
   root(): string;
@@ -148,16 +149,16 @@ async function replaceOne(m: Match) {
       // Only if the line still holds the match where the search found it.
       if (model.getValueInRange(new monaco.Range(m.line, m.column, m.line, m.end)) !== found) return host.status("The file changed; search again.");
       model.pushEditOperations([], [{ range: new monaco.Range(m.line, m.column, m.line, m.end), text }], () => null);
-      await invoke("write_file", { path: m.path, contents: model.getValue() });
+      await writeText(m.path, model.getValue());
       host.markSaved(m.path);
       didSave(model);
     } else {
-      const lines = (await invoke<string>("read_file", { path: m.path })).split("\n");
+      const lines = (await readText(m.path)).split("\n");
       const line = lines[m.line - 1];
       if (line === undefined || !line.startsWith(m.text.slice(0, m.end - 1))) return host.status("The file changed; search again.");
       // Columns are UTF-16 code units, the same units JavaScript strings index by.
       lines[m.line - 1] = line.slice(0, m.column - 1) + text + line.slice(m.end - 1);
-      await invoke("write_file", { path: m.path, contents: lines.join("\n") });
+      await writeText(m.path, lines.join("\n"));
     }
   } catch (e) {
     return host.status(`Replace failed: ${String(e)}`);
@@ -188,11 +189,11 @@ async function replaceIn(paths: string[]) {
   for (const path of paths) {
     try {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
-      const text = model ? model.getValue() : await invoke<string>("read_file", { path });
+      const text = model ? model.getValue() : await readText(path);
       const result = await invoke<{ text: string; count: number }>("replace_text", { text, query: q, replacement: replacement() });
       if (!result.count) continue;
       if (model) model.pushEditOperations([], [{ range: model.getFullModelRange(), text: result.text }], () => null);
-      await invoke("write_file", { path, contents: result.text });
+      await writeText(path, result.text);
       if (model) {
         host.markSaved(path);
         didSave(model);
@@ -259,8 +260,21 @@ export async function loadTodos() {
   const current = ++todoGeneration;
   const matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
   if (current !== todoGeneration) return; // A newer load already started.
-  // Only keywords in comments, not in strings or names such as TODO_LIMIT.
-  const found = matches.filter((m) => inComment(m.text, m.column));
+  // Only keywords in comments, not in strings or names such as TODO_LIMIT. Each file with matches is read and
+  // scanned whole, so lines inside a multi-line comment count; a file that can't be read is judged line by line.
+  const byFile = new Map<string, Match[]>();
+  for (const m of matches) (byFile.get(m.path) ?? byFile.set(m.path, []).get(m.path)!).push(m);
+  const kept = await Promise.all(
+    [...byFile].map(async ([path, list]) => {
+      const text = await readText(path).catch(() => null);
+      if (text === null) return list.filter((m) => inComment(m.text, m.column));
+      const lines = commentMask(text, /\.(html?|blade\.php)$/.test(path)).split("\n");
+      // A blanked keyword was in a comment.
+      return list.filter((m) => lines[m.line - 1]?.[m.column - 1] === " ");
+    }),
+  );
+  if (current !== todoGeneration) return;
+  const found = kept.flat();
   const groups = new Map<string, Match[]>();
   for (const m of found) (groups.get(m.path) ?? groups.set(m.path, []).get(m.path)!).push(m);
   $("todo-summary").textContent = found.length

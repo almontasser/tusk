@@ -57,15 +57,19 @@ const BOM: &str = "\u{feff}";
 /// Decodes a file in one of `.editorconfig`'s charsets. UTF-8 (the default) must be valid; the
 /// others can't fail. A byte-order mark is dropped, and `encode` adds it back.
 fn decode(bytes: Vec<u8>, charset: Option<&str>) -> Result<String, String> {
+    // Strict, like UTF-8: a file that isn't really UTF-16 would lose bytes when saved again.
     let utf16 = |bom: [u8; 2], unit: fn([u8; 2]) -> u16| {
         let body = bytes.strip_prefix(&bom[..]).unwrap_or(&bytes);
         let units: Vec<u16> = body.chunks_exact(2).map(|c| unit([c[0], c[1]])).collect();
-        String::from_utf16_lossy(&units)
+        if body.len() % 2 == 1 {
+            return Err("The file isn't valid UTF-16: it has an odd number of bytes.".to_string());
+        }
+        String::from_utf16(&units).map_err(|_| "The file isn't valid UTF-16.".to_string())
     };
     Ok(match charset {
         Some("latin1") => bytes.iter().map(|&b| b as char).collect(),
-        Some("utf-16le") => utf16([0xff, 0xfe], u16::from_le_bytes),
-        Some("utf-16be") => utf16([0xfe, 0xff], u16::from_be_bytes),
+        Some("utf-16le") => utf16([0xff, 0xfe], u16::from_le_bytes)?,
+        Some("utf-16be") => utf16([0xfe, 0xff], u16::from_be_bytes)?,
         Some("utf-8-bom") => {
             let text = String::from_utf8(bytes).map_err(|_| "The file isn't valid UTF-8.".to_string())?;
             text.strip_prefix(BOM).map(str::to_string).unwrap_or(text)
@@ -189,6 +193,7 @@ mod tests {
         // Without a charset, a byte-order mark stays, and invalid UTF-8 is refused.
         assert_eq!(encode("\u{feff}a", None).unwrap(), "\u{feff}a".as_bytes());
         assert!(decode(vec![0xe9], None).is_err());
+        assert!(decode(vec![0xff, 0xfe, b'a'], Some("utf-16le")).is_err());
     }
 
     #[test]

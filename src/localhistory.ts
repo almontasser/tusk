@@ -7,6 +7,7 @@ import { age } from "./gitparse";
 import { EXCLUDED_FOLDERS } from "./icons";
 import { pick } from "./palette";
 import { toPrune } from "./retention";
+import { readText, writeText } from "./projectfiles";
 
 type Host = { root(): string; showDiff(path: string, original: string, modified: string, label: string, action: { label: string; run(): unknown }): void; status(text: string): void };
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -39,10 +40,19 @@ export async function recordVersion(path: string, text: string, time = Date.now(
   }
 }
 
-/** Files that git ignores, such as build output, from one `git check-ignore`. Outside a repository, none. */
-async function ignored(paths: string[]) {
-  const out = await invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["check-ignore", "--stdin"], input: paths.join("\n") }).catch(() => "");
-  return new Set(out.split("\n"));
+/**
+ * Files that git ignores, such as build output, from one `git check-ignore`. Outside a repository, none. Null when
+ * git can't answer, such as for a path inside a submodule, which fails the whole call.
+ */
+async function ignored(paths: string[]): Promise<Set<string> | null> {
+  try {
+    const out = await invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["check-ignore", "--stdin"], input: paths.join("\n") });
+    return new Set(out.split("\n"));
+  } catch (e) {
+    // Exit status 1, with nothing on stderr, means that none of them are ignored.
+    const message = String(e).trim();
+    return !message || /not a git repository/i.test(message) ? new Set() : null;
+  }
 }
 
 /**
@@ -53,12 +63,14 @@ async function ignored(paths: string[]) {
  */
 export async function recordExternalChanges(paths: string[]) {
   const root = host.root();
-  const candidates = paths.filter((p) => p.startsWith(root + "/") && !relative(p).split("/").some((part) => EXCLUDED_FOLDERS.has(part)));
+  // .env files hold secrets, so they're never copied, even in a project without git to ignore them.
+  const candidates = paths.filter((p) => p.startsWith(root + "/") && !/(^|\/)\.env[^/]*$/.test(p) && !relative(p).split("/").some((part) => EXCLUDED_FOLDERS.has(part)));
   if (!candidates.length) return;
   const skip = await ignored(candidates);
+  if (!skip) return; // Rather than copy files git might ignore.
   // ponytail: 200 files per batch, so a branch switch that rewrites thousands doesn't copy them all; git has those anyway.
   for (const path of candidates.filter((p) => !skip.has(p)).slice(0, 200)) {
-    const text = await invoke<string>("read_file", { path }).catch(() => null); // Deleted, a folder, or not text.
+    const text = await readText(path).catch(() => null); // Deleted, a folder, or not text.
     if (text === null || text.length > MAX_SIZE) continue;
     if (!(await versions(await fileDir(path))).length) {
       const staged = await invoke<string>("run_capture", { cwd: root, program: "git", args: ["show", `:./${relative(path)}`], input: null }).catch(() => null);
@@ -73,7 +85,7 @@ export async function recordBeforeDelete(path: string, isDir: boolean) {
   // ponytail: a folder's first 500 files (ignored ones, such as vendor, left out), which covers typical deletes.
   const files = isDir ? (await invoke<string[]>("list_files", { root: path }).catch(() => [])).slice(0, 500).map((f) => `${path}/${f.replace(/^\//, "")}`) : [path];
   for (const file of files) {
-    const text = await invoke<string>("read_file", { path: file }).catch(() => null);
+    const text = await readText(file).catch(() => null);
     if (text !== null) await recordVersion(file, text);
   }
 }
@@ -108,14 +120,14 @@ export async function showLocalHistory(path: string) {
         run: async () => {
           const version = await invoke<string>("read_file", { path: `${dir}/${name}` });
           // null when the file was deleted.
-          const current = await invoke<string>("read_file", { path }).catch(() => null);
+          const current = await readText(path).catch(() => null);
           host.showDiff(relative(path), version, current ?? "", `${new Date(time).toLocaleString()} ↔ ${current === null ? "Deleted" : "Current"}`, {
             label: "Restore This Version",
             run: async () => {
               if (current !== null) await recordVersion(path, current); // So the restore can be undone from the history too.
               // A deleted file's folder may be gone too.
               await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
-              await invoke("write_file", { path, contents: version });
+              await writeText(path, version);
               host.status(`Restored ${relative(path)} from ${new Date(time).toLocaleString()}`);
             },
           });

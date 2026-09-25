@@ -8,7 +8,8 @@ import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
-import { indentation, type Properties, propertiesFor } from "./editorconfig";
+import { indentation, type Properties } from "./editorconfig";
+import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
@@ -32,7 +33,7 @@ import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { chooseService, composeService, composeServices } from "./sail";
-import { openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -335,6 +336,8 @@ async function openFolder(dir: unknown = null) {
   saveSession();
   for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
+  // The old project's shells and servers belong to it; the new project's session reopens its own.
+  closeTerminals();
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
@@ -469,7 +472,7 @@ async function ensureModel(path: string) {
   const uri = monaco.Uri.file(path);
   const existing = monaco.editor.getModel(uri);
   if (existing) return existing;
-  const text = await invoke<string>("read_file", { path, charset: await charsetOf(path) });
+  const text = await readText(path);
   // Another caller may have created the model while the file was loading.
   return monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, undefined, uri);
 }
@@ -786,28 +789,6 @@ monaco.languages.registerDefinitionProvider("blade", {
 
 // ---- EditorConfig ----
 
-const editorConfigs = new Map<string, Promise<string | null>>(); // folder → its .editorconfig, or null
-
-/** The .editorconfig files that apply to a project file, from the project root down to its folder. */
-async function editorConfigFor(path: string): Promise<Properties> {
-  if (!root || !path.startsWith(root + "/")) return {};
-  const dirs = [root];
-  for (const part of relative(parentOf(path)).split("/").filter(Boolean)) dirs.push(`${dirs.at(-1)}/${part}`);
-  const configs = [];
-  for (const dir of dirs) {
-    if (!editorConfigs.has(dir)) editorConfigs.set(dir, invoke<string>("read_file", { path: `${dir}/.editorconfig` }).catch(() => null));
-    const text = await editorConfigs.get(dir)!;
-    if (text !== null) configs.push({ dir, text });
-  }
-  return propertiesFor(path, configs);
-}
-
-/** `.editorconfig` charsets that `read_file` and `write_file` understand, with their status bar names. */
-const CHARSETS: Record<string, string> = { "utf-8": "UTF-8", "utf-8-bom": "UTF-8 BOM", latin1: "ISO-8859-1", "utf-16le": "UTF-16LE", "utf-16be": "UTF-16BE" };
-const charsetOf = async (path: string) => {
-  const charset = (await editorConfigFor(path)).charset;
-  return charset in CHARSETS ? charset : undefined;
-};
 /** Each file model's charset, for the status bar. */
 const modelCharsets = new WeakMap<monaco.editor.ITextModel, string>();
 /** `.editorconfig`'s end_of_line as Monaco's line ending. Monaco has no CR-only lines, so `cr` is left alone. */
@@ -863,7 +844,7 @@ async function applySaveRules(model: monaco.editor.ITextModel) {
 /** Writes a model that has no tab, such as the merge view's result for a file that isn't open. */
 async function writeModel(path: string) {
   const model = monaco.editor.getModel(monaco.Uri.file(path));
-  if (model) await invoke("write_file", { path, contents: model.getValue(), charset: await charsetOf(path) });
+  if (model) await writeText(path, model.getValue());
 }
 
 async function saveFile(path: string) {
@@ -877,7 +858,7 @@ async function saveFile(path: string) {
   await applySaveRules(tab.model);
   const text = tab.model.getValue();
   try {
-    await invoke("write_file", { path, contents: text, charset: await charsetOf(path) });
+    await writeText(path, text);
   } catch (e) {
     return status(`Couldn't save ${relative(path)}: ${e}`);
   }
@@ -951,7 +932,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 listen<string[]>("fs-change", ({ payload }) => {
   payload.forEach((p) => pending.add(p));
   if (payload.some((p) => p.endsWith("/.editorconfig"))) {
-    editorConfigs.clear();
+    forgetEditorConfigs();
     monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach(applyEditorConfig);
   }
   clearTimeout(timer);
@@ -962,7 +943,7 @@ listen<string[]>("fs-change", ({ payload }) => {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
       const tab = tabs.get(path);
       if (model && !(tab && isDirty(tab))) {
-        const text = await invoke<string>("read_file", { path, charset: await charsetOf(path) }).catch(() => null);
+        const text = await readText(path).catch(() => null);
         if (text !== null && text !== model.getValue()) {
           // Another program changed it, such as a git checkout: keep what the editor had first.
           await recordVersion(path, model.getValue());
@@ -1361,6 +1342,7 @@ initConflicts();
 initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
 
+initProjectFiles(() => root);
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */

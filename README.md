@@ -37,7 +37,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| TODO comments | A comment is recognized from its own line, so a keyword on a line inside a `/* */` comment that doesn't start with `*` is missed. The search stops at 20,000 matches, counted before those outside comments are dropped. |
+| TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
@@ -266,10 +266,11 @@ The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
 when you switch tabs and when you reopen the project. Expanded folders in the
 tree and the sidebar view come back too. Shells reopen in the folder you last
-`cd`'d to. Commands you started from Run Anything, such as `npm run dev` or
-`php artisan serve`, and Tinker, run again if they were still running when you
-closed the project. Tests, git commands, and the debug and profiling servers
-don't run again. If a project has a
+`cd`'d to. Servers and watchers you started from Run Anything, such as `npm run dev`,
+`php artisan serve`, `queue:work`, or `sail up`, and Tinker, run again if they
+were still running when you closed the project. Other commands, tests, git
+commands, and the debug and profiling servers don't run again. Opening another
+project closes the terminals of the one before. If a project has a
 `.phpactor.json` file, Phpactor asks whether to trust it, because the file can
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.
@@ -769,7 +770,7 @@ and outside git. It also keeps one before another program, such as a
 changes a project file you don't have open, such as a file an Artisan `make:`
 command or a formatter rewrites. The first time that happens to a file, the
 version git has staged is kept too, so you can go back to it. Files git
-ignores aren't kept. It also keeps a version before you delete a file or
+ignores, and `.env` files, aren't kept. It also keeps a version before you delete a file or
 folder from the tree. To see a file's versions, run **Show Local History** from
 ⌘⇧A, or right-click the file in the tree. Choose a version to compare it with
 the file as it is now, and click **Restore This Version** to put it back. The

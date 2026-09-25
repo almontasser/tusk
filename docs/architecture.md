@@ -152,11 +152,15 @@ with no line breaks yet takes `end_of_line` when it opens (`setEOL`), and its
 tab stays clean, since the text on disk is the same. Monaco has only LF and
 CRLF, so `end_of_line = cr` is ignored.
 
-`charset` goes to `read_file` and `write_file` in `fs.rs`, which decode and
-encode by hand: Latin-1 maps bytes to the first 256 code points, UTF-16 uses
+`charset` goes to `read_file` and `write_file` in `fs.rs`, through
+`readText` and `writeText` in `src/projectfiles.ts`, which every feature that
+reads or writes a project file's text uses: saving, refactorings
+(`applyWorkspaceEdit`), Replace in Files, local history restores, and reloads.
+Rust decodes and encodes by hand: Latin-1 maps bytes to the first 256 code points, UTF-16 uses
 `String::from_utf16_lossy` and `encode_utf16`, and a byte-order mark is
 dropped on reading and written again on saving (`utf-8-bom`, and UTF-16, which
-is written with one). Text that Latin-1 can't hold fails to save with the
+is written with one). UTF-16 is decoded strictly, like UTF-8: an odd number of
+bytes or an unpaired surrogate fails to open rather than losing bytes on save. Text that Latin-1 can't hold fails to save with the
 character named, and the tab stays unsaved. Without a `charset`, files are
 read as strict UTF-8 and written back unchanged, so a UTF-8 file with a
 byte-order mark keeps it. The model's charset only shows in the status bar;
@@ -970,13 +974,17 @@ server watchdog.
 `src/comments.ts` scans text for comments while skipping strings, so
 `"http://…"` and `'# not a comment'` stay code. It knows `//`, `#` (first on a
 line or before a space, so a CSS `#fff` and `#[Attribute]` don't count),
-`/* */`, `<!-- -->`, and Blade's `{{-- --}}`. `commentMask` blanks every
+`/* */`, `<!-- -->`, and Blade's `{{-- --}}`. Heredocs and nowdocs run to the
+line with their identifier. Outside PHP tags (a PHP file starts there, before
+`<?php`, and returns after `?>`), text is HTML, where an apostrophe opens no
+string, and only HTML and Blade comments count. `commentMask` blanks every
 comment and keeps offsets, for patterns that should only see code: test
 detection, type declarations (`phptypes.ts`), and AI context
-(`aicontext.ts`). `inComment` judges one line alone, for search matches that
-come without their file: it also counts a line that starts with `*`, as inside
-a docblock. The scanner doesn't know heredocs or JavaScript regex literals,
-whose text counts as code.
+(`aicontext.ts`). The TODO view reads each file with matches and masks
+it whole, so a keyword on any line of a multi-line comment counts; a file it
+can't read falls back to `inComment`, which judges one line alone and also
+counts a line that starts with `*`, as inside a docblock. The scanner doesn't
+know JavaScript regex literals, whose text counts as code.
 
 ### Tests and Run Anything
 
@@ -1211,8 +1219,12 @@ For files that aren't open, the editor has no copy of the text before the
 change, so `recordExternalChanges` keeps the text after it: the next change
 then finds its earlier text in the history. The watcher batch in `main.ts`
 passes it every changed path without a Monaco model. It skips folders in
-`EXCLUDED_FOLDERS` (such as `vendor`, `node_modules`, and `.git`) and anything
-`git check-ignore --stdin` names, in one call per batch. A file with no history
+`EXCLUDED_FOLDERS` (such as `vendor`, `node_modules`, and `.git`), `.env`
+files, and anything `git check-ignore --stdin` names, in one call per batch.
+`run_capture` fails on any non-zero exit: an empty error is exit status 1 (none
+ignored), and "not a git repository" means there's nothing to ignore, but any
+other failure, such as a path inside a submodule, skips the whole batch rather
+than copying files git may ignore. A file with no history
 yet first gets `git show :./<path>`, the staged version, when it differs, named
 one millisecond earlier so it sorts before the new text. Unreadable files
 (deleted, binary, or not UTF-8) and files over 1 MB are skipped, and a batch
@@ -1564,8 +1576,12 @@ directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
 back to the project folder.
 
 A command tab comes back only if its caller opened it as restorable and it was
-still running: Run Anything commands (`runner.ts`, for dev servers such as
-`npm run dev`) and Tinker. Tests, git and Composer commands, and anything that
+still running: Run Anything commands that keep running until stopped
+(`LONG_RUNNING` in `runner.ts`: `artisan serve`, queue workers, Horizon,
+Reverb, `npm run dev` and other dev or watch scripts, `vite` but not `vite
+build`, and `sail up` or `docker compose up`) and Tinker. `openFolder` closes
+every terminal (`closeTerminals`) once the old project's tabs have closed, so
+one project's servers never land in another's session. Tests, git and Composer commands, and anything that
 had finished don't run again, since repeating them unasked could push, rebase,
 or change packages. The debug server and the profiling server aren't restored
 either, because each needs its tool's state (the debugger listening, or the

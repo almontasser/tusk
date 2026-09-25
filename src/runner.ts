@@ -33,8 +33,9 @@ const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("
 async function run(title: string, command: string[], tests = false, mode: Mode = "run") {
   last = { title, command, tests, mode };
   const coverage = mode === "coverage";
-  // Commands from Run Anything, such as `npm run dev`, reopen with the project while they still run; tests don't.
-  if (!tests) return openTerminal(getRoot(), title, command, undefined, undefined, true);
+  // Servers and watchers from Run Anything, such as `npm run dev`, reopen with the project while they still run.
+  // Other commands, such as a migration waiting at a prompt, don't run again on their own.
+  if (!tests) return openTerminal(getRoot(), title, command, undefined, undefined, LONG_RUNNING.test(command.join(" ")));
   // In a container, the report has to be somewhere it can write: storage/logs, which git ignores.
   const inContainer = command[0] === `${getRoot()}/vendor/bin/sail` || (command[0] === "docker" && command[1] === "compose");
   const report = inContainer ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
@@ -99,6 +100,10 @@ async function testRunner(debug = false) {
   const { command, container } = await php(local, debug);
   return { command, where: container ? ` (${container.label})` : "" };
 }
+
+/** Commands that keep running until stopped: dev servers, watchers, queue workers, and containers. */
+const LONG_RUNNING =
+  /\b(?:artisan\s+(?:serve|queue:work|queue:listen|horizon|reverb:start|schedule:work|pail|octane:start)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|watch|serve|start)|vite(?!\s+build)(?:\s|$)|sail\s+up|(?:docker[-\s]compose)\s+up)\b/;
 
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
 const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", line]);

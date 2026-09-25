@@ -8,6 +8,7 @@ import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { choose } from "./palette";
 import { settings } from "./settings";
+import { writeText } from "./projectfiles";
 
 type M = typeof monaco.languages;
 
@@ -116,7 +117,7 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       const path = pathOf(op.textDocument.uri);
       const model = await host.ensureModel(path);
       model.pushEditOperations([], op.edits.map((e) => ({ range: toRange(e.range), text: "newText" in e ? e.newText : "" })), () => null);
-      await invoke("write_file", { path, contents: model.getValue() });
+      await writeText(path, model.getValue());
       host.markSaved(path);
       // Servers update their index for open files on save, so reference lookups see these edits.
       didSave(model);

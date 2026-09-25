@@ -88,6 +88,11 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   activate(session);
 }
 
+/** Closes every terminal tab, stopping its process, as when another project opens. Other panel views stay. */
+export function closeTerminals() {
+  for (const s of sessions.filter((s) => s.term)) close(s);
+}
+
 function activate(session: Session | undefined) {
   active = session;
   sessions.forEach((s) => (s.el.hidden = s !== session));

@@ -8,6 +8,7 @@ import { pick } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse";
 import { symbolAt } from "./safedelete";
+import { readText } from "./projectfiles";
 
 type Host = { root(): string; status(text: string): void };
 let host: Host;
@@ -56,7 +57,7 @@ function offsetAt(text: string, p: L.Position): number {
   return offset + p.character;
 }
 
-const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? invoke<string>("read_file", { path });
+const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? readText(path);
 
 /**
  * Edits a method's or function's parameters and rewrites every call Phpactor finds. A method's overrides in

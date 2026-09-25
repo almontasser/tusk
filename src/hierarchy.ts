@@ -7,6 +7,7 @@ import { monaco } from "./editor";
 import { phpactorRequest, workspaceSymbols } from "./lsp";
 import { parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { showPanelView } from "./terminal";
+import { readText } from "./projectfiles";
 
 type Host = {
   root(): string;
@@ -27,7 +28,7 @@ const pathOf = (uri: string) => monaco.Uri.parse(uri).fsPath;
 
 /** The type declared at a line of a file: the last one starting at or before it, or the file's first. */
 async function typeAt(path: string, line = 1): Promise<Type | null> {
-  const source = monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? (await invoke<string>("read_file", { path }).catch(() => ""));
+  const source = monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? (await readText(path).catch(() => ""));
   const types = parseTypeDeclarations(source).map((decl) => ({ decl, line: source.slice(0, decl.offset).split("\n").length }));
   const found = types.filter((t) => t.line <= line).at(-1) ?? types[0];
   return found ? { fqn: found.decl.fqn, kind: found.decl.kind, path, decl: found.decl, line: found.line } : null;
