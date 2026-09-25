@@ -154,9 +154,9 @@ test("gathers outlines, models, recent code, and similar code, without repeats",
   const like = similarCode(index, "app/Http/C.php", source, 12);
   assert.deepEqual(like.map((c) => c.path).sort(), ["app/Models/Post.php", "app/helpers.php"]);
   const extra = buildContext(index, "app/Http/C.php", source, source.indexOf("$post->\n"), [{ path: "app/Other.php", start: 0, text: "recent" }], like);
-  assert.deepEqual(extra.map((e) => e.filename), ["_ide_helper_models.php", "app/Models/Post.php", "app/Other.php", "app/helpers.php"]);
-  assert.match(extra[0].text, /@property bool \$published/);
-  assert.match(extra[1].text, /public function publish\(\): void\n {4}\{ … \}/);
+  // Models' columns go only to Blade views (see the next tests).
+  assert.deepEqual(extra.map((e) => e.filename), ["app/Models/Post.php", "app/Other.php", "app/helpers.php"]);
+  assert.match(extra[0].text, /public function publish\(\): void\n {4}\{ … \}/);
 });
 
 const indexOf = (files: Record<string, string>, models: Index["models"] = {}): Index => {

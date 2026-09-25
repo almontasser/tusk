@@ -1,6 +1,6 @@
 // Context for AI completion: code from other files that helps the model complete the current one.
 // Free of editor imports so Node can test it.
-import { componentClassPath, nameResolver, parseTypeDeclaration, withoutComments } from "./phptypes.ts";
+import { componentClassPath, nameResolver, withoutComments } from "./phptypes.ts";
 import { pathsFor, type Psr4 } from "./psr4.ts";
 import { matchBracket } from "./refactorparse.ts";
 
@@ -265,8 +265,10 @@ export function buildContext(index: Index, rel: string, source: string, offset: 
   const component = viewName(rel)?.startsWith("components.") ? componentClassPath(`x-${viewName(rel)!.slice("components.".length)}`) : null;
   const owners = [component, ...callers.map((c) => c.path)].filter((f): f is string => !!f && f.startsWith("app/") && !f.endsWith(".blade.php") && index.files.has(f));
   const outlined = [...new Set([...used.map((u) => u.file), ...owners])].sort();
-  const own = rel.endsWith(".php") ? parseTypeDeclaration(source)?.fqn : undefined;
-  const docs = [...new Set([...(own ? [own] : []), ...used.map((u) => u.fqn)])].filter((c) => index.models[c]).map((c) => modelDoc(index.models[c]));
+  // Models' columns only for Blade views: in PHP classes they gained nothing in scripts/ai-bench.ts (85.0%
+  // against 87.5% on 40 cases that read a column), since the code around already shows the columns, and
+  // they cost about 400 tokens. In views they gained 2 points (68% against 66% on 50 cases).
+  const docs = rel.endsWith(".blade.php") ? [...new Set(used.map((u) => u.fqn))].filter((c) => index.models[c]).map((c) => modelDoc(index.models[c])) : [];
 
   const definitions: Extra[] = [];
   if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });

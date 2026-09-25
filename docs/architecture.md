@@ -533,10 +533,12 @@ extra files, in this order:
    every model under `app/`: columns from `Schema::getColumns` (or the model's
    fillable, casts, and timestamps without a database), casts, and
    relationships. It takes about 0.3 seconds, and runs again 5 seconds after a
-   PHP file under `app/` or `database/migrations/` changes. The current class
-   and the referenced classes that are models go first, as an
+   PHP file under `app/` or `database/migrations/` changes. In a Blade view,
+   the referenced classes that are models go first, as an
    `_ide_helper_models.php` file of ide-helper docblocks, because models learned
-   `@property` lines from real projects. Casts win over database types, and
+   `@property` lines from real projects. PHP files don't get them: on Pinkary,
+   they changed nothing measurable (see Measuring completion) and cost about 400
+   tokens. Casts win over database types, and
    `tinyint` counts as `bool`, which is what Laravel's `boolean()` creates in
    MySQL and SQLite.
 3. **Recent code, up to 3,000 characters.** When an editor loses focus, the 30
@@ -644,6 +646,22 @@ files with `--- snippet ---`. Declaring its `<filename>` token as the separator
 (`--override-kv tokenizer.ggml.fim_sep_token_id=int:5`), as its model card
 shows, scored lower (47.5%), possibly because the server names the current
 file `filename`.
+
+Pinkary (588 files, 12 models, migrated to SQLite, with one MySQL-only
+collation removed from a migration) measures what koel can't: a database, and
+Blade views. Lines that are only a string in a list (Pinkary has thousands of
+email domains in one class) are left out of every task, since no model can
+guess them. With the 3B model:
+
+| Task and cases | No context | Full context | Full context without models' columns |
+| --- | --- | --- | --- |
+| Lines in PHP classes, 60 | 50.0% | 61.7% | 61.7% |
+| Reading a model's column after `->` in PHP (`CASES=columns`), 40 | – | 85.0% | 87.5% |
+| After `$name->` in Blade views (`blade` task), 50 | 46.0% | 68.0% | 66.0% |
+
+So views get the models' columns and PHP classes don't. On Pinkary, hiding
+suggestions the model was unsure of lost one exact match in 60 PHP cases, and
+none in the Blade cases.
 
 The `types` configuration adds the classes Phpactor finds for the names before
 `->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so

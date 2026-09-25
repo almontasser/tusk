@@ -4,15 +4,19 @@
 //
 //   node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs] [task]
 //
-// `task` is `line` (the default: complete one line) or `block`: complete the rest of a block, 2 to 8
+// `task` is `line` (the default: complete one line), `blade` (the rest of a line after `$name->` in a
+// Blade view), or `block`: complete the rest of a block, 2 to 8
 // lines, from the start of a line. A block run asks once per case with full context, then scores
 // ways of ending a multi-line suggestion on the same replies, so it compares them at no extra cost.
 //
-// `configs` is a comma-separated subset of: none, defs, full, wide, types (default: none, defs, full,
-// types). `wide` is full context with twice the budget for definitions and similar code. `types` is
+// `configs` is a comma-separated subset of: none, defs, full, nomodels, wide, types (default: none,
+// defs, full, types). `nomodels` is full context without the models' columns. `wide` is full context with twice the budget for definitions and similar code. `types` is
 // full context plus the classes of the names before `->` near the cursor, from Phpactor's command
 // line, as the editor gets them from Phpactor. For a project without vendor/, build Phpactor's index
 // first: php src-tauri/resources/tools/phpactor.phar index:build --working-dir=<project>
+// CASES=columns keeps only cases that read a model's column after `->`, to measure the models' columns.
+// DEBUG=1 prints each case's expected text and the model's reply.
+// NO_TYPING=1 skips timing a request after typing, which takes two more requests per case.
 // Recent code isn't measured: a benchmark has no history of where the user worked.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -42,15 +46,29 @@ const index: Index = {
 };
 
 // ---- Cases: code inside method bodies of PHP classes under app/ ----
+/** A line that's only a string in a list, such as one of thousands of email domains: data no model can guess. */
+const DATA = /^(['"]).*\1,?$/;
 let seed = 1;
 const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed / 2 ** 31);
 type Case = { file: string; line: number; column: number; expected: string };
 const candidates: Case[] = [];
-for (const [file, text] of texts) {
+// The blade task: in Blade views, the rest of a line after `$name->`, where a model's columns and relationships go.
+if (task === "blade") {
+  for (const [file, text] of texts) {
+    if (!file.startsWith("resources/views/") || !file.endsWith(".blade.php")) continue;
+    text.split("\n").forEach((l, i) => {
+      const cuts = [...l.matchAll(/\$\w+->/g)].map((m) => m.index! + m[0].length);
+      if (!cuts.length) return;
+      const cut = cuts[Math.floor(random() * cuts.length)];
+      candidates.push({ file, line: i + 1, column: cut + 1, expected: l.slice(cut).trimEnd() });
+    });
+  }
+}
+for (const [file, text] of task === "blade" ? [] : texts) {
   if (!file.startsWith("app/") || !file.endsWith(".php")) continue;
   text.split("\n").forEach((l, i) => {
     const code = l.trim();
-    if (l.search(/\S/) < 8 || code.length < 10 || /^(\/\/|\*|\/\*|#|[{}()\[\];,]+$)/.test(code)) return;
+    if (l.search(/\S/) < 8 || code.length < 10 || /^(\/\/|\*|\/\*|#|[{}()\[\];,]+$)/.test(code) || DATA.test(code)) return;
     // Either the whole line from its indentation, or the rest of it after a boundary a developer would pause at.
     const indent = l.search(/\S/);
     const boundaries = [...l.matchAll(/->|::|\(|= |, |\[/g)].map((m) => m.index! + m[0].length).filter((b) => b > indent + 3 && b < l.trimEnd().length);
@@ -62,7 +80,10 @@ for (let i = candidates.length - 1; i > 0; i--) {
   const j = Math.floor(random() * (i + 1));
   [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
 }
-const cases = candidates.slice(0, Number(count));
+// CASES=columns keeps only cases right after `->` whose hidden text starts with a model's column.
+const columns = new Set(Object.values(models).flatMap((m) => Object.keys(m.columns)));
+const pool = process.env.CASES === "columns" ? candidates.filter((c) => texts.get(c.file)!.split("\n")[c.line - 1].slice(0, c.column - 1).endsWith("->") && columns.has(c.expected.match(/^\w+/)?.[0] ?? "")) : candidates;
+const cases = pool.slice(0, Number(count));
 
 // ---- The server, started as ai_start in src-tauri/src/lsp.rs starts it ----
 const port = 18000 + Math.floor(Math.random() * 1000);
@@ -95,7 +116,7 @@ if (task === "block") {
     const lines = text.split("\n");
     lines.forEach((l, i) => {
       const indent = l.search(/\S/);
-      if (indent < 8 || l.trim().length < 10 || /^(\/\/|\*|\/\*|#|[{}()\[\];,]+$)/.test(l.trim())) return;
+      if (indent < 8 || l.trim().length < 10 || /^(\/\/|\*|\/\*|#|[{}()\[\];,]+$)/.test(l.trim()) || DATA.test(l.trim())) return;
       // The block goes on while lines are blank or indented at least as much.
       let end = i;
       while (end + 1 < lines.length && end - i < 7 && (!lines[end + 1].trim() || lines[end + 1].search(/\S/) >= indent)) end++;
@@ -208,8 +229,8 @@ function typeAt(file: string, offset: number) {
 // ---- Run ----
 const configs = only.split(",");
 type Score = { exactShownAll: number; exact: number; similarity: number; empty: number; repeats: number; ms: number[]; typing: number[]; tokens: number[] };
-/** Cases where the Phpactor types changed the context, and exact matches in them with and without the types. */
-const typed = { cases: 0, full: 0, types: 0 };
+/** For each configuration, the cases where its context differs from full, and exact matches there in full and in it. */
+const changedIn: Record<string, { cases: number; full: number; other: number }> = {};
 const scores = Object.fromEntries(configs.map((c) => [c, { exactShownAll: 0, exact: 0, similarity: 0, empty: 0, repeats: 0, ms: [], typing: [], tokens: [] } as Score]));
 
 for (const [n, c] of cases.entries()) {
@@ -223,6 +244,7 @@ for (const [n, c] of cases.entries()) {
     defs: buildContext(index, c.file, source, offset, [], []),
     full: buildContext(index, c.file, source, offset, [], like),
   };
+  if (configs.includes("nomodels")) extra.nomodels = buildContext({ ...index, models: {} }, c.file, source, offset, [], like);
   if (configs.includes("types")) {
     // The names come before the cursor, so their offsets are the same in the file on disk.
     const found = typedNames(source, offset).flatMap((n) => typeAt(c.file, n.offset));
@@ -232,14 +254,16 @@ for (const [n, c] of cases.entries()) {
   Object.assign(BUDGET, { definitions: budget.definitions * 2, similar: budget.similar * 2 });
   extra.wide = buildContext(index, c.file, source, offset, [], similarCode(index, c.file, source, c.line, 10));
   Object.assign(BUDGET, budget);
-  const changed = configs.includes("full") && configs.includes("types") && JSON.stringify(extra.types) !== JSON.stringify(extra.full);
-  if (changed) typed.cases++;
+  // Cases where another configuration's context differs from full, to score the difference where it applies.
+  const differs = Object.fromEntries(configs.filter((k) => k !== "full" && extra[k]).map((k) => [k, JSON.stringify(extra[k]) !== JSON.stringify(extra.full)]));
+  for (const [k, d] of Object.entries(differs)) if (d) (changedIn[k] ??= { cases: 0, full: 0, other: 0 }).cases++;
   for (const config of configs) {
     const body = infillRequest(lines, c.line, c.column, extra[config], 128);
     const { text, ms, probs } = await ask(body);
+    if (process.env.DEBUG) console.error(JSON.stringify({ file: c.file, line: c.line, expected: c.expected, text: text.slice(0, 120) }));
     // Typing a character with the prompt ready, as the editor's warm-up leaves it: process the prompt one
     // character short, then time the request for the whole prompt.
-    if (body.prompt.trim()) {
+    if (body.prompt.trim() && !process.env.NO_TYPING) {
       await ask({ ...body, prompt: body.prompt.slice(0, -1), n_predict: 0 });
       scores[config].typing.push((await ask(body)).ms);
     }
@@ -252,7 +276,7 @@ for (const [n, c] of cases.entries()) {
     if (!first.trim()) s.empty++;
     if (first === c.expected) {
       s.exact++;
-      if (changed && (config === "full" || config === "types")) typed[config]++;
+      for (const [k, d] of Object.entries(differs)) if (d && (config === "full" || config === k)) changedIn[k][config === "full" ? "full" : "other"]++;
     }
     s.similarity += editSimilarity(first, c.expected);
     s.ms.push(ms);
@@ -270,5 +294,5 @@ for (const [config, s] of Object.entries(scores)) {
   console.log(`| ${config} | ${pct(s.exact)} | ${pct(s.similarity)} | ${pct(s.empty)} | ${pct(s.repeats)} | ${median(s.ms).toFixed(0)} ms | ${median(s.typing).toFixed(0)} ms | ${median(s.tokens).toFixed(0)} |`);
 }
 for (const [config, s] of Object.entries(scores)) console.log(`\n${config}: exact first line ${pct(s.exactShownAll)} when every suggestion is shown, ${pct(s.exact)} when unsure ones are hidden (${pct(s.empty)} empty).`);
-if (typed.cases) console.log(`\nThe types changed the context in ${typed.cases} cases. Exact first line there: ${typed.full} without them, ${typed.types} with them.`);
+for (const [k, c] of Object.entries(changedIn)) console.log(`\n${k} differs from full in ${c.cases} cases. Exact first line there: ${c.full} with full, ${c.other} with ${k}.`);
 server.kill();

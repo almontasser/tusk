@@ -500,10 +500,12 @@ guessing:
   `return view('posts.show', compact('post'));`, with the classes and model
   columns used there. For a component, the `<x-…>` tags that use it and its
   class. So `{{ $post->` knows which model `$post` is.
-- **Model columns:** each referenced Eloquent model's columns, with their types
-  from the database and the model's casts, and its relationships, written the
-  way Laravel IDE Helper writes them. They update a few seconds after you save
-  a model or a migration.
+- **Model columns, in Blade views:** each Eloquent model's columns used where the
+  view is rendered, with their types from the database and the model's casts,
+  and its relationships, written the way Laravel IDE Helper writes them. They
+  update a few seconds after you save a model or a migration. PHP files don't
+  get them: the code around already shows the columns, and a benchmark found
+  no gain there.
 - **What you worked on lately:** the code around the cursor in the last six
   places you left in other files.
 - **Similar code:** the parts of the project that share the most names with the
