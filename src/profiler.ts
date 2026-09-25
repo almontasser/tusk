@@ -502,6 +502,7 @@ const detailPane = q(".profiler-detail");
 const savedWidth = Number(readSetting("profilerDetailWidth"));
 if (savedWidth) detailPane.style.width = `${savedWidth}px`;
 q(".profiler-resize").onmousedown = (down) => {
+  down.preventDefault(); // Otherwise the drag selects the text it passes over.
   const start = detailPane.offsetWidth;
   const move = (e: MouseEvent) => (detailPane.style.width = `${Math.max(200, Math.min(panel.offsetWidth - 300, start + down.clientX - e.clientX))}px`);
   const up = () => {

@@ -156,6 +156,7 @@ export function showPanelView(title: string, el: HTMLElement, onClose: () => voi
 
 // Drag the top edge of the panel to resize it.
 $("panel-resize").onmousedown = (down) => {
+  down.preventDefault(); // Otherwise the drag selects the text it passes over.
   const panel = $("panel");
   const start = panel.offsetHeight;
   const move = (e: MouseEvent) => (panel.style.height = `${Math.max(80, start + down.clientY - e.clientY)}px`);

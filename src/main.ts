@@ -1393,6 +1393,7 @@ try {
   if (width) $("sidebar").style.width = `${width}px`;
 } catch {}
 $("sidebar-resize").onmousedown = (down) => {
+  down.preventDefault(); // Otherwise the drag selects the text it passes over.
   const start = $("sidebar").offsetWidth;
   const move = (e: MouseEvent) => ($("sidebar").style.width = `${Math.max(180, start + e.clientX - down.clientX)}px`);
   const up = () => {
