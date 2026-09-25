@@ -61,7 +61,7 @@ file to change when you add it.
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
@@ -925,16 +925,25 @@ The classes are saved per project.
 ### Docker and Sail
 
 In a Sail project (its compose file uses Laravel Sail) whose containers are
-running, tests, **Debug** on tests, and Artisan commands from Run Anything run
-in the container through `vendor/bin/sail`. Their terminal tabs say "(Sail)".
-When the containers are stopped, everything runs on this Mac. The database
+running, tests, **Debug** on tests, Artisan commands from Run Anything,
+**Routes**, and Tinker run in the container through `vendor/bin/sail`. Their
+terminal tabs say "(Sail)".
+
+Other Docker Compose setups work the same way: the editor finds the service
+that mounts the project folder (preferring one named or built for PHP, such as
+`app` or `php`) and runs those commands in it with `docker compose exec`, in
+the folder where the project is mounted. Terminal tabs name the service, such
+as "Tests (app)". To pick another service, or to run on this Mac instead, run
+**Choose Docker Service for Commands…** from ⌘⇧A. When the containers are
+stopped, everything runs on this Mac. The database
 tool connects through the port Sail forwards (`FORWARD_DB_PORT`, or
 `DB_PORT`), because `DB_HOST` names a container that your Mac can't resolve.
 
 When PHP runs in a container, its paths differ from yours, so the debugger has
 to map them. For a Sail project (its `docker-compose.yml` uses Laravel Sail),
-the editor maps `/var/www/html` to the project folder on its own. For another
-setup, run **Set Server Paths for Debugging…** from ⌘⇧A and enter the
+the editor maps `/var/www/html` to the project folder on its own, and for
+another Compose setup, the folder where the service mounts the project. To
+change it, run **Set Server Paths for Debugging…** from ⌘⇧A and enter the
 project's path in the container. When other folders are mounted elsewhere, add
 them after a comma as `server path=local path`, such as
 `/var/www/html, /opt/shared=packages/shared`. A local path without a leading
@@ -942,7 +951,9 @@ them after a comma as `server path=local path`, such as
 
 Xdebug in the container must connect back to your Mac. With Sail, set
 `SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail
-already points Xdebug at `host.docker.internal`.
+already points Xdebug at `host.docker.internal`. With another setup, the
+container's PHP needs Xdebug installed; **Debug** on a test sets
+`XDEBUG_MODE=debug` and points it at `host.docker.internal`.
 
 ## Profiling
 
@@ -1132,7 +1143,7 @@ committed.
 | `src/profiler.ts` | Profiling runs, the profile list, and the Profiler tab |
 | `src/cachegrind.ts` | Reads Xdebug's Cachegrind profiles |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
-| `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
+| `src/sail.ts` | Runs commands in Laravel Sail or a Docker Compose service when its containers are up |
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |

@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { findTests } from "./phptests";
 import { classFile, type LiveTest, parseEvents, parseJUnit, sameTest, type TestResult } from "./junit";
+import { containerRoot } from "./sail";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; rerun(): unknown; rerunFailed(failed: TestResult[]): unknown };
@@ -35,8 +36,8 @@ let failed: TestResult[] = [];
 q('[data-run="rerun"]').onclick = () => host.rerun();
 q('[data-run="failed"]').onclick = () => failed.length && host.rerunFailed(failed);
 
-// Reports from Sail name files by their path in the container.
-const absolute = (file: string) => (file.startsWith("/") ? file.replace(/^\/var\/www\/html(?=\/)/, host.root()) : `${host.root()}/${file}`);
+// Reports from a container name files by their path in it.
+const absolute = (file: string) => (file.startsWith(`${containerRoot}/`) ? host.root() + file.slice(containerRoot.length) : file.startsWith("/") ? file : `${host.root()}/${file}`);
 
 /** Opens a test at its failure, or at its declaration, which Pest's report leaves out. */
 async function open(r: TestResult) {

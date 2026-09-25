@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
 import { pick } from "./palette";
-import { usesSail } from "./sail";
+import { composeService, usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -243,13 +243,14 @@ export function setExceptionClasses() {
 
 /**
  * Server paths and the local folders they map to, for code that runs in Docker, as typed: comma-separated
- * entries, each `/server/path` (the project folder) or `/server/path=/local/path`. Set by you, or
- * /var/www/html for Sail.
+ * entries, each `/server/path` (the project folder) or `/server/path=/local/path`. Set by you, or else
+ * where Sail or the project's Compose service mounts the project.
  */
 async function serverPaths(): Promise<string> {
   const saved = readSetting(`debug:serverRoot:${host.root()}`);
   if (saved !== null) return saved;
-  return (await usesSail(host.root())) ? "/var/www/html" : "";
+  if (await usesSail(host.root())) return "/var/www/html";
+  return (await composeService(host.root()))?.workdir ?? "";
 }
 
 const trimSlash = (p: string) => p.trim().replace(/(.)\/$/, "$1");

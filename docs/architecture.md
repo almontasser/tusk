@@ -1695,16 +1695,34 @@ rest of the client sees local paths only. The mappings are saved per project in
 `localStorage` as typed (`/var/www/html, /opt/shared=packages/shared`), and
 `parseMappings` reads them: an entry without `=` maps to the project folder,
 and a relative local path is inside it. Without any, a `docker-compose.yml`
-that mentions Laravel Sail maps `/var/www/html`.
+that mentions Laravel Sail maps `/var/www/html`, and another Compose setup maps
+where its service mounts the project.
 
-`src/sail.ts` decides where commands run. A project uses Sail when
-`vendor/bin/sail` exists and a compose file mentions Sail's images, and Sail is
-running when `docker compose ps --status running --quiet` prints anything. It
-checks on every run, so starting or stopping the containers takes effect at
-once. In Sail, test runs write the JUnit report to
+`src/sail.ts` decides where commands run, as a `Container` whose `exec` turns
+a project command (`php …` or `vendor/bin/…`) into a command line. A project
+uses Sail when `vendor/bin/sail` exists and a compose file mentions Sail's
+images, and Sail is running when `docker compose ps --status running --quiet`
+prints anything. Sail's `exec` goes through Sail's own commands (`sail
+artisan`, `sail php`, `sail bin`, and `sail debug` for Artisan with Xdebug),
+which pick its app service.
+
+Otherwise, `docker compose config --format json` gives the resolved services,
+with absolute bind-mount sources, and `servicesMounting` keeps those that
+mount the project folder or a folder above it; the mount's target plus the
+rest of the path is where the project is inside. A service whose name or image
+mentions PHP, `app`, or `laravel` comes first, since a web server often mounts
+the same folder. **Choose Docker Service for Commands…** saves a choice per
+project in `localStorage` (`docker:service:<root>`), or `""` for this Mac. The
+config is read once per project and again after a choice. The service runs
+commands when `docker compose ps --status running --services` lists it, through
+`docker compose exec -w <workdir> <service>`, with `-T` for captured output
+such as `route:list --json`, and `-e` for Xdebug's variables. Both checks run
+on every command, so starting or stopping the containers takes effect at once.
+
+In a container, test runs write the JUnit report to
 `storage/logs/editor-junit.xml`, which the container can write and git
-ignores, and the Tests tab maps `/var/www/html` in reported paths back to the
-project.
+ignores. `containerRoot` holds where the last container mounted the project,
+and the Tests and Coverage tabs map it in reported paths back to the project.
 
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.

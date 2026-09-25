@@ -6,7 +6,7 @@ import { pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
 import { startDebugging, XDEBUG_ENV } from "./debug";
 import { filterFor, type TestResult } from "./junit";
-import { sailRunning } from "./sail";
+import { type Container, runningContainer } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
@@ -35,25 +35,25 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   const coverage = mode === "coverage";
   // Commands from Run Anything, such as `npm run dev`, reopen with the project while they still run; tests don't.
   if (!tests) return openTerminal(getRoot(), title, command, undefined, undefined, true);
-  // In Sail, the report has to be somewhere the container can write: storage/logs, which git ignores.
-  const inSail = command[0] === sail();
-  const report = inSail ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
+  // In a container, the report has to be somewhere it can write: storage/logs, which git ignores.
+  const inContainer = command[0] === `${getRoot()}/vendor/bin/sail` || (command[0] === "docker" && command[1] === "compose");
+  const report = inContainer ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
   await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
-  const reportArg = inSail ? "storage/logs/editor-junit.xml" : report;
+  const reportArg = inContainer ? "storage/logs/editor-junit.xml" : report;
   // PHPUnit 10 and later (and Pest 2 and later) stream events to a file as tests run.
   const live = await exists("vendor/phpunit/phpunit/src/Event");
-  const events = inSail ? `${getRoot()}/storage/logs/editor-events.txt` : report.replace(/junit\.xml$/, "events.txt");
-  const liveArgs = live ? ["--log-events-text", inSail ? "storage/logs/editor-events.txt" : events] : [];
+  const events = inContainer ? `${getRoot()}/storage/logs/editor-events.txt` : report.replace(/junit\.xml$/, "events.txt");
+  const liveArgs = live ? ["--log-events-text", inContainer ? "storage/logs/editor-events.txt" : events] : [];
   if (live) await invoke("remove_path", { path: events }).catch(() => {});
   const timer = live ? setInterval(() => showLive(events, true), 500) : undefined;
-  const clover = inSail ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
+  const clover = inContainer ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
   if (coverage) await invoke("remove_path", { path: clover }).catch(() => {});
-  // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In Sail, the container's settings apply.
+  // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In a container, its own settings apply.
   const profiler = mode === "profile" ? await loadProfiler() : null;
   const profiles = profiler ? await profiler.profileDir() : "";
   const started = Math.floor(Date.now() / 1000);
-  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiler ? ["/usr/bin/env", ...(await profiler.profileEnv(profiles, getRoot()))] : [];
-  const coverageArgs = coverage ? ["--coverage-clover", inSail ? "storage/logs/editor-clover.xml" : clover] : [];
+  const env = coverage && !inContainer ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiler ? ["/usr/bin/env", ...(await profiler.profileEnv(profiles, getRoot()))] : [];
+  const coverageArgs = coverage ? ["--coverage-clover", inContainer ? "storage/logs/editor-clover.xml" : clover] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
@@ -75,18 +75,27 @@ async function reportPath() {
   return `${dir}/junit.xml`;
 }
 
-// Absolute paths: the terminal looks a relative program up in PATH, not in the project.
-const sail = () => `${getRoot()}/vendor/bin/sail`;
-const bin = (name: string) => `${getRoot()}/vendor/bin/${name}`;
+/** A command for this Mac: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in PATH. */
+const onMac = (command: string[]) => (command[0].startsWith("vendor/") ? [`${getRoot()}/${command[0]}`, ...command.slice(1)] : command);
+
+/** Xdebug's trigger for PHP in a container, which reaches the editor on this Mac through Docker's host name. */
+const CONTAINER_XDEBUG = [...XDEBUG_ENV, "XDEBUG_CONFIG=client_host=host.docker.internal"];
+
+/** A PHP command in the project's running container (Sail or a Compose service), or else on this Mac. */
+async function php(command: string[], debug = false): Promise<{ command: string[]; container: Container | null }> {
+  const container = await runningContainer(getRoot());
+  if (container) return { command: container.exec(command, debug ? CONTAINER_XDEBUG : []), container };
+  return { command: debug ? ["/usr/bin/env", ...XDEBUG_ENV, ...onMac(command)] : onMac(command), container };
+}
 
 /**
- * `php artisan test`, which runs Pest when it's installed, or else the test binary. When Sail's containers
- * are running, tests run in them; with `debug`, through `sail debug`, which sets Xdebug's trigger.
+ * `php artisan test`, which runs Pest when it's installed, or else the test binary, in the project's
+ * container when it's up. With `debug`, Xdebug's trigger is set (in Sail, through `sail debug`).
  */
 async function testRunner(debug = false) {
-  if (await sailRunning(getRoot())) return debug ? [sail(), "debug", "test"] : [sail(), "test"];
-  const local = (await exists("artisan")) ? ["php", "artisan", "test"] : [(await exists("vendor/bin/pest")) ? bin("pest") : bin("phpunit")];
-  return debug ? ["/usr/bin/env", ...XDEBUG_ENV, ...local] : local;
+  const local = (await exists("artisan")) ? ["php", "artisan", "test"] : [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
+  const { command, container } = await php(local, debug);
+  return { command, where: container ? ` (${container.label})` : "" };
 }
 
 /** Runs a shell command line, so quoting and pipes work as in a terminal. */
@@ -102,21 +111,21 @@ export async function runTest(path: string, test: TestCase, mode: Mode = "run") 
   const file = path.slice(getRoot().length + 1);
   const runner = await testRunner(mode === "debug");
   // The profile would be written inside the container, where the editor can't find it.
-  if (mode === "profile" && runner[0] === sail()) return status("Profiling runs tests on this Mac, not in Sail. Stop Sail's containers to profile.");
+  if (mode === "profile" && runner.where) return status(`Profiling runs tests on this Mac, not in a container. Stop the${runner.where} containers to profile.`);
   const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${titles[mode]}: ${test.filter ? test.name : file.split("/").pop()}${runner[0] === sail() ? " (Sail)" : ""}`;
+  const title = `${titles[mode]}: ${test.filter ? test.name : file.split("/").pop()}${runner.where}`;
   if (mode === "debug") await startDebugging();
-  return run(title, [...runner, file, ...filter], true, mode);
+  return run(title, [...runner.command, file, ...filter], true, mode);
 }
 
 export const runAllTests = async (coverage = false) => {
   const runner = await testRunner();
-  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner[0] === sail() ? " (Sail)" : ""}`, runner, true, coverage ? "coverage" : "run");
+  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner.where}`, runner.command, true, coverage ? "coverage" : "run");
 };
 
 async function rerunFailed(failed: TestResult[]) {
   const filter = filterFor(failed, await exists("vendor/bin/pest"));
-  return run(`Tests: ${failed.length} failed`, [...(await testRunner()), "--filter", filter], true);
+  return run(`Tests: ${failed.length} failed`, [...(await testRunner()).command, "--filter", filter], true);
 }
 
 /** Runs the test around the cursor, or all tests in the file. */
@@ -148,8 +157,8 @@ async function artisanCommands() {
  */
 export async function runAnything() {
   const artisan = (await exists("artisan")) ? await artisanCommands().catch(() => []) : [];
-  // Artisan commands run in Sail's container when it's up; other command lines run on this Mac.
-  const php = (await sailRunning(getRoot())) ? "vendor/bin/sail artisan" : "php artisan"; // A shell line, so relative works
+  // Artisan commands run in the project's container when it's up; other command lines run on this Mac.
+  const artisanLine = (await php(["php", "artisan"])).command.map(shellQuote).join(" ");
   pick("Run anything: an Artisan command with arguments, or a shell command", (query) => {
     const line = query.trim().replace(/^(php\s+)?artisan\s+/, "");
     if (!line) return [];
@@ -158,29 +167,33 @@ export async function runAnything() {
     const items = artisan.map((c) => ({
       label: c.name,
       detail: c.description,
-      run: () => runLine(`artisan ${c.name}`, `${php} ${c.name}${suffix}`),
+      run: () => runLine(`artisan ${c.name}`, `${artisanLine} ${c.name}${suffix}`),
     }));
     const ranked = rank(word, items).map((i) => ({ ...i, label: `artisan ${i.label}${suffix}` }));
     return [...ranked.slice(0, 50), { label: query.trim(), detail: "Run in terminal", run: () => runLine(word, query.trim()) }];
   });
 }
 
-/** Opens Laravel Tinker in a terminal tab, in Sail's container when it's up. */
-export const tinker = async () =>
-  openTerminal(getRoot(), "Tinker", (await sailRunning(getRoot())) ? [sail(), "artisan", "tinker"] : ["php", "artisan", "tinker"], undefined, undefined, true);
+/** Opens Laravel Tinker in a terminal tab, in the project's container when it's up. */
+export const tinker = async () => openTerminal(getRoot(), "Tinker", (await php(["php", "artisan", "tinker"])).command, undefined, undefined, true);
+
+/** Quotes a word for `/bin/sh` when it needs it. */
+const shellQuote = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
 
 type Route = { method: string; uri: string; name: string | null; action: string };
 
 /** Lists the app's routes from `artisan route:list`; choosing one opens its controller method. */
 export async function showRoutes() {
   const root = getRoot();
-  const artisan = (await sailRunning(root)) ? [sail(), "artisan"] : ["php", "artisan"];
+  const container = await runningContainer(root);
+  const artisan = (args: string[], tty: boolean) => (container ? container.exec(["php", "artisan", ...args], [], tty) : ["php", "artisan", ...args]);
   let routes: Route[];
   try {
-    routes = JSON.parse(await invoke<string>("run_capture", { cwd: root, program: artisan[0], args: [...artisan.slice(1), "route:list", "--json"], input: null }));
+    const [program, ...args] = artisan(["route:list", "--json"], false);
+    routes = JSON.parse(await invoke<string>("run_capture", { cwd: root, program, args, input: null }));
   } catch {
     // Run it in a terminal, which shows why it failed, such as a syntax error in a routes file.
-    return openTerminal(root, "Routes", [...artisan, "route:list"]);
+    return openTerminal(root, "Routes", artisan(["route:list"], true));
   }
   const items = routes.map((r) => ({
     label: `${r.method.replace("|HEAD", "")} /${r.uri.replace(/^\//, "")}`,

@@ -31,6 +31,7 @@ import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./b
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
+import { chooseService, composeService, composeServices } from "./sail";
 import { openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1187,6 +1188,7 @@ const actions: Action[] = [
   { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
   { label: "Edit Snippets (Live Templates)", run: () => editSnippets(openFile) },
   { label: "Laravel Tinker", run: () => root && tinker() },
+  { label: "Choose Docker Service for Commands…", run: () => root && chooseDockerService() },
   { label: "Routes", run: () => root && showRoutes() },
   { label: "Compare with Clipboard", run: compareWithClipboard },
   { label: "Compare with File…", run: compareWithFile },
@@ -1194,6 +1196,17 @@ const actions: Action[] = [
   { label: "New Terminal", run: () => openTerminal(root || "/") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
+
+/** Picks the Compose service that runs tests, Artisan, and Tinker, or this Mac. Sail projects use Sail. */
+async function chooseDockerService() {
+  const services = await composeServices(root);
+  if (!services.length) return status("No Docker Compose service mounts this project, so commands run on this Mac.");
+  const current = (await composeService(root))?.name ?? "";
+  pick("Run tests, Artisan, and Tinker in", () => [
+    ...services.map((s) => ({ label: s.name, detail: `${s.workdir}${s.name === current ? " · current" : ""}`, icon: "codicon-vm", run: () => chooseService(root, s.name) })),
+    { label: "This Mac", detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
+  ]);
+}
 
 const symbolsFor = (keys?: string) =>
   keys?.replace("Shift Shift", "⇧⇧").replace("Ctrl Ctrl", "⌃⌃").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");

@@ -5,14 +5,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { type Coverage, parseClover, uncoveredRanges } from "./junit";
 import { fileGroup } from "./search";
+import { containerRoot } from "./sail";
 import { showPanelView } from "./terminal";
 
 type Host = { openAt(path: string, line: number): unknown; rerun(): unknown };
 let host: Host;
 export const initCoverage = (h: Host) => (host = h);
 
-/** Where Sail's containers mount the project, so report paths from a run in Sail map back to this Mac. */
-const SAIL_ROOT = "/var/www/html";
 
 let coverage: Coverage = new Map();
 const decorations = new Map<monaco.editor.ITextModel, string[]>();
@@ -43,7 +42,7 @@ const decorateAll = () => monaco.editor.getModels().filter((m) => m.uri.scheme =
 export async function loadCoverage(report: string, root: string): Promise<{ covered: number; total: number; files: number } | null> {
   const parsed = parseClover(await invoke<string>("read_file", { path: report }).catch(() => ""));
   if (!parsed.size) return null;
-  coverage = new Map([...parsed].map(([path, lines]) => [path.startsWith(SAIL_ROOT + "/") ? root + path.slice(SAIL_ROOT.length) : path, lines]));
+  coverage = new Map([...parsed].map(([path, lines]) => [path.startsWith(containerRoot + "/") ? root + path.slice(containerRoot.length) : path, lines]));
   decorateAll();
   const counts = [...coverage.values()].flatMap((lines) => [...lines.values()]);
   const result = { covered: counts.filter(Boolean).length, total: counts.length, files: coverage.size };
