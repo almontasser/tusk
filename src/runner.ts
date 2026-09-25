@@ -41,12 +41,13 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   const report = inContainer ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
   await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
   const reportArg = inContainer ? "storage/logs/editor-junit.xml" : report;
-  // PHPUnit 10 and later (and Pest 2 and later) stream events to a file as tests run.
-  const live = await exists("vendor/phpunit/phpunit/src/Event");
+  // Results show as tests run: PHPUnit 10 and later (and Pest 2 and later) stream events to a file, and earlier
+  // versions write a TeamCity log.
+  const format = (await exists("vendor/phpunit/phpunit/src/Event")) ? "events" : "teamcity";
   const events = inContainer ? `${getRoot()}/storage/logs/editor-events.txt` : report.replace(/junit\.xml$/, "events.txt");
-  const liveArgs = live ? ["--log-events-text", inContainer ? "storage/logs/editor-events.txt" : events] : [];
-  if (live) await invoke("remove_path", { path: events }).catch(() => {});
-  const timer = live ? setInterval(() => showLive(events, true), 500) : undefined;
+  const liveArgs = [format === "events" ? "--log-events-text" : "--log-teamcity", inContainer ? "storage/logs/editor-events.txt" : events];
+  await invoke("remove_path", { path: events }).catch(() => {});
+  const timer = setInterval(() => showLive(events, true, format), 500);
   const clover = inContainer ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
   // PHPUnit's XML coverage also records which tests ran each line.
   const perTest = inContainer ? `${getRoot()}/storage/logs/editor-coverage-xml` : report.replace(/junit\.xml$/, "coverage-xml");
@@ -59,7 +60,7 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   const coverageArgs = coverage ? ["--coverage-clover", inContainer ? "storage/logs/editor-clover.xml" : clover, "--coverage-xml", inContainer ? "storage/logs/editor-coverage-xml" : perTest] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
-    if (!(await showResults(report)) && live) showLive(events, false);
+    if (!(await showResults(report))) showLive(events, false, format);
     if (coverage) showCoverage(clover, perTest);
     if (profiler) profiler.openNewestProfile(profiles, started, title);
   }, () => clearInterval(timer));

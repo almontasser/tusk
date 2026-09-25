@@ -83,21 +83,62 @@ export function sameTest(reported: string, name: string): boolean {
   return key(baseName(reported)) === key(name);
 }
 
-export type LiveTest = { className: string; name: string; status: "running" | TestResult["status"] };
+/** A test in a running suite. A failed one has its `message`; `file` and `line` are known from TeamCity logs. */
+export type LiveTest = { className: string; name: string; status: "running" | TestResult["status"]; message?: string; file?: string; line?: number };
 
-/** Reads PHPUnit's --log-events-text stream, written as tests run, for progress before the JUnit report exists. */
+/**
+ * Reads PHPUnit's --log-events-text stream (PHPUnit 10 and later), written as tests run, for progress before the
+ * JUnit report exists. A failure's message is the lines after its `Test Failed` event, up to the next test event.
+ */
 export function parseEvents(text: string): { total: number; tests: LiveTest[] } {
   const total = Number(text.match(/^Test Suite Started \(.*?, (\d+) tests?\)/m)?.[1] ?? 0);
   const tests = new Map<string, LiveTest>();
   const status: Record<string, LiveTest["status"]> = { Prepared: "running", Passed: "passed", Failed: "failed", Errored: "failed", Skipped: "skipped", "Marked Incomplete": "skipped" };
-  for (const [, event, id] of text.matchAll(/^Test (Prepared|Passed|Failed|Errored|Skipped|Marked Incomplete) \((.+?)\)$/gm)) {
+  for (const m of text.matchAll(/^Test (Prepared|Passed|Failed|Errored|Skipped|Marked Incomplete) \((.+?)\)$/gm)) {
+    const [, event, id] = m;
     const at = id.lastIndexOf("::");
     const className = id.slice(0, at).replace(/^P\\/, "");
     // Pest's generated method names, such as __pest_evaluable__group__→_it_works, made readable.
     const name = id.slice(at + 2).replace(/^__pest_evaluable_/, "").replace(/__/g, " ").replace(/_/g, " ").trim();
     const existing = tests.get(id);
     // A test that failed stays failed, even though "Finished" events follow.
-    if (!existing || existing.status === "running") tests.set(id, { className, name, status: status[event] });
+    if (existing && existing.status !== "running") continue;
+    let message: string | undefined;
+    if (event === "Failed" || event === "Errored") {
+      const after = text.slice(m.index! + m[0].length + 1);
+      const end = after.search(/^Test [A-Z][\w ]* \(.*\)$/m);
+      message = (end < 0 ? after : after.slice(0, end)).trim();
+    }
+    tests.set(id, { className, name, status: status[event], message });
+  }
+  return { total, tests: [...tests.values()] };
+}
+
+const teamcityValue = (s: string) => s.replace(/\|(.)/g, (_, c) => ({ n: "\n", r: "\r", "'": "'", "|": "|", "[": "[", "]": "]" })[c as string] ?? c);
+
+/**
+ * Reads a TeamCity log (`--log-teamcity`), which PHPUnit 9 and Pest 1 write as tests run, since they have no event
+ * stream. Each test's `locationHint` gives its file, and a failure's `details` the line it failed on.
+ */
+export function parseTeamcity(text: string): { total: number; tests: LiveTest[] } {
+  const tests = new Map<string, LiveTest>();
+  let total = 0;
+  for (const [, kind, body] of text.matchAll(/^##teamcity\[(\w+) (.*)\]$/gm)) {
+    const a: Record<string, string> = {};
+    for (const [, key, value] of body.matchAll(/(\w+)='((?:[^'|]|\|.)*)'/g)) a[key] = teamcityValue(value);
+    if (kind === "testCount") total += Number(a.count) || 0;
+    if (!a.name || !["testStarted", "testFailed", "testIgnored", "testFinished"].includes(kind)) continue;
+    const key = `${a.flowId}:${a.name}`;
+    const test = tests.get(key);
+    if (kind === "testStarted") {
+      const [file, className = ""] = (a.locationHint ?? "").replace(/^php_qn:\/\//, "").split("::");
+      tests.set(key, { className: className.replace(/^\\/, "").replace(/^P\\/, ""), name: a.name, status: "running", file: file || undefined });
+    } else if (test && kind === "testFailed") {
+      test.status = "failed";
+      test.message = a.message;
+      test.line = Number(a.details?.match(/:(\d+)\s*$/m)?.[1]) || undefined;
+    } else if (test && kind === "testIgnored") test.status = "skipped";
+    else if (test && kind === "testFinished" && test.status === "running") test.status = "passed";
   }
   return { total, tests: [...tests.values()] };
 }

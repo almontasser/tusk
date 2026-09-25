@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf, parseTeamcity } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -108,4 +108,25 @@ test("reads which tests covered each line from PHPUnit's XML coverage", () => {
   assert.deepEqual(testOf(lines.get(15)![0]), { className: "Tests\\Feature\\ExampleTest", name: "test_home" });
   assert.deepEqual(testOf(lines.get(15)![1]), { className: "Tests\\Feature\\PostTest", name: "home page → it loads" });
   assert.deepEqual(testOf("Tests\\Unit\\MathTest::testAdd#with two"), { className: "Tests\\Unit\\MathTest", name: "testAdd" });
+});
+
+test("reads failure messages from PHPUnit's event stream", () => {
+  const events = "Test Prepared (Tests\\Unit\\ATest::test_fails)\nTest Failed (Tests\\Unit\\ATest::test_fails)\nnumbers differ\nFailed asserting that 2 is identical to 1.\nTest Finished (Tests\\Unit\\ATest::test_fails)\n";
+  const [t] = parseEvents(events).tests;
+  assert.equal(t.status, "failed");
+  assert.equal(t.message, "numbers differ\nFailed asserting that 2 is identical to 1.");
+});
+
+test("reads live results from a TeamCity log", () => {
+  const log = [
+    "##teamcity[testCount count='2' flowId='1']",
+    "##teamcity[testStarted name='test_fails' locationHint='php_qn:///app/tests/Unit/ATest.php::\\Tests\\Unit\\ATest::test_fails' flowId='1']",
+    "##teamcity[testFailed name='test_fails' message='it|'s |[bad|]|nFailed' details='/app/tests/Unit/ATest.php:11|n' flowId='1']",
+    "##teamcity[testFinished name='test_fails' flowId='1']",
+    "##teamcity[testStarted name='test_passes' locationHint='php_qn:///app/tests/Unit/ATest.php::\\Tests\\Unit\\ATest::test_passes' flowId='1']",
+  ].join("\n");
+  const { total, tests } = parseTeamcity(log);
+  assert.equal(total, 2);
+  assert.deepEqual(tests[0], { className: "Tests\\Unit\\ATest", name: "test_fails", status: "failed", file: "/app/tests/Unit/ATest.php", message: "it's [bad]\nFailed", line: 11 });
+  assert.equal(tests[1].status, "running");
 });

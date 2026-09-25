@@ -1017,11 +1017,18 @@ report and shows the **Tests** tab.
 
 For progress during the run, the command also gets `--log-events-text`, which
 PHPUnit 10 and later write as events happen (`Test Prepared`, `Test Passed`,
-and so on). The runner checks for `vendor/phpunit/phpunit/src/Event`, which
-PHPUnit 10 added, since older versions reject the option. Every 500 ms,
-`showLive` reads the file and redraws the tree with `parseEvents`. The events
-name classes, not files, so a row opens the file the class name maps to
-(`classFile`) and finds the test in it with `findTests`. When the
+and so on); a failure's message is the lines after its `Test Failed` event, up
+to the next `Test … (…)` event. The runner checks for
+`vendor/phpunit/phpunit/src/Event`, which PHPUnit 10 added, since older
+versions reject the option; they, and Pest 1, get `--log-teamcity` instead,
+whose `testStarted` lines carry each test's file (`locationHint`) and whose
+`testFailed` lines carry the message and, in `details`, the failing line
+(`parseTeamcity`). Every 500 ms, `showLive` reads the file and redraws the
+tree, keeping the test you selected. PHPUnit's events name classes, not files,
+so a row opens the file the class maps to through `composer.json`'s PSR-4
+folders (`autoload-dev`, read once per project, the first candidate that
+exists), or else Laravel's `tests/` layout (`classFile`), and finds the test in
+it with `findTests`. When the
 process exits, the JUnit report replaces the live tree. If there's no report,
 for example because the run crashed, the live tree stays with its last state.
 

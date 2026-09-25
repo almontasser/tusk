@@ -35,7 +35,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
-| Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
+| Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
@@ -682,8 +682,9 @@ and `test()` calls, including those inside `describe()`. Tests run through
 from ⌘⇧A.
 
 While tests run, the **Tests** tab shows progress: how many tests have run,
-how many failed, and a spinner on the test in progress. Click a test to open
-it. When the run ends, the tab shows the results as a tree of test classes and
+how many failed, and a spinner on the test in progress. A test that fails
+shows at once; click it to read why and open it, while the rest keep running.
+This works on every PHPUnit and Pest version. When the run ends, the tab shows the results as a tree of test classes and
 files. Classes with failures start expanded.
 
 - Click a test to see its failure message and open it at the failing line, or
