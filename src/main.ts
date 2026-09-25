@@ -15,7 +15,8 @@ import { initComposer, loadPackages, requirePackage, updateAll } from "./compose
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
-import { httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
+import { editEnvironments } from "./httpenv";
+import { goToRequest, httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, requestItems, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
 import "./httpload";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
@@ -1161,6 +1162,8 @@ const actions: Action[] = [
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
   { label: "HTTP Client: Global Variables…", run: () => root && showGlobals() },
   { label: "HTTP Client: Clear Cookies", run: () => root && clearCookies() },
+  { label: "HTTP Client: Edit Environments", run: () => root && editEnvironments(/\.(http|rest)$/.test(active ?? "") ? active : "") },
+  { label: "Go to Request…", keys: "Alt+Shift+Meta+O", run: () => root && goToRequest() },
   { label: "Select HTTP Environment…", run: () => root && selectEnvironment(active ?? "") },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
@@ -1308,10 +1311,11 @@ function recordShortcut(action: Action) {
 
 function searchEverywhere() {
   const files = root ? invoke<string[]>("list_files", { root }).then((list) => list.map((f) => fileItem(`${root}/${f}`))) : Promise.resolve([]);
-  pick("Search everywhere: classes, files, and actions", async (q) => {
+  const requests = requestItems().catch(() => []);
+  pick("Search everywhere: classes, files, requests, and actions", async (q) => {
     if (!q.trim()) return recent.map(fileItem);
-    const [classes, items] = await Promise.all([symbolItems(q, true), files]);
-    return [...classes.slice(0, 10), ...rank(q, items).slice(0, 30), ...rank(q, actionItems()).slice(0, 5)];
+    const [classes, items, http] = await Promise.all([symbolItems(q, true), files, requests]);
+    return [...classes.slice(0, 10), ...rank(q, items).slice(0, 30), ...rank(q, http).slice(0, 5), ...rank(q, actionItems()).slice(0, 5)];
   }, 150);
 }
 

@@ -99,7 +99,7 @@ function store(kind: string, value: unknown) {
 const listeners = new Set<() => void>();
 /** Runs `fn` when the environment, global variables, or history change. */
 export const onHttpChange = (fn: () => void) => listeners.add(fn);
-const changed = () => listeners.forEach((fn) => fn());
+export const changed = () => listeners.forEach((fn) => fn());
 
 // ---- Environments and variables ----
 
@@ -182,7 +182,7 @@ export async function saveToPrivateEnvironment(path: string, env: string, values
 }
 
 /** Adds the private environment file to .gitignore, since it holds secrets. */
-async function ignorePrivateFile() {
+export async function ignorePrivateFile() {
   const path = `${host.root()}/.gitignore`;
   const text = await invoke<string>("read_file", { path }).catch(() => null);
   if (text === null || text.split("\n").some((l) => l.trim().replace(/^\//, "") === PRIVATE_ENV_FILE)) return;
@@ -226,7 +226,7 @@ async function runScript(script: Script, dir: string, input: Omit<Parameters<typ
   return postScript({ ...input, code });
 }
 
-function postScript(input: { code: string; globals: Record<string, string>; variables: Record<string, string>; environment: Record<string, string>; request: { method: string; url: string; headers: [string, string][]; body: string }; response?: { status: number; headers: [string, string][]; body: string; contentType: string } }): Promise<Output> {
+function postScript(input: { code: string; globals: Record<string, string>; variables: Record<string, string>; environment: Record<string, string>; request: { method: string; url: string; headers: [string, string][]; body: string }; response?: { status: number; headers: [string, string][]; body: string; contentType: string; time?: number } }): Promise<Output> {
   const worker = new ScriptWorker();
   return new Promise<Output>((resolve) => {
     const fail = (error: string) => resolve({ globals: input.globals, variables: input.variables, tests: [], logs: [], error });
@@ -423,7 +423,7 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
       variables,
       environment: env,
       request: { ...scriptRequest(), url: exchange.request.url },
-      response: { status: final.status, headers: final.headers, body, contentType: exchange.contentType },
+      response: { status: final.status, headers: final.headers, body, contentType: exchange.contentType, time: Math.round((exchange.info?.time_total ?? 0) * 1000) },
     });
     setGlobals(out.globals);
     exchange.tests = out.tests;

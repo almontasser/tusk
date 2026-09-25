@@ -989,3 +989,186 @@ export function laravelException(body: string, status: number): ExceptionReport 
   }
   return { className, message, frames };
 }
+
+// ---- Less typing: JSON paths under the cursor, checks without code, and the environment table ----
+
+/** One segment of a JSON path: .key for plain names, ['key'] or ["key"] for others, [n] for array items. */
+const pathSegment = (key: string | number) => (typeof key === "number" ? `[${key}]` : /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : key.includes("'") ? `["${key}"]` : `['${key}']`);
+
+/**
+ * The JSON path of the value at `offset` in JSON text, such as $.data[0].token. On a key, it's the path of the
+ * key's value; between values, the path of the object or array around them. Null when the text isn't JSON.
+ */
+export function jsonPathAt(text: string, offset: number): string | null {
+  let i = 0;
+  let found: string | null = null;
+  const space = () => {
+    while (i < text.length && /\s/.test(text[i])) i++;
+  };
+  const string = () => {
+    for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
+    i++;
+  };
+  // Children come first, so the deepest value that contains the offset wins.
+  const value = (path: string) => {
+    space();
+    const start = i;
+    const open = text[i];
+    if (open === "{" || open === "[") {
+      i++;
+      for (let n = 0; ; n++) {
+        space();
+        if (i >= text.length || text[i] === (open === "{" ? "}" : "]")) break;
+        let child = path + pathSegment(n);
+        if (open === "{") {
+          const keyStart = i;
+          string();
+          child = path + pathSegment(JSON.parse(text.slice(keyStart, i)) as string);
+          if (offset >= keyStart && offset <= i) found ??= child;
+          space();
+          if (text[i] === ":") i++;
+        }
+        const before = i;
+        value(child);
+        if (i === before) i++;
+        space();
+        if (text[i] === ",") i++;
+      }
+      i++;
+      if (offset >= start && offset < i) found ??= path;
+      return;
+    }
+    if (open === '"') string();
+    else while (i < text.length && !/[\s,\]}]/.test(text[i])) i++;
+    if (offset >= start && offset <= i && i > start) found ??= path;
+  };
+  try {
+    value("$");
+  } catch {
+    return null;
+  }
+  return found;
+}
+
+/** A variable name for the value at a JSON path: its last key, such as token for $.data[0].token. */
+export function nameForPath(path: string): string {
+  const keys = [...path.matchAll(/\.([\w$-]+)|\[\s*'([^']*)'\s*\]|\[\s*"([^"]*)"\s*\]/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  return keys.at(-1)?.replace(/[^\w.-]+/g, "_") || "value";
+}
+
+export type CheckKind = "status" | "exists" | "equals" | "header" | "time" | "body";
+/** A test you set up without code. `target` is a JSON path or a header name; kinds that don't need it leave it empty. */
+export type Check = { kind: CheckKind; target: string; expected: string };
+
+/**
+ * Each kind of check: its label, placeholders, and code, given the target and expected value as JavaScript
+ * literals. A `number` kind takes the expected value as a number. Each check runs as one client.test() call.
+ */
+export const CHECKS: Record<CheckKind, { label: string; target?: string; expected?: string; number?: boolean; name(c: Check): string; code(t: string, e: string): string }> = {
+  status: { label: "Status is", expected: "200", name: (c) => `Status is ${c.expected}`, code: (_, e) => `client.assert(String(response.status) === ${e}, "Status was " + response.status)` },
+  exists: { label: "JSON path exists", target: "$.data.id", name: (c) => `${c.target} exists`, code: (t) => `client.assert(jsonPath(response.body, ${t}) !== undefined, "Not in the response")` },
+  equals: { label: "JSON path equals", target: "$.data.id", expected: "1", name: (c) => `${c.target} is ${c.expected}`, code: (t, e) => `{ const v = jsonPath(response.body, ${t}); client.assert([String(v), JSON.stringify(v)].includes(${e}), "Was " + JSON.stringify(v)); }` },
+  header: { label: "Header contains", target: "Content-Type", expected: "json", name: (c) => `${c.target} contains ${c.expected}`, code: (t, e) => `client.assert(String(response.headers.valueOf(${t}) ?? "").includes(${e}), "Was " + response.headers.valueOf(${t}))` },
+  time: { label: "Response time under (ms)", expected: "500", number: true, name: (c) => `Responds in under ${c.expected} ms`, code: (_, e) => `client.assert(response.time < ${e}, "Took " + response.time + " ms")` },
+  body: { label: "Body contains", expected: "text", name: (c) => `Body contains ${c.expected}`, code: (_, e) => `client.assert((typeof response.body === "string" ? response.body : JSON.stringify(response.body)).includes(${e}), "Not in the body")` },
+};
+export const CHECKS_START = "// checks:start";
+export const CHECKS_END = "// checks:end";
+
+const checkLine = (c: Check) => {
+  const k = CHECKS[c.kind];
+  const expected = k.number ? String(Number(c.expected) || 0) : JSON.stringify(c.expected);
+  return `client.test(${JSON.stringify(k.name(c))}, () => ${k.code(JSON.stringify(c.target), expected)});`;
+};
+
+const LITERAL = String.raw`("(?:[^"\\]|\\.)*")`;
+/** A pattern for each kind's code, made from the code itself, with groups for the target and expected value. */
+const checkPatterns = (Object.keys(CHECKS) as CheckKind[]).map((kind) => {
+  const k = CHECKS[kind];
+  const groups: string[] = [];
+  const escaped = k.code("\u0001t", "\u0001e").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const source = escaped.replace(/\u0001[te]/g, (m) => (groups.includes(m) ? `\\${groups.indexOf(m) + 2}` : (groups.push(m), m === "\u0001e" && k.number ? String.raw`(\d+(?:\.\d+)?)` : LITERAL)));
+  return { kind, groups, re: new RegExp(`^client\\.test\\(${LITERAL}, \\(\\) => ${source}\\);$`) };
+});
+
+function parseCheck(line: string): Check | null {
+  for (const { kind, groups, re } of checkPatterns) {
+    const m = line.match(re);
+    if (!m) continue;
+    // Group 1 is the test's name.
+    const at = (g: string) => (groups.includes(g) ? m[groups.indexOf(g) + 2] : undefined);
+    const t = at("\u0001t");
+    const e = at("\u0001e");
+    return { kind, target: t ? (JSON.parse(t) as string) : "", expected: e === undefined ? "" : CHECKS[kind].number ? e : (JSON.parse(e) as string) };
+  }
+  return null;
+}
+
+/** The lines of a response handler and where its checks markers are, or null when it has none. */
+function checksBlock(code: string) {
+  const lines = code.split("\n");
+  const start = lines.findIndex((l) => l.trim() === CHECKS_START);
+  const end = lines.findIndex((l, i) => i > start && l.trim() === CHECKS_END);
+  return start < 0 || end < 0 ? null : { lines, start, end };
+}
+
+/** The checks in a response handler. `editable` is false when the code between the markers isn't what writeChecks writes. */
+export function readChecks(code: string): { checks: Check[]; editable: boolean } {
+  const block = checksBlock(code);
+  if (!block) return { checks: [], editable: true };
+  const checks = block.lines.slice(block.start + 1, block.end).filter((l) => l.trim()).map((l) => parseCheck(l.trim()));
+  return { checks: checks.filter((c): c is Check => !!c), editable: checks.every(Boolean) };
+}
+
+/** Writes checks between the markers, keeping the code around them. No checks removes the markers. */
+export function writeChecks(code: string, checks: Check[]): string {
+  const lines = checks.length ? [CHECKS_START, ...checks.map(checkLine), CHECKS_END] : [];
+  const block = checksBlock(code);
+  if (block) return [...block.lines.slice(0, block.start), ...lines, ...block.lines.slice(block.end + 1)].join("\n").replace(/^\n+|\n+$/g, "");
+  return [code.trimEnd(), ...lines].filter(Boolean).join("\n");
+}
+
+type EnvFile = Record<string, Record<string, unknown>>;
+/** A variable in the environment editor. A value that's undefined isn't set in that environment. */
+export type EnvRow = { name: string; private: boolean; values: Record<string, string | undefined> };
+/** Environments as a table: a column per environment, $shared first, and a row per variable. */
+export type EnvTable = { envs: string[]; rows: EnvRow[] };
+
+/** Names that look like secrets, which the environment editor keeps in the private file. */
+export const looksSecret = (name: string) => /token|secret|password|passwd|key|auth/i.test(name);
+
+/** The table for http-client.env.json and http-client.private.env.json. A variable in the private file is private. */
+export function envTable(shared: EnvFile | null, secret: EnvFile | null): EnvTable {
+  const envs = ["$shared", ...new Set([...Object.keys(shared ?? {}), ...Object.keys(secret ?? {})].filter((e) => e !== "$shared"))];
+  const rows = new Map<string, EnvRow>();
+  for (const [file, isPrivate] of [[shared, false], [secret, true]] as const)
+    for (const [env, vars] of Object.entries(file ?? {}))
+      for (const [name, v] of Object.entries(vars ?? {})) {
+        const row = rows.get(name) ?? { name, private: false, values: {} };
+        row.private ||= isPrivate;
+        row.values[env] = typeof v === "string" ? v : JSON.stringify(v);
+        rows.set(name, row);
+      }
+  return { envs, rows: [...rows.values()] };
+}
+
+/**
+ * The two files' contents for a table. Every environment stays in the shared file, even without values, so it
+ * shows in the menus. A variable without any value gets an empty one in each environment, so it isn't lost.
+ */
+export function envFiles(t: EnvTable): { shared: EnvFile; secret: EnvFile } {
+  const real = t.envs.filter((e) => e !== "$shared");
+  const out = { shared: {} as EnvFile, secret: {} as EnvFile };
+  for (const env of t.envs) {
+    const vars = { shared: {} as Record<string, string>, secret: {} as Record<string, string> };
+    for (const row of t.rows) {
+      if (!row.name) continue;
+      const unset = Object.values(row.values).every((v) => v === undefined);
+      const value = unset && (real.includes(env) || (!real.length && env === "$shared")) ? "" : row.values[env];
+      if (value !== undefined) vars[row.private ? "secret" : "shared"][row.name] = value;
+    }
+    if (env !== "$shared" || Object.keys(vars.shared).length) out.shared[env] = vars.shared;
+    if (Object.keys(vars.secret).length) out.secret[env] = vars.secret;
+  }
+  return out;
+}

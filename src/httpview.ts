@@ -60,7 +60,9 @@ import {
   toLaravel,
   websocketMessages,
 } from "./httpfile";
-import { confirm, pick } from "./palette";
+import { addSaveAsVariable, checksSection } from "./httpchecks";
+import { editEnvironments } from "./httpenv";
+import { confirm, type Item, pick, rank } from "./palette";
 import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
 
@@ -128,7 +130,7 @@ let ownEdit = false;
 let shown: Exchange | null = null;
 
 /** The request the tab edits, parsed from the editor's current text. */
-function currentRequest(): HttpRequest | undefined {
+export function currentRequest(): HttpRequest | undefined {
   if (!current || current.model.isDisposed()) return undefined;
   const line = current.model.getDecorationRange(current.decoration)?.startLineNumber;
   if (!line) return undefined;
@@ -138,7 +140,7 @@ function currentRequest(): HttpRequest | undefined {
 const persistSoon = debounce((path: string) => host.persist(path), 600);
 
 /** Changes the request and writes it back into its file, as one undoable edit. */
-function update(change: (r: HttpRequest) => void) {
+export function update(change: (r: HttpRequest) => void) {
   const r = currentRequest();
   if (!r || !current) return;
   change(r);
@@ -257,7 +259,8 @@ urlInput.oninput = () => {
 };
 sendButton.onclick = () => sendCurrent();
 envSelect.onchange = () => {
-  if (envSelect.value === "\0edit") return (envSelect.value = envSelect.dataset.value ?? ""), createEnvironmentFile();
+  if (envSelect.value === "\0edit") return (envSelect.value = envSelect.dataset.value ?? ""), editEnvironments(current?.path);
+  if (envSelect.value === "\0json") return (envSelect.value = envSelect.dataset.value ?? ""), createEnvironmentFile();
   if (envSelect.value === "\0private") return (envSelect.value = envSelect.dataset.value ?? ""), createEnvironmentFile(PRIVATE_ENV_FILE);
   setEnvironment(envSelect.value);
 };
@@ -285,7 +288,8 @@ async function renderEnvironments(select: HTMLSelectElement) {
   select.replaceChildren(
     ...(Object.keys(envs).length ? Object.keys(envs).map((name) => h("option", { value: name, textContent: name })) : [h("option", { value: "", textContent: "No environment" })]),
     h("option", { value: "\0edit", textContent: "Edit Environments…" }),
-    h("option", { value: "\0private", textContent: "Edit Private Environments…" }),
+    h("option", { value: "\0json", textContent: "Open JSON" }),
+    h("option", { value: "\0private", textContent: "Open Private JSON" }),
   );
   select.value = selected;
   select.dataset.value = selected;
@@ -345,7 +349,7 @@ function renderTabLabels() {
   reqTabs.replaceChildren(...labels.map(([id, label]) => h("button", { role: "tab", textContent: label, ariaSelected: String(id === reqTab), onclick: () => ((reqTab = id), renderTabLabels(), renderReqTab()) })));
 }
 
-function renderReqTab() {
+export function renderReqTab() {
   const r = currentRequest();
   if (!r) return;
   disposeEditors();
@@ -695,6 +699,7 @@ const SNIPPETS: Record<"pre" | "handler", [string, string][]> = {
 };
 
 function scriptsTab(r: HttpRequest) {
+  let checks = checksSection(null);
   const section = (kind: "pre" | "handler") => {
     const script = kind === "pre" ? r.preScript : r.handler;
     const title = kind === "pre" ? "Before the request" : "After the response (tests)";
@@ -709,6 +714,7 @@ function scriptsTab(r: HttpRequest) {
       return wrap;
     }
     const { el, editor } = codeEditor(script?.code ?? "", "javascript", (v) => updateSoon((q) => (kind === "pre" ? (q.preScript = v.trim() ? { code: v } : undefined) : (q.handler = v.trim() ? { code: v } : undefined))), "http-code http-script-code");
+    if (kind === "handler") checks = checksSection(editor);
     for (const [label, code] of SNIPPETS[kind])
       bar.append(
         h("button", {
@@ -723,12 +729,14 @@ function scriptsTab(r: HttpRequest) {
     wrap.append(el);
     return wrap;
   };
+  const [pre, handler] = [section("pre"), section("handler")];
   return h(
     "div",
     { class: "http-pane http-scripts" },
-    section("pre"),
-    section("handler"),
-    h("p", { class: "http-hint" }, "JavaScript, as in PhpStorm: client.global.set(name, value) keeps a value for later requests as {{name}}; client.test(name, fn) and client.assert(condition, message) report tests; response.status, response.body (parsed JSON), response.headers.valueOf(name); request.variables.set(name, value) before sending; jsonPath(value, \"$.a.b\")."),
+    checks,
+    pre,
+    handler,
+    h("p", { class: "http-hint" }, "JavaScript, as in PhpStorm: client.global.set(name, value) keeps a value for later requests as {{name}}; client.test(name, fn) and client.assert(condition, message) report tests; response.status, response.body (parsed JSON), response.headers.valueOf(name), response.time (ms); request.variables.set(name, value) before sending; jsonPath(value, \"$.a.b\")."),
   );
 }
 
@@ -804,7 +812,7 @@ async function askForValues(names: string[], mode: SendMode) {
         { class: "http-empty-actions" },
         h("button", { class: "primary", textContent: "Send", onclick: sendWithValues }),
         h("button", { textContent: "Send Anyway", title: "Send with {{name}} left in", onclick: () => go() }),
-        h("button", { textContent: "Edit Environments…", onclick: () => createEnvironmentFile() }),
+        h("button", { textContent: "Edit Environments…", onclick: () => editEnvironments(current?.path) }),
       ),
     ),
   );
@@ -1092,6 +1100,7 @@ function bodyView(x: Exchange) {
     const editor = monaco.editor.create(el, { ...EDITOR_OPTIONS, readOnly: true, lineNumbers: "on", model: monaco.editor.createModel(value, bodyMode === "raw" ? "plaintext" : languageFor(type)), wordWrap: bodyMode === "raw" ? "on" : "off" });
     responseEditor = editor;
     if (parsed === undefined) return;
+    addSaveAsVariable(editor, parsed, () => jsonFilter);
     // A JSON path narrows the body, such as $.data[*].id.
     const filter = h("input", { class: "http-json-filter", placeholder: "Filter: $.data[*].id", spellcheck: false, value: jsonFilter, title: "A JSON path: $, .key, [n], [*], .*, and ..key for any depth" });
     const apply = () => {
@@ -1462,6 +1471,20 @@ async function loadCollections() {
   );
 }
 
+/** A palette row for every request in the project, which opens it in the HTTP tab. */
+export async function requestItems(): Promise<Item[]> {
+  if (!host.root()) return [];
+  await loadCollections();
+  return collections.flatMap((c) =>
+    c.requests.map((r) => ({ label: r.title || r.name || `${r.method} ${r.url}`, detail: `${r.method} ${r.url} · ${relative(c.path)}`, icon: "codicon-globe", run: () => openRequest(c.path, r.line) })),
+  );
+}
+
+export function goToRequest() {
+  const items = requestItems();
+  pick("Go to request", async (q) => rank(q, await items));
+}
+
 export async function refreshTree() {
   if (!host.root() || $("view-http").hidden) return;
   await loadCollections();
@@ -1647,7 +1670,8 @@ export function initHttpClient(h_: Host) {
   $("http-clear-history").onclick = async () => (await confirm("Clear the HTTP client's history for this project?", "Clear")) && clearHistory();
   const sidebarEnv = $("http-sidebar-env") as HTMLSelectElement;
   sidebarEnv.onchange = () => {
-    if (sidebarEnv.value === "\0edit") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), createEnvironmentFile();
+    if (sidebarEnv.value === "\0edit") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), editEnvironments(current?.path);
+    if (sidebarEnv.value === "\0json") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), createEnvironmentFile();
     if (sidebarEnv.value === "\0private") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), createEnvironmentFile(PRIVATE_ENV_FILE);
     setEnvironment(sidebarEnv.value);
   };
