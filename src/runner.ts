@@ -196,10 +196,23 @@ async function artisanCommand(root: string, args: string[], tty: boolean) {
   return container ? container.exec(["php", "artisan", ...args], [], tty) : ["php", "artisan", ...args];
 }
 
-/** The app's routes, from `artisan route:list --json`. Throws when artisan fails. */
+/**
+ * The app's routes, from `artisan route:list --json`. When artisan fails, throws its error message, which
+ * Laravel prints to stdout, such as a fatal error while booting the app.
+ */
 export async function listRoutes(root = getRoot()): Promise<Route[]> {
   const [program, ...args] = await artisanCommand(root, ["route:list", "--json"], false);
-  return JSON.parse(await invoke<string>("run_capture", { cwd: root, program, args, input: null }));
+  const out = await invoke<string>("run_capture", { cwd: root, program, args, input: null, anyStatus: true });
+  try {
+    return JSON.parse(out);
+  } catch {
+    const lines = out
+      .replace(/\x1b\[[\d;]*m/g, "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    throw new Error(lines.slice(0, 2).join(": ") || "artisan route:list printed nothing");
+  }
 }
 
 /** Lists the app's routes from `artisan route:list`; choosing one opens its controller method. */

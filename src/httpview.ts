@@ -1073,7 +1073,7 @@ async function requestsFromRoutes() {
   try {
     routes = await listRoutes(host.root());
   } catch (e) {
-    return host.status(`Couldn't list the routes: ${String(e).trim().split("\n")[0]}`);
+    return host.status(`Couldn't list the routes: ${e instanceof Error ? e.message : String(e).trim()}`);
   }
   host.status("");
   routes = routes.filter((r) => !/^(_ignition|sanctum|livewire|_debugbar|telescope|horizon|storage)/.test(r.uri.replace(/^\//, "")));

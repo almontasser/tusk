@@ -485,7 +485,8 @@ at the top.
   developer tools (**Copy as cURL**).
 - The method icon makes requests from `php artisan route:list`: one route, all
   API routes, or every route. Each gets `{{host}}` for the app's address and a
-  variable for each route parameter.
+  variable for each route parameter. When artisan fails, such as on an error
+  while the app boots, the message says why.
 - **History** lists the last 100 requests you sent in the project, with their
   responses. Click one to see it again.
 
