@@ -180,3 +180,83 @@ export function parseCachegrind(text: string): Profile {
     tree: tree.children,
   };
 }
+
+/**
+ * Where the time under a call tree node goes: each function's own time within the node's subtree, most first.
+ * A node's own time is its time less its children's.
+ */
+export function hotSpots(root: CallNode): { fn: ProfiledFunction; self: number; calls: number }[] {
+  const byFn = new Map<ProfiledFunction, { fn: ProfiledFunction; self: number; calls: number }>();
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop()!;
+    const spot = byFn.get(node.fn) ?? { fn: node.fn, self: 0, calls: 0 };
+    spot.self += node.time - node.children.reduce((t, c) => t + c.time, 0);
+    spot.calls += node.calls;
+    byFn.set(node.fn, spot);
+    stack.push(...node.children);
+  }
+  return [...byFn.values()].sort((a, b) => b.self - a.self);
+}
+
+/** A database query from a trace of Laravel's connection: its SQL, its bindings as PHP shows them, and its time. */
+export type Query = { sql: string; bindings: string[]; time: number; start: number };
+
+/**
+ * Reads the queries from an Xdebug trace (`xdebug.trace_format=1`, tab-separated) limited to Laravel's
+ * `Illuminate\Database\Connection`. Each query passes through `Connection->run($query, $bindings, ...)`: its
+ * entry record holds the arguments, and the exit record with the same call number holds the time it ended.
+ */
+export function parseSqlTrace(text: string): Query[] {
+  const open = new Map<string, Query>();
+  const queries: Query[] = [];
+  for (const line of text.split("\n")) {
+    const f = line.split("\t");
+    if (f[2] === "0" && f[5] === "Illuminate\\Database\\Connection->run" && f[11]?.startsWith("'")) {
+      const query = { sql: phpString(f[11]), bindings: phpList(f[12] ?? ""), time: 0, start: Number(f[3]) * 1000 };
+      open.set(f[1], query);
+      queries.push(query);
+    } else if (f[2] === "1" && open.has(f[1])) {
+      const query = open.get(f[1])!;
+      query.time = Number(f[3]) * 1000 - query.start;
+      open.delete(f[1]);
+    }
+  }
+  return queries;
+}
+
+/** A PHP string as Xdebug writes it: single-quoted, with \' and \\ escaped. Long strings end in "...". */
+const phpString = (s: string) => s.replace(/^'|'(\.\.\.)?$/g, "").replace(/\\(['\\])/g, "$1");
+
+/** The values of a PHP list as Xdebug writes it, such as [0 => 'a', 1 => 5, 2 => NULL]; strings keep their quotes. */
+export function phpList(s: string): string[] {
+  const values: string[] = [];
+  const body = s.replace(/^\[|\]$/g, "");
+  // A value is a quoted string (with escapes) or anything up to the next comma.
+  for (const m of body.matchAll(/(?:^|, )\d+ => ('(?:[^'\\]|\\.)*'(?:\.\.\.)?|[^,]*)/g)) values.push(m[1]);
+  return values;
+}
+
+/** SQL with its bindings in place of the ? placeholders, for pasting into a database console. Best effort. */
+export function withBindings(q: Query): string {
+  let i = 0;
+  return q.sql.replace(/\?/g, (mark) => (i < q.bindings.length ? q.bindings[i++].replace(/^NULL$/, "null").replace(/^TRUE$/, "1").replace(/^FALSE$/, "0") : mark));
+}
+
+export type QueryGroup = { sql: string; runs: Query[]; time: number; kind: "" | "duplicate" | "repeated" };
+
+/**
+ * Queries with the same SQL, slowest group first. The same SQL and bindings more than once is a duplicate; the same
+ * SQL with different bindings three or more times is often a loop that queries once per item (an N+1 query).
+ */
+export function groupQueries(list: Query[]): QueryGroup[] {
+  const bySql = new Map<string, Query[]>();
+  for (const q of list) bySql.set(q.sql, [...(bySql.get(q.sql) ?? []), q]);
+  return [...bySql]
+    .map(([sql, runs]) => {
+      const distinct = new Set(runs.map((r) => r.bindings.join("\u0000"))).size;
+      const kind: QueryGroup["kind"] = distinct < runs.length ? "duplicate" : runs.length >= 3 ? "repeated" : "";
+      return { sql, runs, time: runs.reduce((t, r) => t + r.time, 0), kind };
+    })
+    .sort((a, b) => b.time - a.time);
+}

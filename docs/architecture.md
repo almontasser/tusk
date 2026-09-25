@@ -1460,6 +1460,27 @@ The flame graph draws each node wider than a pixel as an absolutely positioned
 `div`, about 1,300 for a Laravel request, and redraws when the panel resizes.
 Zooming keeps the zoomed node's ancestors as full-width bars above it.
 
+Queries come from a second Xdebug mode, tracing, run with the profiler
+(`XDEBUG_MODE=profile,trace`). A trace of a whole request would be far larger
+than its profile, so a file PHP runs first (`auto_prepend_file`) calls
+`xdebug_set_filter` to keep only calls made from Laravel's
+`Illuminate/Database/Connection.php`: about 400 lines for a request. The
+settings live in an `.ini` file in the app cache, added through
+`PHP_INI_SCAN_DIR` so that processes a run starts (PHPUnit under
+`artisan test`) get them too. The variable replaces PHP's own scan folders, so
+the editor reads them from `php --ini` and keeps them in front.
+`XDEBUG_CONFIG` doesn't accept `trace_output_name`, so the trace's name is in
+the `.ini` file too: `trace.%t.%p.%R`, matching its profile.
+
+`parseSqlTrace` reads the tab-separated trace format: each `Connection->run`
+entry holds the SQL and bindings as its first two arguments, in Xdebug's PHP
+notation, and the exit record with the same call number gives its end time.
+`groupQueries` groups by SQL and flags duplicates (same bindings more than
+once) and repeats (three or more different bindings).
+
+`hotSpots` sums own time (a node's time less its children's) per function over
+a node's subtree, for the zoomed flame graph.
+
 Profile names use Xdebug's `%R`, the request URI, which is empty on the command
 line. The editor turns its underscores back into slashes to name a browser
 request.
@@ -1835,4 +1856,14 @@ sortable list, so it came first. Keeping every call would cost memory for
 millions of calls, but merging calls along the same path keeps the tree at tens
 of thousands of nodes for a Laravel request, which is small enough to keep for
 the call tree and the flame graph.
+
+### 2026-09-25: Trace queries with Xdebug, not with the app
+
+Listing a request's queries needs their SQL, which a profile doesn't have. A
+listener in the app (`DB::listen`) would need a change to the project, or code
+run before Laravel exists, which can't register one. Xdebug's tracing needs
+neither: filtered to Laravel's connection class, it records each query's SQL,
+bindings, and time from outside the app, for web requests and tests alike. The
+cost is an `auto_prepend_file` during profiled runs, which replaces the
+project's own for those runs.
 

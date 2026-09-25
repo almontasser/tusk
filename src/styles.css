@@ -694,6 +694,21 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler-insights .chip:hover { background: var(--hover); color: var(--text); }
 .profiler-insights .chip b { color: var(--text); font-weight: 600; }
 .profiler-insights .compare { margin-left: 6px; font-weight: 600; }
+/* The Queries view and its side pane. */
+.profiler td.sql, .profiler td.bindings { font-family: var(--mono); }
+.profiler td.bindings { color: var(--muted); }
+.query-flag { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; font: 600 10px/16px var(--ui-family); text-transform: uppercase; vertical-align: 1px; }
+.query-flag.duplicate { background: #e5c07b33; color: var(--yellow); }
+.query-flag.repeated { background: #e0955a33; color: var(--orange); }
+.query-sql { margin: 0; padding: 6px 8px; border-radius: var(--radius); background: var(--hover); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.query-note { margin: 4px 0 0; font-size: 12px; }
+.query-note.duplicate { color: var(--yellow); }
+.query-note.repeated { color: var(--orange); }
+.query-actions { display: flex; gap: 6px; margin-top: 6px; }
+.query-actions .chip { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 11px; background: none; font: 12px var(--ui-family); color: var(--muted); }
+.query-actions .chip:hover { background: var(--hover); color: var(--text); }
+.hot-spots { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 6px; }
+.hot-spots p.muted { padding: 0 12px 4px; }
 /* The flame graph: bars colored by where the code lives. */
 .profiler-flame { flex: 1; overflow: auto; outline: none; padding: 4px 8px; }
 .flame-canvas { position: relative; min-width: 100%; }

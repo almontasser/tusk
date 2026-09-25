@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Call, CallNode, Profile, ProfiledFunction } from "./cachegrind";
+import { type Call, type CallNode, groupQueries, hotSpots, parseSqlTrace, type Profile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import ParseWorker from "./cachegrind.worker?worker";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
@@ -25,7 +25,50 @@ export async function profileDir() {
  * Environment that profiles a PHP run, including processes it starts, such as `artisan test` running PHPUnit.
  * The trigger covers setups with `xdebug.start_with_request=trigger`. Names carry the start time and process ID.
  */
-export const profileEnv = (dir: string) => ["XDEBUG_MODE=profile", "XDEBUG_TRIGGER=1", `XDEBUG_CONFIG=output_dir=${dir} profiler_output_name=cachegrind.out.%t.%p.%R`];
+export async function profileEnv(dir: string, root: string): Promise<string[]> {
+  const env = ["XDEBUG_TRIGGER=1", `XDEBUG_CONFIG=output_dir=${dir} profiler_output_name=cachegrind.out.%t.%p.%R`];
+  // In a Laravel app, also trace the database connection, to list the queries with their SQL. The trace's name is
+  // set in the .ini file: XDEBUG_CONFIG doesn't take trace_output_name.
+  const connection = `${root}/vendor/laravel/framework/src/Illuminate/Database/Connection.php`;
+  if (!(await invoke<boolean>("path_exists", { path: connection }))) return ["XDEBUG_MODE=profile", ...env];
+  return ["XDEBUG_MODE=profile,trace", ...env, `PHP_INI_SCAN_DIR=${await scanDir()}:${await traceSettings()}`, `PHP_EDITOR_SQL_TRACE=${connection}`];
+}
+
+/**
+ * PHP settings for tracing queries, in a folder PHP_INI_SCAN_DIR adds, so processes a run starts (PHPUnit under
+ * artisan test) get them too: a file run before the app that limits tracing to the database connection, and the
+ * trace format. It takes the place of any auto_prepend_file your own settings have.
+ */
+async function traceSettings() {
+  const dir = `${await appCacheDir()}/profiler-php`;
+  await invoke("create_dir", { path: `${dir}/ini` });
+  await invoke("write_file", {
+    path: `${dir}/prepend.php`,
+    contents: `<?php
+// Written by the editor for profiled runs: limits Xdebug's tracing to Laravel's database connection,
+// so the trace holds the queries and little else.
+if (($file = getenv('PHP_EDITOR_SQL_TRACE')) && function_exists('xdebug_set_filter')) {
+    xdebug_set_filter(XDEBUG_FILTER_TRACING, XDEBUG_PATH_INCLUDE, [$file]);
+}
+`,
+  });
+  await invoke("write_file", {
+    path: `${dir}/ini/zz-php-editor.ini`,
+    contents: `; Written by the editor for profiled runs.\nauto_prepend_file="${dir}/prepend.php"\nxdebug.trace_format=1\nxdebug.trace_output_name=trace.%t.%p.%R\nxdebug.var_display_max_data=4096\nxdebug.var_display_max_children=128\nxdebug.var_display_max_depth=3\n`,
+  });
+  return `${dir}/ini`;
+}
+
+let scanned: Promise<string> | undefined;
+/** PHP's own folders of extra .ini files, which setting PHP_INI_SCAN_DIR would otherwise replace. */
+const scanDir = () =>
+  (scanned ??= invoke<string>("run_capture", { cwd: "/", program: "php", args: ["--ini"], input: null })
+    .then((out) => out.match(/^Scan for additional \.ini files in: (.*)$/m)?.[1].trim() ?? "")
+    .then((dir) => (dir === "(none)" ? "" : dir))
+    .catch(() => ""));
+
+/** The query trace written with a profile: the same name, starting with "trace." and ending in ".xt". */
+const traceFor = (profile: string) => profile.replace(/\/cachegrind\.out\.([^/]*?)(\.gz)?$/, "/trace.$1.xt$2");
 
 /**
  * A web request's path from its profile's name, which Xdebug's %R fills with the request URI, turning `/`, `.`,
@@ -51,7 +94,7 @@ export async function startProfilingServer(): Promise<number | undefined> {
   const dir = await profileDir();
   host.status(`Profiling server on http://127.0.0.1:${port}. Each request writes a profile; open it with Open Xdebug Profile….`);
   // server.php finds the public folder from the working directory, as artisan serve runs it.
-  openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...profileEnv(dir), "php", "-S", `127.0.0.1:${port}`, `${root}/${script}`]);
+  openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...(await profileEnv(dir, root)), "php", "-S", `127.0.0.1:${port}`, `${root}/${script}`]);
   server = { root, port };
   return port;
 }
@@ -139,7 +182,7 @@ export async function openNewestProfile(dir: string, since: number, label?: stri
   await openProfile(largest.path, label);
   // Keep the newest profiles only; a Laravel request's profile can be several megabytes.
   const old = (await profilesIn(dir)).sort((a, b) => b.time - a.time).slice(KEEP_PROFILES);
-  for (const f of old) await invoke("remove_path", { path: f.path }).catch(() => {});
+  for (const f of old) for (const path of [f.path, traceFor(f.path)]) await invoke("remove_path", { path }).catch(() => {});
 }
 
 /** What the editor's profiles came from, such as a request or a test, by path. */
@@ -204,6 +247,9 @@ export async function openProfile(path: string, label?: string) {
   if (label) saveLabel(path, label);
   profile = parsed;
   currentPath = path;
+  queries = await loadQueries(path);
+  queryGroups = groupQueries(queries);
+  if (view === "queries" && !queries.length) view = "functions";
   functionsByFile = new Map();
   for (const f of profile.functions) functionsByFile.set(f.file, [...(functionsByFile.get(f.file) ?? []), f]);
   selected = undefined;
@@ -239,6 +285,23 @@ async function load(path: string): Promise<Profile | null> {
 }
 
 let currentPath = "";
+
+// ---- Database queries ----
+// From the trace of Laravel's database connection written next to the profile, when there is one.
+
+let queries: Query[] = [];
+let queryGroups: QueryGroup[] = [];
+
+async function loadQueries(profilePath: string): Promise<Query[]> {
+  const path = traceFor(profilePath);
+  if (path === profilePath || !(await invoke<boolean>("path_exists", { path }))) return [];
+  const text = await (path.endsWith(".gz")
+    ? invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/gzip", args: ["-dc", path], input: null })
+    : invoke<string>("read_file", { path })
+  ).catch(() => "");
+  return parseSqlTrace(text);
+}
+
 
 // ---- Comparing with another profile ----
 
@@ -309,6 +372,8 @@ function showInsights() {
     chip.append(Object.assign(document.createElement("b"), { textContent: insight.label }), ` ${count ? `${count} ${insight.unit} · ` : ""}${ms(time)} · ${share(time)}`);
     const busiest = [...fns].sort((a, b) => b.inclusive - a.inclusive)[0];
     chip.onclick = () => {
+      // With the queries traced, the Database total opens them; otherwise it selects the busiest function.
+      if (insight.label === "Database" && queries.length) return panel.querySelector<HTMLElement>('[data-view="queries"]')!.click();
       if (view !== "functions") panel.querySelector<HTMLElement>('[data-view="functions"]')!.click();
       select(busiest);
     };
@@ -339,7 +404,7 @@ function parse(text: string) {
 
 const MAX_ROWS = 500;
 let profile: Profile = { command: "", functions: [], total: 0, sites: new Map(), tree: [] };
-let view: "functions" | "tree" | "flame" = "functions";
+let view: "functions" | "tree" | "flame" | "queries" = "functions";
 let sort: "name" | "calls" | "self" | "inclusive" | "memory" | "dself" | "dinclusive" = "self";
 let selected: ProfiledFunction | undefined;
 /** The rows the table shows, in order, so the arrow keys can move through them. */
@@ -390,6 +455,7 @@ panel.innerHTML = `
       <button data-view="functions" aria-pressed="true">Functions</button>
       <button data-view="tree" aria-pressed="false">Call tree</button>
       <button data-view="flame" aria-pressed="false">Flame graph</button>
+      <button data-view="queries" aria-pressed="false" hidden>Queries</button>
     </div>
     <input class="profiler-filter" placeholder="Filter functions" aria-label="Filter functions" spellcheck="false" />
     <label class="profiler-check" data-option="project" title="Hide vendor packages and PHP's own functions"><input type="checkbox" /> Project code only</label>
@@ -457,6 +523,7 @@ panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
       if (view === "tree") openBackTrace();
       panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v === b)));
       render();
+      showDetail();
       (view === "flame" ? flameEl : tableEl).focus();
     }),
 );
@@ -513,10 +580,14 @@ function render() {
   flameEl.hidden = view !== "flame";
   project.disabled = view !== "functions";
   panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v.dataset.view === view)));
+  const queriesButton = panel.querySelector<HTMLElement>('[data-view="queries"]')!;
+  queriesButton.hidden = !queries.length;
+  queriesButton.textContent = `Queries (${queries.length})`;
   if (view === "flame") {
     filter.placeholder = "Highlight functions";
     return renderFlame();
   }
+  if (view === "queries") return renderQueries();
   const backTrace = view === "tree" && filterWords().length > 0;
   // While comparing, the change columns take Memory's place, so function names keep their room.
   const list = view === "tree" ? columns.tree : baseline ? [...columns.functions.filter(([key]) => key !== "memory"), ...columns.compare] : columns.functions;
@@ -756,9 +827,122 @@ flameEl.onkeydown = (e) => {
   if (e.key !== "Escape" || !flamePath.length) return;
   flamePath = flamePath.slice(0, -1);
   renderFlame();
+  showDetail();
   e.preventDefault();
 };
 new ResizeObserver(() => view === "flame" && !flameEl.hidden && renderFlame()).observe(flameEl);
+
+// ---- The Queries view ----
+
+let selectedQuery: QueryGroup | undefined;
+
+/** Lists queries grouped by SQL, slowest first; a group opens to each time it ran, with its bindings. */
+function renderQueries() {
+  filter.placeholder = "Filter queries";
+  const words = filterWords();
+  const groups = queryGroups.filter((g) => words.every((w) => g.sql.toLowerCase().includes(w)));
+  const head = document.createElement("tr");
+  for (const [label, tip, num] of [
+    ["Query", "Queries with the same SQL, slowest first. Open one to see each time it ran.", false],
+    ["Runs", "How many times it ran", true],
+    ["Time", "Time in the database, all runs together", true],
+  ] as const)
+    head.append(Object.assign(document.createElement("th"), { textContent: label, title: tip, className: num ? "num" : "" }));
+  q("thead").replaceChildren(head);
+  panel.classList.add("tree-view");
+  const rows: HTMLElement[] = [];
+  for (const g of groups) {
+    const key = `q:${g.sql}`;
+    const open = expanded.has(key);
+    const tr = document.createElement("tr");
+    tr.classList.toggle("selected", g === selectedQuery);
+    const name = cell("", "name sql");
+    const chevron = Object.assign(document.createElement("span"), { className: `chevron codicon codicon-chevron-${open ? "down" : "right"}` });
+    chevron.onclick = (e) => (e.stopPropagation(), expanded.delete(key) || expanded.add(key), render());
+    name.append(chevron);
+    if (g.kind) name.append(Object.assign(document.createElement("span"), { className: `query-flag ${g.kind}`, textContent: g.kind === "duplicate" ? "duplicate" : "repeated" }));
+    name.append(g.sql);
+    name.title = g.sql;
+    const time = timeCell(g.time, "bar");
+    time.style.setProperty("--share", share(g.time) || "0%");
+    tr.append(name, cell(`${g.runs.length}×`, "num"), time);
+    tr.onclick = () => selectQuery(g);
+    rows.push(tr);
+    if (!open) continue;
+    for (const run of g.runs) {
+      const sub = document.createElement("tr");
+      const bindings = cell(run.bindings.length ? run.bindings.join(", ") : "No bindings", "name bindings");
+      bindings.style.paddingLeft = "34px";
+      bindings.title = withBindings(run);
+      sub.append(bindings, cell("", "num"), timeCell(run.time));
+      sub.onclick = () => selectQuery(g);
+      rows.push(sub);
+    }
+  }
+  if (!groups.length) rows.push(Object.assign(document.createElement("tr"), { innerHTML: `<td class="muted" colspan="3">No queries match.</td>` }));
+  // The Database total counts every statement PDO ran; this list only has those Laravel's connection ran.
+  const note = document.createElement("tr");
+  note.append(Object.assign(cell("Queries run through Laravel's database connection. Statements a driver runs itself, such as SQLite's PRAGMA when connecting, aren't listed.", "muted"), { colSpan: 3 }));
+  rows.push(note);
+  shown = [];
+  q("tbody").replaceChildren(...rows);
+}
+
+function selectQuery(g: QueryGroup) {
+  selectedQuery = g;
+  render();
+  showQueryDetail();
+}
+
+/** The side pane for a query: its SQL, why it's flagged, a copy with bindings, and each run. */
+function showQueryDetail() {
+  const g = selectedQuery;
+  const detail = q(".profiler-detail");
+  if (!g) {
+    detail.innerHTML = `<p class="muted">Select a query to see its SQL and each time it ran.</p>`;
+    return;
+  }
+  const heading = document.createElement("div");
+  heading.className = "profiler-detail-heading";
+  heading.append(
+    Object.assign(document.createElement("pre"), { className: "query-sql", textContent: g.sql }),
+    Object.assign(document.createElement("div"), { className: "muted", textContent: `${g.runs.length} ${g.runs.length === 1 ? "run" : "runs"} · ${ms(g.time)} (${share(g.time)} of the run)` }),
+  );
+  if (g.kind)
+    heading.append(
+      Object.assign(document.createElement("p"), {
+        className: `query-note ${g.kind}`,
+        textContent:
+          g.kind === "duplicate"
+            ? "The same query with the same bindings ran more than once. Its result could be kept and reused."
+            : "The same query ran with different bindings, often once per item in a loop (an N+1 query). Eager loading, such as with('relation'), can fetch them in one query.",
+      }),
+    );
+  const copy = Object.assign(document.createElement("button"), { className: "chip", textContent: "Copy with bindings", title: "Copy the first run's SQL with its bindings in place, for a database console" });
+  copy.onclick = () => navigator.clipboard.writeText(withBindings(g.runs[0])).then(() => host.status("Copied the query."));
+  const where = Object.assign(document.createElement("button"), { className: "chip", textContent: "Show callers", title: "Select PDOStatement->execute in the function table, to see which code ran queries" });
+  where.onclick = () => {
+    const execute = profile.functions.find((f) => f.name === "php::PDOStatement->execute");
+    if (!execute) return;
+    panel.querySelector<HTMLElement>('[data-view="functions"]')!.click();
+    select(execute);
+  };
+  const actions = Object.assign(document.createElement("div"), { className: "query-actions" });
+  actions.append(copy, where);
+  heading.append(actions);
+  const runs = document.createElement("section");
+  runs.append(Object.assign(document.createElement("h3"), { textContent: `Runs (${g.runs.length})` }));
+  const table = document.createElement("table");
+  for (const run of g.runs.slice(0, 200)) {
+    const tr = document.createElement("tr");
+    const b = cell(run.bindings.join(", ") || "No bindings", "name");
+    b.title = withBindings(run);
+    tr.append(b, cell(ms(run.time), "num"));
+    table.append(tr);
+  }
+  runs.append(table);
+  detail.replaceChildren(heading, runs);
+}
 
 // ---- Selection and the side pane ----
 
@@ -785,9 +969,12 @@ function select(f: ProfiledFunction) {
 }
 /** The side pane: the selected function, what called it, and what it called, each by time. */
 function showDetail() {
+  if (view === "queries") return showQueryDetail();
   const detail = q(".profiler-detail");
+  const spots = zoomedHotSpots();
   if (!selected) {
     detail.innerHTML = `<p class="muted">Select a function to see its callers and the functions it calls. Double-click it, or press ⏎, to open it.</p>`;
+    if (spots) detail.prepend(spots);
     return;
   }
   const f = selected;
@@ -801,7 +988,39 @@ function showDetail() {
     textContent: `${f.calls} ${f.calls === 1 ? "call" : "calls"} · own ${ms(f.self)} · total ${ms(f.inclusive)} (${share(f.inclusive)}) · memory ${bytes(f.memory)}`,
   });
   heading.append(title, link, stats);
-  detail.replaceChildren(heading, calls("Called by", f.callers), calls("Calls", f.callees));
+  detail.replaceChildren(...(spots ? [spots] : []), heading, calls("Called by", f.callers), calls("Calls", f.callees));
+}
+
+/** In a zoomed flame graph: the functions with the most own time inside the zoomed bar, which is where it's slow. */
+function zoomedHotSpots() {
+  const zoomed = view === "flame" ? flamePath.at(-1) : undefined;
+  if (!zoomed) return null;
+  const section = document.createElement("section");
+  section.className = "hot-spots";
+  section.append(
+    Object.assign(document.createElement("h3"), { textContent: `Inside ${displayName(zoomed.fn).split(/\\|->|::/).pop()}: own time` }),
+    Object.assign(document.createElement("p"), { className: "muted", textContent: `Where its ${ms(zoomed.time)} goes, by the code that ran it.` }),
+  );
+  const table = document.createElement("table");
+  for (const spot of hotSpots(zoomed).slice(0, 12)) {
+    if (spot.self < zoomed.time / 1000) break;
+    const tr = document.createElement("tr");
+    const name = cell(displayName(spot.fn), "name");
+    name.title = `${spot.fn.name}\n${where(spot.fn)}`;
+    const part = `${((spot.self / zoomed.time) * 100).toFixed(1)}%`;
+    const time = cell(`${ms(spot.self)} · ${part}`, "num bar");
+    time.style.setProperty("--share", part);
+    tr.append(name, cell(`${spot.calls}×`, "num"), time);
+    tr.onclick = () => {
+      selected = spot.fn;
+      renderFlame();
+      showDetail();
+    };
+    tr.ondblclick = () => openSource(spot.fn);
+    table.append(tr);
+  }
+  section.append(table);
+  return section;
 }
 
 function calls(label: string, list: Call[]) {

@@ -50,7 +50,7 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In Sail, the container's settings apply.
   const profiles = mode === "profile" ? await profileDir() : "";
   const started = Math.floor(Date.now() / 1000);
-  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiles ? ["/usr/bin/env", ...profileEnv(profiles)] : [];
+  const env = coverage && !inSail ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiles ? ["/usr/bin/env", ...(await profileEnv(profiles, getRoot()))] : [];
   const coverageArgs = coverage ? ["--coverage-clover", inSail ? "storage/logs/editor-clover.xml" : clover] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);

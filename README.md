@@ -894,7 +894,22 @@ and → and ← open and close a node.
 
 Click **Flame graph** to see the same tree as bars: each function's bar sits
 under its caller's and is as wide as its time there, busiest first. Blue bars
-are your code, yellow are `vendor`, and gray are PHP's own functions. Hover
+are your code, yellow are `vendor`, and gray are PHP's own functions. When you zoom in, the side pane lists the functions with the most
+own time inside the zoomed bar: where that part of the run is slow.
+
+In a Laravel app, profiled runs also record the database queries. Click
+**Queries**, or the **Database** total, to list them: queries with the same SQL
+are grouped, slowest first, and a group opens to each run with its bindings
+and time. Two flags point at common problems:
+
+- **Duplicate**: the same SQL with the same bindings ran more than once, so
+  its result could be reused.
+- **Repeated**: the same SQL ran three or more times with different bindings,
+  often once per item in a loop (an N+1 query), which eager loading such as
+  `with('author')` can replace with one query.
+
+Select a query to see its full SQL, copy it with its bindings in place for a
+database console, or jump to the code that ran queries. Hover
 over a bar for its time and calls, click it to zoom in (the bars above it stay,
 and clicking one zooms back out), press Escape to zoom out one level, and
 double-click to open the function. Type in the filter to highlight matching
@@ -936,6 +951,12 @@ Profiling needs Xdebug. The editor sets `XDEBUG_MODE=profile` and
 `XDEBUG_TRIGGER`, so it works whether your `php.ini` starts Xdebug always or on
 a trigger. Profiles from the editor go to the app's cache folder, which keeps
 the newest 50. Profiling doesn't run in Sail's containers.
+
+To record queries, the editor also turns on Xdebug's tracing, limited to
+Laravel's database connection, through a small PHP file that runs before the
+app. It's added with PHP's `PHP_INI_SCAN_DIR`, keeping PHP's own settings
+folders, and takes the place of any `auto_prepend_file` your settings have
+during profiled runs.
 
 ## Database
 
