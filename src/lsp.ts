@@ -74,8 +74,11 @@ const markdown = (c: L.MarkupContent | L.MarkedString | string): monaco.IMarkdow
 const completionKinds = "Text Method Function Constructor Field Variable Class Interface Module Property Unit Value Enum Keyword Snippet Color File Reference Folder EnumMember Constant Struct Event Operator TypeParameter".split(" ");
 const severity = [0, 8, 4, 2, 1]; // Error, Warning, Information, Hint
 
-/** The last diagnostics each server sent for each model, so they can be filtered again once the models are read. */
-const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[] }>();
+/**
+ * The last diagnostics each server sent for each model, so they can be filtered again once the models are read, and
+ * the ones left after filtering (`shown`), which code action requests send.
+ */
+const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[]; shown: L.Diagnostic[] }>();
 onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
 
 /**
@@ -92,22 +95,20 @@ function markDiagnosed(model: monaco.editor.ITextModel) {
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
   const key = `${owner} ${model.uri}`;
   if (!lastDiagnostics.has(key)) model.onWillDispose(() => lastDiagnostics.delete(key));
-  lastDiagnostics.set(key, { model, owner, list });
-  list = realProblems(model.uri.path, textOf(model), model.getLanguageId(), list, facts);
-  monaco.editor.setModelMarkers(
-    model,
-    owner,
-    list.map((d) => ({
-      ...toRange(d.range),
-      message: typeof d.message === "string" ? d.message : d.message.value,
-      severity: severity[severityOf(d)],
-      // LSP's diagnostic tags have MarkerTag's numbers.
-      tags: [...new Set([...(d.tags ?? []), ...(isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : [])])],
-      source: d.source ?? owner.slice(4),
-      code: d.code?.toString(),
-    })),
-  );
+  const shown = realProblems(model.uri.path, textOf(model), model.getLanguageId(), list, facts);
+  lastDiagnostics.set(key, { model, owner, list, shown });
+  monaco.editor.setModelMarkers(model, owner, shown.map((d) => toMarker(d, owner)));
 }
+
+const toMarker = (d: L.Diagnostic, owner: string): monaco.editor.IMarkerData => ({
+  ...toRange(d.range),
+  message: typeof d.message === "string" ? d.message : d.message.value,
+  severity: severity[severityOf(d)],
+  // LSP's diagnostic tags have MarkerTag's numbers.
+  tags: [...new Set([...(d.tags ?? []), ...(isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : [])])],
+  source: d.source ?? owner.slice(4),
+  code: d.code?.toString(),
+});
 
 const problemIcons: Record<number, string> = {
   [monaco.MarkerSeverity.Error]: "$(error)",
@@ -636,7 +637,8 @@ async function startServer(
     if (c.codeActionProvider) {
       reg(ml.registerCodeActionProvider(langs, {
         async provideCodeActions(model, range, context, token) {
-          const diags = diagnostics.get(model.uri.toString()) ?? [];
+          // Only the diagnostics left after filtering, so a dropped false problem gets no quick fix.
+          const diags = lastDiagnostics.get(`${owner} ${model.uri}`)?.shown ?? [];
           const overlapping = diags.filter((d) => monaco.Range.areIntersectingOrTouching(toRange(d.range), range));
           const res = await request<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
             ...doc(model),
@@ -644,12 +646,18 @@ async function startServer(
             context: { diagnostics: overlapping, only: context.only ? [context.only] : undefined },
           }, token);
           return {
-            actions: (res ?? []).map((a) => ({
-              title: a.title,
-              kind: "kind" in a ? a.kind : undefined,
-              isPreferred: "isPreferred" in a ? a.isPreferred : undefined,
-              command: { id: "lsp.codeAction", title: a.title, arguments: [runCodeAction, a] },
-            })),
+            actions: (res ?? []).map((a) => {
+              // A bare Command has no kind. The hover's Quick Fix link and the light bulb list only `quickfix`
+              // actions, so a command answering problems here counts as one.
+              const action = typeof a.command === "string" ? { title: a.title, kind: overlapping.length ? "quickfix" : undefined, diagnostics: overlapping } : (a as L.CodeAction);
+              return {
+                title: a.title,
+                kind: action.kind,
+                isPreferred: action.isPreferred,
+                diagnostics: action.diagnostics?.map((d) => toMarker(d, owner)),
+                command: { id: "lsp.codeAction", title: a.title, arguments: [runCodeAction, a] },
+              };
+            }),
             dispose() {},
           };
         },
