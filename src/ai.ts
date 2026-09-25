@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
-import { buildContext, chunk, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, replacedAfter, similarCode, typedNames } from "./aicontext";
+import { buildContext, chunk, leastLikely, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, replacedAfter, similarCode, typedNames } from "./aicontext";
 import { phpactorRequest } from "./lsp";
 import { parseTypeDeclaration } from "./phptypes";
 import { type Psr4, psr4From } from "./psr4";
@@ -294,10 +294,12 @@ async function infill(model: monaco.editor.ITextModel, position: monaco.Position
   const id = ++nextRequest;
   const cancel = token?.onCancellationRequested(() => invoke("ai_cancel", { id }));
   try {
-    const reply = await invoke<string>("ai_request", { id, port, key, path: "/infill", body: JSON.stringify(body) });
-    return (JSON.parse(reply).content as string) ?? "";
+    const reply = JSON.parse(await invoke<string>("ai_request", { id, port, key, path: "/infill", body: JSON.stringify(body) }));
+    const text = (reply.content as string) ?? "";
+    const tokens = ((reply.completion_probabilities ?? []) as { token: string; logprob: number }[]).map((t) => ({ token: t.token, p: Math.exp(t.logprob) }));
+    return { text, least: leastLikely(text, tokens) };
   } catch {
-    return "";
+    return { text: "", least: [] };
   } finally {
     cancel?.dispose();
   }
@@ -311,7 +313,8 @@ const provider: monaco.languages.InlineCompletionsProvider = {
     const after = model.getLineContent(position.lineNumber).slice(position.column - 1);
     if (/^\w/.test(after)) return; // In the middle of a word.
     const below = model.getLinesContent().slice(position.lineNumber, position.lineNumber + 10);
-    const text = cleanSuggestion(await infill(model, position, 128, token), after, below);
+    const reply = await infill(model, position, 128, token);
+    const text = cleanSuggestion(reply.text, after, below, reply.least);
     if (!text || token.isCancellationRequested) return;
     const end = position.column + replacedAfter(text, after);
     return { items: [{ insertText: text, range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, end) }] };
@@ -347,6 +350,13 @@ export function initAi(deps: { status: typeof status; root: () => string }) {
   status = deps.status;
   projectRoot = deps.root;
   monaco.languages.registerInlineCompletionsProvider("*", provider);
+  // ⌘→ accepts the next word of a suggestion (Monaco's own). ⌘⇧→ accepts the next line, under the same
+  // condition, so it still selects to the end of the line when no suggestion is in front of the cursor.
+  monaco.editor.addKeybindingRule({
+    keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.RightArrow,
+    command: "editor.action.inlineSuggest.acceptNextLine",
+    when: "editorTextFocus && !editorReadonly && inlineSuggestionVisible && cursorBeforeGhostText",
+  });
   monaco.editor.getEditors().forEach(watchEditor);
   monaco.editor.onDidCreateEditor(watchEditor);
   document.getElementById("ai-status")!.onclick = async () => {

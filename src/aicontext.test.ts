@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { replacedAfter, buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, typedNames, viewCallers, viewName, words } from "./aicontext.ts";
+import { leastLikely, replacedAfter, buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, typedNames, viewCallers, viewName, words } from "./aicontext.ts";
 
 const post = `<?php
 
@@ -214,4 +214,21 @@ test("replaces the closing text the editor already added when the suggestion has
   // The text after the cursor ends up after the suggestion's last line, so that's the line that counts.
   assert.equal(replacedAfter("[\n    'a' => 1,\n]);", ");"), 2);
   assert.equal(replacedAfter("); // done\n$next = 1;", ");"), 0);
+});
+
+test("ends a suggestion where the model was unsure", () => {
+  const text = "$post->save();\n        return $post;\n        $post->refresh();";
+  const least = leastLikely(text, [
+    { token: "$post", p: 0.9 },
+    { token: "->save();\n", p: 0.8 },
+    { token: "        return $post;\n", p: 0.6 },
+    { token: "        $post", p: 0.4 },
+    { token: "->refresh();", p: 0.9 },
+  ]);
+  assert.deepEqual(least, [0.8, 0.6, 0.4]);
+  assert.equal(cleanSuggestion(text, "", [], least), "$post->save();\n        return $post;");
+  // Unsure from the first line: nothing.
+  assert.equal(cleanSuggestion(text, "", [], [0.3, 0.9, 0.9]), "");
+  // Without probabilities, only repeats are removed.
+  assert.equal(cleanSuggestion(text, "", []), text);
 });

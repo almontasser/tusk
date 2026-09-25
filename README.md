@@ -456,7 +456,8 @@ so the rest of the team skips the word too. To turn spell checking off, clear
 
 The editor can suggest code as you type, like GitHub Copilot, with a model
 that runs on your Mac. No code leaves the machine. Suggestions appear as gray
-text after the cursor: press Tab to accept one, or keep typing to ignore it. While
+text after the cursor: press Tab to accept one, or keep typing to ignore it. To
+take only part of it, press ⌘→ for the next word, or ⌘⇧→ for the next line. While
 the list of completions is open, a suggestion shows only if it agrees with the
 selected item; press Escape to close the list and see it.
 
@@ -521,7 +522,9 @@ under half a second.
 In a benchmark on an open-source Laravel app, the project context raised the
 share of suggestions that match the hidden line exactly from 48% to 60%.
 Suggestions also stop before code that's already below the cursor, instead of
-repeating it.
+repeating it, and before a line the model is unsure of. When the model is
+unsure from the first line, the editor shows nothing: in the benchmark, every
+suggestion hidden that way was wrong.
 
 A suggestion usually appears about 0.4 seconds after you stop typing. When you
 type again before it arrives, the editor cancels the request, so the model

@@ -473,8 +473,14 @@ end, and 0.9 seconds when it was cancelled.
 The provider waits 250 ms after typing stops and skips the middle of a word.
 `cleanSuggestion` then trims the reply. Small models often go on to repeat
 the code below the cursor (5–6% of benchmark suggestions did), so a suggestion
-ends before a line equal to the next non-blank line below. A suggestion that
-adds nothing is dropped. When a suggestion's first line ends with the rest of
+ends before a line equal to the next non-blank line below. The request also
+asks for each token's probability (`n_probs: 1`), and `leastLikely` finds each
+line's least likely token. A suggestion ends before a line holding a token under
+50% likely, and it's dropped when its first line holds one under 35%. A
+suggestion that adds nothing is dropped too. Tab accepts all of it; ⌘→ (Monaco's
+own) accepts the next word and ⌘⇧→ the next line, a rule added only while a
+suggestion is in front of the cursor, so ⌘⇧→ still selects to the end of the
+line otherwise. When a suggestion's first line ends with the rest of
 the current line, such as a closing bracket, it replaces that text instead of
 adding a second copy.
 
@@ -592,6 +598,24 @@ cases and the 1.5B model:
 
 A wider context adds tokens, and so time, without better suggestions, so the
 budget stays.
+
+The `block` task measures multi-line suggestions: it hides the rest of a
+block, 2 to 8 lines, from the start of a line, asks once per case, and scores
+ways of ending the suggestion on the same replies. On 60 blocks with the 3B
+model:
+
+| Where a suggestion ends | Shown | Right lines per case | Wrong lines per case | Cases with a wrong line |
+| --- | --- | --- | --- | --- |
+| Where the model stopped | 100% | 0.85 | 2.60 | 76.7% |
+| After the first line | 100% | 0.38 | 0.62 | 61.7% |
+| At a blank line | 100% | 0.85 | 2.60 | 76.7% |
+| Before a line with a token under 50% | 100% | 0.77 | 1.78 | 71.7% |
+| Before a line with a token under 70% | 100% | 0.70 | 1.38 | 65.0% |
+| Under 50%, and nothing when the first line has a token under 35% (the editor's) | 81.7% | 0.73 | 1.47 | 53.3% |
+
+The editor's rule removes 43% of wrong lines and keeps 86% of right ones. On
+60 single-line cases it hid 11.7% of suggestions and lost no exact matches
+(71.7% either way): every hidden suggestion was wrong.
 
 The same 300 cases with the 3B model: 48.0% with no context and 65.0% with
 the editor's context, 5.3 points above the 1.5B model. It's half as fast:
