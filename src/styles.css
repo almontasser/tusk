@@ -501,6 +501,13 @@ button.link:hover { text-decoration: underline; }
 /* A line comment thread in a pull request's diff, in a view zone, which inherits the editor's font. */
 .pr-thread { box-sizing: border-box; padding: 6px 12px; font: var(--ui); white-space: normal; overflow: hidden; background: var(--panel); border-left: 3px solid var(--accent); }
 .pr-thread .pr-body { margin: 2px 0 6px; }
+.pr-thread.pending { border-left-color: var(--yellow); }
+/* The comment form under a line, or inside a thread for a reply. */
+.pr-comment-form { box-sizing: border-box; padding: 6px 12px; font: var(--ui); background: var(--panel); border-left: 3px solid var(--accent); }
+.pr-thread .pr-comment-form { padding: 6px 0 0; border: 0; }
+.pr-comment-form textarea { width: 100%; box-sizing: border-box; resize: none; font: var(--ui); }
+.pr-comment-form .pr-actions { margin-top: 6px; }
+.pr-files .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .pr-comment { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .pr-body { overflow-wrap: anywhere; margin-top: 4px; user-select: text; line-height: 1.5; }

@@ -393,10 +393,14 @@ export function showDiff(path: string, original: string, modified: string, label
 }
 
 /** The side of the diff on screen that you last clicked, and the line the cursor is on there. */
-export function diffCursor(): { side: "original" | "modified"; line: number } | null {
+export function diffCursor(): { side: "original" | "modified"; line: number; startLine: number } | null {
   if (!diffEditor?.getModel()) return null;
   const side = lastSide === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
-  return { side: lastSide, line: side.getPosition()?.lineNumber ?? 1 };
+  const s = side.getSelection();
+  if (!s) return { side: lastSide, line: 1, startLine: 1 };
+  // A selection that ends at the start of a line doesn't include that line.
+  const end = s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber;
+  return { side: lastSide, line: end, startLine: s.startLineNumber };
 }
 
 /** Closes the diff. By default it returns to where the diff came from, such as the history view. */

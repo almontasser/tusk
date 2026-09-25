@@ -46,7 +46,7 @@ file to change when you add it.
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
-| Pull requests | You write a line comment in a one-line box, on one line at a time (not a range), and each comment posts at once rather than as part of a pending review. Comments on lines outside the diff's changes are rejected by GitHub. Comment threads in the diff are read-only, so reply through **Comment on Line**. |
+| Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. You can't edit or delete posted comments, or resolve threads. |
 | Split editors | Up to four panes. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
@@ -815,18 +815,30 @@ links open in your browser. `#123` links to that issue or pull request, and
 `@name` to that person's profile. Click a changed file to see its diff without
 checking out the branch. A 💬 count marks files with line comments.
 
-Line comments appear in the conversation under the file and line they're on.
+Line comments appear in the conversation under the file and lines they're on.
 Click one to open the diff at that line. In the diff, each thread shows under
-its line. To add a line comment, click a line in the diff (the new side or the
-old side), click **Comment on Line**, type the comment, and press Enter. On a
-line that already has a thread, the comment is a reply to it. Click **Check Out** to switch to the branch. When the current branch
-has a pull request, its number and check status appear next to the branch name
-in the status bar.
+its line, with a **Reply** link.
 
-Below the conversation, write a comment and click **Comment**, **Approve**, or
-**Request Changes** (which needs a comment). **Merge…** asks how to merge (a
-merge commit, squash, or rebase) and asks you to confirm before it merges on
-GitHub.
+To comment on code in the diff:
+
+1. Click a line, or select several lines, on the new side or the old side.
+2. Click **Comment on Line**. A comment box opens under the line.
+3. Write the comment (Markdown, on as many lines as you like), then click
+   **Add to Review** to keep it for your review, or **Comment Now** to post it
+   at once. ⌘⏎ adds it to the review, and Escape closes the box.
+
+Pending comments show in the diff with a yellow edge and on the pull request's
+page under **Pending review**, where you can delete them. They're kept on this
+Mac until you submit, so closing the app doesn't lose them. To submit, write an
+optional summary below the conversation and click **Submit Review**,
+**Approve**, or **Request Changes**: all pending comments go to GitHub as one
+review. Without pending comments, **Comment** adds a comment to the
+conversation, and **Request Changes** needs one.
+
+Click **Check Out** to switch to the branch. When the current branch has a pull
+request, its number and check status appear next to the branch name in the
+status bar. **Merge…** asks how to merge (a merge commit, squash, or rebase)
+and asks you to confirm before it merges on GitHub.
 
 Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 

@@ -28,7 +28,7 @@ type Details = PullRequest & {
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
-type ReviewComment = { id: number; path: string; line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null };
+type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null };
 /** A line comment and its replies. */
 type Thread = ReviewComment & { comments: ReviewComment[] };
 
@@ -192,26 +192,42 @@ export async function showPullRequest(number: number) {
   for (const c of pr.comments) entry(c.author.login, "", c.body);
   // Line comments, each thread under a link to its place in the diff.
   for (const t of threads) {
-    const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.line}` : " (outdated)"}`);
+    const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"}`);
     where.onclick = () => showFileDiff(pr, t.path, threads, t);
     conversation.append(where);
     for (const c of t.comments) entry(c.user, "", c.body);
   }
 
   const heading = (text: string) => el("h3", "", text);
+  // Your line comments that wait for the review to be submitted. Click one to see it in the diff.
+  const pending = drafts(pr);
+  const pendingList = el("ul", "pr-files");
+  pending.forEach((d, i) => {
+    const li = el("li");
+    li.append(el("span", "name", `${d.path}:${d.start_line ? `${d.start_line}–` : ""}${d.line}`), el("span", "muted", ` ${d.body.split("\n")[0]}`));
+    li.onclick = () => showFileDiff(pr, d.path, threads, d);
+    const remove = el("button", "icon-button codicon codicon-close");
+    remove.title = "Delete this pending comment";
+    remove.onclick = (e) => (e.stopPropagation(), saveDrafts(pr, drafts(pr).filter((_, j) => j !== i)), showPullRequest(number));
+    li.append(remove);
+    pendingList.append(li);
+  });
   const review = el("div", "pr-review");
   const box = el("textarea");
-  box.placeholder = "Leave a comment (Markdown)";
+  box.placeholder = pending.length ? "Summarize your review (Markdown, optional)" : "Leave a comment (Markdown)";
   box.setAttribute("aria-label", "Comment");
   const buttons = el("div", "pr-actions");
-  const reply = (label: string, args: string[], needsText: boolean, done: string) => {
+  // With pending comments, each button submits them as one review. Without, Comment adds a comment
+  // to the conversation, and Approve and Request Changes submit a review with only the summary.
+  const reply = (label: string, event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", needsText: boolean, done: string) => {
     const b = el("button", "", label);
     b.onclick = async () => {
       const body = box.value.trim();
-      if (needsText && !body) return host.status(`Write a comment first: ${label} needs one.`);
+      if (needsText && !body && !pending.length) return host.status(`Write a comment first: ${label} needs one.`);
       buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
       try {
-        await gh(...args, String(number), ...(body ? ["--body", body] : []));
+        if (event === "COMMENT" && !pending.length) await gh("pr", "comment", String(number), "--body", body);
+        else await submitReview(pr, event, body);
         host.status(done);
         showPullRequest(number);
       } catch (e) {
@@ -221,10 +237,10 @@ export async function showPullRequest(number: number) {
     };
     buttons.append(b);
   };
-  reply("Comment", ["pr", "comment"], true, `Commented on #${number}`);
+  reply(pending.length ? `Submit Review (${pending.length})` : "Comment", "COMMENT", true, pending.length ? `Submitted your review on #${number}` : `Commented on #${number}`);
   if (pr.state === "OPEN") {
-    reply("Approve", ["pr", "review", "--approve"], false, `Approved #${number}`);
-    reply("Request Changes", ["pr", "review", "--request-changes"], true, `Requested changes on #${number}`);
+    reply("Approve", "APPROVE", false, `Approved #${number}`);
+    reply("Request Changes", "REQUEST_CHANGES", true, `Requested changes on #${number}`);
   }
   review.append(box, buttons);
   const meta = el("div", "pr-meta", `${pr.state.toLowerCase()} · ${pr.author.login} · ${pr.headRefName} → ${pr.baseRefName}`);
@@ -239,6 +255,7 @@ export async function showPullRequest(number: number) {
     files,
     heading(`Conversation${threads.length ? ` (${threads.length} line ${threads.length === 1 ? "thread" : "threads"})` : ""}`),
     conversation,
+    ...(pending.length ? [heading(`Pending review (${pending.length} ${pending.length === 1 ? "comment" : "comments"})`), pendingList] : []),
     review,
   );
 }
@@ -247,7 +264,7 @@ const repoUrl = (pr: PullRequest) => pr.url.replace(/\/pull\/\d+$/, "");
 
 /** The pull request's line comments, grouped into threads. GitHub points every reply at the thread's first comment. */
 async function lineComments(number: number): Promise<Thread[]> {
-  const jq = ".[] | {id, path, line, side, body, user: .user.login, in_reply_to_id}";
+  const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id}";
   const out = await gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq);
   const comments: ReviewComment[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const threads = new Map<number, Thread>();
@@ -292,7 +309,7 @@ function merge(pr: Details) {
  * Fetches the pull request's head and base, then diffs a file from their merge base to the head, with its
  * line comments under their lines. `at` scrolls to a thread.
  */
-async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: Thread) {
+async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
   await loadMarkdown();
   const head = `refs/remotes/pr/${pr.number}`;
   const base = `refs/remotes/origin/${pr.baseRefName}`;
@@ -302,28 +319,16 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: T
     await git("fetch", "--no-tags", "origin", `+refs/pull/${pr.number}/head:${head}`, `+refs/heads/${pr.baseRefName}:${base}`);
     const mergeBase = (await git("merge-base", head, base)).trim();
     const show = (spec: string) => git("show", spec).catch(() => "");
-    const action = { label: "Comment on Line", title: "Comment on the line with the cursor, or reply to its comments", run: () => comment(pr, path, threads) };
+    const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
     diff = showDiff(path, await show(`${mergeBase}:${path}`), await show(`${head}:${path}`), `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, undefined, action);
     host.status("");
   } catch (e) {
     return host.status(`Can't show the diff: ${String(e).trim()}`);
   }
-  const repo = repoUrl(pr);
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
-  for (const t of threads) {
-    if (t.path !== path || !t.line) continue;
-    const editor = t.side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor();
-    const thread = el("div", "pr-thread");
-    for (const c of t.comments) thread.append(el("div", "pr-meta", c.user), markdown(c.body, repo));
-    // A view zone needs its height up front, so the thread is measured at the editor's visible width
-    // first. The zone itself spans the widest line, so the thread keeps its own width inside it.
-    thread.style.width = `${editor.getLayoutInfo().contentWidth - 40}px`;
-    document.body.append(thread);
-    const heightInPx = thread.offsetHeight + 8;
-    const node = el("div");
-    node.append(thread);
-    editor.changeViewZones((zones) => zones.addZone({ afterLineNumber: t.line!, heightInPx, domNode: node }));
-  }
+  shown = { pr, path, threads, diff, zones: [] };
+  form = undefined;
+  drawZones();
   if (at?.line) {
     const editor = at.side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor();
     const reveal = () => (editor.revealLineInCenter(at.line!), editor.setPosition({ lineNumber: at.line!, column: 1 }));
@@ -333,42 +338,169 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: T
   }
 }
 
-/** Comments on the line with the cursor in the diff, or replies to the thread already on it. */
-function comment(pr: Details, path: string, threads: Thread[]) {
+// ---- Line comments and pending reviews ----
+
+/** A line comment saved for a review you haven't submitted yet. `commit` is the head it was written against. */
+type Draft = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number; body: string; commit: string };
+
+/** The diff on screen, and the view zones (threads, drafts, and the comment form) drawn in it. */
+let shown: { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string][] } | undefined;
+/** The open comment form: a new comment on lines, or a reply to a thread. */
+let form: { side: "LEFT" | "RIGHT"; line: number; start: number; reply?: Thread } | undefined;
+
+// Drafts are kept in localStorage, per pull request, so a reload or a restart doesn't lose them.
+const draftKey = (pr: PullRequest) => `review:${repoUrl(pr)}#${pr.number}`;
+function drafts(pr: PullRequest): Draft[] {
+  try {
+    return JSON.parse(localStorage.getItem(draftKey(pr)) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+function saveDrafts(pr: PullRequest, list: Draft[]) {
+  try {
+    if (list.length) localStorage.setItem(draftKey(pr), JSON.stringify(list));
+    else localStorage.removeItem(draftKey(pr));
+  } catch {
+    host.status("Can't save the pending review: storage is full or unavailable.");
+  }
+}
+
+const lines = (start: number | undefined | null, line: number) => (start && start !== line ? `lines ${start}–${line}` : `line ${line}`);
+
+/** Adds a view zone under a line. A zone needs its height up front, so the content is measured first, at the editor's visible width. */
+function addZone(editor: monaco.editor.ICodeEditor, line: number, content: HTMLElement) {
+  content.style.width = `${editor.getLayoutInfo().contentWidth - 40}px`;
+  document.body.append(content);
+  const heightInPx = content.offsetHeight + 8;
+  const node = el("div");
+  node.append(content);
+  // The zone's buttons and text box take their own clicks and keys, not the editor's.
+  node.onkeydown = (e) => e.stopPropagation();
+  editor.changeViewZones((zones) => shown!.zones.push([editor, zones.addZone({ afterLineNumber: line, heightInPx, domNode: node, suppressMouseDown: true })]));
+}
+
+/** Draws the file's threads, your pending comments, and the open comment form under their lines. */
+function drawZones() {
+  if (!shown) return;
+  const { pr, path, threads, diff } = shown;
+  shown.zones.forEach(([editor, id]) => editor.changeViewZones((zones) => zones.removeZone(id)));
+  shown.zones = [];
+  const editorFor = (side: "LEFT" | "RIGHT") => (side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor());
+  const repo = repoUrl(pr);
+  for (const t of threads) {
+    if (t.path !== path || !t.line) continue;
+    const thread = el("div", "pr-thread");
+    if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
+    for (const c of t.comments) thread.append(el("div", "pr-meta", c.user), markdown(c.body, repo));
+    if (form?.reply?.id === t.id) thread.append(commentForm());
+    else {
+      const reply = el("button", "link", "Reply");
+      reply.onclick = () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones());
+      thread.append(reply);
+    }
+    addZone(editorFor(t.side), t.line, thread);
+  }
+  drafts(pr).forEach((d, i) => {
+    if (d.path !== path) return;
+    const draft = el("div", "pr-thread pending");
+    const remove = el("button", "link", "Delete");
+    remove.onclick = () => (saveDrafts(pr, drafts(pr).filter((_, j) => j !== i)), drawZones());
+    const meta = el("div", "pr-meta", `Pending · ${lines(d.start_line, d.line)} · `);
+    meta.append(remove);
+    draft.append(meta, markdown(d.body, repo));
+    addZone(editorFor(d.side), d.line, draft);
+  });
+  if (form && !form.reply) addZone(editorFor(form.side), form.line, commentForm());
+}
+
+/** The comment form's text box and buttons. ⌘⏎ does the first button's action, and Escape cancels. */
+function commentForm() {
+  const { pr, path } = shown!;
+  const f = form!;
+  const box = el("div", "pr-comment-form");
+  const text = el("textarea");
+  text.rows = 4;
+  text.placeholder = f.reply ? `Reply to ${f.reply.user} (Markdown)` : `Comment on ${lines(f.start, f.line)}${f.side === "LEFT" ? " of the old version" : ""} (Markdown)`;
+  const buttons = el("div", "pr-actions");
+  const close = () => ((form = undefined), drawZones());
+  const button = (label: string, run: (body: string) => unknown, primary = false) => {
+    const b = el("button", primary ? "primary" : "", label);
+    b.onclick = () => {
+      const body = text.value.trim();
+      if (body) run(body);
+    };
+    buttons.append(b);
+  };
+  if (f.reply) button("Reply", (body) => post([`repos/{owner}/{repo}/pulls/${pr.number}/comments/${f.reply!.id}/replies`, "-f", `body=${body}`]), true);
+  else {
+    button("Add to Review", (body) => {
+      const start = f.start !== f.line ? { start_line: f.start } : {};
+      saveDrafts(pr, [...drafts(pr), { path, line: f.line, side: f.side, ...start, body, commit: pr.headRefOid }]);
+      host.status(`Added to your pending review on #${pr.number}. Submit it from the pull request's page.`);
+      close();
+    }, true);
+    const range = f.start !== f.line ? ["-F", `start_line=${f.start}`, "-f", `start_side=${f.side}`] : [];
+    button("Comment Now", (body) =>
+      post([`repos/{owner}/{repo}/pulls/${pr.number}/comments`, "-f", `body=${body}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, "-F", `line=${f.line}`, "-f", `side=${f.side}`, ...range]),
+    );
+  }
+  const cancel = el("button", "", "Cancel");
+  cancel.onclick = close;
+  buttons.append(cancel);
+  text.onkeydown = (e) => {
+    if (e.key === "Enter" && e.metaKey) buttons.querySelector("button")!.click();
+    if (e.key === "Escape") close();
+  };
+  // Posts a comment or a reply at once, then reloads the threads.
+  const post = async (args: string[]) => {
+    buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    try {
+      host.status("Posting the comment…");
+      await gh("api", "--method", "POST", ...args);
+      host.status(`Commented on ${path}:${f.line}`);
+      form = undefined;
+      shown!.threads = await lineComments(pr.number);
+      drawZones();
+    } catch (e) {
+      // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
+      host.status(`Can't comment: ${String(e).trim()}`);
+      buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    }
+  };
+  box.append(text, buttons);
+  requestAnimationFrame(() => text.focus());
+  return box;
+}
+
+/** Opens the comment form for the selected lines in the diff, or a reply to the thread on the cursor's line. */
+function commentAtCursor() {
   const cursor = diffCursor();
-  if (!cursor) return;
+  if (!cursor || !shown) return;
   const side = cursor.side === "original" ? "LEFT" : "RIGHT";
-  const { line } = cursor;
-  const thread = threads.find((t) => t.path === path && t.line === line && t.side === side);
-  const what = thread ? `Reply to ${thread.user} on line ${line}` : `Comment on line ${line}${side === "LEFT" ? " (old side)" : ""}`;
-  pick(
-    `${what}, then press Enter`,
-    (q) =>
-      q.trim()
-        ? [
-            {
-              label: `${thread ? "Reply" : "Comment"}: ${q.trim()}`,
-              run: async () => {
-                const api = `repos/{owner}/{repo}/pulls/${pr.number}/comments`;
-                const args = thread
-                  ? [`${api}/${thread.id}/replies`, "-f", `body=${q.trim()}`]
-                  : [api, "-f", `body=${q.trim()}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, "-F", `line=${line}`, "-f", `side=${side}`];
-                try {
-                  host.status("Posting the comment…");
-                  await gh("api", "--method", "POST", ...args);
-                  host.status(`Commented on ${path}:${line}`);
-                  showFileDiff(pr, path, await lineComments(pr.number), { ...(thread ?? ({} as Thread)), path, line, side });
-                } catch (e) {
-                  // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
-                  host.status(`Can't comment: ${String(e).trim()}`);
-                }
-              },
-            },
-          ]
-        : [],
-    0,
-    { value: "" },
-  );
+  const { line, startLine } = cursor;
+  const reply = startLine === line ? shown.threads.find((t) => t.path === shown!.path && t.line === line && t.side === side) : undefined;
+  form = { side, line, start: startLine, reply };
+  drawZones();
+}
+
+/** Submits a review: the pending comments, with a summary and a verdict, in one request. */
+async function submitReview(pr: Details, event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) {
+  const list = drafts(pr);
+  const review = {
+    // GitHub places each comment on the commit it was written against; later commits mark it outdated.
+    commit_id: list[0]?.commit ?? pr.headRefOid,
+    event,
+    body,
+    comments: list.map(({ path, line, side, start_line, body }) => ({ path, line, side, body, ...(start_line ? { start_line, start_side: side } : {}) })),
+  };
+  await invoke<string>("run_capture", {
+    cwd: host.root(),
+    program: "gh",
+    args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/reviews`, "--input", "-"],
+    input: JSON.stringify(review),
+  });
+  saveDrafts(pr, []);
 }
 
 // ---- Current branch ----

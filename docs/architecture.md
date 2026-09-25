@@ -1243,9 +1243,9 @@ run commands on your Mac. `marked` renders them, and DOMPurify removes scripts,
 event handlers, `javascript:` links, iframes, forms, and inline styles. Links
 open in the browser through `open`, never in the webview.
 
-Comments, reviews, and merges are `gh pr comment`, `gh pr review --approve` or
-`--request-changes`, and `gh pr merge` with `--merge`, `--squash`, or
-`--rebase`. A merge always asks for confirmation first, in the palette, because
+Conversation comments are `gh pr comment`, reviews are a POST to
+`pulls/<n>/reviews` (see [Pending reviews](#pending-reviews)), and merges are
+`gh pr merge` with `--merge`, `--squash`, or `--rebase`. A merge always asks for confirmation first, in the palette, because
 it changes the repository on GitHub.
 
 `gh pr view` has no line comments, so they come from
@@ -1261,12 +1261,33 @@ it's added, so the thread is rendered into the page at the editor's visible
 width, measured, and then moved into the zone. The diff is laid out first,
 because it was hidden until then and has no width. Monaco stretches a zone to
 the width of the longest line, so the thread keeps its own width inside it.
-Clicks don't reach view zones, which is why threads are read-only.
+Zones are added with `suppressMouseDown`, so clicks reach their buttons instead
+of moving the editor's cursor, and the zone stops `keydown` from bubbling, so
+the diff editor's keybindings don't act on text typed into the comment box.
+`drawZones()` removes every zone and draws them again (threads, pending
+comments, and the open form) whenever one changes, without fetching the diff
+again.
 
-**Comment on Line** uses `diffCursor()` from `git.ts`, the side and line you
-last clicked. A new comment is a POST to the same endpoint with `commit_id`
-(the head commit, `headRefOid`), `path`, `line`, and `side`; a reply is a POST
-to `comments/<id>/replies`. Both post at once, without a pending review.
+**Comment on Line** uses `diffCursor()` from `git.ts`: the side you last
+clicked, and the selected lines (a selection ending at column 1 leaves that
+line out). The form opens under the last line. A new comment is a POST to the
+same endpoint with `commit_id` (the head commit, `headRefOid`), `path`,
+`line`, and `side`, plus `start_line` and `start_side` for a range; a reply is
+a POST to `comments/<id>/replies`. With the cursor on a thread's line and no
+range selected, the form replies to that thread.
+
+#### Pending reviews
+
+GitHub's REST API creates a review with all its comments in one request, but
+can't add comments to a pending review one at a time (GraphQL can). So pending
+comments are drafts in `localStorage`, under `review:<repository URL>#<number>`,
+each with the head commit it was written against. Submitting sends one POST to
+`pulls/<n>/reviews` through `gh api --input -`, with the verdict (`COMMENT`,
+`APPROVE`, or `REQUEST_CHANGES`), the summary, and every draft as a comment;
+`commit_id` is the first draft's commit, so comments written before a new push
+land on the lines they were written for, and GitHub marks them outdated. The
+drafts are deleted only after GitHub accepts the review. Replies can't be part
+of a review in the REST API, so they post at once.
 
 `markdown()` turns `#123` and `@name` in text into links after sanitizing,
 walking the text nodes and skipping links and code, so a reference inside a
