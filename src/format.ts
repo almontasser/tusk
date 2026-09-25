@@ -1,20 +1,22 @@
-// Formatting with the project's own tools: Prettier, then Laravel Pint for PHP, then the bundled Mago.
+// Formatting with the project's own tools: Prettier, then Laravel Pint for PHP, then the bundled Mago. Projects
+// without Prettier get the bundled one, with the Svelte and Astro plugins, for everything but PHP and Blade.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 
 type Host = { root(): string; status(text: string): void };
-type Tools = { prettier?: string; pint: boolean };
+/** `plugins` are passed to Prettier with `--plugin`: the bundled Prettier's, which the project doesn't configure. */
+type Tools = { prettier?: string; bundled: boolean; plugins: string[]; pint: boolean };
 
 let host: Host;
-let tools: Tools = { pint: false };
+let tools: Tools = { bundled: false, plugins: [], pint: false };
 
 const run = (program: string, args: string[], input: string) =>
   invoke<string>("run_capture", { cwd: host.root(), program, args, input });
 
 /** Languages Prettier can format with its built-in parsers or common plugins. */
-const PRETTIER_LANGUAGES = ["php", "blade", "javascript", "typescript", "css", "scss", "less", "json", "html", "markdown", "yaml", "vue"];
+const PRETTIER_LANGUAGES = ["php", "blade", "javascript", "typescript", "css", "scss", "less", "json", "html", "markdown", "yaml", "vue", "svelte", "astro"];
 
-/** Monaco's own formatters, which would compete with Prettier for the same languages. */
+/** Monaco's own formatters, which would compete with Prettier for the same languages. Prettier is always there, so they're off. */
 function builtInFormatters(enabled: boolean) {
   const all = [monaco.css.cssDefaults, monaco.css.scssDefaults, monaco.css.lessDefaults, monaco.html.htmlDefaults, monaco.json.jsonDefaults, monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults];
   for (const defaults of all) {
@@ -30,9 +32,11 @@ export async function detectFormatters() {
   const [prettier3, prettier2, pint] = await Promise.all([...candidates, "vendor/bin/pint"].map(exists));
   // The later candidate won when both existed.
   const found = prettier2 ? candidates[1] : prettier3 ? candidates[0] : undefined;
-  const prettier = found && `${host.root()}/${found}`;
-  tools = { prettier, pint };
-  builtInFormatters(!prettier);
+  if (found) tools = { prettier: `${host.root()}/${found}`, bundled: false, plugins: [], pint };
+  else {
+    const modules = `${await invoke<string>("tool_path", { name: "node" })}/node_modules`;
+    tools = { prettier: `${modules}/prettier/bin/prettier.cjs`, bundled: true, plugins: [`${modules}/prettier-plugin-svelte/plugin.js`, `${modules}/prettier-plugin-astro/dist/index.js`], pint };
+  }
 }
 
 /**
@@ -42,9 +46,11 @@ export async function detectFormatters() {
  */
 async function format(path: string, text: string, language: string): Promise<string | null> {
   const rel = path.slice(host.root().length + 1);
-  if (tools.prettier) {
+  // The bundled Prettier has no PHP plugin, so PHP and Blade skip it instead of starting Node for nothing.
+  if (tools.prettier && !(tools.bundled && (language === "php" || language === "blade"))) {
+    const plugins = language === "svelte" || language === "astro" ? tools.plugins.map((p) => `--plugin=${p}`) : [];
     try {
-      return await run("node", [tools.prettier, "--stdin-filepath", rel], text);
+      return await run("node", [tools.prettier, ...plugins, "--stdin-filepath", rel], text);
     } catch (e) {
       if (!/No parser could be inferred/i.test(String(e))) throw e;
     }
@@ -57,6 +63,7 @@ async function format(path: string, text: string, language: string): Promise<str
 
 export function initFormatting(h: Host) {
   host = h;
+  builtInFormatters(false);
   // Monaco turns the whole-file result into minimal edits, so the cursor stays put.
   monaco.languages.registerDocumentFormattingEditProvider(PRETTIER_LANGUAGES, {
     async provideDocumentFormattingEdits(model) {

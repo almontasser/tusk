@@ -1505,21 +1505,31 @@ Two client features were added for it, and any server can use them:
 ## Formatting (frontend step 2)
 
 `src/format.ts` registers one formatting provider for PHP, Blade, JavaScript,
-TypeScript, CSS, SCSS, Less, JSON, HTML, Markdown, YAML, and Vue. It pipes the
+TypeScript, CSS, SCSS, Less, JSON, HTML, Markdown, YAML, Vue, Svelte, and
+Astro. It pipes the
 file's text through a formatter with `run_capture` in the project folder, so
 each formatter finds the project's configuration:
 
 1. Prettier (`node node_modules/prettier/bin/prettier.cjs --stdin-filepath`),
-   when the project has it. If Prettier reports that no parser could be inferred
-   for the file, the next step runs.
+   the project's when it has one, and otherwise the bundled one from the Node
+   tools, with `--plugin` pointing at the bundled `prettier-plugin-svelte` and
+   `prettier-plugin-astro` for those two languages. The bundled Prettier skips
+   PHP and Blade, since it has no plugin for them, which saves starting Node.
+   If Prettier reports that no parser could be inferred for the file, the next
+   step runs.
 2. For PHP, Laravel Pint (`vendor/bin/pint - --stdin-filename`), when the
    project has it.
 3. For PHP, the bundled Mago (`mago format --stdin-input`).
 
-`detectFormatters` looks for Prettier and Pint when a folder opens. When a
-project has Prettier, it turns off Monaco's own formatters for CSS, HTML, JSON,
-and TypeScript (`setModeConfiguration`), which would otherwise compete for those
-languages. Monaco turns each whole-file result into minimal edits, so the cursor
+`detectFormatters` looks for Prettier and Pint when a folder opens. Monaco's
+own formatters for CSS, HTML, JSON, and TypeScript are always off
+(`setModeConfiguration`), since a Prettier is always there and they would
+otherwise compete for those languages.
+
+`node-tools/package.json` pins Prettier and the two plugins directly, rather
+than relying on the copies the Svelte and Astro servers pull in. The Astro
+plugin needs Prettier 3.5.3 or later, while the Svelte server asks for 3.3.x,
+so npm nests 3.3.3 under the Svelte server and the newest 3.x is at the top. Monaco turns each whole-file result into minimal edits, so the cursor
 and undo history stay useful.
 
 ## JavaScript, TypeScript, and Vue (frontend step 3)

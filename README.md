@@ -40,7 +40,7 @@ file to change when you add it.
 | TODO comments | The view finds `TODO`, `FIXME`, and `XXX` anywhere in a file, including strings, not only in comments. Results stop at 20,000. |
 | Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
-| Formatting | Without Prettier, only PHP files format. |
+| Formatting | Blade formats only with a Blade plugin in the project's own Prettier. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
@@ -1061,14 +1061,17 @@ or a `git checkout`, are indexed a few seconds later.
 
 **Formatting** (⌥⌘L) uses your project's own tools:
 
-1. **Prettier**, when the project has it in `node_modules`, for every file its
-   configuration can parse. With `@prettier/plugin-php` or a Blade plugin, that
-   includes PHP and Blade files.
+1. **Prettier**, for every file its configuration can parse: the project's own
+   when it has one in `node_modules`, and otherwise the bundled Prettier, which
+   formats JavaScript, TypeScript, CSS, SCSS, Less, JSON, HTML, Markdown, YAML,
+   Vue, Svelte, and Astro. With `@prettier/plugin-php` or a Blade plugin in
+   the project, the project's Prettier formats PHP and Blade files too.
 2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
    `vendor/bin/pint`.
 3. **Mago**, the bundled fallback for PHP.
 
-Prettier and Pint read the project's own configuration files.
+Prettier, including the bundled one, and Pint read the project's own
+configuration files, and Prettier follows `.editorconfig`.
 
 Mago checks PHP files as you type (static analysis and lint).
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses

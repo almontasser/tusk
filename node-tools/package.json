@@ -8,6 +8,9 @@
     "@tailwindcss/language-server": "0.16.0",
     "@vtsls/language-server": "0.3.0",
     "@vue/language-server": "3.3.11",
+    "prettier": "3.9.9",
+    "prettier-plugin-astro": "1.1.0",
+    "prettier-plugin-svelte": "3.5.2",
     "svelte-language-server": "0.18.4",
     "typescript": "5.9.3",
     "typescript-svelte-plugin": "0.3.52"
