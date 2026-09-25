@@ -1156,3 +1156,28 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+
+/* HTTP client: Laravel tools */
+.http-app-log { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-left: 3px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+.http-app-log-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.http-app-log-head .muted { margin-left: auto; font: 11px var(--mono); flex-shrink: 0; }
+.http-app-log-head .link { font: 12px var(--mono); flex-shrink: 0; }
+.http-app-log-level { font: 600 10px/16px var(--ui-family); text-transform: uppercase; color: var(--muted); flex-shrink: 0; }
+.http-app-log-message { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.http-app-log.error, .http-app-log.critical, .http-app-log.alert, .http-app-log.emergency { border-left-color: var(--red); }
+.http-app-log.error .http-app-log-level, .http-app-log.critical .http-app-log-level, .http-app-log.alert .http-app-log-level, .http-app-log.emergency .http-app-log-level { color: var(--red); }
+.http-app-log.warning { border-left-color: var(--yellow); }
+.http-app-log.warning .http-app-log-level { color: var(--yellow); }
+.http-app-log.notice, .http-app-log.info { border-left-color: var(--blue); }
+.http-app-log.notice .http-app-log-level, .http-app-log.info .http-app-log-level { color: var(--blue); }
+.http-app-log summary { color: var(--muted); font-size: 12px; cursor: default; }
+.http-app-log pre, .http-pane > pre.http-log { max-height: 320px; overflow: auto; }
+.http-log .link { font: inherit; padding: 0; text-align: left; }
+.http-query { border-bottom: 1px solid var(--border-subtle); }
+.http-query summary { display: flex; align-items: center; gap: 8px; padding: 3px 2px; cursor: default; }
+.http-query summary .query-flag { flex-shrink: 0; }
+.http-query-sql { flex: 1; min-width: 0; font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.http-query[open] .http-query-sql { white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.http-query-time { font: 12px var(--mono); min-width: 64px; text-align: right; }
+.http-query-run { display: flex; justify-content: space-between; gap: 12px; padding: 2px 2px 2px 20px; font: 12px var(--mono); }
+.http-query-run span:first-child { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
