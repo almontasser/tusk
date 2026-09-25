@@ -20,36 +20,48 @@ import {
   onHttpChange,
   parentOf,
   PRIVATE_ENV_FILE,
+  type Cancel,
   requestAt,
+  resend,
+  saveToPrivateEnvironment,
   scopes,
+  scriptNames,
   selectedEnvironment,
   selectEnvironment,
   send,
   setEnvironment,
   setGlobals,
   setHost,
+  setPinned,
 } from "./httpclient";
 import {
   formatRequest,
   fromCurl,
+  type ExceptionReport,
+  graphqlParts,
   type Header,
   header,
   type HttpRequest,
+  jsonQuery,
+  laravelException,
   lookupIn,
+  matchRoute,
   METHODS,
   newRequest,
   parseHttp,
   parseSetCookie,
   prepare,
+  resolve,
   type Prepared,
   requestForRoute,
   type Route,
   STATUS_TEXT,
   toCurl,
   toLaravel,
+  websocketMessages,
 } from "./httpfile";
 import { confirm, pick } from "./palette";
-import { listRoutes } from "./runner";
+import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
 
 
@@ -114,7 +126,6 @@ function mark(line: number) {
 let ownEdit = false;
 /** The last exchange shown in the response area. */
 let shown: Exchange | null = null;
-let sending = false;
 
 /** The request the tab edits, parsed from the editor's current text. */
 function currentRequest(): HttpRequest | undefined {
@@ -132,13 +143,31 @@ function update(change: (r: HttpRequest) => void) {
   if (!r || !current) return;
   change(r);
   const model = current.model;
-  const text = formatRequest(r).replace(/\n$/, "");
-  const range = new monaco.Range(r.start, 1, r.end, model.getLineMaxColumn(r.end));
   // Keep the blank line that separates it from the next request.
-  const next = r.end < model.getLineCount() ? "\n" : "";
+  const after = formatRequest(r).replace(/\n$/, "").split("\n");
+  if (r.end < model.getLineCount() || !model.getLineContent(r.end)) after.push("");
+  const before = model.getLinesContent().slice(r.start - 1, r.end);
+  // Replace only the lines that changed, so the cursor, folding, and undo stay put elsewhere in the block.
+  let head = 0;
+  while (head < before.length && head < after.length && before[head] === after[head]) head++;
+  let tail = 0;
+  while (tail < before.length - head && tail < after.length - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  if (head === before.length && head === after.length) return;
+  const from = r.start + head;
+  const to = r.end - tail;
+  const lines = after.slice(head, after.length - tail);
+  // Replaced lines, inserted lines (none replaced: to < from), or removed lines (none inserted).
+  const edit =
+    to >= from
+      ? lines.length
+        ? { range: new monaco.Range(from, 1, to, model.getLineMaxColumn(to)), text: lines.join("\n") }
+        : { range: to < model.getLineCount() ? new monaco.Range(from, 1, to + 1, 1) : new monaco.Range(from - 1, model.getLineMaxColumn(from - 1), to, model.getLineMaxColumn(to)), text: "" }
+      : from > model.getLineCount()
+        ? { range: monaco.Range.fromPositions(model.getFullModelRange().getEndPosition()), text: "\n" + lines.join("\n") }
+        : { range: new monaco.Range(from, 1, from, 1), text: lines.join("\n") + "\n" };
   ownEdit = true;
   try {
-    model.pushEditOperations([], [{ range, text: text + next }], () => null);
+    model.pushEditOperations([], [edit], () => null);
   } finally {
     ownEdit = false;
   }
@@ -221,7 +250,7 @@ const empty = h(
 const main = h("div", { class: "http-main" }, h("div", { class: "http-bar" }, methodSelect, h("div", { class: "http-url-box" }, urlInput, urlPreview), sendButton, moreButton, envSelect), h("div", { class: "http-split" }, reqPane, divider, resPane));
 panel.append(empty, main);
 
-methodSelect.onchange = () => update((r) => (r.method = methodSelect.value));
+methodSelect.onchange = () => (update((r) => (r.method = methodSelect.value)), renderRequest());
 urlInput.oninput = () => {
   updateSoon((r) => (r.url = urlInput.value.trim()));
   if (reqTab === "params") renderReqTab();
@@ -270,6 +299,11 @@ function renderRequest() {
   if (document.activeElement !== urlInput) urlInput.value = r.url;
   methodSelect.value = METHODS.includes(r.method) ? r.method : "GET";
   methodSelect.dataset.method = r.method;
+  if (!cancel) {
+    const ws = r.method === "WEBSOCKET";
+    const connected = ws && socket?.key === `${current?.path}:${r.line}`;
+    sendButton.replaceChildren(icon(ws ? (connected ? "debug-disconnect" : "plug") : "play"), ws ? (connected ? "Disconnect" : "Connect") : "Send");
+  }
   renderTabLabels();
   renderReqTab();
   renderPreview();
@@ -304,7 +338,7 @@ function renderTabLabels() {
     ["params", `Params${query ? ` ${query}` : ""}`],
     ["headers", `Headers${r.headers.length ? ` ${r.headers.length}` : ""}`],
     ["body", `Body${r.body ? " •" : ""}`],
-    ["auth", `Auth${header(r, "authorization") ? " •" : ""}`],
+    ["auth", `Auth${header(r, "authorization") || r.tags.laravelSession ? " •" : ""}`],
     ["scripts", `Scripts${scripts ? ` ${scripts}` : ""}`],
     ["settings", "Settings"],
   ];
@@ -468,7 +502,33 @@ async function chooseFile(): Promise<string | null> {
   return path.startsWith(dir + "/") ? `./${path.slice(dir.length + 1)}` : path;
 }
 
+function graphqlTab(r: HttpRequest) {
+  const parts = graphqlParts(r.body);
+  const write = () => updateSoon((q) => (q.body = parts.query.trim() + (parts.variables.trim() ? `\n\n${parts.variables.trim()}` : "")));
+  const query = codeEditor(parts.query, "plaintext", (v) => ((parts.query = v), write()), "http-code http-script-code");
+  const variables = codeEditor(parts.variables, "json", (v) => ((parts.variables = v), write()), "http-code http-script-code");
+  return h(
+    "div",
+    { class: "http-pane http-scripts" },
+    h("div", { class: "http-script" }, h("div", { class: "http-script-bar" }, h("span", { class: "http-script-title" }, "Query")), query.el),
+    h("div", { class: "http-script" }, h("div", { class: "http-script-bar" }, h("span", { class: "http-script-title" }, "Variables (JSON)")), variables.el),
+    h("p", { class: "http-hint" }, "Sent as a POST with the query and variables as JSON. Both may use {{variables}}."),
+  );
+}
+
+function websocketTab(r: HttpRequest) {
+  const { el } = codeEditor(r.body, "plaintext", (v) => updateSoon((q) => (q.body = v)));
+  return h(
+    "div",
+    { class: "http-pane http-body-pane" },
+    h("p", { class: "http-hint" }, "Messages to send once connected, each after a line of ===. A line of === wait-for-server waits for a message from the server first. Pusher and Reverb pings are answered."),
+    el,
+  );
+}
+
 function bodyTab(r: HttpRequest) {
+  if (r.method === "GRAPHQL") return graphqlTab(r);
+  if (r.method === "WEBSOCKET") return websocketTab(r);
   const type = bodyType(r);
   const types: [BodyType, string][] = [
     ["none", "None"],
@@ -567,8 +627,16 @@ function bodyTab(r: HttpRequest) {
 
 function authTab(r: HttpRequest) {
   const value = header(r, "authorization") ?? "";
-  const kind = !value ? "none" : /^Bearer\s/i.test(value) ? "bearer" : /^Basic\s+\S+\s+\S+$/i.test(value) ? "basic" : "other";
-  const select = h("select", {}, h("option", { value: "none", textContent: "No auth" }), h("option", { value: "bearer", textContent: "Bearer token" }), h("option", { value: "basic", textContent: "Basic (user and password)" }), kind === "other" ? h("option", { value: "other", textContent: "Custom Authorization header" }) : null);
+  const kind = r.tags.laravelSession ? "session" : !value ? "none" : /^Bearer\s/i.test(value) ? "bearer" : /^Basic\s+\S+\s+\S+$/i.test(value) ? "basic" : "other";
+  const select = h(
+    "select",
+    {},
+    h("option", { value: "none", textContent: "No auth" }),
+    h("option", { value: "bearer", textContent: "Bearer token" }),
+    h("option", { value: "basic", textContent: "Basic (user and password)" }),
+    h("option", { value: "session", textContent: "Laravel session (cookies and CSRF)" }),
+    kind === "other" ? h("option", { value: "other", textContent: "Custom Authorization header" }) : null,
+  );
   select.value = kind;
   const set = (v: string | null) =>
     updateSoon((q) => {
@@ -591,10 +659,19 @@ function authTab(r: HttpRequest) {
       const write = () => set(`Basic ${u.value || "user"} ${p.value || "password"}`);
       u.oninput = p.oninput = write;
       fields.append(h("label", {}, "User", u), h("label", {}, "Password", p), h("p", { class: "http-hint" }, "Written as Authorization: Basic user password, which is encoded when sent, as in PhpStorm."));
-    } else if (k === "other") fields.append(h("p", { class: "http-hint" }, `Authorization: ${value}. Edit it in Headers.`));
+    } else if (k === "session")
+      fields.append(
+        h(
+          "p",
+          { class: "http-hint" },
+          "Signs in as a browser would: the first request gets Laravel's XSRF-TOKEN cookie from /sanctum/csrf-cookie (or /), and each request sends it back as X-XSRF-TOKEN, with Origin and Referer. Send your login request, such as POST /login with email and password, with this auth too, and later requests with it use the session. Works for web routes and Sanctum's SPA authentication.",
+        ),
+      );
+    else if (k === "other") fields.append(h("p", { class: "http-hint" }, `Authorization: ${value}. Edit it in Headers.`));
   };
   select.onchange = () => {
-    if (select.value === "none") set(null);
+    update((q) => (q.tags.laravelSession = select.value === "session" || undefined));
+    if (select.value === "none" || select.value === "session") set(null);
     else if (select.value === "bearer") set("Bearer {{token}}");
     else if (select.value === "basic") set("Basic {{user}} {{password}}");
     setTimeout(renderReqTab, 300);
@@ -685,22 +762,200 @@ function settingsTab(r: HttpRequest) {
 
 // ---- Sending ----
 
-async function sendCurrent() {
+type SendMode = "send" | "debug" | "profile";
+let cancel: Cancel | null = null;
+
+/** Names the request uses that nothing defines, leaving out names the file's scripts set. */
+async function missingNames(r: HttpRequest): Promise<string[]> {
+  if (!current) return [];
+  const text = current.model.getValue();
+  const s = await scopes(current.path, text);
+  const set = scriptNames(text);
+  const lookup = lookupIn(s.list.map((l) => l.vars), s.dotenv);
+  const p = await prepare(r, lookup, parentOf(current.path), (f) => invoke<string>("read_file", { path: f }).catch(() => "")).catch(() => null);
+  if (!p) return [];
+  const texts = [p.url, ...p.headers.map(([, v]) => v), p.body ?? ""];
+  return [...new Set(texts.flatMap((t) => [...t.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1])))].filter((n) => !set.has(n));
+}
+
+/** Asks for values of names nothing defines, instead of sending the request with {{name}} in it. */
+async function askForValues(names: string[], mode: SendMode) {
+  const envs = await environments(current?.path ?? "");
+  const env = selectedEnvironment(envs) ?? "local";
+  const inputs = names.map((n) => h("input", { placeholder: n, spellcheck: false }));
+  const remember = h("input", { type: "checkbox" });
+  const go = (values?: Record<string, string>) => sendCurrent(mode, values ?? {});
+  const sendWithValues = async () => {
+    const values = Object.fromEntries(names.map((n, i) => [n, inputs[i].value]));
+    if (remember.checked && current) await saveToPrivateEnvironment(current.path, env, values);
+    go(values);
+  };
+  inputs.forEach((i) => (i.onkeydown = (e) => e.key === "Enter" && sendWithValues()));
+  resTabs.replaceChildren();
+  resSummary.replaceChildren(h("span", { class: "http-missing" }, `Not defined${Object.keys(envs).length ? ` in ${env}` : ""}: ${names.join(", ")}`));
+  resBody.replaceChildren(
+    h(
+      "div",
+      { class: "http-pane http-form http-ask" },
+      ...names.map((n, i) => h("label", {}, n, inputs[i])),
+      h("label", { class: "http-check" }, remember, `Save to ${env} in ${PRIVATE_ENV_FILE}`),
+      h(
+        "div",
+        { class: "http-empty-actions" },
+        h("button", { class: "primary", textContent: "Send", onclick: sendWithValues }),
+        h("button", { textContent: "Send Anyway", title: "Send with {{name}} left in", onclick: () => go() }),
+        h("button", { textContent: "Edit Environments…", onclick: () => createEnvironmentFile() }),
+      ),
+    ),
+  );
+  inputs[0]?.focus();
+}
+
+const addQuery = (url: string, param: string) => {
+  const [base, hash = ""] = url.split("#");
+  return `${base}${base.includes("?") ? "&" : "?"}${param}${hash ? `#${hash}` : ""}`;
+};
+
+/**
+ * Sends the request in the tab, or cancels the one being sent. `debug` adds Xdebug's trigger and listens for its
+ * connection; `profile` sends it to the profiling server and opens the profile. Undefined names are asked for first.
+ */
+async function sendCurrent(mode: SendMode = "send", extraVars?: Record<string, string>) {
+  if (cancel) return cancel.current?.();
   const r = currentRequest();
-  if (!r || !current || sending) return;
-  sending = true;
-  sendButton.disabled = true;
-  sendButton.replaceChildren(icon("loading codicon-modifier-spin"), "Sending");
-  resSummary.replaceChildren(h("span", { class: "muted" }, `${r.method} ${r.url} …`));
+  if (!r || !current) return;
+  if (r.method === "WEBSOCKET") return connectWebSocket(r);
+  if (!extraVars) {
+    const missing = await missingNames(r);
+    if (missing.length) return askForValues(missing, mode);
+  }
+  const path = current.path;
+  let adjust: ((p: Prepared) => Prepared) | undefined;
+  let profiler: Awaited<ReturnType<Host["profiler"]>> | undefined;
+  let since = 0;
+  if (mode === "debug") {
+    const debug = await import("./debug");
+    if (!debug.isListening()) await debug.startDebugging();
+    host.status("Sent with XDEBUG_SESSION. The server's PHP needs Xdebug in debug mode: Start Debug Server runs one.");
+    adjust = (p) => ({ ...p, url: addQuery(p.url, "XDEBUG_SESSION=1"), timeout: Math.max(p.timeout, 3600) });
+  } else if (mode === "profile") {
+    profiler = await host.profiler();
+    const origin = await profiler.profilingOrigin();
+    if (!origin) return;
+    since = Math.floor(Date.now() / 1000);
+    adjust = (p) => ({ ...p, url: p.url.replace(/^https?:\/\/[^/]+/, origin) });
+  }
+  cancel = {};
+  const started = performance.now();
+  const clock = h("span", { class: "http-stat muted" });
+  const tick = () => (clock.textContent = ms((performance.now() - started) / 1000));
+  tick();
+  const timer = setInterval(tick, 100);
+  sendButton.replaceChildren(icon("close"), "Cancel");
+  sendButton.title = "Cancel the request (⌘⏎)";
+  resSummary.replaceChildren(h("span", { class: "muted" }, `${mode === "debug" ? "Debugging" : mode === "profile" ? "Profiling" : "Sending"} ${r.method} ${r.url}`), icon("loading codicon-modifier-spin"), clock);
   try {
-    showExchange(await send(current.path, r));
+    const x = await send(path, r, { cancel, extraVars, adjust });
+    showExchange(x);
+    const final = x.heads.at(-1);
+    if (profiler && final) await profiler.openProfileSince(since, `${r.method} ${x.request.url.replace(/^https?:\/\/[^/]+/, "")} (${final.status})`);
   } catch (e) {
     resSummary.replaceChildren(h("span", { class: "http-error" }, `Couldn't send the request: ${e}`));
   } finally {
-    sending = false;
-    sendButton.disabled = false;
+    clearInterval(timer);
+    cancel = null;
     sendButton.replaceChildren(icon("play"), "Send");
+    sendButton.title = "Send (⌘⏎)";
   }
+}
+
+// ---- WebSocket ----
+// Through the webview's WebSocket, which can't set headers: the request's headers only name the messages' type.
+
+let socket: { ws: WebSocket; key: string } | null = null;
+
+function connectWebSocket(r: HttpRequest) {
+  if (socket) {
+    socket.ws.close();
+    return;
+  }
+  if (!current) return;
+  const path = current.path;
+  (async () => {
+    const s = await scopes(path, current!.model.getValue());
+    const lookup = lookupIn(s.list.map((l) => l.vars), s.dotenv);
+    const url = resolve(r.url, lookup);
+    const messages = websocketMessages(resolve(r.body, lookup));
+    const log = h("div", { class: "http-ws-log" });
+    const state = h("span", { class: "http-status" }, "Connecting");
+    const input = h("textarea", { class: "http-ws-input", placeholder: "Message (⌘⏎ sends)", spellcheck: false });
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      resSummary.replaceChildren(h("span", { class: "http-error" }, `Can't connect to ${url}: ${e}`));
+      return;
+    }
+    socket = { ws, key: `${path}:${r.line}` };
+    const waiting: (() => void)[] = [];
+    const entry = (dir: "in" | "out" | "info", text: string) => {
+      let shown = text;
+      try {
+        shown = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        // Not JSON.
+      }
+      log.append(h("div", { class: `http-ws-entry ${dir}` }, h("span", { class: "http-ws-dir" }, dir === "in" ? "↓" : dir === "out" ? "↑" : "•"), h("span", { class: "muted" }, new Date().toLocaleTimeString()), h("pre", {}, shown)));
+      log.scrollTop = log.scrollHeight;
+    };
+    const post = (text: string) => {
+      if (ws.readyState !== WebSocket.OPEN) return entry("info", "Not connected.");
+      ws.send(text);
+      entry("out", text);
+    };
+    ws.onopen = async () => {
+      state.textContent = "Open";
+      state.className = "http-status good";
+      sendButton.replaceChildren(icon("debug-disconnect"), "Disconnect");
+      for (const m of messages) {
+        if (m.waitForServer) await new Promise<void>((done) => waiting.push(done));
+        post(m.text);
+      }
+    };
+    ws.onmessage = (e) => {
+      const text = typeof e.data === "string" ? e.data : "[binary message]";
+      entry("in", text);
+      // Pusher and Laravel Reverb close a connection that doesn't answer their pings.
+      if (/"event"\s*:\s*"pusher:ping"/.test(text)) post(JSON.stringify({ event: "pusher:pong", data: {} }));
+      waiting.shift()?.();
+    };
+    ws.onerror = () => entry("info", "Connection error.");
+    ws.onclose = (e) => {
+      entry("info", `Closed${e.code ? ` (${e.code}${e.reason ? `: ${e.reason}` : ""})` : ""}.`);
+      state.textContent = "Closed";
+      state.className = "http-status bad";
+      if (socket?.ws === ws) socket = null;
+      sendButton.replaceChildren(icon("plug"), "Connect");
+    };
+    input.onkeydown = (e) => {
+      if (e.key === "Enter" && e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (input.value.trim()) post(input.value), (input.value = "");
+      }
+    };
+    resSummary.replaceChildren(state, h("span", { class: "http-stat muted" }, url));
+    resTabs.replaceChildren();
+    resBody.replaceChildren(
+      h(
+        "div",
+        { class: "http-pane http-ws" },
+        log,
+        messages.length ? h("div", { class: "http-presets" }, "Send again: ", ...messages.map((m, i) => h("button", { class: "chip", textContent: `${i + 1}. ${m.text.replace(/\s+/g, " ").slice(0, 40)}`, title: m.text, onclick: () => post(m.text) }))) : null,
+        h("div", { class: "http-ws-send" }, input, h("button", { textContent: "Send", onclick: () => input.value.trim() && (post(input.value), (input.value = "")) })),
+      ),
+    );
+  })();
 }
 
 /** Shows an exchange, such as one the runner sent, with its request. */
@@ -729,7 +984,7 @@ function showExchange(x: Exchange) {
   shown = x;
   const final = x.heads.at(-1);
   const status = final?.status ?? 0;
-  const pill = h("span", { class: `http-status ${statusClass(status)}` }, x.error && !final ? "Failed" : `${status} ${final?.statusText || STATUS_TEXT[status] || ""}`.trim());
+  const pill = h("span", { class: `http-status ${statusClass(status)}` }, x.error && !final ? (x.error === "Cancelled" ? "Cancelled" : "Failed") : `${status} ${final?.statusText || STATUS_TEXT[status] || ""}`.trim());
   resSummary.replaceChildren(
     pill,
     x.info ? h("span", { class: "http-stat", title: "Total time" }, ms(x.info.time_total)) : "",
@@ -790,11 +1045,18 @@ function bodyView(x: Exchange) {
       if (to) await invoke("run_capture", { cwd: "/", program: "/bin/cp", args: [x.bodyPath, to], input: null }).then(() => host.status(`Saved ${to}`), (e) => host.status(`Couldn't save the body: ${e}`));
     }),
     iconButton("go-to-file", "Open the body in an editor tab", () => host.openAt(x.bodyPath, 1)),
+    iconButton("diff", "Compare with an earlier response to this request", () => compareWithEarlier(x)),
   );
   pane.append(bar);
   const size = x.info?.size_download ?? 0;
   if (!x.heads.length) return pane.append(h("p", { class: "http-hint" }, "No response.")), pane;
   if (!size) return pane.append(h("p", { class: "http-hint" }, "The response has no body.")), pane;
+  const status = x.heads.at(-1)?.status ?? 0;
+  if (status >= 500 && isText(type) && size <= MAX_SHOWN)
+    invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
+      const report = laravelException(text, status);
+      if (report && pane.isConnected) bar.after(exceptionBanner(report, /json/.test(type)));
+    });
   if (bodyMode === "preview") {
     if (image || /pdf/.test(type)) {
       invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/base64", args: ["-i", x.bodyPath], input: null }).then((b64) => {
@@ -818,16 +1080,67 @@ function bodyView(x: Exchange) {
   invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
     if (shown !== x || !el.isConnected) return;
     let value = text;
+    let parsed: unknown;
     if (bodyMode === "pretty" && /json/.test(type)) {
       try {
-        value = JSON.stringify(JSON.parse(text), null, 2);
+        parsed = JSON.parse(text);
+        value = JSON.stringify(parsed, null, 2);
       } catch {
         // Show it as it came.
       }
     }
-    responseEditor = monaco.editor.create(el, { ...EDITOR_OPTIONS, readOnly: true, lineNumbers: "on", model: monaco.editor.createModel(value, bodyMode === "raw" ? "plaintext" : languageFor(type)), wordWrap: bodyMode === "raw" ? "on" : "off" });
+    const editor = monaco.editor.create(el, { ...EDITOR_OPTIONS, readOnly: true, lineNumbers: "on", model: monaco.editor.createModel(value, bodyMode === "raw" ? "plaintext" : languageFor(type)), wordWrap: bodyMode === "raw" ? "on" : "off" });
+    responseEditor = editor;
+    if (parsed === undefined) return;
+    // A JSON path narrows the body, such as $.data[*].id.
+    const filter = h("input", { class: "http-json-filter", placeholder: "Filter: $.data[*].id", spellcheck: false, value: jsonFilter, title: "A JSON path: $, .key, [n], [*], .*, and ..key for any depth" });
+    const apply = () => {
+      jsonFilter = filter.value.trim();
+      const found = jsonFilter && jsonFilter !== "$" ? jsonQuery(parsed, jsonFilter) : [parsed];
+      editor.setValue(JSON.stringify(found.length === 1 && !/\*|\.\./.test(jsonFilter) ? found[0] : found, null, 2) ?? "");
+      filter.classList.toggle("empty", !!jsonFilter && !found.length);
+    };
+    filter.oninput = debounce(apply, 200);
+    bar.querySelector(".http-type")!.replaceWith(filter);
+    if (jsonFilter) apply();
   });
   return pane;
+}
+
+let jsonFilter = "";
+
+/** Where a file in a stack trace is on this Mac: Sail's container keeps the project at /var/www/html. */
+const localPath = (file: string) => (file.startsWith(host.root()) ? file : file.includes("/var/www/html/") ? `${host.root()}/${file.split("/var/www/html/")[1]}` : file);
+
+function exceptionBanner(report: ExceptionReport, json: boolean) {
+  const own = (f: { file: string }) => !/\/vendor\//.test(f.file);
+  const frame = (f: { file: string; line: number }) => {
+    const path = localPath(f.file);
+    return h("button", { class: `link http-frame${own(f) ? "" : " vendor"}`, textContent: `${path.replace(host.root() + "/", "")}:${f.line}`, onclick: () => host.openAt(path, f.line) });
+  };
+  const appFrames = report.frames.filter(own).slice(0, 8);
+  const vendor = report.frames.filter((f) => !own(f));
+  const more = h("details", {}, h("summary", {}, `${vendor.length} frames in vendor`), ...vendor.slice(0, 30).map(frame));
+  return h(
+    "div",
+    { class: "http-exception" },
+    h("div", { class: "http-exception-title" }, icon("error"), h("strong", {}, report.className || "Server error"), report.message ? h("span", {}, report.message) : null),
+    h("div", { class: "http-frames" }, ...appFrames.map(frame), vendor.length ? more : null),
+    json ? null : h("p", { class: "http-hint" }, "Add Accept: application/json to get the exception as JSON, with its whole trace."),
+  );
+}
+
+/** Opens a diff of this response's body and an earlier one to the same request. */
+async function compareWithEarlier(x: Exchange) {
+  const earlier = (await history()).filter((e) => e.id !== x.id && e.path === x.path && (x.name ? e.name === x.name : e.line === x.line) && e.time < x.time);
+  if (!earlier.length) return host.status("There's no earlier response to this request in the history.");
+  pick("Compare with which response?", () =>
+    earlier.map((e) => ({
+      label: `${e.heads.at(-1)?.status ?? "ERR"} · ${new Date(e.time).toLocaleString()}`,
+      detail: `${e.request.method} ${e.request.url}`,
+      run: () => compareExchanges(e, x),
+    })),
+  );
 }
 
 function table(rows: (string | Node)[][], head?: string[]) {
@@ -929,25 +1242,59 @@ async function preparedCurrent(): Promise<Prepared | null> {
 }
 
 function requestMenu() {
+  const withRequest = (fn: (path: string, r: HttpRequest) => unknown) => () => {
+    const r = currentRequest();
+    if (r && current) fn(current.path, r);
+  };
   return [
+    { label: "Send with Debugger", run: () => sendCurrent("debug") },
+    { label: "Send with Profiler", run: () => sendCurrent("profile") },
+    "-" as const,
     { label: "Copy as cURL", run: async () => { const p = await preparedCurrent(); if (p) copy(toCurl(p), "the curl command"); } },
     { label: "Copy as Laravel HTTP", run: async () => { const p = await preparedCurrent(); if (p) copy(toLaravel(p), "the Laravel code"); } },
     "-" as const,
-    { label: "Stress Test…", run: () => { const r = currentRequest(); if (r && current) loadTest(current.path, r); } },
     { label: "Run All Requests in File", run: () => current && runFile(current.path) },
+    { label: "Stress Test…", run: withRequest((path, r) => loadTest(path, r)) },
+    { label: "Monitor…", run: withRequest((path, r) => monitor(path, r)) },
     "-" as const,
-    { label: "Open in Editor", run: () => { const r = currentRequest(); if (r && current) host.openAt(current.path, r.line); } },
-    { label: "Duplicate", run: () => { const r = currentRequest(); if (r && current) duplicate(current.path, r); } },
-    { label: "Delete", run: () => { const r = currentRequest(); if (r && current) deleteRequest(current.path, r); } },
+    { label: "Go to Controller", run: withRequest((_, r) => goToController(r)) },
+    { label: "Open in Editor", run: withRequest((path, r) => host.openAt(path, r.line)) },
+    { label: "Duplicate", run: withRequest(duplicate) },
+    { label: "Delete", run: withRequest(deleteRequest) },
   ];
 }
 
-// Set by httpload.ts, which main loads with the rest, to keep the stress test and the runner in their own module.
+// Set by httpload.ts, which main loads with the rest, to keep the stress test, runner, and monitor in their own module.
 let loadTest: (path: string, r: HttpRequest) => unknown = () => {};
 let runFile: (path: string) => unknown = () => {};
-export function setRunners(load: typeof loadTest, run: typeof runFile) {
+let monitor: (path: string, r: HttpRequest) => unknown = () => {};
+export function setRunners(load: typeof loadTest, run: typeof runFile, watch: typeof monitor) {
   loadTest = load;
   runFile = run;
+  monitor = watch;
+}
+
+/** The app's routes, read once per project; artisan takes a second or two. */
+let routeCache: { root: string; routes: Promise<Route[]> } | null = null;
+function routesList(): Promise<Route[]> {
+  if (routeCache?.root !== host.root()) {
+    const loading = listRoutes(host.root());
+    routeCache = { root: host.root(), routes: loading };
+    loading.catch(() => (routeCache = null));
+  }
+  return routeCache.routes;
+}
+
+async function goToController(r: HttpRequest) {
+  let list: Route[];
+  try {
+    list = await routesList();
+  } catch (e) {
+    return host.status(`Couldn't list the routes: ${e instanceof Error ? e.message : String(e).trim()}`);
+  }
+  const route = matchRoute(r.method, r.url, list);
+  if (!route) return host.status(`No route matches ${r.method} ${r.url}.`);
+  openRoute(route.action);
 }
 
 /** Adds text at the end of a file and returns the line it starts on. */
@@ -1070,15 +1417,18 @@ async function requestsFromRoutes() {
   if (!host.root()) return;
   host.status("Reading routes from artisan route:list…");
   let routes: Route[];
+  routeCache = null;
   try {
-    routes = await listRoutes(host.root());
+    routes = await routesList();
   } catch (e) {
     return host.status(`Couldn't list the routes: ${e instanceof Error ? e.message : String(e).trim()}`);
   }
   host.status("");
   routes = routes.filter((r) => !/^(_ignition|sanctum|livewire|_debugbar|telescope|horizon|storage)/.test(r.uri.replace(/^\//, "")));
-  const addAll = (list: Route[]) => {
-    const text = list.map((r) => formatRequest(requestForRoute(r))).join("\n");
+  // Bodies come from each route's validation rules, read from its FormRequest or validate() call.
+  const withRules = async (r: Route) => requestForRoute(r, /POST|PUT|PATCH/.test(r.method) ? await routeRules(r.action).catch(() => ({})) : {});
+  const addAll = async (list: Route[]) => {
+    const text = (await Promise.all(list.map(withRules))).map(formatRequest).join("\n");
     chooseCollection(async (path) => {
       const line = await append(path, text);
       await openRequest(path, line);
@@ -1090,7 +1440,7 @@ async function requestsFromRoutes() {
   pick("Create a request for which route?", () => [
     ...(api.length ? [{ label: `All API routes (${api.length})`, icon: "codicon-list-flat", run: () => addAll(api) }] : []),
     { label: `All routes (${routes.length})`, icon: "codicon-list-flat", run: () => addAll(routes) },
-    ...routes.map((r) => ({ label: `${r.method.replace("|HEAD", "")} /${r.uri.replace(/^\//, "")}`, detail: r.name ?? r.action, icon: "codicon-symbol-method", run: () => newRequestInteractive(requestForRoute(r)) })),
+    ...routes.map((r) => ({ label: `${r.method.replace("|HEAD", "")} /${r.uri.replace(/^\//, "")}`, detail: r.name ?? r.action, icon: "codicon-symbol-method", run: async () => newRequestInteractive(await withRules(r)) })),
   ]);
 }
 
@@ -1121,7 +1471,8 @@ export async function refreshTree() {
 }
 
 function methodBadge(method: string) {
-  return h("span", { class: "http-badge", data: { method } }, method === "DELETE" ? "DEL" : method === "OPTIONS" ? "OPT" : method);
+  const short: Record<string, string> = { DELETE: "DEL", OPTIONS: "OPT", GRAPHQL: "GQL", WEBSOCKET: "WS" };
+  return h("span", { class: "http-badge", data: { method } }, short[method] ?? method);
 }
 
 function renderTree() {
@@ -1178,13 +1529,20 @@ function markActive() {
   document.querySelectorAll<HTMLElement>("#http-requests .http-request").forEach((row) => row.classList.toggle("active", !!r && row.dataset.path === current?.path && Number(row.dataset.line) === r.line));
 }
 
+let historyFilter = "";
+
 async function renderHistory() {
   const list = $("http-history");
   const entries = await history();
   $("http-history-count").textContent = entries.length ? String(entries.length) : "";
+  const q = historyFilter.toLowerCase();
+  // Pinned first, then newest first.
+  const matching = entries
+    .filter((x) => !q || `${x.request.method} ${x.request.url} ${x.name} ${x.heads.at(-1)?.status ?? ""}`.toLowerCase().includes(q))
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || b.time - a.time);
   list.replaceChildren(
-    ...(entries.length
-      ? entries.slice(0, 50).map((x) => {
+    ...(matching.length
+      ? matching.map((x) => {
           const final = x.heads.at(-1);
           const row = h(
             "div",
@@ -1192,13 +1550,45 @@ async function renderHistory() {
             h("span", { class: `http-code-badge ${statusClass(final?.status ?? 0)}` }, final ? String(final.status) : "ERR"),
             methodBadge(x.request.method),
             h("span", { class: "name" }, x.request.url.replace(/^https?:\/\/[^/]+/, "") || "/"),
+            x.pinned ? icon("pinned") : null,
             h("span", { class: "type" }, ago(x.time)),
           );
           row.onclick = () => openExchange(x);
+          row.oncontextmenu = (e) => {
+            e.preventDefault();
+            showMenu(e.clientX, e.clientY, [
+              { label: "Send Again", run: () => resendExchange(x) },
+              { label: x.pinned ? "Unpin" : "Pin", run: () => setPinned(x.id, !x.pinned) },
+              ...(shown && shown.id !== x.id ? [{ label: "Compare with the Shown Response", run: () => compareExchanges(x, shown!) }] : []),
+              "-" as const,
+              { label: "Copy as cURL", run: () => copy(toCurl(x.request), "the curl command") },
+              { label: "Copy as Laravel HTTP", run: () => copy(toLaravel(x.request), "the Laravel code") },
+            ]);
+          };
           return h("li", {}, row);
         })
-      : [h("li", { class: "muted" }, "Requests you send show here.")]),
+      : [h("li", { class: "muted" }, q ? "No requests match." : "Requests you send show here.")]),
   );
+}
+
+/** Sends a history entry's request again exactly as it went, without scripts. */
+async function resendExchange(x: Exchange) {
+  await openExchange(x);
+  resSummary.replaceChildren(h("span", { class: "muted" }, `Sending ${x.request.method} ${x.request.url} again`), icon("loading codicon-modifier-spin"));
+  showExchange(await resend(x));
+}
+
+async function compareExchanges(a: Exchange, b: Exchange) {
+  const [older, newer] = a.time < b.time ? [a, b] : [b, a];
+  const text = async (e: Exchange) => {
+    const body = await invoke<string>("read_file", { path: e.bodyPath }).catch(() => "");
+    try {
+      return JSON.stringify(JSON.parse(body), null, 2);
+    } catch {
+      return body;
+    }
+  };
+  host.showDiff(newer.bodyPath, await text(older), await text(newer), `${older.request.method} ${older.request.url} at ${new Date(older.time).toLocaleTimeString()} ↔ ${new Date(newer.time).toLocaleTimeString()}`);
 }
 
 // ---- Editor integration ----
@@ -1262,6 +1652,7 @@ export function initHttpClient(h_: Host) {
     setEnvironment(sidebarEnv.value);
   };
   ($("http-filter") as HTMLInputElement).oninput = (e) => ((filter = (e.target as HTMLInputElement).value), renderTree());
+  ($("http-history-filter") as HTMLInputElement).oninput = (e) => ((historyFilter = (e.target as HTMLInputElement).value), renderHistory());
   renderResponse();
 }
 

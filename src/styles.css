@@ -879,11 +879,12 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .http-bar { display: flex; align-items: flex-start; gap: 6px; padding: 0 0 6px; flex-shrink: 0; }
 .http-bar > select, .http-bar > button, .http-bar > input { height: 28px; }
-.http-method { width: 92px; font: 600 12px var(--mono); }
+.http-method { width: 118px; font: 600 12px var(--mono); }
 .http-method[data-method="GET"] { color: var(--green); }
 .http-method[data-method="POST"] { color: var(--yellow); }
 .http-method[data-method="PUT"], .http-method[data-method="PATCH"] { color: var(--blue); }
 .http-method[data-method="DELETE"] { color: var(--red); }
+.http-method[data-method="GRAPHQL"], .http-method[data-method="WEBSOCKET"] { color: var(--purple); }
 .http-url-box { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .http-url { height: 28px; width: 100%; font: 13px var(--mono); }
 .http-url-preview { font: 11px var(--mono); color: var(--faint); padding: 2px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -960,7 +961,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-image img { max-width: 100%; }
 .http-table { border-collapse: collapse; font: 12px var(--mono); width: 100%; }
 .http-table td, .http-table th { padding: 3px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.http-table th { font: 600 12px var(--ui-family); color: var(--muted); }
+.http-table th { font: 600 12px var(--ui-family); color: var(--muted); white-space: nowrap; }
 .http-table td:first-child { color: var(--blue); white-space: nowrap; width: 1%; }
 .http-redirect { margin: 0; font: 12px var(--mono); color: var(--yellow); }
 .http-phase { display: grid; grid-template-columns: 120px 1fr 70px; align-items: center; gap: 8px; }
@@ -978,6 +979,29 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-client .http-bar button:not(.primary):not(.icon-button) { border: 1px solid var(--input-border); border-radius: var(--radius); padding: 0 12px; background: var(--panel); }
 .http-client button:not(:disabled):not(.primary):not(.link):hover { background: var(--hover); }
 .http-import-text { width: min(640px, 100%); height: 120px; font: 12px var(--mono); resize: vertical; }
+
+.http-json-filter { flex: 1; min-width: 80px; font: 12px var(--mono); padding: 2px 7px; height: 24px; }
+.http-json-filter.empty { border-color: var(--orange); }
+.http-exception { border: 1px solid color-mix(in srgb, var(--red) 45%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); border-radius: var(--radius); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; max-height: 45%; overflow: auto; }
+.http-exception-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.http-exception-title .codicon { color: var(--red); align-self: center; }
+.http-exception-title span:not(.codicon) { overflow-wrap: anywhere; }
+.http-frames { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font: 12px var(--mono); }
+.http-frames details { color: var(--muted); display: flex; flex-direction: column; }
+.http-frames summary { cursor: default; }
+.http-frame.vendor { color: var(--muted); display: block; }
+.http-ask { max-width: 520px; }
+.http-ws { flex: 1; min-height: 0; }
+.http-ws-log { flex: 1; min-height: 60px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.http-ws-entry { display: grid; grid-template-columns: 14px 70px 1fr; gap: 6px; align-items: start; }
+.http-ws-entry pre { margin: 0; font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.http-ws-entry.in .http-ws-dir { color: var(--green); }
+.http-ws-entry.out .http-ws-dir { color: var(--blue); }
+.http-ws-entry.info { color: var(--muted); }
+.http-ws-send { display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0; }
+.http-ws-input { flex: 1; height: 56px; font: 12px var(--mono); resize: vertical; }
+.http-ws-send button { border: 1px solid var(--input-border); border-radius: var(--radius); padding: 3px 12px; background: var(--panel); }
+.http-bar-fill.bad { fill: var(--red); }
 
 /* Runner and stress test */
 .http-runner-list { flex: 1; overflow: auto; }
@@ -1021,6 +1045,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-badge[data-method="POST"] { color: var(--yellow); }
 .http-badge[data-method="PUT"], .http-badge[data-method="PATCH"] { color: var(--blue); }
 .http-badge[data-method="DELETE"] { color: var(--red); }
+.http-badge[data-method="GRAPHQL"], .http-badge[data-method="WEBSOCKET"] { color: var(--purple); }
 .http-code-badge { font: 600 10px var(--mono); padding: 1px 4px; border-radius: 3px; flex-shrink: 0; }
 .http-row-send { visibility: hidden; width: 20px; height: 20px; }
 .http-tree .row:hover .http-row-send { visibility: visible; }

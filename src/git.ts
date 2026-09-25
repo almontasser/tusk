@@ -384,9 +384,10 @@ export function showDiff(path: string, original: string, modified: string, label
     original: monaco.editor.createModel(original, undefined, uri("original")),
     modified: monaco.editor.createModel(modified, undefined, uri("modified")),
   });
-  $("diff-path").textContent = path;
+  $("diff-path").textContent = path.startsWith("/") ? path.split("/").pop()! : path;
   $("diff-label").textContent = label;
-  $("diff-open").onclick = () => (closeDiff(false), host.openFile(`${host.root()}/${path}`));
+  // Paths are relative to the project, except files outside it, such as HTTP responses in the app's cache.
+  $("diff-open").onclick = () => (closeDiff(false), host.openFile(path.startsWith("/") ? path : `${host.root()}/${path}`));
   document.querySelectorAll<HTMLElement>("#editor, #history").forEach((e) => (e.hidden = true));
   $("diff").hidden = false;
   return diffEditor;

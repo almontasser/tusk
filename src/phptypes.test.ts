@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -118,4 +118,38 @@ test("lays out long signatures in hovers one parameter per line", () => {
     "### A # b\n\n**Deprecated**: Use c instead\n\n```php\n<?php\npublic function b(\n    bool $deadCode,\n    array<string, int> $map = [],\n    ?string $name = null,\n    int ...$rest,\n): self(A)\n```",
   );
   assert.equal(formatHoverMarkdown("```php\n<?php function a(int $b): void\n```"), "```php\n<?php\nfunction a(int $b): void\n```");
+});
+
+test("validationRules reads FormRequest rules and validate() calls", () => {
+  const request = `<?php
+namespace App\\Http\\Requests;
+class StorePostRequest extends FormRequest {
+    public function rules(): array
+    {
+        return [
+            'title' => 'required|string|max:255', // a comment, with ] and ,
+            'published' => ['boolean'],
+            'tags.*' => ['string', Rule::in(['a', 'b'])],
+            "author.email" => 'required|email',
+        ];
+    }
+}`;
+  const rules = validationRules(methodBody(request, "rules"));
+  assert.deepEqual(Object.keys(rules), ["title", "published", "tags.*", "author.email"]);
+  assert.equal(rules.title, "required|string|max:255");
+  assert.equal(rules.published, "boolean");
+  assert.match(rules["tags.*"], /^string\|a\|b\|\['string', Rule::in/);
+  const controller = `<?php
+namespace App\\Http\\Controllers;
+use App\\Http\\Requests\\StorePostRequest;
+use Illuminate\\Http\\Request;
+class PostController {
+    public function store(StorePostRequest $request) { return 1; }
+    public function update(Request $request, Post $post) {
+        $data = $request->validate(['title' => 'required']);
+    }
+}`;
+  assert.equal(formRequestParameter(controller, "store"), "App\\Http\\Requests\\StorePostRequest");
+  assert.equal(formRequestParameter(controller, "update"), null);
+  assert.deepEqual(validationRules(methodBody(controller, "update")), { title: "required" });
 });

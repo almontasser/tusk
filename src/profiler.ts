@@ -125,28 +125,22 @@ export function profileUrl() {
   );
 }
 
-async function requestAndProfile(path: string) {
+/** The profiling server's address, such as http://127.0.0.1:8000, starting it if needed; undefined when it can't start. */
+export async function profilingOrigin(): Promise<string | undefined> {
   const root = host.root();
-  try {
-    localStorage.setItem(`profilerUrl:${root}`, path);
-  } catch {}
-  let port = server?.root === root && (await listening(server.port)) ? server.port : await startProfilingServer();
-  if (!port) return;
+  const port = server?.root === root && (await listening(server.port)) ? server.port : await startProfilingServer();
+  if (!port) return undefined;
   // Wait for the server to accept connections.
   for (let i = 0; i < 25 && !(await listening(port)); i++) await sleep(200);
+  return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Opens the profile a request wrote after `since` (Unix seconds). Xdebug finishes the profile when PHP shuts the
+ * request down, just after the response, so this waits until the newest profile stops growing.
+ */
+export async function openProfileSince(since: number, label: string) {
   const dir = await profileDir();
-  const since = Math.floor(Date.now() / 1000);
-  host.status(`Requesting ${path}…`, "profiler:progress");
-  const result = await invoke<string>("run_capture", {
-    cwd: "/",
-    program: "/usr/bin/curl",
-    args: ["-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}", `http://127.0.0.1:${port}${path}`],
-    input: null,
-  }).catch(() => "");
-  host.status("", "profiler:progress");
-  const [code, seconds] = result.split(" ");
-  if (!code || code === "000") return host.status(`Couldn't request ${path}: the profiling server didn't answer. See its terminal tab.`);
-  // Xdebug finishes the profile when PHP shuts the request down, just after the response: wait until it stops growing.
   let size = -1;
   for (let i = 0; i < 25; i++) {
     const newest = await newestProfile(dir, since);
@@ -154,7 +148,28 @@ async function requestAndProfile(path: string) {
     size = newest?.size ?? -1;
     await sleep(200);
   }
-  await openNewestProfile(dir, since, `GET ${path} (${code})`);
+  await openNewestProfile(dir, since, label);
+}
+
+async function requestAndProfile(path: string) {
+  const root = host.root();
+  try {
+    localStorage.setItem(`profilerUrl:${root}`, path);
+  } catch {}
+  const origin = await profilingOrigin();
+  if (!origin) return;
+  const since = Math.floor(Date.now() / 1000);
+  host.status(`Requesting ${path}…`, "profiler:progress");
+  const result = await invoke<string>("run_capture", {
+    cwd: "/",
+    program: "/usr/bin/curl",
+    args: ["-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}", `${origin}${path}`],
+    input: null,
+  }).catch(() => "");
+  host.status("", "profiler:progress");
+  const [code, seconds] = result.split(" ");
+  if (!code || code === "000") return host.status(`Couldn't request ${path}: the profiling server didn't answer. See its terminal tab.`);
+  await openProfileSince(since, `GET ${path} (${code})`);
   host.status(`GET ${path}: ${code} in ${Math.round(Number(seconds) * 1000)} ms (with the profiler, which slows PHP down).`);
 }
 

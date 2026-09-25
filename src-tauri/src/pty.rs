@@ -20,7 +20,9 @@ pub struct PtyState(Mutex<HashMap<u32, Session>>);
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Starts `command` (or a login shell) in a pseudo-terminal. Output arrives as
-/// `pty:<id>` events, and `pty-exit:<id>` fires when the process ends.
+/// `pty:<id>` events, and `pty-exit:<id>` fires when the process ends. With a `channel`, the
+/// events are `pty:<channel>` and `pty-exit:<channel>` instead, so the caller can listen before
+/// the process starts and miss nothing from a command that finishes at once.
 #[tauri::command(async)]
 pub fn pty_spawn(
     app: AppHandle,
@@ -29,6 +31,7 @@ pub fn pty_spawn(
     command: Option<Vec<String>>,
     rows: u16,
     cols: u16,
+    channel: Option<String>,
 ) -> Result<u32, String> {
     crate::login_path();
     let pair = native_pty_system()
@@ -78,7 +81,8 @@ pub fn pty_spawn(
         }
     });
     std::thread::spawn(move || {
-        let event = format!("pty:{id}");
+        let name = channel.unwrap_or_else(|| id.to_string());
+        let event = format!("pty:{name}");
         let mut pending = Vec::new();
         while let Ok(chunk) = output.recv() {
             pending.extend_from_slice(&chunk);
@@ -88,7 +92,7 @@ pub fn pty_spawn(
                 let _ = app.emit(&event, text);
             }
         }
-        let _ = app.emit(&format!("pty-exit:{id}"), ());
+        let _ = app.emit(&format!("pty-exit:{name}"), ());
     });
     Ok(id)
 }

@@ -2,6 +2,7 @@
 // curl, so there's nothing to bundle and no browser CORS rules. This module sends requests, keeps variables,
 // cookies, and history, and registers the `http` language; httpview.ts is the HTTP tab and the tool window.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { parseEnv } from "./dbconfig";
 import { monaco } from "./editor";
@@ -26,8 +27,10 @@ export type Host = {
   status(text: string): void;
   openAt(path: string, line: number): Promise<unknown>;
   ensureModel(path: string): Promise<monaco.editor.ITextModel>;
-  /** Writes a model edited from the HTTP tab to disk, unless it's open in a tab, where it's saved as usual. */
+  /** Saves a model edited from the HTTP tab. */
   persist(path: string): Promise<unknown>;
+  profiler(): Promise<typeof import("./profiler")>;
+  showDiff(path: string, original: string, modified: string, label: string): unknown;
 };
 export type Environments = Record<string, Record<string, string>>;
 
@@ -70,6 +73,8 @@ export type Exchange = {
   error?: string;
   /** Names used in the request that no environment, file, or script defines. */
   unresolved: string[];
+  /** Pinned exchanges stay in the history past its limit. */
+  pinned?: boolean;
 };
 
 export let host: Host;
@@ -161,6 +166,19 @@ export async function createEnvironmentFile(file = ENV_FILE) {
     if (file === PRIVATE_ENV_FILE) await ignorePrivateFile();
   }
   await host.openAt(path, 1);
+}
+
+/** Saves values to an environment in the private environment file that applies to `path`, creating it if needed. */
+export async function saveToPrivateEnvironment(path: string, env: string, values: Record<string, string>) {
+  const file = `${await environmentDir(path)}/${PRIVATE_ENV_FILE}`;
+  const existing = await invoke<string>("read_file", { path: file })
+    .then((t) => JSON.parse(t) as Environments)
+    .catch(() => ({}) as Environments);
+  existing[env] = { ...existing[env], ...values };
+  await invoke("write_file", { path: file, contents: JSON.stringify(existing, null, 2) + "\n" });
+  await ignorePrivateFile();
+  if (!stored<string | null>("Env", null)) store("Env", env);
+  changed();
 }
 
 /** Adds the private environment file to .gitignore, since it holds secrets. */
@@ -256,16 +274,122 @@ export async function requestAt(path: string, line: number) {
   return { model, request: requests.find((r) => r.start <= line && line <= r.end) ?? requests.filter((r) => r.line <= line).at(-1) ?? requests[0] };
 }
 
+/** Runs a command in a PTY, passing its output to `onOutput` as it arrives. Nothing is missed: listening starts first. */
+export async function spawnStreaming(cwd: string, command: string[], onOutput: (text: string) => void) {
+  const channel = `http-${newId()}`;
+  let exit!: () => void;
+  const exited = new Promise<void>((resolve) => (exit = resolve));
+  const unlisten = await Promise.all([listen<string>(`pty:${channel}`, (e) => onOutput(e.payload)), listen(`pty-exit:${channel}`, () => exit())]);
+  exited.then(() => unlisten.forEach((u) => u()));
+  let id: number;
+  try {
+    id = await invoke<number>("pty_spawn", { cwd, command, rows: 24, cols: 500, channel });
+  } catch (e) {
+    unlisten.forEach((u) => u());
+    throw e;
+  }
+  return { exited, kill: () => invoke("pty_kill", { id }).catch(() => {}) };
+}
+
+/** Lets the caller stop a request that's being sent. */
+export type Cancel = { current?: () => void; cancelled?: boolean };
+
+type Transfer = Pick<Exchange, "heads" | "info" | "bodyPath" | "contentType" | "error">;
+
+/**
+ * Sends a prepared request with curl, saving the response in `store` under `id`. curl runs in a PTY rather than
+ * through run_capture, so it can be stopped; a text body goes through a file, since a PTY's input is a terminal.
+ */
+async function transmit(prepared: Prepared, dir: string, store: string, id: string, cookies: string | undefined, cancel: Cancel = {}): Promise<Transfer> {
+  const t: Transfer = { heads: [], bodyPath: "", contentType: "" };
+  for (const d of [store, cookies && parentOf(cookies)]) if (d) await invoke("create_dir", { path: d }).catch(() => {});
+  const files = { headers: `${store}/${id}.headers`, body: `${store}/${id}.body`, cookies };
+  let p = prepared;
+  const requestBody = `${store}/${id}.request`;
+  if (p.body !== undefined) {
+    await invoke("write_file", { path: requestBody, contents: p.body });
+    p = { ...p, body: undefined, bodyFile: requestBody };
+  }
+  const { args } = curlArgs(p, files);
+  let out = "";
+  try {
+    const run = await spawnStreaming(dir, ["/usr/bin/curl", ...args], (text) => (out += text));
+    cancel.current = () => ((cancel.cancelled = true), run.kill());
+    await run.exited;
+  } catch (e) {
+    t.error = String(e).trim() || "curl failed";
+  }
+  cancel.current = undefined;
+  out = out.replace(/\r\n/g, "\n");
+  const at = out.lastIndexOf(INFO_MARKER);
+  if (cancel.cancelled) t.error = "Cancelled";
+  else if (!t.error && at < 0) t.error = out.trim() || "curl failed";
+  else if (!t.error) {
+    try {
+      t.info = JSON.parse(out.slice(at + INFO_MARKER.length)) as CurlInfo;
+      if (t.info.exitcode) t.error = t.info.errormsg || out.slice(0, at).trim() || `curl failed with exit code ${t.info.exitcode}`;
+    } catch {
+      t.error = out.trim() || "curl's output couldn't be read";
+    }
+  }
+  t.heads = parseHeaderDump(await invoke<string>("read_file", { path: files.headers }).catch(() => ""));
+  t.contentType = t.heads.at(-1)?.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+  t.bodyPath = files.body;
+  if (await invoke<boolean>("path_exists", { path: files.body })) {
+    t.bodyPath = `${store}/${id}.${extension(t.contentType)}`;
+    await invoke("rename_path", { from: files.body, to: t.bodyPath }).catch(() => (t.bodyPath = files.body));
+  }
+  for (const f of [files.headers, requestBody]) await invoke("remove_path", { path: f }).catch(() => {});
+  return t;
+}
+
+/**
+ * For the @laravel-session tag: gets Laravel's XSRF-TOKEN cookie when the jar doesn't have one for the host, and
+ * sends it back as X-XSRF-TOKEN, with Origin and Referer, as a browser on the app's pages would. Laravel checks the
+ * header on web routes, and Sanctum treats a request from a stateful origin as a browser session.
+ */
+async function laravelSession(p: Prepared, env: string | undefined, dir: string, cookies: string, cancel: Cancel): Promise<Prepared> {
+  const origin = p.url.match(/^https?:\/\/[^/?#]+/)?.[0];
+  if (!origin) return p;
+  const host = new URL(origin).hostname;
+  const token = async () => (await jarCookies(env)).find((c) => c.name === "XSRF-TOKEN" && (c.domain.replace(/^\./, "") === host || host.endsWith(c.domain)))?.value;
+  if (!(await token())) {
+    const scratch = await cacheDir("http-scratch");
+    for (const csrfPath of [typeof p.laravelSession === "string" ? p.laravelSession : "/sanctum/csrf-cookie", "/"]) {
+      const get: Prepared = { method: "GET", url: origin + csrfPath, headers: [["Accept", "text/html,application/json"]], followRedirects: true, timeout: p.timeout, insecure: p.insecure };
+      const t = await transmit(get, dir, scratch, `csrf-${newId()}`, cookies, cancel);
+      await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
+      if (cancel.cancelled || (await token())) break;
+    }
+  }
+  const value = await token();
+  const has = (name: string) => p.headers.some(([k]) => k.toLowerCase() === name.toLowerCase());
+  const headers = [...p.headers];
+  if (value && !has("X-XSRF-TOKEN")) headers.push(["X-XSRF-TOKEN", decodeURIComponent(value)]);
+  if (!has("Origin")) headers.push(["Origin", origin]);
+  if (!has("Referer")) headers.push(["Referer", `${origin}/`]);
+  if (!has("Accept")) headers.push(["Accept", "application/json"]);
+  return { ...p, headers };
+}
+
+export type SendOptions = {
+  /** Values for names nothing else defines, such as ones typed when asked. */
+  extraVars?: Record<string, string>;
+  cancel?: Cancel;
+  /** Changes the prepared request before it goes out, such as to add Xdebug's trigger. */
+  adjust?: (p: Prepared) => Prepared | Promise<Prepared>;
+};
+
 /**
  * Sends a request from an .http file: runs its pre-request script, replaces variables, sends it with curl, runs
  * its response handler, and records it in the history unless it has the @no-log tag.
  */
-export async function send(path: string, request: HttpRequest, extraVars: Record<string, string> = {}): Promise<Exchange> {
+export async function send(path: string, request: HttpRequest, options: SendOptions = {}): Promise<Exchange> {
   const dir = parentOf(path);
   const model = await host.ensureModel(path);
   const s = await scopes(path, model.getValue());
   const [global, file, env] = s.list.map((l) => l.vars);
-  let variables: Record<string, string> = { ...extraVars };
+  let variables: Record<string, string> = { ...options.extraVars };
   const exchange: Exchange = { id: newId(), time: Date.now(), path, name: request.name, line: request.line, env: s.env, request: undefined!, heads: [], bodyPath: "", contentType: "", tests: [], logs: [], unresolved: [] };
   const lookup = () => lookupIn([variables, globals(), file, env], s.dotenv);
   const scriptRequest = () => ({ method: request.method, url: request.url, headers: request.headers.filter((h) => h.enabled).map((h): [string, string] => [h.name, h.value]), body: request.body });
@@ -283,30 +407,14 @@ export async function send(path: string, request: HttpRequest, extraVars: Record
 
   const store = request.tags.noLog ? await cacheDir("http-scratch") : await cacheDir("http-history");
   const cookies = request.tags.noCookieJar ? undefined : await cookieJar(s.env);
-  for (const d of [store, cookies && parentOf(cookies)]) if (d) await invoke("create_dir", { path: d }).catch(() => {});
-  const files = { headers: `${store}/${exchange.id}.headers`, body: `${store}/${exchange.id}.body`, cookies };
-  const { args, input } = curlArgs(exchange.request, files);
-  try {
-    const out = await invoke<string>("run_capture", { cwd: dir, program: "/usr/bin/curl", args, input, anyStatus: true });
-    const at = out.lastIndexOf(INFO_MARKER);
-    const stderr = out.slice(0, Math.max(0, at)).trim();
-    if (at < 0) exchange.error = out.trim() || "curl failed";
-    else {
-      exchange.info = JSON.parse(out.slice(at + INFO_MARKER.length)) as CurlInfo;
-      if (exchange.info.exitcode) exchange.error = exchange.info.errormsg || stderr || `curl failed with exit code ${exchange.info.exitcode}`;
-    }
-  } catch (e) {
-    exchange.error = String(e).trim() || "curl failed";
+  const cancel = options.cancel ?? {};
+  if (exchange.request.laravelSession) {
+    if (cookies) exchange.request = await laravelSession(exchange.request, s.env, dir, cookies, cancel);
+    else exchange.logs.push("@laravel-session needs cookies, but the request has @no-cookie-jar.");
   }
-  exchange.heads = parseHeaderDump(await invoke<string>("read_file", { path: files.headers }).catch(() => ""));
+  if (options.adjust) exchange.request = await options.adjust(exchange.request);
+  Object.assign(exchange, await transmit(exchange.request, dir, store, exchange.id, cookies, cancel));
   const final = exchange.heads.at(-1);
-  exchange.contentType = final?.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
-  exchange.bodyPath = files.body;
-  if (await invoke<boolean>("path_exists", { path: files.body })) {
-    exchange.bodyPath = `${store}/${exchange.id}.${extension(exchange.contentType)}`;
-    await invoke("rename_path", { from: files.body, to: exchange.bodyPath }).catch(() => (exchange.bodyPath = files.body));
-  }
-  await invoke("remove_path", { path: files.headers }).catch(() => {});
 
   if (final && request.handler) {
     const body = isText(exchange.contentType) ? await invoke<string>("read_file", { path: exchange.bodyPath }).catch(() => "") : "";
@@ -323,8 +431,25 @@ export async function send(path: string, request: HttpRequest, extraVars: Record
     if (out.error) exchange.tests.push({ name: "Response handler", passed: false, message: out.error });
   }
   if (final && request.output) await saveOutput(exchange.bodyPath, request.output, dir);
-  if (!request.tags.noLog) await remember(exchange);
+  if (!request.tags.noLog && !cancel.cancelled) await remember(exchange);
   return exchange;
+}
+
+/** Sends an exchange's request again exactly as it went, without scripts, and records the new exchange. */
+export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchange> {
+  const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false };
+  const cookies = await cookieJar(old.env);
+  Object.assign(exchange, await transmit(old.request, parentOf(old.path), await cacheDir("http-history"), exchange.id, cookies, cancel));
+  await remember(exchange);
+  return exchange;
+}
+
+/** Sends a prepared request without scripts or history, as monitoring does. The body is read, then deleted. */
+export async function probe(p: Prepared, path: string, env: string | undefined, cancel: Cancel = {}) {
+  const id = newId();
+  const t = await transmit(p, parentOf(path), await cacheDir("http-scratch"), id, p.laravelSession ? await cookieJar(env) : undefined, cancel);
+  await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
+  return t;
 }
 
 export const isText = (type: string) => !type || /^text\/|json|xml|javascript|html|x-www-form-urlencoded|graphql|yaml|csv/i.test(type);
@@ -374,12 +499,22 @@ export async function history(): Promise<Exchange[]> {
 }
 
 async function remember(exchange: Exchange) {
-  const list = [exchange, ...(await history())];
-  const dropped = list.splice(HISTORY_SIZE);
+  const all = [exchange, ...(await history())];
+  // Pinned exchanges don't count toward the limit.
+  let unpinned = 0;
+  const keep = all.filter((x) => x.pinned || ++unpinned <= HISTORY_SIZE);
+  await saveHistory(keep);
+  for (const old of all.filter((x) => !keep.includes(x))) await invoke("remove_path", { path: old.bodyPath }).catch(() => {});
+}
+
+async function saveHistory(list: Exchange[]) {
   historyCache = list;
   await invoke("write_file", { path: `${await cacheDir("http-history")}/index.json`, contents: JSON.stringify(list) });
-  for (const old of dropped) await invoke("remove_path", { path: old.bodyPath }).catch(() => {});
   changed();
+}
+
+export async function setPinned(id: string, pinned: boolean) {
+  await saveHistory((await history()).map((x) => (x.id === id ? { ...x, pinned } : x)));
 }
 
 export async function clearHistory() {
@@ -477,7 +612,7 @@ const HEADERS: Record<string, string[]> = {
 };
 
 /** Names a file's scripts set, which exist only once the scripts run. */
-const scriptNames = (text: string) => new Set([...text.matchAll(/(?:client\.global|request\.variables)\.set\(\s*["'`]([\w.-]+)["'`]/g)].map((m) => m[1]));
+export const scriptNames = (text: string) => new Set([...text.matchAll(/(?:client\.global|request\.variables)\.set\(\s*["'`]([\w.-]+)["'`]/g)].map((m) => m[1]));
 
 async function variablesFor(model: monaco.editor.ITextModel) {
   const s = await scopes(model.uri.fsPath, model.getValue());

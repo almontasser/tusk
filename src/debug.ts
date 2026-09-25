@@ -365,6 +365,7 @@ export const stepOver = () => step("next");
 export const stepInto = () => step("stepIn");
 export const stepOut = () => step("stepOut");
 export const isPaused = () => stoppedThread !== null;
+export const isListening = () => running;
 
 // ---- Current line ----
 

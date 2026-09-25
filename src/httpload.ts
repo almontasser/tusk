@@ -1,8 +1,7 @@
-// The HTTP client's collection runner, which sends every request in a file in order, and its stress test, which
-// sends one request many times at once with curl's parallel mode and shows live statistics.
+// The HTTP client's collection runner, which sends every request in a file in order; its stress test, which sends
+// one request many times at once with curl's parallel mode and shows live statistics; and its monitor.
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { cacheDir, cookieJar, type Exchange, host, prepareRequest, send } from "./httpclient";
+import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
 import { histogram, type HttpRequest, loadArgs, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
 import { bytes, h, icon, openExchange, setRunners, showHttpPanel } from "./httpview";
 
@@ -65,65 +64,76 @@ async function runFile(path: string) {
 // ---- Stress test ----
 
 const load = h("div", { class: "http-client http-load" });
-let active: { id: number; unlisten: UnlistenFn[]; timer?: ReturnType<typeof setTimeout> } | null = null;
+let active: { kill(): void; timer?: ReturnType<typeof setTimeout>; stopped: boolean } | null = null;
+/** Concurrency levels a ramp-up steps through, up to the maximum you choose. */
+const RAMP = [1, 2, 5, 10, 20, 50, 100, 200, 500];
 
-async function stopLoad() {
+function stopLoad() {
   if (!active) return;
+  active.stopped = true;
   clearTimeout(active.timer);
-  await invoke("pty_kill", { id: active.id }).catch(() => {});
+  active.kill();
 }
+
+const tile = (label: string, value: string, className = "") => h("div", { class: `http-tile ${className}` }, h("span", { class: "http-tile-value" }, value), h("span", { class: "http-tile-label" }, label));
 
 async function loadTest(path: string, request: HttpRequest) {
   const title = `${request.method} ${request.title || request.url}`;
   const saved = (() => {
     try {
-      return JSON.parse(localStorage.getItem("httpLoad") ?? "null") as { mode: string; count: number; seconds: number; concurrency: number } | null;
+      return JSON.parse(localStorage.getItem("httpLoad") ?? "null") as { mode: string; count: number; seconds: number; step?: number; concurrency: number } | null;
     } catch {
       return null;
     }
   })() ?? { mode: "count", count: 200, seconds: 10, concurrency: 10 };
-  const mode = h("select", {}, h("option", { value: "count", textContent: "Requests" }), h("option", { value: "seconds", textContent: "Seconds" }));
+  saved.step ??= 5;
+  const mode = h("select", { title: "Send a number of requests, send for a number of seconds, or ramp concurrency up step by step" }, h("option", { value: "count", textContent: "Requests" }), h("option", { value: "seconds", textContent: "Seconds" }), h("option", { value: "ramp", textContent: "Ramp up, seconds per step" }));
   mode.value = saved.mode;
-  const amount = h("input", { type: "number", min: "1", value: String(saved.mode === "count" ? saved.count : saved.seconds), class: "http-number" });
+  const valueFor = (m: string) => String(m === "count" ? saved.count : m === "seconds" ? saved.seconds : saved.step);
+  const amount = h("input", { type: "number", min: "1", value: valueFor(saved.mode), class: "http-number" });
   const concurrency = h("input", { type: "number", min: "1", max: "500", value: String(saved.concurrency), class: "http-number" });
-  mode.onchange = () => (amount.value = String(mode.value === "count" ? saved.count : saved.seconds));
+  const concurrencyLabel = h("label", { class: "muted" }, saved.mode === "ramp" ? "Up to" : "Concurrency");
+  mode.onchange = () => ((amount.value = valueFor(mode.value)), (concurrencyLabel.textContent = mode.value === "ramp" ? "Up to" : "Concurrency"));
   const start = h("button", { class: "primary http-send" }, icon("play"), "Start");
   const stop = h("button", { textContent: "Stop", disabled: true, onclick: stopLoad });
-  const results = h("div", { class: "http-load-results" }, h("p", { class: "http-hint" }, "Sends the request many times at once and measures how the server holds up. Scripts don't run, and cookies kept for the environment are sent. Only test servers you're allowed to load."));
-  load.replaceChildren(
-    h("div", { class: "http-bar" }, h("strong", { class: "http-load-title", title }, title), h("span", { class: "http-spacer" }), mode, amount, h("label", { class: "muted" }, "Concurrency"), concurrency, start, stop),
-    results,
+  const results = h(
+    "div",
+    { class: "http-load-results" },
+    h("p", { class: "http-hint" }, "Sends the request many times at once and measures how the server holds up. A ramp-up steps through 1, 2, 5, 10, 20, 50… requests at a time, to show where response times start to climb. Scripts don't run, and cookies kept for the environment are sent. Only test servers you're allowed to load."),
   );
+  load.replaceChildren(h("div", { class: "http-bar" }, h("strong", { class: "http-load-title", title }, title), h("span", { class: "http-spacer" }), mode, amount, concurrencyLabel, concurrency, start, stop), results);
   showHttpPanel("Stress Test", load);
   start.onclick = async () => {
     if (active) return;
     const n = Math.max(1, Math.floor(Number(amount.value) || 1));
     const c = Math.max(1, Math.min(500, Math.floor(Number(concurrency.value) || 1)));
-    const settings = { mode: mode.value, count: mode.value === "count" ? n : saved.count, seconds: mode.value === "seconds" ? n : saved.seconds, concurrency: c };
-    Object.assign(saved, settings);
+    Object.assign(saved, { mode: mode.value, concurrency: c, [mode.value === "count" ? "count" : mode.value === "seconds" ? "seconds" : "step"]: n });
     try {
-      localStorage.setItem("httpLoad", JSON.stringify(settings));
+      localStorage.setItem("httpLoad", JSON.stringify(saved));
     } catch {}
     const fresh = parseHttp((await host.ensureModel(path)).getValue()).requests.find((q) => q.line === request.line) ?? request;
     start.disabled = true;
     stop.disabled = false;
-    await run(path, fresh, mode.value === "count" ? n : 10_000_000, mode.value === "seconds" ? n : 0, c, results).finally(() => {
+    try {
+      const prepared = await loadable(path, fresh);
+      if (mode.value === "ramp") await ramp(path, prepared, n, c, results);
+      else {
+        const count = mode.value === "count" ? n : 10_000_000;
+        const seconds = mode.value === "seconds" ? n : 0;
+        await burst(path, prepared, count, seconds, c, (samples, perSecond, elapsed) => render(results, samples, perSecond, elapsed, count, seconds, c));
+      }
+    } catch (e) {
+      results.replaceChildren(h("p", { class: "http-error" }, String(e)));
+    } finally {
       start.disabled = false;
       stop.disabled = true;
-    });
+    }
   };
 }
 
-async function run(path: string, request: HttpRequest, count: number, seconds: number, concurrency: number, results: HTMLElement) {
-  let prepared: Prepared;
-  let env: string | undefined;
-  try {
-    ({ prepared, env } = await prepareRequest(path, request));
-  } catch (e) {
-    results.replaceChildren(h("p", { class: "http-error" }, `Couldn't prepare the request: ${e}`));
-    return;
-  }
-  // Every request reads the body, so it goes in a file rather than on stdin.
+/** The request prepared for repeating: every request reads the body, so a text body goes in a file. */
+async function loadable(path: string, request: HttpRequest): Promise<{ prepared: Prepared; jar?: string }> {
+  let { prepared, env } = await prepareRequest(path, request);
   if (prepared.body !== undefined) {
     const file = `${await cacheDir("http-scratch")}/load-body`;
     await invoke("create_dir", { path: file.slice(0, file.lastIndexOf("/")) }).catch(() => {});
@@ -131,55 +141,82 @@ async function run(path: string, request: HttpRequest, count: number, seconds: n
     prepared = { ...prepared, body: undefined, bodyFile: file };
   }
   const jar = await cookieJar(env);
-  const args = loadArgs(prepared, count, concurrency, (await invoke<boolean>("path_exists", { path: jar })) ? jar : undefined);
+  return { prepared, jar: (await invoke<boolean>("path_exists", { path: jar })) ? jar : undefined };
+}
+
+/** Sends `count` requests (or for `seconds`), `concurrency` at a time, calling `update` with the results as they come. */
+async function burst(path: string, { prepared, jar }: { prepared: Prepared; jar?: string }, count: number, seconds: number, concurrency: number, update: (samples: Sample[], perSecond: number[], elapsed: number) => void) {
   const samples: Sample[] = [];
   /** Requests finished in each second since the start. */
   const perSecond: number[] = [];
-  let began = performance.now();
-  const elapsed = () => Math.max(0, (performance.now() - began) / 1000);
+  const began = performance.now();
+  const elapsed = () => (performance.now() - began) / 1000;
   let buffer = "";
-  let id: number;
-  try {
-    // Output events are named by the terminal's ID, which only comes back after it starts, so curl waits a moment
-    // for the listeners. ponytail: a fixed 0.3 s head start; have pty_spawn take an ID from the caller if it's ever short.
-    const command = ["/bin/sh", "-c", 'sleep 0.3; exec "$0" "$@"', "/usr/bin/curl", ...args];
-    id = await invoke<number>("pty_spawn", { cwd: path.slice(0, path.lastIndexOf("/")), command, rows: 24, cols: 200 });
-    began = performance.now() + 300;
-  } catch (e) {
-    results.replaceChildren(h("p", { class: "http-error" }, `Couldn't start curl: ${e}`));
-    return;
-  }
-  const done = new Promise<void>((resolve) => {
-    const unlisten: UnlistenFn[] = [];
-    active = { id, unlisten };
-    listen<string>(`pty:${id}`, ({ payload }) => {
-      buffer += payload;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const s = parseSample(line);
-        if (!s) continue;
-        samples.push(s);
-        const second = Math.floor(elapsed());
-        perSecond[second] = (perSecond[second] ?? 0) + 1;
-      }
-    }).then((u) => unlisten.push(u));
-    listen(`pty-exit:${id}`, () => resolve()).then((u) => unlisten.push(u));
-    if (seconds) active.timer = setTimeout(stopLoad, seconds * 1000);
+  const run = await spawnStreaming(path.slice(0, path.lastIndexOf("/")), ["/usr/bin/curl", ...loadArgs(prepared, count, concurrency, jar)], (text) => {
+    buffer += text;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const s = parseSample(line);
+      if (!s) continue;
+      samples.push(s);
+      const second = Math.floor(elapsed());
+      perSecond[second] = (perSecond[second] ?? 0) + 1;
+    }
   });
-  const draw = () => render(results, samples, perSecond, elapsed(), count, seconds, concurrency);
-  const ticker = setInterval(draw, 250);
-  await done;
+  active = { kill: run.kill, stopped: false };
+  if (seconds) active.timer = setTimeout(stopLoad, seconds * 1000);
+  const ticker = setInterval(() => update(samples, perSecond, elapsed()), 250);
+  await run.exited;
   clearInterval(ticker);
-  active?.unlisten.forEach((u) => u());
-  clearTimeout(active?.timer);
+  clearTimeout(active.timer);
+  const stopped = active.stopped;
   active = null;
+  update(samples, perSecond, elapsed());
+  return { samples, elapsed: elapsed(), stopped };
+}
+
+async function ramp(path: string, request: { prepared: Prepared; jar?: string }, stepSeconds: number, max: number, results: HTMLElement) {
+  const levels = [...RAMP.filter((c) => c < max), max];
+  const steps: { concurrency: number; summary: ReturnType<typeof summarize> }[] = [];
+  const live = h("div", {});
+  const draw = () =>
+    results.replaceChildren(
+      h("div", { class: "http-progress" }, h("span", { style: `width:${(steps.length / levels.length) * 100}%` })),
+      live,
+      h(
+        "div",
+        { class: "http-charts" },
+        chart("Requests per second at each concurrency", steps.map((st) => ({ label: String(st.concurrency), value: st.summary.rps, tip: `${st.concurrency} at a time: ${st.summary.rps.toFixed(1)} requests per second` })), (v) => v.toFixed(0)),
+        chart("95th percentile response time at each concurrency", steps.map((st) => ({ label: String(st.concurrency), value: st.summary.p95, tip: `${st.concurrency} at a time: 95% took ${ms(st.summary.p95)} or less`, bad: st.summary.failed > 0 })), (v) => ms(v)),
+        h(
+          "div",
+          { class: "http-chart" },
+          h("h4", {}, "Steps"),
+          h(
+            "table",
+            { class: "http-table" },
+            h("thead", {}, h("tr", {}, ...["At a time", "Req/s", "Median", "95th", "Failed"].map((t) => h("th", { textContent: t })))),
+            h("tbody", {}, ...steps.map((st) => h("tr", {}, h("td", {}, String(st.concurrency)), h("td", {}, st.summary.rps.toFixed(1)), h("td", {}, ms(st.summary.p50)), h("td", {}, ms(st.summary.p95)), h("td", { class: st.summary.failed ? "bad" : "" }, String(st.summary.failed))))),
+          ),
+        ),
+      ),
+    );
+  for (const concurrency of levels) {
+    draw();
+    const result = await burst(path, request, 10_000_000, stepSeconds, concurrency, (samples, _, elapsed) => {
+      const s = summarize(samples, elapsed);
+      live.replaceChildren(h("div", { class: "http-tiles" }, tile("Now at a time", String(concurrency)), tile("Requests per second", s.rps.toFixed(1)), tile("95th percentile", ms(s.p95)), tile("Failed", String(s.failed), s.failed ? "bad" : "")));
+    });
+    steps.push({ concurrency, summary: summarize(result.samples, result.elapsed) });
+    if (result.elapsed < stepSeconds - 0.5) break; // Stopped.
+  }
+  live.replaceChildren();
   draw();
 }
 
 function render(results: HTMLElement, samples: Sample[], perSecond: number[], elapsed: number, count: number, seconds: number, concurrency: number) {
   const s = summarize(samples, elapsed);
-  const tile = (label: string, value: string, className = "") => h("div", { class: `http-tile ${className}` }, h("span", { class: "http-tile-value" }, value), h("span", { class: "http-tile-label" }, label));
   const progress = seconds ? Math.min(1, elapsed / seconds) : Math.min(1, s.count / count);
   const errors = s.codes.filter(([code]) => code === "Error" || Number(code) >= 500).reduce((a, [, n]) => a + n, 0);
   results.replaceChildren(
@@ -216,11 +253,103 @@ function render(results: HTMLElement, samples: Sample[], perSecond: number[], el
   );
 }
 
+// ---- Monitor ----
+// Sends the request again every few seconds, without scripts or history, and charts the results.
+
+const watch = h("div", { class: "http-client http-load" });
+let watching: { timer: ReturnType<typeof setTimeout>; cancel: Cancel; stopped: boolean } | null = null;
+
+function stopMonitor() {
+  if (!watching) return;
+  watching.stopped = true;
+  clearTimeout(watching.timer);
+  watching.cancel.current?.();
+  watching = null;
+}
+
+function monitor(path: string, request: HttpRequest) {
+  stopMonitor();
+  const title = `${request.method} ${request.title || request.url}`;
+  const interval = h("input", { type: "number", min: "1", value: "5", class: "http-number" });
+  const start = h("button", { class: "primary http-send" }, icon("play"), "Start");
+  const stop = h("button", { textContent: "Stop", disabled: true });
+  const results = h("div", { class: "http-load-results" }, h("p", { class: "http-hint" }, "Sends the request every few seconds and charts its status and response time, such as to watch an endpoint during a deploy. Scripts don't run, and the checks stay out of the history."));
+  watch.replaceChildren(h("div", { class: "http-bar" }, h("strong", { class: "http-load-title", title }, title), h("span", { class: "http-spacer" }), h("label", { class: "muted" }, "Every (seconds)"), interval, start, stop), results);
+  showHttpPanel("Monitor", watch);
+  stop.onclick = () => {
+    stopMonitor();
+    start.disabled = false;
+    stop.disabled = true;
+  };
+  start.onclick = async () => {
+    const fresh = parseHttp((await host.ensureModel(path)).getValue()).requests.find((q) => q.line === request.line) ?? request;
+    let prepared: Prepared;
+    let env: string | undefined;
+    try {
+      ({ prepared, env } = await prepareRequest(path, fresh));
+    } catch (e) {
+      results.replaceChildren(h("p", { class: "http-error" }, `Couldn't prepare the request: ${e}`));
+      return;
+    }
+    start.disabled = true;
+    stop.disabled = false;
+    const checks: { time: number; status: number; seconds: number; error?: string }[] = [];
+    const state = { timer: 0 as unknown as ReturnType<typeof setTimeout>, cancel: {} as Cancel, stopped: false };
+    watching = state;
+    const tick = async () => {
+      state.cancel = {};
+      const t = await probe(prepared, path, env, state.cancel);
+      if (state.stopped) return;
+      const status = t.heads.at(-1)?.status ?? 0;
+      checks.push({ time: Date.now(), status, seconds: t.info?.time_total ?? 0, error: t.error });
+      drawMonitor(results, checks);
+      state.timer = setTimeout(tick, Math.max(1, Number(interval.value) || 5) * 1000);
+    };
+    tick();
+  };
+}
+
+function drawMonitor(results: HTMLElement, checks: { time: number; status: number; seconds: number; error?: string }[]) {
+  const ok = (c: (typeof checks)[number]) => !c.error && c.status > 0 && c.status < 500;
+  const up = checks.filter(ok).length;
+  const times = checks.filter(ok).map((c) => c.seconds);
+  const s = summarize(times.map((t) => ({ code: 200, total: t, ttfb: t, exit: 0, bytes: 0 })), 1);
+  const last = checks.at(-1)!;
+  const recent = checks.slice(-60);
+  results.replaceChildren(
+    h(
+      "div",
+      { class: "http-tiles" },
+      tile("Last status", last.error && !last.status ? "Failed" : String(last.status), ok(last) ? "" : "bad"),
+      tile("Up", `${((up / checks.length) * 100).toFixed(1)}%`, up < checks.length ? "bad" : ""),
+      tile("Checks", String(checks.length)),
+      tile("Median", ms(s.p50)),
+      tile("95th percentile", ms(s.p95)),
+      tile("Slowest", ms(s.max)),
+    ),
+    h(
+      "div",
+      { class: "http-charts" },
+      chart(
+        "Response time per check (the last 60)",
+        recent.map((c) => ({ label: new Date(c.time).toLocaleTimeString(), value: c.seconds, tip: `${new Date(c.time).toLocaleTimeString()}: ${c.error && !c.status ? c.error : c.status} in ${ms(c.seconds)}`, bad: !ok(c) })),
+        (v) => ms(v),
+      ),
+      h(
+        "div",
+        { class: "http-chart" },
+        h("h4", {}, "Latest checks"),
+        h("table", { class: "http-table" }, h("tbody", {}, ...checks.slice(-8).reverse().map((c) => h("tr", {}, h("td", {}, new Date(c.time).toLocaleTimeString()), h("td", {}, h("span", { class: `http-code-badge ${statusClass(c.status)}` }, c.status ? String(c.status) : "ERR")), h("td", {}, c.error && !c.status ? c.error : ms(c.seconds)))))),
+      ),
+    ),
+  );
+}
+
 /** A bar chart of one series, with a tooltip per bar. */
-function chart(title: string, bars: { label: string; value: number; tip: string }[], format: (v: number) => string) {
+function chart(title: string, bars: { label: string; value: number; tip: string; bad?: boolean }[], format: (v: number) => string) {
   const W = 360;
   const H = 120;
-  const max = Math.max(1, ...bars.map((b) => b.value));
+  const max = Math.max(0, ...bars.map((b) => b.value)) || 1;
   const gap = 2;
   const width = bars.length ? (W - gap * (bars.length - 1)) / bars.length : W;
   const ns = "http://www.w3.org/2000/svg";
@@ -241,7 +370,7 @@ function chart(title: string, bars: { label: string; value: number; tip: string 
     const r = Math.min(4, width / 2, height);
     // Rounded at the top, square on the baseline.
     bar.setAttribute("d", height ? `M${x},${H} V${H - height + r} Q${x},${H - height} ${x + r},${H - height} H${x + width - r} Q${x + width},${H - height} ${x + width},${H - height + r} V${H} Z` : "");
-    bar.setAttribute("class", "http-bar-fill");
+    bar.setAttribute("class", `http-bar-fill${b.bad ? " bad" : ""}`);
     const tip = document.createElementNS(ns, "title");
     tip.textContent = b.tip;
     const group = document.createElementNS(ns, "g");
@@ -254,8 +383,9 @@ function chart(title: string, bars: { label: string; value: number; tip: string 
     t.textContent = text;
     svg.append(t);
   };
-  if (bars.length) label(bars[0].label.split("–")[0], 0, "start"), label(bars.at(-1)!.label.split("–")[1] ?? "", W, "end");
+  // A range label, such as 0–1 s, marks its start on the left and the last one's end on the right.
+  if (bars.length) label(bars[0].label.split("–")[0], 0, "start"), label(bars.at(-1)!.label.split("–").at(-1)!, W, "end");
   return h("div", { class: "http-chart" }, h("h4", {}, title, h("span", { class: "muted" }, ` · peak ${format(max)}`)), svg);
 }
 
-setRunners(loadTest, runFile);
+setRunners(loadTest, runFile, monitor);

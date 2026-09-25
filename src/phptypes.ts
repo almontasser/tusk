@@ -185,3 +185,75 @@ function oneParameterPerLine(line: string): string {
   }
   return line;
 }
+
+/** The text between the bracket at `open` and its match, skipping brackets in strings and comments. */
+function bracketed(source: string, open: number): string {
+  const pairs: Record<string, string> = { "[": "]", "(": ")", "{": "}" };
+  const stack: string[] = [];
+  for (let i = open; i < source.length; i++) {
+    const c = source[i];
+    if (c === "'" || c === '"') {
+      for (i++; i < source.length && source[i] !== c; i++) if (source[i] === "\\") i++;
+    } else if (c === "/" && source[i + 1] === "/") {
+      const end = source.indexOf("\n", i);
+      i = end < 0 ? source.length : end;
+    }
+    else if (c === "/" && source[i + 1] === "*") i = source.indexOf("*/", i) + 1 || source.length;
+    else if (pairs[c]) stack.push(pairs[c]);
+    else if (c === stack.at(-1) && stack.pop() !== undefined && !stack.length) return source.slice(open + 1, i);
+  }
+  return source.slice(open + 1);
+}
+
+/** Splits array or argument text at its top-level commas. */
+function topLevel(text: string): string[] {
+  const items: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'" || c === '"') for (i++; i < text.length && text[i] !== c; i++) text[i] === "\\" && i++;
+    else if ("[({".includes(c)) depth++;
+    else if ("])}".includes(c)) depth--;
+    else if (c === "," && !depth) items.push(text.slice(start, i)), (start = i + 1);
+  }
+  items.push(text.slice(start));
+  return items.map((s) => s.trim()).filter(Boolean);
+}
+
+/** The body of `method` in PHP source, or "" when it isn't declared. */
+export function methodBody(source: string, method: string): string {
+  const m = new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`, "i").exec(source);
+  if (!m) return "";
+  const brace = source.indexOf("{", m.index + m[0].length + bracketed(source, m.index + m[0].length - 1).length);
+  return brace < 0 ? "" : bracketed(source, brace);
+}
+
+/**
+ * Validation rules as field → rule text, from the first rules array in `code`: a FormRequest's `rules()` return, or
+ * `validate([...])` and `Validator::make($data, [...])` in a controller. Rule objects read as their source text.
+ */
+export function validationRules(code: string): Record<string, string> {
+  const m = /(?:return|validate\s*\(|Validator::make\s*\([^,]+,)\s*\[/.exec(code);
+  if (!m) return {};
+  const rules: Record<string, string> = {};
+  const array = bracketed(code, m.index + m[0].length - 1).replace(/(['"])(?:\\.|(?!\1).)*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (t) => (t.startsWith("/") ? "" : t));
+  for (const item of topLevel(array)) {
+    const entry = item.match(/^(['"])(.+?)\1\s*=>\s*([\s\S]*)$/);
+    if (!entry) continue;
+    const strings = [...entry[3].matchAll(/(['"])(.*?)\1/g)].map((s) => s[2]);
+    // Rule objects, such as Rule::in(...), keep their source, so a type name in them still counts.
+    const objects = entry[3].replace(/(['"]).*?\1/g, "").replace(/[\s[\],|]/g, "");
+    rules[entry[2]] = [...strings, ...(objects ? [entry[3].trim()] : [])].join("|");
+  }
+  return rules;
+}
+
+/** The class a controller method's parameter is typed as, when its name ends in Request and isn't Laravel's own Request. */
+export function formRequestParameter(source: string, method: string): string | null {
+  const m = new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`, "i").exec(source);
+  if (!m) return null;
+  const params = bracketed(source, m.index + m[0].length - 1);
+  const type = [...params.matchAll(/([\\\w]+Request)\s+\$\w+/g)].map((t) => t[1]).find((t) => !/^\\?(Illuminate\\Http\\)?Request$/.test(t));
+  return type ? nameResolver(source).resolve(type) : null;
+}

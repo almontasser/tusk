@@ -46,7 +46,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | Editing a request in the HTTP tab rewrites its block (`src/httpfile.ts`, `formatRequest`): comments among its headers or after its body are dropped, and a URL split over several lines joins into one. There's no WebSocket, GraphQL, or gRPC support. The history keeps the last 100 requests per project. A stress test runs no scripts and starts about 0.3 seconds late (`src/httpload.ts`). |
+| HTTP client | WebSockets go through the webview's WebSocket, which can't send custom headers (`connectWebSocket` in `src/httpview.ts`). GraphQL has no schema completion. There's no gRPC. The history keeps the last 100 unpinned requests per project. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. |
 | Split editors | Up to four panes. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -485,26 +485,39 @@ at the top.
   developer tools (**Copy as cURL**).
 - The method icon makes requests from `php artisan route:list`: one route, all
   API routes, or every route. Each gets `{{host}}` for the app's address and a
-  variable for each route parameter. When artisan fails, such as on an error
-  while the app boots, the message says why.
+  variable for each route parameter. A `POST`, `PUT`, or `PATCH` request's JSON
+  body lists the fields its controller validates, read from the FormRequest it
+  takes or its `validate()` call, with a value of the right type for each. A web
+  route gets Laravel session auth, and an API route behind `auth:sanctum` a
+  bearer token. When artisan fails, such as on an error while the app boots,
+  the message says why.
 - **History** lists the last 100 requests you sent in the project, with their
-  responses. Click one to see it again.
+  responses, and a filter. Click one to see it again. Right-click one to send it
+  again exactly as it went, pin it (pinned requests stay at the top and don't
+  count toward the 100), compare it with the response on screen, or copy it as
+  cURL or Laravel code.
 
 ### The HTTP tab
 
 The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
 menu, and the environment. Under the URL, you see it with its variables
-replaced, and the names nothing defines.
+replaced, and the names nothing defines. While a request runs, **Send** becomes
+**Cancel** and the time it's taken counts up.
+
+When a request uses a variable nothing defines, **Send** asks for its value
+first. **Send** uses the values you type, and can save them to the environment
+in the private environment file. **Send Anyway** sends `{{name}}` as written.
 
 The request's tabs edit its text in the `.http` file, and edits in the editor
-show in the tabs:
+show in the tabs. Each change rewrites only the lines it touches, keeping
+comments and a URL split over several lines, and saves the file.
 
 | Tab | What you set |
 | --- | --- |
 | Params | The URL's query parameters |
 | Headers | Headers, each of which you can turn off (it's commented out in the file) |
 | Body | None, JSON (with **Format**), form fields, multipart fields and files, text, or a file (`< ./path`, or `<@ ./path` to replace variables in it) |
-| Auth | A bearer token, or a user and password (`Authorization: Basic user password`, encoded when sent, as in PhpStorm) |
+| Auth | A bearer token, a user and password (`Authorization: Basic user password`, encoded when sent, as in PhpStorm), or a Laravel session |
 | Scripts | JavaScript that runs before the request and after the response, with snippets for common tests |
 | Settings | Title, name for scripts, redirects, cookies, TLS verification, history, timeouts, and a file to save the response to |
 
@@ -512,7 +525,12 @@ The response shows its status, time, size, and test results. Choosing a request
 shows its last response from the history. The response has these tabs:
 
 - **Body**: formatted and highlighted, or raw. HTML and images also have a
-  preview. Copy it, save it, or open it in an editor tab.
+  preview. Copy it, save it, open it in an editor tab, or compare it with an
+  earlier response to the same request in a diff. A JSON body has a filter:
+  type a path such as `$.data[*].id` to see only what it selects. When Laravel
+  answers with an exception (with `APP_DEBUG` on), the body starts with its
+  class, message, and the files and lines of the stack trace, which open when
+  you click them. Paths in Sail's container map to the project.
 - **Headers**, including each redirect on the way.
 - **Cookies** the response set, and those kept for the environment.
 - **Timing**: DNS lookup, connecting, TLS, waiting, and downloading.
@@ -520,8 +538,18 @@ shows its last response from the history. The response has these tabs:
 - **Request**: the request as sent, as a curl command and as Laravel `Http::`
   code, each with **Copy**.
 
-The menu next to **Send** also copies the request as cURL or Laravel code, runs
-every request in the file, and starts a stress test.
+The menu next to **Send** also has:
+
+- **Send with Debugger**: starts listening for Xdebug and sends the request
+  with `XDEBUG_SESSION`, so it stops at your breakpoints. The server's PHP needs
+  Xdebug in debug mode, as **Start Debug Server** runs it.
+- **Send with Profiler**: sends the request to the profiling server, starting
+  it if needed, and opens the request's profile.
+- **Copy as cURL** and **Copy as Laravel HTTP**.
+- **Run All Requests in File**, **Stress Test…**, and **Monitor…**.
+- **Go to Controller**: opens the controller method of the route the request
+  calls, matched by method and path.
+- **Open in Editor**, **Duplicate**, and **Delete**.
 
 In the editor, each request has **▶ Send Request** and **Open in HTTP Client**
 above it, and the first shows the environment and **Run All**. The editor
@@ -604,12 +632,52 @@ Put these comments above the request line:
 | `# @timeout 5` | Seconds before giving up (60 by default) |
 | `# @connection-timeout 2` | Seconds to wait for the connection |
 | `# @insecure` | Accept any TLS certificate. PhpStorm reads it as a comment |
+| `# @laravel-session` | Sign in with Laravel's session, as **Auth** > **Laravel session** sets it. A path after it, such as `/csrf`, is where to get the XSRF token. PhpStorm reads it as a comment |
 
 After the body, `>> ./out.json` saves the response to a file, adding a number
 when it exists, and `>>! ./out.json` replaces it.
 
 Cookies work like a browser's: responses' cookies are kept per environment and
 sent with later requests. **HTTP Client: Clear Cookies** in ⌘⇧A forgets them.
+
+### Laravel session auth
+
+Web routes and Sanctum's SPA authentication check a session cookie and a CSRF
+token, as a browser sends them. With **Laravel session** auth, a request first
+gets Laravel's `XSRF-TOKEN` cookie from `/sanctum/csrf-cookie` (or `/`) when the
+environment's cookies don't have one, then sends it back as `X-XSRF-TOKEN`, with
+`Origin`, `Referer`, and `Accept: application/json`. Send your login request,
+such as `POST /login` with an email and password, with this auth, and the
+requests after it with the same auth use the session.
+
+### GraphQL
+
+A `GRAPHQL` request sends a query, and optionally variables, as a JSON `POST`.
+Its Body tab has a Query editor and a Variables editor. In the file, the
+variables are a JSON object after a blank line:
+
+```http
+GRAPHQL {{host}}/graphql
+
+query Posts($first: Int) { posts(first: $first) { id title } }
+
+{"first": 10}
+```
+
+### WebSockets
+
+A `WEBSOCKET` request connects when you click **Connect**, and the response
+side becomes a console: what you send and receive, with times and formatted
+JSON, and a box to send more (⌘⏎). The file's messages, each after a line of
+`===`, are sent once connected. A line of `=== wait-for-server` waits for a
+message from the server before the next. Pings from Pusher and Laravel Reverb
+are answered, so the connection stays open.
+
+```http
+WEBSOCKET ws://localhost:8080/app/{{reverbKey}}
+===
+{"event": "pusher:subscribe", "data": {"channel": "posts"}}
+```
 
 ### Running a file
 
@@ -625,6 +693,19 @@ times, requests completed each second, a histogram of response times, and the
 status codes. Choose a number of requests or a number of seconds, and how many
 run at a time (up to 500). Scripts don't run, and the environment's cookies are
 sent. Only test servers you're allowed to load.
+
+**Ramp up** steps through 1, 2, 5, 10, 20, 50, and more requests at a time, up
+to the number you choose, for the seconds per step you choose. It charts
+requests per second and the 95th percentile response time at each step, marking
+steps with failures, so you see where the server slows down.
+
+### Monitoring
+
+**Monitor…** sends the request every few seconds, such as to watch an endpoint
+during a deploy. The **Monitor** tab shows the last status, how often it was
+up, the median, 95th percentile, and slowest response times, a chart of the
+last 60 checks with failures in red, and the latest checks. Scripts don't run,
+and checks stay out of the history.
 
 ## Composer
 

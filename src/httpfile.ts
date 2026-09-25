@@ -29,6 +29,12 @@ export type HttpRequest = {
   handler?: Script;
   /** `>> path` saves the response body; `>>! path` overwrites the file instead of adding a number. */
   output?: { path: string; force: boolean };
+  /** The URL as written over several lines, kept while the URL doesn't change. */
+  urlLines?: string[];
+  /** Comments among the headers, each with the number of headers before it. */
+  headerComments?: [number, string][];
+  /** Comments in or after the body, each with the number of body lines before it. */
+  bodyComments?: [number, string][];
 };
 
 export type Tags = {
@@ -41,9 +47,11 @@ export type Tags = {
   /** Seconds. */
   timeout?: number;
   connectionTimeout?: number;
+  /** Send Laravel's XSRF token and a browser's Origin, fetching the token from this path (or the defaults) first. Not a PhpStorm tag. */
+  laravelSession?: string | true;
 };
 
-export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"];
+export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT", "GRAPHQL", "WEBSOCKET"];
 const REQUEST_LINE = new RegExp(`^(${METHODS.join("|")})\\s+(\\S+)(?:\\s+(HTTP\\/[\\d.]+))?\\s*$`, "i");
 const VAR_LINE = /^@([\w.-]+)\s*=\s*(.*?)\s*$/;
 const TAG_LINE = /^\s*(?:#|\/\/)\s*@([\w-]+)(?:\s+(.*?))?\s*$/;
@@ -109,6 +117,7 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
         else if (tag === "insecure") tags.insecure = true;
         else if (tag === "timeout") tags.timeout = seconds(value);
         else if (tag === "connection-timeout") tags.connectionTimeout = seconds(value);
+        else if (tag === "laravel-session") tags.laravelSession = value || true;
         else comments.push(line);
       } else if (isComment(line)) comments.push(line);
       else if (/^<\s*(\{%|\S)/.test(line.trim()) && !REQUEST_LINE.test(line.trim())) ([preScript, i] = readScript(lines, i, "<")), i--;
@@ -133,25 +142,36 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
       tags,
       preScript,
     };
+    const urlStart = i;
     i++;
     // Indented lines continue the URL, such as one query parameter per line.
     while (i < to && /^\s+[?&/]/.test(lines[i])) request.url += lines[i++].trim();
-    for (; i < to && lines[i].trim(); i++) {
+    if (i - urlStart > 1) request.urlLines = lines.slice(urlStart, i);
+    const headerComments: [number, string][] = [];
+    // A WebSocket request's first === line ends its headers, even without a blank line.
+    for (; i < to && lines[i].trim() && !lines[i].startsWith("==="); i++) {
       const line = lines[i];
       // A commented-out header is a header you turned off.
       const off = line.match(/^\s*#\s*([\w-]+)\s*:\s?(.*)$/);
       if (off && !TAG_LINE.test(line)) request.headers.push({ name: off[1], value: off[2].trim(), enabled: false });
-      else if (isComment(line)) continue;
+      else if (isComment(line)) headerComments.push([request.headers.length, line]);
       else if (line.indexOf(":") > 0) request.headers.push({ name: line.slice(0, line.indexOf(":")).trim(), value: line.slice(line.indexOf(":") + 1).trim(), enabled: true });
     }
+    if (headerComments.length) request.headerComments = headerComments;
     const body: string[] = [];
+    const bodyComments: [number, string][] = [];
     for (; i < to; i++) {
       const line = lines[i];
       if ((m = line.match(/^>>(!)?\s+(\S.*?)\s*$/))) request.output = { path: m[2], force: !!m[1] };
       else if (/^>\s*(\{%|\S)/.test(line)) ([request.handler, i] = readScript(lines, i, ">")), i--;
       else if (/^<>\s/.test(line)) continue; // PhpStorm's links to saved responses.
-      else if (!request.handler && !request.output && !isComment(line)) body.push(line);
+      else if (isComment(line)) bodyComments.push([body.length, line]);
+      else if (!request.handler && !request.output) body.push(line);
     }
+    // Positions count from the body's first line, after the blank lines that trimming removes.
+    const leading = body.findIndex((l) => l.trim());
+    const kept = leading < 0 ? 0 : body.slice(leading).join("\n").trimEnd().split("\n").length;
+    if (bodyComments.length) request.bodyComments = bodyComments.map(([n, l]) => [Math.min(Math.max(0, n - Math.max(0, leading)), kept), l]);
     request.body = body.join("\n").trim();
     requests.push(request);
   };
@@ -171,7 +191,22 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
 
 const scriptLines = (prefix: string, s: Script) => (s.file ? [`${prefix} ${s.file}`] : [`${prefix} {%`, ...(s.code ?? "").split("\n").map((l) => (l ? `    ${l}` : l)), "%}"]);
 
-/** A request's block as text, starting with its ### line. The inverse of parsing, apart from comments' placement. */
+/** The request line, and the URL's continuation lines when it was written over several and its layout still fits. */
+function requestLines(r: HttpRequest): string[] {
+  const version = r.httpVersion ? ` ${r.httpVersion}` : "";
+  if (!r.urlLines || version) return [`${r.method} ${r.url}${version}`];
+  const [first, ...rest] = r.urlLines;
+  const written = first.trim().split(/\s+/)[1] + rest.map((l) => l.trim()).join("");
+  if (written === r.url && first.trim().split(/\s+/)[0].toUpperCase() === r.method) return r.urlLines;
+  // The URL changed: keep one query parameter per line, as it was.
+  const indent = rest[0]?.match(/^\s*/)![0] || "    ";
+  const q = r.url.indexOf("?");
+  if (q < 0) return [`${r.method} ${r.url}`];
+  const params = r.url.slice(q + 1).split("&").filter(Boolean);
+  return [`${r.method} ${r.url.slice(0, q)}`, ...params.map((p, i) => `${indent}${i ? "&" : "?"}${p}`)];
+}
+
+/** A request's block as text, starting with its ### line. The inverse of parsing: comments stay near where they were. */
 export function formatRequest(r: HttpRequest): string {
   const out = [`###${r.title ? ` ${r.title}` : ""}`, ...r.comments, ...r.vars.map(([k, v]) => `@${k} = ${v}`)];
   const t = r.tags;
@@ -182,10 +217,25 @@ export function formatRequest(r: HttpRequest): string {
   if (t.insecure) out.push("# @insecure");
   if (t.timeout !== undefined) out.push(`# @timeout ${t.timeout}`);
   if (t.connectionTimeout !== undefined) out.push(`# @connection-timeout ${t.connectionTimeout}`);
+  if (t.laravelSession) out.push(`# @laravel-session${typeof t.laravelSession === "string" ? ` ${t.laravelSession}` : ""}`);
   if (r.preScript) out.push(...scriptLines("<", r.preScript));
-  out.push(`${r.method} ${r.url}${r.httpVersion ? ` ${r.httpVersion}` : ""}`);
-  for (const h of r.headers) out.push(`${h.enabled ? "" : "# "}${h.name}: ${h.value}`);
-  if (r.body) out.push("", r.body);
+  out.push(...requestLines(r));
+  const headerComments = [...(r.headerComments ?? [])];
+  r.headers.forEach((h, i) => {
+    while (headerComments.length && headerComments[0][0] <= i) out.push(headerComments.shift()![1]);
+    out.push(`${h.enabled ? "" : "# "}${h.name}: ${h.value}`);
+  });
+  out.push(...headerComments.map(([, line]) => line));
+  const body = r.body ? r.body.split("\n") : [];
+  const bodyComments = [...(r.bodyComments ?? [])];
+  if (body.length || bodyComments.length) {
+    out.push("");
+    body.forEach((line, i) => {
+      while (bodyComments.length && bodyComments[0][0] <= i) out.push(bodyComments.shift()![1]);
+      out.push(line);
+    });
+    out.push(...bodyComments.map(([, line]) => line));
+  }
   if (r.handler) out.push("", ...scriptLines(">", r.handler));
   if (r.output) out.push(`>>${r.output.force ? "!" : ""} ${r.output.path}`);
   return out.join("\n") + "\n";
@@ -303,6 +353,7 @@ export type Prepared = {
   timeout: number;
   connectTimeout?: number;
   insecure: boolean;
+  laravelSession?: string | true;
 };
 
 const absolute = (dir: string, path: string) => (path.startsWith("/") ? path : `${dir}/${path.replace(/^\.\//, "")}`);
@@ -348,7 +399,22 @@ export async function prepare(r: HttpRequest, lookup: Lookup, dir: string, read:
     timeout: r.tags.timeout ?? 60,
     connectTimeout: r.tags.connectionTimeout,
     insecure: !!r.tags.insecure,
+    ...(r.tags.laravelSession ? { laravelSession: r.tags.laravelSession } : {}),
   };
+  if (r.method === "GRAPHQL") {
+    // Sent as a POST with the query, and the variables when there are some, as JSON.
+    const { query, variables } = graphqlParts(sub(r.body));
+    let vars: unknown;
+    try {
+      vars = variables ? JSON.parse(variables) : undefined;
+    } catch {
+      vars = undefined;
+    }
+    p.method = "POST";
+    p.headers = [...headers.filter(([k]) => k.toLowerCase() !== "content-type"), ["Content-Type", "application/json"]];
+    p.body = JSON.stringify(vars === undefined ? { query } : { query, variables: vars });
+    return p;
+  }
   const body = r.body.trim();
   const fileBody = body.match(/^<(@)?\s+(\S.*)$/);
   const type = headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
@@ -363,6 +429,35 @@ export async function prepare(r: HttpRequest, lookup: Lookup, dir: string, read:
     p.headers = headers.filter(([k]) => k.toLowerCase() !== "content-type");
   } else if (body) p.body = sub(r.body);
   return p;
+}
+
+/** A GraphQL body: the query, then optionally a JSON object of variables after a blank line, as PhpStorm writes it. */
+export function graphqlParts(body: string): { query: string; variables: string } {
+  const chunks = body.split(/\n\s*\n/);
+  const last = chunks.at(-1)?.trim() ?? "";
+  if (chunks.length > 1 && last.startsWith("{") && last.endsWith("}") && !/^\{\s*\w+\s*[({]/.test(last)) return { query: chunks.slice(0, -1).join("\n\n").trim(), variables: last };
+  return { query: body.trim(), variables: "" };
+}
+
+/** A WEBSOCKET body's messages, separated by `===` lines. `=== wait-for-server` waits for a message before the next. */
+export function websocketMessages(body: string): { text: string; waitForServer: boolean }[] {
+  const messages: { text: string; waitForServer: boolean }[] = [];
+  let current: string[] = [];
+  let wait = false;
+  const flush = () => {
+    const text = current.join("\n").trim();
+    if (text) messages.push({ text, waitForServer: wait });
+    current = [];
+  };
+  for (const line of body.split("\n")) {
+    const m = line.match(/^===\s*(wait-for-server)?\s*$/);
+    if (m) {
+      flush();
+      wait = !!m[1];
+    } else current.push(line);
+  }
+  flush();
+  return messages;
 }
 
 /** Marks the end of the headers curl writes to stdout, before its --write-out JSON. */
@@ -759,16 +854,138 @@ export function histogram(values: number[], buckets: number): { to: number; coun
 
 // ---- Laravel routes ----
 
-export type Route = { method: string; uri: string; name: string | null; action: string };
+export type Route = { method: string; uri: string; name: string | null; action: string; middleware?: string[] };
 
-/** A request for an `artisan route:list --json` route, with {{host}} for the app's address and a variable per parameter. */
-export function requestForRoute(route: Route): HttpRequest {
+/**
+ * A request for an `artisan route:list --json` route, with {{host}} for the app's address and a variable per
+ * parameter. A web route signs in with the Laravel session, and an API route behind Sanctum with a bearer token.
+ */
+export function requestForRoute(route: Route, rules: Record<string, string> = {}): HttpRequest {
   const method = route.method.split("|").find((m) => m !== "HEAD") ?? "GET";
   const path = route.uri.replace(/\{(\w+)\??\}/g, "{{$1}}");
   const r = newRequest({ title: route.name ?? `${method} /${route.uri.replace(/^\//, "")}`, method, url: `{{host}}/${path.replace(/^\//, "")}`, headers: [{ name: "Accept", value: "application/json", enabled: true }] });
+  const middleware = route.middleware ?? [];
+  // Routes in the web group, or with its session middleware by class, as Filament lists them.
+  if (middleware.some((m) => m === "web" || /\\StartSession$/.test(m))) r.tags.laravelSession = true;
+  else if (middleware.some((m) => /^auth:sanctum|Authenticate:sanctum/.test(m))) r.headers.push({ name: "Authorization", value: "Bearer {{token}}", enabled: true });
   if (["POST", "PUT", "PATCH"].includes(method)) {
     r.headers.push({ name: "Content-Type", value: "application/json", enabled: true });
-    r.body = "{}";
+    r.body = Object.keys(rules).length ? JSON.stringify(bodyFromRules(rules), null, 2) : "{}";
   }
   return r;
+}
+
+/** The route a request calls: same method, and a path whose segments match, with {param} matching anything. */
+export function matchRoute(method: string, url: string, routes: Route[]): Route | undefined {
+  const path = url
+    .replace(/^\{\{[^}]+\}\}/, "")
+    .replace(/^https?:\/\/[^/]+/, "")
+    .split(/[?#]/)[0]
+    .replace(/^\/+|\/+$/g, "");
+  const segments = path ? path.split("/") : [];
+  const m = method === "GRAPHQL" ? "POST" : method;
+  return routes.find((r) => {
+    if (!r.method.split("|").includes(m)) return false;
+    const parts = r.uri.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+    const required = parts.filter((p) => !/^\{\w+\?\}$/.test(p)).length;
+    if (segments.length < required || segments.length > parts.length) return false;
+    return segments.every((s, i) => /^\{\w+\??\}$/.test(parts[i]) || s === parts[i] || /^\{\{[^}]+\}\}$/.test(s));
+  });
+}
+
+/** A JSON body for Laravel validation rules, with a value of the right type for each field. */
+export function bodyFromRules(rules: Record<string, string>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const example = (rule: string, key: string): unknown => {
+    if (/\b(boolean|accepted|declined)\b/.test(rule)) return false;
+    if (/\b(integer|numeric|decimal|digits|min_digits)\b/.test(rule)) return 0;
+    if (/\barray\b/.test(rule)) return [];
+    if (/\bemail\b/.test(rule)) return "{{$random.email}}";
+    if (/\buuid\b/.test(rule)) return "{{$uuid}}";
+    if (/\b(date|date_format|after|before)\b/.test(rule)) return "{{$isoTimestamp}}";
+    if (/\burl\b/.test(rule)) return "https://example.com";
+    if (/password/.test(key)) return "password";
+    return "";
+  };
+  const set = (target: Record<string, unknown> | unknown[], parts: string[], value: unknown) => {
+    const [part, ...rest] = parts;
+    if (part === "*") {
+      const list = target as unknown[];
+      if (!rest.length) return void (list.length || list.push(value));
+      if (!list.length) list.push(rest[0] === "*" ? [] : {});
+      return set(list[0] as Record<string, unknown>, rest, value);
+    }
+    const obj = target as Record<string, unknown>;
+    if (!rest.length) {
+      obj[part] ??= value;
+      return;
+    }
+    if (typeof obj[part] !== "object" || obj[part] === null) obj[part] = rest[0] === "*" ? [] : {};
+    set(obj[part] as Record<string, unknown>, rest, value);
+  };
+  for (const [key, rule] of Object.entries(rules)) {
+    set(body, key.split("."), example(rule, key));
+    if (/\bconfirmed\b/.test(rule) && !key.includes(".")) body[`${key}_confirmation`] = body[key];
+  }
+  return body;
+}
+
+/** Values that `path` selects in JSON: $, .key, ['key'], [n], [-n], [*], .*, and ..key for any depth. */
+export function jsonQuery(value: unknown, path: string): unknown[] {
+  const tokens = [...path.trim().replace(/^\$/, "").matchAll(/\.\.([\w$-]+|\*)|\.([\w$-]+|\*)|\[\s*(?:'([^']*)'|"([^"]*)"|(-?\d+)|(\*))\s*\]/g)];
+  let current: unknown[] = [value];
+  const children = (v: unknown) => (v && typeof v === "object" ? Object.values(v as object) : []);
+  const descendants = (v: unknown): unknown[] => [v, ...children(v).flatMap(descendants)];
+  for (const [, deep, key, quoted, dquoted, index, star] of tokens) {
+    if (deep !== undefined) {
+      const all = current.flatMap(descendants);
+      current = deep === "*" ? all.flatMap(children) : all.flatMap((v) => (v && typeof v === "object" && !Array.isArray(v) && deep in (v as object) ? [(v as Record<string, unknown>)[deep]] : []));
+    } else if (star !== undefined || key === "*") current = current.flatMap(children);
+    else if (index !== undefined) current = current.flatMap((v) => (Array.isArray(v) ? [v.at(Number(index))].filter((x) => x !== undefined) : []));
+    else {
+      const k = key ?? quoted ?? dquoted;
+      current = current.flatMap((v) => (v && typeof v === "object" && k in (v as object) ? [(v as Record<string, unknown>)[k]] : []));
+    }
+  }
+  return current;
+}
+
+export type ExceptionReport = { className: string; message: string; frames: { file: string; line: number }[] };
+
+/**
+ * The exception in a Laravel error response with APP_DEBUG on: the JSON Laravel sends when asked for JSON, or the
+ * file and line references in its HTML error page (Ignition's or Laravel's own).
+ */
+export function laravelException(body: string, status: number): ExceptionReport | null {
+  if (status < 500) return null;
+  try {
+    const j = JSON.parse(body) as { exception?: string; message?: string; file?: string; line?: number; trace?: { file?: string; line?: number }[] };
+    if (j && typeof j === "object" && j.exception) {
+      const frames = [{ file: j.file, line: j.line }, ...(j.trace ?? [])].filter((f): f is { file: string; line: number } => !!f.file).map((f) => ({ file: f.file, line: f.line ?? 1 }));
+      return { className: j.exception, message: j.message ?? "", frames };
+    }
+  } catch {
+    // Not JSON: look for an HTML error page.
+  }
+  const text = body.replace(/\\\//g, "/");
+  const seen = new Set<string>();
+  const frames: { file: string; line: number }[] = [];
+  for (const [, file, line] of text.matchAll(/((?:\/[\w.@~+-]+)+\.php)(?:"?\s*,\s*"line_number"\s*:\s*|:|\s+on\s+line\s+|&quot;,&quot;line_number&quot;:)(\d+)/g)) {
+    if (seen.has(`${file}:${line}`) || frames.length >= 40) continue;
+    seen.add(`${file}:${line}`);
+    frames.push({ file, line: Number(line) });
+  }
+  if (!frames.length) return null;
+  const decode = (s: string) => s.replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const className = text.match(/"exception_class"\s*:\s*"([^"]+)"/)?.[1].replace(/\\\\/g, "\\") ?? "";
+  const json = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
+  let message = decode(text.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? "").trim();
+  if (json) {
+    try {
+      message = JSON.parse(`"${json}"`);
+    } catch {
+      // Keep the page title.
+    }
+  }
+  return { className, message, frames };
 }

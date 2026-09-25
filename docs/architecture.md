@@ -924,15 +924,34 @@ files work in PhpStorm and VS Code's REST Client.
   curl's header dump, imports and exports curl commands (`shellWords` handles
   bash quoting, including `$'…'`), writes Laravel `Http::` code, and computes
   stress test statistics.
-- `src/httpclient.ts` sends a request with `/usr/bin/curl` through
-  `run_capture`. curl writes the headers (`-D`) and body (`-o`) to files in the
-  app's cache and prints its `%{json}` write-out after a marker, with its own
-  errors before it (`--stderr -`). Bodies stay in files, so binary responses
-  and large ones never pass through a JavaScript string unless shown. `-g`
-  keeps brackets in URLs literal. Cookies go to a Netscape-format jar per
-  project and environment (`-b` and `-c`). The history is an `index.json` of
-  exchanges beside their body files, capped at 100. Global variables and the
-  selected environment are in `localStorage`, per project.
+- `src/httpclient.ts` sends a request with `/usr/bin/curl` in a PTY
+  (`pty_spawn`), so **Cancel** can kill it. `pty_spawn` takes a `channel` that
+  names its output events, so the listeners are in place before curl starts and
+  a request that finishes at once loses nothing; a terminal's events are named
+  by its ID, which only comes back after the process starts. curl writes the
+  headers (`-D`) and body (`-o`) to files in the app's cache and prints its
+  `%{json}` write-out after a marker, with its own errors before it (`--stderr
+  -`). A text body goes through a file too, since a PTY's input is a terminal.
+  Bodies stay in files, so binary responses and large ones never pass through a
+  JavaScript string unless shown. `-g` keeps brackets in URLs literal. Cookies
+  go to a Netscape-format jar per project and environment (`-b` and `-c`). The
+  history is an `index.json` of exchanges beside their body files, capped at
+  100 unpinned ones. Global variables and the selected environment are in
+  `localStorage`, per project.
+- `@laravel-session` requests read `XSRF-TOKEN` from the jar, fetching
+  `/sanctum/csrf-cookie` (or `/`) first when it's missing, and add
+  `X-XSRF-TOKEN`, `Origin`, and `Referer`. Laravel rotates the token in its
+  responses, and the jar keeps the newest.
+- **Send with Debugger** starts the Xdebug listener and adds `XDEBUG_SESSION=1`
+  to the query, which Xdebug reads in trigger mode. **Send with Profiler**
+  swaps the URL's origin for the profiling server's (`profilingOrigin` in
+  `src/profiler.ts`) and opens the profile written after the send.
+- Requests from routes get a body from `validationRules` and
+  `formRequestParameter` in `src/phptypes.ts`, which read the rules array of a
+  FormRequest's `rules()` or a controller's `validate()` with bracket matching
+  that skips strings and comments, and `bodyFromRules` in `src/httpfile.ts`,
+  which picks each field's example value from its rules. **Go to Controller**
+  matches the request to a route with `matchRoute`.
 - Scripts run in `src/httpscript.worker.ts`, a worker with no access to Tauri's
   IPC, so a script in a cloned repository can't run commands. The worker is
   stopped after 5 seconds. It gets copies of the globals and variables and
@@ -940,16 +959,25 @@ files work in PhpStorm and VS Code's REST Client.
 - `src/httpview.ts` is the tool window and the HTTP tab. The tab tracks its
   request with a model decoration on the request's first line, which moves as
   the file changes above it. Each form edit parses the model, changes the
-  request, and replaces its block with `formatRequest`'s text in one undoable
-  edit. A file that isn't open in a tab is then written to disk; one that is
-  stays unsaved, as after any edit. Edits in the editor re-render the form
-  unless focus is in it.
-- `src/httpload.ts` runs a file's requests in order through `send`, and the
-  stress test. The stress test is one curl process in parallel mode (`-Z
-  --parallel-max`), repeating the URL with a glob range in its fragment, which
-  isn't sent, and printing one line per request. It runs in a PTY so its output
-  streams: `run_capture` returns only at the end. Brackets and braces in the
-  URL are escaped for the glob.
+  request, formats it, and replaces only the lines between the unchanged ones
+  at the block's start and end, in one undoable edit. The parser keeps comments
+  among the headers and in the body with their positions, and a URL written
+  over several lines, so formatting puts them back. The file then saves, open
+  in a tab or not, so a reload can't lose a form edit. Edits in the editor
+  re-render the form unless focus is in it.
+- A Laravel error response is read by `laravelException`: the JSON Laravel
+  sends when asked for it, or file and line references in an HTML error page.
+- WebSockets use the webview's `WebSocket`: curl in macOS has no WebSocket
+  support, and a Rust client would be a new dependency for a console that
+  mostly talks to Reverb or Pusher on the same machine.
+- `src/httpload.ts` runs a file's requests in order through `send`, the
+  stress test, and the monitor. The stress test is one curl process in
+  parallel mode (`-Z --parallel-max`), repeating the URL with a glob range in
+  its fragment, which isn't sent, and printing one line per request. It runs in
+  a PTY so its output streams. Brackets and braces in the URL are escaped for
+  the glob. A ramp-up runs one such process per concurrency level, each killed
+  after its seconds. The monitor sends through `probe`, which skips scripts
+  and history.
 
 The `http` Monarch grammar embeds JSON bodies and JavaScript scripts. Monarch
 only embeds a language whose tokenizer has loaded, and a zero-width rule enters
@@ -3056,4 +3084,21 @@ the same request with the same TLS, cookie, and redirect handling. One process
 with `--parallel-max` holds the concurrency without a process per request. A
 Rust client would measure more precisely at very high rates, but would add a
 dependency and a second request path to keep in step.
+
+### 2026-09-26: HTTP requests run in a PTY, named by a channel
+
+`run_capture` can't be stopped, and **Cancel** needs to stop curl. A PTY can be
+killed and streams output, which the stress test already needed. Its events
+were named by the terminal's ID, which only comes back after the process
+starts, so a request that finished at once could end before anyone listened.
+The stress test worked around that with a 0.3-second head start. `pty_spawn`
+now takes an optional `channel` for the event names, so the caller listens
+first.
+
+### 2026-09-26: The HTTP tab edits only the lines that change
+
+Rewriting a request's whole block dropped comments among its headers and in its
+body, and joined a URL written over several lines. The parser now keeps those,
+with their positions, and an edit replaces only the lines that differ, so the
+file reads as its author wrote it and diffs stay small.
 

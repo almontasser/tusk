@@ -1458,8 +1458,10 @@ initHttpClient({
   status,
   openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }),
   ensureModel,
-  // A file open in a tab stays unsaved, as after any edit; auto-save or ⌘S writes it.
-  persist: (path) => (tabs.has(path) ? Promise.resolve() : writeModel(path)),
+  // Edits from the HTTP tab save at once, even in a tab, so a reload or a closed tab doesn't lose them.
+  persist: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)),
+  profiler: loadProfiler,
+  showDiff: (path, original, modified, label) => showDiff(path, original, modified, label),
 });
 initComposer({ root: () => root, status });
 initRefactor({ root: () => root, status });

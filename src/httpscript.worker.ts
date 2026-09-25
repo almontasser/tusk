@@ -1,5 +1,6 @@
 // Runs .http request scripts (PhpStorm's `client`, `request`, and `response` objects) in a worker, so a script in
 // a project file can't reach the app's commands, and a script that never ends can be stopped.
+import { jsonQuery } from "./httpfile";
 
 type Input = {
   code: string;
@@ -14,14 +15,10 @@ export type Output = { globals: Record<string, string>; variables: Record<string
 
 const text = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
 
-/** Reads a simple JSONPath, such as $.data[0].id, from a value. */
+/** Reads a JSONPath, such as $.data[0].id: one value, or a list for a path with a wildcard or ..key. */
 function jsonPath(value: unknown, path: string): unknown {
-  let current: unknown = value;
-  for (const [, key, index] of path.replace(/^\$\.?/, "").matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
-    if (current === null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[key ?? index];
-  }
-  return current;
+  const found = jsonQuery(value, path);
+  return /\*|\.\./.test(path) ? found : found[0];
 }
 
 self.onmessage = ({ data }: MessageEvent<Input>) => {

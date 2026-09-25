@@ -11,7 +11,7 @@ import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
 import { workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
-import { methodLine, routeTarget } from "./phptypes";
+import { formRequestParameter, methodBody, methodLine, routeTarget, validationRules } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 
 let getRoot: () => string;
@@ -240,19 +240,35 @@ export async function showRoutes() {
 }
 
 /** Opens the class and method a route runs: from composer.json's PSR-4 folders, or else from the PHP index (for vendor). */
-async function openRoute(action: string) {
-  const target = routeTarget(action);
-  if (!target) return status(`This route runs ${action === "Closure" ? "a closure in a routes file" : action}, not a class.`);
+/** The file that declares a class: from composer.json's PSR-4 folders, or else the PHP index. */
+export async function classFile(fqn: string): Promise<string | undefined> {
   const root = getRoot();
   const psr4 = psr4From(await invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"));
-  let path: string | undefined;
-  for (const rel of pathsFor(target.fqn, psr4)) if (await exists(rel)) path ??= `${root}/${rel}`;
-  if (!path) {
-    const short = target.fqn.split("\\").pop()!;
-    const namespace = target.fqn.slice(0, -short.length - 1);
-    const symbols = (await workspaceSymbols(short)).filter((s) => s.name === short && !s.path.includes(".phar/"));
-    path = (symbols.find((s) => s.container === namespace) ?? symbols[0])?.path;
-  }
+  for (const rel of pathsFor(fqn, psr4)) if (await exists(rel)) return `${root}/${rel}`;
+  const short = fqn.split("\\").pop()!;
+  const namespace = fqn.slice(0, -short.length - 1);
+  const symbols = (await workspaceSymbols(short)).filter((s) => s.name === short && !s.path.includes(".phar/"));
+  return (symbols.find((s) => s.container === namespace) ?? symbols[0])?.path;
+}
+
+/** The validation rules a route's controller method declares, through a FormRequest parameter or a validate() call. */
+export async function routeRules(action: string): Promise<Record<string, string>> {
+  const target = routeTarget(action);
+  const path = target && (await classFile(target.fqn));
+  if (!target || !path) return {};
+  const read = (file: string) => invoke<string>("read_file", { path: file }).catch(() => "");
+  const source = await read(path);
+  const formRequest = formRequestParameter(source, target.method);
+  const requestFile = formRequest && (await classFile(formRequest));
+  const rules = requestFile ? validationRules(methodBody(await read(requestFile), "rules")) : {};
+  return Object.keys(rules).length ? rules : validationRules(methodBody(source, target.method));
+}
+
+/** Opens the controller method a route action names. */
+export async function openRoute(action: string) {
+  const target = routeTarget(action);
+  if (!target) return status(`This route runs ${action === "Closure" ? "a closure in a routes file" : action}, not a class.`);
+  const path = await classFile(target.fqn);
   if (!path) return status(`${target.fqn} isn't in the project's PSR-4 folders or the PHP index yet. If indexing is running, try again when it ends.`);
   const source = await invoke<string>("read_file", { path }).catch(() => "");
   openAt(path, methodLine(source, target.method) || 1);

@@ -4,7 +4,14 @@ import { test } from "node:test";
 import {
   curlArgs,
   formatRequest,
+  header,
+  bodyFromRules,
   fromCurl,
+  graphqlParts,
+  jsonQuery,
+  laravelException,
+  matchRoute,
+  websocketMessages,
   histogram,
   loadArgs,
   lookupIn,
@@ -211,4 +218,102 @@ test("summarizes load test samples", () => {
 test("builds requests for Laravel routes", () => {
   const r = requestForRoute({ method: "PUT|PATCH", uri: "api/posts/{post}/{slug?}", name: "posts.update", action: "" });
   assert.deepEqual([r.method, r.url, r.title, r.body], ["PUT", "{{host}}/api/posts/{{post}}/{{slug}}", "posts.update", "{}"]);
+  const web = requestForRoute({ method: "POST", uri: "posts", name: null, action: "", middleware: ["web", "auth"] }, { title: "required" });
+  assert.deepEqual([web.tags.laravelSession, web.body], [true, '{\n  "title": ""\n}']);
+  const api = requestForRoute({ method: "GET|HEAD", uri: "api/me", name: null, action: "", middleware: ["api", "Illuminate\\Auth\\Middleware\\Authenticate:sanctum"] });
+  assert.equal(header(api, "authorization"), "Bearer {{token}}");
+});
+
+test("formatting keeps comments and a URL written over several lines", () => {
+  const text = `### Search
+GET {{host}}/api/posts
+    ?page=1
+    &sort=title
+# Filters
+Accept: application/json
+# the key goes here
+X-Key: 1
+
+# Payload
+{"a": 1}
+# after the body
+`;
+  const [r] = parseHttpFile(text);
+  assert.equal(formatRequest(r), text);
+  r.headers.push({ name: "X-New", value: "2", enabled: true });
+  r.url = "{{host}}/api/posts?page=2&sort=title";
+  const again = formatRequest(r);
+  assert.match(again, /GET \{\{host\}\}\/api\/posts\n {4}\?page=2\n {4}&sort=title\n# Filters\nAccept/);
+  assert.match(again, /X-Key: 1\nX-New: 2\n\n# Payload\n\{"a": 1\}\n# after the body\n$/);
+});
+
+test("reads the laravel-session tag, GraphQL, and WebSocket requests", async () => {
+  const [session, gql, ws] = parseHttpFile(`# @laravel-session
+POST /login
+
+###
+GRAPHQL http://x/graphql
+
+query Posts($n: Int) { posts(first: $n) { id } }
+
+{"n": {{count}}}
+
+###
+WEBSOCKET ws://x/app
+===
+{"event": "subscribe"}
+=== wait-for-server
+{"event": "next"}
+`);
+  assert.equal(session.tags.laravelSession, true);
+  assert.match(formatRequest(session), /# @laravel-session\nPOST/);
+  assert.deepEqual(graphqlParts(gql.body), { query: "query Posts($n: Int) { posts(first: $n) { id } }", variables: '{"n": {{count}}}' });
+  const p = await prepare(gql, lookupIn([{ count: "3" }]), "/", async () => "");
+  assert.deepEqual([p.method, JSON.parse(p.body!)], ["POST", { query: "query Posts($n: Int) { posts(first: $n) { id } }", variables: { n: 3 } }]);
+  assert.deepEqual(websocketMessages(ws.body), [
+    { text: '{"event": "subscribe"}', waitForServer: false },
+    { text: '{"event": "next"}', waitForServer: true },
+  ]);
+  assert.equal(graphqlParts("{ posts { id } }").variables, "");
+});
+
+test("queries JSON with paths", () => {
+  const data = { data: [{ id: 1, tags: ["a"] }, { id: 2, tags: [] }], meta: { total: 2, page: { id: 9 } } };
+  assert.deepEqual(jsonQuery(data, "$.data[*].id"), [1, 2]);
+  assert.deepEqual(jsonQuery(data, "$.data[-1].id"), [2]);
+  assert.deepEqual(jsonQuery(data, "$['meta'].total"), [2]);
+  assert.deepEqual(jsonQuery(data, "$..id"), [1, 2, 9]);
+  assert.deepEqual(jsonQuery(data, "$.meta.*"), [2, { id: 9 }]);
+  assert.deepEqual(jsonQuery(data, "$.missing"), []);
+});
+
+test("builds bodies from validation rules and matches routes", () => {
+  assert.deepEqual(bodyFromRules({ title: "required|string", count: "integer", "tags": "array", "tags.*": "string", "author.email": "email", "items.*.qty": "numeric", password: "required|confirmed", ok: "boolean" }), {
+    title: "",
+    count: 0,
+    tags: [""],
+    author: { email: "{{$random.email}}" },
+    items: [{ qty: 0 }],
+    password: "password",
+    password_confirmation: "password",
+    ok: false,
+  });
+  const routes = [
+    { method: "GET|HEAD", uri: "api/posts", name: null, action: "A@index" },
+    { method: "PUT|PATCH", uri: "api/posts/{post}", name: null, action: "A@update" },
+    { method: "GET|HEAD", uri: "api/users/{user?}", name: null, action: "U@show" },
+  ];
+  assert.equal(matchRoute("GET", "{{host}}/api/posts?page=2", routes)?.action, "A@index");
+  assert.equal(matchRoute("PATCH", "http://app.test/api/posts/{{id}}", routes)?.action, "A@update");
+  assert.equal(matchRoute("GET", "/api/users", routes)?.action, "U@show");
+  assert.equal(matchRoute("POST", "/api/posts", routes), undefined);
+});
+
+test("reads Laravel exceptions from JSON and HTML error pages", () => {
+  const json = JSON.stringify({ message: "Boom", exception: "RuntimeException", file: "/app/Http/C.php", line: 12, trace: [{ file: "/vendor/x.php", line: 3 }, { function: "closure" }] });
+  assert.deepEqual(laravelException(json, 500), { className: "RuntimeException", message: "Boom", frames: [{ file: "/app/Http/C.php", line: 12 }, { file: "/vendor/x.php", line: 3 }] });
+  assert.equal(laravelException(json, 422), null);
+  const html = `<html><title>Division by zero</title><script>window.data = {"report":{"exception_class":"DivisionByZeroError","message":"Division by zero","stacktrace":[{"file":"\\/var\\/www\\/html\\/app\\/Math.php","line_number":7}]}}</script>`;
+  assert.deepEqual(laravelException(html, 500), { className: "DivisionByZeroError", message: "Division by zero", frames: [{ file: "/var/www/html/app/Math.php", line: 7 }] });
+  assert.equal(laravelException("<html>Server Error</html>", 500), null);
 });
