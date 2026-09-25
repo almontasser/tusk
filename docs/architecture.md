@@ -488,6 +488,8 @@ menu is `showMenu` from `files.ts`. `main.ts` calls `followEditor` when the
 cursor moves or the tabs redraw: it selects the row of the problem under the
 cursor (keeping the selected one if the cursor is in it too, as with overlapping
 problems), and redraws the panel when the file changes and **Current File** is on.
+While the panel is hidden, it only records the cursor, and showing the panel
+selects the row then.
 
 `problemCounts` also returns the files with errors. `updateProblems` in
 `main.ts`, which runs after the panel's debounced render and after the tabs
@@ -2584,8 +2586,8 @@ measurement.
 - **Per keystroke, do only what changed.** An edit updates its tab's unsaved
   dot (`showDirty`) instead of redrawing every tab bar, and the status bar
   listens to one cursor event and counts a selection with
-  `getValueLengthInRange`. Conflict shading, change markers, and blame wait
-  for a pause.
+  `getValueLengthInRange`. Conflict shading, change markers, blame, the inline
+  problem, and the Problems panel wait for a pause.
 - **Load rarely used code on first use.** `xterm.js`, `marked` and DOMPurify,
   and the profiler are separate chunks, which took the main bundle from 4.53 MB
   to 4.10 MB. Monaco is the rest of it.

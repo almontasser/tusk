@@ -22,6 +22,7 @@ type Host = {
 };
 
 type Problem = { range: monaco.IRange; message: string; severity: monaco.MarkerSeverity; source?: string; code?: string };
+const toProblem = (m: monaco.editor.IMarker): Problem => ({ range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value });
 
 let host: Host;
 /** Problems in files that aren't open, by path, from the last scan or from a file's markers when it closed. */
@@ -125,8 +126,8 @@ function allProblems(): Map<string, Problem[]> {
   for (const m of monaco.editor.getModelMarkers({})) {
     const path = m.resource.fsPath;
     if (m.resource.scheme !== "file" || !path.startsWith(`${root}/`) || !isShown(m.severity) || !live(path)) continue;
-    const problem = { range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value };
-    all.set(path, [...(all.get(path) ?? []), problem]);
+    // Live paths aren't in `all` yet, so this never pushes onto a scan's list.
+    (all.get(path) ?? all.set(path, []).get(path)!).push(toProblem(m));
   }
   return all;
 }
@@ -186,6 +187,7 @@ export function followEditor(path: string, position: monaco.IPosition | null) {
   const moved = path !== caret.path;
   caret = { path, position };
   if (moved && currentOnly) return renderSoon();
+  if (!list.isConnected) return;
   const at = (r: (typeof rows)[number]) => !!position && r.path === path && !!r.problem && monaco.Range.containsPosition(r.problem.range, position);
   // Keep the selected problem when the cursor is in it too, such as after opening the second of two overlapping ones.
   if (rows.some((r) => r.key === selected && at(r))) return;
@@ -298,7 +300,7 @@ monaco.editor.onDidCreateModel((model) =>
     const path = model.uri.fsPath;
     if (model.uri.scheme !== "file" || scan.root !== host.root() || !diagnosed.has(path) || host.unsaved(path)) return;
     const markers = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => isShown(m.severity));
-    scanned.set(path, markers.map((m) => ({ range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value })));
+    scanned.set(path, markers.map(toProblem));
     renderSoon();
   }),
 );
@@ -307,7 +309,7 @@ monaco.editor.onDidCreateModel((model) =>
 export function showProblems() {
   showPanelView("Problems", panel);
   if (scan.root !== host.root() && !scan.running) scanProject(true);
-  else render();
+  else render(), followEditor(caret.path, caret.position);
 }
 
 /** Forgets the last project's scan, when another project opens. */
@@ -451,9 +453,12 @@ export function showInlineProblems(ed: monaco.editor.ICodeEditor) {
   ed.onDidChangeModelContent(() => (inline.clear(), soon()));
   ed.onDidChangeCursorPosition(soon);
   ed.onDidChangeModel(soon);
-  ed.onDidDispose(() => (markers.dispose(), clearTimeout(timer)));
-  onSettings(soon);
+  inlineEditors.add(soon);
+  ed.onDidDispose(() => (markers.dispose(), clearTimeout(timer), inlineEditors.delete(soon)));
 }
+/** Each pane's update, so one settings listener serves them all and a closed pane's goes with it. */
+const inlineEditors = new Set<() => void>();
+onSettings(() => inlineEditors.forEach((update) => update()));
 
 export function initProblems(h: Host) {
   host = h;
