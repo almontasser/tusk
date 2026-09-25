@@ -186,12 +186,25 @@ script.
 | --- | --- | --- |
 | Phpactor | 2026.06.23.0 | PHP archive (`.phar`) |
 | Laravel LSP | 0.0.32 | PHP archive (`.phar`) |
-| Mago | 1.50.0 | Native binary for the build machine's architecture |
+| Mago | 1.50.0 | Native binary for the build's target |
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
 | Vue language server | 3.3.11 | npm package, run with Node |
 | PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
 | `llama-server` (llama.cpp) | b11165 | Native binary and its libraries, for AI completion |
+| `typos-lsp` | 0.1.56 | Native binary for the build's target |
+
+Native tools follow the build's target: `TAURI_ENV_TARGET_TRIPLE`, which Tauri
+sets for `beforeBuildCommand`, or this Mac's architecture. For
+`universal-apple-darwin` (or `--universal`), the script downloads both
+architectures, unpacks each under the cache, and joins each file with `lipo`.
+llama.cpp's Intel build has no `libggml-metal`, so that library stays Apple
+silicon only; no Intel file links to it. Among the Node packages, only the
+Astro compiler is native per architecture (`fsevents` is universal already,
+and Tailwind's watcher ships every platform); npm installs it for this Mac, so
+the other architecture's package is downloaded from the lockfile's URL and
+checked against its integrity hash, and a single-architecture build removes one
+it doesn't need.
 
 Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.

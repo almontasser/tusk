@@ -47,7 +47,7 @@ file to change when you add it.
 | Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
 | Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | Split editors | Up to four panes. |
-| Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
+| Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
 
@@ -123,7 +123,19 @@ pnpm tauri build
 ```
 
 The `.app` bundle and the `.dmg` file are written to
-`src-tauri/target/release/bundle/`.
+`src-tauri/target/release/bundle/`. The build runs on Macs with the same chip
+as the one that built it.
+
+To build one app for both Apple silicon and Intel Macs, add Rust's Intel target
+once, then build for both:
+
+```sh
+rustup target add x86_64-apple-darwin
+pnpm tauri build --target universal-apple-darwin
+```
+
+The tools are then fetched for both chips and joined into universal binaries.
+The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle/`.
 
 ## The window
 
