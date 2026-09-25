@@ -305,6 +305,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #editor.sash-col, #editor.sash-col * { cursor: row-resize !important; }
 .tabs .tab.drop-before { box-shadow: inset 2px 0 var(--accent); }
 .pane.drop-target .pane-editor { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Dropping on an edge splits the pane: the half the new pane will take is shaded. */
+.pane:is(.drop-left, .drop-right, .drop-top, .drop-bottom) .pane-editor::after { content: ""; position: absolute; z-index: 10; pointer-events: none; background: color-mix(in srgb, var(--accent) 25%, transparent); border: 2px solid var(--accent); box-sizing: border-box; }
+.pane.drop-left .pane-editor::after { inset: 0 50% 0 0; }
+.pane.drop-right .pane-editor::after { inset: 0 0 0 50%; }
+.pane.drop-top .pane-editor::after { inset: 0 0 50% 0; }
+.pane.drop-bottom .pane-editor::after { inset: 50% 0 0 0; }
 
 #empty-editor { flex: 1; display: grid; place-items: center; background: var(--bg); }
 #empty-editor dl { display: grid; grid-template-columns: auto auto; gap: 14px 28px; margin: 0; align-items: center; color: var(--faint); font-size: 14px; }

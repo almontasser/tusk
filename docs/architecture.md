@@ -83,7 +83,10 @@ when no other pane has it (`closeFile`). Renames and deletions go through
 current one went away. A pane left with no tabs closes, and Unsplit moves a
 pane's tabs to the pane beside it.
 
-Tabs drag with HTML drag and drop (`placeTab`). The `#editor` listeners run in
+Tabs drag with HTML drag and drop (`placeTab`). A drop within the outer quarter
+of a pane's editor, measured to the nearest edge, splits that pane there
+(`splitPane`, which can put the new pane before or after), unless the tab is
+its own pane's only tab or four panes are open. The `#editor` listeners run in
 the capture phase, so Monaco never sees a tab dropped on its text as text to
 insert. Borders between panes have no element of their own, which would have
 to be skipped everywhere the layout reads a group's children: `sashAt` treats

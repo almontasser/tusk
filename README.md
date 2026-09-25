@@ -42,7 +42,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
 | Pull requests | You write a line comment in a one-line box, on one line at a time (not a range), and each comment posts at once rather than as part of a pending review. Comments on lines outside the diff's changes are rejected by GitHub. Comment threads in the diff are read-only, so reply through **Comment on Line**. |
-| Split editors | Up to four panes. Dropping a tab on a pane's edge doesn't split it; use ⌘\ or ⌘⇧\. |
+| Split editors | Up to four panes. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
 ### Missing
@@ -241,7 +241,9 @@ current file opens in a new pane, up to four panes. With four, ⌘\ moves to the
 next pane. Each pane has its own tabs, and a file open in two panes shows your
 edits in both. Closing a pane's last tab closes the pane. Run **Move Tab to Next
 Pane** to move the current tab, or drag a tab: within its tab bar to reorder
-it, or onto another pane's tabs or editor to move it there. Drag the border
+it, onto another pane's tabs or editor to move it there, or onto the edge of any
+pane's editor to split that pane with it. The shaded half shows where the new
+pane goes. Drag the border
 between two panes to resize them. Run **Unsplit** to close the focused pane and
 move its tabs to the pane beside it. The panes, and the shell terminals, come
 back when the project reopens.

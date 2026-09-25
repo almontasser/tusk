@@ -88,12 +88,18 @@ const MAX_PANES = 4;
 /** Opens the current file in a new pane to the right (`row`) or below (`col`). With four panes, it moves to the next pane instead. */
 function split(dir: "row" | "col") {
   if (panes.length >= MAX_PANES) return focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]), editor.focus();
-  const current = currentPane();
-  const view = editor.saveViewState();
+  splitPane(currentPane(), dir, active, false);
+  editor.focus();
+}
+
+/** Adds a pane showing `path` beside another: after it (right or below), or before it (left or above). */
+function splitPane(current: Pane, dir: "row" | "col", path: string, before: boolean) {
+  const shown = current === currentPane() ? active : current.active;
+  const view = path === shown ? current.editor.saveViewState() : viewStates.get(path);
   const pane = addPane();
   const parent = current.el.parentElement!;
   if (parent.classList.contains(dir)) {
-    current.el.after(pane.el);
+    current.el[before ? "before" : "after"](pane.el);
     // After a resize, sizes are flex-grow values in pixels; the new pane takes half of the current one's.
     const grow = parseFloat(current.el.style.flexGrow);
     if (grow) current.el.style.flexGrow = pane.el.style.flexGrow = String(grow / 2);
@@ -103,14 +109,13 @@ function split(dir: "row" | "col") {
     group.style.flexGrow = current.el.style.flexGrow;
     current.el.style.flexGrow = "";
     current.el.replaceWith(group);
-    group.append(current.el, pane.el);
+    group.append(...(before ? [pane.el, current.el] : [current.el, pane.el]));
   }
-  pane.paths = active ? [active] : [];
-  pane.active = active;
-  pane.editor.setModel(tabs.get(active)?.model ?? null);
+  pane.paths = path ? [path] : [];
+  pane.active = path;
+  pane.editor.setModel(tabs.get(path)?.model ?? null);
   if (view) pane.editor.restoreViewState(view);
   focusPane(pane);
-  editor.focus();
 }
 
 /** Closes a pane, moving its tabs to the pane beside it. */
@@ -187,14 +192,28 @@ function placeTab(path: string, from: Pane, to: Pane, before: string | null) {
   renderTabs();
 }
 
-// Drag a tab within its bar to reorder it, or onto another pane's tabs or editor to move it there.
+// Drag a tab within its bar to reorder it, onto another pane's tabs or editor to move it there,
+// or onto the outer quarter of any pane's editor to split that pane with it.
 let draggedTab: { path: string; from: Pane } | null = null;
+type Edge = "left" | "right" | "top" | "bottom";
 const dropTarget = (e: DragEvent) => {
   const pane = panes.find((p) => p.el.contains(e.target as Node));
+  if (!pane) return undefined;
   const tab = (e.target as HTMLElement).closest<HTMLElement>(".tab");
-  return pane && { pane, before: tab ? pane.paths[[...pane.bar.children].indexOf(tab)] : null, tab, inBar: pane.bar.contains(e.target as Node) };
+  const inBar = pane.bar.contains(e.target as Node);
+  let edge: Edge | null = null;
+  // Splitting its own pane only makes sense when the pane keeps other tabs.
+  const alone = pane === draggedTab?.from && pane.paths.length === 1;
+  if (!inBar && !alone && panes.length < MAX_PANES) {
+    const r = pane.el.querySelector(".pane-editor")!.getBoundingClientRect();
+    const distances: [Edge, number][] = [["left", (e.clientX - r.left) / r.width], ["right", (r.right - e.clientX) / r.width], ["top", (e.clientY - r.top) / r.height], ["bottom", (r.bottom - e.clientY) / r.height]];
+    const [nearest, distance] = distances.sort((a, b) => a[1] - b[1])[0];
+    if (distance < 0.25) edge = nearest;
+  }
+  return { pane, before: tab ? pane.paths[[...pane.bar.children].indexOf(tab)] : null, tab, inBar, edge };
 };
-const clearDropMarks = () => document.querySelectorAll("#editor .drop-before, #editor .drop-target").forEach((el) => el.classList.remove("drop-before", "drop-target"));
+const DROP_MARKS = ["drop-before", "drop-target", "drop-left", "drop-right", "drop-top", "drop-bottom"];
+const clearDropMarks = () => document.querySelectorAll("#editor .pane, #editor .tab").forEach((el) => el.classList.remove(...DROP_MARKS));
 // Capture phase, so Monaco doesn't treat a tab dropped on the editor as text to insert.
 $("editor").addEventListener("dragover", (e) => {
   const target = draggedTab && dropTarget(e);
@@ -203,6 +222,7 @@ $("editor").addEventListener("dragover", (e) => {
   e.stopPropagation();
   clearDropMarks();
   if (target.tab) target.tab.classList.add("drop-before");
+  else if (target.edge) target.pane.el.classList.add(`drop-${target.edge}`);
   else if (!target.inBar) target.pane.el.classList.add("drop-target");
 }, true);
 $("editor").addEventListener("dragleave", clearDropMarks);
@@ -212,9 +232,15 @@ $("editor").addEventListener("drop", (e) => {
   if (!target || !draggedTab) return;
   e.preventDefault();
   e.stopPropagation();
-  // Dropped on itself, or on the editor of the pane it came from: nothing to do.
-  const same = target.pane === draggedTab.from;
-  if (target.before !== draggedTab.path && (target.inBar || !same)) placeTab(draggedTab.path, draggedTab.from, target.pane, target.before);
+  const { path, from } = draggedTab;
+  if (target.edge) {
+    splitPane(target.pane, target.edge === "left" || target.edge === "right" ? "row" : "col", path, target.edge === "left" || target.edge === "top");
+    leave(from, path);
+    saveSoon();
+    renderTabs();
+  }
+  // Dropped on itself, or on the middle of the pane it came from: nothing to do.
+  else if (target.before !== path && (target.inBar || target.pane !== from)) placeTab(path, from, target.pane, target.before);
   draggedTab = null;
 }, true);
 $("editor").addEventListener("dragend", () => ((draggedTab = null), clearDropMarks()));
