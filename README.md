@@ -1157,6 +1157,17 @@ Results show in the **Database** tab of the bottom panel. After you change
 
 ## Diagnostics and formatting
 
+The **Problems** panel (⌘6, or click the error and warning counts in the
+status bar) lists errors and warnings across the whole project, grouped by
+file; click one to go to it. The first time you open it, it scans the project:
+Mago checks every file in a few seconds, and then Phpactor's own checks, such
+as deprecated classes and unused imports, run file by file in the background
+(a few minutes for about 1,000 files, using half the cores). Phpactor's results
+are cached by each file's contents, so **Scan Project** later rechecks only
+what changed. Open files show their live problems as you type. The status bar
+counts cover the project once it has been scanned. Laravel LSP's and Tailwind's
+problems show for open files only.
+
 When `composer.lock` changes, for example after `composer require`, the editor
 rebuilds Phpactor's index, so new packages' classes and functions are found.
 This also happens when you open a project whose `composer.lock` changed while
@@ -1221,6 +1232,8 @@ committed.
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
 | `src/editor.ts` | Monaco setup, web workers, and the Blade, Vue, Svelte, and Astro grammars |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
+| `src/diagnostics.ts` | Filters false problems out of the servers' diagnostics, and reads Mago's report |
+| `src/problems.ts` | Problems panel: the project's errors and warnings |
 | `src/terminal.ts` | Terminal panel |
 | `src/git.ts` | Commit view, diff view, partial staging, branches, and stash |
 | `src/history.ts` | Git log, file history, and commit actions |

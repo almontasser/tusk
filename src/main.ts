@@ -18,6 +18,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
+import { forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -341,6 +342,7 @@ async function openFolder(dir: unknown = null) {
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
+  forgetProblems();
   recent = [];
   const session = loadSession();
   openDirs.clear();
@@ -582,27 +584,15 @@ function languageName(id: string) {
   return languageNames.get(id)!;
 }
 
-/** Error and warning counts across open files; clicking lists them. */
+/** Error and warning counts, across the project once the Problems panel has scanned it; clicking shows the panel. */
 function updateProblems() {
-  const markers = monaco.editor.getModelMarkers({}).filter((m) => tabs.has(m.resource.fsPath));
-  $("error-count").textContent = String(markers.filter((m) => m.severity === monaco.MarkerSeverity.Error).length);
-  $("warning-count").textContent = String(markers.filter((m) => m.severity === monaco.MarkerSeverity.Warning).length);
+  const { project, errors, warnings } = problemCounts();
+  $("error-count").textContent = String(errors);
+  $("warning-count").textContent = String(warnings);
+  $("problems").title = project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)";
 }
 monaco.editor.onDidChangeMarkers(updateProblems);
-$("problems").onclick = () => {
-  const markers = monaco.editor
-    .getModelMarkers({})
-    .filter((m) => tabs.has(m.resource.fsPath) && m.severity >= monaco.MarkerSeverity.Warning)
-    .sort((a, b) => b.severity - a.severity);
-  pick("Problems in open files", (q) =>
-    rank(q, markers.map((m) => ({
-      label: m.message.split("\n")[0],
-      detail: `${relative(m.resource.fsPath)}:${m.startLineNumber}`,
-      icon: m.severity === monaco.MarkerSeverity.Error ? "codicon-error icon-error" : "codicon-warning icon-warning",
-      run: () => openAt(m.resource.fsPath, new monaco.Range(m.startLineNumber, m.startColumn, m.endLineNumber, m.endColumn)),
-    }))),
-  );
-};
+$("problems").onclick = () => root && showProblems();
 
 // ---- Recent projects and the welcome screen ----
 
@@ -1118,6 +1108,8 @@ const actions: Action[] = [
   { label: "Move Tab to Next Pane", run: moveTabToNextPane },
   { label: "Unsplit", run: () => unsplit() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
+  { label: "Problems", keys: "Meta+6", run: () => root && showProblems() },
+  { label: "Scan Project for Problems", run: () => root && (showProblems(), scanProject()) },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Show Local History", run: () => active && showLocalHistory(active) },
   { label: "Local History: Deleted Files…", run: showDeletedFiles },
@@ -1347,6 +1339,7 @@ initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
 
 initProjectFiles(() => root);
+initProblems({ root: () => root, openAt: (path, range) => openAt(path, range), status, changed: updateProblems });
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */
@@ -1374,6 +1367,7 @@ document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
     }),
 );
 const panelButtons: Record<string, () => unknown> = {
+  problems: () => root && showProblems(),
   log: () => showLog(),
   debug: showDebugPanel,
   terminal: () => toggleTerminal(root || "/"),

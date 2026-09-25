@@ -438,6 +438,24 @@ that project were all real: wrong `@var` and `@return` types, a package in
 composer.json that `vendor` didn't have, a test calling `addMonth(3)`, and the
 like.
 
+### The project's problems
+
+`src/problems.ts` scans the whole project for the Problems panel. Mago has no
+server mode, but one `mago analyze` and one `mago lint` over the project (with
+the editor's settings, `--reporting-format json --minimum-report-level
+warning`) take about 3 seconds and 1.6 GB on a 1,000-file project.
+`run_capture` takes `anyStatus` for them, since Mago exits with an error when it
+finds problems. `magoIssuesByFile` converts the report as Phpactor's Mago
+extension does, with Mago's UTF-8 byte offsets turned into UTF-16 positions.
+Phpactor has no project-wide check, so its diagnostics command,
+`language-server:diagnostics`, runs once per file with the file on standard
+input and the editor's index path in `--config-extra`, half the cores at a time;
+at about 1.5 seconds a file, 1,000 files take 2 to 4 minutes. Its results are
+cached in the app's cache (`problems/<project>/phpactor.json`) by a hash of
+each file's text. Both go through `realProblems` and `severityOf`, as open
+files do. Files open in the editor show their live markers instead, and a file
+that closes keeps its last markers as its scan result.
+
 ### Docblocks Phpactor can't read
 
 Phpactor's docblock parser drops a `@param` whose type it can't read, such as a

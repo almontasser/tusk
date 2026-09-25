@@ -831,6 +831,24 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .hierarchy .kind-enum { color: #d673d6; }
 
 /* ==========================================================================
+   Problems
+   ========================================================================== */
+
+.problems { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.problems-toolbar { display: flex; gap: 8px; align-items: center; padding: 2px 10px 6px 8px; flex-shrink: 0; }
+.problems-toolbar button { display: flex; gap: 4px; align-items: center; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
+.problems-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problems-tree, .problems-tree ul { list-style: none; margin: 0; padding: 0; }
+.problems-tree { flex: 1; overflow: auto; border-top: 1px solid var(--border-subtle); padding: 4px 0; }
+.problems-row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 10px 0 6px; white-space: nowrap; cursor: default; }
+.problems-row:hover { background: var(--hover); }
+.problems-item { padding-left: 42px; }
+.problems-file .codicon-chevron-down, .problems-file .codicon-chevron-right { color: var(--faint); }
+.problems-message { overflow: hidden; text-overflow: ellipsis; }
+.problems-muted { color: var(--faint); overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 40%; }
+.problems-count { margin-left: auto; padding: 0 6px; border-radius: 8px; background: var(--hover); color: var(--muted); }
+
+/* ==========================================================================
    HTTP client
    ========================================================================== */
 

@@ -22,13 +22,14 @@ pub fn paths_exist(paths: Vec<String>) -> Vec<bool> {
 
 /// Runs a program in `cwd` and returns its standard output, for short queries such as
 /// `php artisan list --format=json`. `input`, if given, is written to standard input.
-/// Fails with standard error if the program fails.
+/// Fails with standard error if the program fails, unless `any_status`: checkers such as Mago
+/// exit with an error when they find problems, and still print their report.
 #[tauri::command]
-pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input: Option<String>) -> Result<String, String> {
-    crate::blocking(move || capture(cwd, program, args, input)).await
+pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input: Option<String>, any_status: Option<bool>) -> Result<String, String> {
+    crate::blocking(move || capture(cwd, program, args, input, any_status.unwrap_or(false))).await
 }
 
-fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>) -> Result<String, String> {
+fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>, any_status: bool) -> Result<String, String> {
     crate::login_path();
     let mut child = Command::new(program)
         .args(args)
@@ -44,7 +45,7 @@ fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String
         std::thread::spawn(move || stdin.write_all(input.as_bytes()));
     }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
+    if !out.status.success() && !(any_status && out.status.code().is_some()) {
         return Err(String::from_utf8_lossy(&out.stderr).into());
     }
     Ok(String::from_utf8_lossy(&out.stdout).into())
