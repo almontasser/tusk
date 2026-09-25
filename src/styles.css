@@ -184,6 +184,8 @@ kbd {
   background: var(--bg);
 }
 .tb-search span:nth-child(2) { flex: 1; text-align: left; }
+/* Keycaps sit 3px apart, as on the welcome page, not the box's 8px gap. */
+.tb-search kbd + kbd { margin-left: -5px; }
 .tb-icon { display: inline-grid; place-items: center; width: 30px; height: 28px; border-radius: var(--radius); color: var(--muted); }
 .tb-icon:hover { color: var(--text); }
 
