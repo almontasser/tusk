@@ -57,7 +57,7 @@ file to change when you add it.
 | Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
-| Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
+| Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
@@ -645,9 +645,11 @@ TypeScript version when `node_modules/typescript` exists.
 
 Vue, Svelte, and Astro files highlight their HTML, `<script lang="ts">` as
 TypeScript, `<style lang="scss">` or `lang="less"` as those languages, and an
-Astro file's `---` frontmatter as TypeScript. Svelte and Astro get
-highlighting, spell checking, and Tailwind completion, but no language server
-of their own.
+Astro file's `---` frontmatter as TypeScript. `.svelte` and `.astro` files get
+their own language servers (Svelte's and Astro's), with completion, hover, go
+to definition, and type errors in markup, scripts, and styles. Each starts the
+first time you open one of its files. TypeScript files see the types of the
+Svelte and Astro components they import.
 ## Tests and commands
 
 In test files, **▶ Run test** and **▶ Run all tests in file** links appear above

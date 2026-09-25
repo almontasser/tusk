@@ -726,7 +726,10 @@ const tailwindSettings = {
   },
 };
 
-/** Settings for vtsls, which also loads the Vue TypeScript plugin from the bundled tools. */
+/**
+ * Settings for vtsls, which also loads the Vue, Svelte, and Astro TypeScript plugins from the bundled tools, so
+ * TypeScript files see the types of the components they import.
+ */
 function typescriptSettings(nodeDir: string) {
   const language = {
     inlayHints: { parameterNames: { enabled: "literals" }, functionLikeReturnTypes: { enabled: true } },
@@ -740,6 +743,8 @@ function typescriptSettings(nodeDir: string) {
       tsserver: {
         globalPlugins: [
           { name: "@vue/typescript-plugin", location: nodeDir, languages: ["vue"], configNamespace: "typescript", enableForWorkspaceTypeScriptVersions: true },
+          { name: "typescript-svelte-plugin", location: nodeDir, languages: ["svelte"], enableForWorkspaceTypeScriptVersions: true },
+          { name: "@astrojs/ts-plugin", location: nodeDir, languages: ["astro"], enableForWorkspaceTypeScriptVersions: true },
         ],
       },
     },
@@ -764,11 +769,16 @@ let lazyStart: monaco.IDisposable | undefined;
  * Starts the TypeScript server (vtsls) when the first JavaScript, TypeScript, or Vue file
  * opens, and the Vue server when the first Vue file opens. The Vue server asks vtsls for
  * TypeScript information through `tsserver/request` notifications, which this forwards.
+ * The Svelte and Astro servers run TypeScript themselves, and start with their first file.
  */
 async function startFrontendServersLazily(root: string) {
   const nodeDir = await invoke<string>("tool_path", { name: "node" });
   let ts: Promise<Server | null> | undefined;
   let vue: Promise<Server | null> | undefined;
+  const others: Record<string, Promise<Server | null>> = {};
+  const tsdk = `${nodeDir}/node_modules/typescript/lib`;
+  // Astro's server needs the TypeScript library's folder; Svelte's has its own copy.
+  const component = { svelte: ["Svelte", {}], astro: ["Astro", { typescript: { tsdk } }] } as const;
   const add = (p: Promise<Server>, what: string) =>
     p.then(
       (s) => (servers.push(s), s),
@@ -782,7 +792,7 @@ async function startFrontendServersLazily(root: string) {
   const startVue = () =>
     (vue ??= startTs().then((tsServer) =>
       add(
-        startServer("vue", root, ["vue"], { typescript: { tsdk: `${nodeDir}/node_modules/typescript/lib` } }, {}, (method, params, notify) => {
+        startServer("vue", root, ["vue"], { typescript: { tsdk } }, {}, (method, params, notify) => {
           if (method !== "tsserver/request" || !tsServer) return;
           for (const [id, command, args] of params as [number, string, unknown][]) {
             tsServer
@@ -797,6 +807,7 @@ async function startFrontendServersLazily(root: string) {
     const lang = m.getLanguageId();
     if (lang === "javascript" || lang === "typescript") startTs();
     if (lang === "vue") startVue();
+    if (lang === "svelte" || lang === "astro") others[lang] ??= add(startServer(lang, root, [lang], component[lang][1]), component[lang][0]);
   };
   monaco.editor.getModels().forEach(onModel);
   lazyStart = monaco.editor.onDidCreateModel(onModel);

@@ -1541,7 +1541,20 @@ like this:
 
 Both start lazily (`startFrontendServersLazily`): vtsls with the first
 JavaScript, TypeScript, or Vue model, and the Vue server with the first Vue
-model. While vtsls runs, Monaco's built-in TypeScript features are turned off,
+model.
+
+The Svelte server (`svelte-language-server`) and the Astro server
+(`@astrojs/language-server`, built on Volar) start the same way, with their
+first `.svelte` or `.astro` model. Unlike the Vue server, each runs TypeScript
+itself, so nothing is forwarded to vtsls. Svelte's server has its own
+TypeScript; Astro's gets the bundled TypeScript's `lib` folder as
+`typescript.tsdk`. For the other direction, a `.ts` file importing a component,
+vtsls loads `typescript-svelte-plugin` and `@astrojs/ts-plugin` from the
+bundled tools, next to the Vue plugin. Svelte's server reports a missing Svelte
+config in `vite.config` as an error on line 1, which is right for a Svelte
+project and harmless in a Laravel one that has a stray `.svelte` file. With
+Prettier and `yaml-language-server` (Astro's frontmatter), these add about
+60 MB to the bundled Node tools. While vtsls runs, Monaco's built-in TypeScript features are turned off,
 so completions and diagnostics don't appear twice. Formatting stays with
 `format.ts`: the client doesn't register formatting providers from language
 servers.

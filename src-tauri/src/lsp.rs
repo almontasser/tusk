@@ -43,7 +43,7 @@ pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools"))
 }
 
-/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, or `vue`) for `root`, replacing a running one with the
+/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, `vue`, `svelte`, or `astro`) for `root`, replacing a running one with the
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
@@ -58,6 +58,8 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         "typescript" => ("node", "node/node_modules/@vtsls/language-server/bin/vtsls.js", &["--stdio"]),
         "vue" => ("node", "node/node_modules/@vue/language-server/bin/vue-language-server.js", &["--stdio"]),
+        "svelte" => ("node", "node/node_modules/svelte-language-server/bin/server.js", &["--stdio"]),
+        "astro" => ("node", "node/node_modules/@astrojs/language-server/bin/nodeServer.js", &["--stdio"]),
         // A native binary: the watchdog execs it directly (the runtime is the program itself).
         "typos" => ("", "typos-lsp", &[]),
         // Not a language server: the Xdebug debug adapter. DAP frames messages the same way.
