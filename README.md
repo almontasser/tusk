@@ -894,7 +894,11 @@ and → and ← open and close a node.
 
 Click **Flame graph** to see the same tree as bars: each function's bar sits
 under its caller's and is as wide as its time there, busiest first. Blue bars
-are your code, yellow are `vendor`, and gray are PHP's own functions. When you zoom in, the side pane lists the functions with the most
+are your code, yellow are `vendor`, and gray are PHP's own functions. Hover
+over a bar for its time and calls, click it to zoom in (the bars above it stay,
+and clicking one zooms back out), press Escape to zoom out one level, and
+double-click to open the function. Type in the filter to highlight matching
+functions. When you zoom in, the side pane lists the functions with the most
 own time inside the zoomed bar: where that part of the run is slow.
 
 In a Laravel app, profiled runs also record the database queries. Click
@@ -909,11 +913,7 @@ and time. Two flags point at common problems:
   `with('author')` can replace with one query.
 
 Select a query to see its full SQL, copy it with its bindings in place for a
-database console, or jump to the code that ran queries. Hover
-over a bar for its time and calls, click it to zoom in (the bars above it stay,
-and clicking one zooms back out), press Escape to zoom out one level, and
-double-click to open the function. Type in the filter to highlight matching
-functions.
+database console, or jump to the code that ran queries.
 
 Type in the filter while the call tree shows to find a function's back trace:
 the matching functions are listed first, each opening to the functions that
