@@ -10,7 +10,7 @@ import { choose } from "./palette";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
+import { isDeprecation, magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -100,6 +100,7 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
       ...toRange(d.range),
       message: typeof d.message === "string" ? d.message : d.message.value,
       severity: severity[severityOf(d)],
+      tags: isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : undefined,
       code: d.code?.toString(),
     })),
   );

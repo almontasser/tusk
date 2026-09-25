@@ -463,6 +463,15 @@ that closes keeps its last markers as its scan result. The panel's Errors and
 Warnings toggles filter the list, not the status bar counts, and are kept in
 `localStorage` (`problemsShown`).
 
+### Deprecations
+
+Neither Phpactor nor Mago tags its deprecation reports as deprecated, so
+`isDeprecation` in `diagnostics.ts` finds them by code (Mago's `deprecated-*`,
+Phpactor's `worse.deprecated_usage`), and `setMarkers` gives their markers
+Monaco's deprecated tag, which draws the code struck through. Mago reports the
+whole call (`$method->setAccessible(true)`), so `realProblems` narrows its range
+to the deprecated name from the message.
+
 ### Problem popups and the problem page
 
 Monaco's own problem hover shows the message as plain text in the editor's

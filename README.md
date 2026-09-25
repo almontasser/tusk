@@ -1162,6 +1162,8 @@ status bar) lists errors and warnings across the whole project, grouped by
 file; click one to go to it. The **Errors** and **Warnings** buttons, which show
 their counts, turn each kind on and off, and the panel remembers your choice.
 
+Deprecated methods, classes, and functions show struck through.
+
 Pointing at a problem in the editor shows it with code formatted as code, and
 the checker's notes as paragraphs. **Open in Editor** in that popup, or the
 button at the end of a row in the Problems panel, shows the problem on a page

@@ -121,3 +121,10 @@ class A {
   ];
   assert.deepEqual(kept("/p/app/A.php", text, list).length, 1);
 });
+
+test("narrows a deprecation to the deprecated name", () => {
+  const text = "<?php\n$method->setAccessible(true);\n";
+  const d = { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 29 } }, message: "Call to deprecated method: `ReflectionMethod::setAccessible`.", code: "deprecated-method", source: "mago" };
+  const [kept] = realProblems("/p/app/A.php", text, "php", [d], { ...facts, phpVersion: "8.5" });
+  assert.deepEqual(kept.range, { start: { line: 1, character: 9 }, end: { line: 1, character: 22 } });
+});

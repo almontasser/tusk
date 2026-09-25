@@ -112,7 +112,8 @@ function withoutEloquentMagic<D extends Diagnostic>(text: string, list: D[], fac
  *   undefined variables (`new readonly class`), unresolved names (trait `insteadof` rules), missing interface
  *   methods (it compares their names with case, and misses a trait's traits), and missing generic tags (it
  *   ignores template defaults, such as Filament's `@template TModel of Model = Model`).
- * - Phpactor's unused import that a docblock uses (`@use HasFactory<UserFactory>`), or that Mago reports too.
+ * - Phpactor's unused import that a docblock uses (`@use HasFactory<UserFactory>`), or that Mago reports too, and
+ *   its deprecation that Mago reports on the same line.
  * - Phpactor's "has not been defined" for a model's column set in the model.
  * - Phpactor's namespace hint in a file with no named class, such as tests/Pest.php.
  * - A member used in a trait: the classes that use the trait have it. PhpStorm doesn't check these either.
@@ -157,6 +158,8 @@ function falsePositive({ path, lines, traits, byReference, docblocks, fileClass,
       const name = message.match(/^Name "([^"]+)"/)?.[1]?.split("\\").pop();
       return !!name && (new RegExp(`\\b${name}\\b`).test(docblocks) || sameLine.has(`no-redundant-use ${d.range.start.line}`));
     }
+    case "worse.deprecated_usage":
+      return ["method", "class", "function", "constant", "property"].some((kind) => sameLine.has(`deprecated-${kind} ${d.range.start.line}`));
     case "worse.assignment_to_missing_property": {
       const property = message.match(/^Property "(\w+)"/)?.[1];
       return !!property && !!fileClass && facts.isModelProperty(fileClass, property) === true;
@@ -247,7 +250,9 @@ export function realProblems<D extends Diagnostic>(path: string, text: string, l
     namedClass: !!declaration("class|interface|trait|enum"),
     sameLine: new Set(list.map((d) => `${d.code} ${d.range.start.line}`)),
   };
-  return withoutEloquentMagic(text, list, facts).filter((d) => !documentedAfterAll(text, lineStarts, d) && !falsePositive(file, facts, d));
+  return withoutEloquentMagic(text, list, facts)
+    .filter((d) => !documentedAfterAll(text, lineStarts, d) && !falsePositive(file, facts, d))
+    .map((d) => (isDeprecation(d) ? onDeprecatedName(text, lineStarts, d) : d));
 }
 
 /**
@@ -400,4 +405,25 @@ export function formatType(type: string): string {
     } else out += c;
   }
   return out;
+}
+
+/** A report of a deprecated method, class, function, or constant, which the editor strikes through. */
+export const isDeprecation = (d: Diagnostic) => (/^mago/.test(d.source ?? "") && /^deprecated-/.test(String(d.code))) || d.code === "worse.deprecated_usage";
+
+/**
+ * `d` narrowed to the deprecated name, as its strikethrough covers: Mago reports the whole call
+ * (`$method->setAccessible(true)`). The name is the message's last `::name` or backticked name.
+ */
+function onDeprecatedName<D extends Diagnostic>(text: string, lineStarts: number[], d: D): D {
+  const name = messageOf(d).match(/`(?:[^`]*::)?\\?([\w\\]*?)(\w+)`/)?.[2];
+  const offset = (p: Position) => (lineStarts[p.line] ?? text.length) + p.character;
+  const [start, end] = [offset(d.range.start), offset(d.range.end)];
+  const at = name ? text.slice(start, end).lastIndexOf(name) : -1;
+  if (at < 0 || end - start === name!.length) return d;
+  const position = (o: number): Position => {
+    let line = d.range.start.line;
+    while (lineStarts[line + 1] !== undefined && lineStarts[line + 1] <= o) line++;
+    return { line, character: o - lineStarts[line] };
+  };
+  return { ...d, range: { start: position(start + at), end: position(start + at + name!.length) } };
 }
