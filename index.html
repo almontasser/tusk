@@ -33,6 +33,7 @@
         <button data-view="todo" title="TODO"><span class="codicon codicon-checklist"></span></button>
         <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
         <button data-view="composer" title="Composer"><span class="codicon codicon-package"></span></button>
+        <button data-view="http" title="HTTP Client"><span class="codicon codicon-globe"></span></button>
         <div class="spacer"></div>
         <button data-panel="problems" title="Problems (⌘6)"><span class="codicon codicon-warning"></span></button>
         <button data-panel="log" title="Git Log (⌘9)"><span class="codicon codicon-history"></span></button>
@@ -158,6 +159,26 @@
           </div>
           <p id="composer-summary" class="db-connection muted"></p>
           <ul id="composer-list"></ul>
+        </section>
+        <section id="view-http" hidden>
+          <header class="view-header">
+            <span>HTTP Client</span>
+            <div class="view-actions">
+              <button class="icon-button" id="http-new" title="New Request"><span class="codicon codicon-add"></span></button>
+              <button class="icon-button" id="http-import" title="Import a cURL Command"><span class="codicon codicon-terminal"></span></button>
+              <button class="icon-button" id="http-routes" title="Requests from Laravel Routes"><span class="codicon codicon-symbol-method"></span></button>
+              <button class="icon-button" id="http-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+            </div>
+          </header>
+          <div class="pr-toolbar">
+            <select id="http-sidebar-env" aria-label="Environment"></select>
+          </div>
+          <div class="pr-toolbar">
+            <input id="http-filter" placeholder="Filter requests" aria-label="Filter requests" spellcheck="false" />
+          </div>
+          <ul id="http-requests" class="http-tree"></ul>
+          <header class="git-group">History <span class="count" id="http-history-count"></span><button class="icon-button" id="http-clear-history" title="Clear History"><span class="codicon codicon-clear-all"></span></button></header>
+          <ul id="http-history" class="http-tree"></ul>
         </section>
         <div id="sidebar-resize" aria-hidden="true"></div>
       </aside>

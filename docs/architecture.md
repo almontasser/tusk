@@ -909,13 +909,53 @@ costs nothing until you open it.
 
 ### HTTP client
 
-`src/httpfile.ts` parses `.http` files and curl's output, and Node tests both.
-`src/httpclient.ts` registers an `http` language with a Monarch grammar, a
-code lens per request, and ⌘⏎. A request runs `/usr/bin/curl -sS -i` through
-`run_capture`, with the body on stdin (`--data-binary @-`) and the total time
-appended by `--write-out` after a marker. curl ships with macOS, and running it
-from Rust avoids the browser's CORS rules that `fetch` in the webview would
-apply. Interim responses, such as `100 Continue`, are skipped when parsing.
+`.http` files stay the one copy of each request. The HTTP tab is a form over a
+request's block of text, so there's no second store to keep in step, and the
+files work in PhpStorm and VS Code's REST Client.
+
+- `src/httpfile.ts` has no editor imports, so Node tests it. `parseHttp` reads
+  blocks between `###` lines: file variables, tags, pre-request scripts, the
+  request line (with indented continuation lines), headers (a commented-out
+  header is one turned off), the body, the response handler, and `>>` output.
+  Each request records its block's lines (`start`, `end`). `formatRequest`
+  writes a request back as text. `prepare` replaces variables, resolves file
+  bodies relative to the `.http` file, turns multipart bodies into curl form
+  parts, and encodes `Basic user password`. It also builds curl arguments, reads
+  curl's header dump, imports and exports curl commands (`shellWords` handles
+  bash quoting, including `$'…'`), writes Laravel `Http::` code, and computes
+  stress test statistics.
+- `src/httpclient.ts` sends a request with `/usr/bin/curl` through
+  `run_capture`. curl writes the headers (`-D`) and body (`-o`) to files in the
+  app's cache and prints its `%{json}` write-out after a marker, with its own
+  errors before it (`--stderr -`). Bodies stay in files, so binary responses
+  and large ones never pass through a JavaScript string unless shown. `-g`
+  keeps brackets in URLs literal. Cookies go to a Netscape-format jar per
+  project and environment (`-b` and `-c`). The history is an `index.json` of
+  exchanges beside their body files, capped at 100. Global variables and the
+  selected environment are in `localStorage`, per project.
+- Scripts run in `src/httpscript.worker.ts`, a worker with no access to Tauri's
+  IPC, so a script in a cloned repository can't run commands. The worker is
+  stopped after 5 seconds. It gets copies of the globals and variables and
+  returns the changed ones, with test results and logs.
+- `src/httpview.ts` is the tool window and the HTTP tab. The tab tracks its
+  request with a model decoration on the request's first line, which moves as
+  the file changes above it. Each form edit parses the model, changes the
+  request, and replaces its block with `formatRequest`'s text in one undoable
+  edit. A file that isn't open in a tab is then written to disk; one that is
+  stays unsaved, as after any edit. Edits in the editor re-render the form
+  unless focus is in it.
+- `src/httpload.ts` runs a file's requests in order through `send`, and the
+  stress test. The stress test is one curl process in parallel mode (`-Z
+  --parallel-max`), repeating the URL with a glob range in its fragment, which
+  isn't sent, and printing one line per request. It runs in a PTY so its output
+  streams: `run_capture` returns only at the end. Brackets and braces in the
+  URL are escaped for the glob.
+
+The `http` Monarch grammar embeds JSON bodies and JavaScript scripts. Monarch
+only embeds a language whose tokenizer has loaded, and a zero-width rule enters
+it only with `@rematch`, so the grammar registers after loading both. Hovers,
+completion, and warnings for undefined variables read the same scopes as
+sending, plus names the file's scripts set.
 
 ### Composer
 
@@ -3000,3 +3040,20 @@ font of the list that's installed (its text measures differently from both the
 serif and sans-serif fallbacks), and ligatures are on only when that isn't a
 system fallback. A settings file that still has the old default list gets the
 new one.
+
+### 2026-09-26: The HTTP client keeps requests in .http files
+
+A request builder usually stores collections in its own format. Here the form
+edits `.http` text instead, because the files already live in the project,
+review well in pull requests, and open in PhpStorm and VS Code. The cost is
+that the form rewrites a request's block, dropping comments inside it; the
+editor stays available for anything the form can't express.
+
+### 2026-09-26: Stress tests use curl's parallel mode, not a Rust HTTP client
+
+curl ships with macOS and already sends every request, so a stress test sends
+the same request with the same TLS, cookie, and redirect handling. One process
+with `--parallel-max` holds the concurrency without a process per request. A
+Rust client would measure more precisely at very high rates, but would add a
+dependency and a second request path to keep in step.
+

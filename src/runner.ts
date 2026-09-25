@@ -190,18 +190,27 @@ const shellQuote = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'$
 
 type Route = { method: string; uri: string; name: string | null; action: string };
 
+/** Runs artisan with the arguments, in the app's Sail container when one runs. */
+async function artisanCommand(root: string, args: string[], tty: boolean) {
+  const container = await runningContainer(root);
+  return container ? container.exec(["php", "artisan", ...args], [], tty) : ["php", "artisan", ...args];
+}
+
+/** The app's routes, from `artisan route:list --json`. Throws when artisan fails. */
+export async function listRoutes(root = getRoot()): Promise<Route[]> {
+  const [program, ...args] = await artisanCommand(root, ["route:list", "--json"], false);
+  return JSON.parse(await invoke<string>("run_capture", { cwd: root, program, args, input: null }));
+}
+
 /** Lists the app's routes from `artisan route:list`; choosing one opens its controller method. */
 export async function showRoutes() {
   const root = getRoot();
-  const container = await runningContainer(root);
-  const artisan = (args: string[], tty: boolean) => (container ? container.exec(["php", "artisan", ...args], [], tty) : ["php", "artisan", ...args]);
   let routes: Route[];
   try {
-    const [program, ...args] = artisan(["route:list", "--json"], false);
-    routes = JSON.parse(await invoke<string>("run_capture", { cwd: root, program, args, input: null }));
+    routes = await listRoutes(root);
   } catch {
     // Run it in a terminal, which shows why it failed, such as a syntax error in a routes file.
-    return openTerminal(root, "Routes", artisan(["route:list"], true));
+    return openTerminal(root, "Routes", await artisanCommand(root, ["route:list"], true));
   }
   const items = routes.map((r) => ({
     label: `${r.method.replace("|HEAD", "")} /${r.uri.replace(/^\//, "")}`,

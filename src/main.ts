@@ -14,7 +14,9 @@ import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
-import { initHttpClient, selectEnvironment } from "./httpclient";
+import { clearCookies } from "./httpclient";
+import { httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
+import "./httpload";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
@@ -346,6 +348,7 @@ async function openFolder(dir: unknown = null) {
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
   forgetProblems();
+  resetHttpClient();
   recent = [];
   const session = loadSession();
   openDirs.clear();
@@ -979,6 +982,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     refreshGit();
     refreshSearch(paths);
     refreshTodos(paths);
+    httpFilesChanged([...paths]);
   }, 150);
 });
 
@@ -1153,7 +1157,11 @@ const actions: Action[] = [
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },
   editorAction("Execute Query", "", "phpEditor.runSql"),
-  { label: "Select HTTP Environment…", run: () => active && selectEnvironment(active) },
+  { label: "HTTP Client", run: () => showView("http") },
+  { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
+  { label: "HTTP Client: Global Variables…", run: () => root && showGlobals() },
+  { label: "HTTP Client: Clear Cookies", run: () => root && clearCookies() },
+  { label: "Select HTTP Environment…", run: () => root && selectEnvironment(active ?? "") },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
@@ -1390,6 +1398,7 @@ function showView(name: string) {
   if (name === "database") loadTables();
   if (name === "composer") loadPackages();
   if (name === "todo") loadTodos();
+  if (name === "http") refreshTree();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -1444,7 +1453,14 @@ initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
 initRebase({ root: () => root, status });
 initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
-initHttpClient({ root: () => root, status });
+initHttpClient({
+  root: () => root,
+  status,
+  openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }),
+  ensureModel,
+  // A file open in a tab stays unsaved, as after any edit; auto-save or ⌘S writes it.
+  persist: (path) => (tabs.has(path) ? Promise.resolve() : writeModel(path)),
+});
 initComposer({ root: () => root, status });
 initRefactor({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });

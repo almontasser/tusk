@@ -46,6 +46,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
+| HTTP client | Editing a request in the HTTP tab rewrites its block (`src/httpfile.ts`, `formatRequest`): comments among its headers or after its body are dropped, and a URL split over several lines joins into one. There's no WebSocket, GraphQL, or gRPC support. The history keeps the last 100 requests per project. A stress test runs no scripts and starts about 0.3 seconds late (`src/httpload.ts`). |
 | Split editors | Up to four panes. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -60,7 +61,7 @@ file to change when you add it.
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
@@ -465,32 +466,163 @@ without a file.
 
 ## HTTP client
 
-Write requests in a `.http` file, as in PhpStorm, and click **▶ Send Request**
-above one, or press ⌘⏎ in it. The response opens in the **HTTP** tab: status,
-time, headers, and the body, with JSON formatted.
+Requests live in `.http` files in the project, in the format PhpStorm and VS
+Code's REST Client read, so you commit them and your team uses them too. Click
+the globe icon in the tool window bar, or run **HTTP Client** from ⌘⇧A.
+
+### The tool window
+
+The **HTTP Client** tool window lists every request in the project's `.http` and
+`.rest` files, grouped by file, with a filter box and the selected environment
+at the top.
+
+- Click a request to edit it in the **HTTP** tab. Double-click it to open its
+  file. Hover over it and click ▶ to send it.
+- Right-click a request to send, rename, duplicate, delete, or stress test it.
+  Right-click a file to add a request to it or run all of its requests.
+- **+** adds a request to a file you choose, or to a new file in `http/`.
+- The terminal icon imports a curl command, such as one from your browser's
+  developer tools (**Copy as cURL**).
+- The method icon makes requests from `php artisan route:list`: one route, all
+  API routes, or every route. Each gets `{{host}}` for the app's address and a
+  variable for each route parameter.
+- **History** lists the last 100 requests you sent in the project, with their
+  responses. Click one to see it again.
+
+### The HTTP tab
+
+The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
+menu, and the environment. Under the URL, you see it with its variables
+replaced, and the names nothing defines.
+
+The request's tabs edit its text in the `.http` file, and edits in the editor
+show in the tabs:
+
+| Tab | What you set |
+| --- | --- |
+| Params | The URL's query parameters |
+| Headers | Headers, each of which you can turn off (it's commented out in the file) |
+| Body | None, JSON (with **Format**), form fields, multipart fields and files, text, or a file (`< ./path`, or `<@ ./path` to replace variables in it) |
+| Auth | A bearer token, or a user and password (`Authorization: Basic user password`, encoded when sent, as in PhpStorm) |
+| Scripts | JavaScript that runs before the request and after the response, with snippets for common tests |
+| Settings | Title, name for scripts, redirects, cookies, TLS verification, history, timeouts, and a file to save the response to |
+
+The response shows its status, time, size, and test results, with these tabs:
+
+- **Body**: formatted and highlighted, or raw. HTML and images also have a
+  preview. Copy it, save it, or open it in an editor tab.
+- **Headers**, including each redirect on the way.
+- **Cookies** the response set, and those kept for the environment.
+- **Timing**: DNS lookup, connecting, TLS, waiting, and downloading.
+- **Tests**: each test's result, and what scripts logged.
+- **Request**: the request as sent, as a curl command and as Laravel `Http::`
+  code, each with **Copy**.
+
+The menu next to **Send** also copies the request as cURL or Laravel code, runs
+every request in the file, and starts a stress test.
+
+In the editor, each request has **▶ Send Request** and **Open in HTTP Client**
+above it, and the first shows the environment and **Run All**. The editor
+completes methods, headers, header values, tags, and `{{variables}}`. Hover over
+a variable to see its value and where it comes from. A variable nothing defines
+is underlined.
 
 ```http
-### Create a post
-POST {{host}}/api/posts
+@api = {{host}}/api
+
+### Log in
+POST {{api}}/login
 Content-Type: application/json
+
+{"email": "{{email}}", "password": "{{password}}"}
+
+> {%
+    client.global.set("token", response.body.token);
+    client.test("Logged in", () => client.assert(response.status === 200));
+%}
+
+### My posts
+# @no-redirect
+GET {{api}}/posts?filter[status]=draft
 Authorization: Bearer {{token}}
-
-{"title": "Hello"}
-
-### List posts
-GET {{host}}/api/posts
-    ?page=2
 ```
 
-Variables such as `{{host}}` come from `http-client.env.json` next to the
-`.http` file or in the project root, with one set of values per environment.
-Put secrets in `http-client.private.env.json`, which overrides the shared file,
-and don't commit it. The first environment is used until you run **Select HTTP
-Environment…** from ⌘⇧A.
+### Variables
+
+A request's `{{name}}` comes from the first of these that defines it:
+
+1. A value the request's own pre-request script set (`request.variables.set`).
+2. A global value a script saved (`client.global.set`). Globals last until you
+   clear them with **HTTP Client: Global Variables…** in ⌘⇧A.
+3. A file variable: `@name = value` in the `.http` file.
+4. The selected environment, from `http-client.env.json` next to the file or in
+   the project root. `http-client.private.env.json` overrides it for secrets.
+   **Edit Private Environments…** in the environment menu creates it and adds it
+   to `.gitignore`. Values in a `$shared` environment apply to every
+   environment.
+
+Dynamic values change each time you send: `{{$uuid}}`, `{{$timestamp}}`,
+`{{$isoTimestamp}}`, `{{$randomInt}}`, `{{$random.integer(1, 10)}}`,
+`{{$random.float(0, 1)}}`, `{{$random.alphabetic(8)}}`,
+`{{$random.alphanumeric(8)}}`, `{{$random.hexadecimal(8)}}`,
+`{{$random.numeric(6)}}`, `{{$random.email}}`, and `{{$random.bool}}`.
+`{{$dotenv.NAME}}` reads the project's `.env`.
 
 ```json
 { "local": { "host": "http://localhost:8000" }, "staging": { "host": "https://staging.example.com" } }
 ```
+
+**Edit Environments…** in the environment menu creates `http-client.env.json`
+with a `local` environment for `APP_URL` from `.env`.
+
+### Scripts and tests
+
+Scripts are JavaScript, as in PhpStorm. They run in a worker without access to
+the editor, and stop after 5 seconds.
+
+| Object | What it offers |
+| --- | --- |
+| `client` | `global.set/get/clear/clearAll/isEmpty`, `test(name, fn)`, `assert(condition, message)`, `log(...)` |
+| `response` | `status`, `body` (parsed when it's JSON), `headers.valueOf(name)`, `headers.valuesOf(name)`, `contentType.mimeType` |
+| `request` | `method`, `url`, `body`, `headers`, `variables.set/get`, `environment.get` |
+| `jsonPath(value, path)` | Reads a path such as `$.data[0].id` |
+
+`> ./script.js` and `< ./script.js` run a script from a file instead.
+
+### Tags
+
+Put these comments above the request line:
+
+| Tag | Effect |
+| --- | --- |
+| `# @name login` | A name for scripts and the tool window |
+| `# @no-redirect` | Don't follow redirects |
+| `# @no-cookie-jar` | Don't send or keep cookies |
+| `# @no-log` | Leave it out of the history |
+| `# @timeout 5` | Seconds before giving up (60 by default) |
+| `# @connection-timeout 2` | Seconds to wait for the connection |
+| `# @insecure` | Accept any TLS certificate. PhpStorm reads it as a comment |
+
+After the body, `>> ./out.json` saves the response to a file, adding a number
+when it exists, and `>>! ./out.json` replaces it.
+
+Cookies work like a browser's: responses' cookies are kept per environment and
+sent with later requests. **HTTP Client: Clear Cookies** in ⌘⇧A forgets them.
+
+### Running a file
+
+**Run All Requests in File** sends each request in order, so a login request's
+token reaches the requests after it. The **HTTP Runner** tab lists each result,
+with its status, time, and tests. Click one to see its response.
+
+### Stress testing
+
+**Stress Test…** sends one request many times at once and shows, as it runs,
+requests per second, failures, the median, 95th, and 99th percentile response
+times, requests completed each second, a histogram of response times, and the
+status codes. Choose a number of requests or a number of seconds, and how many
+run at a time (up to 500). Scripts don't run, and the environment's cookies are
+sent. Only test servers you're allowed to load.
 
 ## Composer
 
@@ -1316,8 +1448,11 @@ committed.
 | `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
 | `src/composer.ts` | The Composer tool window |
 | `src/composerdata.ts` | Joins `composer show` and `composer outdated` output |
-| `src/httpclient.ts` | The HTTP client for `.http` files |
-| `src/httpfile.ts` | Reads `.http` files and curl's output |
+| `src/httpclient.ts` | The HTTP client's sending, variables, cookies, history, and `http` language |
+| `src/httpview.ts` | The HTTP Client tool window and the HTTP tab |
+| `src/httpload.ts` | The HTTP client's runner and stress test |
+| `src/httpscript.worker.ts` | Runs `.http` request scripts |
+| `src/httpfile.ts` | Reads and writes `.http` files, builds curl arguments, and converts requests |
 | `src/hierarchy.ts` | The type hierarchy view |
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
