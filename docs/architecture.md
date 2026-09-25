@@ -544,11 +544,14 @@ buffer, once per model version. `magoFixes` in `diagnostics.ts` reads each
 issue's `edits`: byte ranges and UTF-8 `new_text` bytes, and a `safety` of
 `safe`, `potentiallyunsafe`, or `unsafe`. Each fix whose range touches a marker
 with the same code becomes a `quickfix` action; only safe ones are preferred,
-and the others say so in their title. `safeEdits` collects every safe fix,
-leaving out fixes that overlap one before them, for **Fix All Safe Mago
-Problems in File**. The same action has the kind `source.fixAll.mago` when the
+and the others say so in their title. `safeEdits` collects the safe fixes for
+problems the file shows, leaving out fixes that overlap one before them, for
+**Fix All Safe Mago Problems in File**. A fix for a problem the filters drop,
+such as an unused import that a trait's `use` needs, isn't applied. The same action has the kind `source.fixAll.mago` when the
 request asks for `source.fixAll`, so Monaco's `editor.action.fixAll` applies
 it. The edits go through Monaco, so they're undoable and the file isn't saved.
+They carry the model version Mago ran on, so Monaco refuses them if the text
+changed while Mago ran.
 The analyzer's fixes aren't offered, since `mago analyze` on one buffer still
 reads the whole project.
 

@@ -178,7 +178,9 @@ monaco.languages.registerCodeActionProvider("php", {
     const fixAll = context.only?.startsWith("source.fixAll") ?? false;
     const markers = (fixAll ? monaco.editor.getModelMarkers({ resource: model.uri }) : context.markers).filter((m) => magoCategory[m.source ?? ""] && typeof m.code === "string");
     const actions: monaco.languages.CodeAction[] = [];
-    const edit = (edits: { range: L.Range; text: string }[]) => ({ edits: edits.map((e) => ({ resource: model.uri, textEdit: { range: toRange(e.range), text: e.text }, versionId: model.getVersionId() })) });
+    // The version the edits are for, taken before Mago runs, so Monaco refuses them if the text changes meanwhile.
+    const versionId = model.getVersionId();
+    const edit = (edits: { range: L.Range; text: string }[]) => ({ edits: edits.map((e) => ({ resource: model.uri, textEdit: { range: toRange(e.range), text: e.text }, versionId })) });
     if (!fixAll) {
       const lines = model.getLinesContent();
       for (const m of markers) {
@@ -200,7 +202,9 @@ monaco.languages.registerCodeActionProvider("php", {
         actions.unshift({ title: `${f.title}${risk}`, kind: "quickfix", isPreferred: !risk, diagnostics, edit: edit(f.edits) });
       }
     }
-    const safe = safeEdits(fixes);
+    // Only fixes for problems the editor shows: the filters drop some of Mago's, such as an import a trait uses.
+    const shown = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => m.source === "mago-lint");
+    const safe = safeEdits(fixes.filter((f) => shown.some((m) => m.code === f.code && monaco.Range.areIntersectingOrTouching(m, toRange(f.range)))));
     if (safe.length) actions.push({ title: "Fix All Safe Mago Problems in File", kind: fixAll ? "source.fixAll.mago" : "quickfix", edit: edit(safe) });
     return { actions, dispose() {} };
   },
