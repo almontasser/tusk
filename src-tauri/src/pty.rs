@@ -114,6 +114,20 @@ pub fn pty_kill(state: State<PtyState>, id: u32) {
     }
 }
 
+/// The folder a terminal's process is in, such as a shell after `cd`, so a restored shell starts there.
+#[tauri::command]
+pub fn pty_cwd(state: State<PtyState>, id: u32) -> Option<String> {
+    let pid = state.0.lock().unwrap().get(&id)?.child.process_id()?;
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    let read = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDVNODEPATHINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    if read != size {
+        return None;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const libc::c_char) };
+    Some(path.to_string_lossy().into_owned())
+}
+
 /// Takes the longest valid UTF-8 prefix from `buf`, leaving a character that was split
 /// across reads for the next call. Invalid bytes become U+FFFD.
 fn take_utf8(buf: &mut Vec<u8>) -> String {

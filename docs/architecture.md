@@ -1411,15 +1411,27 @@ Each project's session is saved in `localStorage` under `session:<root>`:
 | `dirs` | Expanded folders in the tree |
 | `view` | The sidebar view: project, commit, or pull requests |
 | `panes`, `focused` | Each pane's file, left to right, and the focused pane |
-| `shells`, `panel` | How many plain shells were open, and whether the panel showed |
+| `terminals`, `panel` | The running shells (title and folder) and restorable commands (title, folder, and command), and whether the panel showed. Older sessions have `shells`, a count of shells. |
 
 The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
 sidebar view), when the page unloads or the window loses focus, and before it
 opens another folder. When it opens a folder, it expands the saved folders,
 reopens the tabs, skips files that no longer exist, splits the panes again,
-and opens the shells as new shells in the project folder. Terminal tabs that
-ran a command, such as a test run or `artisan serve`, aren't restored, since
-running a command again on its own can surprise you.
+and reopens the terminals, after the language servers start.
+
+A shell reopens in its last folder. `terminal.ts` can't see `cd`, so 500 ms
+after you press Enter in a shell, it asks for the shell process's working
+directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
+`PROC_PIDVNODEPATHINFO` (no subprocess). A folder that no longer exists falls
+back to the project folder.
+
+A command tab comes back only if its caller opened it as restorable and it was
+still running: Run Anything commands (`runner.ts`, for dev servers such as
+`npm run dev`) and Tinker. Tests, git and Composer commands, and anything that
+had finished don't run again, since repeating them unasked could push, rebase,
+or change packages. The debug server and the profiling server aren't restored
+either, because each needs its tool's state (the debugger listening, or the
+profile folder) set up first.
 
 ## Tailwind CSS (frontend step 1)
 

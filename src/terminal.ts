@@ -6,8 +6,10 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { isDark, onSettings } from "./settings";
 
-/** A panel tab: a terminal, or another view (without `term`). `shell` marks a plain shell, not a command. */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; shell?: boolean };
+/** What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again. */
+export type Restore = { title: string; cwd: string; command?: string[] };
+/** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore };
 
 const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
@@ -21,8 +23,8 @@ const themes = {
 const theme = () => themes[isDark() ? "dark" : "light"];
 onSettings(() => sessions.forEach((s) => s.term && (s.term.options.theme = theme())));
 
-/** How many plain shells are open and running, for restoring them with the project. */
-export const shellCount = () => sessions.filter((s) => s.shell && !s.exited).length;
+/** The shells and restorable commands that are still running, in tab order, for the session. */
+export const runningTerminals = () => sessions.filter((s) => s.restore && !s.exited).map((s) => s.restore!);
 export const panelShown = () => panelVisible;
 
 // xterm.js loads with the first terminal, not with the app.
@@ -30,9 +32,10 @@ const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addo
 
 /**
  * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
- * ends; `onClose` runs when its tab closes, even while the process still runs.
+ * ends; `onClose` runs when its tab closes, even while the process still runs. Shells, and commands
+ * opened with `restorable` (such as a dev server), reopen with the project while they still run.
  */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void) {
+export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false) {
   showPanel(true);
   const [{ Terminal }, { FitAddon }] = await loadXterm();
   const el = document.createElement("div");
@@ -45,7 +48,18 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   fit.fit();
 
   const id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
-  const session: Session = { title, term, fit, el, exited: false, dispose: () => {}, shell: !command };
+  const restore = !command || restorable ? { title, cwd, command } : undefined;
+  const session: Session = { title, term, fit, el, exited: false, dispose: () => {}, restore };
+  // A shell's folder changes with `cd`, so after you press Enter, read where it is now.
+  let cwdTimer: ReturnType<typeof setTimeout> | undefined;
+  const followCwd = (data: string) => {
+    if (command || !data.includes("\r")) return;
+    clearTimeout(cwdTimer);
+    cwdTimer = setTimeout(async () => {
+      const now = await invoke<string | null>("pty_cwd", { id }).catch(() => null);
+      if (now) restore!.cwd = now;
+    }, 500);
+  };
   const unlisteners = await Promise.all([
     listen<string>(`pty:${id}`, (e) => term.write(e.payload)),
     listen(`pty-exit:${id}`, () => {
@@ -55,12 +69,13 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
       onExit?.();
     }),
   ]);
-  const input = term.onData((data) => invoke("pty_write", { id, data }).catch(() => {}));
+  const input = term.onData((data) => (followCwd(data), invoke("pty_write", { id, data }).catch(() => {})));
   const resize = term.onResize(({ rows, cols }) => invoke("pty_resize", { id, rows, cols }).catch(() => {}));
   const observer = new ResizeObserver(() => el.offsetParent && fit.fit());
   observer.observe(el);
   session.dispose = () => {
     onClose?.();
+    clearTimeout(cwdTimer);
     unlisteners.forEach((u) => u());
     input.dispose();
     resize.dispose();

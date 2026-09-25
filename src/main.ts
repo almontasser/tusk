@@ -31,7 +31,7 @@ import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./b
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
-import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
+import { openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -357,10 +357,12 @@ async function openFolder(dir: unknown = null) {
   loadBookmarks();
   if (session) await restoreSession(session);
   restartServers();
-  // Shells come back fresh in the project folder, after the language servers have started;
-  // command tabs, such as a server, aren't re-run.
-  for (let i = 0; i < (session?.shells ?? 0); i++) await openTerminal(root);
-  if ((session?.shells ?? 0) > 0 && !session?.panel) toggleTerminal(root);
+  // Terminals reopen after the language servers have started: shells in their last folder, and
+  // commands such as a dev server run again. Sessions from before terminals were saved kept a count of shells.
+  const terminals: Restore[] = session?.terminals ?? Array.from({ length: session?.shells ?? 0 }, () => ({ title: "Terminal", cwd: root }));
+  const found = terminals.length ? await invoke<boolean[]>("paths_exist", { paths: terminals.map((t) => t.cwd) }) : [];
+  for (const [i, t] of terminals.entries()) await openTerminal(found[i] ? t.cwd : root, t.title, t.command, undefined, undefined, !!t.command);
+  if (terminals.length && !session?.panel) toggleTerminal(root);
 }
 
 // ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
@@ -374,7 +376,8 @@ type Session = {
   /** The panes and their tabs, and the focused pane's position among them. */
   layout?: Layout;
   focused?: number;
-  /** How many shell terminals were open, and whether the panel showed. */
+  /** The running shells and restorable commands, and whether the panel showed. `shells` is the older count of shells. */
+  terminals?: Restore[];
   shells?: number;
   panel?: boolean;
 };
@@ -400,7 +403,7 @@ function saveSession() {
     view: currentView,
     layout: layoutOf($("editor")),
     focused: paneOrder().indexOf(currentPane()),
-    shells: shellCount(),
+    terminals: runningTerminals(),
     panel: panelShown(),
   };
   try {

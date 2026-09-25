@@ -33,7 +33,8 @@ const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("
 async function run(title: string, command: string[], tests = false, mode: Mode = "run") {
   last = { title, command, tests, mode };
   const coverage = mode === "coverage";
-  if (!tests) return openTerminal(getRoot(), title, command);
+  // Commands from Run Anything, such as `npm run dev`, reopen with the project while they still run; tests don't.
+  if (!tests) return openTerminal(getRoot(), title, command, undefined, undefined, true);
   // In Sail, the report has to be somewhere the container can write: storage/logs, which git ignores.
   const inSail = command[0] === sail();
   const report = inSail ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
@@ -166,7 +167,7 @@ export async function runAnything() {
 
 /** Opens Laravel Tinker in a terminal tab, in Sail's container when it's up. */
 export const tinker = async () =>
-  openTerminal(getRoot(), "Tinker", (await sailRunning(getRoot())) ? [sail(), "artisan", "tinker"] : ["php", "artisan", "tinker"]);
+  openTerminal(getRoot(), "Tinker", (await sailRunning(getRoot())) ? [sail(), "artisan", "tinker"] : ["php", "artisan", "tinker"], undefined, undefined, true);
 
 type Route = { method: string; uri: string; name: string | null; action: string };
 

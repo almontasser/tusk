@@ -54,7 +54,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Session restore | Shells come back fresh, without their history, and command tabs (tests, servers) aren't re-run. |
+| Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
 | Settings | `.editorconfig`'s `end_of_line` and `charset` aren't applied; files keep their own line endings and are read as UTF-8. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
@@ -261,7 +261,11 @@ off, closing a changed tab asks whether to save it.
 The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
 when you switch tabs and when you reopen the project. Expanded folders in the
-tree and the sidebar view come back too. If a project has a
+tree and the sidebar view come back too. Shells reopen in the folder you last
+`cd`'d to. Commands you started from Run Anything, such as `npm run dev` or
+`php artisan serve`, and Tinker, run again if they were still running when you
+closed the project. Tests, git commands, and the debug and profiling servers
+don't run again. If a project has a
 `.phpactor.json` file, Phpactor asks whether to trust it, because the file can
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.
