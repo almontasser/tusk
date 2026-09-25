@@ -571,8 +571,10 @@ each kind of context. It indexes the project the way the editor does, builds
 prompts with the editor's own functions, and starts `llama-server` with the
 same options. It scores the first line of each cleaned suggestion: exact
 matches, edit similarity, empty suggestions, and how often the raw suggestion
-repeated the code below. Recent code isn't measured, since a benchmark has no
-history of where you worked.
+repeated the code below. It times each request twice: cold, and after typing a
+character with the prompt ready, which is what the editor's warm-ups leave.
+Recent code isn't measured, since a benchmark has no history of where you
+worked.
 
 ```sh
 node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs]
@@ -590,6 +592,13 @@ cases and the 1.5B model:
 
 A wider context adds tokens, and so time, without better suggestions, so the
 budget stays.
+
+The same 300 cases with the 3B model: 48.0% with no context and 65.0% with
+the editor's context, 5.3 points above the 1.5B model. It's half as fast:
+it reads prompts at about 880 tokens a second against 1,800, and writes 66
+tokens a second against 123. Over 120 cases, a suggestion after typing a
+character, with the prompt ready, took 372 ms against 199 ms (the median, before
+the editor's 250 ms pause), and a cold prompt 2.4 seconds against 1.3.
 
 The `types` configuration adds the classes Phpactor finds for the names before
 `->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so

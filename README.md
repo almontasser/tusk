@@ -416,7 +416,7 @@ Choose the model in **AI completion model**:
 | Model | Download | Notes |
 | --- | --- | --- |
 | Qwen2.5-Coder 1.5B | 1.6 GB | The default: fast, good at finishing a line |
-| Qwen2.5-Coder 3B | 3.3 GB | Better multi-line suggestions, a little slower |
+| Qwen2.5-Coder 3B | 3.3 GB | About 5 points more exact suggestions; each takes about 0.2 s longer |
 | Qwen2.5-Coder 7B | 8.1 GB | The best suggestions, but slower, and needs 16 GB of memory or more |
 
 The first start takes about 15 seconds while macOS prepares the GPU code;

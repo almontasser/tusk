@@ -109,10 +109,10 @@ function typeAt(file: string, offset: number) {
 
 // ---- Run ----
 const configs = only.split(",");
-type Score = { exact: number; similarity: number; empty: number; repeats: number; ms: number[]; tokens: number[] };
+type Score = { exact: number; similarity: number; empty: number; repeats: number; ms: number[]; typing: number[]; tokens: number[] };
 /** Cases where the Phpactor types changed the context, and exact matches in them with and without the types. */
 const typed = { cases: 0, full: 0, types: 0 };
-const scores = Object.fromEntries(configs.map((c) => [c, { exact: 0, similarity: 0, empty: 0, repeats: 0, ms: [], tokens: [] } as Score]));
+const scores = Object.fromEntries(configs.map((c) => [c, { exact: 0, similarity: 0, empty: 0, repeats: 0, ms: [], typing: [], tokens: [] } as Score]));
 
 for (const [n, c] of cases.entries()) {
   const lines = texts.get(c.file)!.split("\n");
@@ -139,6 +139,12 @@ for (const [n, c] of cases.entries()) {
   for (const config of configs) {
     const body = infillRequest(lines, c.line, c.column, extra[config], 128);
     const { text, ms } = await ask(body);
+    // Typing a character with the prompt ready, as the editor's warm-up leaves it: process the prompt one
+    // character short, then time the request for the whole prompt.
+    if (body.prompt.trim()) {
+      await ask({ ...body, prompt: body.prompt.slice(0, -1), n_predict: 0 });
+      scores[config].typing.push((await ask(body)).ms);
+    }
     const below = lines.slice(c.line, c.line + 10);
     const next = below.find((l) => l.trim())?.trim();
     const s = scores[config];
@@ -159,10 +165,10 @@ for (const [n, c] of cases.entries()) {
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
 const pct = (x: number) => `${((100 * x) / cases.length).toFixed(1)}%`;
 console.log(`\n${root}: ${cases.length} cases, ${index.files.size} files indexed, ${Object.keys(models).length} models, ${modelPath.split("/").pop()}\n`);
-console.log("| Context | Exact first line | Edit similarity | Empty | Repeated code below | Median time | Context tokens (about) |");
-console.log("| --- | --- | --- | --- | --- | --- | --- |");
+console.log("| Context | Exact first line | Edit similarity | Empty | Repeated code below | Median time, cold | Median time, typing | Context tokens (about) |");
+console.log("| --- | --- | --- | --- | --- | --- | --- | --- |");
 for (const [config, s] of Object.entries(scores)) {
-  console.log(`| ${config} | ${pct(s.exact)} | ${pct(s.similarity)} | ${pct(s.empty)} | ${pct(s.repeats)} | ${median(s.ms).toFixed(0)} ms | ${median(s.tokens).toFixed(0)} |`);
+  console.log(`| ${config} | ${pct(s.exact)} | ${pct(s.similarity)} | ${pct(s.empty)} | ${pct(s.repeats)} | ${median(s.ms).toFixed(0)} ms | ${median(s.typing).toFixed(0)} ms | ${median(s.tokens).toFixed(0)} |`);
 }
 if (typed.cases) console.log(`\nThe types changed the context in ${typed.cases} cases. Exact first line there: ${typed.full} without them, ${typed.types} with them.`);
 server.kill();
