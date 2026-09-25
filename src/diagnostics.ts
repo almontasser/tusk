@@ -2,7 +2,7 @@
 // Mago's report of a whole project. Free of editor imports so Node can test it, and so the open files and the
 // project's problems go through the same filters.
 import { withoutMagic } from "./magic.ts";
-import { docblockHasParam } from "./phptypes.ts";
+import { docblockHasParam, docblockHasReturn } from "./phptypes.ts";
 
 type Position = { line: number; character: number };
 export type Diagnostic = {
@@ -211,13 +211,16 @@ function ownDocblock(lines: string[], line: number): boolean {
 }
 
 /**
- * Phpactor's "Method "send" is missing @param $body" when the docblock has it: Phpactor's docblock parser drops a
- * `@param` whose type it can't read, such as a PHPStan array shape with quoted keys (`array{'code': string}`).
+ * Phpactor's "Method "send" is missing @param $body", or "is missing docblock return type", when the docblock has
+ * the tag: Phpactor's docblock parser drops a tag whose type it can't read, such as a PHPStan array shape with
+ * quoted keys (`array{'code': string}`) or an open one (`array{id: string, ...}`).
  */
 function documentedAfterAll(text: string, lineStarts: number[], d: Diagnostic): boolean {
+  const at = (lineStarts[d.range.start.line] ?? text.length) + d.range.start.character;
+  if (d.code === "worse.docblock_missing_return_type") return docblockHasReturn(text, at);
   if (d.code !== "worse.docblock_missing_param") return false;
   const name = messageOf(d).match(/@param \$(\w+)/)?.[1];
-  return !!name && docblockHasParam(text, (lineStarts[d.range.start.line] ?? text.length) + d.range.start.character, name);
+  return !!name && docblockHasParam(text, at, name);
 }
 
 /** The diagnostics worth showing for a file: none in libraries, and none of the false ones above. */

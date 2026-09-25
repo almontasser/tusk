@@ -104,3 +104,20 @@ test("formats messages for hovers and the problem page", () => {
   );
   assert.equal(formatType("array{'a': array<int, string>, 'b': list{int}}"), "array{\n  'a': array<int, string>,\n  'b': list{\n    int\n  }\n}");
 });
+
+test("drops Phpactor's missing @return when the docblock has one it can't read", () => {
+  const text = `<?php
+class A {
+    /**
+     * @return Generator<int, array{id: string, ...}>
+     */
+    private function entries(): Generator {}
+
+    private function other(): array {}
+}`;
+  const list = [
+    at(text, "entries", "worse.docblock_missing_return_type", "Method entries is missing docblock return type: Generator<mixed>", "phpactor"),
+    at(text, "other", "worse.docblock_missing_return_type", "Method other is missing docblock return type: array", "phpactor"),
+  ];
+  assert.deepEqual(kept("/p/app/A.php", text, list).length, 1);
+});

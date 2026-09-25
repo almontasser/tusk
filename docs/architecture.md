@@ -510,7 +510,10 @@ parse), and then reports `worse.docblock_missing_param` for a parameter the
 docblock does document. `documentedAfterAll` in `lsp.ts` finds the docblock of
 the function around the report (`docblockHasParam` in `phptypes.ts`: the
 `/** … */` right before `function`, with only modifiers and attributes between)
-and drops the report when it has `@param … $name`.
+and drops the report when it has `@param … $name`. The same goes for
+`worse.docblock_missing_return_type` and `@return`: Phpactor can't read an open
+array shape either (`array{id: string, ...}`), which Mago needs for
+`array<mixed>&array{…}`.
 
 ### Unfinished first builds
 
