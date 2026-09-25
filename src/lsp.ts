@@ -327,6 +327,8 @@ async function startServer(
   };
   /** The document Phpactor checks next: the one its diagnostics engine keeps waiting (see checkOneByOne). */
   let lastEnqueued = "";
+  /** Whether an indexing run has ended since the server started (see the $/progress handler). */
+  let indexedOnce = false;
   /** Phpactor's empty publishes waiting to apply, by document (see the publishDiagnostics handler). */
   const heldClears = new Map<string, ReturnType<typeof setTimeout>>();
   const call = <T>(method: string, params: unknown, token?: monaco.CancellationToken) => {
@@ -405,7 +407,9 @@ async function startServer(
       else if (!progressTimers.has(token)) {
         progressTimers.set(token, setTimeout(() => (progressShown.add(token), host.status(text, `${name}:progress`)), 800));
       }
-      if (v.kind === "end" && /^indexing/i.test(progressTitles.get(token) ?? "")) recheckOpenFiles();
+      // Only the first indexing run: later ones follow a file created or changed on disk, and a pass over every open
+      // file would take Phpactor's one waiting check away from the file you're editing for a minute.
+      if (v.kind === "end" && !indexedOnce && /^indexing/i.test(progressTitles.get(token) ?? "")) (indexedOnce = true), recheckOpenFiles();
       if (v.kind === "end") (progressTitles.delete(token), progressShown.delete(token));
     }
   });

@@ -637,8 +637,10 @@ replaces the one before, and it drops a document's results once another is
 waiting. So when a session reopened several files, or indexing ended and the
 editor asked for every open file again, only the last one got checked, and the
 others showed no problems until you edited them. `checkOneByOne` in `lsp.ts`
-sends `didSave` for one file at a time, when the server starts and when
-indexing ends. It moves to the next file half a second after a publish that has
+sends `didSave` for one file at a time, when the server starts and when its
+first indexing run ends. Later indexing runs follow a file created on disk,
+such as by `artisan make`, and a pass then took the check away from the file
+you were editing for up to a minute, so they don't start one. It moves to the next file half a second after a publish that has
 results from both `mago` and `mago-lint`, 5 seconds after the last publish
 (Mago takes about 2, and a checker that finds nothing publishes nothing), or
 after 30 seconds. Moving on sooner would make Phpactor drop Mago's results for
