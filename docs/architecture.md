@@ -611,6 +611,16 @@ To try other server options, set `LLAMA_ARGS`, for example
 `LLAMA_ARGS="--spec-type ngram-simple"`; it's split on spaces, so model paths
 in it can't contain spaces.
 
+JetBrains' Mellum 4B, in mradermacher's 4-bit build (`Q4_K_M`, 2.6 GB),
+scored 58.3% on the same 120 cases, against 59.2% for Qwen2.5-Coder 1.5B and
+67.5% for 3B. After typing it took 209 ms, like 1.5B, but a cold prompt took
+4.9 seconds. It needs `--spm-infill`, since it expects the suffix before the
+prefix. Its model file declares no file separator, so the server divides extra
+files with `--- snippet ---`. Declaring its `<filename>` token as the separator
+(`--override-kv tokenizer.ggml.fim_sep_token_id=int:5`), as its model card
+shows, scored lower (47.5%), possibly because the server names the current
+file `filename`.
+
 The `types` configuration adds the classes Phpactor finds for the names before
 `->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
 the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
