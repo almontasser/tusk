@@ -18,7 +18,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { closeProblemPage, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
+import { closeProblemPage, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -489,7 +489,10 @@ function markSaved(path: string) {
 async function renamed(from: string, to: string) {
   const old = monaco.editor.getModel(monaco.Uri.file(from));
   const tab = tabs.get(from);
-  if (!tab) return old?.dispose();
+  if (!tab) {
+    old?.dispose();
+    return forgetPath(from);
+  }
   const unsaved = isDirty(tab) ? tab.model.getValue() : null;
   const model = await ensureModel(to);
   if (unsaved !== null) model.setValue(unsaved);
@@ -505,6 +508,7 @@ async function renamed(from: string, to: string) {
   if (view) viewStates.set(to, view);
   retarget((p) => (p === from ? to : p));
   old?.dispose();
+  forgetPath(from);
   renderTabs();
   markActiveInTree();
 }
@@ -520,6 +524,7 @@ function forget(path: string) {
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && inside(m.uri.fsPath)).forEach((m) => m.dispose());
   [...viewStates.keys()].filter(inside).forEach((p) => viewStates.delete(p));
   retarget((p) => (inside(p) ? null : p));
+  forgetPath(path);
   renderTabs();
   markActiveInTree();
 }
@@ -1347,7 +1352,13 @@ initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });
 
 initProjectFiles(() => root);
-initProblems({ root: () => root, openAt: (path, range) => openAt(path, range), status, changed: updateProblems });
+initProblems({
+  root: () => root,
+  openAt: (path, range) => openAt(path, range),
+  status,
+  unsaved: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!),
+  changed: updateProblems,
+});
 initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */

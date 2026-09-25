@@ -1183,8 +1183,9 @@ brings back the view it covered, such as a diff. The first time you open it, it 
 Mago checks every file in a few seconds, and then Phpactor's own checks, such
 as deprecated classes and unused imports, run file by file in the background
 (a few minutes for about 1,000 files, using half the cores). Phpactor's results
-are cached by each file's contents, so **Scan Project** later rechecks only
-what changed. Open files show their live problems as you type; after a fix, a
+are cached by each file's contents for the first scan after the project opens.
+**Scan Project** rechecks every file, since a change in one file can change
+another's problems. Open files show their live problems as you type; after a fix, a
 problem can stay for up to 4 seconds while the checks run again. Mago's notes
 and help show in the editor only, not in the panel. The status bar counts cover
 the project once it has been scanned. Laravel LSP's and Tailwind's problems

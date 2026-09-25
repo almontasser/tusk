@@ -466,9 +466,15 @@ Phpactor has no project-wide check, so its diagnostics command,
 input and the editor's index path in `--config-extra`, half the cores at a time;
 at about 1.5 seconds a file, 1,000 files take 2 to 4 minutes. Its results are
 cached in the app's cache (`problems/<project>/phpactor.json`) by a hash of
-each file's text. Both go through `realProblems` and `severityOf`, as open
+each file's text. A file's results also depend on the files it uses, so only
+the first scan after a project opens reads the cache; **Scan Project** runs
+Phpactor on every file. Both go through `realProblems` and `severityOf`, as open
 files do. Files open in the editor show their live markers instead, and a file
-that closes keeps its last markers as its scan result. The panel's Errors and
+that closes keeps its last markers as its scan result, unless you close it
+without saving its changes. Then it keeps its earlier scan result. Deleting or
+moving a file drops its problems (`forgetPath`). A scan that a newer one
+replaced (the project changed) checks its run number after each wait and stops
+without publishing; **Scan Project** does nothing while a scan runs. The panel's Errors and
 Warnings toggles filter the list, not the status bar counts, and are kept in
 `localStorage` (`problemsShown`).
 
@@ -2890,6 +2896,17 @@ for the light bulb's automatic requests as the caret moves. Suppression uses
 it's no longer needed. There's no action that turns a rule off in `mago.toml`:
 the rule label in the popup names the rule, and a project-wide change is
 better made in the file.
+
+### 2026-09-25: Scan Project ignores the Phpactor cache
+
+Phpactor's cached results are keyed by a hash of each file's text, but a
+file's problems also depend on the classes it uses, so a change in one file
+can leave another file's cached results wrong. **Scan Project** ignores the
+cache and runs Phpactor on every file, which takes a few minutes on a large
+project. Only the first scan after a project opens reads the cache, so the
+panel fills quickly after a restart. Rescanning only the files that changed on
+disk was left out: whether Mago on single paths gives correct cross-file
+results is unproven.
 
 ### 2026-09-25: Phpactor's empty publish waits
 

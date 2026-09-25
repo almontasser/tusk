@@ -12,6 +12,8 @@ type Host = {
   root(): string;
   openAt(path: string, range: monaco.IRange): void;
   status(text: string): void;
+  /** Whether the file's tab has unsaved changes. */
+  unsaved(path: string): boolean;
   /** Called when the counts may have changed, for the status bar. */
   changed(): void;
 };
@@ -169,11 +171,11 @@ function render() {
 let pending: ReturnType<typeof setTimeout> | undefined;
 const renderSoon = () => (clearTimeout(pending), (pending = setTimeout(render, 200)));
 monaco.editor.onDidChangeMarkers(renderSoon);
-// A closing file keeps its last markers, which are newer than the scan.
+// A closing file keeps its last markers, which are newer than the scan, unless they're for changes you didn't save.
 monaco.editor.onDidCreateModel((model) =>
   model.onWillDispose(() => {
     const path = model.uri.fsPath;
-    if (model.uri.scheme !== "file" || scan.root !== host.root() || !diagnosed.has(path)) return;
+    if (model.uri.scheme !== "file" || scan.root !== host.root() || !diagnosed.has(path) || host.unsaved(path)) return;
     const markers = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => isShown(m.severity));
     scanned.set(path, markers.map((m) => ({ range: m, message: m.message, severity: m.severity, source: m.source, code: typeof m.code === "string" ? m.code : m.code?.value })));
     renderSoon();
@@ -183,7 +185,7 @@ monaco.editor.onDidCreateModel((model) =>
 /** Shows the Problems panel, scanning the project the first time. */
 export function showProblems() {
   showPanelView("Problems", panel);
-  if (scan.root !== host.root() && !scan.running) scanProject();
+  if (scan.root !== host.root() && !scan.running) scanProject(true);
   else render();
 }
 
@@ -194,6 +196,14 @@ export function forgetProblems() {
   render();
 }
 
+/** Drops the problems of a file, or of every file in a folder, that was deleted or moved. */
+export function forgetPath(path: string) {
+  const inside = (p: string) => p === path || p.startsWith(`${path}/`);
+  [...scanned.keys()].filter(inside).forEach((p) => scanned.delete(p));
+  [...diagnosed].filter(inside).forEach((p) => diagnosed.delete(p));
+  renderSoon();
+}
+
 const hash = (text: string) => {
   let h = 0;
   for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
@@ -202,12 +212,12 @@ const hash = (text: string) => {
 
 /**
  * Scans every PHP file: Mago first (seconds), then Phpactor, one process per file, several at a time (about 1.5
- * seconds each). Phpactor's results are kept in the app's cache by each file's text, so a later scan runs it
- * only for files that changed.
+ * seconds each). Phpactor's results are kept in the app's cache by each file's text, but a file's results also
+ * depend on the files it uses, so only the first scan after the project opens reads the cache (`useCache`).
  */
-export async function scanProject() {
+export async function scanProject(useCache = false) {
   const root = host.root();
-  if (!root) return;
+  if (!root || scan.running) return;
   const run = ++scan.run;
   const current = () => run === scan.run;
   scan = { root, run, running: true, progress: "Checking with Mago…" };
@@ -255,7 +265,9 @@ export async function scanProject() {
 
     // Phpactor: its own checks, such as deprecated classes and unused imports, file by file.
     const cachePath = `${await projectCache("problems", root)}/phpactor.json`;
-    const cache: Record<string, { hash: number; list: Diagnostic[] }> = await invoke<string>("read_file", { path: cachePath }).then(JSON.parse, () => ({}));
+    const cache: Record<string, { hash: number; list: Diagnostic[] }> = useCache
+      ? await invoke<string>("read_file", { path: cachePath }).then(JSON.parse, () => ({}))
+      : {};
     const phar = await invoke<string>("tool_path", { name: "phpactor.phar" });
     const extra = JSON.stringify({ ...PHPACTOR_INDEX, "language_server_mago.enabled": false, "language_server_phpstan.enabled": false });
     let done = 0;
@@ -263,6 +275,8 @@ export async function scanProject() {
     const worker = async () => {
       for (let rel = next.shift(); rel && current(); rel = next.shift()) {
         const source = await text(rel);
+        // A newer scan may have started while this one waited; its results must not mix with this one's.
+        if (!current()) return;
         const key = hash(source);
         if (cache[rel]?.hash !== key) {
           const out = await invoke<string>("run_capture", {
@@ -271,6 +285,7 @@ export async function scanProject() {
             args: [phar, "language-server:diagnostics", `--uri=${monaco.Uri.file(`${root}/${rel}`).toString()}`, `--config-extra=${extra}`, "-n"],
             input: source,
           }).catch(() => "[]");
+          if (!current()) return;
           cache[rel] = { hash: key, list: (() => { try { return JSON.parse(out) as Diagnostic[]; } catch { return []; } })() };
         }
         if (cache[rel].list.length) add(rel, cache[rel].list), publish([rel]);
@@ -281,11 +296,12 @@ export async function scanProject() {
     // Half the cores, so the editor stays responsive.
     await Promise.all(Array.from({ length: Math.max(2, Math.floor(navigator.hardwareConcurrency / 2)) }, worker));
     if (!current()) return;
+    scan.progress = "";
     for (const rel of Object.keys(cache)) if (!texts.has(rel)) delete cache[rel];
     await invoke("create_dir", { path: cachePath.slice(0, cachePath.lastIndexOf("/")) });
     await invoke("write_file", { path: cachePath, contents: JSON.stringify(cache) });
-    scan.progress = "";
   } catch (e) {
+    if (!current()) return;
     host.status(`Couldn't scan the project: ${e}`);
     scan.progress = "";
   } finally {
