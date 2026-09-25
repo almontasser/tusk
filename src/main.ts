@@ -15,6 +15,7 @@ import { initComposer, loadPackages, requirePackage, updateAll } from "./compose
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { closeMerge, initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
+import { detectAppAddress } from "./httplaravel";
 import { httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
 import "./httpload";
 import { initSafeDelete, safeDelete } from "./safedelete";
@@ -1161,6 +1162,7 @@ const actions: Action[] = [
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
   { label: "HTTP Client: Global Variables…", run: () => root && showGlobals() },
   { label: "HTTP Client: Clear Cookies", run: () => root && clearCookies() },
+  { label: "HTTP Client: Detect App Address", run: () => root && detectAppAddress(active ?? "") },
   { label: "Select HTTP Environment…", run: () => root && selectEnvironment(active ?? "") },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },

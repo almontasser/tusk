@@ -33,6 +33,7 @@ import {
   setGlobals,
   setHost,
   setPinned,
+  updateExchange,
 } from "./httpclient";
 import {
   formatRequest,
@@ -60,6 +61,7 @@ import {
   toLaravel,
   websocketMessages,
 } from "./httpfile";
+import { detectAppAddress, generateFeatureTest, lastExchange, logCount, logsView, queriesView } from "./httplaravel";
 import { confirm, pick } from "./palette";
 import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
@@ -259,6 +261,7 @@ sendButton.onclick = () => sendCurrent();
 envSelect.onchange = () => {
   if (envSelect.value === "\0edit") return (envSelect.value = envSelect.dataset.value ?? ""), createEnvironmentFile();
   if (envSelect.value === "\0private") return (envSelect.value = envSelect.dataset.value ?? ""), createEnvironmentFile(PRIVATE_ENV_FILE);
+  if (envSelect.value === "\0detect") return (envSelect.value = envSelect.dataset.value ?? ""), detectAppAddress(current?.path);
   setEnvironment(envSelect.value);
 };
 panel.addEventListener("keydown", (e) => {
@@ -286,6 +289,7 @@ async function renderEnvironments(select: HTMLSelectElement) {
     ...(Object.keys(envs).length ? Object.keys(envs).map((name) => h("option", { value: name, textContent: name })) : [h("option", { value: "", textContent: "No environment" })]),
     h("option", { value: "\0edit", textContent: "Edit Environments…" }),
     h("option", { value: "\0private", textContent: "Edit Private Environments…" }),
+    h("option", { value: "\0detect", textContent: "Detect App Address…" }),
   );
   select.value = selected;
   select.dataset.value = selected;
@@ -858,7 +862,15 @@ async function sendCurrent(mode: SendMode = "send", extraVars?: Record<string, s
     const x = await send(path, r, { cancel, extraVars, adjust });
     showExchange(x);
     const final = x.heads.at(-1);
-    if (profiler && final) await profiler.openProfileSince(since, `${r.method} ${x.request.url.replace(/^https?:\/\/[^/]+/, "")} (${final.status})`);
+    if (profiler && final) {
+      const profile = await profiler.openProfileSince(since, `${r.method} ${x.request.url.replace(/^https?:\/\/[^/]+/, "")} (${final.status})`);
+      // The Queries tab lists the SQL trace written with the profile.
+      if (profile) {
+        x.queries = await profiler.loadQueries(profile);
+        await updateExchange(x);
+        if (shown === x) renderResponse();
+      }
+    }
   } catch (e) {
     resSummary.replaceChildren(h("span", { class: "http-error" }, `Couldn't send the request: ${e}`));
   } finally {
@@ -974,7 +986,7 @@ export async function sendAt(path: string, line: number) {
 
 // ---- Response ----
 
-type ResTab = "body" | "headers" | "cookies" | "timing" | "tests" | "request";
+type ResTab = "body" | "headers" | "cookies" | "timing" | "tests" | "logs" | "queries" | "request";
 let resTab: ResTab = "body";
 let bodyMode: "pretty" | "raw" | "preview" = "pretty";
 let responseEditor: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -1015,13 +1027,15 @@ function renderResponse() {
     ["cookies", `Cookies${cookies.length ? ` ${cookies.length}` : ""}`],
     ["timing", "Timing"],
     ["tests", `Tests${x.tests.length ? ` ${x.tests.filter((t) => t.passed).length}/${x.tests.length}` : ""}${x.logs.length ? " •" : ""}`],
+    ["logs", `Logs${logCount(x) ? ` ${logCount(x)}` : ""}`],
+    ["queries", `Queries${x.queries?.length ? ` ${x.queries.length}` : ""}`],
     ["request", "Request"],
   ];
   resTabs.replaceChildren(...labels.map(([id, label]) => h("button", { role: "tab", textContent: label, ariaSelected: String(id === resTab), onclick: () => ((resTab = id), renderResponse()) })));
   responseEditor?.getModel()?.dispose();
   responseEditor?.dispose();
   responseEditor = null;
-  const content = { body: bodyView, headers: headersView, cookies: cookiesView, timing: timingView, tests: testsView, request: requestView }[resTab](x);
+  const content = { body: bodyView, headers: headersView, cookies: cookiesView, timing: timingView, tests: testsView, logs: logsView, queries: queriesView, request: requestView }[resTab](x);
   resBody.replaceChildren(content);
 }
 
@@ -1110,7 +1124,7 @@ function bodyView(x: Exchange) {
 let jsonFilter = "";
 
 /** Where a file in a stack trace is on this Mac: Sail's container keeps the project at /var/www/html. */
-const localPath = (file: string) => (file.startsWith(host.root()) ? file : file.includes("/var/www/html/") ? `${host.root()}/${file.split("/var/www/html/")[1]}` : file);
+export const localPath = (file: string) => (file.startsWith(host.root()) ? file : file.includes("/var/www/html/") ? `${host.root()}/${file.split("/var/www/html/")[1]}` : file);
 
 function exceptionBanner(report: ExceptionReport, json: boolean) {
   const own = (f: { file: string }) => !/\/vendor\//.test(f.file);
@@ -1229,6 +1243,7 @@ function requestView(x: Exchange) {
     h("pre", { class: "http-log" }, curl),
     h("h4", {}, "Laravel ", h("button", { class: "link", textContent: "Copy", onclick: () => copy(laravel, "the Laravel code") })),
     h("pre", { class: "http-log" }, laravel),
+    h("h4", {}, "Feature test ", h("button", { class: "link", textContent: "Generate…", title: "Write a Pest or PHPUnit test that sends this request and checks this response", onclick: () => generateFeatureTest(x) })),
   );
 }
 
@@ -1256,6 +1271,8 @@ function requestMenu() {
     { label: "Run All Requests in File", run: () => current && runFile(current.path) },
     { label: "Stress Test…", run: withRequest((path, r) => loadTest(path, r)) },
     { label: "Monitor…", run: withRequest((path, r) => monitor(path, r)) },
+    "-" as const,
+    { label: "Generate Feature Test…", run: withRequest(async (path, r) => generateFeatureTest(await lastExchange(path, r, shown))) },
     "-" as const,
     { label: "Go to Controller", run: withRequest((_, r) => goToController(r)) },
     { label: "Open in Editor", run: withRequest((path, r) => host.openAt(path, r.line)) },
@@ -1649,6 +1666,7 @@ export function initHttpClient(h_: Host) {
   sidebarEnv.onchange = () => {
     if (sidebarEnv.value === "\0edit") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), createEnvironmentFile();
     if (sidebarEnv.value === "\0private") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), createEnvironmentFile(PRIVATE_ENV_FILE);
+    if (sidebarEnv.value === "\0detect") return (sidebarEnv.value = sidebarEnv.dataset.value ?? ""), detectAppAddress();
     setEnvironment(sidebarEnv.value);
   };
   ($("http-filter") as HTMLInputElement).oninput = (e) => ((filter = (e.target as HTMLInputElement).value), renderTree());

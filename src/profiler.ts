@@ -148,7 +148,7 @@ export async function openProfileSince(since: number, label: string) {
     size = newest?.size ?? -1;
     await sleep(200);
   }
-  await openNewestProfile(dir, since, label);
+  return openNewestProfile(dir, since, label);
 }
 
 async function requestAndProfile(path: string) {
@@ -193,11 +193,12 @@ const newestProfile = async (dir: string, since: number) =>
 
 export async function openNewestProfile(dir: string, since: number, label?: string) {
   const largest = await newestProfile(dir, since);
-  if (!largest) return host.status("Profiling failed: Xdebug wrote no profile. Check that Xdebug is installed (php -m).");
+  if (!largest) return void host.status("Profiling failed: Xdebug wrote no profile. Check that Xdebug is installed (php -m).");
   await openProfile(largest.path, label);
   // Keep the newest profiles only; a Laravel request's profile can be several megabytes.
   const old = (await profilesIn(dir)).sort((a, b) => b.time - a.time).slice(KEEP_PROFILES);
   for (const f of old) for (const path of [f.path, traceFor(f.path)]) await invoke("remove_path", { path }).catch(() => {});
+  return largest.path;
 }
 
 /** What the editor's profiles came from, such as a request or a test, by path. */
@@ -307,7 +308,8 @@ let currentPath = "";
 let queries: Query[] = [];
 let queryGroups: QueryGroup[] = [];
 
-async function loadQueries(profilePath: string): Promise<Query[]> {
+/** The queries in the SQL trace written next to a profile; none when there's no trace. */
+export async function loadQueries(profilePath: string): Promise<Query[]> {
   const path = traceFor(profilePath);
   if (path === profilePath || !(await invoke<boolean>("path_exists", { path }))) return [];
   const text = await (path.endsWith(".gz")

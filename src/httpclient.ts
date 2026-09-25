@@ -18,6 +18,7 @@ import {
   type ResponseHead,
   type Script,
 } from "./httpfile";
+import type { Query } from "./cachegrind";
 import type { Output, Test } from "./httpscript.worker";
 import ScriptWorker from "./httpscript.worker?worker";
 import { pick } from "./palette";
@@ -75,6 +76,10 @@ export type Exchange = {
   unresolved: string[];
   /** Pinned exchanges stay in the history past its limit. */
   pinned?: boolean;
+  /** What Laravel's log gained while the request ran. */
+  appLog?: string;
+  /** The database queries the request ran, when it was sent with the profiler. */
+  queries?: Query[];
 };
 
 export let host: Host;
@@ -160,7 +165,7 @@ export async function selectEnvironment(path = "") {
 export async function createEnvironmentFile(file = ENV_FILE) {
   const path = `${host.root()}/${file}`;
   if (!(await invoke<boolean>("path_exists", { path }))) {
-    const url = (await dotenv()).APP_URL || "http://localhost:8000";
+    const url = file === ENV_FILE ? (await (await import("./httplaravel")).appAddresses())[0].url : "";
     const contents = file === ENV_FILE ? { local: { host: url } } : { local: { token: "" } };
     await invoke("create_file", { path, contents: JSON.stringify(contents, null, 2) + "\n" });
     if (file === PRIVATE_ENV_FILE) await ignorePrivateFile();
@@ -413,7 +418,9 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
     else exchange.logs.push("@laravel-session needs cookies, but the request has @no-cookie-jar.");
   }
   if (options.adjust) exchange.request = await options.adjust(exchange.request);
+  const log = await logSizes();
   Object.assign(exchange, await transmit(exchange.request, dir, store, exchange.id, cookies, cancel));
+  exchange.appLog = await logSince(log);
   const final = exchange.heads.at(-1);
 
   if (final && request.handler) {
@@ -437,9 +444,11 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
 
 /** Sends an exchange's request again exactly as it went, without scripts, and records the new exchange. */
 export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchange> {
-  const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false };
+  const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false, queries: undefined };
   const cookies = await cookieJar(old.env);
+  const log = await logSizes();
   Object.assign(exchange, await transmit(old.request, parentOf(old.path), await cacheDir("http-history"), exchange.id, cookies, cancel));
+  exchange.appLog = await logSince(log);
   await remember(exchange);
   return exchange;
 }
@@ -450,6 +459,29 @@ export async function probe(p: Prepared, path: string, env: string | undefined, 
   const t = await transmit(p, parentOf(path), await cacheDir("http-scratch"), id, p.laravelSession ? await cookieJar(env) : undefined, cancel);
   await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
   return t;
+}
+
+// ---- Laravel's log ----
+// The size of each log file before a request, so what the request logged is what the files gained after it.
+
+const LOG_LIMIT = 200 * 1024;
+const logFiles = () => ({ cwd: `${host.root()}/storage/logs`, program: "/bin/sh", input: null, any_status: true });
+
+/** Sizes of laravel.log and the newest daily log (laravel-YYYY-MM-DD.log), by path. */
+async function logSizes(): Promise<Record<string, number>> {
+  const out = await invoke<string>("run_capture", { ...logFiles(), args: ["-c", 'for f in laravel.log $(ls -t laravel-*.log 2>/dev/null | head -1); do [ -f "$f" ] && stat -f "%z %N" "$f"; done; true'] }).catch(() => "");
+  return Object.fromEntries(out.split("\n").flatMap((l) => (l.match(/^(\d+) (.+)$/) ? [[l.slice(l.indexOf(" ") + 1), Number(l.split(" ")[0])]] : [])));
+}
+
+/** What the log files gained since `before`, the last 200 KB at most. */
+async function logSince(before: Record<string, number>) {
+  let text = "";
+  for (const [file, size] of Object.entries(await logSizes())) {
+    // A smaller file was rotated or cleared: all of it is new.
+    const from = size >= (before[file] ?? 0) ? (before[file] ?? 0) : 0;
+    if (size > from) text += await invoke<string>("run_capture", { ...logFiles(), args: ["-c", `tail -c +${from + 1} "$0" | tail -c ${LOG_LIMIT}`, file] }).catch(() => "");
+  }
+  return text || undefined;
 }
 
 export const isText = (type: string) => !type || /^text\/|json|xml|javascript|html|x-www-form-urlencoded|graphql|yaml|csv/i.test(type);
@@ -511,6 +543,12 @@ async function saveHistory(list: Exchange[]) {
   historyCache = list;
   await invoke("write_file", { path: `${await cacheDir("http-history")}/index.json`, contents: JSON.stringify(list) });
   changed();
+}
+
+/** Saves an exchange that changed after it was sent, such as with the queries from its profile. */
+export async function updateExchange(x: Exchange) {
+  const list = await history();
+  if (list.some((e) => e.id === x.id)) await saveHistory(list.map((e) => (e.id === x.id ? x : e)));
 }
 
 export async function setPinned(id: string, pinned: boolean) {
