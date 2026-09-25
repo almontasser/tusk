@@ -71,8 +71,11 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); user-select: none; cursor: default; }
-input, textarea, select, [contenteditable] { user-select: text; }
+body { margin: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); -webkit-user-select: none; user-select: none; cursor: default; }
+/* Like a native app, the interface's text can't be selected (WebKit reads only the prefixed property). Text you'd
+   copy can: fields, comments and messages, test failures, database cells, and hovers. The editor and the terminal
+   handle their own selection. */
+input, textarea, select, [contenteditable], .tests-detail, .db-grid td, .monaco-hover { -webkit-user-select: text; user-select: text; }
 [hidden] { display: none !important; }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
@@ -404,7 +407,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #settings button { align-self: flex-end; background: var(--accent); border-color: var(--accent); color: var(--on-accent); padding: 4px 20px; }
 
 #toasts { position: fixed; right: 16px; bottom: 40px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
-.toast { pointer-events: auto; max-width: 420px; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; user-select: text; }
+.toast { pointer-events: auto; max-width: 420px; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; -webkit-user-select: text; user-select: text; }
 .toast .codicon { color: var(--red); margin-top: 1px; }
 .toast p { margin: 0; overflow-wrap: anywhere; }
 .toast button { margin-left: 6px; color: var(--faint); }
@@ -511,7 +514,7 @@ button.link:hover { text-decoration: underline; }
 .pr-files .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .pr-comment { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
-.pr-body { overflow-wrap: anywhere; margin-top: 4px; user-select: text; line-height: 1.5; }
+.pr-body { overflow-wrap: anywhere; margin-top: 4px; -webkit-user-select: text; user-select: text; line-height: 1.5; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote, .markdown table { margin: 0 0 8px; }
@@ -549,14 +552,14 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 #history-list li:hover { background: var(--hover); }
 #history-list li.selected { background: var(--selected); }
 #history-list .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#history-list .meta, #history-detail .meta { color: var(--faint); font-size: 12px; white-space: pre-wrap; user-select: text; }
+#history-list .meta, #history-detail .meta { color: var(--faint); font-size: 12px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .ref { font-size: 11px; color: var(--blue); background: #6aa7f81f; border-radius: 4px; padding: 1px 5px; margin-right: 6px; }
 .ref.tag { color: var(--yellow); background: #e5c07b1f; }
 #history-more { margin: 8px 12px; }
 #history-detail { flex: 1; overflow: auto; padding: 12px 18px; }
 #history-detail h2 { font-size: 15px; margin: 4px 0 6px; }
 #history-detail h3 { font-size: 11px; color: var(--faint); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
-#history-detail .message { white-space: pre-wrap; font: 12px var(--mono); margin: 10px 0; user-select: text; }
+#history-detail .message { white-space: pre-wrap; font: 12px var(--mono); margin: 10px 0; -webkit-user-select: text; user-select: text; }
 .history-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .history-files { list-style: none; margin: 0; padding: 0; }
 .history-files li { display: flex; gap: 8px; height: 22px; align-items: center; padding: 0 4px; border-radius: 4px; font: 12px var(--mono); }
@@ -628,10 +631,10 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .debug-vars .var.expandable::before { font: 14px/1 codicon; content: "\eab6"; color: var(--faint); margin-right: 2px; }
 .debug-vars .var.expandable.open::before { content: "\eab4"; }
 .debug-vars .name { color: var(--purple); }
-.debug-vars .value { user-select: text; }
+.debug-vars .value { -webkit-user-select: text; user-select: text; }
 .debug-vars .type { color: var(--faint); margin-left: 4px; }
 .debug-console { display: flex; flex-direction: column; border-top: 1px solid var(--border); max-height: 40%; flex-shrink: 0; }
-.debug-console pre { margin: 0; padding: 4px 8px; overflow: auto; flex: 1; min-height: 20px; font-family: var(--mono); user-select: text; }
+.debug-console pre { margin: 0; padding: 4px 8px; overflow: auto; flex: 1; min-height: 20px; font-family: var(--mono); -webkit-user-select: text; user-select: text; }
 .debug-console input { border: 0; border-top: 1px solid var(--border); border-radius: 0; font: 12px var(--mono); box-shadow: none !important; }
 
 /* ==========================================================================

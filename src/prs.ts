@@ -180,7 +180,7 @@ export async function showPullRequest(number: number) {
   const files = el("ul", "pr-files");
   for (const f of pr.files) {
     const li = el("li");
-    li.append(el("span", "name", f.path), el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`));
+    li.append(el("span", "name", ltr(f.path)), el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`));
     const count = threads.filter((t) => t.path === f.path).length;
     if (count) li.append(el("span", "codicon codicon-comment", ` ${count}`));
     li.onclick = () => showFileDiff(pr, f.path, threads);
@@ -230,7 +230,7 @@ export async function showPullRequest(number: number) {
   const pendingList = el("ul", "pr-files");
   for (const c of pendingComments) {
     const li = el("li");
-    li.append(el("span", "name", `${c.path}:${c.start_line ? `${c.start_line}–` : ""}${c.line}`), el("span", "muted", ` ${c.body.split("\n")[0]}`));
+    li.append(el("span", "name", ltr(`${c.path}:${c.start_line ? `${c.start_line}–` : ""}${c.line}`)), el("span", "muted", ` ${c.body.split("\n")[0]}`));
     li.onclick = () => showFileDiff(pr, c.path, threads, c);
     const remove = el("button", "icon-button codicon codicon-close");
     remove.title = "Delete this pending comment";
@@ -291,6 +291,12 @@ export async function showPullRequest(number: number) {
   // Fetch the head and base now, so opening a file's diff doesn't wait for the network.
   prepareDiff(pr).catch(() => {});
 }
+
+/**
+ * A path for a right-to-left box, which puts the ellipsis of a long path at its start. The left-to-right mark in
+ * front keeps the path's own order, so `.env.example` doesn't show as `env.example.`.
+ */
+const ltr = (path: string) => `\u200E${path}`;
 
 /** " · 3h ago", with the full date and time on hover. */
 function when(at: string) {

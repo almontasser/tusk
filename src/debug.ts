@@ -444,7 +444,8 @@ function render() {
       const file = f.source?.path ? f.source.path.slice(host.root().length + 1) || f.source.path : f.source?.name ?? "";
       li.innerHTML = `<span class="fn"></span><span class="loc"></span>`;
       li.querySelector(".fn")!.textContent = f.name;
-      li.querySelector(".loc")!.textContent = `${file}:${f.line}`;
+      // The left-to-right mark keeps a path such as .env in order in the right-to-left box that ellipsizes its start.
+      li.querySelector(".loc")!.textContent = `\u200E${file}:${f.line}`;
       li.classList.toggle("selected", f.source?.path === current?.path && f.line === current?.line);
       li.onclick = () => selectFrame(f);
       return li;

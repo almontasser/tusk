@@ -2063,6 +2063,15 @@ buttons over the left edge of `#titlebar`, which starts its content 80 px in.
 Empty parts of the title bar carry `data-tauri-drag-region`, so dragging them
 moves the window; that needs the `core:window:allow-start-dragging` permission.
 
+As in a native app, the interface's text can't be selected: `body` has
+`user-select: none`, which WebKit reads only as `-webkit-user-select`, so every
+rule sets both. Text worth copying opts back in: fields, comment and message
+bodies, test failures, database cells, and hovers; Monaco and xterm.js handle
+their own selection. Drag handles call `preventDefault` on `mousedown`, so a
+resize never starts a selection. Long paths in right-to-left boxes (which put
+the ellipsis at the start) begin with a left-to-right mark, or bidi rules move
+a leading dot to the end (`.env.example` showed as `env.example.`).
+
 ### Styles and themes
 
 `styles.css` defines colors, sizes, and fonts as variables on `:root`, with a
