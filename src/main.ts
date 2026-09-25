@@ -32,7 +32,7 @@ import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./b
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
-import { chooseService, composeService, composeServices } from "./sail";
+import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1182,6 +1182,7 @@ const actions: Action[] = [
 
 /** Picks the Compose service that runs tests, Artisan, and Tinker, or this Mac. Sail projects use Sail. */
 async function chooseDockerService() {
+  forgetComposeServices(root);
   const services = await composeServices(root);
   if (!services.length) return status("No Docker Compose service mounts this project, so commands run on this Mac.");
   const current = (await composeService(root))?.name ?? "";

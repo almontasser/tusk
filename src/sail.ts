@@ -24,8 +24,8 @@ export async function sailRunning(root: string): Promise<boolean> {
   return out.trim() !== "";
 }
 
-/** A Compose service that mounts the project, and where the project is inside it. */
-export type Service = { name: string; workdir: string };
+/** A Compose service that mounts the project, where the project is inside it, and whether it looks like PHP. */
+export type Service = { name: string; workdir: string; php: boolean };
 type ComposeConfig = { services?: Record<string, { image?: string; volumes?: { type: string; source?: string; target: string }[] }> };
 
 /**
@@ -33,26 +33,38 @@ type ComposeConfig = { services?: Record<string, { image?: string; volumes?: { t
  * files, `.env`, and relative paths. One named or built for PHP comes first.
  */
 export function servicesMounting(root: string, config: ComposeConfig): Service[] {
-  const found: (Service & { php: boolean })[] = [];
+  const found: Service[] = [];
   for (const [name, service] of Object.entries(config.services ?? {})) {
     const mount = service.volumes?.find((v) => v.type === "bind" && v.source && (root === v.source || root.startsWith(`${v.source}/`)));
     if (mount) found.push({ name, workdir: mount.target + root.slice(mount.source!.length), php: /php|app|laravel/i.test(`${name} ${service.image ?? ""}`) });
   }
-  return found.sort((a, b) => Number(b.php) - Number(a.php)).map(({ name, workdir }) => ({ name, workdir }));
+  return found.sort((a, b) => Number(b.php) - Number(a.php));
 }
 
 /** The chosen service for each project: set with Choose Docker Service, or "" to run on this Mac. */
 const choiceKey = (root: string) => `docker:service:${root}`;
 const composeConfigs = new Map<string, Promise<Service[]>>();
 
-/** The Compose services that could run the project's commands. Empty without a compose file or Docker. */
+/** The Compose services that could run the project's commands. Empty without a compose file or Docker; that isn't kept, so a compose file added later is found. */
 export function composeServices(root: string): Promise<Service[]> {
   if (!composeConfigs.has(root))
-    composeConfigs.set(root, docker(root, ["config", "--format", "json"]).then((out) => servicesMounting(root, JSON.parse(out)), () => []));
+    composeConfigs.set(
+      root,
+      docker(root, ["config", "--format", "json"]).then(
+        (out) => servicesMounting(root, JSON.parse(out)),
+        () => (composeConfigs.delete(root), []),
+      ),
+    );
   return composeConfigs.get(root)!;
 }
 
-/** The Compose service commands run in, or null for this Mac: your choice, or else the likeliest PHP service. */
+/** Reads the compose files again next time, such as before choosing a service. */
+export const forgetComposeServices = (root: string) => composeConfigs.delete(root);
+
+/**
+ * The Compose service commands run in, or null for this Mac: your choice, or else a service named or built for
+ * PHP. A service that only mounts the project, such as a Node container for Vite, isn't picked on its own.
+ */
 export async function composeService(root: string): Promise<Service | null> {
   const services = await composeServices(root);
   let chosen: string | null = null;
@@ -60,7 +72,7 @@ export async function composeService(root: string): Promise<Service | null> {
     chosen = localStorage.getItem(choiceKey(root));
   } catch {}
   if (chosen === "") return null;
-  return services.find((s) => s.name === chosen) ?? services[0] ?? null;
+  return services.find((s) => s.name === chosen) ?? services.find((s) => s.php) ?? null;
 }
 
 export function chooseService(root: string, name: string) {

@@ -1072,9 +1072,10 @@ each line, `<covered by="Class::method">` for every test that ran it
 read when its model is decorated, or for **Show Tests Covering Line**, and kept
 until the next run. Decorating is synchronous, so a model is decorated at once
 with hit counts and again with the tests' names once its report is read.
-`testOf` turns an ID into a class and a readable name: Pest's IDs have a `P\`
-prefix and a method of `__pest_evaluable_` plus the description with `_` for
-spaces. Choosing a test opens it through `openTest` in `testresults.ts`, which
+`testOf` turns an ID into a class and a readable name: PHPUnit adds a data set
+as `#<name>`, which is dropped (and the list shows each test once), and Pest's
+IDs have a `P\` prefix and a method of `__pest_evaluable_` plus the description
+with `_` for spaces. Choosing a test opens it through `openTest` in `testresults.ts`, which
 finds the declaration with `findTests` and `sameTest`, as the Tests tab does.
 The Coverage tab's folders add up the lines of the files under each folder, from
 Clover; clicking one filters the file list below by path prefix.
@@ -1773,10 +1774,12 @@ Otherwise, `docker compose config --format json` gives the resolved services,
 with absolute bind-mount sources, and `servicesMounting` keeps those that
 mount the project folder or a folder above it; the mount's target plus the
 rest of the path is where the project is inside. A service whose name or image
-mentions PHP, `app`, or `laravel` comes first, since a web server often mounts
-the same folder. **Choose Docker Service for Commands…** saves a choice per
-project in `localStorage` (`docker:service:<root>`), or `""` for this Mac. The
-config is read once per project and again after a choice. The service runs
+mentions PHP, `app`, or `laravel` is picked on its own; a service that only
+mounts the project, such as a Node container for Vite, is used only when you
+choose it, since it may have no PHP. **Choose Docker Service for Commands…**
+reads the compose files again and saves a choice per project in `localStorage`
+(`docker:service:<root>`), or `""` for this Mac. The config is kept per project
+once read; a failed read isn't kept, so a compose file added later is found. The service runs
 commands when `docker compose ps --status running --services` lists it, through
 `docker compose exec -w <workdir> <service>`, with `-T` for captured output
 such as `route:list --json`, and `-e` for Xdebug's variables. Both checks run
@@ -1922,18 +1925,25 @@ leaks into the frontend:
 
 TLS goes through `native-tls`, which is macOS's Security framework, so the
 system's certificate authorities apply. `ssl_mode` follows libpq: PostgreSQL
-defaults to `prefer`, which tries TLS and falls back to plain text; `prefer`
-and `require` accept any certificate, as libpq does, `verify-ca` checks the
-certificate but not the host name, and `verify-full` checks both. MySQL turns
+defaults to `prefer`, which tries TLS and falls back to plain text; `allow`,
+`prefer`, and `require` accept any certificate, as libpq does, `verify-ca` checks the
+certificate but not the host name, and `verify-full` checks both. A CA file
+may hold a bundle of certificates, as AWS RDS's does; each is trusted. MySQL
+connects with `CLIENT_FOUND_ROWS`, so an `UPDATE` reports the rows it matched
+rather than only those it changed, and a grid edit that sets a cell to an equal
+value (`10.5` for `10.50`) still counts as one row. MySQL turns
 TLS on with a CA file (`MYSQL_ATTR_SSL_CA`, the only TLS setting in Laravel's
 MySQL config) or with `DB_SSLMODE` set to `require` or stricter.
 
 `db_tunnel` runs the system's `ssh -N -L 127.0.0.1:<free port>:<host>:<port>
 <destination>` under the same watchdog as the language servers, so it ends with
 the app, and waits up to 15 seconds for the local port to accept connections.
-`BatchMode=yes` makes a password prompt fail at once instead of hanging, and
+`BatchMode=yes` makes a password prompt fail at once instead of hanging,
 `ExitOnForwardFailure=yes` makes a failed forward end ssh, whose error message
-is returned. Tunnels are kept per destination and address, and reused while
+is returned, and `ServerAliveInterval` ends a tunnel whose connection died,
+such as after the Mac sleeps, so the next query opens a new one. Once the
+tunnel works, a thread keeps reading ssh's error output, which would otherwise
+fill its pipe and stop ssh. Tunnels are kept per destination and address, and reused while
 ssh runs. `database.ts` keeps the destination per project in `localStorage`
 (`db:ssh:<root>`) and connects to the tunnel's port instead of `.env`'s.
 
@@ -1956,9 +1966,10 @@ may have changed the schema. An alias is found with a pattern (`posts p`,
 
 Grid edits are pending until **Submit**, as in PhpStorm. `makeEditable` keeps
 new values by row and column, rows to delete, and rows to add, and
-`statements()` turns them into SQL: one `UPDATE` per edited row, with every
-value as a string literal that the database converts to the column's type,
-then one `DELETE` per deleted row, then one `INSERT` per new row, with only the
+`statements()` turns them into SQL: one `DELETE` per deleted row first, so a
+row edited to take a deleted row's key doesn't collide with it, then one
+`UPDATE` per edited row, with every value as a string literal that the
+database converts to the column's type, then one `INSERT` per new row, with only the
 columns you filled in so the rest get their defaults (`DEFAULT VALUES`, or
 `() VALUES ()` on MySQL, when none are filled in). Rows are found by their
 primary key (`primaryKeyQuery`), using the values from before the edit, so

@@ -163,7 +163,8 @@ export function coveringTests(xml: string): Map<number, string[]> {
  * and a method named `__pest_evaluable_` plus the description, with `_` for spaces and describe() blocks in front.
  */
 export function testOf(id: string): { className: string; name: string } {
-  const [className, method = ""] = id.replace(/^P\\/, "").split("::");
+  // PHPUnit adds a data set as `#<name>`, which isn't part of the test's name.
+  const [className, method = ""] = id.replace(/^P\\/, "").replace(/#.*$/, "").split("::");
   const pest = method.startsWith("__pest_evaluable_");
   const name = pest ? method.slice("__pest_evaluable_".length).replace(/_/g, " ").replace(/\s+/g, " ").trim() : method;
   return { className, name };

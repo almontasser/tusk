@@ -945,7 +945,9 @@ terminal tabs say "(Sail)".
 Other Docker Compose setups work the same way: the editor finds the service
 that mounts the project folder (preferring one named or built for PHP, such as
 `app` or `php`) and runs those commands in it with `docker compose exec`, in
-the folder where the project is mounted. Terminal tabs name the service, such
+the folder where the project is mounted. A service that only mounts the
+project without being named or built for PHP, such as a Node container for
+Vite, isn't used unless you choose it. Terminal tabs name the service, such
 as "Tests (app)". To pick another service, or to run on this Mac instead, run
 **Choose Docker Service for Commands…** from ⌘⇧A. When the containers are
 stopped, everything runs on this Mac. The database

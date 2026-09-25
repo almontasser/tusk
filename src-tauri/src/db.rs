@@ -109,7 +109,10 @@ fn mysql_error(e: mysql::Error) -> String {
 /// Connects to MySQL or MariaDB. With a CA file, or `ssl_mode` set to require or verify, the connection is
 /// encrypted; `require` alone, as in libpq, doesn't check the server's certificate.
 fn open_mysql(c: &Connection) -> Result<mysql::Conn, String> {
+    // CLIENT_FOUND_ROWS: an UPDATE reports the rows it matched, not only those whose value changed, so a grid
+    // edit that sets a cell to the value it has (10.50 as 10.5) still counts as one row.
     let mut opts = mysql::OptsBuilder::new()
+        .additional_capabilities(mysql::consts::CapabilityFlags::CLIENT_FOUND_ROWS)
         .ip_or_hostname(Some(&c.host))
         .tcp_port(c.port)
         .db_name(Some(&c.database))
@@ -139,11 +142,14 @@ fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
     use postgres::config::SslMode;
     let mode = if c.ssl_mode.is_empty() { "prefer" } else { c.ssl_mode.as_str() };
     let mut tls = native_tls::TlsConnector::builder();
-    tls.danger_accept_invalid_certs(matches!(mode, "prefer" | "require"))
+    tls.danger_accept_invalid_certs(matches!(mode, "allow" | "prefer" | "require"))
         .danger_accept_invalid_hostnames(mode != "verify-full");
     if !c.ssl_ca.is_empty() {
+        // A bundle, such as AWS RDS's, holds many certificates; from_pem takes only one.
         let pem = std::fs::read(&c.ssl_ca).map_err(|e| format!("Can't read {}: {e}", c.ssl_ca))?;
-        tls.add_root_certificate(native_tls::Certificate::from_pem(&pem).map_err(|e| e.to_string())?);
+        for cert in native_tls::Certificate::stack_from_pem(&pem).map_err(|e| e.to_string())? {
+            tls.add_root_certificate(cert);
+        }
     }
     let connector = postgres_native_tls::MakeTlsConnector::new(tls.build().map_err(|e| e.to_string())?);
     postgres::Config::new()
@@ -250,7 +256,8 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
     crate::login_path();
     let local = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = Command::new("/bin/sh")
-        .args(["-c", crate::lsp::WATCHDOG, "sh", "ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10"])
+        // ServerAlive ends a tunnel whose connection died, such as after sleep, so the next query opens a new one.
+        .args(["-c", crate::lsp::WATCHDOG, "sh", "ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         .arg("-L")
         .arg(format!("127.0.0.1:{local}:{host}:{port}"))
         .arg(&destination)
@@ -268,6 +275,10 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
             return Err(format!("SSH to {destination} failed: {}", message.trim()));
         }
         if std::net::TcpStream::connect(("127.0.0.1", local)).is_ok() {
+            // Keep reading ssh's messages, such as a failed connection to the database, or its pipe fills and ssh stops.
+            if let Some(mut stderr) = child.stderr.take() {
+                std::thread::spawn(move || std::io::copy(&mut stderr, &mut std::io::sink()));
+            }
             tunnels.insert(key, (child, local));
             return Ok(local);
         }

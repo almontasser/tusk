@@ -74,7 +74,8 @@ export async function showTestsCoveringLine(editor: monaco.editor.ICodeEditor) {
   const lines = coverage.get(model.uri.fsPath)!;
   let at = line;
   while (at > 0 && !lines.has(at)) at--;
-  const ran = (await testsIn(model.uri.fsPath)).get(at) ?? [];
+  // Each data set of a test is its own entry; one per test is enough to open it.
+  const ran = [...new Set(((await testsIn(model.uri.fsPath)).get(at) ?? []).map((id) => id.replace(/#.*$/, "")))];
   if (!ran.length) return host.status(lines.get(at) ? `No test is recorded as covering line ${at}.` : `Line ${at} isn't covered by any test.`);
   pick(`Tests that ran line ${at}`, () =>
     ran.map((id) => {

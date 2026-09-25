@@ -199,6 +199,7 @@ const results = el("div", "db-results");
 /** Runs a query and shows its rows. With `table`, cells can be edited when the rows include the primary key. */
 async function run(sql: string, table?: string) {
   if (!connection) await loadConnection();
+  results.onkeydown = null; // ⌘⏎ submits the grid's own changes, set up again by makeEditable.
   const summary = el("div", "db-summary muted", "Running…");
   results.replaceChildren(summary);
   showPanelView("Database", results);
@@ -267,10 +268,11 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
   const edits = new Map<number, Map<number, string | null>>();
   const deletes = new Set<number>();
   const inserts: Record<string, string | null>[] = [];
-  // Updates first, keyed on each row's values before the change, so editing a key column still finds its row.
+  // Deletes first, so a row edited to take a deleted row's key doesn't collide with it. Updates are keyed on
+  // each row's values before the change, so editing a key column still finds its row.
   const statements = () => [
-    ...[...edits].filter(([r]) => !deletes.has(r)).map(([r, cells]) => updateStatement(driver, table, Object.fromEntries([...cells].map(([c, v]) => [result.columns[c], v])), keyOf(result.rows[r]))),
     ...[...deletes].map((r) => deleteStatement(driver, table, keyOf(result.rows[r]))),
+    ...[...edits].filter(([r]) => !deletes.has(r)).map(([r, cells]) => updateStatement(driver, table, Object.fromEntries([...cells].map(([c, v]) => [result.columns[c], v])), keyOf(result.rows[r]))),
     ...inserts.map((values) => insertStatement(driver, table, values)),
   ];
 

@@ -12,6 +12,6 @@ test("finds the Compose services that mount the project, PHP first", () => {
       other: { image: "node", volumes: [{ type: "bind", source: "/p/application", target: "/x" }] },
     },
   };
-  assert.deepEqual(servicesMounting("/p/app", config), [{ name: "php", workdir: "/srv/app" }, { name: "nginx", workdir: "/var/www" }]);
+  assert.deepEqual(servicesMounting("/p/app", config), [{ name: "php", workdir: "/srv/app", php: true }, { name: "nginx", workdir: "/var/www", php: false }]);
   assert.deepEqual(servicesMounting("/p/app", {}), []);
 });

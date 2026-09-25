@@ -107,4 +107,5 @@ test("reads which tests covered each line from PHPUnit's XML coverage", () => {
   assert.deepEqual(lines.get(14), []);
   assert.deepEqual(testOf(lines.get(15)![0]), { className: "Tests\\Feature\\ExampleTest", name: "test_home" });
   assert.deepEqual(testOf(lines.get(15)![1]), { className: "Tests\\Feature\\PostTest", name: "home page → it loads" });
+  assert.deepEqual(testOf("Tests\\Unit\\MathTest::testAdd#with two"), { className: "Tests\\Unit\\MathTest", name: "testAdd" });
 });
