@@ -516,8 +516,8 @@ the list reloads when they finish.
 
 ## Spell checking
 
-The editor marks misspellings in comments, strings, and names with a blue
-underline, in PHP, Blade, JavaScript, TypeScript, Vue, Markdown, and more. It
+The editor marks misspellings in comments, strings, and names with a green
+wavy underline, in PHP, Blade, JavaScript, TypeScript, Vue, Markdown, and more. It
 splits names such as `$userAdress` and `get_adress` into words. Press ⌥⏎ on a
 misspelling to replace it with the suggestion, or to ignore the word in the
 project, which adds it to `typos.toml` in the project root. Commit that file

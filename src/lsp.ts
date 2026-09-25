@@ -103,11 +103,31 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
 const toMarker = (d: L.Diagnostic, owner: string): monaco.editor.IMarkerData => ({
   ...toRange(d.range),
   message: typeof d.message === "string" ? d.message : d.message.value,
-  severity: severity[severityOf(d)],
-  // LSP's diagnostic tags have MarkerTag's numbers.
-  tags: [...new Set([...(d.tags ?? []), ...(isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : [])])],
+  ...(owner === "lsp:typos"
+    ? // Monaco draws a hint with the deprecated tag without a squiggle; the typo decorations below draw spelling's own.
+      { severity: monaco.MarkerSeverity.Hint, tags: [monaco.MarkerTag.Deprecated] }
+    : {
+        severity: severity[severityOf(d)],
+        // LSP's diagnostic tags have MarkerTag's numbers.
+        tags: [...new Set([...(d.tags ?? []), ...(isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : [])])],
+      }),
   source: d.source ?? owner.slice(4),
   code: d.code?.toString(),
+});
+
+/**
+ * Spelling gets a green wavy underline of its own, as in PhpStorm, since Monaco styles markers by severity only.
+ * Following the markers, rather than the server's publishes, clears the underlines when the spell checker stops.
+ */
+const typoDecorations = new Map<string, string[]>();
+monaco.editor.onDidChangeMarkers((uris) => {
+  for (const uri of uris) {
+    const model = monaco.editor.getModel(uri);
+    const old = typoDecorations.get(uri.toString()) ?? [];
+    const typos = model ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
+    if (!model || (!old.length && !typos.length)) continue;
+    typoDecorations.set(uri.toString(), model.deltaDecorations(old, typos.map((range) => ({ range, options: { description: "typo", inlineClassName: "typo" } }))));
+  }
 });
 
 const problemIcons: Record<number, string> = {

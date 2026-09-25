@@ -940,7 +940,9 @@ bundled per architecture like Mago. `typos` checks words against a list of
 known misspellings, not a dictionary, so it doesn't flag names, jargon, or
 abbreviations, and it understands `camelCase` and `snake_case`. The server
 reports misspellings as information, with a fix and an "ignore in the project"
-code action, which writes `typos.toml`. It's a native binary, so the bridge
+code action, which writes `typos.toml`. The editor underlines them with a
+green wave of their own (`typoDecorations` in `lsp.ts`), and next and previous
+problem skip them. It's a native binary, so the bridge
 runs it without a runtime (an empty runtime in `lsp.rs`). Changing the
 **Check spelling** setting restarts the servers, which starts or stops it.
 
@@ -2907,9 +2909,16 @@ instead of Monaco's F2 rename; ⇧F6 renames. F8 and ⇧F8, VS Code's keys for t
 same move across files, stay with the debugger while it's paused and reach
 Monaco otherwise. Errors aren't visited before warnings: Monaco's widget walks
 markers by position, and a wrapper that skips warnings can wait until the plain
-order proves insufficient. Spelling problems don't get a squiggle of their own,
-because Monaco styles markers by severity only, and a separate decoration layer
-would have to track every typos marker.
+order proves insufficient.
+
+### 2026-09-25: Spelling has a squiggle of its own
+
+Monaco styles markers by severity only, so spelling problems looked like any
+other information. Their markers are now hints with the deprecated tag, which
+Monaco draws without a squiggle, and a decoration per marker draws a green wavy
+underline, as PhpStorm marks typos. The decorations follow marker changes, not
+the server's publishes, so they clear with the markers. As hints, spelling
+problems are skipped by F2 and F8, and don't mark the scrollbar.
 
 ### 2026-09-25: Problems show their checker and rule
 

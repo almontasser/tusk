@@ -981,3 +981,10 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .problem-page-range-info { text-decoration: underline wavy var(--blue); text-underline-offset: 3px; }
 .problems-page-button { visibility: hidden; margin-left: auto; flex-shrink: 0; }
 .problems-row:hover .problems-page-button { visibility: visible; }
+
+/* Spelling problems (typoDecorations in lsp.ts). The marker's own inline class strikes through; this wins. */
+.monaco-editor .typo {
+  text-decoration: underline wavy var(--green) !important;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
