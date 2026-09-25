@@ -185,7 +185,10 @@ export function followEditor(path: string, position: monaco.IPosition | null) {
   const moved = path !== caret.path;
   caret = { path, position };
   if (moved && currentOnly) return renderSoon();
-  const here = position && rows.find((r) => r.path === path && r.problem && monaco.Range.containsPosition(r.problem.range, position));
+  const at = (r: (typeof rows)[number]) => !!position && r.path === path && !!r.problem && monaco.Range.containsPosition(r.problem.range, position);
+  // Keep the selected problem when the cursor is in it too, such as after opening the second of two overlapping ones.
+  if (rows.some((r) => r.key === selected && at(r))) return;
+  const here = rows.find(at);
   if (here) select(here.key);
 }
 

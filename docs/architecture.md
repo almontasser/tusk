@@ -486,7 +486,8 @@ position, and message, so a redraw keeps the selection. The list is a focusable
 `role="tree"` that handles the arrow keys, Enter, and ⌘C itself; the context
 menu is `showMenu` from `files.ts`. `main.ts` calls `followEditor` when the
 cursor moves or the tabs redraw: it selects the row of the problem under the
-cursor, and redraws the panel when the file changes and **Current File** is on.
+cursor (keeping the selected one if the cursor is in it too, as with overlapping
+problems), and redraws the panel when the file changes and **Current File** is on.
 
 `problemCounts` also returns the files with errors. `updateProblems` in
 `main.ts`, which runs after the panel's debounced render and after the tabs
