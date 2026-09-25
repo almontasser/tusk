@@ -1440,6 +1440,13 @@ An earlier build kept pending comments in `localStorage`
 (`review:<repository URL>#<number>`); those aren't read or moved to GitHub,
 since they were short-lived.
 
+The conversation is one timeline, oldest first, as on GitHub: the description,
+then reviews (`submittedAt`), comments (`createdAt`), and line comment threads
+(their first comment's `created_at`), sorted together, each with its age (`3h
+ago`, from `age` in `gitparse.ts`) and the full date on hover. Refreshing the
+pull request on screen, such as after you post a comment, leaves it in place
+until the new version is ready; only another pull request shows "Loading…".
+
 `markdown()` turns `#123` and `@name` in text into links after sanitizing,
 walking the text nodes and skipping links and code, so a reference inside a
 URL or code sample stays as it is.

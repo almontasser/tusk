@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { monaco } from "./editor";
 import { diffCursor, git, showDiff } from "./git";
-import { type Check, checkState, checksSummary } from "./gitparse";
+import { age, type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -23,12 +23,13 @@ type Details = PullRequest & {
   headRefOid: string;
   state: string;
   files: { path: string; additions: number; deletions: number }[];
-  comments: { author: Author; body: string; url: string }[];
-  reviews: { author: Author; state: string; body: string }[];
+  createdAt: string;
+  comments: { author: Author; body: string; url: string; createdAt: string }[];
+  reviews: { author: Author; state: string; body: string; submittedAt: string }[];
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
-type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null };
+type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null; created_at: string };
 /** A line comment and its replies. `node` is the thread's GraphQL ID, for resolving it. */
 type Thread = ReviewComment & { comments: ReviewComment[]; node?: string; resolved?: boolean };
 
@@ -135,12 +136,14 @@ export async function showPullRequest(number: number) {
   $("pr-list-view").hidden = true;
   const detail = $("pr-detail");
   detail.hidden = false;
-  detail.replaceChildren(el("p", "muted", "Loading…"));
+  // Refreshing the same pull request, such as after you comment, keeps it on screen until the new version is ready.
+  if (detail.dataset.number !== String(number)) detail.replaceChildren(el("p", "muted", "Loading…"));
+  detail.dataset.number = String(number);
   let pr: Details;
   let threads: Thread[];
   try {
     [pr, threads] = await Promise.all([
-      gh("pr", "view", String(number), "--json", `${FIELDS},body,headRefOid,state,files,comments,reviews`).then(JSON.parse),
+      gh("pr", "view", String(number), "--json", `${FIELDS},body,headRefOid,state,files,comments,reviews,createdAt`).then(JSON.parse),
       lineComments(number),
       me(),
       loadPending(number).catch(() => null),
@@ -186,33 +189,40 @@ export async function showPullRequest(number: number) {
 
   const repo = repoUrl(pr);
   const conversation = el("div", "pr-conversation");
-  const entry = (author: string, label: string, body: string) => {
+  // The conversation is one timeline, oldest first, as on GitHub: the description, reviews, comments, and line
+  // comment threads (at their first comment's time), each with its date.
+  const timeline: { at: string; nodes: HTMLElement[] }[] = [];
+  const entry = (author: string, label: string, body: string, at: string) => {
     const item = el("div", "pr-comment");
-    item.append(el("div", "pr-meta", `${author}${label ? ` · ${label}` : ""}`), markdown(body, repo));
-    conversation.append(item);
+    const meta = el("div", "pr-meta", `${author}${label ? ` · ${label}` : ""}`);
+    meta.append(when(at));
+    item.append(meta, markdown(body, repo));
+    return item;
   };
   // A comment you can edit or delete when it's yours; it redraws in place while you do.
-  const editable = (user: string, body: string, api: string) => {
+  const editable = (user: string, body: string, api: string, at: string) => {
     const item = el("div", "pr-comment");
-    const draw = () => item.replaceChildren(...commentBlock(user, body, api, repo, draw, () => showPullRequest(number)));
+    const draw = () => item.replaceChildren(...commentBlock(user, body, api, repo, draw, () => showPullRequest(number), at));
     draw();
-    conversation.append(item);
+    return item;
   };
-  if (pr.body) entry(pr.author.login, "description", pr.body);
   // Your pending review isn't part of the conversation yet; it's listed below.
-  for (const r of pr.reviews) if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED")) entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body);
+  for (const r of pr.reviews)
+    if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED")) timeline.push({ at: r.submittedAt, nodes: [entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body, r.submittedAt)] });
   for (const c of pr.comments) {
     const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
-    if (id) editable(c.author.login, c.body, `repos/{owner}/{repo}/issues/comments/${id}`);
-    else entry(c.author.login, "", c.body);
+    timeline.push({ at: c.createdAt, nodes: [id ? editable(c.author.login, c.body, `repos/{owner}/{repo}/issues/comments/${id}`, c.createdAt) : entry(c.author.login, "", c.body, c.createdAt)] });
   }
   // Line comments, each thread under a link to its place in the diff.
   for (const t of threads) {
     const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"}${t.resolved ? " · resolved" : ""}`);
     where.onclick = () => showFileDiff(pr, t.path, threads, t);
-    conversation.append(where);
-    for (const c of t.comments) editable(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`);
+    timeline.push({ at: t.created_at, nodes: [where, ...t.comments.map((c) => editable(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, c.created_at))] });
   }
+  const time = (at: string) => Date.parse(at) || 0; // A missing date sorts first rather than breaking the order.
+  timeline.sort((a, b) => time(a.at) - time(b.at));
+  if (pr.body) conversation.append(entry(pr.author.login, "description", pr.body, pr.createdAt));
+  conversation.append(...timeline.flatMap((t) => t.nodes));
 
   const heading = (text: string) => el("h3", "", text);
   // Your line comments that wait for the review to be submitted. Click one to see it in the diff.
@@ -282,6 +292,14 @@ export async function showPullRequest(number: number) {
   prepareDiff(pr).catch(() => {});
 }
 
+/** " · 3h ago", with the full date and time on hover. */
+function when(at: string) {
+  const time = Date.parse(at);
+  const span = el("span", "pr-when", Number.isNaN(time) ? "" : ` · ${age(time / 1000) === "now" ? "just now" : `${age(time / 1000)} ago`}`);
+  if (!Number.isNaN(time)) span.title = new Date(time).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" });
+  return span;
+}
+
 const repoUrl = (pr: PullRequest) => pr.url.replace(/\/pull\/\d+$/, "");
 
 /**
@@ -289,7 +307,7 @@ const repoUrl = (pr: PullRequest) => pr.url.replace(/\/pull\/\d+$/, "");
  * Whether a thread is resolved is only in GraphQL, keyed there by the first comment's ID.
  */
 async function lineComments(number: number): Promise<Thread[]> {
-  const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id}";
+  const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id, created_at}";
   const [out, states] = await Promise.all([
     gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq),
     threadStates(number).catch(() => new Map<number, { id: string; resolved: boolean }>()),
@@ -327,8 +345,9 @@ let deleting = "";
  * A comment's author and text, with Edit and Delete when it's yours. `api` is the comment's REST path.
  * `redraw` draws it again after you start or cancel an edit, and `reload` fetches everything after GitHub changed it.
  */
-function commentBlock(user: string, body: string, api: string, repo: string, redraw: () => void, reload: () => unknown): HTMLElement[] {
+function commentBlock(user: string, body: string, api: string, repo: string, redraw: () => void, reload: () => unknown, at?: string): HTMLElement[] {
   const meta = el("div", "pr-meta", user);
+  if (at) meta.append(when(at));
   if (!myLogin || user !== myLogin) return [meta, markdown(body, repo)];
   const link = (label: string, run: () => unknown) => {
     const b = el("button", "link", label);
@@ -507,7 +526,7 @@ async function readPending(number: number): Promise<Pending | null> {
   const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
   if (!found) return (pending = null);
   const { id, node } = JSON.parse(found.split("\n")[0]);
-  const jq = ".[] | {id, path, line: (.line // .original_line), start_line, side: (.side // \"RIGHT\"), body, user: .user.login, in_reply_to_id}";
+  const jq = ".[] | {id, path, line: (.line // .original_line), start_line, side: (.side // \"RIGHT\"), body, user: .user.login, in_reply_to_id, created_at}";
   const out = await gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/reviews/${id}/comments`, "--jq", jq);
   return (pending = { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) });
 }
@@ -593,7 +612,7 @@ function drawZones() {
       continue;
     }
     if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
-    for (const c of t.comments) thread.append(...commentBlock(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, repo, drawZones, reload));
+    for (const c of t.comments) thread.append(...commentBlock(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, repo, drawZones, reload, c.created_at));
     if (form?.reply?.id === t.id) thread.append(commentForm());
     else {
       const actions = el("div", "pr-thread-actions");
