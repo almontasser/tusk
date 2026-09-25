@@ -28,7 +28,11 @@ import {
   substitute,
   summarize,
   toCurl,
+  toAxios,
+  toFetch,
+  toGuzzle,
   toLaravel,
+  overBudget,
   unresolved,
 } from "./httpfile.ts";
 
@@ -316,4 +320,46 @@ test("reads Laravel exceptions from JSON and HTML error pages", () => {
   const html = `<html><title>Division by zero</title><script>window.data = {"report":{"exception_class":"DivisionByZeroError","message":"Division by zero","stacktrace":[{"file":"\\/var\\/www\\/html\\/app\\/Math.php","line_number":7}]}}</script>`;
   assert.deepEqual(laravelException(html, 500), { className: "DivisionByZeroError", message: "Division by zero", frames: [{ file: "/var/www/html/app/Math.php", line: 7 }] });
   assert.equal(laravelException("<html>Server Error</html>", 500), null);
+});
+
+test("reads, writes, and sends connection settings", async () => {
+  const text = `### Secure\n# @proxy http://127.0.0.1:8888\n# @client-cert ./certs/client.pem\n# @client-key /keys/client.key\n# @http2\n# @budget 300\nGET https://x.test/a\n`;
+  const [r] = parseHttpFile(text);
+  assert.deepEqual(r.tags, { proxy: "http://127.0.0.1:8888", clientCert: "./certs/client.pem", clientKey: "/keys/client.key", http: "2", budget: 300 });
+  assert.equal(formatRequest(r), text);
+  assert.equal(parseHttpFile("# @http1\nGET /").at(0)!.tags.http, "1.1");
+  assert.equal(parseHttpFile("# @budget 0.5s\nGET /").at(0)!.tags.budget, 500);
+  const p = await prepare(r, lookupIn([]), "/p", async () => "");
+  assert.deepEqual([p.clientCert, p.clientKey, p.budget], ["/p/certs/client.pem", "/keys/client.key", 300]);
+  const { args } = curlArgs(p, { headers: "/h", body: "/b" });
+  for (const [flag, value] of [["-x", "http://127.0.0.1:8888"], ["--cert", "/p/certs/client.pem"], ["--key", "/keys/client.key"]]) assert.equal(args[args.indexOf(flag) + 1], value);
+  assert.ok(args.includes("--http2") && loadArgs(p, 2, 1).includes("--http2"));
+  assert.match(toCurl(p), /-x http:\/\/127\.0\.0\.1:8888 \\\n {2}--cert \/p\/certs\/client\.pem \\\n {2}--key \/keys\/client\.key \\\n {2}--http2$/);
+  assert.equal(overBudget(p, 0.412), true);
+  assert.equal(overBudget(p, 0.2), false);
+  // An environment's "$proxy" applies when the request has no @proxy, and HTTP/1.1 on the request line changes nothing.
+  const [plain] = parseHttpFile("GET https://x.test/ HTTP/1.1");
+  const q = await prepare(plain, lookupIn([{ $proxy: "socks5://localhost:1080" }]), "/p", async () => "");
+  assert.deepEqual([q.proxy, q.http], ["socks5://localhost:1080", undefined]);
+});
+
+test("exports fetch, axios, and Guzzle code", async () => {
+  const [, create] = parseHttpFile(file);
+  const p = await prepare(create, lookupIn([{ api: "http://x/api", token: "t", title: "Hi" }]), "/p", async () => "");
+  assert.equal(
+    toFetch(p),
+    `const response = await fetch("http://x/api/posts", {\n  method: "POST",\n  headers: {\n    "Content-Type": "application/json",\n    "Authorization": "Bearer t"\n  },\n  body: JSON.stringify({\n    "title": "Hi"\n  }),\n  redirect: "manual",\n  signal: AbortSignal.timeout(5000),\n});\nconst data = await response.text();`,
+  );
+  assert.match(toAxios(p), /method: "post",\n {2}url: "http:\/\/x\/api\/posts",[\s\S]*data: \{\n {4}"title": "Hi"\n {2}\},\n {2}maxRedirects: 0,\n {2}timeout: 5000,/);
+  assert.equal(
+    toGuzzle(p),
+    `$client = new \\GuzzleHttp\\Client();\n$response = $client->request('POST', 'http://x/api/posts', [\n    'headers' => [\n        'Authorization' => 'Bearer t',\n    ],\n    'json' => [\n        'title' => 'Hi',\n    ],\n    'allow_redirects' => false,\n    'timeout' => 5,\n]);`,
+  );
+  const form = { method: "POST", url: "http://x/f", headers: [["Content-Type", "application/x-www-form-urlencoded"]] as [string, string][], body: "a=1&b=two", followRedirects: true, timeout: 60, insecure: false };
+  assert.match(toFetch(form), /body: new URLSearchParams\(\{\n {4}"a": "1",\n {4}"b": "two"\n {2}\}\),/);
+  assert.match(toGuzzle(form), /'form_params' => \[\n {8}'a' => '1',/);
+  const multipart = { ...form, headers: [], body: undefined, form: [{ name: "name", value: "Ann" }, { name: "photo", file: "/tmp/a.png" }] };
+  assert.match(toFetch(multipart), /^import \{ openAsBlob \} from "node:fs";\n\nconst form = new FormData\(\);\nform\.append\("name", "Ann"\);\nform\.append\("photo", await openAsBlob\("\/tmp\/a\.png"\), "a\.png"\);/);
+  assert.match(toAxios(multipart), /data: form,/);
+  assert.match(toGuzzle(multipart), /\['name' => 'photo', 'contents' => fopen\('\/tmp\/a\.png', 'r'\), 'filename' => 'a\.png'\],/);
 });

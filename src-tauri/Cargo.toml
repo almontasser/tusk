@@ -35,6 +35,8 @@ postgres = "0.19.14"
 mysql = { version = "28.0.2", default-features = false, features = ["minimal", "native-tls"] }
 native-tls = "0.2"
 postgres-native-tls = "0.5"
+tungstenite = { version = "0.28", features = ["native-tls"] }
+base64 = "0.22"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1156,3 +1156,8 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+
+/* HTTP client: protocols */
+.http-stat.http-over-budget { padding: 0 8px; border-radius: 10px; background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.http-script-bar .link { margin-left: auto; }
+.http-code-lang { align-self: flex-start; margin-bottom: 4px; }

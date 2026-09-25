@@ -49,6 +49,15 @@ export type Tags = {
   connectionTimeout?: number;
   /** Send Laravel's XSRF token and a browser's Origin, fetching the token from this path (or the defaults) first. Not a PhpStorm tag. */
   laravelSession?: string | true;
+  /** Send through this proxy, as curl's -x takes it. Not a PhpStorm tag; an environment's "$proxy" value applies too. */
+  proxy?: string;
+  /** A client certificate and its key for mutual TLS, relative to the .http file. Not PhpStorm tags. */
+  clientCert?: string;
+  clientKey?: string;
+  /** Force a protocol version (# @http2 or # @http1). Not PhpStorm tags; PhpStorm reads `HTTP/2` on the request line, which works too. */
+  http?: "2" | "1.1";
+  /** Milliseconds the response may take before it counts as too slow. Not a PhpStorm tag. */
+  budget?: number;
 };
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT", "GRAPHQL", "WEBSOCKET"];
@@ -118,6 +127,12 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
         else if (tag === "timeout") tags.timeout = seconds(value);
         else if (tag === "connection-timeout") tags.connectionTimeout = seconds(value);
         else if (tag === "laravel-session") tags.laravelSession = value || true;
+        else if (tag === "proxy" && value) tags.proxy = value;
+        else if (tag === "client-cert" && value) tags.clientCert = value;
+        else if (tag === "client-key" && value) tags.clientKey = value;
+        else if (tag === "http2") tags.http = "2";
+        else if (tag === "http1") tags.http = "1.1";
+        else if (tag === "budget") tags.budget = /^\d+(\.\d+)?$/.test(value ?? "") ? Number(value) : (seconds(value) ?? NaN) * 1000 || undefined;
         else comments.push(line);
       } else if (isComment(line)) comments.push(line);
       else if (/^<\s*(\{%|\S)/.test(line.trim()) && !REQUEST_LINE.test(line.trim())) ([preScript, i] = readScript(lines, i, "<")), i--;
@@ -218,6 +233,11 @@ export function formatRequest(r: HttpRequest): string {
   if (t.timeout !== undefined) out.push(`# @timeout ${t.timeout}`);
   if (t.connectionTimeout !== undefined) out.push(`# @connection-timeout ${t.connectionTimeout}`);
   if (t.laravelSession) out.push(`# @laravel-session${typeof t.laravelSession === "string" ? ` ${t.laravelSession}` : ""}`);
+  if (t.proxy) out.push(`# @proxy ${t.proxy}`);
+  if (t.clientCert) out.push(`# @client-cert ${t.clientCert}`);
+  if (t.clientKey) out.push(`# @client-key ${t.clientKey}`);
+  if (t.http) out.push(t.http === "2" ? "# @http2" : "# @http1");
+  if (t.budget !== undefined) out.push(`# @budget ${t.budget}`);
   if (r.preScript) out.push(...scriptLines("<", r.preScript));
   out.push(...requestLines(r));
   const headerComments = [...(r.headerComments ?? [])];
@@ -354,7 +374,17 @@ export type Prepared = {
   connectTimeout?: number;
   insecure: boolean;
   laravelSession?: string | true;
+  proxy?: string;
+  /** Absolute paths. */
+  clientCert?: string;
+  clientKey?: string;
+  http?: "2" | "1.1";
+  /** Milliseconds. */
+  budget?: number;
 };
+
+/** Whether a response that took `seconds` went over the request's @budget. */
+export const overBudget = (p: Prepared, seconds: number | undefined) => p.budget !== undefined && seconds !== undefined && seconds * 1000 > p.budget;
 
 const absolute = (dir: string, path: string) => (path.startsWith("/") ? path : `${dir}/${path.replace(/^\.\//, "")}`);
 
@@ -401,6 +431,15 @@ export async function prepare(r: HttpRequest, lookup: Lookup, dir: string, read:
     insecure: !!r.tags.insecure,
     ...(r.tags.laravelSession ? { laravelSession: r.tags.laravelSession } : {}),
   };
+  // A $ name can't clash with a variable of your own, and PhpStorm reads it as one it doesn't use.
+  const proxy = r.tags.proxy ? sub(r.tags.proxy) : lookup("$proxy");
+  if (proxy) p.proxy = proxy;
+  if (r.tags.clientCert) p.clientCert = absolute(dir, sub(r.tags.clientCert));
+  if (r.tags.clientKey) p.clientKey = absolute(dir, sub(r.tags.clientKey));
+  // HTTP/1.1 on the request line is PhpStorm's default spelling rather than a choice, so only HTTP/2 counts.
+  const version = r.tags.http ?? (/^HTTP\/2/i.test(r.httpVersion) ? "2" : undefined);
+  if (version) p.http = version;
+  if (r.tags.budget !== undefined) p.budget = r.tags.budget;
   if (r.method === "GRAPHQL") {
     // Sent as a POST with the query, and the variables when there are some, as JSON.
     const { query, variables } = graphqlParts(sub(r.body));
@@ -460,6 +499,15 @@ export function websocketMessages(body: string): { text: string; waitForServer: 
   return messages;
 }
 
+/** curl options for the proxy, client certificate, and protocol version, which every way of sending uses. */
+const connectionArgs = (p: Prepared) => [
+  ...(p.proxy ? ["-x", p.proxy] : []),
+  ...(p.clientCert ? ["--cert", p.clientCert] : []),
+  ...(p.clientKey ? ["--key", p.clientKey] : []),
+  // Without these, curl asks for HTTP/2 over HTTPS and uses HTTP/1.1 otherwise.
+  ...(p.http ? [p.http === "2" ? "--http2" : "--http1.1"] : []),
+];
+
 /** Marks the end of the headers curl writes to stdout, before its --write-out JSON. */
 export const INFO_MARKER = "\n__HTTP_INFO__";
 
@@ -476,6 +524,7 @@ export function curlArgs(p: Prepared, files: { headers: string; body: string; co
   if (p.followRedirects) args.push("-L", "--max-redirs", "20");
   if (p.connectTimeout) args.push("--connect-timeout", String(p.connectTimeout));
   if (p.insecure) args.push("-k");
+  args.push(...connectionArgs(p));
   if (files.cookies) args.push("-b", files.cookies, "-c", files.cookies);
   // Without an Accept-Encoding header of your own, curl asks for compressed bodies and decompresses them.
   if (!p.headers.some(([k]) => k.toLowerCase() === "accept-encoding")) args.push("--compressed");
@@ -699,6 +748,7 @@ export function toCurl(p: Prepared): string {
   else if (p.body !== undefined) parts.push(`--data-raw ${shellQuote(p.body)}`);
   if (p.followRedirects) parts.push("-L");
   if (p.insecure) parts.push("-k");
+  for (let i = 0, a = connectionArgs(p); i < a.length; i++) parts.push(a[i].startsWith("--http") ? a[i] : `${a[i]} ${shellQuote(a[++i])}`);
   return parts.join(" \\\n  ");
 }
 
@@ -762,6 +812,111 @@ export function toLaravel(p: Prepared): string {
   return `$response = Http::${first.slice(2)}${rest.map((c) => `\n    ${c}`).join("")};`;
 }
 
+// ---- Code for JavaScript and Guzzle ----
+
+type Body =
+  | { kind: "json"; value: unknown }
+  | { kind: "form"; fields: Record<string, string> }
+  | { kind: "multipart"; parts: FormPart[] }
+  | { kind: "text"; text: string; type: string }
+  | { kind: "file"; path: string }
+  | null;
+
+/** The prepared request's body in the form the code generators write it. */
+function bodyOf(p: Prepared): Body {
+  const type = p.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+  if (p.form) return { kind: "multipart", parts: p.form };
+  if (p.bodyFile) return { kind: "file", path: p.bodyFile };
+  if (p.body === undefined) return null;
+  if (/json/i.test(type)) {
+    try {
+      return { kind: "json", value: JSON.parse(p.body) };
+    } catch {
+      // Sent as text.
+    }
+  }
+  if (/x-www-form-urlencoded/i.test(type)) return { kind: "form", fields: Object.fromEntries(new URLSearchParams(p.body)) };
+  return { kind: "text", text: p.body, type };
+}
+
+const js = (v: unknown, indent: string) => JSON.stringify(v, null, 2).replace(/\n/g, `\n${indent}`);
+const partName = (f: FormPart) => f.filename ?? f.file!.split("/").pop()!;
+
+/** Lines that build a FormData from multipart parts, reading files with Node's openAsBlob. */
+const formDataLines = (parts: FormPart[]) => [
+  "const form = new FormData();",
+  ...parts.map((f) => (f.file ? `form.append(${js(f.name, "")}, await openAsBlob(${js(f.file, "")}), ${js(partName(f), "")});` : `form.append(${js(f.name, "")}, ${js(f.value ?? "", "")});`)),
+];
+
+/** The setup lines and the body expression for fetch and axios. */
+function jsBody(body: Body, json: (value: unknown) => string): { setup: string[]; value?: string; imports: boolean } {
+  if (!body) return { setup: [], imports: false };
+  if (body.kind === "json") return { setup: [], value: json(body.value), imports: false };
+  if (body.kind === "form") return { setup: [], value: `new URLSearchParams(${js(body.fields, "  ")})`, imports: false };
+  if (body.kind === "multipart") return { setup: formDataLines(body.parts), value: "form", imports: true };
+  if (body.kind === "file") return { setup: [], value: `await openAsBlob(${js(body.path, "")})`, imports: true };
+  return { setup: [], value: js(body.text, "  "), imports: false };
+}
+
+/** JavaScript that sends the prepared request with fetch, for a browser or Node 20 and later. */
+export function toFetch(p: Prepared): string {
+  const b = jsBody(bodyOf(p), (v) => `JSON.stringify(${js(v, "  ")})`);
+  const options = [`  method: ${js(p.method, "")},`];
+  if (p.headers.length) options.push(`  headers: ${js(Object.fromEntries(p.headers), "  ")},`);
+  if (b.value) options.push(`  body: ${b.value},`);
+  if (!p.followRedirects) options.push(`  redirect: "manual",`);
+  if (p.timeout !== 60) options.push(`  signal: AbortSignal.timeout(${p.timeout * 1000}),`);
+  return [
+    ...(b.imports ? [`import { openAsBlob } from "node:fs";`, ""] : []),
+    ...b.setup,
+    `const response = await fetch(${js(p.url, "")}, {`,
+    ...options,
+    "});",
+    "const data = await response.text();",
+  ].join("\n");
+}
+
+/** JavaScript that sends the prepared request with axios. */
+export function toAxios(p: Prepared): string {
+  const b = jsBody(bodyOf(p), (v) => js(v, "  "));
+  const options = [`  method: ${js(p.method.toLowerCase(), "")},`, `  url: ${js(p.url, "")},`];
+  if (p.headers.length) options.push(`  headers: ${js(Object.fromEntries(p.headers), "  ")},`);
+  if (b.value) options.push(`  data: ${b.value},`);
+  if (!p.followRedirects) options.push("  maxRedirects: 0,");
+  if (p.timeout !== 60) options.push(`  timeout: ${p.timeout * 1000},`);
+  return [`import axios from "axios";`, ...(b.imports ? [`import { openAsBlob } from "node:fs";`] : []), "", ...b.setup, "const response = await axios({", ...options, "});"].join("\n");
+}
+
+/** PHP that sends the prepared request with Guzzle's `$client->request()`. */
+export function toGuzzle(p: Prepared): string {
+  const body = bodyOf(p);
+  const options: string[] = [];
+  const opt = (key: string, value: string) => options.push(`    ${phpString(key)} => ${value},`);
+  // Guzzle sets Content-Type itself for json and form_params.
+  const headers = p.headers.filter(([k]) => k.toLowerCase() !== "content-type" || !(body?.kind === "json" || body?.kind === "form"));
+  if (headers.length) opt("headers", phpValue(Object.fromEntries(headers), "    "));
+  if (body?.kind === "json") opt("json", phpValue(body.value, "    "));
+  else if (body?.kind === "form") opt("form_params", phpValue(body.fields, "    "));
+  else if (body?.kind === "multipart") {
+    const part = (f: FormPart) =>
+      f.file
+        ? `        ['name' => ${phpString(f.name)}, 'contents' => fopen(${phpString(f.file)}, 'r'), 'filename' => ${phpString(partName(f))}],`
+        : `        ['name' => ${phpString(f.name)}, 'contents' => ${phpString(f.value ?? "")}],`;
+    opt("multipart", `[\n${body.parts.map(part).join("\n")}\n    ]`);
+  } else if (body?.kind === "file") opt("body", `fopen(${phpString(body.path)}, 'r')`);
+  else if (body?.kind === "text") opt("body", phpString(body.text));
+  if (!p.followRedirects) opt("allow_redirects", "false");
+  if (p.insecure) opt("verify", "false");
+  if (p.timeout !== 60) opt("timeout", String(p.timeout));
+  if (p.connectTimeout) opt("connect_timeout", String(p.connectTimeout));
+  if (p.proxy) opt("proxy", phpString(p.proxy));
+  if (p.clientCert) opt("cert", phpString(p.clientCert));
+  if (p.clientKey) opt("ssl_key", phpString(p.clientKey));
+  if (p.http) opt("version", p.http === "2" ? "2.0" : "1.1");
+  const args = `${phpString(p.method)}, ${phpString(p.url)}${options.length ? `, [\n${options.join("\n")}\n]` : ""}`;
+  return `$client = new \\GuzzleHttp\\Client();\n$response = $client->request(${args});`;
+}
+
 // ---- Load testing ----
 
 /** One request of a load test: its status (0 when it failed), total time and time to first byte in seconds, and curl's exit code. */
@@ -781,6 +936,7 @@ export function loadArgs(p: Prepared, count: number, concurrency: number, cookie
   else args.push("-X", p.method);
   if (p.followRedirects) args.push("-L");
   if (p.insecure) args.push("-k");
+  args.push(...connectionArgs(p));
   if (p.connectTimeout) args.push("--connect-timeout", String(p.connectTimeout));
   // Send the cookies kept for the environment, such as a session, without changing them.
   if (cookies) args.push("-b", cookies);

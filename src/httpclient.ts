@@ -444,12 +444,13 @@ export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchan
   return exchange;
 }
 
-/** Sends a prepared request without scripts or history, as monitoring does. The body is read, then deleted. */
-export async function probe(p: Prepared, path: string, env: string | undefined, cancel: Cancel = {}) {
+/** Sends a prepared request without scripts or history, as monitoring does. The body is deleted, after it's read when `readBody` is set. */
+export async function probe(p: Prepared, path: string, env: string | undefined, cancel: Cancel = {}, readBody = false) {
   const id = newId();
   const t = await transmit(p, parentOf(path), await cacheDir("http-scratch"), id, p.laravelSession ? await cookieJar(env) : undefined, cancel);
+  const body = readBody ? await invoke<string>("read_file", { path: t.bodyPath }).catch(() => "") : "";
   await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
-  return t;
+  return { ...t, body };
 }
 
 export const isText = (type: string) => !type || /^text\/|json|xml|javascript|html|x-www-form-urlencoded|graphql|yaml|csv/i.test(type);
@@ -593,7 +594,7 @@ const httpGrammar: monaco.languages.IMonarchLanguage = {
 
 // ---- Editing .http files: completion, hovers, undefined variables, folding, and the outline ----
 
-const TAGS = ["name", "no-redirect", "no-cookie-jar", "no-log", "insecure", "timeout", "connection-timeout"];
+const TAGS = ["name", "no-redirect", "no-cookie-jar", "no-log", "insecure", "timeout", "connection-timeout", "proxy", "client-cert", "client-key", "http2", "http1", "budget"];
 const DYNAMIC = ["$uuid", "$timestamp", "$isoTimestamp", "$randomInt", "$random.integer(0, 100)", "$random.float(0, 1)", "$random.alphabetic(10)", "$random.alphanumeric(10)", "$random.hexadecimal(10)", "$random.numeric(6)", "$random.email", "$random.bool", "$dotenv.APP_URL"];
 const HEADERS: Record<string, string[]> = {
   Accept: ["application/json", "text/html", "*/*"],
