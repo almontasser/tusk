@@ -11,7 +11,7 @@ import { formatHoverMarkdown } from "./phptypes";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { isDeprecation, isUnused, magoConfigText, problemMarkdown, realProblems, ruleLabel, severityOf } from "./diagnostics";
+import { isDeprecation, isUnused, magoConfigText, magoExpect, magoFixes, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -147,6 +147,64 @@ function registerProblemHover() {
   });
 }
 registerProblemHover();
+
+// ---- Mago's fixes and suppressions ----
+
+/** Mago's lint of a model's text, run once per version. Phpactor's Mago extension drops the fixes Mago reports. */
+const magoLints = new WeakMap<monaco.editor.ITextModel, { version: number; fixes: Promise<MagoFix[]> }>();
+function magoFixesOf(model: monaco.editor.ITextModel): Promise<MagoFix[]> {
+  const version = model.getVersionId();
+  let lint = magoLints.get(model);
+  if (lint?.version !== version) {
+    const text = textOf(model);
+    const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "lint", "--stdin-input", model.uri.fsPath.slice(projectRoot.length + 1), "--reporting-format", "json"];
+    const fixes = invoke<string>("tool_path", { name: "mago" })
+      .then((mago) => invoke<string>("run_capture", { cwd: projectRoot, program: mago, args, input: text, anyStatus: true }))
+      .then((json) => magoFixes(json, text))
+      .catch((e) => (host.status(`Mago lint failed: ${e}`), []));
+    magoLints.set(model, (lint = { version, fixes }));
+  }
+  return lint.fixes;
+}
+
+const magoCategory: Record<string, "lint" | "analysis"> = { "mago-lint": "lint", mago: "analysis" };
+
+/**
+ * Quick fixes for Mago's problems: its own fix (labelled when it may change behavior), all its safe fixes in the
+ * file (also Monaco's Fix All), and a `// @mago-expect` comment that suppresses the problem on its line.
+ */
+monaco.languages.registerCodeActionProvider("php", {
+  async provideCodeActions(model, range, context) {
+    const fixAll = context.only?.startsWith("source.fixAll") ?? false;
+    const markers = (fixAll ? monaco.editor.getModelMarkers({ resource: model.uri }) : context.markers).filter((m) => magoCategory[m.source ?? ""] && typeof m.code === "string");
+    const actions: monaco.languages.CodeAction[] = [];
+    const edit = (edits: { range: L.Range; text: string }[]) => ({ edits: edits.map((e) => ({ resource: model.uri, textEdit: { range: toRange(e.range), text: e.text }, versionId: model.getVersionId() })) });
+    if (!fixAll) {
+      const lines = model.getLinesContent();
+      for (const m of markers) {
+        const code = m.code as string;
+        const title = `Suppress ${code} for this line`;
+        const expect = !/^(parse|unfulfilled-expect)$/.test(code) && magoExpect(lines, m.startLineNumber - 1, magoCategory[m.source!], code);
+        if (expect && !actions.some((a) => a.title === title)) actions.push({ title, kind: "quickfix", diagnostics: [m], edit: edit([expect]) });
+      }
+    }
+    // Mago runs only when asked (⌥⏎, the problem popup, Fix All), not for the light bulb's requests as the caret moves.
+    const lint = markers.filter((m) => m.source === "mago-lint");
+    if (context.trigger !== monaco.languages.CodeActionTriggerType.Invoke || !lint.length || !projectRoot || !model.uri.fsPath.startsWith(`${projectRoot}/`)) return { actions, dispose() {} };
+    const fixes = await magoFixesOf(model);
+    if (!fixAll) {
+      for (const f of fixes.filter((f) => monaco.Range.areIntersectingOrTouching(toRange(f.range), range))) {
+        const diagnostics = lint.filter((m) => m.code === f.code && monaco.Range.areIntersectingOrTouching(m, toRange(f.range)));
+        if (!diagnostics.length) continue;
+        const risk = f.safety === "unsafe" ? " (unsafe)" : f.safety === "potentiallyunsafe" ? " (may change behavior)" : "";
+        actions.unshift({ title: `${f.title}${risk}`, kind: "quickfix", isPreferred: !risk, diagnostics, edit: edit(f.edits) });
+      }
+    }
+    const safe = safeEdits(fixes);
+    if (safe.length) actions.push({ title: "Fix All Safe Mago Problems in File", kind: fixAll ? "source.fixAll.mago" : "quickfix", edit: edit(safe) });
+    return { actions, dispose() {} };
+  },
+}, { providedCodeActionKinds: ["quickfix", "source.fixAll.mago"] });
 
 /** Converts locations and loads their files, because Monaco can only show locations in existing models. */
 async function locations(result: L.Location | L.Location[] | L.LocationLink[] | null): Promise<monaco.languages.Location[]> {

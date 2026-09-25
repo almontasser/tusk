@@ -1074,6 +1074,7 @@ const actions: Action[] = [
   editorAction("Next Problem in Files", "", "editor.action.marker.nextInFiles"),
   editorAction("Previous Problem in Files", "", "editor.action.marker.prevInFiles"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
+  editorAction("Fix All Safe Problems in File", "", "editor.action.fixAll"),
   editorAction("Parameter Info", "Meta+P", "editor.action.triggerParameterHints"),
   editorAction("Quick Documentation", "F1", "editor.action.showHover"),
   editorAction("Extend Selection", "Alt+ArrowUp", "editor.action.smartSelect.expand"),

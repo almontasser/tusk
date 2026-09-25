@@ -296,6 +296,8 @@ type MagoIssue = {
   notes?: string[];
   help?: string;
   annotations: { kind: string; span: { file_id: { name: string }; start: { offset: number }; end: { offset: number } } }[];
+  /** Each file's edits that fix the issue. `new_text` is UTF-8 bytes. */
+  edits?: [unknown, { range: { start: number; end: number }; new_text: number[]; safety: string }[]][];
 };
 
 /**
@@ -331,6 +333,60 @@ export function magoIssuesByFile(json: string, source: "mago" | "mago-lint"): Ma
       },
     ]),
   );
+}
+
+type Range = { start: Position; end: Position };
+type TextEdit = { range: Range; text: string };
+
+/** A fix Mago's linter offers for an issue: `safe`, `potentiallyunsafe`, or `unsafe`, as its riskiest edit is. */
+export type MagoFix = { code: string; title: string; range: Range; safety: string; edits: TextEdit[] };
+
+/** The fixes in `mago lint --stdin-input --reporting-format json` output for `text`, one file's buffer. */
+export function magoFixes(json: string, text: string): MagoFix[] {
+  const position = positions(text);
+  const decoder = new TextDecoder();
+  const risk = ["safe", "potentiallyunsafe", "unsafe"];
+  return ((JSON.parse(json || "{}").issues ?? []) as MagoIssue[]).flatMap((issue) => {
+    const primary = issue.annotations.find((a) => a.kind === "Primary") ?? issue.annotations[0];
+    const edits = (issue.edits ?? []).flatMap(([, list]) => list);
+    if (!primary || !edits.length) return [];
+    return [{
+      code: issue.code,
+      title: issue.help?.replace(/\.$/, "") || `Fix ${issue.code}`,
+      range: { start: position(primary.span.start.offset), end: position(primary.span.end.offset) },
+      safety: risk[Math.max(...edits.map((e) => risk.indexOf(e.safety)))] ?? "unsafe",
+      edits: edits.map((e) => ({ range: { start: position(e.range.start), end: position(e.range.end) }, text: decoder.decode(Uint8Array.from(e.new_text)) })),
+    }];
+  });
+}
+
+/** The safe fixes' edits, less the fixes that overlap an earlier one, which Mago leaves for its next run too. */
+export function safeEdits(fixes: MagoFix[]): TextEdit[] {
+  const before = (a: Position, b: Position) => a.line < b.line || (a.line === b.line && a.character < b.character);
+  const overlap = (a: TextEdit, b: TextEdit) => before(a.range.start, b.range.end) && before(b.range.start, a.range.end);
+  const kept: TextEdit[] = [];
+  for (const f of fixes) if (f.safety === "safe" && !f.edits.some((e) => kept.some((k) => overlap(e, k)))) kept.push(...f.edits);
+  return kept;
+}
+
+/**
+ * The edit that tells Mago to expect `category:code` on the 0-based `line`, so it's no longer reported: the code
+ * added to a `// @mago-expect` comment for the category just above the line, or a new comment above it. A comment
+ * can't mix `lint` and `analysis` codes, so each has its own. None for a line with `<?php`, where a comment above
+ * would be output.
+ */
+export function magoExpect(lines: string[], line: number, category: "lint" | "analysis", code: string): TextEdit | undefined {
+  const target = lines[line] ?? "";
+  if (target.includes("<?")) return undefined;
+  for (let i = line - 1; i >= 0 && /^\s*\/\/\s*@mago-(expect|ignore)\s/.test(lines[i]); i--) {
+    const list = lines[i].match(new RegExp(`@mago-(expect|ignore)\\s+${category}:[\\w-]+(,[\\w-]+)*`));
+    if (list) {
+      const at = { line: i, character: list.index! + list[0].length };
+      return { range: { start: at, end: at }, text: `,${code}` };
+    }
+  }
+  const at = { line, character: 0 };
+  return { range: { start: at, end: at }, text: `${target.match(/^\s*/)![0]}// @mago-expect ${category}:${code}\n` };
 }
 
 /** Converts UTF-8 byte offsets in `text` to 0-based lines and UTF-16 characters. */

@@ -533,6 +533,34 @@ keeps it from the language servers), and Go to Code. Opening a file closes it.
 The page remembers which of the editor, diff, history, and merge views it hid,
 and closing it shows those again.
 
+### Mago's fixes and suppressions
+
+Mago reports fixes for many lint rules, but Phpactor's Mago extension drops
+them, so a second code action provider for `php` in `lsp.ts` gets them from
+Mago itself. On a request the user makes (`CodeActionTriggerType.Invoke`: ⌥⏎,
+the hover's Quick Fix link, or Fix All) with `mago-lint` markers in the range,
+it runs `mago lint --stdin-input <path> --reporting-format json` on the
+buffer, once per model version. `magoFixes` in `diagnostics.ts` reads each
+issue's `edits`: byte ranges and UTF-8 `new_text` bytes, and a `safety` of
+`safe`, `potentiallyunsafe`, or `unsafe`. Each fix whose range touches a marker
+with the same code becomes a `quickfix` action; only safe ones are preferred,
+and the others say so in their title. `safeEdits` collects every safe fix,
+leaving out fixes that overlap one before them, for **Fix All Safe Mago
+Problems in File**. The same action has the kind `source.fixAll.mago` when the
+request asks for `source.fixAll`, so Monaco's `editor.action.fixAll` applies
+it. The edits go through Monaco, so they're undoable and the file isn't saved.
+The analyzer's fixes aren't offered, since `mago analyze` on one buffer still
+reads the whole project.
+
+Every `mago` and `mago-lint` marker also gets **Suppress *code* for this
+line**, which doesn't run Mago, so the light bulb shows it too. `magoExpect`
+writes `// @mago-expect lint:code` (`analysis:` for the analyzer) above the
+marker's first line with its indentation, or adds `,code` to a
+`// @mago-expect` or `@mago-ignore` comment for the same category in the
+comment lines just above. Mago 1.50.0 ignores a comment that mixes `lint:` and
+`analysis:` codes, so each category gets its own line. A line with `<?php` gets
+no suppression, and neither do `parse` and `unfulfilled-expect`.
+
 ### Next and previous problem
 
 F2 and ⇧F2 run Monaco's `editor.action.marker.next` and `marker.prev`, which
@@ -2827,6 +2855,16 @@ problems overlap the range, so it shows in the hover's Quick Fix link. The
 request sends the markers' filtered diagnostics, kept per model
 and server, instead of matching Monaco's markers back to the server's raw
 diagnostics by range, code, and message.
+
+### 2026-09-25: Mago's fixes come from Mago, on request
+
+The client runs `mago lint` itself for fixes, since Phpactor's extension drops
+them, but only for requests the user makes with a lint problem in range, not
+for the light bulb's automatic requests as the caret moves. Suppression uses
+`@mago-expect` rather than `@mago-ignore`, so Mago reports the comment once
+it's no longer needed. There's no action that turns a rule off in `mago.toml`:
+the rule label in the popup names the rule, and a project-wide change is
+better made in the file.
 
 ### Editor font and ligatures
 

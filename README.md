@@ -1233,6 +1233,14 @@ user model, a test's `$this` your test case, and `shouldReceive()` takes
 arguments. Problems Mago can't prove, such as a value that may be null, show
 as warnings; using a value of unknown type shows as a hint.
 
+⌥⏎ on a Mago problem offers Mago's own fix, such as removing an unused import,
+and **Fix All Safe Mago Problems in File**. A fix that may change what the
+code does says so in its title. **Fix All Safe Problems in File** in ⌘⇧A
+applies the safe fixes without the menu. **Suppress *rule* for this line**
+adds a `// @mago-expect lint:rule` comment (`analysis:` for the analyzer)
+above the line, or adds the rule to one already there. Mago reports the
+comment once the problem is gone, and its fix removes the comment.
+
 ## Test app
 
 `scripts/make-fixture.sh` creates `fixtures/demo`, a Laravel 12 app with

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, magoConfigText, problemMarkdown, magoIssuesByFile, realProblems, ruleLabel, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -141,4 +141,31 @@ class A { use hasIcon; }`;
     at(text, "use Filament\\Support\\Concerns\\HasColor", "no-redundant-use", "Unused import: `HasColor`.", "mago-lint"),
   ];
   assert.deepEqual(realProblems("/p/app/A.php", text, "php", list, facts).map((d) => d.message), ["Unused import: `HasColor`."]);
+});
+
+test("reads Mago's fixes and suppresses its issues", () => {
+  const text = "<?php\n// é\n$x = array(1);\n";
+  const at = (s: string) => new TextEncoder().encode(text.slice(0, text.indexOf(s))).length;
+  const span = (start: number, end: number) => ({ file_id: { name: "a.php" }, start: { offset: start }, end: { offset: end } });
+  const edit = (start: number, end: number, newText: string, safety = "safe") => ({ range: { start, end }, new_text: [...new TextEncoder().encode(newText)], safety });
+  const issue = (code: string, help: string, edits: object[]) => ({ level: "Note", code, message: "m", help, annotations: [{ kind: "Primary", span: span(at("array"), at(";")) }], edits: [[{}, edits]] });
+  const json = JSON.stringify({
+    issues: [
+      issue("array-style", "Use `[]`.", [edit(at("array"), at("(1") + 1, "["), edit(at(");"), at(";"), "]")]),
+      issue("other", "Rewrite it.", [edit(at("array"), at(";"), "[1]")]),
+      issue("risky", "Guess.", [edit(0, 0, "x", "potentiallyunsafe")]),
+    ],
+  });
+  const fixes = magoFixes(json, text);
+  assert.deepEqual(fixes.map((f) => [f.title, f.safety]), [["Use `[]`", "safe"], ["Rewrite it", "safe"], ["Guess", "potentiallyunsafe"]]);
+  assert.deepEqual(fixes[0].edits[0], { range: { start: { line: 2, character: 5 }, end: { line: 2, character: 11 } }, text: "[" });
+  // The second fix overlaps the first, and the third isn't safe.
+  assert.deepEqual(safeEdits(fixes).map((e) => e.text), ["[", "]"]);
+
+  const lines = ["<?php", "function f() {", "    // @mago-expect lint:a", "    // @mago-expect analysis:b", "    $x = 1;", "}"];
+  assert.equal(magoExpect(lines, 4, "lint", "c")?.text, ",c");
+  assert.deepEqual(magoExpect(lines, 4, "lint", "c")?.range.start, { line: 2, character: 26 });
+  assert.equal(magoExpect(lines, 1, "analysis", "d")?.text, "// @mago-expect analysis:d\n");
+  assert.equal(magoExpect(["    $y = 2;"], 0, "lint", "e")?.text, "    // @mago-expect lint:e\n");
+  assert.equal(magoExpect(lines, 0, "lint", "strict-types"), undefined);
 });
