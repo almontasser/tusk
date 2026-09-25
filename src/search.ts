@@ -70,7 +70,6 @@ function preview(m: Match) {
 
 function render(error: string) {
   const groups = byFile();
-  const root = host.root();
   $("find-summary").textContent =
     error ||
     (matches.length
@@ -81,34 +80,45 @@ function render(error: string) {
   let shown = 0;
   $("find-results").replaceChildren(
     ...[...groups].map(([path, list]) => {
-      const group = document.createElement("li");
-      const header = document.createElement("div");
-      header.className = "find-file";
-      const rel = path.slice(root.length + 1);
-      const name = rel.split("/").pop()!;
-      const icon = fileIcon(name);
-      header.innerHTML = `<span class="chevron codicon codicon-chevron-down"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span><button title="Replace in this file">Replace</button>`;
-      header.querySelector(".name")!.textContent = name;
-      header.querySelector(".dir")!.textContent = rel.slice(0, -name.length - 1);
-      header.querySelector(".count")!.textContent = String(list.length);
-      header.querySelector("button")!.onclick = (e) => (e.stopPropagation(), replaceIn([path]));
-      const rows = document.createElement("ul");
-      const chevron = header.querySelector(".chevron")!;
-      const fill = () => rows.childElementCount || rows.append(...list.map(matchRow));
-      const setOpen = (open: boolean) => {
-        rows.hidden = !open;
-        chevron.classList.toggle("codicon-chevron-down", open);
-        chevron.classList.toggle("codicon-chevron-right", !open);
-        if (open) fill();
-      };
+      const replace = document.createElement("button");
+      replace.title = "Replace in this file";
+      replace.textContent = "Replace";
+      replace.onclick = (e) => (e.stopPropagation(), replaceIn([path]));
       const open = shown + list.length <= EXPANDED_ROWS;
-      setOpen(open);
       if (open) shown += list.length;
-      header.onclick = () => setOpen(!!rows.hidden);
-      group.append(header, rows);
-      return group;
+      return fileGroup(path, list, matchRow, open, replace);
     }),
   );
+}
+
+/**
+ * A file in a results list, with its items below. Click the file to collapse them; they render when first shown.
+ * The badge shows `count`, or else the number of items.
+ */
+export function fileGroup<T>(path: string, list: T[], row: (item: T) => HTMLElement, open: boolean, action?: HTMLElement, count?: string) {
+  const group = document.createElement("li");
+  const header = document.createElement("div");
+  header.className = "find-file";
+  const rel = path.slice(host.root().length + 1);
+  const name = rel.split("/").pop()!;
+  const icon = fileIcon(name);
+  header.innerHTML = `<span class="chevron codicon codicon-chevron-down"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="count"></span>`;
+  header.querySelector(".name")!.textContent = name;
+  header.querySelector(".dir")!.textContent = rel.slice(0, -name.length - 1);
+  header.querySelector(".count")!.textContent = count ?? String(list.length);
+  if (action) header.append(action);
+  const rows = document.createElement("ul");
+  const chevron = header.querySelector(".chevron")!;
+  const setOpen = (open: boolean) => {
+    rows.hidden = !open;
+    chevron.classList.toggle("codicon-chevron-down", open);
+    chevron.classList.toggle("codicon-chevron-right", !open);
+    if (open && !rows.childElementCount) rows.append(...list.map(row));
+  };
+  setOpen(open);
+  header.onclick = () => setOpen(!!rows.hidden);
+  group.append(header, rows);
+  return group;
 }
 
 function matchRow(m: Match) {
@@ -229,3 +239,51 @@ export function initSearch(h: Host) {
 
 /** Reruns the search after files change, so results stay current. */
 export const refreshSearch = () => $<HTMLInputElement>("find-query").value && searchSoon();
+
+// ---- The TODO view ----
+
+const TODO_QUERY: Query = { text: String.raw`\b(TODO|FIXME|XXX)\b`, regex: true, caseSensitive: true, wholeWord: false };
+let todoGeneration = 0;
+
+/** Lists TODO, FIXME, and XXX comments in project files, grouped by file, as PhpStorm's TODO window does. Ignored files, such as vendor, are skipped. */
+export async function loadTodos() {
+  const root = host.root();
+  if (!root) return;
+  const current = ++todoGeneration;
+  const found = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
+  if (current !== todoGeneration) return; // A newer load already started.
+  const groups = new Map<string, Match[]>();
+  for (const m of found) groups.set(m.path, [...(groups.get(m.path) ?? []), m]);
+  $("todo-summary").textContent = found.length
+    ? `${found.length}${found.length >= MAX_MATCHES ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
+    : "No TODO, FIXME, or XXX comments in project files.";
+  let shown = 0;
+  $("todo-results").replaceChildren(
+    ...[...groups].map(([path, list]) => {
+      const open = shown + list.length <= EXPANDED_ROWS;
+      if (open) shown += list.length;
+      return fileGroup(path, list, todoRow, open);
+    }),
+  );
+}
+
+/** A TODO's row: its text from the keyword on, which is the part worth reading. */
+function todoRow(m: Match) {
+  const li = document.createElement("li");
+  li.className = "find-match";
+  const line = document.createElement("span");
+  line.className = "line";
+  line.textContent = String(m.line);
+  const text = document.createElement("span");
+  text.className = "preview";
+  const mark = document.createElement("mark");
+  mark.textContent = m.text.slice(m.column - 1, m.end - 1);
+  text.append(mark, m.text.slice(m.end - 1, m.end + 200).replace(/\s*(\*\/|-->|--\}\})\s*$/, ""));
+  li.append(line, text);
+  li.onclick = () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end));
+  return li;
+}
+
+let todoTimer: ReturnType<typeof setTimeout> | undefined;
+/** Reloads the TODO view after files change, while it shows. */
+export const refreshTodos = () => !$("view-todo").hidden && (clearTimeout(todoTimer), (todoTimer = setTimeout(loadTodos, 250)));

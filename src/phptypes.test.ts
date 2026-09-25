@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentClassPath, deletionLines, laravelNames, parseTypeDeclaration, parseTypeDeclarations } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -93,4 +93,12 @@ test("maps component tags to their classes", () => {
   assert.equal(componentClassPath("x-alert"), "app/View/Components/Alert.php");
   assert.equal(componentClassPath("x-forms.input-text"), "app/View/Components/Forms/InputText.php");
   assert.equal(componentClassPath("x-filament::button"), null);
+});
+
+test("routeTarget reads controller actions from route:list", () => {
+  assert.deepEqual(routeTarget("App\\Http\\Controllers\\PostController@index"), { fqn: "App\\Http\\Controllers\\PostController", method: "index" });
+  assert.deepEqual(routeTarget("App\\Http\\Controllers\\ShowDashboard"), { fqn: "App\\Http\\Controllers\\ShowDashboard", method: "__invoke" });
+  assert.equal(routeTarget("Closure"), null);
+  assert.equal(methodLine("<?php\nclass A {\n  public function index(Request $r) {}\n}", "index"), 3);
+  assert.equal(methodLine("<?php\nclass A {}", "index"), 0);
 });

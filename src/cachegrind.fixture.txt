@@ -1,0 +1,206 @@
+version: 1
+creator: xdebug 3.5.3 (PHP 8.4.24)
+cmd: /app/demo.php
+part: 1
+positions: line
+
+events: Time_(10ns) Memory_(bytes)
+
+fl=(1) php:internal
+fn=(1) php::strtoupper
+5 42 32
+
+fl=(1)
+fn=(2) php::str_repeat
+5 146 40
+
+fl=(2) /app/demo.php
+fn=(3) Greeter->greet
+4 658 48
+cfl=(1)
+cfn=(1)
+calls=1 0 0
+5 42 32
+cfl=(1)
+cfn=(2)
+calls=1 0 0
+5 146 40
+
+fl=(1)
+fn=(1)
+5 8 32
+
+fl=(1)
+fn=(2)
+5 4 40
+
+fl=(2)
+fn=(3)
+4 158 48
+cfl=(1)
+cfn=(1)
+calls=1 0 0
+5 8 32
+cfl=(1)
+cfn=(2)
+calls=1 0 0
+5 4 40
+
+fl=(1)
+fn=(1)
+5 4 32
+
+fl=(1)
+fn=(2)
+5 1 40
+
+fl=(2)
+fn=(3)
+4 53 48
+cfl=(1)
+cfn=(1)
+calls=1 0 0
+5 4 32
+cfl=(1)
+cfn=(2)
+calls=1 0 0
+5 1 40
+
+fl=(2)
+fn=(4) fib
+2 25 0
+
+fl=(2)
+fn=(4)
+2 8 0
+
+fl=(2)
+fn=(4)
+2 104 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 25 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 8 0
+
+fl=(2)
+fn=(4)
+2 8 0
+
+fl=(2)
+fn=(4)
+2 104 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 138 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 8 0
+
+fl=(2)
+fn=(4)
+2 8 0
+
+fl=(2)
+fn=(4)
+2 4 0
+
+fl=(2)
+fn=(4)
+2 58 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 8 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 4 0
+
+fl=(2)
+fn=(4)
+2 138 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 250 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 71 64
+
+fl=(2)
+fn=(4)
+2 4 0
+
+fl=(2)
+fn=(4)
+2 4 0
+
+fl=(2)
+fn=(4)
+2 58 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 4 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 4 0
+
+fl=(2)
+fn=(4)
+2 4 0
+
+fl=(2)
+fn=(4)
+2 92 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 67 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 4 0
+
+fl=(2)
+fn=(4)
+2 133 0
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 458 64
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+2 163 64
+
+fl=(2)
+fn=(5) {main}
+1 2817 0
+cfl=(2)
+cfn=(3)
+calls=1 0 0
+9 846 120
+cfl=(2)
+cfn=(3)
+calls=1 0 0
+9 171 120
+cfl=(2)
+cfn=(3)
+calls=1 0 0
+9 58 120
+cfl=(2)
+cfn=(4)
+calls=1 0 0
+10 754 64
+
+summary: 43588 528880
+

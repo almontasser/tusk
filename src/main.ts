@@ -25,8 +25,12 @@ import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, initSettings, onSettings, openSettings, removeEditor, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
-import { initSearch, openSearch, refreshSearch } from "./search";
-import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor } from "./runner";
+import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
+import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
+import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
+import { editSnippets, initSnippets } from "./snippets";
+import { hideCoverage } from "./coverage";
+import { chooseProfile, initProfiler, profileUrl, startProfilingServer } from "./profiler";
 import { openTerminal, panelShown, shellCount, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -150,6 +154,7 @@ async function openFolder(dir: unknown = null) {
   refreshGit();
   detectFormatters();
   loadBreakpoints();
+  loadBookmarks();
   if (session) await restoreSession(session);
   restartServers();
 }
@@ -695,6 +700,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     renderTabs();
     refreshGit();
     refreshSearch();
+    refreshTodos();
   }, 150);
 });
 
@@ -751,6 +757,25 @@ async function symbolItems(query: string, typesOnly: boolean): Promise<Item[]> {
 
 const goToClass = () => pick("Go to class", (q) => symbolItems(q, true), 150);
 const goToSymbol = () => pick("Go to symbol", (q) => symbolItems(q, false), 150);
+
+/** Shows the current file against the clipboard, or against another file, in the diff view. */
+async function compareWithClipboard() {
+  if (!active) return;
+  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch(() => "");
+  showDiff(relative(active), clipboard, editor.getValue(), "Clipboard ↔ Current file");
+}
+
+async function compareWithFile() {
+  if (!active || !root) return;
+  const current = active;
+  const files = await invoke<string[]>("list_files", { root });
+  pick(`Compare ${nameOf(current)} with`, (q) =>
+    rank(q, files.filter((f) => `${root}/${f}` !== current).map((f) => ({
+      ...fileItem(`${root}/${f}`),
+      run: async () => showDiff(relative(current), await invoke<string>("read_file", { path: `${root}/${f}` }), tabs.get(current)?.model.getValue() ?? "", `${f} ↔ ${relative(current)}`),
+    }))),
+  );
+}
 
 const recentFiles = () => pick("Recent files", (q) => rank(q, recent.filter((p) => p !== active).map(fileItem)));
 
@@ -839,8 +864,15 @@ const actions: Action[] = [
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run All Tests", run: () => root && runAllTests() },
+  { label: "Run All Tests with Coverage", run: () => root && runAllTests(true) },
+  { label: "Run Test at Cursor with Coverage", run: () => runTestAtCursor(editor, "coverage") },
+  { label: "Profile Test at Cursor", run: () => runTestAtCursor(editor, "profile") },
+  { label: "Open Xdebug Profile…", run: chooseProfile },
+  { label: "Profile URL…", run: () => root && profileUrl() },
+  { label: "Start Profiling Server (PHP's server with the Xdebug profiler)", run: () => root && startProfilingServer() },
+  { label: "Hide Coverage", run: hideCoverage },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
-  { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, true) },
+  { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, "debug") },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Edit Breakpoint…", keys: "Meta+Shift+F8", run: () => active && editBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Toggle Pause on Exceptions", run: togglePauseOnExceptions },
@@ -863,6 +895,14 @@ const actions: Action[] = [
     },
   },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
+  { label: "TODO", run: () => showView("todo") },
+  { label: "Toggle Bookmark", keys: "F3", run: () => active && toggleBookmark(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
+  { label: "Edit Snippets (Live Templates)", run: () => editSnippets(openFile) },
+  { label: "Laravel Tinker", run: () => root && tinker() },
+  { label: "Routes", run: () => root && showRoutes() },
+  { label: "Compare with Clipboard", run: compareWithClipboard },
+  { label: "Compare with File…", run: compareWithFile },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
@@ -1005,10 +1045,13 @@ window.addEventListener(
   true,
 );
 
-initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }));
+initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status);
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initAi({ status, root: () => root });
 initSettings();
+initSnippets();
+initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
+initBookmarks({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initFormatting({ root: () => root, status });
 initConflicts();
 initHistory({ root: () => root, status });
@@ -1027,6 +1070,7 @@ function showView(name: string) {
   if (name === "prs") loadPullRequests();
   if (name === "database") loadTables();
   if (name === "composer") loadPackages();
+  if (name === "todo") loadTodos();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -1054,6 +1098,7 @@ $("welcome-open").onclick = () => openFolder();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
+$("todo-refresh").onclick = () => loadTodos();
 
 // Drag the sidebar's right edge to resize it; the width is remembered.
 try {

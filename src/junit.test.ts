@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseEvents, parseJUnit, sameTest } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -84,4 +84,16 @@ Test Prepared (Tests\\Unit\\ExampleTest::test_two)
     ["Tests\\Feature\\PostTest", "home page → it loads", "failed"],
     ["Tests\\Unit\\ExampleTest", "test two", "running"],
   ]);
+});
+
+test("reads statement coverage from a Clover report", () => {
+  const coverage = parseClover(readFileSync(new URL("./clover.fixture.xml", import.meta.url), "utf8"));
+  assert.deepEqual([...coverage.keys()], ["/var/www/html/app/Models/Post.php"]);
+  assert.deepEqual([...coverage.get("/var/www/html/app/Models/Post.php")!], [[16, 1], [21, 0], [22, 3]]);
+});
+
+test("groups uncovered lines into ranges, split by covered ones", () => {
+  const lines = new Map([[3, 0], [5, 0], [9, 0], [7, 2], [12, 1], [14, 0]]);
+  assert.deepEqual(uncoveredRanges(lines), [[3, 5], [9, 9], [14, 14]]);
+  assert.deepEqual(uncoveredRanges(new Map([[1, 1]])), []);
 });

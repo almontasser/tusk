@@ -30,6 +30,7 @@
         <button data-view="commit" title="Commit (⌘K)"><span class="codicon codicon-git-commit"></span></button>
         <button data-view="prs" title="Pull Requests"><span class="codicon codicon-git-pull-request"></span></button>
         <button data-view="search" title="Find in Files (⌘⇧F)"><span class="codicon codicon-search"></span></button>
+        <button data-view="todo" title="TODO"><span class="codicon codicon-checklist"></span></button>
         <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
         <button data-view="composer" title="Composer"><span class="codicon codicon-package"></span></button>
         <div class="spacer"></div>
@@ -95,6 +96,17 @@
           </div>
           <p id="find-summary"></p>
           <ul id="find-results"></ul>
+        </section>
+
+        <section id="view-todo" hidden>
+          <header class="view-header">
+            <span>TODO</span>
+            <div class="view-actions">
+              <button class="icon-button" id="todo-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+            </div>
+          </header>
+          <p id="todo-summary"></p>
+          <ul id="todo-results"></ul>
         </section>
 
         <section id="view-prs" hidden>

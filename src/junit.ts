@@ -1,4 +1,5 @@
-// Reads the JUnit XML report that PHPUnit and Pest write with --log-junit. Free of editor imports so Node can test it.
+// Reads the reports PHPUnit and Pest write: JUnit XML (--log-junit), the event stream, and Clover coverage
+// (--coverage-clover). Free of editor imports so Node can test it.
 
 export type TestResult = {
   name: string;
@@ -99,4 +100,36 @@ export function parseEvents(text: string): { total: number; tests: LiveTest[] } 
     if (!existing || existing.status === "running") tests.set(id, { className, name, status: status[event] });
   }
   return { total, tests: [...tests.values()] };
+}
+
+/** Line coverage by file: each executable line's hit count. */
+export type Coverage = Map<string, Map<number, number>>;
+
+/**
+ * Reads a Clover report's statement lines. Method lines are skipped: a method's declaration line
+ * counts as covered when any of its statements ran, which would hide an uncovered first statement.
+ */
+export function parseClover(xml: string): Coverage {
+  const coverage: Coverage = new Map();
+  for (const [, attrs, body] of xml.matchAll(/<file\b([^>]*)>([\s\S]*?)<\/file>/g)) {
+    const lines = new Map<number, number>();
+    for (const [line] of body.matchAll(/<line\b[^>]*>/g)) {
+      const a = attributes(line);
+      if (a.type === "stmt") lines.set(Number(a.num), Number(a.count));
+    }
+    if (lines.size) coverage.set(attributes(attrs).name, lines);
+  }
+  return coverage;
+}
+
+/** Runs of uncovered statement lines as [first, last], split wherever a covered statement lies between them. */
+export function uncoveredRanges(lines: Map<number, number>): [number, number][] {
+  const ranges: [number, number][] = [];
+  let open = false;
+  for (const [line, count] of [...lines].sort((a, b) => a[0] - b[0])) {
+    if (count) open = false;
+    else if (open) ranges[ranges.length - 1][1] = line;
+    else (ranges.push([line, line]), (open = true));
+  }
+  return ranges;
 }

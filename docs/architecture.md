@@ -864,6 +864,33 @@ anchor keep a failed `it works` from also running `it works fast`. The filter ne
 starts with `(`: PHP would read the parentheses as regex delimiters, and the
 match would become case-sensitive.
 
+### Code coverage
+
+A coverage run adds `--coverage-clover <app cache>/clover.xml` (in Sail,
+`storage/logs/editor-clover.xml`) and, outside Sail, runs the command through
+`/usr/bin/env XDEBUG_MODE=coverage`. PHPUnit picks PCOV when it's loaded, so
+the variable only matters with Xdebug. The report is deleted before the run,
+like the JUnit one. When the process exits, `loadCoverage` in
+`src/coverage.ts` reads it with `parseClover` from `src/junit.ts` and maps
+Sail's `/var/www/html` back to the project.
+
+Only `type="stmt"` lines count. Clover also lists each method's declaration
+line, which is covered whenever any statement in the method ran, so showing it
+would paint a green mark above an uncovered first statement.
+
+Marks are model decorations with `linesDecorationsClassName`, the same strip
+as the git change markers. Coverage takes the first 3 pixels and git markers
+start at 5, so both show on a changed line. Decorations stick to their lines
+as you edit, and models created later, such as a file opened after the run,
+get their marks in `onDidCreateModel`.
+
+The Coverage tab is a panel view (`showPanelView`) that reuses the Tests tab's
+toolbar styles and the Find view's file groups (`fileGroup` in `src/search.ts`,
+generic over its items). `uncoveredRanges` in `src/junit.ts` joins uncovered
+statement lines into runs, splitting a run only at a covered statement, since
+blank lines and comments aren't in the report. A file's text is read when its
+rows first show, so collapsed files cost nothing.
+
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
 
@@ -1406,6 +1433,122 @@ project.
 The Debug tab lives in the bottom panel: `showPanelView` in `terminal.ts` lets
 any element be a panel tab next to the terminals.
 
+## Profiler
+
+`src/profiler.ts` runs PHP with `XDEBUG_MODE=profile`, `XDEBUG_TRIGGER=1`, and
+`XDEBUG_CONFIG=output_dir=<app cache>/profiles
+profiler_output_name=cachegrind.out.%t.%p`. The environment reaches child
+processes, which matters because `php artisan test` runs PHPUnit in a new
+process. That writes two profiles, so after a run, the editor opens the
+largest one written since the run started. The profiling server runs PHP's
+built-in server with Laravel's `server.php`, as `artisan serve` does, instead
+of `artisan serve` itself, because `serve` passes only some variables to the
+server it starts and `XDEBUG_TRIGGER` isn't one of them. `server.php` finds
+`public` from the working directory, so the server runs there.
+
+The parser also sums each caller-to-callee pair's calls and time from the
+`calls=` lines, and inverts them for callers. That's one entry per pair of
+functions that called each other, not per call, so it stays small even for
+millions of calls. The side pane of the Profiler tab lists these pairs.
+
+The parser also sums the time of the calls made from each line (a `calls=`
+line's cost line gives the call site), by the caller's file. The editor shows
+these at the end of lines as injected text (`after` decorations). Their range
+is empty, so they need `showIfCollapsed: true`; without it, Monaco keeps the
+decoration but never draws it.
+
+Memory comes from the second event, `Memory_(bytes)`. Xdebug measures it as
+the growth in memory use over a call, so the own amounts don't add up to a
+caller's, and the table shows only the total, counted like total time.
+
+Profiles parse in a Web Worker (`src/cachegrind.worker.ts`), so a large one
+doesn't freeze the window. Structured cloning keeps the references between
+functions (callers and callees) when the result comes back.
+
+Profile URL starts the profiling server when this session hasn't, or when its
+port no longer answers, and requests the path with `curl`. Xdebug finishes a
+profile when PHP shuts the request down, just after the response is sent, so
+the editor waits until the newest profile stops growing before opening it.
+
+With text in the filter, the call tree turns into back traces: the matching
+functions are the roots, and a node's children are its function's callers.
+Walking down from the root instead, through every function that can reach a
+match, explodes in a Laravel app, where nearly everything passes through the
+same pipeline and container functions. A caller row in a back trace shows no
+time, because the pair's time is its own call to the row above, not time spent
+reaching the match.
+
+The totals above the table (Database, Autoloading, Views, HTTP calls, Redis)
+sum the total time of known functions: PHP's `PDO` and `PDOStatement` methods,
+Composer's `ClassLoader->loadClass`, Laravel's `View->render`, `curl_exec`, and
+`Redis` methods. They add up without counting anything twice, because PHP's own
+functions don't call each other and a function's total counts nested calls to
+itself once. Queries count calls to `PDOStatement->execute`, `PDO->exec`, and
+`PDO->query`.
+
+Comparing matches functions by name between two profiles. A function the other
+profile didn't run counts in full, and one that only the other profile ran
+doesn't show. The editor names its profiles (the request or test) in
+`localStorage` by path, since the files only carry the script Xdebug saw.
+
+The call tree and the flame graph use the real tree of calls, with calls along
+the same path merged: a node is a function under one path from the root. The
+parser builds it with the same post-order claiming: a finished block becomes a
+node and adopts its callees' nodes, merging those of the same function (and
+their subtrees). A Laravel request has 20,000 to 30,000 such nodes, and every
+node's children add up to no more than the node. When a profile opens, the tree
+opens along the busiest child while it takes at least a tenth of the run.
+
+The flame graph draws each node wider than a pixel as an absolutely positioned
+`div`, about 1,300 for a Laravel request, and redraws when the panel resizes.
+Zooming keeps the zoomed node's ancestors as full-width bars above it.
+
+Queries come from a second Xdebug mode, tracing, run with the profiler
+(`XDEBUG_MODE=profile,trace`). A trace of a whole request would be far larger
+than its profile, so a file PHP runs first (`auto_prepend_file`) calls
+`xdebug_set_filter` to keep only calls made from Laravel's
+`Illuminate/Database/Connection.php`: about 400 lines for a request. The
+settings live in an `.ini` file in the app cache, added through
+`PHP_INI_SCAN_DIR` so that processes a run starts (PHPUnit under
+`artisan test`) get them too. The variable replaces PHP's own scan folders, so
+the editor reads them from `php --ini` and keeps them in front.
+`XDEBUG_CONFIG` doesn't accept `trace_output_name`, so the trace's name is in
+the `.ini` file too: `trace.%t.%p.%R`, matching its profile.
+
+`parseSqlTrace` reads the tab-separated trace format: each `Connection->run`
+entry holds the SQL and bindings as its first two arguments, in Xdebug's PHP
+notation, and the exit record with the same call number gives its end time.
+`groupQueries` groups by SQL and flags duplicates (same bindings more than
+once) and repeats (three or more different bindings).
+
+`hotSpots` sums own time (a node's time less its children's) per function over
+a node's subtree, for the zoomed flame graph.
+
+Profile names use Xdebug's `%R`, the request URI, which is empty on the command
+line. The editor turns its underscores back into slashes to name a browser
+request.
+
+After a profiling run, the editor keeps the newest 50 profiles in its folder and
+deletes older ones, since a Laravel request's profile can be several megabytes.
+The profiling server checks ports from 8000 with `lsof` and takes the first
+free one.
+
+Xdebug gzips profiles by default. macOS's `/usr/bin/gzip -dc` decompresses them
+through `run_capture`, so no Rust crate was added. `stat -f "%m %z %N"` lists
+profiles with their time and size.
+
+`parseCachegrind` in `src/cachegrind.ts` reads the format line by line. Xdebug
+writes one block per call, after the call returns, so blocks come in post-order:
+a block's callees are the last blocks no caller has claimed yet, one per
+`calls=` line. Each block
+carries a map from function to the time of that function's outermost calls in
+its subtree. A caller merges its callees' maps (into the largest one) and sets
+its own entry, which replaces any nested calls to itself. The roots' maps give
+each function's total time with recursion counted once, direct or through other
+functions, such as Laravel's middleware pipeline. On a real Laravel request,
+every function's own time adds up to exactly the total, and a 700,000-line
+profile parses in about 100 ms.
+
 ## Database
 
 `src-tauri/src/db.rs` has one command, `db_query`, which runs one statement and
@@ -1449,6 +1592,31 @@ show the result.
 `statementAt` finds the statement around the caret by splitting on semicolons,
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.
+
+## Bookmarks, snippets, and other small tools
+
+- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: lines per file,
+  saved in `localStorage` under `bookmarks:<project>`, and drawn as decorations
+  on open models so they follow edits. They sit in the glyph margin's left lane,
+  so a line can show a bookmark and a breakpoint together. Line changes from
+  edits are saved on each change.
+- **Snippets** (`src/snippets.ts`) come from `snippets.json` in the app's
+  config folder, in VS Code's format. One completion provider for every
+  language (`"*"`) filters them by `scope`. While the file is open in a tab, the
+  provider reads the tab's text, so changes apply without a save or reload.
+- **TODO** (`loadTodos` in `src/search.ts`) is a sidebar view that reuses
+  `search_text` with a case-sensitive regex, so it respects `.gitignore` and
+  the 20,000-match limit. It shares the Find view's file groups
+  (`fileGroup`), and reloads after file changes while it shows.
+- **Routes** (`showRoutes` in `src/runner.ts`) parse `artisan route:list
+  --json`. `routeTarget` in `src/phptypes.ts` reads the action; the class is
+  found through composer.json's PSR-4 folders first (fast, and works before
+  indexing ends), then through Phpactor's workspace symbols for `vendor`
+  classes.
+- **Tinker** is a terminal tab running `artisan tinker`, in Sail when it's up.
+- **Compare with Clipboard** reads the clipboard with `pbpaste` through
+  `run_capture`, because WebKit asks for permission on
+  `navigator.clipboard.readText`. Both comparisons use the git diff view.
 
 ## Interface
 
@@ -1708,3 +1876,37 @@ A dictionary checker such as Hunspell flags every identifier, abbreviation,
 and package name in code unless it has large custom word lists. `typos` looks
 only for known misspellings, which fits code with few false positives. The
 cost is that a rare misspelling that isn't on its list goes unnoticed.
+
+### 2026-09-25: Small tools in the palette, except TODO
+
+Bookmarks and routes list in the palette instead of sidebar views. The palette
+already filters, ranks, and opens results, so each tool is a few lines, and
+you usually glance at these lists and leave. TODO comments get a sidebar view,
+because you work through them one by one and want the list to stay open.
+
+### 2026-09-25: Clover for coverage, regex-parsed
+
+PHPUnit and Pest write Clover, Cobertura, PHP, HTML, and text coverage. Clover
+is flat (a file, then its lines with hit counts), so the same regex approach
+as the JUnit report reads it without an XML parser. The PHP format would need
+PHP to read it back, and HTML and text are for people.
+
+### 2026-09-25: A function table first, then the merged call tree
+
+PhpStorm's profiler shows execution statistics (a function table) and a call
+tree. The table answers the common question, "where does the time go?", in one
+sortable list, so it came first. Keeping every call would cost memory for
+millions of calls, but merging calls along the same path keeps the tree at tens
+of thousands of nodes for a Laravel request, which is small enough to keep for
+the call tree and the flame graph.
+
+### 2026-09-25: Trace queries with Xdebug, not with the app
+
+Listing a request's queries needs their SQL, which a profile doesn't have. A
+listener in the app (`DB::listen`) would need a change to the project, or code
+run before Laravel exists, which can't register one. Xdebug's tracing needs
+neither: filtered to Laravel's connection class, it records each query's SQL,
+bindings, and time from outside the app, for web requests and tests alike. The
+cost is an `auto_prepend_file` during profiled runs, which replaces the
+project's own for those runs.
+

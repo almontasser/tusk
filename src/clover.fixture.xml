@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1758758400">
+  <project timestamp="1758758400">
+    <package name="App\Models">
+      <file name="/var/www/html/app/Models/Post.php">
+        <class name="App\Models\Post" namespace="App\Models">
+          <metrics complexity="2" methods="2" coveredmethods="1" statements="3" coveredstatements="2" elements="5" coveredelements="3"/>
+        </class>
+        <line num="14" type="method" name="author" visibility="public" complexity="1" crap="1" count="1"/>
+        <line num="16" type="stmt" count="1"/>
+        <line num="19" type="method" name="publish" visibility="public" complexity="1" crap="2" count="0"/>
+        <line num="21" type="stmt" count="0"/>
+        <line num="22" type="stmt" count="3"/>
+        <metrics loc="24" ncloc="24" classes="1" methods="2" coveredmethods="1" statements="3" coveredstatements="2" elements="5" coveredelements="3"/>
+      </file>
+    </package>
+    <file name="/var/www/html/app/Empty.php">
+      <metrics loc="3" ncloc="3" classes="0" methods="0" coveredmethods="0" statements="0" coveredstatements="0" elements="0" coveredelements="0"/>
+    </file>
+    <metrics files="2" loc="27" ncloc="27" classes="1" methods="2" coveredmethods="1" statements="3" coveredstatements="2" elements="5" coveredelements="3"/>
+  </project>
+</coverage>

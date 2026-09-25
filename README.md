@@ -32,6 +32,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | While tests run, the tree finds a test's file from its class name, which assumes Laravel's `tests/` layout; failure messages show once the run ends. Projects on PHPUnit 9 or earlier see results only at the end. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
+| TODO comments | The view finds `TODO`, `FIXME`, and `XXX` anywhere in a file, including strings, not only in comments. Results stop at 20,000. |
 | Test detection | `src/phptests.ts` reads tests with regexes, so a test inside a `/* */` comment still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
 | Formatting | Without Prettier, only PHP files format. |
@@ -56,6 +57,11 @@ file to change when you add it.
 | Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use; in JavaScript, TypeScript, and Vue files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
+| Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
+| Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
+| Deployment | There's no remote deployment or sync over SFTP or FTP. |
+| Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
 | Updates | There's no auto-update. Each new version is a new DMG to install. |
 
@@ -163,6 +169,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
 | ⌘F12 | File structure |
+| F3 | Toggle a bookmark on the current line |
+| ⌘F3 | Show bookmarks |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
 | ⌃⇧B | Go to type declaration |
@@ -290,6 +298,54 @@ becomes the query.
   `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
+
+### TODO comments
+
+Click the checklist icon in the tool window bar, or run **TODO** from ⌘⇧A, to
+open the **TODO** view. It lists every `TODO`, `FIXME`, and `XXX` in the
+project's files, grouped by file. Click one to open it. The list updates when
+files change, and the refresh button reloads it. Files that `.gitignore`
+excludes, such as `vendor`, aren't searched.
+
+## Bookmarks
+
+Press F3 to bookmark the current line, and F3 again to remove the bookmark. A
+bookmark shows as a blue marker in the gutter and moves with its line as you
+edit. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved per
+project.
+
+## Snippets
+
+Snippets work like PhpStorm's live templates: type a snippet's prefix, choose
+it from the completion list, and press Tab to move between its placeholders.
+
+Run **Edit Snippets (Live Templates)** from ⌘⇧A to open `snippets.json`. The
+first time, the file is created with two examples. It uses VS Code's snippet
+format, so you can paste snippets from VS Code:
+
+```json
+{
+  "Laravel route": {
+    "scope": "php",
+    "prefix": "rget",
+    "body": ["Route::get('/${1:path}', [${2:Controller}::class, '${3:index}']);"],
+    "description": "A GET route to a controller method"
+  }
+}
+```
+
+`scope` lists language IDs, such as `php,blade`. Leave it out to offer the
+snippet in every file. Changes apply as you type in the file.
+
+## Compare files
+
+With a file open, run one of these from ⌘⇧A to open the diff view:
+
+- **Compare with Clipboard** compares the file with the clipboard's text.
+- **Compare with File…** compares it with another project file that you
+  choose.
+
+The diff shows the editor's text, including unsaved changes.
 
 ## Safe delete
 
@@ -482,6 +538,15 @@ config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
 
+- **Routes**, from ⌘⇧A, lists the app's routes from `php artisan route:list`.
+  Search by method, path, route name, or controller, and choose a route to
+  open its controller method. Routes to classes in `vendor`, such as Filament
+  pages, open once Phpactor has indexed them. If `route:list` fails, it runs in
+  a terminal tab so you can see the error.
+- **Laravel Tinker**, from ⌘⇧A, opens `php artisan tinker` in a terminal tab.
+
+When Sail's containers are running, both commands run in the container.
+
 ### Blade
 
 Blade files highlight their HTML, the PHP inside `{{ }}`, `{!! !!}`,
@@ -575,6 +640,26 @@ files. Classes with failures start expanded.
   them.
 
 The terminal tab keeps the runner's full output.
+
+### Code coverage
+
+Run **Run All Tests with Coverage** or **Run Test at Cursor with Coverage**
+from ⌘⇧A. When the run ends, the status bar shows the share of lines covered,
+and the gutter marks each executable line: green if it ran, red if it didn't.
+Hover over a mark to see how many times the line ran. Marks follow their lines
+as you edit and stay until the next coverage run, or until you run **Hide
+Coverage**. ⌃R reruns with coverage too.
+
+The **Coverage** tab in the bottom panel lists every file with uncovered lines,
+least covered first, with each file's percentage. Under each file, a row shows
+a run of uncovered lines, such as `15–17`, and the code on its first line.
+Click a row to open it there. The tab's buttons rerun with coverage and hide
+coverage.
+
+Coverage needs PCOV or Xdebug for PHP. PHPUnit uses PCOV when it's loaded, and
+the editor sets `XDEBUG_MODE=coverage` for Xdebug. Only the folders in
+`phpunit.xml`'s `<source>` are measured. In Sail, the container's PHP must have
+one of them, as Sail's images do when `SAIL_XDEBUG_MODE` includes `coverage`.
 
 In Pest files, `$this` in a test is the project's test case, which Phpactor and
 Mago can't see, so the editor hides their problems about `$this` on those
@@ -784,6 +869,104 @@ Xdebug in the container must connect back to your Mac. With Sail, set
 `SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail
 already points Xdebug at `host.docker.internal`.
 
+## Profiling
+
+The editor runs Xdebug's profiler and shows the result in the **Profiler** tab
+of the bottom panel. Run these from ⌘⇧A:
+
+- **Profile Test at Cursor**, or the **Profile** link above a test, runs the
+  test with the profiler and opens its profile when the run ends.
+- **Profile URL…** asks for a path, such as `/posts?page=2`, requests it
+  through the profiling server (starting the server if needed), and opens that
+  request's profile. The status bar shows the response code and time.
+- While the profiling server runs, pages you open in a browser, where you can
+  sign in, are profiled too. They're listed in **Open Xdebug Profile…** by
+  their URL.
+- **Start Profiling Server (PHP's server with the Xdebug profiler)** serves the
+  app at `http://127.0.0.1:8000`, as `php artisan serve` does, or on the next
+  free port if 8000 is taken. Each request writes a profile.
+- **Open Xdebug Profile…** lists profiles from the editor's runs and from
+  Xdebug's own `xdebug.output_dir`, newest first. The editor's profiles are
+  named by what they profiled, such as `GET /admin/login (200)` or a test.
+  **Choose File…** opens any other `cachegrind.out` file, compressed or not.
+
+The Profiler tab lists every function with its calls, its own time, its total
+time (which includes the functions it called), and its memory. Both times also
+show as a share of the whole run, and a line under the own time shows that
+share at a glance. Recursive functions count their nested calls once. Memory is
+how much memory in use grew over the function's calls, as Xdebug measures it:
+memory freed before a call returns doesn't count.
+
+Click **Call tree** to see each function under the function that called it,
+with its calls and time on that path. The tree opens along the busiest path,
+and → and ← open and close a node.
+
+Click **Flame graph** to see the same tree as bars: each function's bar sits
+under its caller's and is as wide as its time there, busiest first. Blue bars
+are your code, yellow are `vendor`, and gray are PHP's own functions. Hover
+over a bar for its time and calls, click it to zoom in (the bars above it stay,
+and clicking one zooms back out), press Escape to zoom out one level, and
+double-click to open the function. Type in the filter to highlight matching
+functions. When you zoom in, the side pane lists the functions with the most
+own time inside the zoomed bar: where that part of the run is slow.
+
+In a Laravel app, profiled runs also record the database queries. Click
+**Queries**, or the **Database** total, to list them: queries with the same SQL
+are grouped, slowest first, and a group opens to each run with its bindings
+and time. Two flags point at common problems:
+
+- **Duplicate**: the same SQL with the same bindings ran more than once, so
+  its result could be reused.
+- **Repeated**: the same SQL ran three or more times with different bindings,
+  often once per item in a loop (an N+1 query), which eager loading such as
+  `with('author')` can replace with one query.
+
+Select a query to see its full SQL, copy it with its bindings in place for a
+database console, or jump to the code that ran queries.
+
+Type in the filter while the call tree shows to find a function's back trace:
+the matching functions are listed first, each opening to the functions that
+called it, and the busiest chain of callers of the first match opens at once.
+
+With **Times in editor** on, open files show how long the calls on each line
+took, at the end of the line, such as `199 ms · 74.6%`. A function's
+declaration shows its total time and how often it ran, such as
+`⏱ 334 ms · 89.1% · 1 call`. Lines over 10% of the
+run are orange, and over 1% yellow. Hover over a time to see how many calls it
+covers. Lines under a thousandth of the run are left out.
+
+- Above the table, totals show where the time went: **Database** (queries and
+  their time), **Autoloading** (classes loaded), **Views** (views rendered),
+  and **HTTP calls** and **Redis** when the run used them. Click one to select
+  its function and see what called it, such as the code that ran each query.
+- Click a column header to sort by it, and type in the filter to find
+  functions.
+- Select **Project code only** to hide `vendor` packages and PHP's own
+  functions. The choice is remembered.
+- Click a function to see, beside the table, the functions that called it and
+  the functions it called, each with the number of calls and their time. Click
+  one there to move to it.
+- Double-click a function, or press ⏎, to open it. ↑ and ↓ move through the
+  list.
+- To see what a change did, click the compare button and choose the profile
+  from before it. The table shows each function's change in own and total
+  time, slowest first, in red when slower and green when faster, and the row
+  above it shows the change in the whole run. Click **Stop comparing** to go
+  back.
+- The folder button opens another profile, and the reveal button shows the
+  profile's file in Finder. Drag the side pane's edge to resize it.
+
+Profiling needs Xdebug. The editor sets `XDEBUG_MODE=profile` and
+`XDEBUG_TRIGGER`, so it works whether your `php.ini` starts Xdebug always or on
+a trigger. Profiles from the editor go to the app's cache folder, which keeps
+the newest 50. Profiling doesn't run in Sail's containers.
+
+To record queries, the editor also turns on Xdebug's tracing, limited to
+Laravel's database connection, through a small PHP file that runs before the
+app. It's added with PHP's `PHP_INI_SCAN_DIR`, keeping PHP's own settings
+folders, and takes the place of any `auto_prepend_file` your settings have
+during profiled runs.
+
 ## Database
 
 The **Database** tool window (the cylinder icon) connects to the database in
@@ -864,14 +1047,19 @@ committed.
 | `src/rebase.ts` | Interactive rebase |
 | `src/gitparse.ts` | Parsers for git output, line diffs, partial staging, merge alignment, and rebase todo lists |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
-| `src/runner.ts` | Test runner, run links, and Run Anything |
+| `src/runner.ts` | Test runner, run links, Run Anything, routes, and Tinker |
 | `src/testresults.ts` | The Tests tab: live progress and the results tree |
-| `src/junit.ts` | Reads JUnit reports and PHPUnit's event stream, and builds rerun filters |
+| `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, and Clover coverage reports, and builds rerun filters |
+| `src/coverage.ts` | Code coverage marks in the gutter and the Coverage tab |
+| `src/profiler.ts` | Profiling runs, the profile list, and the Profiler tab |
+| `src/cachegrind.ts` | Reads Xdebug's Cachegrind profiles |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/sail.ts` | Detects Laravel Sail and whether its containers are running |
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
-| `src/search.ts` | The Find view: find and replace in files |
+| `src/search.ts` | The Find view: find and replace in files, and TODO comments |
+| `src/bookmarks.ts` | Bookmarks |
+| `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
 | `src/localhistory.ts` | Local history of saved, changed, and deleted files |
 | `src/retention.ts` | Which local history versions to delete |
@@ -888,7 +1076,7 @@ committed.
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
 | `src/refactorparse.ts` | Argument, parameter, and assignment parsing for the refactorings |
-| `src/phptypes.ts` | Reads PHP declarations, and Laravel's names for methods and components |
+| `src/phptypes.ts` | Reads PHP declarations, Laravel's names for methods and components, and route actions |
 | `src/icons.ts` | File and folder icons |
 | `src/themes.ts` | Monaco color themes |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
