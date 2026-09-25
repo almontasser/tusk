@@ -8,6 +8,7 @@
     "@tailwindcss/language-server": "0.16.0",
     "@vtsls/language-server": "0.3.0",
     "@vue/language-server": "3.3.11",
+    "blade-formatter": "1.44.4",
     "prettier": "3.9.9",
     "prettier-plugin-astro": "1.1.0",
     "prettier-plugin-svelte": "3.5.2",

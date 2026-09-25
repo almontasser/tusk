@@ -847,6 +847,27 @@ sign `[@]` before `php` and `endphp`. Tag names allow `-`, `.`, and `:` for
 components, except `script` and `style`, which keep the PHP grammar's
 embedded JavaScript and CSS.
 
+Inside `<script>` and `<style>`, JavaScript or CSS is an embedded language
+(`scriptEmbedded.<language>`), and while a language is embedded, Monarch only
+tries the rules that leave it (`nextEmbedded: "@pop"`). So each Blade construct
+leaves: `{{`, `{!!`, and `{{--` switch to `bladeEchoIn`, `bladeCommentIn`, or
+`bladePhpIn` with the state to return to in the name
+(`bladeEchoIn.scriptEmbedded.text/javascript`), the way the PHP grammar
+handles `<?php … ?>` there, and the closing token switches back with
+`nextEmbedded: "$S3"`. A directive can't be read while leaving, so a known
+directive name leaves with `@rematch` to `bladeDirectiveIn`, which reads it and
+goes on to `bladeArgsIn` for its parentheses, or straight back. Scripts get a
+list of Blade's directives, so `@` elsewhere in JavaScript stays JavaScript,
+and styles get echoes and comments only, since CSS has `@media` and Tailwind's
+`@apply`.
+
+Blade formatting runs the bundled `blade-formatter` (`--stdin`) after the
+project's Prettier, if it has one, reports that it can't parse the file. The
+Prettier plugin for Blade (`@shufo/prettier-plugin-blade`) wraps the same
+formatter but pins its own Prettier, so the formatter itself is bundled. It
+brings about 70 MB of dependencies to the Node tools, mostly Tailwind 3 for
+sorting classes, a PHP parser, and Linguist's language data.
+
 Laravel LSP answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
 class-based component, from `componentClassPath` in `src/phptypes.ts`.

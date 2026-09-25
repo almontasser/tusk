@@ -1,11 +1,12 @@
 // Formatting with the project's own tools: Prettier, then Laravel Pint for PHP, then the bundled Mago. Projects
 // without Prettier get the bundled one, with the Svelte and Astro plugins, for everything but PHP and Blade.
+// Blade that the project's Prettier can't format goes to the bundled blade-formatter.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 
 type Host = { root(): string; status(text: string): void };
 /** `plugins` are passed to Prettier with `--plugin`: the bundled Prettier's, which the project doesn't configure. */
-type Tools = { prettier?: string; bundled: boolean; plugins: string[]; pint: boolean };
+type Tools = { prettier?: string; bundled: boolean; plugins: string[]; pint: boolean; blade?: string };
 
 let host: Host;
 let tools: Tools = { bundled: false, plugins: [], pint: false };
@@ -32,11 +33,10 @@ export async function detectFormatters() {
   const [prettier3, prettier2, pint] = await Promise.all([...candidates, "vendor/bin/pint"].map(exists));
   // The later candidate won when both existed.
   const found = prettier2 ? candidates[1] : prettier3 ? candidates[0] : undefined;
-  if (found) tools = { prettier: `${host.root()}/${found}`, bundled: false, plugins: [], pint };
-  else {
-    const modules = `${await invoke<string>("tool_path", { name: "node" })}/node_modules`;
-    tools = { prettier: `${modules}/prettier/bin/prettier.cjs`, bundled: true, plugins: [`${modules}/prettier-plugin-svelte/plugin.js`, `${modules}/prettier-plugin-astro/dist/index.js`], pint };
-  }
+  const modules = `${await invoke<string>("tool_path", { name: "node" })}/node_modules`;
+  const blade = `${modules}/blade-formatter/bin/blade-formatter.cjs`;
+  if (found) tools = { prettier: `${host.root()}/${found}`, bundled: false, plugins: [], pint, blade };
+  else tools = { prettier: `${modules}/prettier/bin/prettier.cjs`, bundled: true, plugins: [`${modules}/prettier-plugin-svelte/plugin.js`, `${modules}/prettier-plugin-astro/dist/index.js`], pint, blade };
 }
 
 /**
@@ -55,6 +55,8 @@ async function format(path: string, text: string, language: string): Promise<str
       if (!/No parser could be inferred/i.test(String(e))) throw e;
     }
   }
+  // It reads the project's .bladeformatterrc, and indents with 4 spaces without one, as Laravel's views do.
+  if (language === "blade" && tools.blade) return run("node", [tools.blade, "--stdin"], text);
   if (language !== "php") return null;
   if (tools.pint) return run("php", ["vendor/bin/pint", "-", `--stdin-filename=${rel}`], text);
   const mago = await invoke<string>("tool_path", { name: "mago" });

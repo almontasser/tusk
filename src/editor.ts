@@ -60,6 +60,23 @@ monaco.languages.onLanguage("blade", async () => {
   ];
   // <x-card.header>, <livewire:counter>. <script> and <style> keep the PHP grammar's JS and CSS states.
   const tagName = /(<\/?)((?!script\b|style\b)[\w\-:.]+)/;
+  // Inside <script> and <style>, JavaScript or CSS is an embedded language. Blade there leaves it and comes back
+  // after, as the PHP grammar does for <?php … ?>: state `blade…In.<state>.<language>` returns to `<state>.<language>`.
+  const back = (token: string) => ({ token, switchTo: "@$S2.$S3", nextEmbedded: "$S3" });
+  const leave = (token: string, to: string, state: string) => ({ token, switchTo: `@${to}.${state}.$S2`, nextEmbedded: "@pop" });
+  const directive = /[@](?:json|js|if|elseif|else|endif|unless|endunless|isset|endisset|foreach|endforeach|for|endfor|forelse|empty|endforelse|while|endwhile|switch|case|break|default|endswitch|include|vite|can|endcan|cannot|endcannot|env|endenv|push|endpush|stack|section|endsection|yield|auth|endauth|guest|endguest|csrf|once|endonce|production|endproduction)\b/;
+  const embedded = (state: string, directives: boolean): Rule[] => [
+    [/\{\{--/, leave("comment.blade", "bladeCommentIn", state)],
+    [/\{\{|\{!!/, leave("delimiter.blade", "bladeEchoIn", state)],
+    // Only in scripts: CSS has at-rules of its own, such as @media and Tailwind's @apply. Monarch only looks at
+    // rules that leave the embedded language, so a directive leaves first and is read in bladeDirectiveIn.
+    ...(directives
+      ? ([
+          [/[@]php\b(?!\s*\()/, leave("keyword.blade", "bladePhpIn", state)],
+          [directive, { token: "@rematch", switchTo: `@bladeDirectiveIn.${state}.$S2`, nextEmbedded: "@pop" }],
+        ] as Rule[])
+      : []),
+  ];
   monaco.languages.setLanguageConfiguration("blade", php.conf);
   monaco.languages.setMonarchTokensProvider("blade", {
     ...php.language,
@@ -93,6 +110,16 @@ monaco.languages.onLanguage("blade", async () => {
       ],
       bladePhp: [[/[@]endphp\b/, "keyword.blade", "@pop"], { include: "phpRoot" }],
       bladeComment: [[/--\}\}/, "comment.blade", "@pop"], [/./, "comment.blade"]],
+      scriptEmbedded: [...embedded("scriptEmbedded", true), ...t.scriptEmbedded],
+      styleEmbedded: [...embedded("styleEmbedded", false), ...t.styleEmbedded],
+      bladeEchoIn: [[/\}\}|!!\}/, back("delimiter.blade")], { include: "phpRoot" }],
+      bladeCommentIn: [[/--\}\}/, back("comment.blade")], [/./, "comment.blade"]],
+      bladePhpIn: [[/[@]endphp\b/, back("keyword.blade")], { include: "phpRoot" }],
+      bladeDirectiveIn: [
+        [/([@]\w+)(\s*)(\()/, ["keyword.blade", "", { token: "delimiter.parenthesis.php", switchTo: "@bladeArgsIn.$S2.$S3" }]],
+        [/[@]\w+/, back("keyword.blade")],
+      ],
+      bladeArgsIn: [[/\(/, "delimiter.parenthesis.php", "@bladeArgs"], [/\)/, back("delimiter.parenthesis.php")], { include: "phpRoot" }],
     },
   });
 });

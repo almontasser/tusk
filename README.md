@@ -39,8 +39,7 @@ file to change when you add it.
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
 | TODO comments | A comment is recognized from its own line, so a keyword on a line inside a `/* */` comment that doesn't start with `*` is missed. The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
-| Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Blade inside `<script>` blocks isn't highlighted as PHP. |
-| Formatting | Blade formats only with a Blade plugin in the project's own Prettier. |
+| Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
@@ -589,9 +588,16 @@ Blade files highlight their HTML, the PHP inside `{{ }}`, `{!! !!}`,
 directive arguments such as `@if (…)` and `@class([…])`, and `@php` blocks,
 also inside tags and attribute values. Component tags such as
 `<x-card.header>` and bound attributes such as `:title="$post->title"` are
-recognized. Laravel LSP completes component names after `<x-`. ⌘B on a
-component tag opens its view, and for a class-based component also its class
-in `app/View/Components`.
+recognized. Inside `<script>`, echoes, comments, `@json(…)` and other
+directives, and `@php` blocks highlight as Blade and PHP, with the JavaScript
+around them intact; inside `<style>`, echoes and comments do. Laravel LSP
+completes component names after `<x-`. ⌘B on a component tag opens its view,
+and for a class-based component also its class in `app/View/Components`.
+
+Blade files format (⌥⌘L) with the bundled `blade-formatter`, which indents
+Blade, HTML, and scripts, and reads your project's `.bladeformatterrc` when it
+has one. When your project's own Prettier has a Blade plugin, that runs
+instead.
 
 ## Filament features
 
