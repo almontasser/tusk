@@ -102,7 +102,7 @@ const magicNoise = (d: L.Diagnostic) => /^mago/.test(d.source ?? "") && /^(non-d
 const isRequest = (className: string) => /^\\?(Illuminate\\Http\\Request|App\\Http\\Requests\\.+)$/.test(className);
 
 /**
- * Drops Mago's "ambiguous property access" and "ambiguous method call" where Laravel really answers them: a model's
+ * Drops Mago's "ambiguous property access" and "ambiguous method call", and Phpactor's "does not exist", where Laravel really answers them: a model's
  * column, relationship, or accessor, a local scope or query builder method it forwards (`create`, `where`), or a
  * request's input. `withoutMagic` then drops the `mixed-*` issues that follow from them. Anything Laravel doesn't
  * have keeps its hint.
@@ -112,10 +112,17 @@ function withoutEloquentMagic(model: monaco.editor.ITextModel, list: L.Diagnosti
   // A facade's methods return `mixed` in its docblock, such as DB::transaction(), so its calls are magic too.
   const facadeCalls = [...text.matchAll(/\b([A-Z]\w*)::\w+\s*\(/g)].filter((m) => isFacade(m[1], text)).map((m) => m.index!);
   return withoutMagic(text, list, facadeCalls, (d) => {
-    if (!/^mago/.test(d.source ?? "")) return false;
     const message = typeof d.message === "string" ? d.message : d.message.value;
-    const property = d.code === "non-documented-property" && message.match(/\$(\w+) on class `([^`]+)`/);
-    const method = d.code === "non-documented-method" && message.match(/call to `(\w+)` on class `([^`]+)`/);
+    let property: RegExpMatchArray | null | false = false;
+    let method: RegExpMatchArray | null | false = false;
+    if (/^mago/.test(d.source ?? "")) {
+      property = d.code === "non-documented-property" && message.match(/\$(\w+) on class `([^`]+)`/);
+      method = d.code === "non-documented-method" && message.match(/call to `(\w+)` on class `([^`]+)`/);
+    } else if (d.code === "worse.missing_member") {
+      // Phpactor: Method "create" does not exist on class "App\Models\Message", and the same for properties.
+      property = message.match(/^Property "(\w+)" does not exist on class "([^"]+)"/);
+      method = message.match(/^Method "(\w+)" does not exist on class "([^"]+)"/);
+    }
     return !!((property && (isRequest(property[2]) || isModelProperty(property[2], property[1]))) || (method && isModelMethod(method[2], method[1])));
   });
 }

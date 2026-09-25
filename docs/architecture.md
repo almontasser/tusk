@@ -274,7 +274,9 @@ Mago's `non-documented-property` when the class is a model that has the
 property, or a request (`Illuminate\Http\Request`, or a class in
 `App\Http\Requests`, whose input reads as properties), and
 `non-documented-method` when the model has the scope or the builder has the
-method. `withoutMagic` in `src/magic.ts` then drops the `mixed-*` issues that
+method. Phpactor's `worse.missing_member` (`Method "create" does not exist on
+class "App\Models\Message"`, or `Property "…"`) goes through the same checks,
+since it doesn't know about Eloquent's forwarding either. `withoutMagic` in `src/magic.ts` then drops the `mixed-*` issues that
 follow: those in the same statement, from after the previous `;`, `{`, or `}`
 to the next `;`, and those in later statements that use a variable such a
 statement assigned, down the chain, until the next named function. Each
