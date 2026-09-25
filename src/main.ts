@@ -1040,7 +1040,8 @@ const recentFiles = () => pick("Recent files", (q) => rank(q, recent.filter((p) 
 // ---- Actions and keyboard shortcuts ----
 
 /** Keys use `Ctrl`, `Alt`, `Shift`, and `Meta` joined with `+`, then the key from `KeyboardEvent.code`. */
-type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean };
+/** A shortcut whose `when` returns false passes the key on, so Monaco's own binding runs. */
+type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean; when?: () => boolean };
 
 /** An action that runs a Monaco command. Its shortcut works only while the editor has focus. */
 const editorAction = (label: string, keys: string, id: string): Action => ({
@@ -1068,6 +1069,10 @@ const actions: Action[] = [
   { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
+  editorAction("Next Problem", "F2", "editor.action.marker.next"),
+  editorAction("Previous Problem", "Shift+F2", "editor.action.marker.prev"),
+  editorAction("Next Problem in Files", "", "editor.action.marker.nextInFiles"),
+  editorAction("Previous Problem in Files", "", "editor.action.marker.prevInFiles"),
   editorAction("Show Context Actions", "Alt+Enter", "editor.action.quickFix"),
   editorAction("Parameter Info", "Meta+P", "editor.action.triggerParameterHints"),
   editorAction("Quick Documentation", "F1", "editor.action.showHover"),
@@ -1148,10 +1153,10 @@ const actions: Action[] = [
   { label: "Set Server Paths for Debugging…", run: () => root && setServerRoot() },
   { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },
   { label: "Stop Debugging", keys: "Meta+F2", run: stopDebugging },
-  { label: "Resume Program", keys: "F9", run: () => isPaused() && resume() },
-  { label: "Step Over", keys: "F8", run: () => isPaused() && stepOver() },
-  { label: "Step Into", keys: "F7", run: () => isPaused() && stepInto() },
-  { label: "Step Out", keys: "Shift+F8", run: () => isPaused() && stepOut() },
+  { label: "Resume Program", keys: "F9", run: () => isPaused() && resume(), when: isPaused },
+  { label: "Step Over", keys: "F8", run: () => isPaused() && stepOver(), when: isPaused },
+  { label: "Step Into", keys: "F7", run: () => isPaused() && stepInto(), when: isPaused },
+  { label: "Step Out", keys: "Shift+F8", run: () => isPaused() && stepOut(), when: isPaused },
   { label: "Debug Panel", run: showDebugPanel },
   {
     label: "Start Debug Server (php artisan serve with Xdebug)",
@@ -1300,7 +1305,7 @@ window.addEventListener(
     if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
     const combo = comboOf(e);
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
-    if (!action || (action.editorOnly && !editor.hasTextFocus())) return;
+    if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
     const inTerminal = document.activeElement?.closest("#terminals");
     if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;

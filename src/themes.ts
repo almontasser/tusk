@@ -55,6 +55,12 @@ function defineBuiltIns() {
       "peekViewTitle.background": "#2b2d30",
       "diffEditor.insertedTextBackground": "#54915933",
       "diffEditor.removedTextBackground": "#e06c7533",
+      // Squiggles and the next-problem widget use --red, --yellow, and --blue from styles.css.
+      "editorError.foreground": "#e06c75",
+      "editorWarning.foreground": "#e5c07b",
+      "editorInfo.foreground": "#6aa7f8",
+      "editorHint.foreground": "#6f737a",
+      "editorMarkerNavigation.background": "#2b2d30",
     },
   });
   monaco.editor.defineTheme("editor-light", {
@@ -86,6 +92,11 @@ function defineBuiltIns() {
       "scrollbarSlider.background": "#a0a3ad55",
       "scrollbarSlider.hoverBackground": "#a0a3ad88",
       "editorOverviewRuler.border": "#00000000",
+      "editorError.foreground": "#c94f4f",
+      "editorWarning.foreground": "#a8781f",
+      "editorInfo.foreground": "#3574f0",
+      "editorHint.foreground": "#818594",
+      "editorMarkerNavigation.background": "#f7f8fa",
     },
   });
 }

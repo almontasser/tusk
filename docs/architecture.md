@@ -512,6 +512,18 @@ handles: a page in the editor area, like the diff view, with the message
 four lines around the problem with its range underlined (a `problem` scheme
 keeps it from the language servers), and Go to Code. Opening a file closes it.
 
+### Next and previous problem
+
+F2 and ⇧F2 run Monaco's `editor.action.marker.next` and `marker.prev`, which
+show the marker in Monaco's go-to-error zone widget. **Next Problem in Files**
+runs `marker.nextInFiles`, which opens other files through the editor opener.
+Monaco binds F8 and ⇧F8 to the in-files pair; the stepping actions have a
+`when: isPaused`, so the keyboard handler lets those keys through to Monaco
+while the debugger is idle. The built-in themes set `editorError.foreground`,
+`editorWarning.foreground`, `editorInfo.foreground`, and
+`editorHint.foreground` to the interface's colors, and Monaco derives the
+widget's colors from them.
+
 ### Checking open files one at a time
 
 Phpactor's diagnostics engine (`DiagnosticsEngine` in its language server
@@ -1277,8 +1289,10 @@ Everywhere** all read this list, so a new action needs one line.
 The handler listens in the capture phase and stops matched events, so these
 shortcuts win over Monaco's defaults (for example, ⌘⇧O is **Go to File**, not
 Monaco's quick outline). Editor actions, such as ⌘D, run only while the editor
-has focus, so they don't fire while you type in the palette. Double Shift is
-two Shift presses within 350 ms with no other key between them.
+has focus, so they don't fire while you type in the palette. An action with a
+`when` function claims its shortcut only while `when` returns true; otherwise
+the key reaches Monaco. Double Shift is two Shift presses within 350 ms with no
+other key between them.
 
 ### Terminal
 
@@ -2765,6 +2779,17 @@ changed. Go to file took about 55 ms to appear, waiting on the project walk; it
 now appears in 1 to 2 ms. The file list isn't cached: the watcher doesn't say
 whether a change added or removed a file, and Laravel's log writes would clear
 a cache constantly.
+
+### 2026-09-25: F2 goes to the next problem
+
+F2 and ⇧F2 go to the next and previous problem, as in PhpStorm's keymap,
+instead of Monaco's F2 rename; ⇧F6 renames. F8 and ⇧F8, VS Code's keys for the
+same move across files, stay with the debugger while it's paused and reach
+Monaco otherwise. Errors aren't visited before warnings: Monaco's widget walks
+markers by position, and a wrapper that skips warnings can wait until the plain
+order proves insufficient. Spelling problems don't get a squiggle of their own,
+because Monaco styles markers by severity only, and a separate decoration layer
+would have to track every typos marker.
 
 ### Editor font and ligatures
 

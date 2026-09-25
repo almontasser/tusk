@@ -192,6 +192,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌃⇧B | Go to type declaration |
 | ⌥F7 | Find usages |
 | ⇧F6 | Rename (also renames the file for a class) |
+| F2 and ⇧F2 | Next and previous problem in the file |
 | ⌥⏎ | Show context actions and quick fixes |
 | ⌘P | Parameter info |
 | F1 | Quick documentation |
@@ -211,7 +212,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘F8 | Toggle a breakpoint on the current line |
 | ⇧⌘F8 | Edit the breakpoint on the current line: condition, hit count, or log message |
 | F9 | Resume (while debugging) |
-| F8, F7, ⇧F8 | Step over, step into, step out |
+| F8, F7, ⇧F8 | Step over, step into, step out (when not paused, F8 and ⇧F8 go to the next and previous problem across files) |
 | ⌘F2 | Stop debugging |
 | ⌘K | Commit |
 | ⌘⇧K | Push |
@@ -1164,6 +1165,12 @@ their counts, turn each kind on and off, and the panel remembers your choice.
 
 Deprecated methods, classes, and functions show struck through, and unused
 imports faded, as in VS Code. Hovers lay out long signatures with one parameter per line.
+
+Press F2 or ⇧F2 to go to the next or previous problem in the file, with its
+message in a panel below the line. **Next Problem in Files** and **Previous
+Problem in Files** in ⌘⇧A, or F8 and ⇧F8 while you aren't debugging, move on to
+other files. In the Dark and Light themes, squiggles use the interface's red,
+yellow, and blue.
 
 Pointing at a problem in the editor shows it with code formatted as code, and
 the checker's notes as paragraphs. **Open in Editor** in that popup, or the
