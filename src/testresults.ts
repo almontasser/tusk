@@ -39,6 +39,9 @@ q('[data-run="failed"]').onclick = () => failed.length && host.rerunFailed(faile
 // Reports from a container name files by their path in it.
 const absolute = (file: string) => (file.startsWith(`${containerRoot}/`) ? host.root() + file.slice(containerRoot.length) : file.startsWith("/") ? file : `${host.root()}/${file}`);
 
+/** Opens a test by its class and name, at its declaration. */
+export const openTest = (className: string, name: string) => open({ name, className, file: classFile(className), line: 0, time: 0, status: "passed", message: "" });
+
 /** Opens a test at its failure, or at its declaration, which Pest's report leaves out. */
 async function open(r: TestResult) {
   const path = absolute(r.file);

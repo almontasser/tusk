@@ -62,7 +62,7 @@ file to change when you add it.
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
-| Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
+| Coverage | The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
@@ -692,12 +692,16 @@ The terminal tab keeps the runner's full output.
 Run **Run All Tests with Coverage** or **Run Test at Cursor with Coverage**
 from ⌘⇧A. When the run ends, the status bar shows the share of lines covered,
 and the gutter marks each executable line: green if it ran, red if it didn't.
-Hover over a mark to see how many times the line ran. Marks follow their lines
-as you edit and stay until the next coverage run, or until you run **Hide
-Coverage**. ⌃R reruns with coverage too.
+Hover over a mark to see how many times the line ran and which tests ran it.
+To list those tests, put the cursor on the line and run **Show Tests Covering
+Line** from ⌘⇧A; choose one to open it. Marks follow their lines as you edit
+and stay until the next coverage run, or until you run **Hide Coverage**. ⌃R
+reruns with coverage too.
 
-The **Coverage** tab in the bottom panel lists every file with uncovered lines,
-least covered first, with each file's percentage. Under each file, a row shows
+The **Coverage** tab in the bottom panel starts with each folder's coverage,
+nested, such as `app/Models 45% · 9/20`. Click a folder to list only its
+files, and click it again to list them all. Below, it lists every file with
+uncovered lines, least covered first, with each file's percentage. Under each file, a row shows
 a run of uncovered lines, such as `15–17`, and the code on its first line.
 Click a row to open it there. The tab's buttons rerun with coverage and hide
 coverage.

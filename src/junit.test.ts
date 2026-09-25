@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -96,4 +96,15 @@ test("groups uncovered lines into ranges, split by covered ones", () => {
   const lines = new Map([[3, 0], [5, 0], [9, 0], [7, 2], [12, 1], [14, 0]]);
   assert.deepEqual(uncoveredRanges(lines), [[3, 5], [9, 9], [14, 14]]);
   assert.deepEqual(uncoveredRanges(new Map([[1, 1]])), []);
+});
+
+test("reads which tests covered each line from PHPUnit's XML coverage", () => {
+  const index = `<phpunit><project source="/app/app"><directory name="/"><directory name="Models"><file name="Post.php" href="Models/Post.php.xml"/></directory></directory></project></phpunit>`;
+  assert.deepEqual([...coverageIndex(index).files], [["/app/app/Models/Post.php", "Models/Post.php.xml"]]);
+  const file = `<coverage><line nr="14"/><line nr="15"><covered by="Tests\\Feature\\ExampleTest::test_home"/><covered by="P\\Tests\\Feature\\PostTest::__pest_evaluable__home_page__&#x2192;_it_loads"/></line><line nr="20"/></coverage><source><line no="15"><token>x</token></line></source>`;
+  const lines = coveringTests(file);
+  assert.equal(lines.get(15)!.length, 2);
+  assert.deepEqual(lines.get(14), []);
+  assert.deepEqual(testOf(lines.get(15)![0]), { className: "Tests\\Feature\\ExampleTest", name: "test_home" });
+  assert.deepEqual(testOf(lines.get(15)![1]), { className: "Tests\\Feature\\PostTest", name: "home page → it loads" });
 });

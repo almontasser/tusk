@@ -689,6 +689,13 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .tests-summary { margin-left: 6px; }
 .coverage-list, .coverage-list ul { list-style: none; margin: 0; padding: 0; }
 .coverage-list { flex: 1; overflow: auto; }
+/* Coverage by folder, above the files; click one to show only its files. */
+.coverage-folders { list-style: none; margin: 0; padding: 4px 0; max-height: 35%; overflow: auto; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.coverage-folder { display: flex; align-items: center; gap: 6px; padding: 1px 8px; cursor: pointer; }
+.coverage-folder:hover { background: var(--hover); }
+.coverage-folder.active { background: var(--selected); }
+.coverage-folder .name { flex: 1; }
+.coverage-folder .percent { color: var(--muted); font-variant-numeric: tabular-nums; }
 .coverage .find-match { cursor: pointer; }
 .profiler-filter { width: 180px; flex-shrink: 1; min-width: 100px; margin-left: 2px; }
 .profiler-check { display: flex; align-items: center; gap: 4px; margin-left: 8px; white-space: nowrap; color: var(--muted); }

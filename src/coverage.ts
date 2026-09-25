@@ -1,14 +1,17 @@
 // Code coverage in the gutter: after a test run with coverage, lines that ran get a green mark and lines
-// that didn't get a red one. Marks follow their lines as you edit, and stay until the next run or Hide Coverage.
-// The Coverage panel lists each file's uncovered lines, least covered file first.
+// that didn't get a red one, and a covered line's mark names the tests that ran it. Marks follow their lines as
+// you edit, and stay until the next run or Hide Coverage. The Coverage panel shows each folder's coverage and
+// lists each file's uncovered lines, least covered file first.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
-import { type Coverage, parseClover, uncoveredRanges } from "./junit";
+import { type Coverage, coverageIndex, coveringTests, parseClover, testOf, uncoveredRanges } from "./junit";
+import { pick } from "./palette";
+import { openTest } from "./testresults";
 import { fileGroup } from "./search";
 import { containerRoot } from "./sail";
 import { showPanelView } from "./terminal";
 
-type Host = { openAt(path: string, line: number): unknown; rerun(): unknown };
+type Host = { openAt(path: string, line: number): unknown; rerun(): unknown; status(text: string): void };
 let host: Host;
 export const initCoverage = (h: Host) => (host = h);
 
@@ -16,8 +19,33 @@ export const initCoverage = (h: Host) => (host = h);
 let coverage: Coverage = new Map();
 const decorations = new Map<monaco.editor.ITextModel, string[]>();
 
-function decorate(model: monaco.editor.ITextModel) {
+/** Where each file's per-test report is in PHPUnit's XML coverage, and the tests by line of those read so far. */
+let perTest: { dir: string; files: Map<string, string> } | null = null;
+const testsByFile = new Map<string, Promise<Map<number, string[]>>>();
+
+/** The tests that ran each line of a file, or an empty map without a per-test report. */
+function testsIn(path: string): Promise<Map<number, string[]>> {
+  const href = perTest?.files.get(path);
+  if (!href) return Promise.resolve(new Map());
+  if (!testsByFile.has(path))
+    testsByFile.set(path, invoke<string>("read_file", { path: `${perTest!.dir}/${href}` }).then(coveringTests, () => new Map()));
+  return testsByFile.get(path)!;
+}
+
+const label = (id: string) => {
+  const { className, name } = testOf(id);
+  return `${className.split("\\").pop()} › ${name}`;
+};
+
+/** Marks each covered and uncovered line. Once the file's per-test report is read, a covered line's mark names its tests. */
+function decorate(model: monaco.editor.ITextModel, tests = new Map<number, string[]>()) {
   const lines = [...(coverage.get(model.uri.fsPath) ?? [])].filter(([line]) => line <= model.getLineCount());
+  const tooltip = (line: number, count: number) => {
+    if (!count) return "Not covered";
+    const ran = tests.get(line) ?? [];
+    const by = ran.length ? `, by ${ran.length === 1 ? "1 test" : `${ran.length} tests`}:\n${ran.slice(0, 8).map(label).join("\n")}${ran.length > 8 ? `\n…and ${ran.length - 8} more` : ""}` : "";
+    return `Covered: ran ${count} ${count === 1 ? "time" : "times"}${by}`;
+  };
   const ids = model.deltaDecorations(
     decorations.get(model) ?? [],
     lines.map(([line, count]) => ({
@@ -25,24 +53,51 @@ function decorate(model: monaco.editor.ITextModel) {
       options: {
         isWholeLine: true,
         linesDecorationsClassName: count ? "coverage-hit" : "coverage-miss",
-        linesDecorationsTooltip: count ? `Covered: ran ${count} ${count === 1 ? "time" : "times"}` : "Not covered",
+        linesDecorationsTooltip: tooltip(line, count),
         stickiness: 1,
       },
     })),
   );
   decorations.set(model, ids);
+  if (!tests.size && perTest?.files.has(model.uri.fsPath))
+    testsIn(model.uri.fsPath).then((found) => found.size && !model.isDisposed() && coverage.has(model.uri.fsPath) && decorate(model, found));
 }
 
-const decorateAll = () => monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach(decorate);
+/** Lists the tests that ran the line with the cursor; choosing one opens it. */
+export async function showTestsCoveringLine(editor: monaco.editor.ICodeEditor) {
+  const model = editor.getModel();
+  const line = editor.getPosition()?.lineNumber;
+  if (!model || !line) return;
+  if (!coverage.has(model.uri.fsPath)) return host.status("No coverage for this file. Run tests with coverage first.");
+  if (!perTest) return host.status("This coverage run has no per-test report. Run tests with coverage again.");
+  // A line inside a statement that spans lines counts from the statement's first line, the one with a mark.
+  const lines = coverage.get(model.uri.fsPath)!;
+  let at = line;
+  while (at > 0 && !lines.has(at)) at--;
+  const ran = (await testsIn(model.uri.fsPath)).get(at) ?? [];
+  if (!ran.length) return host.status(lines.get(at) ? `No test is recorded as covering line ${at}.` : `Line ${at} isn't covered by any test.`);
+  pick(`Tests that ran line ${at}`, () =>
+    ran.map((id) => {
+      const { className, name } = testOf(id);
+      return { label: name, detail: className, icon: "codicon-beaker", run: () => openTest(className, name) };
+    }),
+  );
+}
+
+const decorateAll = () => monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => decorate(m));
 
 /**
  * Shows a Clover report's coverage in every editor. Returns the covered and total statement counts,
  * or null when there's no report, such as when PHP has neither PCOV nor Xdebug.
  */
-export async function loadCoverage(report: string, root: string): Promise<{ covered: number; total: number; files: number } | null> {
+export async function loadCoverage(report: string, root: string, perTestDir?: string): Promise<{ covered: number; total: number; files: number } | null> {
   const parsed = parseClover(await invoke<string>("read_file", { path: report }).catch(() => ""));
   if (!parsed.size) return null;
-  coverage = new Map([...parsed].map(([path, lines]) => [path.startsWith(containerRoot + "/") ? root + path.slice(containerRoot.length) : path, lines]));
+  const local = (path: string) => (path.startsWith(containerRoot + "/") ? root + path.slice(containerRoot.length) : path);
+  coverage = new Map([...parsed].map(([path, lines]) => [local(path), lines]));
+  const index = perTestDir ? await invoke<string>("read_file", { path: `${perTestDir}/index.xml` }).catch(() => "") : "";
+  perTest = index ? { dir: perTestDir!, files: new Map([...coverageIndex(index).files].map(([path, href]) => [local(path), href])) } : null;
+  testsByFile.clear();
   decorateAll();
   const counts = [...coverage.values()].flatMap((lines) => [...lines.values()]);
   const result = { covered: counts.filter(Boolean).length, total: counts.length, files: coverage.size };
@@ -52,9 +107,12 @@ export async function loadCoverage(report: string, root: string): Promise<{ cove
 
 export function hideCoverage() {
   coverage = new Map();
+  perTest = null;
+  testsByFile.clear();
   decorateAll();
   q(".tests-summary").textContent = "Coverage hidden. Run tests with coverage to show it again.";
   q(".coverage-list").replaceChildren();
+  q(".coverage-folders").replaceChildren();
 }
 
 // ---- The Coverage panel ----
@@ -67,6 +125,7 @@ panel.innerHTML = `
     <button data-run="hide" title="Hide coverage"><span class="codicon codicon-eye-closed"></span></button>
     <span class="tests-summary"></span>
   </div>
+  <ul class="coverage-folders" aria-label="Coverage by folder"></ul>
   <ul class="coverage-list" aria-label="Uncovered lines"></ul>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
 q('[data-run="rerun"]').onclick = () => host.rerun();
@@ -74,14 +133,44 @@ q('[data-run="hide"]').onclick = hideCoverage;
 
 const percent = (covered: number, total: number) => (total ? Math.floor((covered / total) * 100) : 100);
 
-/** Lists files with uncovered lines, least covered first. Files start expanded until about 200 rows show. */
+/** The folder the file list shows, relative to the project, or "" for every file. */
+let folder = "";
+
+/**
+ * Shows each folder's coverage, nested, then the files with uncovered lines, least covered first. Clicking a
+ * folder limits the files to it. Files start expanded until about 200 rows show.
+ */
 function renderPanel(root: string, result: { covered: number; total: number; files: number }) {
-  const files = [...coverage]
-    .map(([path, lines]) => ({ path, ranges: uncoveredRanges(lines), covered: [...lines.values()].filter(Boolean).length, total: lines.size }))
-    .filter((f) => f.ranges.length && f.path.startsWith(root + "/"))
+  const all = [...coverage]
+    .filter(([path]) => path.startsWith(root + "/"))
+    .map(([path, lines]) => ({ path, rel: path.slice(root.length + 1), ranges: uncoveredRanges(lines), covered: [...lines.values()].filter(Boolean).length, total: lines.size }));
+  // Every folder that holds a covered file, with the lines of all the files under it.
+  const folders = new Map<string, { covered: number; total: number }>();
+  for (const f of all)
+    for (let i = f.rel.indexOf("/"); i > 0; i = f.rel.indexOf("/", i + 1)) {
+      const totals = folders.get(f.rel.slice(0, i)) ?? folders.set(f.rel.slice(0, i), { covered: 0, total: 0 }).get(f.rel.slice(0, i))!;
+      totals.covered += f.covered;
+      totals.total += f.total;
+    }
+  if (!folders.has(folder)) folder = "";
+  q(".coverage-folders").replaceChildren(
+    ...[...folders].sort(([a], [b]) => a.localeCompare(b)).map(([name, totals]) => {
+      const li = document.createElement("li");
+      li.className = `coverage-folder${name === folder ? " active" : ""}`;
+      li.style.paddingLeft = `${8 + (name.split("/").length - 1) * 14}px`;
+      li.title = folder === name ? "Show the files of every folder" : `Show only the files in ${name}`;
+      li.innerHTML = `<span class="codicon codicon-folder"></span><span class="name"></span><span class="percent"></span>`;
+      li.querySelector(".name")!.textContent = name.slice(name.lastIndexOf("/") + 1);
+      li.querySelector(".percent")!.textContent = `${percent(totals.covered, totals.total)}% · ${totals.covered}/${totals.total}`;
+      li.onclick = () => ((folder = folder === name ? "" : name), renderPanel(root, result));
+      return li;
+    }),
+  );
+  const files = all
+    .filter((f) => f.ranges.length && (!folder || f.rel.startsWith(folder + "/")))
     .sort((a, b) => a.covered / a.total - b.covered / b.total || a.path.localeCompare(b.path));
-  const full = result.files - files.length;
-  q(".tests-summary").textContent = `${percent(result.covered, result.total)}% of lines covered (${result.covered} of ${result.total}) · ${files.length} ${files.length === 1 ? "file has" : "files have"} uncovered lines${full ? `, ${full} fully covered` : ""}`;
+  const full = all.filter((f) => !f.ranges.length && (!folder || f.rel.startsWith(folder + "/"))).length;
+  q(".tests-summary").textContent = `${percent(result.covered, result.total)}% of lines covered (${result.covered} of ${result.total}) · ${folder ? `in ${folder}, ` : ""}${files.length} ${files.length === 1 ? "file has" : "files have"} uncovered lines${full ? `, ${full} fully covered` : ""}`;
   let shown = 0;
   q(".coverage-list").replaceChildren(
     ...files.map((f) => {

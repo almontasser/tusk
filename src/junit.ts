@@ -133,3 +133,38 @@ export function uncoveredRanges(lines: Map<number, number>): [number, number][] 
   }
   return ranges;
 }
+
+/**
+ * Reads the index of PHPUnit's XML coverage (`--coverage-xml`): the folder the report's paths are relative
+ * to, and each source file's report, relative to the index, by the source file's path.
+ */
+export function coverageIndex(xml: string): { source: string; files: Map<string, string> } {
+  const source = attributes(xml.match(/<project\b[^>]*>/)?.[0] ?? "").source ?? "";
+  const files = new Map<string, string>();
+  for (const [tag] of xml.matchAll(/<file\b[^>]*>/g)) {
+    const href = attributes(tag).href;
+    if (href) files.set(`${source}/${href.replace(/\.xml$/, "")}`, href);
+  }
+  return { source, files };
+}
+
+/** The tests that ran each line, from one file of PHPUnit's XML coverage, as reported test IDs. */
+export function coveringTests(xml: string): Map<number, string[]> {
+  const lines = new Map<number, string[]>();
+  // Only the <coverage> section: <source> has <line> tags of its own, for the file's tokens.
+  const section = xml.match(/<coverage>([\s\S]*?)<\/coverage>/)?.[1] ?? "";
+  for (const [, attrs, body = ""] of section.matchAll(/<line\b([^>]*?)(?:\/>|>([\s\S]*?)<\/line>)/g))
+    lines.set(Number(attributes(attrs).nr), [...body.matchAll(/<covered\b[^>]*>/g)].map(([tag]) => attributes(tag).by));
+  return lines;
+}
+
+/**
+ * A test ID from coverage, `Class::method`, as its class and a readable name. Pest's IDs have a `P\` prefix
+ * and a method named `__pest_evaluable_` plus the description, with `_` for spaces and describe() blocks in front.
+ */
+export function testOf(id: string): { className: string; name: string } {
+  const [className, method = ""] = id.replace(/^P\\/, "").split("::");
+  const pest = method.startsWith("__pest_evaluable_");
+  const name = pest ? method.slice("__pest_evaluable_".length).replace(/_/g, " ").replace(/\s+/g, " ").trim() : method;
+  return { className, name };
+}

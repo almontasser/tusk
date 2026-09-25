@@ -47,23 +47,25 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
   if (live) await invoke("remove_path", { path: events }).catch(() => {});
   const timer = live ? setInterval(() => showLive(events, true), 500) : undefined;
   const clover = inContainer ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
-  if (coverage) await invoke("remove_path", { path: clover }).catch(() => {});
+  // PHPUnit's XML coverage also records which tests ran each line.
+  const perTest = inContainer ? `${getRoot()}/storage/logs/editor-coverage-xml` : report.replace(/junit\.xml$/, "coverage-xml");
+  if (coverage) await Promise.all([clover, perTest].map((path) => invoke("remove_path", { path }).catch(() => {})));
   // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In a container, its own settings apply.
   const profiler = mode === "profile" ? await loadProfiler() : null;
   const profiles = profiler ? await profiler.profileDir() : "";
   const started = Math.floor(Date.now() / 1000);
   const env = coverage && !inContainer ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiler ? ["/usr/bin/env", ...(await profiler.profileEnv(profiles, getRoot()))] : [];
-  const coverageArgs = coverage ? ["--coverage-clover", inContainer ? "storage/logs/editor-clover.xml" : clover] : [];
+  const coverageArgs = coverage ? ["--coverage-clover", inContainer ? "storage/logs/editor-clover.xml" : clover, "--coverage-xml", inContainer ? "storage/logs/editor-coverage-xml" : perTest] : [];
   return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
-    if (coverage) showCoverage(clover);
+    if (coverage) showCoverage(clover, perTest);
     if (profiler) profiler.openNewestProfile(profiles, started, title);
   }, () => clearInterval(timer));
 }
 
-async function showCoverage(clover: string) {
-  const result = await loadCoverage(clover, getRoot());
+async function showCoverage(clover: string, perTest: string) {
+  const result = await loadCoverage(clover, getRoot(), perTest);
   if (!result) return status("Coverage failed: no report. Install PCOV or Xdebug for PHP, or see the test output.");
   const percent = result.total ? Math.floor((result.covered / result.total) * 100) : 0;
   status(`Coverage: ${percent}% of lines (${result.covered} of ${result.total}) in ${result.files} files`);
@@ -240,7 +242,7 @@ export function initRunner(
   openAt = open;
   status = showStatus;
   initTestResults({ root, openAt: open, rerun, rerunFailed });
-  initCoverage({ openAt: open, rerun });
+  initCoverage({ openAt: open, rerun, status: showStatus });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, mode?: Mode) => runTest(path, test, mode));
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {

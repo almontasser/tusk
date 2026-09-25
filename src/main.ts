@@ -29,7 +29,7 @@ import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "
 import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
 import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
-import { hideCoverage } from "./coverage";
+import { hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { chooseService, composeService, composeServices } from "./sail";
 import { openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
@@ -1160,6 +1160,7 @@ const actions: Action[] = [
   { label: "Profile URL…", run: () => root && loadProfiler().then((p) => p.profileUrl()) },
   { label: "Start Profiling Server (PHP's server with the Xdebug profiler)", run: () => root && loadProfiler().then((p) => p.startProfilingServer()) },
   { label: "Hide Coverage", run: hideCoverage },
+  { label: "Show Tests Covering Line", run: () => showTestsCoveringLine(editor), editorOnly: true },
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, "debug") },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },

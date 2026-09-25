@@ -1032,7 +1032,23 @@ A coverage run adds `--coverage-clover <app cache>/clover.xml` (in Sail,
 the variable only matters with Xdebug. The report is deleted before the run,
 like the JUnit one. When the process exits, `loadCoverage` in
 `src/coverage.ts` reads it with `parseClover` from `src/junit.ts` and maps
-Sail's `/var/www/html` back to the project.
+the container's folder (`containerRoot`) back to the project.
+
+Clover has no per-test data, so the run also adds `--coverage-xml` with a
+folder next to the report. PHPUnit's XML coverage has an `index.xml`, whose
+`<project source>` and `<file href>` give each source file's report
+(`coverageIndex`), and a report per file whose `<coverage>` section lists, for
+each line, `<covered by="Class::method">` for every test that ran it
+(`coveringTests`). Only the index is read after the run; a file's report is
+read when its model is decorated, or for **Show Tests Covering Line**, and kept
+until the next run. Decorating is synchronous, so a model is decorated at once
+with hit counts and again with the tests' names once its report is read.
+`testOf` turns an ID into a class and a readable name: Pest's IDs have a `P\`
+prefix and a method of `__pest_evaluable_` plus the description with `_` for
+spaces. Choosing a test opens it through `openTest` in `testresults.ts`, which
+finds the declaration with `findTests` and `sameTest`, as the Tests tab does.
+The Coverage tab's folders add up the lines of the files under each folder, from
+Clover; clicking one filters the file list below by path prefix.
 
 Only `type="stmt"` lines count. Clover also lists each method's declaration
 line, which is covered whenever any statement in the method ran, so showing it
@@ -2261,10 +2277,13 @@ because you work through them one by one and want the list to stay open.
 
 ### 2026-09-25: Clover for coverage, regex-parsed
 
-PHPUnit and Pest write Clover, Cobertura, PHP, HTML, and text coverage. Clover
-is flat (a file, then its lines with hit counts), so the same regex approach
-as the JUnit report reads it without an XML parser. The PHP format would need
-PHP to read it back, and HTML and text are for people.
+PHPUnit and Pest write Clover, Cobertura, PHP, HTML, XML, and text coverage.
+Clover is flat (a file, then its lines with hit counts), so the same regex
+approach as the JUnit report reads it without an XML parser. The PHP format
+would need PHP to read it back, and HTML and text are for people. Clover has
+no per-test data, so runs also write PHPUnit's XML format for which tests ran
+each line, read lazily, file by file; its `<coverage>` sections are regular
+enough for the same regex approach.
 
 ### 2026-09-25: A function table first, then the merged call tree
 
