@@ -43,7 +43,7 @@ file to change when you add it.
 | Formatting | Without Prettier, only PHP files format. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
-| Unsaved files | Language servers sync the full text on every change, which may lag on very large files (`track` in `src/lsp.ts`). |
+| Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
 | Pull requests | You write a line comment in a one-line box, on one line at a time (not a range), and each comment posts at once rather than as part of a pending review. Comments on lines outside the diff's changes are rejected by GitHub. Comment threads in the diff are read-only, so reply through **Comment on Line**. |
