@@ -17,7 +17,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { initLocalHistory, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
+import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
@@ -970,6 +970,8 @@ listen<string[]>("fs-change", ({ payload }) => {
         }
       }
     }
+    // Files without a model weren't open, so the loop above kept no version of them.
+    recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     aiFilesChanged([...paths]);
     const php = [...paths].filter((p) => p.endsWith(".php"));

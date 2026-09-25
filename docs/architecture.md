@@ -1149,8 +1149,19 @@ Two more moments add a version. When the file watcher reports that an open,
 unmodified file changed on disk, the editor records the model's text before
 reloading it. Deleting from the tree records the file, or each file in the
 folder that `list_files` returns (ignored files left out, at most 500), before
-moving it to the Trash. Only open files are covered for outside changes: the
-editor has no earlier copy of the others to keep.
+moving it to the Trash.
+
+For files that aren't open, the editor has no copy of the text before the
+change, so `recordExternalChanges` keeps the text after it: the next change
+then finds its earlier text in the history. The watcher batch in `main.ts`
+passes it every changed path without a Monaco model. It skips folders in
+`EXCLUDED_FOLDERS` (such as `vendor`, `node_modules`, and `.git`) and anything
+`git check-ignore --stdin` names, in one call per batch. A file with no history
+yet first gets `git show :./<path>`, the staged version, when it differs, named
+one millisecond earlier so it sorts before the new text. Unreadable files
+(deleted, binary, or not UTF-8) and files over 1 MB are skipped, and a batch
+keeps at most 200 files, so a branch switch doesn't copy the whole project;
+git has those versions anyway.
 
 A deleted file's history stays in its folder. **Deleted Files** lists the
 history folders whose project path no longer exists, and restoring creates the

@@ -59,7 +59,7 @@ file to change when you add it.
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Svelte and Astro files are highlighted, but have no language server (no completion or diagnostics). Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
-| Local history | Changes by other programs are kept only for files open in the editor. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
+| Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
@@ -738,7 +738,11 @@ history follows renames.
 
 Each time you save a file, the editor keeps a copy of it, outside the project
 and outside git. It also keeps one before another program, such as a
-`git checkout`, changes a file you have open, and before you delete a file or
+`git checkout`, changes a file you have open, and after another program
+changes a project file you don't have open, such as a file an Artisan `make:`
+command or a formatter rewrites. The first time that happens to a file, the
+version git has staged is kept too, so you can go back to it. Files git
+ignores aren't kept. It also keeps a version before you delete a file or
 folder from the tree. To see a file's versions, run **Show Local History** from
 ⌘⇧A, or right-click the file in the tree. Choose a version to compare it with
 the file as it is now, and click **Restore This Version** to put it back. The

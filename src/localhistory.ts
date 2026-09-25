@@ -1,9 +1,10 @@
 // Local history: a copy of each file every time you save it, before another program changes an open file,
-// and before you delete it, kept outside the project in the app's data folder, so you can compare with or
-// restore a version that was never committed, even of a deleted file.
+// after another program changes a closed one, and before you delete it, kept outside the project in the app's
+// data folder, so you can compare with or restore a version that was never committed, even of a deleted file.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { age } from "./gitparse";
+import { EXCLUDED_FOLDERS } from "./icons";
 import { pick } from "./palette";
 import { toPrune } from "./retention";
 
@@ -23,18 +24,47 @@ const versions = async (dir: string) =>
     .sort()
     .reverse();
 
-/** Saves a version of a project file, unless it's large or the same as the last version. */
-export async function recordVersion(path: string, text: string) {
+/** Saves a version of a project file, unless it's large or the same as the last version. `time` names the version. */
+export async function recordVersion(path: string, text: string, time = Date.now()) {
   if (!host.root() || !path.startsWith(host.root() + "/") || text.length > MAX_SIZE) return;
   try {
     const dir = await fileDir(path);
     const [last] = await versions(dir);
     if (last && (await invoke<string>("read_file", { path: `${dir}/${last}` }).catch(() => null)) === text) return;
     await invoke("create_dir", { path: dir });
-    await invoke("write_file", { path: `${dir}/${Date.now()}.txt`, contents: text });
+    await invoke("write_file", { path: `${dir}/${time}.txt`, contents: text });
     for (const name of toPrune(await versions(dir), Date.now())) await invoke("remove_path", { path: `${dir}/${name}` });
   } catch {
     // History is a convenience; a failure here must never block saving.
+  }
+}
+
+/** Files that git ignores, such as build output, from one `git check-ignore`. Outside a repository, none. */
+async function ignored(paths: string[]) {
+  const out = await invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["check-ignore", "--stdin"], input: paths.join("\n") }).catch(() => "");
+  return new Set(out.split("\n"));
+}
+
+/**
+ * Keeps versions of project files that another program changed while they weren't open, such as a
+ * code generator or `git checkout`. The text before the change is gone by then, so each change's new
+ * text is kept: the next change then has its earlier text in the history. A file changed for the first
+ * time also gets the version git has staged, when it differs, as its earlier text.
+ */
+export async function recordExternalChanges(paths: string[]) {
+  const root = host.root();
+  const candidates = paths.filter((p) => p.startsWith(root + "/") && !relative(p).split("/").some((part) => EXCLUDED_FOLDERS.has(part)));
+  if (!candidates.length) return;
+  const skip = await ignored(candidates);
+  // ponytail: 200 files per batch, so a branch switch that rewrites thousands doesn't copy them all; git has those anyway.
+  for (const path of candidates.filter((p) => !skip.has(p)).slice(0, 200)) {
+    const text = await invoke<string>("read_file", { path }).catch(() => null); // Deleted, a folder, or not text.
+    if (text === null || text.length > MAX_SIZE) continue;
+    if (!(await versions(await fileDir(path))).length) {
+      const staged = await invoke<string>("run_capture", { cwd: root, program: "git", args: ["show", `:./${relative(path)}`], input: null }).catch(() => null);
+      if (staged !== null && staged !== text) await recordVersion(path, staged, Date.now() - 1);
+    }
+    await recordVersion(path, text);
   }
 }
 
@@ -68,7 +98,7 @@ export async function showLocalHistory(path: string) {
   if (!path.startsWith(host.root() + "/")) return host.status("Local history covers files in the project.");
   const dir = await fileDir(path);
   const names = await versions(dir);
-  if (!names.length) return host.status(`No local history for ${relative(path)} yet. A version is kept each time you save.`);
+  if (!names.length) return host.status(`No local history for ${relative(path)} yet. A version is kept each time you save, and when another program changes it.`);
   pick(`Local history of ${relative(path)}`, () =>
     names.map((name) => {
       const time = Number.parseInt(name);
