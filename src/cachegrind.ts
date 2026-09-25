@@ -9,6 +9,11 @@ export type ProfiledFunction = {
   /** Time in the function's own code, and including what it called, in milliseconds. */
   self: number;
   inclusive: number;
+  /**
+   * How much memory in use grew over its outermost calls, including what it called, in bytes, as Xdebug measures
+   * it: memory freed before a call returns doesn't count, so it can be negative, and it doesn't add up across functions.
+   */
+  memory: number;
   /** The functions it called and the functions that called it, with how often and how long those calls took. */
   callees: Call[];
   callers: Call[];
@@ -16,7 +21,14 @@ export type ProfiledFunction = {
 
 export type Call = { fn: ProfiledFunction; calls: number; time: number };
 
-export type Profile = { command: string; functions: ProfiledFunction[]; /** The script's total time in milliseconds. */ total: number };
+export type Profile = {
+  command: string;
+  functions: ProfiledFunction[];
+  /** The script's total time in milliseconds. */
+  total: number;
+  /** Time spent in calls made from each line, by file: where the run spent its time, line by line. */
+  sites: Map<string, Map<number, { time: number; calls: number }>>;
+};
 
 /**
  * Xdebug writes one block per call, when the call returns: `fn=` names the function, the next cost line is its
@@ -35,14 +47,16 @@ export function parseCachegrind(text: string): Profile {
   let command = "";
   let scale = 1 / 1000; // microseconds to milliseconds
   let file = "";
-  type Block = { fn: ProfiledFunction; time: number; calls: number; totals?: Map<ProfiledFunction, number> };
+  type Cost = { time: number; memory: number };
+  type Block = { fn: ProfiledFunction; time: number; memory: number; calls: number; totals?: Map<ProfiledFunction, Cost> };
+  const sites: Profile["sites"] = new Map();
   const unclaimed: Block[] = [];
   let block: Block | undefined;
   let callee = "";
   let expect: "self" | "call" | "" = "";
   const get = (name: string) => {
     let fn = byName.get(name);
-    if (!fn) byName.set(name, (fn = { name, file: "", line: 0, calls: 0, self: 0, inclusive: 0, callees: [], callers: [] }));
+    if (!fn) byName.set(name, (fn = { name, file: "", line: 0, calls: 0, self: 0, inclusive: 0, memory: 0, callees: [], callers: [] }));
     return fn;
   };
   const edges = new Map<ProfiledFunction, Map<ProfiledFunction, Call>>();
@@ -58,9 +72,13 @@ export function parseCachegrind(text: string): Profile {
     const callees = unclaimed.splice(Math.max(0, unclaimed.length - block.calls));
     // Reuse the largest callee map, so deep call chains don't copy every map at every level.
     callees.sort((a, b) => (b.totals?.size ?? 0) - (a.totals?.size ?? 0));
-    const totals = callees[0]?.totals ?? new Map<ProfiledFunction, number>();
-    for (const callee of callees.slice(1)) for (const [fn, t] of callee.totals ?? []) totals.set(fn, (totals.get(fn) ?? 0) + t);
-    totals.set(block.fn, block.time);
+    const totals = callees[0]?.totals ?? new Map<ProfiledFunction, Cost>();
+    for (const callee of callees.slice(1))
+      for (const [fn, c] of callee.totals ?? []) {
+        const t = totals.get(fn);
+        totals.set(fn, t ? { time: t.time + c.time, memory: t.memory + c.memory } : c);
+      }
+    totals.set(block.fn, { time: block.time, memory: block.memory });
     for (const callee of callees) callee.totals = undefined;
     block.totals = totals;
     unclaimed.push(block);
@@ -78,18 +96,26 @@ export function parseCachegrind(text: string): Profile {
       const fn = get(resolve("fn", line.slice(eq + 1)));
       fn.file ||= file;
       fn.calls++;
-      block = { fn, time: 0, calls: 0 };
+      block = { fn, time: 0, memory: 0, calls: 0 };
       expect = "self";
     } else if (key === "cfn") callee = resolve("fn", line.slice(eq + 1));
     else if (key === "calls") expect = "call";
     else if (/^\d/.test(line) && block) {
-      const [position, time = "0"] = line.split(" ");
+      const [position, time = "0", bytes = "0"] = line.split(" ");
       const cost = Number(time) * scale;
+      const memory = Number(bytes);
       block.time += cost;
+      block.memory += memory;
       if (expect === "self") {
         block.fn.self += cost;
         block.fn.line ||= Number(position);
       } else if (expect === "call") {
+        let lines = sites.get(block.fn.file);
+        if (!lines) sites.set(block.fn.file, (lines = new Map()));
+        const site = lines.get(Number(position)) ?? { time: 0, calls: 0 };
+        site.time += cost;
+        site.calls++;
+        lines.set(Number(position), site);
         block.calls++;
         const target = get(callee);
         let out = edges.get(block.fn);
@@ -106,7 +132,11 @@ export function parseCachegrind(text: string): Profile {
   }
   finish();
   // What's left unclaimed are the roots: {main}, and anything PHP ran after it, such as shutdown functions.
-  for (const root of unclaimed) for (const [fn, t] of root.totals ?? []) fn.inclusive += t;
+  for (const root of unclaimed)
+    for (const [fn, c] of root.totals ?? []) {
+      fn.inclusive += c.time;
+      fn.memory += c.memory;
+    }
   for (const [caller, out] of edges)
     for (const call of out.values()) {
       caller.callees.push(call);
@@ -114,5 +144,10 @@ export function parseCachegrind(text: string): Profile {
     }
   const functions = [...byName.values()];
   const main = byName.get("{main}");
-  return { command, functions, total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)) };
+  return {
+    command,
+    functions,
+    total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)),
+    sites,
+  };
 }

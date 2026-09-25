@@ -1408,6 +1408,22 @@ The parser also sums each caller-to-callee pair's calls and time from the
 functions that called each other, not per call, so it stays small even for
 millions of calls. The side pane of the Profiler tab lists these pairs.
 
+The parser also sums the time of the calls made from each line (a `calls=`
+line's cost line gives the call site), by the caller's file. The editor shows
+these at the end of lines as injected text (`after` decorations). Their range
+is empty, so they need `showIfCollapsed: true`; without it, Monaco keeps the
+decoration but never draws it.
+
+Memory comes from the second event, `Memory_(bytes)`. Xdebug measures it as
+the growth in memory use over a call, so the own amounts don't add up to a
+caller's, and the table shows only the total, counted like total time.
+
+The call tree is built from the caller-to-callee pairs, not from each call: a
+node's children are everything its function called, from any caller. Keeping
+the real tree would cost memory for every call. A function already on a node's
+path isn't opened again, which ends recursion. When a profile opens, the tree
+opens along the busiest callee while it takes at least a tenth of the run.
+
 After a profiling run, the editor keeps the newest 50 profiles in its folder and
 deletes older ones, since a Laravel request's profile can be several megabytes.
 The profiling server checks ports from 8000 with `lsof` and takes the first

@@ -662,8 +662,12 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .coverage-list, .coverage-list ul { list-style: none; margin: 0; padding: 0; }
 .coverage-list { flex: 1; overflow: auto; }
 .coverage .find-match { cursor: pointer; }
-.profiler-filter { width: 220px; margin-left: 2px; }
-.profiler-project { display: flex; align-items: center; gap: 4px; margin-left: 8px; white-space: nowrap; color: var(--muted); }
+.profiler-filter { width: 180px; flex-shrink: 1; min-width: 100px; margin-left: 2px; }
+.profiler-check { display: flex; align-items: center; gap: 4px; margin-left: 8px; white-space: nowrap; color: var(--muted); }
+.profiler-check:has(input:disabled), .profiler-filter:disabled { opacity: 0.45; }
+.profiler .segmented { display: flex; flex-shrink: 0; margin: 0 6px 0 2px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.profiler .segmented button { width: auto; height: 24px; padding: 0 10px; white-space: nowrap; border-radius: 0; font: 12px var(--ui-family); color: var(--muted); }
+.profiler .segmented button[aria-pressed="true"] { background: var(--selected); color: var(--text); }
 .profiler .tests-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .profiler-body { flex: 1; display: flex; min-height: 0; }
 .profiler-table { flex: 1; overflow: auto; outline: none; }
@@ -674,6 +678,13 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler th.sorted::after { content: " ↓"; }
 .profiler th.num { width: 130px; }
 .profiler th[data-sort="calls"] { width: 70px; }
+.profiler th[data-sort="memory"] { width: 90px; }
+.profiler.tree-view th[data-sort="inclusive"] { width: 150px; }
+.profiler .chevron { display: inline-block; width: 16px; vertical-align: -3px; color: var(--faint); font-size: 14px !important; }
+/* Times of the calls on each line, after the line in the editor. */
+.profile-time { color: var(--faint) !important; font-style: italic; }
+.profile-time.warm { color: var(--yellow) !important; }
+.profile-time.hot { color: var(--orange) !important; font-weight: 600; }
 .profiler td { padding: 2px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .profiler tbody tr:hover, .profiler-detail tr:hover { background: var(--hover); }
 .profiler tbody tr.selected { background: var(--selected-inactive); }

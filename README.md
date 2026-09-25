@@ -58,7 +58,7 @@ file to change when you add it.
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes a PHP file uses; in JavaScript, TypeScript, Vue, and Blade files it has only similar and recent code, not the definitions of what the code imports. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
-| Profiler | There's no call graph or call tree, only each function's direct callers and callees. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
+| Profiler | The call tree merges a function's calls from all its callers, so the times under a node are that function's overall, not only the ones under this caller. There's no graph view. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Breadcrumbs | The path bar shows the file's path, not the class and method at the cursor. Sticky scroll shows the enclosing scopes at the top of the editor instead. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Git worktrees | Worktrees can't be listed, created, or opened from the editor. |
@@ -874,10 +874,23 @@ of the bottom panel. Run these from ⌘⇧A:
   Xdebug's own `xdebug.output_dir`, newest first, with their time and size.
   **Choose File…** opens any other `cachegrind.out` file, compressed or not.
 
-The Profiler tab lists every function with its calls, its own time, and its
-total time, which includes the functions it called. Both times also show as a
-share of the whole run, and a line under the own time shows that share at a
-glance. Recursive functions count their nested calls once.
+The Profiler tab lists every function with its calls, its own time, its total
+time (which includes the functions it called), and its memory. Both times also
+show as a share of the whole run, and a line under the own time shows that
+share at a glance. Recursive functions count their nested calls once. Memory is
+how much memory in use grew over the function's calls, as Xdebug measures it:
+memory freed before a call returns doesn't count.
+
+Click **Call tree** to see each function under the functions that called it.
+The tree opens along the busiest path. → and ← open and close a node, and a
+function that calls back into one of its callers isn't opened again. A node's
+children are everything its function called, from any caller, so the tree
+stays fast for millions of calls.
+
+With **Times in editor** on, open files show how long the calls on each line
+took, at the end of the line, such as `199 ms · 74.6%`. Lines over 10% of the
+run are orange, and over 1% yellow. Hover over a time to see how many calls it
+covers. Lines under a thousandth of the run are left out.
 
 - Click a column header to sort by it, and type in the filter to find
   functions.

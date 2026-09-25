@@ -6,6 +6,7 @@ import { appCacheDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { type Call, parseCachegrind, type Profile, type ProfiledFunction } from "./cachegrind";
 import { pick, rank } from "./palette";
+import { monaco } from "./editor";
 import { openTerminal, showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): unknown; status(text: string, source?: string): void };
@@ -111,21 +112,28 @@ export async function openProfile(path: string) {
   if (!parsed.functions.length) return host.status(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
   profile = parsed;
   selected = undefined;
+  expanded = hotPath();
   q(".tests-summary").textContent = `${relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
   q(".tests-summary").title = path;
   render();
   showDetail();
+  decorateAll();
   showPanelView("Profiler", panel);
 }
 
 // ---- The Profiler tab ----
 
 const MAX_ROWS = 500;
-let profile: Profile = { command: "", functions: [], total: 0 };
-let sort: "name" | "calls" | "self" | "inclusive" = "self";
+let profile: Profile = { command: "", functions: [], total: 0, sites: new Map() };
+let view: "functions" | "tree" = "functions";
+let sort: "name" | "calls" | "self" | "inclusive" | "memory" = "self";
 let selected: ProfiledFunction | undefined;
-/** The functions the table shows, in order, so the arrow keys can move through them. */
-let shown: ProfiledFunction[] = [];
+/** The rows the table shows, in order, so the arrow keys can move through them. */
+let shown: Row[] = [];
+/** A table row: a function, or in the call tree, a function under its caller, with the calls on that path. */
+type Row = { fn: ProfiledFunction; key: string; depth: number; calls: number; time: number; recursive?: boolean };
+/** Call tree nodes that are open, by their path of function names from the root. */
+let expanded = new Set<string>();
 
 const readSetting = (key: string) => {
   try {
@@ -134,10 +142,21 @@ const readSetting = (key: string) => {
     return null;
   }
 };
+const saveSetting = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {}
+};
 let projectOnly = readSetting("profilerProjectOnly") === "true";
+let editorTimes = readSetting("profilerEditorTimes") !== "false";
 
 const relative = (path: string) => (path.startsWith(host.root() + "/") ? path.slice(host.root().length + 1) : path);
 const ms = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(2)} s` : n >= 10 ? `${Math.round(n)} ms` : n >= 0.01 ? `${n.toFixed(2)} ms` : `${Math.round(n * 1000)} µs`);
+const bytes = (n: number) => {
+  const size = Math.abs(n);
+  const text = size >= 1_048_576 ? `${(size / 1_048_576).toFixed(1)} MB` : size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`;
+  return n < 0 ? `−${text}` : text;
+};
 const share = (n: number) => (profile.total ? `${((n / profile.total) * 100).toFixed(1)}%` : "");
 const isInternal = (f: ProfiledFunction) => f.file === "php:internal";
 const isProject = (f: ProfiledFunction) => !isInternal(f) && f.file.startsWith(host.root() + "/") && !f.file.startsWith(host.root() + "/vendor/");
@@ -151,19 +170,19 @@ panel.className = "tests profiler";
 panel.innerHTML = `
   <div class="tests-toolbar">
     <button data-action="open" title="Open another profile"><span class="codicon codicon-folder-opened"></span></button>
+    <div class="segmented" role="group" aria-label="View">
+      <button data-view="functions" aria-pressed="true">Functions</button>
+      <button data-view="tree" aria-pressed="false">Call tree</button>
+    </div>
     <input class="profiler-filter" placeholder="Filter functions" aria-label="Filter functions" spellcheck="false" />
-    <label class="profiler-project" title="Hide vendor packages and PHP's own functions"><input type="checkbox" /> Project code only</label>
+    <label class="profiler-check" data-option="project" title="Hide vendor packages and PHP's own functions"><input type="checkbox" /> Project code only</label>
+    <label class="profiler-check" data-option="editor" title="Show how long the calls on each line took, at the end of the line in open files"><input type="checkbox" /> Times in editor</label>
     <span class="tests-summary"></span>
   </div>
   <div class="profiler-body">
     <div class="profiler-table" tabindex="0" aria-label="Functions">
       <table>
-        <thead><tr>
-          <th data-sort="name">Function</th>
-          <th data-sort="calls" class="num">Calls</th>
-          <th data-sort="self" class="num">Own time</th>
-          <th data-sort="inclusive" class="num">Total time</th>
-        </tr></thead>
+        <thead></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -171,28 +190,47 @@ panel.innerHTML = `
   </div>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
 const filter = q(".profiler-filter") as HTMLInputElement;
-const project = q(".profiler-project input") as HTMLInputElement;
+const project = q('[data-option="project"] input') as HTMLInputElement;
+const times = q('[data-option="editor"] input') as HTMLInputElement;
 const tableEl = q(".profiler-table");
 project.checked = projectOnly;
+times.checked = editorTimes;
 filter.oninput = () => render();
 project.onchange = () => {
   projectOnly = project.checked;
-  try {
-    localStorage.setItem("profilerProjectOnly", String(projectOnly));
-  } catch {}
+  saveSetting("profilerProjectOnly", projectOnly);
   render();
 };
+times.onchange = () => {
+  editorTimes = times.checked;
+  saveSetting("profilerEditorTimes", editorTimes);
+  decorateAll();
+};
 q('[data-action="open"]').onclick = () => chooseProfile();
-panel.querySelectorAll<HTMLElement>("th").forEach((th) => (th.onclick = () => ((sort = th.dataset.sort as typeof sort), render())));
+panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
+  (b) =>
+    (b.onclick = () => {
+      view = b.dataset.view as typeof view;
+      panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v === b)));
+      render();
+      tableEl.focus();
+    }),
+);
 
-// ↑ and ↓ move the selection, and ⏎ opens the selected function.
+// ↑ and ↓ move the selection, ⏎ opens the selected function, and in the call tree, → and ← open and close a node.
 tableEl.onkeydown = (e) => {
   const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 15, PageUp: -15 };
-  if (e.key in moves && shown.length) {
-    const at = selected ? shown.indexOf(selected) : -1;
-    select(shown[Math.max(0, Math.min(shown.length - 1, at + moves[e.key]))]);
-  } else if (e.key === "Enter" && selected) openSource(selected);
-  else return;
+  const at = shown.findIndex((r) => r.key === selectedKey);
+  const row = shown[at];
+  if (e.key in moves && shown.length) selectRow(shown[Math.max(0, Math.min(shown.length - 1, at + moves[e.key]))]);
+  else if (e.key === "Enter" && selected) openSource(selected);
+  else if (view === "tree" && row && e.key === "ArrowRight" && !row.recursive && row.fn.callees.length) {
+    if (expanded.has(row.key)) selectRow(shown[at + 1]);
+    else (expanded.add(row.key), render());
+  } else if (view === "tree" && row && e.key === "ArrowLeft") {
+    if (expanded.delete(row.key)) render();
+    else selectRow(shown.slice(0, at).reverse().find((r) => r.depth < row.depth) ?? row);
+  } else return;
   e.preventDefault();
 };
 
@@ -206,50 +244,161 @@ function cell(text: string, className = "") {
 /** The time columns: milliseconds, and the share of the whole run. */
 const timeCell = (n: number, className = "") => cell(`${ms(n)} · ${share(n)}`, `num ${className}`);
 
-/** Shows the functions that match the filter, sorted by the chosen column: names A to Z, numbers largest first. */
+const columns = {
+  functions: [
+    ["name", "Function", ""],
+    ["calls", "Calls", "How many times it ran"],
+    ["self", "Own time", "Time in the function's own code, not in what it called"],
+    ["inclusive", "Total time", "Time from the start to the end of its calls, including what it called"],
+    ["memory", "Memory", "How much memory in use grew over its calls, including what it called. Memory freed before a call returned doesn't count."],
+  ],
+  tree: [
+    ["name", "Call tree", "Each function under the functions that called it"],
+    ["calls", "Calls", "How many times the caller called it"],
+    ["inclusive", "Time", "Time in those calls, including what they called"],
+  ],
+} as const;
+
+/** Shows the function table, or the call tree, with the chosen sort and filter. */
 function render() {
-  const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
-  shown = profile.functions
-    .filter((f) => (!projectOnly || isProject(f)) && words.every((w) => f.name.toLowerCase().includes(w)))
-    .sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name) : b[sort] - a[sort]));
-  const total = shown.length;
-  shown = shown.slice(0, MAX_ROWS);
-  panel.querySelectorAll<HTMLElement>("th").forEach((th) => th.classList.toggle("sorted", th.dataset.sort === sort));
-  q("tbody").replaceChildren(
-    ...shown.map((f) => {
-      const tr = document.createElement("tr");
-      tr.classList.toggle("selected", f === selected);
-      const name = cell(displayName(f), "name");
-      name.title = `${f.name}\n${where(f)}`;
-      name.append(Object.assign(document.createElement("span"), { className: "where", textContent: where(f) }));
-      // A line under own time shows its share of the run, so the costly functions stand out.
-      const own = timeCell(f.self, "bar");
-      own.style.setProperty("--share", share(f.self) || "0%");
-      tr.append(name, cell(String(f.calls), "num"), own, timeCell(f.inclusive));
-      tr.onclick = () => (select(f), tableEl.focus());
-      tr.ondblclick = () => openSource(f);
-      rowOf.set(f, tr);
-      return tr;
-    }),
-  );
-  const note = total > MAX_ROWS ? `${total - MAX_ROWS} more functions. Filter to find them.` : !total ? "No functions match." : "";
+  const heads = columns[view].map(([key, label, tip]) => {
+    const th = Object.assign(document.createElement("th"), { textContent: label, title: tip, className: key === "name" ? "" : "num" });
+    th.dataset.sort = key;
+    if (view === "functions") th.onclick = () => ((sort = key), render());
+    th.classList.toggle("sorted", view === "functions" && key === sort);
+    return th;
+  });
+  const tr = document.createElement("tr");
+  tr.append(...heads);
+  q("thead").replaceChildren(tr);
+  panel.classList.toggle("tree-view", view === "tree");
+  filter.disabled = project.disabled = view === "tree";
+  let note = "";
+  if (view === "functions") {
+    const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const matching = profile.functions
+      .filter((f) => (!projectOnly || isProject(f)) && words.every((w) => f.name.toLowerCase().includes(w)))
+      .sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name) : b[sort] - a[sort]));
+    shown = matching.slice(0, MAX_ROWS).map((f) => ({ fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive }));
+    note = matching.length > MAX_ROWS ? `${matching.length - MAX_ROWS} more functions. Filter to find them.` : !matching.length ? "No functions match." : "";
+  } else {
+    shown = treeRows();
+    note = shown.length >= MAX_TREE_ROWS ? "The tree shows its first rows. Close some nodes to see the rest." : "";
+  }
+  q("tbody").replaceChildren(...shown.map(view === "functions" ? functionRow : treeRow));
   if (note) {
-    const tr = document.createElement("tr");
-    tr.append(Object.assign(cell(note, "muted"), { colSpan: 4 }));
-    q("tbody").append(tr);
+    const row = document.createElement("tr");
+    row.append(Object.assign(cell(note, "muted"), { colSpan: columns[view].length }));
+    q("tbody").append(row);
   }
 }
-const rowOf = new WeakMap<ProfiledFunction, HTMLTableRowElement>();
 
-/** Selects a function: highlights its row and lists its callers and callees beside the table. */
-function select(f: ProfiledFunction) {
-  if (selected) rowOf.get(selected)?.classList.remove("selected");
-  selected = f;
-  const row = rowOf.get(f);
+function functionRow(r: Row) {
+  const f = r.fn;
+  const tr = document.createElement("tr");
+  tr.classList.toggle("selected", r.key === selectedKey);
+  const name = cell(displayName(f), "name");
+  name.title = `${f.name}\n${where(f)}`;
+  name.append(Object.assign(document.createElement("span"), { className: "where", textContent: where(f) }));
+  // A line under own time shows its share of the run, so the costly functions stand out.
+  const own = timeCell(f.self, "bar");
+  own.style.setProperty("--share", share(f.self) || "0%");
+  tr.append(name, cell(String(f.calls), "num"), own, timeCell(f.inclusive), cell(bytes(f.memory), "num"));
+  tr.onclick = () => (selectRow(r), tableEl.focus());
+  tr.ondblclick = () => openSource(f);
+  rowOf.set(r.key, tr);
+  return tr;
+}
+
+// ---- The call tree ----
+// Built from caller-to-callee totals, not from each call: a node's children are everything its function called,
+// from any caller. That keeps it small for millions of calls; the times under a node are its function's, overall.
+
+const MAX_TREE_ROWS = 2000;
+
+/** The rows of open nodes, depth first, children by time. A function already on the path isn't opened again. */
+function treeRows(): Row[] {
+  const rows: Row[] = [];
+  const roots = profile.functions.filter((f) => !f.callers.length).sort((a, b) => b.inclusive - a.inclusive);
+  const walk = (row: Row, path: Set<ProfiledFunction>) => {
+    if (rows.length >= MAX_TREE_ROWS) return;
+    rows.push(row);
+    if (row.recursive || !expanded.has(row.key)) return;
+    const next = new Set(path).add(row.fn);
+    for (const c of [...row.fn.callees].sort((a, b) => b.time - a.time))
+      walk({ fn: c.fn, key: `${row.key}\n${c.fn.name}`, depth: row.depth + 1, calls: c.calls, time: c.time, recursive: next.has(c.fn) }, next);
+  };
+  for (const f of roots) walk({ fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive }, new Set());
+  return rows;
+}
+
+/** Opens the busiest path from the root, as long as each step takes at least a tenth of the run. */
+function hotPath() {
+  const open = new Set<string>();
+  let fn = profile.functions.find((f) => f.name === "{main}") ?? profile.functions.find((f) => !f.callers.length);
+  let key = fn?.name ?? "";
+  const seen = new Set<ProfiledFunction>();
+  while (fn && !seen.has(fn) && open.size < 40) {
+    seen.add(fn);
+    open.add(key);
+    const next = [...fn.callees].sort((a, b) => b.time - a.time)[0];
+    if (!next || next.time < profile.total / 10) break;
+    fn = next.fn;
+    key = `${key}\n${fn.name}`;
+  }
+  return open;
+}
+
+function treeRow(r: Row) {
+  const tr = document.createElement("tr");
+  tr.classList.toggle("selected", r.key === selectedKey);
+  const name = cell("", "name");
+  name.style.paddingLeft = `${6 + r.depth * 14}px`;
+  const canOpen = !r.recursive && r.fn.callees.length > 0;
+  const chevron = Object.assign(document.createElement("span"), {
+    className: `chevron codicon ${canOpen ? (expanded.has(r.key) ? "codicon-chevron-down" : "codicon-chevron-right") : ""}`,
+  });
+  chevron.onclick = (e) => {
+    e.stopPropagation();
+    if (!canOpen) return;
+    if (!expanded.delete(r.key)) expanded.add(r.key);
+    render();
+  };
+  name.append(chevron, displayName(r.fn));
+  if (r.recursive) name.append(Object.assign(document.createElement("span"), { className: "where", textContent: "↻ calls back into a caller" }));
+  name.title = `${r.fn.name}\n${where(r.fn)}`;
+  const time = timeCell(r.time, "bar");
+  time.style.setProperty("--share", share(r.time) || "0%");
+  tr.append(name, cell(String(r.calls), "num"), time);
+  tr.onclick = () => (selectRow(r), tableEl.focus());
+  tr.ondblclick = () => openSource(r.fn);
+  rowOf.set(r.key, tr);
+  return tr;
+}
+
+// ---- Selection and the side pane ----
+
+let selectedKey = "";
+const rowOf = new Map<string, HTMLTableRowElement>();
+
+/** Selects a row: highlights it and lists its function's callers and callees beside the table. */
+function selectRow(r: Row) {
+  rowOf.get(selectedKey)?.classList.remove("selected");
+  selectedKey = r.key;
+  selected = r.fn;
+  const row = rowOf.get(r.key);
   if (row?.isConnected) row.classList.add("selected"), row.scrollIntoView({ block: "nearest" });
   showDetail();
 }
 
+/** Selects a function from the side pane: its row in the function table, when the table shows it. */
+function select(f: ProfiledFunction) {
+  if (view === "functions") return selectRow(shown.find((r) => r.fn === f) ?? { fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive });
+  rowOf.get(selectedKey)?.classList.remove("selected");
+  selected = f;
+  selectedKey = "";
+  showDetail();
+}
 /** The side pane: the selected function, what called it, and what it called, each by time. */
 function showDetail() {
   const detail = q(".profiler-detail");
@@ -265,7 +414,7 @@ function showDetail() {
   if (!isInternal(f)) (link as HTMLAnchorElement).href = "#", (link.onclick = (e) => (e.preventDefault(), openSource(f)));
   const stats = Object.assign(document.createElement("div"), {
     className: "muted",
-    textContent: `${f.calls} ${f.calls === 1 ? "call" : "calls"} · own ${ms(f.self)} · total ${ms(f.inclusive)} (${share(f.inclusive)})`,
+    textContent: `${f.calls} ${f.calls === 1 ? "call" : "calls"} · own ${ms(f.self)} · total ${ms(f.inclusive)} (${share(f.inclusive)}) · memory ${bytes(f.memory)}`,
   });
   heading.append(title, link, stats);
   detail.replaceChildren(heading, calls("Called by", f.callers), calls("Calls", f.callees));
@@ -291,3 +440,41 @@ function calls(label: string, list: Call[]) {
   section.append(table);
   return section;
 }
+
+// ---- Times in the editor ----
+// At the end of each line that made calls, the time those calls took, from the open profile. Lines under a
+// thousandth of the run are left out, so the marks point at what matters.
+
+const lineDecorations = new Map<monaco.editor.ITextModel, string[]>();
+
+function decorate(model: monaco.editor.ITextModel) {
+  const lines = editorTimes ? profile.sites.get(model.uri.fsPath) : undefined;
+  const min = profile.total / 1000;
+  const marks = [...(lines ?? [])].filter(([line, site]) => site.time >= min && line <= model.getLineCount());
+  const ids = model.deltaDecorations(
+    lineDecorations.get(model) ?? [],
+    marks.map(([line, site]) => {
+      const part = site.time / profile.total;
+      const column = model.getLineMaxColumn(line);
+      return {
+        range: new monaco.Range(line, column, line, column),
+        options: {
+          after: { content: `  ${ms(site.time)} · ${share(site.time)}`, inlineClassName: `profile-time${part >= 0.1 ? " hot" : part >= 0.01 ? " warm" : ""}` },
+          hoverMessage: { value: `Calls from this line: ${site.calls}, taking ${ms(site.time)} (${share(site.time)} of the profiled run).` },
+          // The range is empty (the end of the line), and Monaco hides empty decorations without this.
+          showIfCollapsed: true,
+          stickiness: 1,
+        },
+      };
+    }),
+  );
+  lineDecorations.set(model, ids);
+}
+
+const decorateAll = () => monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach(decorate);
+
+monaco.editor.onDidCreateModel((model) => {
+  if (model.uri.scheme !== "file") return;
+  if (profile.sites.size) decorate(model);
+  model.onWillDispose(() => lineDecorations.delete(model));
+});

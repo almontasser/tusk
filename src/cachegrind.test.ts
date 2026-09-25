@@ -45,3 +45,12 @@ test("lists each function's callers and callees", () => {
   assert.deepEqual(greet.callers.map((c) => [c.fn.name, c.calls]), [["{main}", 3]]);
   assert.deepEqual(fn("fib").callers.map((c) => c.fn.name).sort(), ["fib", "{main}"]);
 });
+
+test("reads memory, and the time of calls made from each line", () => {
+  // Each Greeter->greet call grew memory by 48 bytes itself, and its two calls by 32 and 40.
+  assert.equal(fn("Greeter->greet").memory, 3 * (48 + 32 + 40));
+  const line5 = profile.sites.get("/app/demo.php")!.get(5)!;
+  assert.equal(line5.calls, 6); // strtoupper and str_repeat, three times each
+  close(line5.time, (42 + 146 + 8 + 4 + 4 + 1) / 100_000);
+  assert.equal(profile.sites.get("/app/demo.php")!.get(9)!.calls, 3); // $g->greet() in the loop
+});
