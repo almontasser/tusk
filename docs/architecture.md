@@ -1452,8 +1452,16 @@ reduces `statusCheckRollup` to one state. It accepts both check runs (with
 To diff a pull request file without checking it out, the view fetches the pull
 request head into `refs/remotes/pr/<number>` and the base branch into
 `refs/remotes/origin/<base>`. It then compares the file at their merge base
-with the file at the head, which matches what GitHub shows. The fetch doesn't
-touch your working tree or current branch.
+with the file at the head commit (`headRefOid`), which matches what GitHub
+shows. The fetch doesn't touch your working tree or current branch.
+`prepareDiff` does this once per pull request and head commit, and the pull
+request's page starts it as soon as it opens, so clicking a file usually waits
+only for two local `git show` calls; when the head commit is already in the
+repository and the base branch has a ref, nothing is fetched. A push changes
+`headRefOid`, so the next page load fetches again. Threads draw with the diff,
+and pending comments come from the pending review load the page already
+started (`pendingOf` shares one request per pull request), added when it
+finishes.
 
 The pull request for the current branch (`gh pr view` without a number) loads
 when the branch or project changes, through `branchListeners` in `git.ts`.

@@ -278,6 +278,8 @@ export async function showPullRequest(number: number) {
     ...(pendingComments.length ? [heading(`Pending review (${pendingComments.length} ${pendingComments.length === 1 ? "comment" : "comments"})`), pendingList] : []),
     review,
   );
+  // Fetch the head and base now, so opening a file's diff doesn't wait for the network.
+  prepareDiff(pr).catch(() => {});
 }
 
 const repoUrl = (pr: PullRequest) => pr.url.replace(/\/pull\/\d+$/, "");
@@ -423,27 +425,49 @@ function merge(pr: Details) {
  * Fetches the pull request's head and base, then diffs a file from their merge base to the head, with its
  * line comments under their lines. `at` scrolls to a thread.
  */
+/** Each pull request's merge base, once its head and base are fetched, per head commit, so a push fetches again. */
+const mergeBases = new Map<string, Promise<string>>();
+
+/**
+ * Fetches a pull request's head and base, then finds their merge base. The pull request page starts this when it
+ * opens, so a file's diff usually opens without waiting for the network. With the head commit already here, from
+ * an earlier fetch or a checkout, nothing is fetched.
+ */
+function prepareDiff(pr: Details): Promise<string> {
+  const key = `${pr.number}:${pr.headRefOid}`;
+  if (!mergeBases.has(key)) {
+    const base = `refs/remotes/origin/${pr.baseRefName}`;
+    const ready = (async () => {
+      const here = await git("cat-file", "-e", `${pr.headRefOid}^{commit}`).then(() => git("rev-parse", "--verify", "-q", base)).then(() => true, () => false);
+      if (!here) await git("fetch", "--no-tags", "origin", `+refs/pull/${pr.number}/head:refs/remotes/pr/${pr.number}`, `+refs/heads/${pr.baseRefName}:${base}`);
+      return (await git("merge-base", pr.headRefOid, base)).trim();
+    })();
+    // A failed fetch is tried again next time.
+    mergeBases.set(key, ready.catch((e) => (mergeBases.delete(key), Promise.reject(e))));
+  }
+  return mergeBases.get(key)!;
+}
+
 async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
-  await loadMarkdown();
-  const head = `refs/remotes/pr/${pr.number}`;
-  const base = `refs/remotes/origin/${pr.baseRefName}`;
   let diff: monaco.editor.IStandaloneDiffEditor;
   try {
-    host.status(`Fetching #${pr.number}…`);
-    await git("fetch", "--no-tags", "origin", `+refs/pull/${pr.number}/head:${head}`, `+refs/heads/${pr.baseRefName}:${base}`);
-    const mergeBase = (await git("merge-base", head, base)).trim();
+    const slow = setTimeout(() => host.status(`Fetching #${pr.number}…`), 300);
+    const [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => clearTimeout(slow)), loadMarkdown(), me()]);
     const show = (spec: string) => git("show", spec).catch(() => "");
+    const [original, modified] = await Promise.all([show(`${mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
-    diff = showDiff(path, await show(`${mergeBase}:${path}`), await show(`${head}:${path}`), `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, undefined, action);
+    diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, undefined, action);
     host.status("");
   } catch (e) {
     return host.status(`Can't show the diff: ${String(e).trim()}`);
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
-  await Promise.all([me(), pending?.number === pr.number ? null : loadPending(pr.number).catch(() => null)]);
   shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
   form = undefined;
   drawZones();
+  // Your pending review usually loaded with the pull request's page; if it's still on its way, its comments are
+  // added when it arrives.
+  pendingOf(pr.number).then(() => shown?.pr === pr && drawZones());
   if (at?.line) {
     const editor = at.side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor();
     const reveal = () => (editor.revealLineInCenter(at.line!), editor.setPosition({ lineNumber: at.line!, column: 1 }));
@@ -469,7 +493,17 @@ type Pending = { number: number; id: number; node: string; comments: ReviewComme
 let pending: Pending | null = null;
 
 /** Loads your pending review of a pull request. GitHub lists a pending review only to its author. */
-async function loadPending(number: number): Promise<Pending | null> {
+/** The last load of a pull request's pending review, finished or not, so callers share it rather than ask again. */
+let pendingLoad: { number: number; done: Promise<Pending | null> } | undefined;
+const pendingOf = (number: number) => (pendingLoad?.number === number ? pendingLoad.done : loadPending(number));
+
+function loadPending(number: number): Promise<Pending | null> {
+  const done = readPending(number);
+  pendingLoad = { number, done: done.catch(() => null) };
+  return done;
+}
+
+async function readPending(number: number): Promise<Pending | null> {
   const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
   if (!found) return (pending = null);
   const { id, node } = JSON.parse(found.split("\n")[0]);
@@ -486,7 +520,7 @@ type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: 
  * can only add comments while creating a review, so later ones go through GraphQL's addPullRequestReviewThread.
  */
 async function addPending(pr: Details, place: Place, body: string) {
-  if (pending?.number !== pr.number) await loadPending(pr.number);
+  await pendingOf(pr.number);
   if (!pending) {
     const comment = { path: place.path, line: place.line, side: place.side, body, ...(place.start_line ? { start_line: place.start_line, start_side: place.side } : {}) };
     await invoke<string>("run_capture", {
