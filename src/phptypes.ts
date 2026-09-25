@@ -143,3 +143,45 @@ function docblockAt(source: string, at: number): string {
   if (fn < 0 || end < 0 || start < 0 || !/^[\s\w#[\]()'",:=\\]*$/.test(source.slice(end + 2, fn))) return "";
   return source.slice(start, end);
 }
+
+/**
+ * Phpactor's hover Markdown, easier to read: in each PHP code block, a `// @deprecated …` comment becomes a line
+ * above the block, and a function signature longer than 80 characters gets one parameter per line.
+ */
+export function formatHoverMarkdown(markdown: string): string {
+  return markdown.replace(/```php\n([\s\S]*?)```/g, (_, code: string) => {
+    let note = "";
+    const body = code
+      .replace(/^<\?php\s*/, "")
+      .replace(/^\/\/\s*@deprecated\b\s*(.*)\n/, (_: string, why: string) => ((note = `**Deprecated**${why ? `: ${why}` : ""}\n\n`), ""))
+      .replace(/^\s*⚠\s*/, "")
+      .split("\n")
+      .map((line) => (line.length > 80 ? oneParameterPerLine(line) : line))
+      .join("\n")
+      .trimEnd();
+    return `${note}\`\`\`php\n<?php\n${body}\n\`\`\``;
+  });
+}
+
+/** A signature line with each parameter of its first parameter list on a line of its own. */
+function oneParameterPerLine(line: string): string {
+  const open = line.search(/\bfunction\s+&?\w+\s*\(/) >= 0 ? line.indexOf("(", line.search(/\bfunction\b/)) : -1;
+  if (open < 0) return line;
+  const params: string[] = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = open; i < line.length; i++) {
+    const c = line[i];
+    if ("([{<".includes(c)) depth++;
+    else if (")]}>".includes(c) && line[i - 1] !== "=") depth--;
+    if ((c === "," && depth === 1) || depth === 0) {
+      params.push(line.slice(start, i).trim());
+      start = i + 1;
+      if (depth === 0) {
+        const indent = line.match(/^\s*/)![0];
+        return `${line.slice(0, open + 1)}\n${params.filter(Boolean).map((p) => `${indent}    ${p},`).join("\n")}\n${indent}${line.slice(i)}`;
+      }
+    }
+  }
+  return line;
+}

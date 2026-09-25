@@ -114,6 +114,8 @@ function withoutEloquentMagic<D extends Diagnostic>(text: string, list: D[], fac
  *   ignores template defaults, such as Filament's `@template TModel of Model = Model`).
  * - Phpactor's unused import that a docblock uses (`@use HasFactory<UserFactory>`), or that Mago reports too, and
  *   its deprecation that Mago reports on the same line.
+ * - An unused import that the code uses with other letter case (`use HasDescription, hasIcon;`): PHP's class
+ *   names ignore case, and both checkers don't.
  * - Phpactor's "has not been defined" for a model's column set in the model.
  * - Phpactor's namespace hint in a file with no named class, such as tests/Pest.php.
  * - A member used in a trait: the classes that use the trait have it. PhpStorm doesn't check these either.
@@ -144,6 +146,9 @@ type FileFacts = {
 
 function falsePositive({ path, lines, traits, byReference, docblocks, fileClass, namedClass, sameLine }: FileFacts, facts: Facts, d: Diagnostic): boolean {
   const message = messageOf(d);
+  // PHP's class names ignore case, so `use ..., hasIcon;` uses an imported `HasIcon`; both checkers compare with case.
+  const usedWithOtherCase = (name: string) =>
+    lines.some((l) => !/^\s*use\s+[\w\\]+(\s+as\s+\w+)?\s*;/.test(l) && new RegExp(`(?<![\\w$\\\\])${name}(?!\\w)`, "i").test(l) && !new RegExp(`(?<![\\w$\\\\])${name}(?!\\w)`).test(l));
   const line = lines[d.range.start.line] ?? "";
   const byReferenceCode = /null|no-value|impossible|redundant|reference-constraint-violation|mismatched-array-index|undefined-(int|string)-array-index/;
   if (byReference && (byReferenceCode.test(String(d.code)) || /`null`/.test(message)) && byReference.test(line)) return true;
@@ -156,7 +161,11 @@ function falsePositive({ path, lines, traits, byReference, docblocks, fileClass,
       return true;
     case "worse.unused_import": {
       const name = message.match(/^Name "([^"]+)"/)?.[1]?.split("\\").pop();
-      return !!name && (new RegExp(`\\b${name}\\b`).test(docblocks) || sameLine.has(`no-redundant-use ${d.range.start.line}`));
+      return !!name && (new RegExp(`\\b${name}\\b`).test(docblocks) || usedWithOtherCase(name) || sameLine.has(`no-redundant-use ${d.range.start.line}`));
+    }
+    case "no-redundant-use": {
+      const name = message.match(/^Unused import: `([^`]+)`/)?.[1]?.split("\\").pop();
+      return !!name && usedWithOtherCase(name);
     }
     case "worse.deprecated_usage":
       return ["method", "class", "function", "constant", "property"].some((kind) => sameLine.has(`deprecated-${kind} ${d.range.start.line}`));
@@ -252,7 +261,7 @@ export function realProblems<D extends Diagnostic>(path: string, text: string, l
   };
   return withoutEloquentMagic(text, list, facts)
     .filter((d) => !documentedAfterAll(text, lineStarts, d) && !falsePositive(file, facts, d))
-    .map((d) => (isDeprecation(d) ? onDeprecatedName(text, lineStarts, d) : d));
+    .map((d) => (isDeprecation(d) ? onDeprecatedName(text, lineStarts, d) : isUnused(d) ? onUseStatement(lines, d) : d));
 }
 
 /**
@@ -274,7 +283,8 @@ const nullCall = (d: Diagnostic) => d.code === "invalid-callable" && /of type `n
 
 /** The LSP severity to show a diagnostic with: Laravel's magic as a hint (see magicNoise), and unproven types as warnings. */
 export function severityOf(d: Diagnostic): number {
-  if (magicNoise(d)) return 4;
+  // Faded rather than underlined, and not counted, as in VS Code.
+  if (magicNoise(d) || isUnused(d)) return 4;
   if (d.source === "mago" && (unproven.test(String(d.code ?? "")) || narrowerClosure(d) || nullCall(d))) return Math.max(d.severity ?? 1, 2);
   return d.severity ?? 1;
 }
@@ -426,4 +436,15 @@ function onDeprecatedName<D extends Diagnostic>(text: string, lineStarts: number
     return { line, character: o - lineStarts[line] };
   };
   return { ...d, range: { start: position(start + at), end: position(start + at + name!.length) } };
+}
+
+/** A report of an unused import, which the editor fades as a hint, as VS Code does. */
+export const isUnused = (d: Diagnostic) => d.code === "worse.unused_import" || d.code === "no-redundant-use";
+
+/** `d` widened to its whole `use …;` line, which the fade covers, when the import is on a line of its own. */
+function onUseStatement<D extends Diagnostic>(lines: string[], d: D): D {
+  const line = lines[d.range.start.line] ?? "";
+  const use = line.match(/^(\s*)use\s[^;]*;/);
+  if (!use || d.range.end.line !== d.range.start.line) return d;
+  return { ...d, range: { start: { line: d.range.start.line, character: use[1].length }, end: { line: d.range.start.line, character: use[0].length } } };
 }

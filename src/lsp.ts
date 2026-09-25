@@ -7,10 +7,11 @@ import { listen } from "@tauri-apps/api/event";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { choose } from "./palette";
+import { formatHoverMarkdown } from "./phptypes";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { isDeprecation, magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
+import { isDeprecation, isUnused, magoConfigText, problemMarkdown, realProblems, severityOf } from "./diagnostics";
 
 type M = typeof monaco.languages;
 
@@ -100,7 +101,7 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
       ...toRange(d.range),
       message: typeof d.message === "string" ? d.message : d.message.value,
       severity: severity[severityOf(d)],
-      tags: isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : undefined,
+      tags: isDeprecation(d) ? [monaco.MarkerTag.Deprecated] : isUnused(d) ? [monaco.MarkerTag.Unnecessary] : undefined,
       code: d.code?.toString(),
     })),
   );
@@ -549,7 +550,7 @@ async function startServer(
           // Phpactor answers for a docblock with its parser's node name, such as `ClassMembersNode`.
           const contents = (Array.isArray(h.contents) ? h.contents : [h.contents]).filter((c) => !/^\s*[A-Z]\w*Node\s*$/.test(typeof c === "string" ? c : c.value));
           if (!contents.length) return null;
-          return { contents: contents.map(markdown), range: h.range && toRange(h.range) };
+          return { contents: contents.map(markdown).map((c) => ({ ...c, value: formatHoverMarkdown(c.value) })), range: h.range && toRange(h.range) };
         },
       }));
     }

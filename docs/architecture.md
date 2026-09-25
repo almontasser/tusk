@@ -472,6 +472,22 @@ Monaco's deprecated tag, which draws the code struck through. Mago reports the
 whole call (`$method->setAccessible(true)`), so `realProblems` narrows its range
 to the deprecated name from the message.
 
+Unused imports (Phpactor's `worse.unused_import`, Mago's `no-redundant-use`)
+show as VS Code shows them: hints over the whole `use …;` line with Monaco's
+unnecessary tag, which fades them without an underline, and not counted as
+problems (`isUnused`). An import the code uses with other letter case (`use
+HasDescription, hasIcon;`) isn't reported: PHP's class names ignore case, and
+both checkers compare with it.
+
+### Hovers
+
+Phpactor's hover shows a member's signature in a PHP code block, on one line
+however many parameters it has, with a `// @deprecated …` comment and a `⚠`
+before it. `formatHoverMarkdown` in `phptypes.ts` moves the deprecation to a
+**Deprecated** line above the block, puts `<?php` (which Monaco needs to
+highlight PHP) on a line of its own, and gives a signature longer than 80
+characters one parameter per line.
+
 ### Problem popups and the problem page
 
 Monaco's own problem hover shows the message as plain text in the editor's

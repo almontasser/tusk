@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -109,4 +109,13 @@ test("finds a parameter in the docblock before its function, whatever its type",
   assert.equal(docblockHasParam(source, at, "body"), true);
   assert.equal(docblockHasParam(source, at, "other"), false);
   assert.equal(docblockHasParam("<?php\n/** @param int $x */\n$y = 1;\nfunction f($x) {}", 40, "x"), false);
+});
+
+test("lays out long signatures in hovers one parameter per line", () => {
+  const md = "### A # b\n\n```php\n<?php // @deprecated Use c instead\n    ⚠ public function b(bool $deadCode, array<string, int> $map = [], ?string $name = null, int ...$rest): self(A)\n```";
+  assert.equal(
+    formatHoverMarkdown(md),
+    "### A # b\n\n**Deprecated**: Use c instead\n\n```php\n<?php\npublic function b(\n    bool $deadCode,\n    array<string, int> $map = [],\n    ?string $name = null,\n    int ...$rest,\n): self(A)\n```",
+  );
+  assert.equal(formatHoverMarkdown("```php\n<?php function a(int $b): void\n```"), "```php\n<?php\nfunction a(int $b): void\n```");
 });

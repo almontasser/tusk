@@ -128,3 +128,15 @@ test("narrows a deprecation to the deprecated name", () => {
   const [kept] = realProblems("/p/app/A.php", text, "php", [d], { ...facts, phpVersion: "8.5" });
   assert.deepEqual(kept.range, { start: { line: 1, character: 9 }, end: { line: 1, character: 22 } });
 });
+
+test("counts an import used with other letter case as used", () => {
+  const text = `<?php
+use Filament\\Support\\Concerns\\HasIcon;
+use Filament\\Support\\Concerns\\HasColor;
+class A { use hasIcon; }`;
+  const list = [
+    at(text, "use Filament\\Support\\Concerns\\HasIcon", "no-redundant-use", "Unused import: `HasIcon`.", "mago-lint"),
+    at(text, "use Filament\\Support\\Concerns\\HasColor", "no-redundant-use", "Unused import: `HasColor`.", "mago-lint"),
+  ];
+  assert.deepEqual(realProblems("/p/app/A.php", text, "php", list, facts).map((d) => d.message), ["Unused import: `HasColor`."]);
+});
