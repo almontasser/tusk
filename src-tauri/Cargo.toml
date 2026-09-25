@@ -32,7 +32,9 @@ trash = "5.2.9"
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 postgres = "0.19.14"
-mysql = { version = "28.0.2", default-features = false, features = ["minimal"] }
+mysql = { version = "28.0.2", default-features = false, features = ["minimal", "native-tls"] }
+native-tls = "0.2"
+postgres-native-tls = "0.5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

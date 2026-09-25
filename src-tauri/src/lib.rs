@@ -53,8 +53,11 @@ pub fn run() {
         .manage(lsp::LspState::default())
         .manage(lsp::AiRequests::default())
         .manage(pty::PtyState::default())
+        .manage(db::Tunnels::default())
         .invoke_handler(tauri::generate_handler![
             db::db_query,
+            db::db_batch,
+            db::db_tunnel,
             fs::read_dir,
             fs::read_file,
             fs::write_file,

@@ -1845,16 +1845,34 @@ profile parses in about 100 ms.
 
 ## Database
 
-`src-tauri/src/db.rs` has one command, `db_query`, which runs one statement and
-returns column names, rows, and the number of changed rows. Every value comes
+`src-tauri/src/db.rs` has `db_query`, which runs one statement and returns
+column names, rows, and the number of changed rows, `db_batch`, which runs
+statements in one transaction, and `db_tunnel`, for SSH. Every value comes
 back as text or null, which is all the grid needs, so no driver's type mapping
 leaks into the frontend:
 
 | Driver | Crate | How values become text |
 | --- | --- | --- |
 | SQLite | `rusqlite` with its bundled SQLite | Each `ValueRef` is formatted. Blobs show their size. |
-| MySQL, MariaDB | `mysql`, without TLS | The text protocol (`query_iter`) returns every value as bytes. |
-| PostgreSQL | `postgres`, without TLS | The simple query protocol returns every value as text. |
+| MySQL, MariaDB | `mysql`, with `native-tls` | The text protocol (`query_iter`) returns every value as bytes. |
+| PostgreSQL | `postgres`, with `postgres-native-tls` | The simple query protocol returns every value as text. |
+
+TLS goes through `native-tls`, which is macOS's Security framework, so the
+system's certificate authorities apply. `ssl_mode` follows libpq: PostgreSQL
+defaults to `prefer`, which tries TLS and falls back to plain text; `prefer`
+and `require` accept any certificate, as libpq does, `verify-ca` checks the
+certificate but not the host name, and `verify-full` checks both. MySQL turns
+TLS on with a CA file (`MYSQL_ATTR_SSL_CA`, the only TLS setting in Laravel's
+MySQL config) or with `DB_SSLMODE` set to `require` or stricter.
+
+`db_tunnel` runs the system's `ssh -N -L 127.0.0.1:<free port>:<host>:<port>
+<destination>` under the same watchdog as the language servers, so it ends with
+the app, and waits up to 15 seconds for the local port to accept connections.
+`BatchMode=yes` makes a password prompt fail at once instead of hanging, and
+`ExitOnForwardFailure=yes` makes a failed forward end ssh, whose error message
+is returned. Tunnels are kept per destination and address, and reused while
+ssh runs. `database.ts` keeps the destination per project in `localStorage`
+(`db:ssh:<root>`) and connects to the tunnel's port instead of `.env`'s.
 
 Each query opens a new connection, and results stop at 1,000 rows. The query
 runs on a blocking thread, so a slow server doesn't stall the app.
@@ -1873,16 +1891,19 @@ keeps them until the connection reloads or a statement returns no rows, which
 may have changed the schema. An alias is found with a pattern (`posts p`,
 `posts as p`) anywhere in the file.
 
-Cell edits apply at once, one `UPDATE` per cell, with every value as a string
-literal that the database converts to the column's type. The row is found by
-its primary key (`primaryKeyQuery`), using the values shown in the grid. If
-the update doesn't change exactly one row, the editor reports it and keeps the
-old value. There's no batch of pending edits to submit, as PhpStorm has.
-**Add Row** runs one `INSERT` with only the columns you filled in, so the rest
-get their defaults (`DEFAULT VALUES`, or `() VALUES ()` on MySQL, when none
-are filled in). **Delete Rows** runs one `DELETE` per selected row, by primary
-key, after a confirmation in the palette. Both run the grid's query again to
-show the result.
+Grid edits are pending until **Submit**, as in PhpStorm. `makeEditable` keeps
+new values by row and column, rows to delete, and rows to add, and
+`statements()` turns them into SQL: one `UPDATE` per edited row, with every
+value as a string literal that the database converts to the column's type,
+then one `DELETE` per deleted row, then one `INSERT` per new row, with only the
+columns you filled in so the rest get their defaults (`DEFAULT VALUES`, or
+`() VALUES ()` on MySQL, when none are filled in). Rows are found by their
+primary key (`primaryKeyQuery`), using the values from before the edit, so
+changing a key column still finds the row, and a row's edits share one
+`UPDATE` for the same reason. Submit sends them to `db_batch` with
+`one_row_each`: a statement that changes no row or several rolls the whole
+batch back. Afterwards the grid's query runs again to show the result; Revert
+runs it again without submitting.
 `statementAt` finds the statement around the caret by splitting on semicolons,
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.

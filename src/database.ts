@@ -1,5 +1,5 @@
 // Database tool: tables and columns in the sidebar, a query console, and a results grid in the panel.
-// The connection comes from the project's .env, as Laravel reads it.
+// The connection comes from the project's .env, as Laravel reads it, optionally through an SSH tunnel.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import {
@@ -41,13 +41,51 @@ const icon = (name: string) => el("span", `codicon codicon-${name}`);
 
 const query = (sql: string) => invoke<Result>("db_query", { connection, sql });
 
+/** The SSH destination the project's database is reached through, or "" to connect directly. */
+const sshKey = () => `db:ssh:${host.root()}`;
+function sshDestination() {
+  try {
+    return localStorage.getItem(sshKey()) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 async function loadConnection() {
   const env = await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => "");
-  connection = connectionFromEnv(parseEnv(env), host.root(), await usesSail(host.root()));
+  const c = connectionFromEnv(parseEnv(env), host.root(), await usesSail(host.root()));
   schema = null;
-  const c = connection;
+  const ssh = c.driver === "sqlite" ? "" : sshDestination();
   $("db-connection").textContent =
-    c.driver === "sqlite" ? `SQLite · ${c.database.replace(host.root() + "/", "")}` : `${c.driver} · ${c.username}@${c.host}:${c.port}/${c.database}`;
+    c.driver === "sqlite"
+      ? `SQLite · ${c.database.replace(host.root() + "/", "")}`
+      : `${c.driver} · ${c.username}@${c.host}:${c.port}/${c.database}${ssh ? ` · via ${ssh}` : ""}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
+  connection = null;
+  // Through SSH, .env's host and port are as the SSH server sees them, such as 127.0.0.1:3306 on the server.
+  connection = ssh ? { ...c, host: "127.0.0.1", port: await invoke<number>("db_tunnel", { destination: ssh, host: c.host, port: c.port }) } : c;
+}
+
+/** Sets the SSH server to reach the project's database through, or connects directly again. */
+export function connectOverSsh() {
+  if (!host.root()) return;
+  pick(
+    "Database over SSH: type a destination, such as forge@203.0.113.5, ssh://user@host:2222, or a host from ~/.ssh/config",
+    (q) => [
+      {
+        label: q.trim() ? `Connect through ${q.trim()}` : "Connect directly, without SSH",
+        detail: q.trim() ? "Uses your SSH keys or agent; .env's DB_HOST and DB_PORT are as the server sees them" : "",
+        run: () => {
+          try {
+            if (q.trim()) localStorage.setItem(sshKey(), q.trim());
+            else localStorage.removeItem(sshKey());
+          } catch {}
+          loadTables();
+        },
+      },
+    ],
+    0,
+    { value: sshDestination() },
+  );
 }
 
 // ---- Tables ----
@@ -204,8 +242,9 @@ function cell(td: HTMLElement, value: string | null) {
 }
 
 /**
- * Double-click a cell to edit it. Enter saves the change to the database at once, and Escape cancels.
- * Click a row's number to select it (⌘-click for several), to delete the selected rows.
+ * Double-click a cell to edit it, Enter keeps the change, and Escape cancels. Click a row's number to select
+ * it (⌘-click for several) for Delete Rows, and Add Row adds one. Changes wait, marked in the grid, until
+ * Submit (or ⌘⏎) applies them all in one transaction; Revert drops them.
  */
 async function makeEditable(sql: string, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
   const driver = connection!.driver;
@@ -224,6 +263,17 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     return b;
   };
 
+  // Pending changes: new values by row and column, rows to delete, and rows to add.
+  const edits = new Map<number, Map<number, string | null>>();
+  const deletes = new Set<number>();
+  const inserts: Record<string, string | null>[] = [];
+  // Updates first, keyed on each row's values before the change, so editing a key column still finds its row.
+  const statements = () => [
+    ...[...edits].filter(([r]) => !deletes.has(r)).map(([r, cells]) => updateStatement(driver, table, Object.fromEntries([...cells].map(([c, v]) => [result.columns[c], v])), keyOf(result.rows[r]))),
+    ...[...deletes].map((r) => deleteStatement(driver, table, keyOf(result.rows[r]))),
+    ...inserts.map((values) => insertStatement(driver, table, values)),
+  ];
+
   button("Add Row", "add", () => {
     if (body.querySelector(".new-row")) return;
     const tr = el("tr", "new-row");
@@ -239,44 +289,53 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     body.prepend(tr);
     tr.parentElement!.parentElement!.parentElement!.scrollTop = 0;
     inputs[0]?.input.focus();
-    tr.onkeydown = async (e) => {
+    tr.onkeydown = (e) => {
       e.stopPropagation();
       if (e.key === "Escape") tr.remove();
-      if (e.key !== "Enter") return;
+      if (e.key !== "Enter" || e.metaKey) return;
       const values = Object.fromEntries(inputs.filter((i) => i.input.value !== "").map((i) => [i.c, i.input.value === "NULL" ? null : i.input.value]));
-      try {
-        await query(insertStatement(driver, table, values));
-        host.status(`Added a row to ${table}`);
-        run(sql, table);
-      } catch (e) {
-        host.status(`Can't add the row to ${table}: ${String(e)}`);
-      }
+      inserts.push(values);
+      // The row stays, showing what will be added.
+      tr.className = "added";
+      tr.onkeydown = null;
+      inputs.forEach((i) => cell(i.td, i.input.value === "" ? "default" : values[i.c] ?? null));
+      changed();
     };
   });
 
   const selected = new Set<number>();
   const remove = button("Delete Rows", "trash", () => {
-    const count = selected.size;
-    const label = `Delete ${count} ${count === 1 ? "row" : "rows"} from ${table}`;
-    // Confirmed in the palette rather than a native dialog, which a page reload could leave stuck on screen.
-    pick(`${label}? This can't be undone.`, () => [
-      {
-        label,
-        run: async () => {
-          let deleted = 0;
-          try {
-            for (const r of selected) deleted += (await query(deleteStatement(driver, table, keyOf(result.rows[r])))).affected;
-            host.status(`Deleted ${deleted} ${deleted === 1 ? "row" : "rows"} from ${table}`);
-          } catch (e) {
-            host.status(`Deleted ${deleted}, then stopped: ${String(e)}`);
-          }
-          run(sql, table);
-        },
-      },
-      { label: "Cancel", run: () => {} },
-    ]);
+    for (const r of selected) deletes.add(r), rows[r].classList.add("deleted");
+    selected.clear();
+    rows.forEach((row) => row.classList.remove("selected"));
+    remove.disabled = true;
+    changed();
   });
   remove.disabled = true;
+  const submit = button("Submit", "check", async () => {
+    const list = statements();
+    if (!list.length) return;
+    submit.disabled = true;
+    try {
+      await invoke("db_batch", { connection, statements: list, oneRowEach: true });
+      host.status(`Saved ${list.length} ${list.length === 1 ? "change" : "changes"} to ${table}`);
+      run(sql, table);
+    } catch (e) {
+      host.status(`Can't save the changes to ${table}: ${String(e)}`);
+      submit.disabled = false;
+    }
+  });
+  const revert = button("Revert", "discard", () => run(sql, table));
+  /** Updates the Submit and Revert buttons after a change, with the SQL they'd run as Submit's tooltip. */
+  const changed = () => {
+    const list = statements();
+    submit.disabled = revert.disabled = !list.length;
+    submit.lastChild!.textContent = list.length ? `Submit ${list.length} ${list.length === 1 ? "Change" : "Changes"}` : "Submit";
+    submit.title = list.join(";\n");
+  };
+  changed();
+  results.onkeydown = (e) => e.key === "Enter" && e.metaKey && !submit.disabled && (e.preventDefault(), submit.click());
+
   rows.forEach((tr, r) => {
     const index = tr.children[0] as HTMLElement;
     index.title = "Click to select the row, ⌘-click to select several";
@@ -291,41 +350,41 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     };
   });
   rows.forEach((tr, r) =>
-    result.columns.forEach((column, c) => {
+    result.columns.forEach((_, c) => {
       const td = tr.children[c + 1] as HTMLElement;
       td.title = "Double-click to edit. Type NULL for a null value.";
+      const current = () => (edits.get(r)?.has(c) ? edits.get(r)!.get(c)! : result.rows[r][c]);
+      const show = () => (cell(td, current()), td.classList.toggle("changed", !!edits.get(r)?.has(c)));
       td.ondblclick = () => {
-        const cells = result.rows[r];
+        if (deletes.has(r)) return;
         const input = el("input");
-        input.value = cells[c] ?? "NULL";
+        input.value = current() ?? "NULL";
         td.replaceChildren(input);
         td.classList.add("editing");
         input.focus();
         input.select();
         let done = false;
-        const finish = async (save: boolean) => {
+        const finish = (keep: boolean) => {
           if (done) return;
           done = true;
-          const value = input.value === "NULL" ? null : input.value;
-          if (save && value !== cells[c]) {
-            try {
-              const { affected } = await query(updateStatement(driver, table, column, value, keyOf(cells)));
-              if (affected !== 1) throw new Error(`${affected} rows matched the row's key`);
-              cells[c] = value;
-              host.status(`Updated ${table}.${column}`);
-            } catch (e) {
-              host.status(`Can't update ${table}.${column}: ${String(e)}`);
-            }
-          }
           td.classList.remove("editing");
-          cell(td, cells[c]);
+          if (keep) {
+            const value = input.value === "NULL" ? null : input.value;
+            const row = edits.get(r) ?? edits.set(r, new Map()).get(r)!;
+            // Back to the original value is no change at all.
+            value === result.rows[r][c] ? row.delete(c) : row.set(c, value);
+            if (!row.size) edits.delete(r);
+            changed();
+          }
+          show();
         };
         input.onkeydown = (e) => {
           if (e.key === "Enter") finish(true);
           if (e.key === "Escape") finish(false);
-          e.stopPropagation();
+          // ⌘⏎ goes on to the grid, which submits, with this edit kept first.
+          if (!(e.key === "Enter" && e.metaKey)) e.stopPropagation();
         };
-        input.onblur = () => finish(false);
+        input.onblur = () => finish(true);
       };
     }),
   );

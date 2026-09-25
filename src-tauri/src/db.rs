@@ -10,6 +10,12 @@ pub struct Connection {
     database: String,
     username: String,
     password: String,
+    /// libpq's sslmode (disable, prefer, require, verify-ca, verify-full), from DB_SSLMODE. Empty for the driver's default.
+    #[serde(default)]
+    ssl_mode: String,
+    /// A PEM file of the certificate authority to trust: MYSQL_ATTR_SSL_CA, or DB_SSLROOTCERT for PostgreSQL.
+    #[serde(default)]
+    ssl_ca: String,
 }
 
 #[derive(Serialize, Default)]
@@ -46,10 +52,119 @@ pub async fn db_query(connection: Connection, sql: String) -> Result<QueryResult
     .map_err(|e| e.to_string())?
 }
 
+/// Runs statements in one transaction, and returns how many rows each changed. If one fails, none apply. With
+/// `one_row_each`, as for edits in the results grid, a statement that changes no row or several fails too.
+#[tauri::command]
+pub async fn db_batch(connection: Connection, statements: Vec<String>, one_row_each: Option<bool>) -> Result<Vec<u64>, String> {
+    let check = move |affected: Vec<u64>| match affected.iter().position(|&n| n != 1) {
+        Some(i) if one_row_each == Some(true) => Err(format!("Nothing was saved: change {} of {} matched {} rows instead of one.", i + 1, affected.len(), affected[i])),
+        _ => Ok(affected),
+    };
+    tauri::async_runtime::spawn_blocking(move || match connection.driver.as_str() {
+        "sqlite" => {
+            let err = |e: rusqlite::Error| e.to_string();
+            let mut db = open_sqlite(&connection)?;
+            let tx = db.transaction().map_err(err)?;
+            let affected = check(statements.iter().map(|s| tx.execute(s, []).map(|n| n as u64).map_err(err)).collect::<Result<Vec<_>, _>>()?)?;
+            tx.commit().map_err(err)?;
+            Ok(affected)
+        }
+        "mysql" | "mariadb" => {
+            use mysql::prelude::Queryable;
+            let mut conn = open_mysql(&connection)?;
+            let mut tx = conn.start_transaction(mysql::TxOpts::default()).map_err(mysql_error)?;
+            let mut affected = Vec::new();
+            for s in &statements {
+                tx.query_drop(s).map_err(mysql_error)?;
+                affected.push(tx.affected_rows());
+            }
+            let affected = check(affected)?;
+            tx.commit().map_err(mysql_error)?;
+            Ok(affected)
+        }
+        "pgsql" => {
+            let mut client = open_pgsql(&connection)?;
+            let mut tx = client.transaction().map_err(pgsql_error)?;
+            let affected = check(statements.iter().map(|s| tx.execute(s.as_str(), &[]).map_err(pgsql_error)).collect::<Result<Vec<_>, _>>()?)?;
+            tx.commit().map_err(pgsql_error)?;
+            Ok(affected)
+        }
+        other => Err(format!("The {other} driver isn't supported.")),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn open_sqlite(c: &Connection) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open_with_flags(&c.database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).map_err(|e| e.to_string())
+}
+
+fn mysql_error(e: mysql::Error) -> String {
+    match e {
+        mysql::Error::MySqlError(e) => e.message,
+        e => e.to_string(),
+    }
+}
+
+/// Connects to MySQL or MariaDB. With a CA file, or `ssl_mode` set to require or verify, the connection is
+/// encrypted; `require` alone, as in libpq, doesn't check the server's certificate.
+fn open_mysql(c: &Connection) -> Result<mysql::Conn, String> {
+    let mut opts = mysql::OptsBuilder::new()
+        .ip_or_hostname(Some(&c.host))
+        .tcp_port(c.port)
+        .db_name(Some(&c.database))
+        .user(Some(&c.username))
+        .pass(Some(&c.password));
+    let mode = c.ssl_mode.as_str();
+    if !c.ssl_ca.is_empty() || matches!(mode, "require" | "verify-ca" | "verify-full") {
+        let mut ssl = mysql::SslOpts::default();
+        if !c.ssl_ca.is_empty() {
+            ssl = ssl.with_root_cert_path(Some(std::path::PathBuf::from(&c.ssl_ca)));
+        }
+        let unchecked = mode == "require" && c.ssl_ca.is_empty();
+        ssl = ssl.with_danger_accept_invalid_certs(unchecked).with_danger_skip_domain_validation(unchecked || mode == "verify-ca");
+        opts = opts.ssl_opts(ssl);
+    }
+    mysql::Conn::new(opts).map_err(mysql_error)
+}
+
+fn pgsql_error(e: postgres::Error) -> String {
+    e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string())
+}
+
+/// Connects to PostgreSQL with libpq's sslmode, which Laravel defaults to `prefer`: try TLS, and fall back
+/// to plain text. `prefer` and `require` don't check the certificate, `verify-ca` checks it but not the
+/// host name, and `verify-full` checks both, against the system's authorities and `ssl_ca`.
+fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
+    use postgres::config::SslMode;
+    let mode = if c.ssl_mode.is_empty() { "prefer" } else { c.ssl_mode.as_str() };
+    let mut tls = native_tls::TlsConnector::builder();
+    tls.danger_accept_invalid_certs(matches!(mode, "prefer" | "require"))
+        .danger_accept_invalid_hostnames(mode != "verify-full");
+    if !c.ssl_ca.is_empty() {
+        let pem = std::fs::read(&c.ssl_ca).map_err(|e| format!("Can't read {}: {e}", c.ssl_ca))?;
+        tls.add_root_certificate(native_tls::Certificate::from_pem(&pem).map_err(|e| e.to_string())?);
+    }
+    let connector = postgres_native_tls::MakeTlsConnector::new(tls.build().map_err(|e| e.to_string())?);
+    postgres::Config::new()
+        .host(&c.host)
+        .port(c.port)
+        .dbname(&c.database)
+        .user(&c.username)
+        .password(&c.password)
+        .ssl_mode(match mode {
+            "disable" => SslMode::Disable,
+            "prefer" | "allow" => SslMode::Prefer,
+            _ => SslMode::Require,
+        })
+        .connect(connector)
+        .map_err(pgsql_error)
+}
+
 fn sqlite(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     use rusqlite::types::ValueRef;
     let err = |e: rusqlite::Error| e.to_string();
-    let db = rusqlite::Connection::open_with_flags(&c.database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).map_err(err)?;
+    let db = open_sqlite(c)?;
     let mut stmt = db.prepare(sql).map_err(err)?;
     let mut result = QueryResult { columns: stmt.column_names().iter().map(|s| s.to_string()).collect(), ..Default::default() };
     if result.columns.is_empty() {
@@ -75,17 +190,8 @@ fn sqlite(c: &Connection, sql: &str) -> Result<QueryResult, String> {
 
 fn mysql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     use mysql::prelude::Queryable;
-    let err = |e: mysql::Error| match e {
-        mysql::Error::MySqlError(e) => e.message,
-        e => e.to_string(),
-    };
-    let opts = mysql::OptsBuilder::new()
-        .ip_or_hostname(Some(&c.host))
-        .tcp_port(c.port)
-        .db_name(Some(&c.database))
-        .user(Some(&c.username))
-        .pass(Some(&c.password));
-    let mut conn = mysql::Conn::new(opts).map_err(err)?;
+    let err = mysql_error;
+    let mut conn = open_mysql(c)?;
     // The text protocol returns every value as bytes, so each cell reads as a string.
     let mut rows = conn.query_iter(sql).map_err(err)?;
     let mut result = QueryResult { affected: rows.affected_rows(), ..Default::default() };
@@ -108,16 +214,8 @@ fn mysql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
 
 fn pgsql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     use postgres::SimpleQueryMessage;
-    let err = |e: postgres::Error| e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string());
-    // ponytail: no TLS; add postgres-native-tls when someone connects to a server that requires it.
-    let mut client = postgres::Config::new()
-        .host(&c.host)
-        .port(c.port)
-        .dbname(&c.database)
-        .user(&c.username)
-        .password(&c.password)
-        .connect(postgres::NoTls)
-        .map_err(err)?;
+    let err = pgsql_error;
+    let mut client = open_pgsql(c)?;
     // The simple query protocol returns every value as text.
     let mut result = QueryResult::default();
     for message in client.simple_query(sql).map_err(err)? {
@@ -131,6 +229,54 @@ fn pgsql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     Ok(result)
 }
 
+/// SSH tunnels by destination and database address, with the local port each listens on.
+#[derive(Default)]
+pub struct Tunnels(std::sync::Mutex<std::collections::HashMap<String, (std::process::Child, u16)>>);
+
+/// Forwards a free local port to `host:port` as seen from an SSH server, and returns the port. It runs the
+/// system's `ssh`, so ~/.ssh/config, keys, and the agent apply; `destination` is anything `ssh` accepts, such
+/// as `forge@203.0.113.5`, a host alias, or `ssh://user@host:2222`. A password prompt can't be answered here,
+/// so it needs key or agent authentication. A running tunnel is reused, and every tunnel ends with the app.
+#[tauri::command(async)]
+pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: String, port: u16) -> Result<u16, String> {
+    use std::process::{Command, Stdio};
+    let key = format!("{destination}|{host}|{port}");
+    let mut tunnels = state.0.lock().unwrap();
+    if let Some((child, local)) = tunnels.get_mut(&key) {
+        if matches!(child.try_wait(), Ok(None)) {
+            return Ok(*local);
+        }
+    }
+    crate::login_path();
+    let local = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", crate::lsp::WATCHDOG, "sh", "ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10"])
+        .arg("-L")
+        .arg(format!("127.0.0.1:{local}:{host}:{port}"))
+        .arg(&destination)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Can't start ssh: {e}"))?;
+    // Wait until the forward accepts connections, or ssh gives up.
+    for _ in 0..150 {
+        if let Ok(Some(_)) = child.try_wait() {
+            let mut message = String::new();
+            use std::io::Read;
+            let _ = child.stderr.take().map(|mut e| e.read_to_string(&mut message));
+            return Err(format!("SSH to {destination} failed: {}", message.trim()));
+        }
+        if std::net::TcpStream::connect(("127.0.0.1", local)).is_ok() {
+            tunnels.insert(key, (child, local));
+            return Ok(local);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    Err(format!("SSH to {destination} timed out."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,12 +286,22 @@ mod tests {
         let path = std::env::temp_dir().join("php-editor-db-test.sqlite");
         let _ = std::fs::remove_file(&path);
         rusqlite::Connection::open(&path).unwrap();
-        let c = Connection { driver: "sqlite".into(), host: String::new(), port: 0, database: path.to_string_lossy().into(), username: String::new(), password: String::new() };
+        let c = Connection { driver: "sqlite".into(), host: String::new(), port: 0, database: path.to_string_lossy().into(), username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() };
         sqlite(&c, "CREATE TABLE t (id INTEGER, name TEXT)").unwrap();
         assert_eq!(sqlite(&c, "INSERT INTO t VALUES (1, 'a'), (2, NULL)").unwrap().affected, 2);
         let r = sqlite(&c, "SELECT * FROM t").unwrap();
         assert_eq!(r.columns, ["id", "name"]);
         assert_eq!(r.rows, [vec![Some("1".into()), Some("a".into())], vec![Some("2".into()), None]]);
+
+        // A batch applies all its statements, or none when one fails.
+        let batch = |statements: &[&str]| tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, statements.iter().map(|s| s.to_string()).collect(), None));
+        assert_eq!(batch(&["UPDATE t SET name = 'b' WHERE id = 1", "DELETE FROM t WHERE id = 2"]).unwrap(), [1, 1]);
+        assert!(batch(&["INSERT INTO t VALUES (3, 'c')", "INSERT INTO missing VALUES (1)"]).is_err());
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t").unwrap().rows, [vec![Some("1".into())]]);
+        // A grid edit that matches no row undoes the others.
+        let exact = tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, vec!["DELETE FROM t WHERE id = 1".into(), "DELETE FROM t WHERE id = 99".into()], Some(true)));
+        assert!(exact.unwrap_err().contains("change 2 of 2"));
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t").unwrap().rows, [vec![Some("1".into())]]);
     }
 
     /// Against throwaway servers: `docker run -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=laravel -p 33066:3306 mysql:8`
@@ -154,7 +310,7 @@ mod tests {
     #[ignore]
     fn queries_servers() {
         for (driver, port, user) in [("mysql", 33066, "root"), ("pgsql", 54329, "postgres")] {
-            let c = Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into() };
+            let c = Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
             let run = |sql: &str| if driver == "mysql" { mysql(&c, sql) } else { pgsql(&c, sql) }.unwrap();
             run("DROP TABLE IF EXISTS t");
             run("CREATE TABLE t (id INTEGER, name TEXT, at TIMESTAMP NULL)");
@@ -162,6 +318,16 @@ mod tests {
             let r = run("SELECT * FROM t ORDER BY id");
             assert_eq!(r.columns, ["id", "name", "at"], "{driver}");
             assert_eq!(r.rows, [vec![Some("1".into()), Some("a".into()), Some("2026-01-02 03:04:05".into())], vec![Some("2".into()), None, None]], "{driver}");
+
+            let batch = |c: Connection, statements: &[&str]| tauri::async_runtime::block_on(db_batch(c, statements.iter().map(|s| s.to_string()).collect(), None));
+            let again = || Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
+            assert_eq!(batch(again(), &["UPDATE t SET name = 'b' WHERE id = 1", "DELETE FROM t WHERE id = 2"]).unwrap(), [1, 1], "{driver}");
+            assert!(batch(again(), &["DELETE FROM t", "INSERT INTO missing VALUES (1)"]).is_err(), "{driver}");
+            assert_eq!(run("SELECT count(*) FROM t").rows, [vec![Some("1".into())]], "{driver}");
         }
+        // MySQL 8 serves TLS with a certificate it made itself, which `require` accepts and `verify-full` refuses.
+        let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'");
+        assert_ne!(tls("require").unwrap().rows[0][1], Some(String::new()));
+        assert!(tls("verify-full").is_err());
     }
 }

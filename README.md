@@ -45,7 +45,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
+| Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
 | Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | Split editors | Up to four panes. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
@@ -1061,15 +1061,32 @@ your project's `.env`, as Laravel does: `DB_CONNECTION`, `DB_HOST`, `DB_PORT`,
 anything missing. SQLite, MySQL, MariaDB, and PostgreSQL work without
 installing a client, because the drivers are built into the app.
 
+TLS follows the same `.env` settings as Laravel's `config/database.php`:
+`DB_SSLMODE` (`disable`, `prefer`, `require`, `verify-ca`, or `verify-full`,
+as in PostgreSQL; PostgreSQL defaults to `prefer`), and `MYSQL_ATTR_SSL_CA` or
+`DB_SSLROOTCERT` for the certificate authority. `require` encrypts without
+checking the server's certificate, and `verify-full` checks it and the host
+name.
+
+To reach a database on a server, run **Database: Connect over SSH…** from ⌘⇧A
+and type the SSH destination, such as `forge@203.0.113.5`,
+`ssh://user@host:2222`, or a host from `~/.ssh/config`. The editor opens a
+tunnel with your Mac's `ssh`, using your keys or SSH agent (it can't ask for a
+password), and `DB_HOST` and `DB_PORT` are then as the server sees them, such
+as `127.0.0.1:3306`. Leave the destination empty to connect directly again.
+
 - Click a table to see its columns. A `?` after a type marks a nullable column.
 - Double-click a table to show its first 500 rows. Double-click a cell to
-  edit it, and press Enter to save the change to the database, or Escape to
-  cancel. Type `NULL` for a null value. Tables without a primary key are
-  read-only.
+  edit it, and press Enter to keep the change, or Escape to cancel. Type
+  `NULL` for a null value. Tables without a primary key are read-only.
 - To add a row, click **Add Row**, fill in the values, and press Enter. Leave a
   value empty to use the column's default.
 - To delete rows, click a row's number to select it (⌘-click to select
-  several), click **Delete Rows**, and confirm.
+  several), and click **Delete Rows**.
+- Changes wait, marked in the grid (yellow for edited cells, green for new
+  rows, and struck through for deleted ones), until you click **Submit** or
+  press ⌘⏎. They apply together, in one transaction: if one fails, none do.
+  Hover over **Submit** to see the SQL. **Revert** drops them.
 - Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then
   press ⌘⏎ to run the statement under the caret, or the selection. ⌘⏎ also runs
   SQL in any `.sql` file.

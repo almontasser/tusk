@@ -1,7 +1,8 @@
 // Reads a Laravel project's database connection from .env, and finds the SQL statement to run.
 // Free of editor imports so Node can test it.
 
-export type Connection = { driver: string; host: string; port: number; database: string; username: string; password: string };
+/** `ssl_mode` is libpq's sslmode, and `ssl_ca` a certificate authority file; the Rust side reads both. */
+export type Connection = { driver: string; host: string; port: number; database: string; username: string; password: string; ssl_mode: string; ssl_ca: string };
 
 export function parseEnv(text: string): Record<string, string> {
   const env: Record<string, string> = {};
@@ -19,19 +20,19 @@ export function parseEnv(text: string): Record<string, string> {
 /**
  * Laravel's defaults from config/database.php fill anything .env leaves out. In a Sail project, DB_HOST
  * names the database's container, which only resolves inside Docker, so connect to the port Sail
- * forwards to this Mac instead.
+ * forwards to this Mac instead. TLS follows the variables Laravel's config reads: DB_SSLMODE for
+ * PostgreSQL (also honored for MySQL), and MYSQL_ATTR_SSL_CA or DB_SSLROOTCERT for the authority.
  */
 export function connectionFromEnv(env: Record<string, string>, root: string, sail = false): Connection {
   const driver = env.DB_CONNECTION || "sqlite";
-  if (driver === "sqlite") {
-    const file = env.DB_DATABASE || "database/database.sqlite";
-    return { driver, host: "", port: 0, username: "", password: "", database: file.startsWith("/") ? file : `${root}/${file}` };
-  }
+  const inProject = (file: string) => (file.startsWith("/") ? file : `${root}/${file}`);
+  const tls = { ssl_mode: env.DB_SSLMODE ?? "", ssl_ca: (env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) ? inProject(env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) : "" };
+  if (driver === "sqlite") return { driver, host: "", port: 0, username: "", password: "", database: inProject(env.DB_DATABASE || "database/database.sqlite"), ssl_mode: "", ssl_ca: "" };
   const port = Number(env.DB_PORT) || (driver === "pgsql" ? 5432 : 3306);
   const host = env.DB_HOST || "127.0.0.1";
-  if (sail && !/^(127\.0\.0\.1|localhost|::1)$/.test(host))
-    return { driver, host: "127.0.0.1", port: Number(env.FORWARD_DB_PORT) || port, database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "" };
-  return { driver, host, port, database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "" };
+  const credentials = { database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "", ...tls };
+  if (sail && !/^(127\.0\.0\.1|localhost|::1)$/.test(host)) return { driver, host: "127.0.0.1", port: Number(env.FORWARD_DB_PORT) || port, ...credentials };
+  return { driver, host, port, ...credentials };
 }
 
 /** The statement around an offset, as PhpStorm runs the statement under the caret. */
@@ -95,10 +96,11 @@ function whereKey(driver: string, key: Record<string, string | null>): string {
   return Object.entries(key).map(([k, v]) => (v === null ? `${id(k)} IS NULL` : `${id(k)} = ${literal(driver, v)}`)).join(" AND ");
 }
 
-/** Updates one cell of the row whose primary key has the given values. */
-export function updateStatement(driver: string, table: string, column: string, value: string | null, key: Record<string, string | null>): string {
+/** Updates cells of the row whose primary key has the given values, as they were before the update. */
+export function updateStatement(driver: string, table: string, values: Record<string, string | null>, key: Record<string, string | null>): string {
   const id = (name: string) => quoteIdentifier(driver, name);
-  return `UPDATE ${id(table)} SET ${id(column)} = ${literal(driver, value)} WHERE ${whereKey(driver, key)}`;
+  const set = Object.entries(values).map(([column, value]) => `${id(column)} = ${literal(driver, value)}`).join(", ");
+  return `UPDATE ${id(table)} SET ${set} WHERE ${whereKey(driver, key)}`;
 }
 
 /** Deletes the row whose primary key has the given values. */

@@ -12,8 +12,14 @@ test("fills in Laravel's defaults", () => {
   assert.equal(connectionFromEnv({}, "/app").database, "/app/database/database.sqlite");
   assert.equal(connectionFromEnv({ DB_DATABASE: "/tmp/x.sqlite" }, "/app").database, "/tmp/x.sqlite");
   assert.deepEqual(connectionFromEnv({ DB_CONNECTION: "pgsql" }, "/app"), {
-    driver: "pgsql", host: "127.0.0.1", port: 5432, database: "laravel", username: "root", password: "",
+    driver: "pgsql", host: "127.0.0.1", port: 5432, database: "laravel", username: "root", password: "", ssl_mode: "", ssl_ca: "",
   });
+});
+
+test("reads TLS settings as Laravel's config does", () => {
+  const pg = connectionFromEnv({ DB_CONNECTION: "pgsql", DB_SSLMODE: "verify-full", DB_SSLROOTCERT: "storage/ca.pem" }, "/app");
+  assert.deepEqual([pg.ssl_mode, pg.ssl_ca], ["verify-full", "/app/storage/ca.pem"]);
+  assert.equal(connectionFromEnv({ DB_CONNECTION: "mysql", MYSQL_ATTR_SSL_CA: "/etc/ssl/cert.pem" }, "/app").ssl_ca, "/etc/ssl/cert.pem");
 });
 
 test("connects to Sail's forwarded port", () => {
@@ -39,8 +45,8 @@ test("quotes identifiers per driver", () => {
 test("builds cell updates", () => {
   assert.equal(literal("mysql", "a\\b'c"), "'a\\\\b''c'");
   assert.equal(literal("pgsql", "a\\b"), "'a\\b'");
-  assert.equal(updateStatement("sqlite", "posts", "title", null, { id: "7" }), `UPDATE "posts" SET "title" = NULL WHERE "id" = '7'`);
-  assert.equal(updateStatement("mysql", "t", "v", "x", { a: "1", b: null }), "UPDATE `t` SET `v` = 'x' WHERE `a` = '1' AND `b` IS NULL");
+  assert.equal(updateStatement("sqlite", "posts", { title: null }, { id: "7" }), `UPDATE "posts" SET "title" = NULL WHERE "id" = '7'`);
+  assert.equal(updateStatement("mysql", "t", { v: "x", id: "2" }, { a: "1", b: null }), "UPDATE `t` SET `v` = 'x', `id` = '2' WHERE `a` = '1' AND `b` IS NULL");
 });
 
 test("builds row inserts and deletes", () => {

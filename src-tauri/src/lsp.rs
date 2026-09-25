@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// often ignore the LSP `processId` and outlive a crashed or force-quit editor. The shell
 /// starts a loop that watches the app's PID, then `exec`s the server, so the server keeps
 /// the shell's PID and `Child::kill` still reaches it.
-const WATCHDOG: &str = r#"app=$PPID; (while kill -0 "$app" && kill -0 $$; do sleep 2; done; kill $$) >/dev/null 2>&1 </dev/null & exec "$@""#;
+pub(crate) const WATCHDOG: &str = r#"app=$PPID; (while kill -0 "$app" && kill -0 $$; do sleep 2; done; kill $$) >/dev/null 2>&1 </dev/null & exec "$@""#;
 
 /// Running language servers by name, each with a channel to the thread that writes its input.
 #[derive(Default)]

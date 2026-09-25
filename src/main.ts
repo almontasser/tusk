@@ -18,7 +18,7 @@ import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
-import { initDatabase, loadTables, openConsole } from "./database";
+import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
@@ -1142,6 +1142,7 @@ const actions: Action[] = [
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
+  { label: "Database: Connect over SSH…", run: () => (showView("database"), connectOverSsh()) },
   { label: "Composer", run: () => showView("composer") },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },
