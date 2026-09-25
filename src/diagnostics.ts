@@ -140,7 +140,7 @@ type FileFacts = {
   /** The file's class, such as `App\Models\Post`, and whether it declares a named class, interface, trait, or enum. */
   fileClass: string | undefined;
   namedClass: boolean;
-  /** `code line` of each diagnostic, to find two servers reporting the same thing. */
+  /** `code line` of each diagnostic, and `source code line:character message`, to find two servers reporting the same thing. */
   sameLine: Set<string>;
 };
 
@@ -175,6 +175,11 @@ function falsePositive({ path, lines, traits, byReference, docblocks, fileClass,
     }
     case "fix_namespace_class_name":
       return !namedClass;
+    case "parse": {
+      // `mago analyze` and `mago lint` both report each parse error.
+      const { line, character } = d.range.start;
+      return d.source === "mago" && sameLine.has(`mago-lint parse ${line}:${character} ${message}`);
+    }
     case "non-existent-method":
     case "non-existent-property": {
       const type = message.match(/on (?:type|class|interface|trait) `([^`]+)`/)?.[1] ?? "";
@@ -257,7 +262,7 @@ export function realProblems<D extends Diagnostic>(path: string, text: string, l
     docblocks: (text.match(/\/\*\*[\s\S]*?\*\//g) ?? []).join("\n"),
     fileClass: declared && (namespace ? `${namespace}\\${declared}` : declared),
     namedClass: !!declaration("class|interface|trait|enum"),
-    sameLine: new Set(list.map((d) => `${d.code} ${d.range.start.line}`)),
+    sameLine: new Set(list.flatMap((d) => [`${d.code} ${d.range.start.line}`, `${d.source} ${d.code} ${d.range.start.line}:${d.range.start.character} ${messageOf(d)}`])),
   };
   return withoutEloquentMagic(text, list, facts)
     .filter((d) => !documentedAfterAll(text, lineStarts, d) && !falsePositive(file, facts, d))
@@ -295,7 +300,7 @@ type MagoIssue = {
   message: string;
   notes?: string[];
   help?: string;
-  annotations: { kind: string; span: { file_id: { name: string }; start: { offset: number }; end: { offset: number } } }[];
+  annotations: { kind: string; message?: string; span: { file_id: { name: string }; start: { offset: number }; end: { offset: number } } }[];
   /** Each file's edits that fix the issue. `new_text` is UTF-8 bytes. */
   edits?: [unknown, { range: { start: number; end: number }; new_text: number[]; safety: string }[]][];
 };
@@ -303,7 +308,10 @@ type MagoIssue = {
 /**
  * The files `mago lint` or `mago analyze --reporting-format json` reports on, relative to the project, each with a
  * function that converts its issues for the file's text. Mago counts UTF-8 bytes; the diagnostics count UTF-16
- * units, as the language server's do. The messages match Phpactor's Mago extension's, which the filters read.
+ * units, as the language server's do. The messages match Phpactor's Mago extension's, which the filters read, except
+ * a parse error's: Mago's is always "Parse error encountered during parsing", so this takes the one on its location,
+ * such as "Expected one of `Variable`, found `LeftBrace`". Levels map as Phpactor's do: note to Information and help to
+ * Hint. The Problems panel shows neither, so the scan asks Mago for warnings and errors only.
  */
 export function magoIssuesByFile(json: string, source: "mago" | "mago-lint"): Map<string, (text: string) => Diagnostic[]> {
   const byFile = new Map<string, MagoIssue[]>();
@@ -324,7 +332,7 @@ export function magoIssuesByFile(json: string, source: "mago" | "mago-lint"): Ma
           const notes = (issue.notes ?? []).filter(Boolean).map((n) => `\n${n}`).join("");
           return {
             range: { start: position(primary.span.start.offset), end: position(primary.span.end.offset) },
-            message: issue.message + notes + (issue.help ? `\n\n${issue.help}` : ""),
+            message: (issue.code === "parse" && primary.message ? primary.message : issue.message) + notes + (issue.help ? `\n\n${issue.help}` : ""),
             severity: severity[issue.level.toLowerCase()] ?? 1,
             code: issue.code,
             source,

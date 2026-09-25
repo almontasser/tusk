@@ -327,6 +327,8 @@ async function startServer(
   };
   /** The document Phpactor checks next: the one its diagnostics engine keeps waiting (see checkOneByOne). */
   let lastEnqueued = "";
+  /** Phpactor's empty publishes waiting to apply, by document (see the publishDiagnostics handler). */
+  const heldClears = new Map<string, ReturnType<typeof setTimeout>>();
   const call = <T>(method: string, params: unknown, token?: monaco.CancellationToken) => {
     flush();
     const id = nextId++;
@@ -359,11 +361,24 @@ async function startServer(
         (e) => send({ id: msg.id, error: { code: -32603, message: String(e) } }),
       );
     } else if (msg.method === "textDocument/publishDiagnostics") {
-      diagnostics.set(msg.params.uri, msg.params.diagnostics);
-      const model = monaco.editor.getModel(monaco.Uri.parse(msg.params.uri));
-      if (model && name === "phpactor" && msg.params.uri === lastEnqueued) markDiagnosed(model);
-      if (model) setMarkers(model, owner, msg.params.diagnostics);
-      published.get(msg.params.uri)?.();
+      const { uri, diagnostics: list } = msg.params as L.PublishDiagnosticsParams;
+      diagnostics.set(uri, list);
+      const model = monaco.editor.getModel(monaco.Uri.parse(uri));
+      clearTimeout(heldClears.get(uri));
+      heldClears.delete(uri);
+      const apply = () => {
+        if (!model || model.isDisposed()) return;
+        if (name === "phpactor" && uri === lastEnqueued) markDiagnosed(model);
+        setMarkers(model, owner, list);
+      };
+      // Phpactor publishes an empty list before each check, then the list so far as each checker finishes, and
+      // nothing more for a checker that found nothing. Keeping the old markers until the check is likely done stops
+      // them from vanishing and coming back after each pause in typing.
+      // ponytail: held markers keep their old ranges (Monaco moves the squiggles, not the markers the Problems panel
+      // reads); read ranges from the decorations if that shows.
+      if (name === "phpactor" && !list.length && lastDiagnostics.get(`${owner} ${uri}`)?.shown.length) heldClears.set(uri, setTimeout(apply, 4000));
+      else apply();
+      published.get(uri)?.(list);
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
       host.status(`${name}: ${msg.params.message}`, name);
       // Phpactor asks for a restart after you trust a project's .phpactor.json.
@@ -441,11 +456,12 @@ async function startServer(
    * Phpactor's diagnostics engine keeps one waiting document: each document opened, changed, or saved replaces
    * the one before, and the engine drops a document's results once another is waiting. So when a session reopens
    * several files, only the last got checked. This asks for one file at a time, each once the one before has
-   * published and then been quiet for 3 seconds (Mago takes about 2), or after 30 seconds. A newer pass stops an
-   * older one.
+   * published results from both Mago checkers (plus half a second), or has been quiet for 5 seconds since its last
+   * publish (Mago takes about 2, and a checker that finds nothing publishes nothing), or after 30 seconds. A newer
+   * pass stops an older one.
    */
   let checkRun = 0;
-  const published = new Map<string, () => void>();
+  const published = new Map<string, (list: L.Diagnostic[]) => void>();
   async function checkOneByOne(models: monaco.editor.ITextModel[]) {
     const run = ++checkRun;
     for (const model of models) {
@@ -455,7 +471,11 @@ async function startServer(
       await new Promise<void>((resolve) => {
         const done = () => (clearTimeout(timer), published.delete(uri), resolve());
         let timer = setTimeout(done, 30000);
-        published.set(uri, () => (clearTimeout(timer), (timer = setTimeout(done, 3000))));
+        published.set(uri, (list) => {
+          clearTimeout(timer);
+          const sources = new Set(list.map((d) => d.source));
+          timer = setTimeout(done, sources.has("mago") && sources.has("mago-lint") ? 500 : 5000);
+        });
         notify("textDocument/didSave", { textDocument: { uri } });
       });
     }
@@ -525,6 +545,7 @@ async function startServer(
     request,
     stop() {
       unlisten();
+      heldClears.forEach(clearTimeout);
       disposables.forEach((d) => d.dispose());
       monaco.editor.getModels().forEach((m) => monaco.editor.setModelMarkers(m, owner, []));
       // So onModelsRead can't bring back the stopped server's markers.

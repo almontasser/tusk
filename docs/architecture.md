@@ -452,6 +452,15 @@ warning`) take about 3 seconds and 1.6 GB on a 1,000-file project.
 `run_capture` takes `anyStatus` for them, since Mago exits with an error when it
 finds problems. `magoIssuesByFile` converts the report as Phpactor's Mago
 extension does, with Mago's UTF-8 byte offsets turned into UTF-16 positions.
+Mago's message for a parse error is always "Parse error encountered during
+parsing", so for code `parse` the scan takes the message on the error's
+location instead, such as "Expected one of `Variable`, found `LeftBrace`".
+Phpactor's extension keeps the generic message for open files. Both `mago
+analyze` and `mago lint` report each parse error, so `realProblems` drops the
+`mago` one when a `mago-lint` one has the same position and message. Both
+paths map Mago's levels the same way: note to Information and help to Hint.
+The panel shows neither, so the scan asks only for warnings and errors, and
+open files show notes and help in the editor only.
 Phpactor has no project-wide check, so its diagnostics command,
 `language-server:diagnostics`, runs once per file with the file on standard
 input and the editor's index path in `--config-extra`, half the cores at a time;
@@ -584,11 +593,24 @@ replaces the one before, and it drops a document's results once another is
 waiting. So when a session reopened several files, or indexing ended and the
 editor asked for every open file again, only the last one got checked, and the
 others showed no problems until you edited them. `checkOneByOne` in `lsp.ts`
-sends `didSave` for one file at a time, the next once the last has published and
-been quiet for 3 seconds (Mago takes about 2), or after 30 seconds, when the
-server starts and when indexing ends. The client tracks the document Phpactor
-checks next (`lastEnqueued`), and a publish for it marks the file as checked
-(`diagnosed`). Until then, the Problems panel shows the scan's problems for an
+sends `didSave` for one file at a time, when the server starts and when
+indexing ends. It moves to the next file half a second after a publish that has
+results from both `mago` and `mago-lint`, 5 seconds after the last publish
+(Mago takes about 2, and a checker that finds nothing publishes nothing), or
+after 30 seconds. Moving on sooner would make Phpactor drop Mago's results for
+the file. The client tracks the document Phpactor checks next
+(`lastEnqueued`), and a publish for it marks the file as checked
+(`diagnosed`).
+
+Before each check, `DiagnosticsEngine` publishes an empty list, then the list so
+far as each checker finishes. A checker with no results publishes nothing, so
+the empty list is the only way a file that became clean loses its problems.
+Applying it at once made every squiggle vanish after each pause in typing and
+come back in stages. The client holds an empty Phpactor publish for a file
+that has problems for 4 seconds, and any later publish for the file replaces
+it. A held publish doesn't mark the file as checked. Held markers keep their
+old ranges: Monaco moves the squiggles as you type, but not the marker ranges
+that the Problems panel reads. Until then, the Problems panel shows the scan's problems for an
 open PHP file: other servers, such as the spell checker, publish first.
 
 ### Docblocks Phpactor can't read
@@ -2868,6 +2890,14 @@ for the light bulb's automatic requests as the caret moves. Suppression uses
 it's no longer needed. There's no action that turns a rule off in `mago.toml`:
 the rule label in the popup names the rule, and a project-wide change is
 better made in the file.
+
+### 2026-09-25: Phpactor's empty publish waits
+
+The client holds Phpactor's empty publish for 4 seconds instead of applying it,
+so problems don't flicker while you type. The cost is that a file you fix
+keeps its last problems for up to 4 seconds. Checking open files one at a time
+waits for results from both Mago checkers, or 5 seconds of quiet, rather than
+3 seconds of quiet, which could move on while Mago was still running.
 
 ### Editor font and ligatures
 

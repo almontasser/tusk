@@ -91,6 +91,15 @@ test("reads Mago's report with UTF-8 byte offsets", () => {
   assert.deepEqual(d.range, { start: { line: 2, character: 0 }, end: { line: 2, character: 2 } });
 });
 
+test("shows each parse error once, with the message on its location", () => {
+  const text = "<?php\nfunction a( {\n";
+  const annotations = [{ message: "Expected one of `Variable`, found `LeftBrace`", kind: "Primary", span: { file_id: { name: "a.php" }, start: { offset: 18 }, end: { offset: 19 } } }];
+  const json = JSON.stringify({ issues: [{ level: "Error", code: "parse", message: "Parse error encountered during parsing", annotations }] });
+  const list = [...magoIssuesByFile(json, "mago").get("a.php")!(text), ...magoIssuesByFile(json, "mago-lint").get("a.php")!(text)];
+  assert.equal(list[0].message, "Expected one of `Variable`, found `LeftBrace`");
+  assert.deepEqual(realProblems("/p/a.php", text, "php", list, facts).map((d) => d.source), ["mago-lint"]);
+});
+
 test("writes the project's Mago settings", () => {
   const bundled = '[source]\nincludes = ["vendor"]\nexcludes = [".*"]\n';
   const text = magoConfigText(bundled, '{"require": {"php": "^8.2|^8.3"}}', ["/stubs"], ["vendor/a.php"]);
