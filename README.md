@@ -865,8 +865,11 @@ already points Xdebug at `host.docker.internal`.
 The editor runs Xdebug's profiler and shows the result in the **Profiler** tab
 of the bottom panel. Run these from ⌘⇧A:
 
-- **Profile Test at Cursor** runs the test at the cursor with the profiler,
-  and opens its profile when the run ends.
+- **Profile Test at Cursor**, or the **Profile** link above a test, runs the
+  test with the profiler and opens its profile when the run ends.
+- **Profile URL…** asks for a path, such as `/posts?page=2`, requests it
+  through the profiling server (starting the server if needed), and opens that
+  request's profile. The status bar shows the response code and time.
 - **Start Profiling Server (PHP's server with the Xdebug profiler)** serves the
   app at `http://127.0.0.1:8000`, as `php artisan serve` does, or on the next
   free port if 8000 is taken. Each request writes a profile.
@@ -887,8 +890,14 @@ function that calls back into one of its callers isn't opened again. A node's
 children are everything its function called, from any caller, so the tree
 stays fast for millions of calls.
 
+Type in the filter while the call tree shows to find a function's back trace:
+the matching functions are listed first, each opening to the functions that
+called it, and the busiest chain of callers of the first match opens at once.
+
 With **Times in editor** on, open files show how long the calls on each line
-took, at the end of the line, such as `199 ms · 74.6%`. Lines over 10% of the
+took, at the end of the line, such as `199 ms · 74.6%`. A function's
+declaration shows its total time and how often it ran, such as
+`⏱ 334 ms · 89.1% · 1 call`. Lines over 10% of the
 run are orange, and over 1% yellow. Hover over a time to see how many calls it
 covers. Lines under a thousandth of the run are left out.
 

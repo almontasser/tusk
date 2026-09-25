@@ -4,7 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import { type Call, parseCachegrind, type Profile, type ProfiledFunction } from "./cachegrind";
+import type { Call, Profile, ProfiledFunction } from "./cachegrind";
+import ParseWorker from "./cachegrind.worker?worker";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
 import { openTerminal, showPanelView } from "./terminal";
@@ -32,17 +33,80 @@ const KEEP_PROFILES = 50;
  * Serves the app with PHP's built-in server and Laravel's server.php, as `artisan serve` does, on the first free port
  * from 8000. Not through `artisan serve`: it passes only some variables to the server, and XDEBUG_TRIGGER isn't one.
  */
-export async function startProfilingServer() {
+export async function startProfilingServer(): Promise<number | undefined> {
   const root = host.root();
-  const server = "vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php";
-  if (!(await invoke<boolean>("path_exists", { path: `${root}/${server}` }))) return host.status("The profiling server needs a Laravel project with its vendor folder installed.");
+  const script = "vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php";
+  if (!(await invoke<boolean>("path_exists", { path: `${root}/${script}` }))) {
+    host.status("The profiling server needs a Laravel project with its vendor folder installed.");
+    return undefined;
+  }
   let port = 8000;
-  // lsof exits with an error when nothing listens on the port.
-  while (port < 8100 && (await invoke("run_capture", { cwd: "/", program: "/usr/sbin/lsof", args: ["-iTCP:" + port, "-sTCP:LISTEN"], input: null }).then(() => true, () => false))) port++;
+  while (port < 8100 && (await listening(port))) port++;
   const dir = await profileDir();
   host.status(`Profiling server on http://127.0.0.1:${port}. Each request writes a profile; open it with Open Xdebug Profile….`);
   // server.php finds the public folder from the working directory, as artisan serve runs it.
-  openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...profileEnv(dir), "php", "-S", `127.0.0.1:${port}`, `${root}/${server}`]);
+  openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...profileEnv(dir), "php", "-S", `127.0.0.1:${port}`, `${root}/${script}`]);
+  server = { root, port };
+  return port;
+}
+
+/** The profiling server this session started, so Profile URL can reuse it. */
+let server: { root: string; port: number } | undefined;
+
+/** Whether something listens on a local port. lsof exits with an error when nothing does. */
+const listening = (port: number) =>
+  invoke("run_capture", { cwd: "/", program: "/usr/sbin/lsof", args: ["-iTCP:" + port, "-sTCP:LISTEN"], input: null }).then(
+    () => true,
+    () => false,
+  );
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Asks for a path, requests it through the profiling server (starting it if needed), and opens that request's profile. */
+export function profileUrl() {
+  const last = readSetting(`profilerUrl:${host.root()}`) ?? "/";
+  pick(
+    "Profile a URL: type the path to request, such as /posts?page=2",
+    (query) => {
+      const path = "/" + query.trim().replace(/^https?:\/\/[^/]+/, "").replace(/^\/+/, "");
+      return [{ label: `GET ${path}`, detail: "Request it through the profiling server and open its profile", icon: "codicon-pulse", run: () => requestAndProfile(path) }];
+    },
+    0,
+    { value: last, select: [0, last.length] },
+  );
+}
+
+async function requestAndProfile(path: string) {
+  const root = host.root();
+  try {
+    localStorage.setItem(`profilerUrl:${root}`, path);
+  } catch {}
+  let port = server?.root === root && (await listening(server.port)) ? server.port : await startProfilingServer();
+  if (!port) return;
+  // Wait for the server to accept connections.
+  for (let i = 0; i < 25 && !(await listening(port)); i++) await sleep(200);
+  const dir = await profileDir();
+  const since = Math.floor(Date.now() / 1000);
+  host.status(`Requesting ${path}…`, "profiler:progress");
+  const result = await invoke<string>("run_capture", {
+    cwd: "/",
+    program: "/usr/bin/curl",
+    args: ["-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}", `http://127.0.0.1:${port}${path}`],
+    input: null,
+  }).catch(() => "");
+  host.status("", "profiler:progress");
+  const [code, seconds] = result.split(" ");
+  if (!code || code === "000") return host.status(`Couldn't request ${path}: the profiling server didn't answer. See its terminal tab.`);
+  // Xdebug finishes the profile when PHP shuts the request down, just after the response: wait until it stops growing.
+  let size = -1;
+  for (let i = 0; i < 25; i++) {
+    const newest = await newestProfile(dir, since);
+    if (newest && newest.size === size) break;
+    size = newest?.size ?? -1;
+    await sleep(200);
+  }
+  await openNewestProfile(dir, since, `GET ${path} (${code})`);
+  host.status(`GET ${path}: ${code} in ${Math.round(Number(seconds) * 1000)} ms (with the profiler, which slows PHP down).`);
 }
 
 /** Profile files in a folder with their modification time (Unix seconds) and size. */
@@ -59,10 +123,14 @@ async function profilesIn(dir: string): Promise<{ path: string; time: number; si
  * Opens the largest profile written since `since` (Unix seconds), which is the one that did the work:
  * `artisan test` also writes a small profile for itself.
  */
-export async function openNewestProfile(dir: string, since: number) {
-  const largest = (await profilesIn(dir)).filter((f) => Number(f.path.match(/cachegrind\.out\.(\d+)/)?.[1]) >= since).sort((a, b) => b.size - a.size)[0];
+/** The largest profile written since `since` (Unix seconds). */
+const newestProfile = async (dir: string, since: number) =>
+  (await profilesIn(dir)).filter((f) => Number(f.path.match(/cachegrind\.out\.(\d+)/)?.[1]) >= since).sort((a, b) => b.size - a.size)[0];
+
+export async function openNewestProfile(dir: string, since: number, label?: string) {
+  const largest = await newestProfile(dir, since);
   if (!largest) return host.status("Profiling failed: Xdebug wrote no profile. Check that Xdebug is installed (php -m).");
-  await openProfile(largest.path);
+  await openProfile(largest.path, label);
   // Keep the newest profiles only; a Laravel request's profile can be several megabytes.
   const old = (await profilesIn(dir)).sort((a, b) => b.time - a.time).slice(KEEP_PROFILES);
   for (const f of old) await invoke("remove_path", { path: f.path }).catch(() => {});
@@ -93,8 +161,11 @@ export async function chooseProfile() {
   pick(files.length ? "Open an Xdebug profile" : "No profiles yet: run Profile Test at Cursor, or choose a file", (q) => rank(q, items));
 }
 
-/** Reads a profile, decompressing it when Xdebug gzipped it (the default), and shows the Profiler tab. */
-export async function openProfile(path: string) {
+/**
+ * Reads a profile, decompressing it when Xdebug gzipped it (the default), and shows the Profiler tab. `label` names
+ * what was profiled, such as a request; without it, the tab shows the script Xdebug recorded.
+ */
+export async function openProfile(path: string, label?: string) {
   host.status(`Reading ${path.split("/").pop()}…`, "profiler:progress");
   let text: string;
   try {
@@ -105,20 +176,31 @@ export async function openProfile(path: string) {
     host.status("", "profiler:progress");
     return host.status(`Couldn't read the profile: ${e}`);
   }
-  // Let the status bar paint before parsing, which takes a moment for a large profile.
-  await new Promise((r) => setTimeout(r, 0));
-  const parsed = parseCachegrind(text);
+  const parsed = await parse(text).catch(() => null);
   host.status("", "profiler:progress");
+  if (!parsed) return host.status(`Couldn't read the profile: ${path} failed to parse.`);
   if (!parsed.functions.length) return host.status(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
   profile = parsed;
+  functionsByFile = new Map();
+  for (const f of profile.functions) functionsByFile.set(f.file, [...(functionsByFile.get(f.file) ?? []), f]);
   selected = undefined;
   expanded = hotPath();
-  q(".tests-summary").textContent = `${relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
+  q(".tests-summary").textContent = `${label ?? relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
   q(".tests-summary").title = path;
   render();
   showDetail();
   decorateAll();
   showPanelView("Profiler", panel);
+}
+
+/** Parses in a worker; a profile of a large request can be hundreds of megabytes. */
+function parse(text: string) {
+  const worker = new ParseWorker();
+  return new Promise<Profile>((resolve, reject) => {
+    worker.onmessage = (e: MessageEvent<Profile>) => resolve(e.data);
+    worker.onerror = (e) => reject(new Error(e.message));
+    worker.postMessage(text);
+  }).finally(() => worker.terminate());
 }
 
 // ---- The Profiler tab ----
@@ -131,7 +213,7 @@ let selected: ProfiledFunction | undefined;
 /** The rows the table shows, in order, so the arrow keys can move through them. */
 let shown: Row[] = [];
 /** A table row: a function, or in the call tree, a function under its caller, with the calls on that path. */
-type Row = { fn: ProfiledFunction; key: string; depth: number; calls: number; time: number; recursive?: boolean };
+type Row = { fn: ProfiledFunction; key: string; depth: number; calls: number; time: number; recursive?: boolean; match?: boolean };
 /** Call tree nodes that are open, by their path of function names from the root. */
 let expanded = new Set<string>();
 
@@ -195,7 +277,10 @@ const times = q('[data-option="editor"] input') as HTMLInputElement;
 const tableEl = q(".profiler-table");
 project.checked = projectOnly;
 times.checked = editorTimes;
-filter.oninput = () => render();
+filter.oninput = () => {
+  if (view === "tree") openBackTrace();
+  render();
+};
 project.onchange = () => {
   projectOnly = project.checked;
   saveSetting("profilerProjectOnly", projectOnly);
@@ -211,6 +296,7 @@ panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
   (b) =>
     (b.onclick = () => {
       view = b.dataset.view as typeof view;
+      if (view === "tree") openBackTrace();
       panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v === b)));
       render();
       tableEl.focus();
@@ -224,7 +310,7 @@ tableEl.onkeydown = (e) => {
   const row = shown[at];
   if (e.key in moves && shown.length) selectRow(shown[Math.max(0, Math.min(shown.length - 1, at + moves[e.key]))]);
   else if (e.key === "Enter" && selected) openSource(selected);
-  else if (view === "tree" && row && e.key === "ArrowRight" && !row.recursive && row.fn.callees.length) {
+  else if (view === "tree" && row && e.key === "ArrowRight" && !row.recursive && (filterWords().length ? row.fn.callers : row.fn.callees).length) {
     if (expanded.has(row.key)) selectRow(shown[at + 1]);
     else (expanded.add(row.key), render());
   } else if (view === "tree" && row && e.key === "ArrowLeft") {
@@ -253,7 +339,7 @@ const columns = {
     ["memory", "Memory", "How much memory in use grew over its calls, including what it called. Memory freed before a call returned doesn't count."],
   ],
   tree: [
-    ["name", "Call tree", "Each function under the functions that called it"],
+    ["name", "Call tree", "Each function under the function that called it. Type in the filter to see a function's callers instead."],
     ["calls", "Calls", "How many times the caller called it"],
     ["inclusive", "Time", "Time in those calls, including what they called"],
   ],
@@ -261,7 +347,9 @@ const columns = {
 
 /** Shows the function table, or the call tree, with the chosen sort and filter. */
 function render() {
-  const heads = columns[view].map(([key, label, tip]) => {
+  const backTrace = view === "tree" && filterWords().length > 0;
+  const heads = columns[view].map(([key, name, tip]) => {
+    const label = backTrace && key === "name" ? "Called by" : name;
     const th = Object.assign(document.createElement("th"), { textContent: label, title: tip, className: key === "name" ? "" : "num" });
     th.dataset.sort = key;
     if (view === "functions") th.onclick = () => ((sort = key), render());
@@ -272,7 +360,8 @@ function render() {
   tr.append(...heads);
   q("thead").replaceChildren(tr);
   panel.classList.toggle("tree-view", view === "tree");
-  filter.disabled = project.disabled = view === "tree";
+  project.disabled = view === "tree";
+  filter.placeholder = view === "tree" ? "Find in the call tree" : "Filter functions";
   let note = "";
   if (view === "functions") {
     const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -283,7 +372,12 @@ function render() {
     note = matching.length > MAX_ROWS ? `${matching.length - MAX_ROWS} more functions. Filter to find them.` : !matching.length ? "No functions match." : "";
   } else {
     shown = treeRows();
-    note = shown.length >= MAX_TREE_ROWS ? "The tree shows its first rows. Close some nodes to see the rest." : "";
+    note =
+      shown.length >= MAX_TREE_ROWS
+        ? "The tree shows its first rows. Close some nodes, or find a function, to see the rest."
+        : !shown.length
+          ? "No functions match."
+          : "";
   }
   q("tbody").replaceChildren(...shown.map(view === "functions" ? functionRow : treeRow));
   if (note) {
@@ -316,20 +410,48 @@ function functionRow(r: Row) {
 
 const MAX_TREE_ROWS = 2000;
 
-/** The rows of open nodes, depth first, children by time. A function already on the path isn't opened again. */
+/**
+ * The rows of open nodes, depth first, children by time. A function already on the path isn't opened again.
+ * With text in the filter, the matching functions are the roots instead, and each opens to the functions that
+ * called it: a back trace, as PhpStorm calls it.
+ */
 function treeRows(): Row[] {
   const rows: Row[] = [];
-  const roots = profile.functions.filter((f) => !f.callers.length).sort((a, b) => b.inclusive - a.inclusive);
+  const words = filterWords();
+  const up = words.length > 0;
   const walk = (row: Row, path: Set<ProfiledFunction>) => {
     if (rows.length >= MAX_TREE_ROWS) return;
     rows.push(row);
     if (row.recursive || !expanded.has(row.key)) return;
     const next = new Set(path).add(row.fn);
-    for (const c of [...row.fn.callees].sort((a, b) => b.time - a.time))
+    for (const c of [...(up ? row.fn.callers : row.fn.callees)].sort((a, b) => b.time - a.time))
       walk({ fn: c.fn, key: `${row.key}\n${c.fn.name}`, depth: row.depth + 1, calls: c.calls, time: c.time, recursive: next.has(c.fn) }, next);
   };
-  for (const f of roots) walk({ fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive }, new Set());
+  for (const f of treeRoots()) walk({ fn: f, key: `${up ? "↑" : ""}${f.name}`, depth: 0, calls: f.calls, time: f.inclusive, match: up }, new Set());
   return rows;
+}
+
+const filterWords = () => filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+
+/** The call tree's roots: where the run starts, or with text in the filter, the matching functions by total time. */
+function treeRoots() {
+  const words = filterWords();
+  const roots = words.length ? profile.functions.filter((f) => words.every((w) => f.name.toLowerCase().includes(w))) : profile.functions.filter((f) => !f.callers.length);
+  return roots.sort((a, b) => b.inclusive - a.inclusive).slice(0, MAX_ROWS);
+}
+
+/** Opens the busiest chain of callers above the first match, so its back trace shows at once. */
+function openBackTrace() {
+  const first = treeRoots()[0];
+  if (!first) return;
+  let key = `↑${first.name}`;
+  const seen = new Set<ProfiledFunction>();
+  for (let fn: ProfiledFunction | undefined = first; fn && !seen.has(fn) && seen.size < 40; ) {
+    seen.add(fn);
+    expanded.add(key);
+    fn = [...fn.callers].sort((a, b) => b.time - a.time)[0]?.fn;
+    if (fn) key = `${key}\n${fn.name}`;
+  }
 }
 
 /** Opens the busiest path from the root, as long as each step takes at least a tenth of the run. */
@@ -352,9 +474,10 @@ function hotPath() {
 function treeRow(r: Row) {
   const tr = document.createElement("tr");
   tr.classList.toggle("selected", r.key === selectedKey);
+  tr.classList.toggle("match", !!r.match);
   const name = cell("", "name");
   name.style.paddingLeft = `${6 + r.depth * 14}px`;
-  const canOpen = !r.recursive && r.fn.callees.length > 0;
+  const canOpen = !r.recursive && (filterWords().length ? r.fn.callers : r.fn.callees).length > 0;
   const chevron = Object.assign(document.createElement("span"), {
     className: `chevron codicon ${canOpen ? (expanded.has(r.key) ? "codicon-chevron-down" : "codicon-chevron-right") : ""}`,
   });
@@ -367,7 +490,9 @@ function treeRow(r: Row) {
   name.append(chevron, displayName(r.fn));
   if (r.recursive) name.append(Object.assign(document.createElement("span"), { className: "where", textContent: "↻ calls back into a caller" }));
   name.title = `${r.fn.name}\n${where(r.fn)}`;
-  const time = timeCell(r.time, "bar");
+  // In a back trace, a caller's time would be the time of its own call to the next row up, not the time it spent
+  // reaching the function you found, so only the found functions show times.
+  const time = filterWords().length && r.depth > 0 ? cell("", "num") : timeCell(r.time, "bar");
   time.style.setProperty("--share", share(r.time) || "0%");
   tr.append(name, cell(String(r.calls), "num"), time);
   tr.onclick = () => (selectRow(r), tableEl.focus());
@@ -442,33 +567,54 @@ function calls(label: string, list: Call[]) {
 }
 
 // ---- Times in the editor ----
-// At the end of each line that made calls, the time those calls took, from the open profile. Lines under a
-// thousandth of the run are left out, so the marks point at what matters.
+// From the open profile: at the end of each line that made calls, the time those calls took, and at each function's
+// declaration, its total time. Anything under a thousandth of the run is left out, so the marks point at what matters.
 
 const lineDecorations = new Map<monaco.editor.ITextModel, string[]>();
 
+/** Functions by the file that defines them, for the times at their declarations. */
+let functionsByFile = new Map<string, ProfiledFunction[]>();
+
 function decorate(model: monaco.editor.ITextModel) {
-  const lines = editorTimes ? profile.sites.get(model.uri.fsPath) : undefined;
+  const path = model.uri.fsPath;
   const min = profile.total / 1000;
-  const marks = [...(lines ?? [])].filter(([line, site]) => site.time >= min && line <= model.getLineCount());
-  const ids = model.deltaDecorations(
-    lineDecorations.get(model) ?? [],
-    marks.map(([line, site]) => {
-      const part = site.time / profile.total;
-      const column = model.getLineMaxColumn(line);
-      return {
-        range: new monaco.Range(line, column, line, column),
-        options: {
-          after: { content: `  ${ms(site.time)} · ${share(site.time)}`, inlineClassName: `profile-time${part >= 0.1 ? " hot" : part >= 0.01 ? " warm" : ""}` },
-          hoverMessage: { value: `Calls from this line: ${site.calls}, taking ${ms(site.time)} (${share(site.time)} of the profiled run).` },
-          // The range is empty (the end of the line), and Monaco hides empty decorations without this.
-          showIfCollapsed: true,
-          stickiness: 1,
-        },
-      };
-    }),
-  );
-  lineDecorations.set(model, ids);
+  const lineCount = model.getLineCount();
+  const heat = (time: number) => (time / profile.total >= 0.1 ? " hot" : time / profile.total >= 0.01 ? " warm" : "");
+  const at = (line: number, content: string, className: string, hover: string): monaco.editor.IModelDeltaDecoration => {
+    const column = model.getLineMaxColumn(line);
+    return {
+      range: new monaco.Range(line, column, line, column),
+      options: {
+        after: { content, inlineClassName: className },
+        hoverMessage: { value: hover },
+        // The range is empty (the end of the line), and Monaco hides empty decorations without this.
+        showIfCollapsed: true,
+        stickiness: 1,
+      },
+    };
+  };
+  const marks = !editorTimes
+    ? []
+    : [
+        // Where a function is declared: its total time and how often it ran.
+        ...(functionsByFile.get(path) ?? [])
+          .filter((f) => f.inclusive >= min && f.line > 0 && f.line <= lineCount)
+          .map((f) =>
+            at(
+              f.line,
+              `  ⏱ ${ms(f.inclusive)} · ${share(f.inclusive)} · ${f.calls} ${f.calls === 1 ? "call" : "calls"}`,
+              `profile-time declaration${heat(f.inclusive)}`,
+              `\`${displayName(f)}\` ran ${f.calls} ${f.calls === 1 ? "time" : "times"}: ${ms(f.inclusive)} in total (${share(f.inclusive)} of the run), ${ms(f.self)} in its own code, ${bytes(f.memory)} of memory.`,
+            ),
+          ),
+        // Where calls are made: how long they took.
+        ...[...(profile.sites.get(path) ?? [])]
+          .filter(([line, site]) => site.time >= min && line <= lineCount)
+          .map(([line, site]) =>
+            at(line, `  ${ms(site.time)} · ${share(site.time)}`, `profile-time${heat(site.time)}`, `Calls from this line: ${site.calls}, taking ${ms(site.time)} (${share(site.time)} of the profiled run).`),
+          ),
+      ];
+  lineDecorations.set(model, model.deltaDecorations(lineDecorations.get(model) ?? [], marks));
 }
 
 const decorateAll = () => monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach(decorate);

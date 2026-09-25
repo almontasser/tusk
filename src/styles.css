@@ -680,11 +680,13 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler th[data-sort="calls"] { width: 70px; }
 .profiler th[data-sort="memory"] { width: 90px; }
 .profiler.tree-view th[data-sort="inclusive"] { width: 150px; }
+.profiler tbody tr.match td.name { color: var(--yellow); }
 .profiler .chevron { display: inline-block; width: 16px; vertical-align: -3px; color: var(--faint); font-size: 14px !important; }
 /* Times of the calls on each line, after the line in the editor. */
 .profile-time { color: var(--faint) !important; font-style: italic; }
 .profile-time.warm { color: var(--yellow) !important; }
 .profile-time.hot { color: var(--orange) !important; font-weight: 600; }
+.profile-time.declaration { font-style: normal; }
 .profiler td { padding: 2px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .profiler tbody tr:hover, .profiler-detail tr:hover { background: var(--hover); }
 .profiler tbody tr.selected { background: var(--selected-inactive); }

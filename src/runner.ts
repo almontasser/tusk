@@ -56,7 +56,7 @@ async function run(title: string, command: string[], tests = false, mode: Mode =
     clearInterval(timer);
     if (!(await showResults(report)) && live) showLive(events, false);
     if (coverage) showCoverage(clover);
-    if (profiles) openNewestProfile(profiles, started);
+    if (profiles) openNewestProfile(profiles, started, title);
   });
 }
 
@@ -231,6 +231,7 @@ export function initRunner(root: () => string, open: (path: string, line: number
             return [
               { range, command: { id: "tests.run", title: test.filter ? "▶ Run test" : "▶ Run all tests in file", arguments: [path, test] } },
               { range, command: { id: "tests.run", title: "Debug", arguments: [path, test, "debug"] } },
+              { range, command: { id: "tests.run", title: "Profile", arguments: [path, test, "profile"] } },
             ];
           });
       return { lenses, dispose() {} };

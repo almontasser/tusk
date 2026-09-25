@@ -1418,6 +1418,23 @@ Memory comes from the second event, `Memory_(bytes)`. Xdebug measures it as
 the growth in memory use over a call, so the own amounts don't add up to a
 caller's, and the table shows only the total, counted like total time.
 
+Profiles parse in a Web Worker (`src/cachegrind.worker.ts`), so a large one
+doesn't freeze the window. Structured cloning keeps the references between
+functions (callers and callees) when the result comes back.
+
+Profile URL starts the profiling server when this session hasn't, or when its
+port no longer answers, and requests the path with `curl`. Xdebug finishes a
+profile when PHP shuts the request down, just after the response is sent, so
+the editor waits until the newest profile stops growing before opening it.
+
+With text in the filter, the call tree turns into back traces: the matching
+functions are the roots, and a node's children are its function's callers.
+Walking down from the root instead, through every function that can reach a
+match, explodes in a Laravel app, where nearly everything passes through the
+same pipeline and container functions. A caller row in a back trace shows no
+time, because the pair's time is its own call to the row above, not time spent
+reaching the match.
+
 The call tree is built from the caller-to-callee pairs, not from each call: a
 node's children are everything its function called, from any caller. Keeping
 the real tree would cost memory for every call. A function already on a node's
