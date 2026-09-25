@@ -476,7 +476,17 @@ moving a file drops its problems (`forgetPath`). A scan that a newer one
 replaced (the project changed) checks its run number after each wait and stops
 without publishing; **Scan Project** does nothing while a scan runs. The panel's Errors and
 Warnings toggles filter the list, not the status bar counts, and are kept in
-`localStorage` (`problemsShown`).
+`localStorage` (`problemsShown`). The **Current File** toggle (`problemsCurrentFile`)
+keeps the file in the editor, and the filter box keeps problems for which
+`matchesFilter` in `diagnostics.ts` finds every word in the message, the
+`source(code)` label, or the relative path. Files with errors sort first.
+
+The panel keeps the selected row's key, a file's path or a problem's path,
+position, and message, so a redraw keeps the selection. The list is a focusable
+`role="tree"` that handles the arrow keys, Enter, and ⌘C itself; the context
+menu is `showMenu` from `files.ts`. `main.ts` calls `followEditor` when the
+cursor moves or the tabs redraw: it selects the row of the problem under the
+cursor, and redraws the panel when the file changes and **Current File** is on.
 
 `problemCounts` also returns the files with errors. `updateProblems` in
 `main.ts`, which runs after the panel's debounced render and after the tabs
@@ -2929,6 +2939,13 @@ A file with errors shows its name in red with a wavy underline in the tree and
 its tab, and the folders above it show their names in red, as in PhpStorm.
 Warnings get no mark, and there's no setting for them: most PHP files have a
 warning, so marking them would color most of the tree.
+
+### 2026-09-25: The Problems panel filter is plain words
+
+The filter matches plain words against the message, rule label, and path. It
+has no `@source:` or `!exclude` syntax, no Info toggle, no Collapse All, and no
+cap on rendered rows: add them when someone asks. Quick Fix isn't in the row's
+context menu, since Enter and then ⌥⏎ do the same.
 
 ### Editor font and ligatures
 

@@ -854,11 +854,16 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .problems-tree { flex: 1; overflow: auto; border-top: 1px solid var(--border-subtle); padding: 4px 0; }
 .problems-row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 10px 0 6px; white-space: nowrap; cursor: default; }
 .problems-row:hover { background: var(--hover); }
+.problems-row.selected { background: var(--selected-inactive); }
+.problems-tree:focus { outline: none; }
+.problems-tree:focus .problems-row.selected { background: var(--selected); }
+.problems-filter { width: 180px; padding: 3px 8px; font-size: 12px; }
 .problems-item { padding-left: 42px; }
 .problems-file .codicon-chevron-down, .problems-file .codicon-chevron-right { color: var(--faint); }
 .problems-message { overflow: hidden; text-overflow: ellipsis; }
 .problems-muted { color: var(--faint); overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 40%; }
-.problems-count { margin-left: auto; padding: 0 6px; border-radius: 8px; background: var(--hover); color: var(--muted); }
+.problems-count { display: flex; gap: 3px; align-items: center; margin-left: auto; padding: 0 6px; border-radius: 8px; background: var(--hover); color: var(--muted); }
+.problems-count .codicon { font-size: 12px; }
 
 /* ==========================================================================
    HTTP client

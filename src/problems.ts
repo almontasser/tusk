@@ -4,7 +4,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { facts, projectCache, readModels } from "./eloquent";
-import { formatType, magoIssuesByFile, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
+import { formatType, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
+import { showMenu } from "./files";
+import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
 import { showPanelView } from "./terminal";
 
@@ -65,11 +67,45 @@ function severityToggle(severity: monaco.MarkerSeverity, icon: string, name: str
 }
 const errorToggle = severityToggle(monaco.MarkerSeverity.Error, "codicon-error icon-error", "Errors");
 const warningToggle = severityToggle(monaco.MarkerSeverity.Warning, "codicon-warning icon-warning", "Warnings");
-toolbar.append(rescan, errorToggle.button, warningToggle.button, summary);
+const filter = document.createElement("input");
+filter.type = "search";
+filter.className = "problems-filter";
+filter.placeholder = "Filter";
+filter.title = "Show problems whose message, rule, or path contains every word";
+filter.oninput = () => render();
+/** Whether the panel lists only the problems of the file in the editor, remembered across restarts. */
+let currentOnly = (() => {
+  try {
+    return localStorage.getItem("problemsCurrentFile") === "true";
+  } catch {
+    return false;
+  }
+})();
+const currentFile = document.createElement("button");
+currentFile.className = "problems-toggle";
+currentFile.innerHTML = '<span class="codicon codicon-file"></span> Current File';
+currentFile.title = "Show only the file in the editor";
+currentFile.onclick = () => {
+  currentOnly = !currentOnly;
+  try {
+    localStorage.setItem("problemsCurrentFile", String(currentOnly));
+  } catch {}
+  render();
+};
+toolbar.append(rescan, errorToggle.button, warningToggle.button, currentFile, filter, summary);
 const list = document.createElement("ul");
 list.className = "problems-tree";
+list.role = "tree";
+list.tabIndex = 0;
 panel.append(toolbar, list);
 const collapsed = new Set<string>();
+/** The file in the editor and its cursor, which the Current File toggle and the selection follow. */
+let caret: { path: string; position: monaco.IPosition | null } = { path: "", position: null };
+/** The selected row's key: a file's path, or a problem's path, position, and message. */
+let selected = "";
+/** The rows on screen, in order, for the arrow keys. */
+let rows: { key: string; path: string; problem?: Problem; row: HTMLElement }[] = [];
+const keyOf = (path: string, p: Problem) => `${path}:${p.range.startLineNumber}:${p.range.startColumn}:${p.message}`;
 
 const MARKER = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warning } as Record<number, monaco.MarkerSeverity>;
 /** A severity's name in the icon and squiggle classes. */
@@ -109,27 +145,85 @@ export function problemCounts() {
   };
 }
 
+/** Marks a row as selected, and scrolls to it unless the panel is only redrawing. */
+function select(key: string, scroll = true) {
+  selected = key;
+  for (const r of rows) {
+    r.row.classList.toggle("selected", r.key === key);
+    r.row.ariaSelected = String(r.key === key);
+    if (r.key === key && scroll) r.row.scrollIntoView({ block: "nearest" });
+  }
+}
+
+/** A problem as one line of text: `path:line:column severity rule message`. */
+const problemText = (path: string, p: Problem) =>
+  [`${path.slice(host.root().length + 1)}:${p.range.startLineNumber}:${p.range.startColumn}`, level(p.severity), ruleLabel(p.source, p.code), p.message].filter(Boolean).join(" ");
+const copy = (text: string) => navigator.clipboard.writeText(text).then(() => host.status("Copied the problem"));
+
+list.addEventListener("keydown", (e) => {
+  const i = rows.findIndex((r) => r.key === selected);
+  const r = rows[i];
+  const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (step) rows.length && select(rows[Math.min(rows.length - 1, Math.max(0, i + step))].key);
+  else if (!r) return;
+  else if (e.key === "Enter") r.row.click();
+  // Left collapses a file, or goes from a problem to its file; Right expands a file.
+  else if (e.key === "ArrowLeft" && r.problem) select(r.path);
+  else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    if (collapsed.has(r.path) !== (e.key === "ArrowLeft")) r.row.click();
+  } else if (e.key === "c" && e.metaKey && r.problem) copy(problemText(r.path, r.problem));
+  else return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+
+/**
+ * Follows the editor: redraws the panel for the Current File toggle when the file changes, and selects the problem
+ * under the cursor.
+ */
+export function followEditor(path: string, position: monaco.IPosition | null) {
+  const moved = path !== caret.path;
+  caret = { path, position };
+  if (moved && currentOnly) return renderSoon();
+  const here = position && rows.find((r) => r.path === path && r.problem && monaco.Range.containsPosition(r.problem.range, position));
+  if (here) select(here.key);
+}
+
 function render() {
   host.changed();
   if (!panel.isConnected) return;
   const root = host.root();
+  const words = filter.value.trim();
+  const errorsIn = (problems: Problem[]) => problems.filter((p) => p.severity === monaco.MarkerSeverity.Error).length;
+  // Files with errors first, as VS Code lists them.
   const files = [...allProblems()]
-    .map(([path, problems]): [string, Problem[]] => [path, problems.filter((p) => shown.has(p.severity))])
+    .filter(([path]) => !currentOnly || path === caret.path)
+    .map(([path, problems]): [string, Problem[]] => [
+      path,
+      problems.filter((p) => shown.has(p.severity) && matchesFilter(words, { ...p, path: path.slice(root.length + 1) })),
+    ])
     .filter(([, p]) => p.length)
-    .sort(([a], [b]) => a.localeCompare(b));
+    .sort(([a, pa], [b, pb]) => Number(!errorsIn(pa)) - Number(!errorsIn(pb)) || a.localeCompare(b));
   const { errors, warnings } = problemCounts();
   errorToggle.update(errors);
   warningToggle.update(warnings);
+  currentFile.classList.toggle("on", currentOnly);
+  currentFile.setAttribute("aria-pressed", String(currentOnly));
   summary.textContent = [scan.progress, `${files.length} files`].filter(Boolean).join(" · ");
   rescan.disabled = scan.running;
+  rows = [];
   list.replaceChildren(
     ...files.map(([path, problems]) => {
       const item = document.createElement("li");
       const row = document.createElement("div");
       row.className = "problems-row problems-file";
+      row.role = "treeitem";
       const open = !collapsed.has(path);
+      row.ariaExpanded = String(open);
+      rows.push({ key: path, path, row });
       const name = path.slice(root.length + 1);
-      row.innerHTML = `<span class="codicon codicon-chevron-${open ? "down" : "right"}"></span><span class="codicon codicon-file"></span>`;
+      const icon = fileIcon(name.split("/").pop()!);
+      row.innerHTML = `<span class="codicon codicon-chevron-${open ? "down" : "right"}"></span><span class="codicon codicon-${icon.codicon} ${icon.color}"></span>`;
       const label = document.createElement("span");
       label.textContent = name.split("/").pop()!;
       const dir = document.createElement("span");
@@ -137,9 +231,13 @@ function render() {
       dir.textContent = name.split("/").slice(0, -1).join("/");
       const count = document.createElement("span");
       count.className = "problems-count";
-      count.textContent = String(problems.length);
+      const fileErrors = errorsIn(problems);
+      count.innerHTML = [
+        fileErrors && `<span class="codicon codicon-error icon-error"></span> ${fileErrors}`,
+        problems.length - fileErrors && `<span class="codicon codicon-warning icon-warning"></span> ${problems.length - fileErrors}`,
+      ].filter(Boolean).join(" ");
       row.append(label, dir, count);
-      row.onclick = () => (collapsed.has(path) ? collapsed.delete(path) : collapsed.add(path), render());
+      row.onclick = () => (select(path), collapsed.has(path) ? collapsed.delete(path) : collapsed.add(path), render());
       item.append(row);
       if (open) {
         const children = document.createElement("ul");
@@ -148,6 +246,9 @@ function render() {
           ...sorted.map((p) => {
             const li = document.createElement("li");
             li.className = "problems-row problems-item";
+            li.role = "treeitem";
+            const key = keyOf(path, p);
+            rows.push({ key, path, problem: p, row: li });
             li.innerHTML = `<span class="codicon codicon-${level(p.severity)} icon-${level(p.severity)}"></span>`;
             const message = document.createElement("span");
             message.className = "problems-message";
@@ -162,7 +263,17 @@ function render() {
             page.innerHTML = '<span class="codicon codicon-open-preview"></span>';
             page.onclick = (e) => (e.stopPropagation(), showProblemPage({ ...p, path }));
             li.append(message, where, page);
-            li.onclick = () => host.openAt(path, p.range);
+            li.onclick = () => (select(key), host.openAt(path, p.range));
+            li.oncontextmenu = (e) => {
+              e.preventDefault();
+              select(key);
+              showMenu(e.clientX, e.clientY, [
+                { label: "Copy", run: () => copy(problemText(path, p)) },
+                { label: "Copy Message", run: () => copy(p.message) },
+                "-",
+                { label: "Show Details", run: () => showProblemPage({ ...p, path }) },
+              ]);
+            };
             return li;
           }),
         );
@@ -171,6 +282,7 @@ function render() {
       return item;
     }),
   );
+  select(selected, false);
 }
 
 let pending: ReturnType<typeof setTimeout> | undefined;

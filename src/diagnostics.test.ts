@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, matchesFilter, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -181,4 +181,12 @@ test("reads Mago's fixes and suppresses its issues", () => {
 
 test("withFolders marks each file and the folders above it", () => {
   assert.deepEqual([...withFolders(["/p/a/b.php", "/p/a/c.php", "/p/d.php", "/elsewhere/e.php"], "/p")], ["/p/a/b.php", "/p/a", "/p/a/c.php", "/p/d.php"]);
+});
+
+test("the Problems panel's filter matches every word in the message, rule, or path", () => {
+  const p = { message: "Undefined variable $user", source: "mago", code: "undefined-variable", path: "app/Http/UserController.php" };
+  assert.ok(matchesFilter("", p));
+  assert.ok(matchesFilter("USER controller", p));
+  assert.ok(matchesFilter("mago(undefined", p));
+  assert.ok(!matchesFilter("user missing", p));
 });

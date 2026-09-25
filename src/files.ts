@@ -18,7 +18,7 @@ type Host = {
   status(text: string): void;
 };
 
-type MenuItem = { label: string; run(): unknown } | "-";
+export type MenuItem = { label: string; run(): unknown } | "-";
 
 const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
@@ -131,7 +131,7 @@ export const revealInFinder = (path = selected || host.active()) =>
 
 // ---- Context menu ----
 
-function showMenu(x: number, y: number, items: MenuItem[]) {
+export function showMenu(x: number, y: number, items: MenuItem[]) {
   $("menu")?.remove();
   const menu = document.createElement("ul");
   menu.id = "menu";

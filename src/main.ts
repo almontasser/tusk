@@ -18,7 +18,7 @@ import { initHttpClient, selectEnvironment } from "./httpclient";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { closeProblemPage, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
+import { closeProblemPage, followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -66,6 +66,7 @@ function addPane(): Pane {
   // Moving the cursor changes the selection too, so this one event covers both.
   ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
   ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
+  ed.onDidChangeCursorPosition((e) => pane.editor === editor && followEditor(active, e.position));
   return pane;
 }
 
@@ -924,6 +925,7 @@ function renderTabs() {
     pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
   showBreadcrumbs($("path"), active ? relative(active) : "", editor);
+  followEditor(active, editor.getPosition());
   $("empty-editor").hidden = tabs.size > 0 || !root;
   updateProblems();
   $("editor").style.display = tabs.size ? "" : "none";

@@ -1162,6 +1162,13 @@ The **Problems** panel (⌘6, or click the error and warning counts in the
 status bar) lists errors and warnings across the whole project, grouped by
 file; click one to go to it. The **Errors** and **Warnings** buttons, which show
 their counts, turn each kind on and off, and the panel remembers your choice.
+**Current File** lists only the file in the editor, and the filter box keeps
+problems whose message, rule, or path contains every word you type. Files with
+errors come first, each with its error and warning counts. The problem under the
+cursor is selected in the panel. In the panel, ↑ and ↓ move the selection, ← and
+→ collapse and expand a file, Enter opens the problem, and ⌘C copies it as
+`path:line:column severity rule message`. Right-click a problem to copy it or
+its message, or to show its details.
 A file with errors shows its name in red with a wavy underline in the file
 tree and on its tab, and the folders that contain it show their names in red.
 The Problems button in the activity bar shows the error count.

@@ -463,6 +463,12 @@ export function problemMarkdown(message: string): string {
 /** Which checker and rule reported a problem, as VS Code shows it: `mago-lint(no-redundant-use)`, or whichever is known. */
 export const ruleLabel = (source?: string, code?: string) => (source && code ? `${source}(${code})` : source || code || "");
 
+/** Whether a problem matches the Problems panel's filter: every word in its message, rule, or relative path, ignoring case. */
+export const matchesFilter = (filter: string, p: { message: string; source?: string; code?: string; path: string }) => {
+  const text = `${p.message} ${ruleLabel(p.source, p.code)} ${p.path}`.toLowerCase();
+  return filter.toLowerCase().split(/\s+/).every((word) => text.includes(word));
+};
+
 /** A long type, such as an array shape, laid out with one key per line: `array{'a': int, 'b': string}`. */
 export function formatType(type: string): string {
   let out = "";
