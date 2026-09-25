@@ -260,12 +260,32 @@ suffix, and every project gets a fresh index.
 Mago's analyzer has no Laravel plugin (its plugins are `stdlib`, `psl`,
 `flow-php`, and `psr-container`), and a stub class with `@property` tags in
 `includes` doesn't help: the project's own class wins. So a relationship read
-as a property (`$sender->provider`) is `non-documented-property`, and each call
-on its value is `mixed-method-access`, an error. `setMarkers` in `lsp.ts` shows
-Mago's `non-documented-*` and `mixed-*` issues as hints instead, for every
-class: in Laravel code they come from Eloquent, requests, and facades far more
-often than from real mistakes, and PhpStorm reports the first only as a weak
-warning and the rest not at all.
+as a property (`$sender->provider`) is `non-documented-property`, a forwarded
+static call (`Message::create()`) is `non-documented-method`, and each use of
+their values is a `mixed-*` issue, some of them errors.
+
+`src/eloquent.ts` reads the project's models with `introspect.php models` (each
+model's columns, relationships, accessors from `get…Attribute()` or
+`Attribute` methods and `$appends`, and local scopes) and `introspect.php
+builder` (the public methods of Eloquent's and the query builder), once per
+project and again 1.5 seconds after a PHP file under `app/` or `database/` is
+saved. It boots the app, which takes about half a second. `setMarkers` drops
+Mago's `non-documented-property` when the class is a model that has the
+property, or a request (`Illuminate\Http\Request`, or a class in
+`App\Http\Requests`, whose input reads as properties), and
+`non-documented-method` when the model has the scope or the builder has the
+method. `withoutMagic` in `src/magic.ts` then drops the `mixed-*` issues that
+follow: those in the same statement, from after the previous `;`, `{`, or `}`
+to the next `;`, and those in later statements that use a variable such a
+statement assigned, down the chain, until the next named function. Each
+server's last diagnostics per file are kept, so they're filtered again when the
+models are read. Anything left, such as a property a model doesn't have, or a
+facade's `mixed` return, shows as a hint (`magicNoise`) rather than a problem,
+as PhpStorm reports magic access only as a weak warning.
+
+In development, Tauri copies `filament-lsp/` into `target/debug/tools/` only
+when the Rust side rebuilds, so a change to `introspect.php` reaches the running
+app after the next Rust rebuild.
 
 ### Unfinished first builds
 

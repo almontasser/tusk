@@ -1156,10 +1156,12 @@ reads the project and `vendor` but skips hidden folders, `node_modules`, and
 (`strict-types` and `literal-named-argument`) are off, and rules about code
 size and complexity (such as `cyclomatic-complexity` and `too-many-methods`)
 show as warnings rather than errors. Mago's analyzer doesn't know Laravel's
-magic, such as Eloquent attributes and relationships (`$post->author`) or
-request input (`$request->email`), so it reports them as undocumented and every
-call on them as a call on `mixed`; the editor shows those as hints (dots you can
-hover), not as problems.
+magic, such as Eloquent attributes and relationships (`$post->author`),
+forwarded calls (`Post::create()`), or request input (`$request->email`). The
+editor reads your models' columns, relationships, accessors, and scopes, and
+hides those reports, and the ones they cause further on, when Laravel really
+has the member; anything left shows as a hint (dots you can hover), not as a
+problem.
 
 ## Test app
 

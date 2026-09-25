@@ -9,6 +9,8 @@ import { monaco } from "./editor";
 import { choose } from "./palette";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
+import { isModelMethod, isModelProperty, onModelsRead, readModels, rereadModels } from "./eloquent";
+import { withoutMagic } from "./magic";
 
 type M = typeof monaco.languages;
 
@@ -96,9 +98,36 @@ function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): bo
  */
 const magicNoise = (d: L.Diagnostic) => /^mago/.test(d.source ?? "") && /^(non-documented-(property|method)|mixed-)/.test(String(d.code ?? ""));
 
+/** A request's input reads as properties (`$request->email`), so any name is valid on a request. */
+const isRequest = (className: string) => /^\\?(Illuminate\\Http\\Request|App\\Http\\Requests\\.+)$/.test(className);
+
+/**
+ * Drops Mago's "ambiguous property access" and "ambiguous method call" where Laravel really answers them: a model's
+ * column, relationship, or accessor, a local scope or query builder method it forwards (`create`, `where`), or a
+ * request's input. `withoutMagic` then drops the `mixed-*` issues that follow from them. Anything Laravel doesn't
+ * have keeps its hint.
+ */
+function withoutEloquentMagic(model: monaco.editor.ITextModel, list: L.Diagnostic[]): L.Diagnostic[] {
+  return withoutMagic(textOf(model), list, (d) => {
+    if (!/^mago/.test(d.source ?? "")) return false;
+    const message = typeof d.message === "string" ? d.message : d.message.value;
+    const property = d.code === "non-documented-property" && message.match(/\$(\w+) on class `([^`]+)`/);
+    const method = d.code === "non-documented-method" && message.match(/call to `(\w+)` on class `([^`]+)`/);
+    return !!((property && (isRequest(property[2]) || isModelProperty(property[2], property[1]))) || (method && isModelMethod(method[2], method[1])));
+  });
+}
+
+/** The last diagnostics each server sent for each model, so they can be filtered again once the models are read. */
+const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[] }>();
+onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
+
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
+  const key = `${owner} ${model.uri}`;
+  if (!lastDiagnostics.has(key)) model.onWillDispose(() => lastDiagnostics.delete(key));
+  lastDiagnostics.set(key, { model, owner, list });
   if (isLibrary(model)) list = [];
   if (list.length && isPestFile(model)) list = list.filter((d) => !pestFalsePositive(model, d));
+  if (list.length && model.getLanguageId() === "php") list = withoutEloquentMagic(model, list);
   monaco.editor.setModelMarkers(
     model,
     owner,
@@ -843,6 +872,7 @@ let starts = 0;
 
 export async function startLsp(root: string, h: Host) {
   host = h;
+  readModels(root);
   starts++;
   projectRoot = root;
   servers.splice(0).forEach((s) => s.stop());
@@ -935,7 +965,11 @@ function markIndexComplete(root: string) {
 let awaitingFullIndex = false;
 let fullIndexRun: unknown;
 
-export const didSave = (model: monaco.editor.ITextModel) => servers.forEach((s) => s.didSave(model));
+export const didSave = (model: monaco.editor.ITextModel) => {
+  servers.forEach((s) => s.didSave(model));
+  // A model or a migration may have changed the models' properties.
+  if (/\/(app|database)\/.*\.php$/.test(model.uri.path) && projectRoot) rereadModels(projectRoot);
+};
 
 export type Symbol = { name: string; kind: L.SymbolKind; container?: string; path: string; range?: monaco.IRange };
 
