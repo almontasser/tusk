@@ -83,6 +83,17 @@ when no other pane has it (`closeFile`). Renames and deletions go through
 current one went away. A pane left with no tabs closes, and Unsplit moves a
 pane's tabs to the pane beside it.
 
+Tabs drag with HTML drag and drop (`placeTab`). The `#editor` listeners run in
+the capture phase, so Monaco never sees a tab dropped on its text as text to
+insert. Borders between panes have no element of their own, which would have
+to be skipped everywhere the layout reads a group's children: `sashAt` treats
+a press within 4 pixels of a pane's or group's edge, next to a sibling, as a
+resize. When a resize starts, each sibling's `flex-grow` becomes its size in
+pixels (all measured before any is set, since each change reflows the rest),
+and the two sides of the border trade pixels. Sizes go into the session as
+`grow`. A new split takes half of the pane's `flex-grow`, and a new group takes
+over the pane's.
+
 ### Saving
 
 `saveFile` writes one tab if it has unsaved changes, then marks it saved, sends

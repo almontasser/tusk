@@ -92,10 +92,16 @@ function split(dir: "row" | "col") {
   const view = editor.saveViewState();
   const pane = addPane();
   const parent = current.el.parentElement!;
-  if (parent.classList.contains(dir)) current.el.after(pane.el);
-  else {
+  if (parent.classList.contains(dir)) {
+    current.el.after(pane.el);
+    // After a resize, sizes are flex-grow values in pixels; the new pane takes half of the current one's.
+    const grow = parseFloat(current.el.style.flexGrow);
+    if (grow) current.el.style.flexGrow = pane.el.style.flexGrow = String(grow / 2);
+  } else {
     const group = document.createElement("div");
     group.className = `split ${dir}`;
+    group.style.flexGrow = current.el.style.flexGrow;
+    current.el.style.flexGrow = "";
     current.el.replaceWith(group);
     group.append(current.el, pane.el);
   }
@@ -121,7 +127,11 @@ function unsplit(pane = currentPane()) {
   const group = pane.el.parentElement!;
   pane.el.remove();
   // A group left with one child is replaced by that child.
-  if (group !== $("editor") && group.children.length === 1) group.replaceWith(group.firstElementChild!);
+  if (group !== $("editor") && group.children.length === 1) {
+    const only = group.firstElementChild as HTMLElement;
+    only.style.flexGrow = group.style.flexGrow;
+    group.replaceWith(only);
+  }
   renderTabs();
 }
 
@@ -148,43 +158,132 @@ function retarget(change: (path: string) => string | null) {
   }
 }
 
+/** Removes a tab from one pane, without closing the file. A pane left without tabs closes. */
+function leave(pane: Pane, path: string) {
+  pane.paths = pane.paths.filter((p) => p !== path);
+  if ((pane === currentPane() ? active : pane.active) === path) showIn(pane, pane.paths.at(-1) ?? "");
+  if (!pane.paths.length) unsplit(pane);
+}
+
 /** Moves the current tab to the next pane, splitting right when there's only one. */
 function moveTabToNextPane() {
   if (!active) return;
   const from = currentPane();
-  const path = active;
   if (panes.length < 2) split("row");
-  else {
-    const to = panes[(panes.indexOf(from) + 1) % panes.length];
+  placeTab(active, from, panes[(panes.indexOf(from) + 1) % panes.length], null);
+}
+
+/** Puts a tab before another in a pane (or last, for null), taking it out of the pane it came from. */
+function placeTab(path: string, from: Pane, to: Pane, before: string | null) {
+  to.paths = to.paths.filter((p) => p !== path);
+  const i = before ? to.paths.indexOf(before) : -1;
+  to.paths.splice(i < 0 ? to.paths.length : i, 0, path);
+  if (from !== to) {
     focusPane(to);
     openFile(path);
+    leave(from, path);
   }
-  from.paths = from.paths.filter((p) => p !== path);
-  showIn(from, from.paths.at(-1) ?? "");
-  if (!from.paths.length) unsplit(from);
+  saveSoon();
   renderTabs();
 }
 
-type Layout = { paths: string[]; active: string } | { dir: "row" | "col"; children: Layout[] };
+// Drag a tab within its bar to reorder it, or onto another pane's tabs or editor to move it there.
+let draggedTab: { path: string; from: Pane } | null = null;
+const dropTarget = (e: DragEvent) => {
+  const pane = panes.find((p) => p.el.contains(e.target as Node));
+  const tab = (e.target as HTMLElement).closest<HTMLElement>(".tab");
+  return pane && { pane, before: tab ? pane.paths[[...pane.bar.children].indexOf(tab)] : null, tab, inBar: pane.bar.contains(e.target as Node) };
+};
+const clearDropMarks = () => document.querySelectorAll("#editor .drop-before, #editor .drop-target").forEach((el) => el.classList.remove("drop-before", "drop-target"));
+// Capture phase, so Monaco doesn't treat a tab dropped on the editor as text to insert.
+$("editor").addEventListener("dragover", (e) => {
+  const target = draggedTab && dropTarget(e);
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  clearDropMarks();
+  if (target.tab) target.tab.classList.add("drop-before");
+  else if (!target.inBar) target.pane.el.classList.add("drop-target");
+}, true);
+$("editor").addEventListener("dragleave", clearDropMarks);
+$("editor").addEventListener("drop", (e) => {
+  const target = draggedTab && dropTarget(e);
+  clearDropMarks();
+  if (!target || !draggedTab) return;
+  e.preventDefault();
+  e.stopPropagation();
+  // Dropped on itself, or on the editor of the pane it came from: nothing to do.
+  const same = target.pane === draggedTab.from;
+  if (target.before !== draggedTab.path && (target.inBar || !same)) placeTab(draggedTab.path, draggedTab.from, target.pane, target.before);
+  draggedTab = null;
+}, true);
+$("editor").addEventListener("dragend", () => ((draggedTab = null), clearDropMarks()));
+
+// Drag the border between two panes to resize them. The border has no element of its own: a press
+// within 4 pixels of a pane's or group's leading edge, next to a sibling, starts the resize.
+function sashAt(e: MouseEvent) {
+  for (let el = (e.target as HTMLElement).closest<HTMLElement>(".split > *"); el; el = el.parentElement!.closest<HTMLElement>(".split > *")) {
+    const row = el.parentElement!.classList.contains("row");
+    const r = el.getBoundingClientRect();
+    if (el.previousElementSibling && (row ? e.clientX - r.left : e.clientY - r.top) <= 4) return { el, row };
+    const next = el.nextElementSibling as HTMLElement | null;
+    if (next && (row ? r.right - e.clientX : r.bottom - e.clientY) <= 4) return { el: next, row };
+  }
+  return null;
+}
+$("editor").addEventListener("pointermove", (e) => {
+  if (e.buttons) return;
+  const sash = sashAt(e);
+  $("editor").classList.toggle("sash-row", !!sash?.row);
+  $("editor").classList.toggle("sash-col", !!sash && !sash.row);
+});
+$("editor").addEventListener("pointerdown", (e) => {
+  const sash = sashAt(e);
+  if (!sash) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const { el, row } = sash;
+  const prev = el.previousElementSibling as HTMLElement;
+  // Every sibling's flex-grow becomes its size in pixels, so the two being resized can trade pixels.
+  // Measure them all before changing any, since each change reflows the rest.
+  const siblings = [...el.parentElement!.children] as HTMLElement[];
+  const sizes = siblings.map((child) => child.getBoundingClientRect()[row ? "width" : "height"]);
+  siblings.forEach((child, i) => (child.style.flexGrow = String(sizes[i])));
+  const start = prev.getBoundingClientRect()[row ? "left" : "top"];
+  const total = parseFloat(prev.style.flexGrow) + parseFloat(el.style.flexGrow);
+  const move = (m: PointerEvent) => {
+    const size = Math.min(Math.max((row ? m.clientX : m.clientY) - start, 80), total - 80);
+    prev.style.flexGrow = String(size);
+    el.style.flexGrow = String(total - size);
+  };
+  const up = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", up), saveSoon());
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+}, true);
+
+/** `grow` is the pane's or group's flex-grow after a resize. */
+type Layout = ({ paths: string[]; active: string } | { dir: "row" | "col"; children: Layout[] }) & { grow?: string };
 
 /** The panes' arrangement and tabs, for the session. */
 function layoutOf(el: Element): Layout {
   const pane = panes.find((p) => p.el === el);
-  if (pane) return { paths: pane.paths, active: pane === currentPane() ? active : pane.active };
-  return { dir: el.classList.contains("col") ? "col" : "row", children: [...el.children].map(layoutOf) };
+  const grow = (el as HTMLElement).style.flexGrow || undefined;
+  if (pane) return { paths: pane.paths, active: pane === currentPane() ? active : pane.active, grow };
+  return { dir: el.classList.contains("col") ? "col" : "row", children: [...el.children].map(layoutOf), grow };
 }
 
 /** Rebuilds saved panes inside a group; `take` gives each leaf its pane. Files that no longer open are skipped. */
 function buildLayout(layout: Layout, into: HTMLElement, take: () => Pane) {
   if ("paths" in layout) {
     const pane = take();
+    pane.el.style.flexGrow = layout.grow ?? "";
     into.append(pane.el);
     pane.paths = layout.paths.filter((p) => tabs.has(p));
     showIn(pane, pane.paths.includes(layout.active) ? layout.active : (pane.paths.at(-1) ?? ""));
     return;
   }
   const group = into === $("editor") && layout.dir === "row" ? into : document.createElement("div");
-  if (group !== into) (group.className = `split ${layout.dir}`), into.append(group);
+  if (group !== into) (group.className = `split ${layout.dir}`), (group.style.flexGrow = layout.grow ?? ""), into.append(group);
   layout.children.forEach((child) => buildLayout(child, group, take));
 }
 const tabs = new Map<string, Tab>();
@@ -574,9 +673,7 @@ async function openFile(path: string) {
 /** Closes a tab in one pane. The file stays open if another pane has it; otherwise it closes, saving first. */
 async function closeTab(path: string, pane = currentPane()) {
   if (!panes.some((p) => p !== pane && p.paths.includes(path))) return closeFile(path);
-  pane.paths = pane.paths.filter((p) => p !== path);
-  if ((pane === currentPane() ? active : pane.active) === path) showIn(pane, pane.paths.at(-1) ?? "");
-  if (!pane.paths.length) unsplit(pane);
+  leave(pane, path);
   saveSoon();
   renderTabs();
   markActiveInTree();
@@ -721,6 +818,8 @@ function renderTabs() {
         el.querySelector(".name")!.textContent = nameOf(path);
         el.onclick = () => (focusPane(pane), openFile(path));
         el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
+        el.draggable = true;
+        el.ondragstart = (e) => ((draggedTab = { path, from: pane }), e.dataTransfer?.setData("application/x-editor-tab", path));
         const close = document.createElement("span");
         close.className = "close";
         close.title = "Close (⌘W)";
