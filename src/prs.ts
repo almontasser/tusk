@@ -23,14 +23,14 @@ type Details = PullRequest & {
   headRefOid: string;
   state: string;
   files: { path: string; additions: number; deletions: number }[];
-  comments: { author: Author; body: string }[];
+  comments: { author: Author; body: string; url: string }[];
   reviews: { author: Author; state: string; body: string }[];
 };
 
 /** A comment on a line of the diff. `line` is null when the code it was on has changed since. */
 type ReviewComment = { id: number; path: string; line: number | null; start_line: number | null; side: "LEFT" | "RIGHT"; body: string; user: string; in_reply_to_id: number | null };
-/** A line comment and its replies. */
-type Thread = ReviewComment & { comments: ReviewComment[] };
+/** A line comment and its replies. `node` is the thread's GraphQL ID, for resolving it. */
+type Thread = ReviewComment & { comments: ReviewComment[]; node?: string; resolved?: boolean };
 
 type Host = { root(): string; status(text: string): void; showView(name: "prs"): void };
 
@@ -140,6 +140,7 @@ export async function showPullRequest(number: number) {
     [pr, threads] = await Promise.all([
       gh("pr", "view", String(number), "--json", `${FIELDS},body,headRefOid,state,files,comments,reviews`).then(JSON.parse),
       lineComments(number),
+      me(),
     ]);
   } catch (e) {
     detail.replaceChildren(el("p", "muted", `Can't load #${number}: ${String(e).trim()}`));
@@ -187,15 +188,26 @@ export async function showPullRequest(number: number) {
     item.append(el("div", "pr-meta", `${author}${label ? ` · ${label}` : ""}`), markdown(body, repo));
     conversation.append(item);
   };
+  // A comment you can edit or delete when it's yours; it redraws in place while you do.
+  const editable = (user: string, body: string, api: string) => {
+    const item = el("div", "pr-comment");
+    const draw = () => item.replaceChildren(...commentBlock(user, body, api, repo, draw, () => showPullRequest(number)));
+    draw();
+    conversation.append(item);
+  };
   if (pr.body) entry(pr.author.login, "description", pr.body);
   for (const r of pr.reviews) if (r.body || r.state !== "COMMENTED") entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body);
-  for (const c of pr.comments) entry(c.author.login, "", c.body);
+  for (const c of pr.comments) {
+    const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
+    if (id) editable(c.author.login, c.body, `repos/{owner}/{repo}/issues/comments/${id}`);
+    else entry(c.author.login, "", c.body);
+  }
   // Line comments, each thread under a link to its place in the diff.
   for (const t of threads) {
-    const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"}`);
+    const where = el("button", "link pr-thread-link", `${t.path}${t.line ? `:${t.start_line && t.start_line !== t.line ? `${t.start_line}–` : ""}${t.line}` : " (outdated)"}${t.resolved ? " · resolved" : ""}`);
     where.onclick = () => showFileDiff(pr, t.path, threads, t);
     conversation.append(where);
-    for (const c of t.comments) entry(c.user, "", c.body);
+    for (const c of t.comments) editable(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`);
   }
 
   const heading = (text: string) => el("h3", "", text);
@@ -262,16 +274,110 @@ export async function showPullRequest(number: number) {
 
 const repoUrl = (pr: PullRequest) => pr.url.replace(/\/pull\/\d+$/, "");
 
-/** The pull request's line comments, grouped into threads. GitHub points every reply at the thread's first comment. */
+/**
+ * The pull request's line comments, grouped into threads. GitHub points every reply at the thread's first comment.
+ * Whether a thread is resolved is only in GraphQL, keyed there by the first comment's ID.
+ */
 async function lineComments(number: number): Promise<Thread[]> {
   const jq = ".[] | {id, path, line, start_line, side, body, user: .user.login, in_reply_to_id}";
-  const out = await gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq);
+  const [out, states] = await Promise.all([
+    gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/comments`, "--jq", jq),
+    threadStates(number).catch(() => new Map<number, { id: string; resolved: boolean }>()),
+  ]);
   const comments: ReviewComment[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const threads = new Map<number, Thread>();
-  for (const c of comments) if (!c.in_reply_to_id) threads.set(c.id, { ...c, comments: [c] });
+  for (const c of comments) if (!c.in_reply_to_id) threads.set(c.id, { ...c, comments: [c], node: states.get(c.id)?.id, resolved: states.get(c.id)?.resolved });
   for (const c of comments) if (c.in_reply_to_id) threads.get(c.in_reply_to_id)?.comments.push(c);
   return [...threads.values()];
 }
+
+// ponytail: the first 100 threads; a pull request with more shows the rest as unresolved, without Resolve.
+const THREADS = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { nodes { databaseId } } } } } }
+}`;
+
+/** Each thread's GraphQL ID and whether it's resolved, by the REST ID of its first comment. */
+async function threadStates(number: number) {
+  const jq = ".data.repository.pullRequest.reviewThreads.nodes[] | {id, resolved: .isResolved, first: .comments.nodes[0].databaseId}";
+  const out = await gh("api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${number}`, "-f", `query=${THREADS}`, "--jq", jq);
+  const lines: { id: string; resolved: boolean; first: number }[] = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return new Map(lines.map((t) => [t.first, { id: t.id, resolved: t.resolved }]));
+}
+
+/** Your GitHub login, so your own comments get Edit and Delete. Empty when `gh` can't tell. */
+let myLogin = "";
+let loginLookup: Promise<unknown> | undefined;
+const me = () => (loginLookup ??= gh("api", "user", "--jq", ".login").then((l) => (myLogin = l.trim()), () => (loginLookup = undefined)));
+
+/** The comment being edited, and the one whose delete waits for a second click, by REST path. */
+let editing = "";
+let deleting = "";
+
+/**
+ * A comment's author and text, with Edit and Delete when it's yours. `api` is the comment's REST path.
+ * `redraw` draws it again after you start or cancel an edit, and `reload` fetches everything after GitHub changed it.
+ */
+function commentBlock(user: string, body: string, api: string, repo: string, redraw: () => void, reload: () => unknown): HTMLElement[] {
+  const meta = el("div", "pr-meta", user);
+  if (!myLogin || user !== myLogin) return [meta, markdown(body, repo)];
+  const link = (label: string, run: () => unknown) => {
+    const b = el("button", "link", label);
+    b.onclick = run;
+    meta.append(" · ", b);
+  };
+  const change = async (args: string[], what: string) => {
+    try {
+      await gh("api", ...args, api);
+      editing = deleting = "";
+      await reload();
+    } catch (e) {
+      host.status(`Can't ${what} the comment: ${String(e).trim()}`);
+    }
+  };
+  if (editing === api) {
+    const box = el("div", "pr-comment-form");
+    const text = el("textarea");
+    text.rows = 4;
+    text.value = body;
+    const buttons = el("div", "pr-actions");
+    const save = el("button", "primary", "Save");
+    save.onclick = () => text.value.trim() && change(["--method", "PATCH", "-f", `body=${text.value.trim()}`], "edit");
+    const cancel = el("button", "", "Cancel");
+    cancel.onclick = () => ((editing = ""), redraw());
+    text.onkeydown = (e) => {
+      if (e.key === "Enter" && e.metaKey) save.click();
+      if (e.key === "Escape") cancel.click();
+    };
+    buttons.append(save, cancel);
+    box.append(text, buttons);
+    requestAnimationFrame(() => text.focus());
+    return [meta, box];
+  }
+  if (deleting === api) {
+    meta.append(" · Delete this comment on GitHub?");
+    link("Delete", () => change(["--method", "DELETE"], "delete"));
+    link("Cancel", () => ((deleting = ""), redraw()));
+  } else {
+    link("Edit", () => ((editing = api), (deleting = ""), redraw()));
+    link("Delete", () => ((deleting = api), (editing = ""), redraw()));
+  }
+  return [meta, markdown(body, repo)];
+}
+
+/** Resolves or reopens a thread on GitHub. */
+async function setResolved(t: Thread, resolved: boolean) {
+  const mutation = resolved ? "resolveReviewThread" : "unresolveReviewThread";
+  try {
+    await gh("api", "graphql", "-f", `query=mutation($id: ID!) { ${mutation}(input: { threadId: $id }) { thread { isResolved } } }`, "-f", `id=${t.node}`);
+    shown!.threads = await lineComments(shown!.pr.number);
+    drawZones();
+  } catch (e) {
+    host.status(`Can't ${resolved ? "resolve" : "reopen"} the thread: ${String(e).trim()}`);
+  }
+}
+
+/** Resolved threads you opened with Show, by thread ID. */
+const expanded = new Set<number>();
 
 /** Asks how to merge, confirms, and merges on GitHub. */
 function merge(pr: Details) {
@@ -326,6 +432,7 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
     return host.status(`Can't show the diff: ${String(e).trim()}`);
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
+  await me();
   shown = { pr, path, threads, diff, zones: [] };
   form = undefined;
   drawZones();
@@ -388,16 +495,32 @@ function drawZones() {
   shown.zones = [];
   const editorFor = (side: "LEFT" | "RIGHT") => (side === "LEFT" ? diff.getOriginalEditor() : diff.getModifiedEditor());
   const repo = repoUrl(pr);
+  const reload = async () => ((shown!.threads = await lineComments(pr.number)), drawZones());
   for (const t of threads) {
     if (t.path !== path || !t.line) continue;
-    const thread = el("div", "pr-thread");
+    const thread = el("div", `pr-thread${t.resolved ? " resolved" : ""}`);
+    const action = (parent: HTMLElement, label: string, run: () => unknown) => {
+      const b = el("button", "link", label);
+      b.onclick = run;
+      parent.append(parent.childNodes.length ? " · " : "", b);
+    };
+    // A resolved thread shows as one line until you open it.
+    if (t.resolved && !expanded.has(t.id)) {
+      const summary = el("div", "pr-meta", `Resolved · ${t.comments.length} ${t.comments.length === 1 ? "comment" : "comments"} from ${t.user}`);
+      action(summary, "Show", () => (expanded.add(t.id), drawZones()));
+      thread.append(summary);
+      addZone(editorFor(t.side), t.line, thread);
+      continue;
+    }
     if (t.start_line && t.start_line !== t.line) thread.append(el("div", "pr-meta", `On ${lines(t.start_line, t.line)}`));
-    for (const c of t.comments) thread.append(el("div", "pr-meta", c.user), markdown(c.body, repo));
+    for (const c of t.comments) thread.append(...commentBlock(c.user, c.body, `repos/{owner}/{repo}/pulls/comments/${c.id}`, repo, drawZones, reload));
     if (form?.reply?.id === t.id) thread.append(commentForm());
     else {
-      const reply = el("button", "link", "Reply");
-      reply.onclick = () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones());
-      thread.append(reply);
+      const actions = el("div", "pr-thread-actions");
+      action(actions, "Reply", () => ((form = { side: t.side, line: t.line!, start: t.line!, reply: t }), drawZones()));
+      if (t.node) action(actions, t.resolved ? "Unresolve" : "Resolve", () => setResolved(t, !t.resolved));
+      if (t.resolved) action(actions, "Hide", () => (expanded.delete(t.id), drawZones()));
+      thread.append(actions);
     }
     addZone(editorFor(t.side), t.line, thread);
   }

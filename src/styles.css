@@ -502,6 +502,7 @@ button.link:hover { text-decoration: underline; }
 .pr-thread { box-sizing: border-box; padding: 6px 12px; font: var(--ui); white-space: normal; overflow: hidden; background: var(--panel); border-left: 3px solid var(--accent); }
 .pr-thread .pr-body { margin: 2px 0 6px; }
 .pr-thread.pending { border-left-color: var(--yellow); }
+.pr-thread.resolved { border-left-color: var(--faint); }
 /* The comment form under a line, or inside a thread for a reply. */
 .pr-comment-form { box-sizing: border-box; padding: 6px 12px; font: var(--ui); background: var(--panel); border-left: 3px solid var(--accent); }
 .pr-thread .pr-comment-form { padding: 6px 0 0; border: 0; }

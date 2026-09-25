@@ -1300,6 +1300,25 @@ same endpoint with `commit_id` (the head commit, `headRefOid`), `path`,
 a POST to `comments/<id>/replies`. With the cursor on a thread's line and no
 range selected, the form replies to that thread.
 
+#### Resolving, editing, and deleting
+
+REST has no resolved state for threads, so `lineComments` also asks GraphQL
+for `reviewThreads` (the first 100), through `gh api graphql` with `-F
+owner={owner} -F name={repo}`, which `gh` fills in from the repository. Each
+GraphQL thread is matched to its REST thread by the `databaseId` of its first
+comment, which is the REST comment ID. **Resolve** and **Unresolve** send
+`resolveReviewThread` or `unresolveReviewThread` with the thread's node ID. If
+GraphQL fails, the threads still load, without resolve state or the links.
+
+`me()` reads your login once (`gh api user`). `commentBlock` renders a comment,
+and for your own adds **Edit** (`PATCH`) and **Delete** (`DELETE`) on its REST
+path: `pulls/comments/<id>` for line comments, and `issues/comments/<id>` for
+conversation comments, whose ID comes from the `#issuecomment-<id>` in the URL
+`gh pr view` returns. Which comment is being edited, or waits for its delete to
+be confirmed, is module state; in the diff a change redraws every zone, since
+a view zone's height is fixed when it's added, and in the sidebar it redraws
+the one comment.
+
 #### Pending reviews
 
 GitHub's REST API creates a review with all its comments in one request, but

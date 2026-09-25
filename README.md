@@ -46,7 +46,7 @@ file to change when you add it.
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
-| Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. You can't edit or delete posted comments, or resolve threads. |
+| Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | Split editors | Up to four panes. |
 | Platform | macOS only, and a build contains Mago for the build machine's architecture only (not a universal binary). |
 
@@ -836,7 +836,10 @@ checking out the branch. A 💬 count marks files with line comments.
 
 Line comments appear in the conversation under the file and lines they're on.
 Click one to open the diff at that line. In the diff, each thread shows under
-its line, with a **Reply** link.
+its line, with **Reply** and **Resolve** links. A resolved thread shows as one
+line; click **Show** to read it or **Unresolve** to reopen it. Your own
+comments, in the diff and in the conversation, have **Edit** and **Delete**
+links. Deleting asks you to click **Delete** again to confirm.
 
 To comment on code in the diff:
 
