@@ -454,7 +454,9 @@ at about 1.5 seconds a file, 1,000 files take 2 to 4 minutes. Its results are
 cached in the app's cache (`problems/<project>/phpactor.json`) by a hash of
 each file's text. Both go through `realProblems` and `severityOf`, as open
 files do. Files open in the editor show their live markers instead, and a file
-that closes keeps its last markers as its scan result.
+that closes keeps its last markers as its scan result. The panel's Errors and
+Warnings toggles filter the list, not the status bar counts, and are kept in
+`localStorage` (`problemsShown`).
 
 ### Docblocks Phpactor can't read
 

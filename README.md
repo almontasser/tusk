@@ -1159,7 +1159,8 @@ Results show in the **Database** tab of the bottom panel. After you change
 
 The **Problems** panel (⌘6, or click the error and warning counts in the
 status bar) lists errors and warnings across the whole project, grouped by
-file; click one to go to it. The first time you open it, it scans the project:
+file; click one to go to it. The **Errors** and **Warnings** buttons, which show
+their counts, turn each kind on and off, and the panel remembers your choice. The first time you open it, it scans the project:
 Mago checks every file in a few seconds, and then Phpactor's own checks, such
 as deprecated classes and unused imports, run file by file in the background
 (a few minutes for about 1,000 files, using half the cores). Phpactor's results

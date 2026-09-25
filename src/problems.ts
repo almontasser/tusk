@@ -33,7 +33,37 @@ rescan.innerHTML = '<span class="codicon codicon-refresh"></span> Scan Project';
 rescan.onclick = () => scanProject();
 const summary = document.createElement("span");
 summary.className = "problems-summary";
-toolbar.append(rescan, summary);
+
+/** Which severities the panel lists, remembered across restarts. */
+const shown = (() => {
+  try {
+    return new Set<monaco.MarkerSeverity>(JSON.parse(localStorage.getItem("problemsShown") ?? "null") ?? [monaco.MarkerSeverity.Error, monaco.MarkerSeverity.Warning]);
+  } catch {
+    return new Set([monaco.MarkerSeverity.Error, monaco.MarkerSeverity.Warning]);
+  }
+})();
+/** A toggle that shows or hides one severity, labeled with its count. */
+function severityToggle(severity: monaco.MarkerSeverity, icon: string, name: string) {
+  const button = document.createElement("button");
+  button.className = "problems-toggle";
+  button.title = `Show ${name}`;
+  button.onclick = () => {
+    shown.has(severity) ? shown.delete(severity) : shown.add(severity);
+    try {
+      localStorage.setItem("problemsShown", JSON.stringify([...shown]));
+    } catch {}
+    render();
+  };
+  const update = (count: number) => {
+    button.classList.toggle("on", shown.has(severity));
+    button.setAttribute("aria-pressed", String(shown.has(severity)));
+    button.innerHTML = `<span class="codicon ${icon}"></span> ${count} ${name}`;
+  };
+  return { button, update };
+}
+const errorToggle = severityToggle(monaco.MarkerSeverity.Error, "codicon-error icon-error", "Errors");
+const warningToggle = severityToggle(monaco.MarkerSeverity.Warning, "codicon-warning icon-warning", "Warnings");
+toolbar.append(rescan, errorToggle.button, warningToggle.button, summary);
 const list = document.createElement("ul");
 list.className = "problems-tree";
 panel.append(toolbar, list);
@@ -71,9 +101,14 @@ function render() {
   host.changed();
   if (!panel.isConnected) return;
   const root = host.root();
-  const files = [...allProblems()].filter(([, p]) => p.length).sort(([a], [b]) => a.localeCompare(b));
+  const files = [...allProblems()]
+    .map(([path, problems]): [string, Problem[]] => [path, problems.filter((p) => shown.has(p.severity))])
+    .filter(([, p]) => p.length)
+    .sort(([a], [b]) => a.localeCompare(b));
   const { errors, warnings } = problemCounts();
-  summary.textContent = [scan.progress, `${errors} errors, ${warnings} warnings in ${files.length} files`].filter(Boolean).join(" · ");
+  errorToggle.update(errors);
+  warningToggle.update(warnings);
+  summary.textContent = [scan.progress, `${files.length} files`].filter(Boolean).join(" · ");
   rescan.disabled = scan.running;
   list.replaceChildren(
     ...files.map(([path, problems]) => {
