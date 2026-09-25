@@ -1435,6 +1435,19 @@ same pipeline and container functions. A caller row in a back trace shows no
 time, because the pair's time is its own call to the row above, not time spent
 reaching the match.
 
+The totals above the table (Database, Autoloading, Views, HTTP calls, Redis)
+sum the total time of known functions: PHP's `PDO` and `PDOStatement` methods,
+Composer's `ClassLoader->loadClass`, Laravel's `View->render`, `curl_exec`, and
+`Redis` methods. They add up without counting anything twice, because PHP's own
+functions don't call each other and a function's total counts nested calls to
+itself once. Queries count calls to `PDOStatement->execute`, `PDO->exec`, and
+`PDO->query`.
+
+Comparing matches functions by name between two profiles. A function the other
+profile didn't run counts in full, and one that only the other profile ran
+doesn't show. The editor names its profiles (the request or test) in
+`localStorage` by path, since the files only carry the script Xdebug saw.
+
 The call tree is built from the caller-to-callee pairs, not from each call: a
 node's children are everything its function called, from any caller. Keeping
 the real tree would cost memory for every call. A function already on a node's

@@ -874,7 +874,8 @@ of the bottom panel. Run these from ⌘⇧A:
   app at `http://127.0.0.1:8000`, as `php artisan serve` does, or on the next
   free port if 8000 is taken. Each request writes a profile.
 - **Open Xdebug Profile…** lists profiles from the editor's runs and from
-  Xdebug's own `xdebug.output_dir`, newest first, with their time and size.
+  Xdebug's own `xdebug.output_dir`, newest first. The editor's profiles are
+  named by what they profiled, such as `GET /admin/login (200)` or a test.
   **Choose File…** opens any other `cachegrind.out` file, compressed or not.
 
 The Profiler tab lists every function with its calls, its own time, its total
@@ -901,6 +902,10 @@ declaration shows its total time and how often it ran, such as
 run are orange, and over 1% yellow. Hover over a time to see how many calls it
 covers. Lines under a thousandth of the run are left out.
 
+- Above the table, totals show where the time went: **Database** (queries and
+  their time), **Autoloading** (classes loaded), **Views** (views rendered),
+  and **HTTP calls** and **Redis** when the run used them. Click one to select
+  its function and see what called it, such as the code that ran each query.
 - Click a column header to sort by it, and type in the filter to find
   functions.
 - Select **Project code only** to hide `vendor` packages and PHP's own
@@ -910,7 +915,13 @@ covers. Lines under a thousandth of the run are left out.
   one there to move to it.
 - Double-click a function, or press ⏎, to open it. ↑ and ↓ move through the
   list.
-- The folder button opens another profile.
+- To see what a change did, click the compare button and choose the profile
+  from before it. The table shows each function's change in own and total
+  time, slowest first, in red when slower and green when faster, and the row
+  above it shows the change in the whole run. Click **Stop comparing** to go
+  back.
+- The folder button opens another profile, and the reveal button shows the
+  profile's file in Finder. Drag the side pane's edge to resize it.
 
 Profiling needs Xdebug. The editor sets `XDEBUG_MODE=profile` and
 `XDEBUG_TRIGGER`, so it works whether your `php.ini` starts Xdebug always or on

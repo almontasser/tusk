@@ -136,29 +136,56 @@ export async function openNewestProfile(dir: string, since: number, label?: stri
   for (const f of old) await invoke("remove_path", { path: f.path }).catch(() => {});
 }
 
-/** Lists recent profiles from the editor's runs and Xdebug's output folder, and opens the one you choose. */
-export async function chooseProfile() {
+/** What the editor's profiles came from, such as a request or a test, by path. */
+function labels(): Record<string, string> {
+  try {
+    return JSON.parse(readSetting("profilerLabels") ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveLabel(path: string, label: string) {
+  const all = labels();
+  all[path] = label;
+  // Only the newest profiles are kept, so only their labels are.
+  const kept = Object.fromEntries(Object.entries(all).slice(-KEEP_PROFILES * 2));
+  try {
+    localStorage.setItem("profilerLabels", JSON.stringify(kept));
+  } catch {}
+}
+
+/**
+ * Lists recent profiles from the editor's runs and Xdebug's output folder, newest first, and passes the one you
+ * choose to `chosen`: opening it, or comparing with it.
+ */
+export async function chooseProfile(title = "Open an Xdebug profile", chosen: (path: string) => unknown = (path) => openProfile(path)) {
   const xdebugDir = await invoke<string>("run_capture", { cwd: "/", program: "php", args: ["-r", 'echo ini_get("xdebug.output_dir");'], input: null }).catch(() => "");
   const editorDir = await profileDir();
   const files = [...(await profilesIn(editorDir)), ...(xdebugDir.trim() ? await profilesIn(xdebugDir.trim()) : [])].sort((a, b) => b.time - a.time);
   const kb = (size: number) => (size >= 1_000_000 ? `${(size / 1_000_000).toFixed(1)} MB` : `${Math.ceil(size / 1000)} KB`);
+  const names = labels();
   const items = [
-    ...files.map((f) => ({
-      label: `${new Date(f.time * 1000).toLocaleString()} · ${kb(f.size)}`,
-      detail: `${f.path.startsWith(editorDir) ? "Editor run" : "Xdebug folder"} · ${f.path.split("/").pop()}`,
-      icon: "codicon-pulse",
-      run: () => openProfile(f.path),
-    })),
+    ...files.map((f) => {
+      const when = `${new Date(f.time * 1000).toLocaleString()} · ${kb(f.size)}`;
+      const from = f.path.startsWith(editorDir) ? "" : " · Xdebug folder";
+      return {
+        label: names[f.path] ?? when,
+        detail: names[f.path] ? `${when}${from}` : `${f.path.split("/").pop()}${from}`,
+        icon: f.path === currentPath ? "codicon-eye" : "codicon-pulse",
+        run: () => chosen(f.path),
+      };
+    }),
     {
       label: "Choose File…",
       icon: "codicon-folder-opened",
       run: async () => {
         const path = await open({ directory: false });
-        if (typeof path === "string") openProfile(path);
+        if (typeof path === "string") chosen(path);
       },
     },
   ];
-  pick(files.length ? "Open an Xdebug profile" : "No profiles yet: run Profile Test at Cursor, or choose a file", (q) => rank(q, items));
+  pick(files.length ? title : "No profiles yet: run Profile Test at Cursor or Profile URL, or choose a file", (q) => rank(q, items));
 }
 
 /**
@@ -166,31 +193,127 @@ export async function chooseProfile() {
  * what was profiled, such as a request; without it, the tab shows the script Xdebug recorded.
  */
 export async function openProfile(path: string, label?: string) {
+  const parsed = await load(path);
+  if (!parsed) return;
+  if (label) saveLabel(path, label);
+  profile = parsed;
+  currentPath = path;
+  functionsByFile = new Map();
+  for (const f of profile.functions) functionsByFile.set(f.file, [...(functionsByFile.get(f.file) ?? []), f]);
+  selected = undefined;
+  expanded = hotPath();
+  q(".tests-summary").textContent = `${label ?? labels()[path] ?? relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
+  q(".tests-summary").title = path;
+  render();
+  showInsights();
+  showDetail();
+  decorateAll();
+  showPanelView("Profiler", panel);
+}
+
+/** Reads and parses a profile, decompressing it when Xdebug gzipped it (the default). Null, with a message, when it can't. */
+async function load(path: string): Promise<Profile | null> {
   host.status(`Reading ${path.split("/").pop()}…`, "profiler:progress");
+  const done = (message = "") => (host.status("", "profiler:progress"), message && host.status(message), null);
   let text: string;
   try {
     text = path.endsWith(".gz")
       ? await invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/gzip", args: ["-dc", path], input: null })
       : await invoke<string>("read_file", { path });
   } catch (e) {
-    host.status("", "profiler:progress");
-    return host.status(`Couldn't read the profile: ${e}`);
+    return done(`Couldn't read the profile: ${e}`);
   }
   const parsed = await parse(text).catch(() => null);
-  host.status("", "profiler:progress");
-  if (!parsed) return host.status(`Couldn't read the profile: ${path} failed to parse.`);
-  if (!parsed.functions.length) return host.status(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
-  profile = parsed;
-  functionsByFile = new Map();
-  for (const f of profile.functions) functionsByFile.set(f.file, [...(functionsByFile.get(f.file) ?? []), f]);
-  selected = undefined;
-  expanded = hotPath();
-  q(".tests-summary").textContent = `${label ?? relative(profile.command)} · ${ms(profile.total)} · ${profile.functions.length} functions`;
-  q(".tests-summary").title = path;
+  if (!parsed) return done(`Couldn't read the profile: ${path} failed to parse.`);
+  if (!parsed.functions.length) return done(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
+  done();
+  return parsed;
+}
+
+let currentPath = "";
+
+// ---- Comparing with another profile ----
+
+/** The profile to compare with, by function name, and what it came from. */
+let baseline: { functions: Map<string, ProfiledFunction>; label: string; total: number } | undefined;
+
+/** Chooses a profile to compare the open one with: the table then shows how much each function's time changed. */
+export function compareWith() {
+  chooseProfile("Compare with: choose the profile from before your change", async (path) => {
+    const parsed = await load(path);
+    if (!parsed) return;
+    baseline = { functions: new Map(parsed.functions.map((f) => [f.name, f])), label: labels()[path] ?? path.split("/").pop()!, total: parsed.total };
+    view = "functions";
+    sort = "dinclusive"; // The biggest slowdowns first.
+    panel.querySelectorAll<HTMLElement>("[data-view]").forEach((v) => (v.ariaPressed = String(v.dataset.view === view)));
+    render();
+    showInsights();
+  });
+}
+
+const stopComparing = () => {
+  baseline = undefined;
+  if (sort === "dself" || sort === "dinclusive") sort = "self";
   render();
-  showDetail();
-  decorateAll();
-  showPanelView("Profiler", panel);
+  showInsights();
+};
+
+/** A function's change in own or total time since the baseline; a function the baseline didn't run counts in full. */
+const delta = (f: ProfiledFunction, key: "self" | "inclusive") => f[key] - (baseline?.functions.get(f.name)?.[key] ?? 0);
+
+/** A change in time: slower is red and faster green, ignoring changes under a hundredth of a millisecond. */
+function deltaCell(n: number) {
+  const td = cell(Math.abs(n) < 0.01 ? "—" : `${n > 0 ? "+" : "−"}${ms(Math.abs(n))}`, `num ${n >= 0.01 ? "slower" : n <= -0.01 ? "faster" : ""}`);
+  return td;
+}
+
+// ---- Where the time went ----
+
+/** Laravel-aware totals for the kinds of work that usually dominate a request, from PHP's and Composer's functions. */
+const INSIGHTS: { label: string; match: (name: string) => boolean; counts?: (name: string) => boolean; unit?: string }[] = [
+  {
+    label: "Database",
+    match: (n) => n.startsWith("php::PDO"),
+    counts: (n) => /^php::(PDOStatement->execute|PDO->exec|PDO->query)$/.test(n),
+    unit: "queries",
+  },
+  { label: "Autoloading", match: (n) => n === "Composer\\Autoload\\ClassLoader->loadClass", counts: () => true, unit: "classes" },
+  { label: "Views", match: (n) => n === "Illuminate\\View\\View->render", counts: () => true, unit: "views" },
+  { label: "HTTP calls", match: (n) => /^php::curl_(multi_)?exec$/.test(n), counts: (n) => n === "php::curl_exec", unit: "requests" },
+  { label: "Redis", match: (n) => n.startsWith("php::Redis->"), counts: () => true, unit: "commands" },
+];
+
+/** The row above the table: time in the database, autoloading, views, and outgoing calls, and the comparison. */
+function showInsights() {
+  const row = q(".profiler-insights");
+  row.replaceChildren();
+  for (const insight of INSIGHTS) {
+    const fns = profile.functions.filter((f) => insight.match(f.name));
+    // PHP's own functions don't nest in each other, and loadClass and render count nested calls once, so totals add up.
+    const time = fns.reduce((t, f) => t + f.inclusive, 0);
+    if (!fns.length || time < profile.total / 1000) continue;
+    const count = fns.filter((f) => insight.counts?.(f.name)).reduce((n, f) => n + f.calls, 0);
+    const chip = Object.assign(document.createElement("button"), {
+      className: "chip",
+      title: `Select ${fns.length === 1 ? "the function" : "the busiest function"}, to see what called it`,
+    });
+    chip.append(Object.assign(document.createElement("b"), { textContent: insight.label }), ` ${count ? `${count} ${insight.unit} · ` : ""}${ms(time)} · ${share(time)}`);
+    const busiest = [...fns].sort((a, b) => b.inclusive - a.inclusive)[0];
+    chip.onclick = () => {
+      if (view !== "functions") panel.querySelector<HTMLElement>('[data-view="functions"]')!.click();
+      select(busiest);
+    };
+    row.append(chip);
+  }
+  if (baseline) {
+    const change = profile.total - baseline.total;
+    const note = Object.assign(document.createElement("span"), { className: `compare ${change >= 0 ? "slower" : "faster"}` });
+    note.textContent = `Compared with ${baseline.label}: ${change >= 0 ? "+" : "−"}${ms(Math.abs(change))} (${ms(baseline.total)} → ${ms(profile.total)})`;
+    const stop = Object.assign(document.createElement("button"), { className: "chip", textContent: "Stop comparing" });
+    stop.onclick = stopComparing;
+    row.append(note, stop);
+  }
+  row.hidden = !row.childElementCount;
 }
 
 /** Parses in a worker; a profile of a large request can be hundreds of megabytes. */
@@ -208,7 +331,7 @@ function parse(text: string) {
 const MAX_ROWS = 500;
 let profile: Profile = { command: "", functions: [], total: 0, sites: new Map() };
 let view: "functions" | "tree" = "functions";
-let sort: "name" | "calls" | "self" | "inclusive" | "memory" = "self";
+let sort: "name" | "calls" | "self" | "inclusive" | "memory" | "dself" | "dinclusive" = "self";
 let selected: ProfiledFunction | undefined;
 /** The rows the table shows, in order, so the arrow keys can move through them. */
 let shown: Row[] = [];
@@ -252,6 +375,8 @@ panel.className = "tests profiler";
 panel.innerHTML = `
   <div class="tests-toolbar">
     <button data-action="open" title="Open another profile"><span class="codicon codicon-folder-opened"></span></button>
+    <button data-action="compare" title="Compare with another profile, such as one from before your change"><span class="codicon codicon-diff"></span></button>
+    <button data-action="reveal" title="Reveal the profile file in Finder"><span class="codicon codicon-file-symlink-file"></span></button>
     <div class="segmented" role="group" aria-label="View">
       <button data-view="functions" aria-pressed="true">Functions</button>
       <button data-view="tree" aria-pressed="false">Call tree</button>
@@ -261,6 +386,7 @@ panel.innerHTML = `
     <label class="profiler-check" data-option="editor" title="Show how long the calls on each line took, at the end of the line in open files"><input type="checkbox" /> Times in editor</label>
     <span class="tests-summary"></span>
   </div>
+  <div class="profiler-insights" hidden></div>
   <div class="profiler-body">
     <div class="profiler-table" tabindex="0" aria-label="Functions">
       <table>
@@ -268,6 +394,7 @@ panel.innerHTML = `
         <tbody></tbody>
       </table>
     </div>
+    <div class="profiler-resize" title="Drag to resize"></div>
     <div class="profiler-detail"></div>
   </div>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
@@ -292,6 +419,26 @@ times.onchange = () => {
   decorateAll();
 };
 q('[data-action="open"]').onclick = () => chooseProfile();
+
+// Drag the side pane's left edge to resize it; the width is remembered.
+const detailPane = q(".profiler-detail");
+const savedWidth = Number(readSetting("profilerDetailWidth"));
+if (savedWidth) detailPane.style.width = `${savedWidth}px`;
+q(".profiler-resize").onmousedown = (down) => {
+  const start = detailPane.offsetWidth;
+  const move = (e: MouseEvent) => (detailPane.style.width = `${Math.max(200, Math.min(panel.offsetWidth - 300, start + down.clientX - e.clientX))}px`);
+  const up = () => {
+    removeEventListener("mousemove", move);
+    removeEventListener("mouseup", up);
+    try {
+      localStorage.setItem("profilerDetailWidth", String(detailPane.offsetWidth));
+    } catch {}
+  };
+  addEventListener("mousemove", move);
+  addEventListener("mouseup", up);
+};
+q('[data-action="compare"]').onclick = () => compareWith();
+q('[data-action="reveal"]').onclick = () => currentPath && invoke("run_capture", { cwd: "/", program: "/usr/bin/open", args: ["-R", currentPath], input: null }).catch(() => {});
 panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
   (b) =>
     (b.onclick = () => {
@@ -331,6 +478,10 @@ function cell(text: string, className = "") {
 const timeCell = (n: number, className = "") => cell(`${ms(n)} · ${share(n)}`, `num ${className}`);
 
 const columns = {
+  compare: [
+    ["dself", "Δ Own", "How much the function's own time changed since the profile you compare with. Red is slower."],
+    ["dinclusive", "Δ Total", "How much the function's total time changed since the profile you compare with. Red is slower."],
+  ],
   functions: [
     ["name", "Function", ""],
     ["calls", "Calls", "How many times it ran"],
@@ -348,7 +499,9 @@ const columns = {
 /** Shows the function table, or the call tree, with the chosen sort and filter. */
 function render() {
   const backTrace = view === "tree" && filterWords().length > 0;
-  const heads = columns[view].map(([key, name, tip]) => {
+  // While comparing, the change columns take Memory's place, so function names keep their room.
+  const list = view === "tree" ? columns.tree : baseline ? [...columns.functions.filter(([key]) => key !== "memory"), ...columns.compare] : columns.functions;
+  const heads = list.map(([key, name, tip]) => {
     const label = backTrace && key === "name" ? "Called by" : name;
     const th = Object.assign(document.createElement("th"), { textContent: label, title: tip, className: key === "name" ? "" : "num" });
     th.dataset.sort = key;
@@ -367,7 +520,9 @@ function render() {
     const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
     const matching = profile.functions
       .filter((f) => (!projectOnly || isProject(f)) && words.every((w) => f.name.toLowerCase().includes(w)))
-      .sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name) : b[sort] - a[sort]));
+      .sort((a, b) =>
+        sort === "name" ? a.name.localeCompare(b.name) : sort === "dself" ? delta(b, "self") - delta(a, "self") : sort === "dinclusive" ? delta(b, "inclusive") - delta(a, "inclusive") : b[sort] - a[sort],
+      );
     shown = matching.slice(0, MAX_ROWS).map((f) => ({ fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive }));
     note = matching.length > MAX_ROWS ? `${matching.length - MAX_ROWS} more functions. Filter to find them.` : !matching.length ? "No functions match." : "";
   } else {
@@ -382,7 +537,7 @@ function render() {
   q("tbody").replaceChildren(...shown.map(view === "functions" ? functionRow : treeRow));
   if (note) {
     const row = document.createElement("tr");
-    row.append(Object.assign(cell(note, "muted"), { colSpan: columns[view].length }));
+    row.append(Object.assign(cell(note, "muted"), { colSpan: list.length }));
     q("tbody").append(row);
   }
 }
@@ -397,7 +552,8 @@ function functionRow(r: Row) {
   // A line under own time shows its share of the run, so the costly functions stand out.
   const own = timeCell(f.self, "bar");
   own.style.setProperty("--share", share(f.self) || "0%");
-  tr.append(name, cell(String(f.calls), "num"), own, timeCell(f.inclusive), cell(bytes(f.memory), "num"));
+  tr.append(name, cell(String(f.calls), "num"), own, timeCell(f.inclusive));
+  tr.append(...(baseline ? [deltaCell(delta(f, "self")), deltaCell(delta(f, "inclusive"))] : [cell(bytes(f.memory), "num")]));
   tr.onclick = () => (selectRow(r), tableEl.focus());
   tr.ondblclick = () => openSource(f);
   rowOf.set(r.key, tr);

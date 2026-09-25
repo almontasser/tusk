@@ -671,7 +671,11 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler .tests-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .profiler-body { flex: 1; display: flex; min-height: 0; }
 .profiler-table { flex: 1; overflow: auto; outline: none; }
-.profiler-detail { width: 38%; min-width: 260px; overflow: auto; border-left: 1px solid var(--border); padding: 6px 0; }
+/* Below this, the table scrolls sideways rather than squeezing function names to nothing. */
+.profiler-table table { min-width: 640px; }
+.profiler-detail { width: 32%; min-width: 200px; overflow: auto; padding: 6px 0; flex-shrink: 0; }
+.profiler-resize { width: 5px; margin-left: -2px; cursor: col-resize; flex-shrink: 0; border-right: 1px solid var(--border); }
+.profiler-resize:hover { border-right-color: var(--accent); }
 .profiler table { width: 100%; border-collapse: collapse; font: 12px var(--mono); table-layout: fixed; }
 .profiler th { position: sticky; top: 0; background: var(--panel); text-align: left; font: 600 12px var(--ui-family); padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 .profiler th:hover { color: var(--text); background: var(--hover); }
@@ -681,6 +685,15 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .profiler th[data-sort="memory"] { width: 90px; }
 .profiler.tree-view th[data-sort="inclusive"] { width: 150px; }
 .profiler tbody tr.match td.name { color: var(--yellow); }
+.profiler th[data-sort="dself"], .profiler th[data-sort="dinclusive"] { width: 90px; }
+.profiler .slower { color: var(--red); }
+.profiler .faster { color: var(--green); }
+/* Where the time went: database, autoloading, views, and the comparison, above the table. */
+.profiler-insights { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 10px 6px; flex-shrink: 0; }
+.profiler-insights .chip { width: auto; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 11px; background: none; font: 12px var(--ui-family); color: var(--muted); white-space: nowrap; }
+.profiler-insights .chip:hover { background: var(--hover); color: var(--text); }
+.profiler-insights .chip b { color: var(--text); font-weight: 600; }
+.profiler-insights .compare { margin-left: 6px; font-weight: 600; }
 .profiler .chevron { display: inline-block; width: 16px; vertical-align: -3px; color: var(--faint); font-size: 14px !important; }
 /* Times of the calls on each line, after the line in the editor. */
 .profile-time { color: var(--faint) !important; font-style: italic; }
