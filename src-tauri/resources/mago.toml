@@ -18,3 +18,10 @@ integrations = ["laravel"]
 [linter.rules]
 strict-types = { enabled = false }
 literal-named-argument = { enabled = false }
+# Code size and complexity are hints to refactor, not errors: warnings, as PhpStorm shows them.
+cyclomatic-complexity = { level = "warning" }
+kan-defect = { level = "warning" }
+too-many-methods = { level = "warning" }
+too-many-properties = { level = "warning" }
+too-many-enum-cases = { level = "warning" }
+excessive-parameter-list = { level = "warning" }
