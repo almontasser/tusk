@@ -529,6 +529,14 @@ extra files, in this order:
    definitions. The classes that render the view (under `app/`) are outlined too,
    for a Livewire component's properties, and so is a component's own class
    under `app/View/Components/`.
+   A JavaScript, TypeScript, or Vue file gets outlines of the project files it
+   imports instead: `importedFiles` resolves each `import … from` (relative
+   paths directly; an alias such as `@/` or `~/` as the shortest indexed path
+   ending with the rest, since projects point aliases at different folders,
+   koel at `resources/assets/js`) and orders them by the nearest use of their
+   imported names. `outlineScript` keeps declarations, classes, interfaces, and
+   objects, and replaces function bodies (a `{` after a `)`, a return type, or
+   `=>`) with `{ … }`. For a Vue file, it outlines the `<script>` blocks.
 2. **Models.** `introspect.php models` boots the app once, and describes
    every model under `app/`: columns from `Schema::getColumns` (or the model's
    fillable, casts, and timestamps without a database), casts, and
@@ -659,7 +667,13 @@ guess them. With the 3B model:
 | Reading a model's column after `->` in PHP (`CASES=columns`), 40 | – | 85.0% | 87.5% |
 | After `$name->` in Blade views (`blade` task), 50 | 46.0% | 68.0% | 66.0% |
 
-So views get the models' columns and PHP classes don't. On Pinkary, hiding
+So views get the models' columns and PHP classes don't.
+
+The `js` task measures lines in koel's TypeScript and Vue scripts (60 cases):
+41.7% with no context, 63.3% with similar code only, and 66.7% with the
+outlines of imported files too. The outlines doubled the context, from about
+760 tokens to 1,620, so a cold prompt took 3.6 seconds instead of 2.0; the
+editor's warm-up on focus hides most of that. On Pinkary, hiding
 suggestions the model was unsure of lost one exact match in 60 PHP cases, and
 none in the Blade cases.
 

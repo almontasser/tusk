@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { leastLikely, replacedAfter, buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, typedNames, viewCallers, viewName, words } from "./aicontext.ts";
+import { importedFiles, outlineScript, resolveImport, leastLikely, replacedAfter, buildContext, chunk, cleanSuggestion, columnType, type Index, infillRequest, modelDoc, outline, pack, referencedClasses, similar, similarCode, typedNames, viewCallers, viewName, words } from "./aicontext.ts";
 
 const post = `<?php
 
@@ -231,4 +231,61 @@ test("ends a suggestion where the model was unsure", () => {
   assert.equal(cleanSuggestion(text, "", [], [0.3, 0.9, 0.9]), "");
   // Without probabilities, only repeats are removed.
   assert.equal(cleanSuggestion(text, "", []), text);
+});
+
+test("outlines scripts, keeping declarations and dropping function bodies", () => {
+  const ts = `import { ref } from 'vue'
+import type { Song } from '@/types'
+
+export interface Playable {
+  id: string
+}
+
+export const playback = {
+  volume: 7,
+  play (song: Song): Promise<void> {
+    if (song) { return start() }
+  },
+  stop: () => { halt() },
+}
+
+export class Queue extends Base {
+  songs: Song[] = []
+
+  add (song: Song) {
+    this.songs.push(song) // don't { break
+  }
+}
+`;
+  assert.equal(
+    outlineScript("resources/js/playback.ts", ts),
+    `export interface Playable {
+  id: string
+}
+
+export const playback = {
+  volume: 7,
+  play (song: Song): Promise<void> { … },
+  stop: () => { … },
+}
+
+export class Queue extends Base {
+  songs: Song[] = []
+
+  add (song: Song) { … }
+}`,
+  );
+  const vue = "<template><div>{{ a }}</div></template>\n<script setup lang=\"ts\">\nconst props = defineProps<{ song: Song }>()\nconst play = () => { start() }\n</script>\n";
+  assert.equal(outlineScript("A.vue", vue), "const props = defineProps<{ song: Song }>()\nconst play = () => { … }");
+});
+
+test("finds the project files a script imports, nearest use first", () => {
+  const files = new Map(["resources/js/stores/queue.ts", "resources/js/utils/format.ts", "resources/js/components/Song.vue", "resources/js/services/index.ts"].map((f) => [f, { text: "", chunks: [] }]));
+  const index: Index = { psr4: {}, files, models: {}, outline: () => "" };
+  assert.equal(resolveImport(index, "resources/js/components", "../stores/queue"), "resources/js/stores/queue.ts");
+  assert.equal(resolveImport(index, "resources/js/components", "@/components/Song.vue"), "resources/js/components/Song.vue");
+  assert.equal(resolveImport(index, "resources/js", "@/services"), "resources/js/services/index.ts");
+  assert.equal(resolveImport(index, "resources/js", "vue"), undefined);
+  const source = "import { format } from '@/utils/format'\nimport { queue } from '../stores/queue'\nimport { ref } from 'vue'\n\nconst a = format(1)\nconst b = queue.add()\n";
+  assert.deepEqual(importedFiles(index, "resources/js/components/X.ts", source, source.length), ["resources/js/stores/queue.ts", "resources/js/utils/format.ts"]);
 });

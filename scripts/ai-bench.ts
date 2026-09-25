@@ -4,8 +4,8 @@
 //
 //   node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs] [task]
 //
-// `task` is `line` (the default: complete one line), `blade` (the rest of a line after `$name->` in a
-// Blade view), or `block`: complete the rest of a block, 2 to 8
+// `task` is `line` (the default: complete one line in a PHP class), `js` (the same in JavaScript,
+// TypeScript, and Vue scripts), `blade` (the rest of a line after `$name->` in a Blade view), or `block`: complete the rest of a block, 2 to 8
 // lines, from the start of a line. A block run asks once per case with full context, then scores
 // ways of ending a multi-line suggestion on the same replies, so it compares them at no extra cost.
 //
@@ -20,7 +20,7 @@
 // Recent code isn't measured: a benchmark has no history of where the user worked.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { BUDGET, buildContext, chunk, leastLikely, typedNames, cleanSuggestion, type Extra, INDEXED, type Index, infillRequest, MAX_FILES, type ModelFacts, outline, SKIPPED, similarCode } from "../src/aicontext.ts";
+import { BUDGET, buildContext, chunk, leastLikely, typedNames, cleanSuggestion, type Extra, INDEXED, type Index, infillRequest, MAX_FILES, type ModelFacts, outlineFile, SKIPPED, similarCode } from "../src/aicontext.ts";
 import { psr4From } from "../src/psr4.ts";
 
 const [root, modelPath, count = "80", only = "none,defs,full,types", task = "line"] = process.argv.slice(2);
@@ -42,7 +42,7 @@ const index: Index = {
   psr4: psr4From(existsSync(`${root}/composer.json`) ? readFileSync(`${root}/composer.json`, "utf8") : "{}"),
   files: new Map([...texts].map(([f, text]) => [f, { text, chunks: chunk(f, text) }])),
   models,
-  outline: (rel) => outline(texts.get(rel) ?? ""),
+  outline: (rel) => outlineFile(rel, texts.get(rel) ?? ""),
 };
 
 // ---- Cases: code inside method bodies of PHP classes under app/ ----
@@ -64,7 +64,24 @@ if (task === "blade") {
     });
   }
 }
-for (const [file, text] of task === "blade" ? [] : texts) {
+// The js task: lines in JavaScript, TypeScript, and the scripts of Vue files, indented at least 4.
+if (task === "js") {
+  for (const [file, text] of texts) {
+    if (!/\.(js|jsx|ts|tsx|vue)$/.test(file) || /(^|\/)(tests?|__tests__)\/|\.(spec|test)\./.test(file)) continue;
+    let inScript = !file.endsWith(".vue");
+    text.split("\n").forEach((l, i) => {
+      if (file.endsWith(".vue") && /^<script\b/.test(l)) inScript = true;
+      if (file.endsWith(".vue") && /^<\/script>/.test(l)) inScript = false;
+      const code = l.trim();
+      if (!inScript || l.search(/\S/) < 4 || code.length < 10 || /^(\/\/|\*|\/\*|[{}()\[\];,]+$)/.test(code) || DATA.test(code)) return;
+      const indent = l.search(/\S/);
+      const boundaries = [...l.matchAll(/\.|\(|= |, |\[/g)].map((m) => m.index! + m[0].length).filter((b) => b > indent + 3 && b < l.trimEnd().length);
+      const cut = boundaries.length && random() < 0.5 ? boundaries[Math.floor(random() * boundaries.length)] : indent;
+      candidates.push({ file, line: i + 1, column: cut + 1, expected: l.slice(cut).trimEnd() });
+    });
+  }
+}
+for (const [file, text] of task === "blade" || task === "js" ? [] : texts) {
   if (!file.startsWith("app/") || !file.endsWith(".php")) continue;
   text.split("\n").forEach((l, i) => {
     const code = l.trim();

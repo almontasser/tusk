@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
-import { buildContext, chunk, leastLikely, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outline, replacedAfter, similarCode, typedNames } from "./aicontext";
+import { buildContext, chunk, leastLikely, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outlineFile, replacedAfter, similarCode, typedNames } from "./aicontext";
 import { phpactorRequest } from "./lsp";
 import { parseTypeDeclaration } from "./phptypes";
 import { type Psr4, psr4From } from "./psr4";
@@ -219,8 +219,8 @@ const indexOf = (p: Project): Index => ({
   ...p,
   outline: (rel) => {
     const open = monaco.editor.getModel(monaco.Uri.file(`${p.root}/${rel}`));
-    if (open) return outline(open.getValue());
-    if (!p.outlines.has(rel)) p.outlines.set(rel, outline(p.files.get(rel)?.text ?? ""));
+    if (open) return outlineFile(rel, open.getValue());
+    if (!p.outlines.has(rel)) p.outlines.set(rel, outlineFile(rel, p.files.get(rel)?.text ?? ""));
     return p.outlines.get(rel)!;
   },
 });

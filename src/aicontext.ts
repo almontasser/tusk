@@ -37,6 +37,86 @@ export function outline(source: string, max = 2500): string {
   return out.length > max ? out.slice(0, out.lastIndexOf("\n", max)) + "\n    // …" : out;
 }
 
+/** JavaScript or TypeScript with comments, strings, and template literals blanked out, keeping offsets. */
+const blankScript = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g, (m) => " ".repeat(m.length));
+
+/**
+ * A JavaScript, TypeScript, or Vue file reduced to what its importers need: declarations, classes,
+ * interfaces, and objects, with each function body replaced by `{ … }`. For a Vue file, its scripts.
+ * Imports are dropped. Cut at `max` characters, at a line break.
+ * ponytail: a regex literal holding a quote or a brace can end the outline early.
+ */
+export function outlineScript(rel: string, source: string, max = 2500): string {
+  if (rel.endsWith(".vue")) source = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join("\n");
+  const code = blankScript(source);
+  let out = "";
+  let from = 0;
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] !== "{") continue;
+    // A function body: after the parameters' ")", with or without a return type, or after "=>".
+    const before = code.slice(Math.max(0, i - 200), i);
+    if (!/(\)|=>)\s*$/.test(before) && !/\)\s*:\s*[^{};=()]+$/.test(before)) continue;
+    const end = matchBracket(code, i);
+    if (end < 0) break;
+    out += source.slice(from, i) + "{ … }";
+    from = end + 1;
+    i = end;
+  }
+  out = (out + source.slice(from))
+    .replace(/^import\s[^;]*?from\s*['"][^'"]+['"];?[ \t]*\n?/gm, "")
+    .replace(/^import\s+['"][^'"]+['"];?[ \t]*\n?/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return out.length > max ? out.slice(0, out.lastIndexOf("\n", max)) + "\n  // …" : out;
+}
+
+/** A file's outline for AI completion, by its kind. */
+export const outlineFile = (rel: string, text: string) => (rel.endsWith(".php") ? outline(text) : outlineScript(rel, text));
+
+const SCRIPT_EXTENSIONS = ["", ".ts", ".tsx", ".js", ".jsx", ".vue", "/index.ts", "/index.js"];
+
+/**
+ * The indexed file an import in `dir` names: a relative path, or an alias such as `@/` or `~/` for a
+ * scripts folder (resources/js in Laravel, but projects differ), found as the shortest indexed path
+ * that ends with the rest. Undefined for packages.
+ */
+export function resolveImport(index: Index, dir: string, spec: string): string | undefined {
+  if (spec.startsWith(".")) {
+    const parts: string[] = [];
+    for (const part of `${dir}/${spec}`.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part && part !== ".") parts.push(part);
+    }
+    const base = parts.join("/");
+    return SCRIPT_EXTENSIONS.map((e) => base + e).find((f) => index.files.has(f));
+  }
+  if (!/^[@~]\//.test(spec)) return undefined;
+  // ponytail: scans every indexed path for each import; a map by file name would be faster on big projects.
+  for (const e of SCRIPT_EXTENSIONS) {
+    const found = [...index.files.keys()].filter((f) => f.endsWith(`/${spec.slice(2)}${e}`));
+    if (found.length) return found.sort((a, b) => a.length - b.length)[0];
+  }
+  return undefined;
+}
+
+/** The project files a script imports, the ones whose imported names are used nearest to `offset` first. */
+export function importedFiles(index: Index, rel: string, source: string, offset: number): string[] {
+  const dir = rel.split("/").slice(0, -1).join("/");
+  const distance = new Map<string, number>();
+  for (const [, clause, spec] of source.matchAll(/^\s*import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/gm)) {
+    const file = resolveImport(index, dir, spec);
+    if (!file || file === rel) continue;
+    let d = Infinity;
+    for (const name of clause.match(/[A-Za-z_$][\w$]*/g) ?? []) {
+      if (name === "type" || name === "as") continue;
+      for (const m of source.matchAll(new RegExp(`(?<![\\w$.])${escapeRegex(name)}(?![\\w$])`, "g"))) d = Math.min(d, Math.abs(m.index! - offset));
+    }
+    distance.set(file, Math.min(d, distance.get(file) ?? Infinity));
+  }
+  return [...distance].sort((a, b) => a[1] - b[1]).map(([file]) => file);
+}
+
 /**
  * Full names of the classes a PHP file refers to, nearest to `offset` first: names used in the
  * code, resolved through the file's imports and namespace. Names that aren't classes (constants,
@@ -166,7 +246,7 @@ export type Index = {
   files: Map<string, { text: string; chunks: Chunk[] }>;
   /** Eloquent models by class. */
   models: Record<string, ModelFacts>;
-  /** A file's outline, from its unsaved text when it's open. */
+  /** A file's outline (see outlineFile), from its unsaved text when it's open. */
   outline: (rel: string) => string;
 };
 /** Code the user worked on: the lines from `start` (0-based) of a file, by path relative to the root. */
@@ -264,7 +344,8 @@ export function buildContext(index: Index, rel: string, source: string, offset: 
   // Classes that own the view: a component's class, and the classes that render it (Livewire components, mailables, controllers).
   const component = viewName(rel)?.startsWith("components.") ? componentClassPath(`x-${viewName(rel)!.slice("components.".length)}`) : null;
   const owners = [component, ...callers.map((c) => c.path)].filter((f): f is string => !!f && f.startsWith("app/") && !f.endsWith(".blade.php") && index.files.has(f));
-  const outlined = [...new Set([...used.map((u) => u.file), ...owners])].sort();
+  const imported = /\.(js|jsx|ts|tsx|vue)$/.test(rel) ? importedFiles(index, rel, source, offset).slice(0, 8) : [];
+  const outlined = [...new Set([...used.map((u) => u.file), ...owners, ...imported])].sort();
   // Models' columns only for Blade views: in PHP classes they gained nothing in scripts/ai-bench.ts (85.0%
   // against 87.5% on 40 cases that read a column), since the code around already shows the columns, and
   // they cost about 400 tokens. In views they gained 2 points (68% against 66% on 50 cases).
@@ -273,7 +354,7 @@ export function buildContext(index: Index, rel: string, source: string, offset: 
   const definitions: Extra[] = [];
   if (docs.length) definitions.push({ filename: "_ide_helper_models.php", text: `<?php\n\n${docs.join("\n\n")}\n` });
   // In a fixed order, so moving the cursor changes the prompt only when the set of classes changes.
-  definitions.push(...outlined.map((file) => ({ filename: file, text: `<?php\n\n${index.outline(file)}\n` })));
+  definitions.push(...outlined.map((file) => ({ filename: file, text: `${file.endsWith(".php") ? "<?php\n\n" : ""}${index.outline(file)}\n` })));
   // The code around each call, even when its class is outlined: the outline drops the method body that passes the variables.
   definitions.push(...callers.map((c) => ({ filename: c.path, text: c.text + "\n" })));
   const worked = recent.filter((r) => r.path !== rel).map((r) => ({ filename: r.path, text: r.text + "\n" }));
