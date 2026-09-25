@@ -366,9 +366,11 @@ async function startServer(
       const model = monaco.editor.getModel(monaco.Uri.parse(uri));
       clearTimeout(heldClears.get(uri));
       heldClears.delete(uri);
+      // Read now: a held publish applies after you may have moved on to another file.
+      const enqueued = name === "phpactor" && uri === lastEnqueued;
       const apply = () => {
         if (!model || model.isDisposed()) return;
-        if (name === "phpactor" && uri === lastEnqueued) markDiagnosed(model);
+        if (enqueued) markDiagnosed(model);
         setMarkers(model, owner, list);
       };
       // Phpactor publishes an empty list before each check, then the list so far as each checker finishes, and

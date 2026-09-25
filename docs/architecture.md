@@ -600,7 +600,8 @@ results from both `mago` and `mago-lint`, 5 seconds after the last publish
 after 30 seconds. Moving on sooner would make Phpactor drop Mago's results for
 the file. The client tracks the document Phpactor checks next
 (`lastEnqueued`), and a publish for it marks the file as checked
-(`diagnosed`).
+(`diagnosed`). Until then, the Problems panel shows the scan's problems for an
+open PHP file: other servers, such as the spell checker, publish first.
 
 Before each check, `DiagnosticsEngine` publishes an empty list, then the list so
 far as each checker finishes. A checker with no results publishes nothing, so
@@ -610,8 +611,7 @@ come back in stages. The client holds an empty Phpactor publish for a file
 that has problems for 4 seconds, and any later publish for the file replaces
 it. A held publish doesn't mark the file as checked. Held markers keep their
 old ranges: Monaco moves the squiggles as you type, but not the marker ranges
-that the Problems panel reads. Until then, the Problems panel shows the scan's problems for an
-open PHP file: other servers, such as the spell checker, publish first.
+that the Problems panel reads.
 
 ### Docblocks Phpactor can't read
 
