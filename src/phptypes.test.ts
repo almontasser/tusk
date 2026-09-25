@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget } from "./phptypes.ts";
+import { componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -101,4 +101,12 @@ test("routeTarget reads controller actions from route:list", () => {
   assert.equal(routeTarget("Closure"), null);
   assert.equal(methodLine("<?php\nclass A {\n  public function index(Request $r) {}\n}", "index"), 3);
   assert.equal(methodLine("<?php\nclass A {}", "index"), 0);
+});
+
+test("finds a parameter in the docblock before its function, whatever its type", () => {
+  const source = "<?php\nclass A {\n    /**\n     * @param array{'message':string, 'code':string} $body\n     */\n    #[Pure]\n    public function send(array $body, array $other) {}\n}\n";
+  const at = source.indexOf("$body, ");
+  assert.equal(docblockHasParam(source, at, "body"), true);
+  assert.equal(docblockHasParam(source, at, "other"), false);
+  assert.equal(docblockHasParam("<?php\n/** @param int $x */\n$y = 1;\nfunction f($x) {}", 40, "x"), false);
 });

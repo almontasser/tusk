@@ -123,3 +123,15 @@ export function routeTarget(action: string): { fqn: string; method: string } | n
 /** The 1-based line that declares `method` in PHP source, or 0 when there's none. */
 export const methodLine = (source: string, method: string) =>
   source.split("\n").findIndex((l) => new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`, "i").test(l)) + 1;
+
+/**
+ * Whether the docblock of the function declared around `at` (such as a parameter's position) has `@param … $name`.
+ * The docblock is the `/** … *\/` right before the declaration, with only modifiers and attributes between.
+ */
+export function docblockHasParam(source: string, at: number, name: string): boolean {
+  const fn = source.lastIndexOf("function", at);
+  const end = source.lastIndexOf("*/", fn);
+  const start = source.lastIndexOf("/**", end);
+  if (fn < 0 || end < 0 || start < 0 || !/^[\s\w#[\]()'",:=\\]*$/.test(source.slice(end + 2, fn))) return false;
+  return new RegExp(`@param\\b[^\\n]*\\$${name}\\b`).test(source.slice(start, end));
+}

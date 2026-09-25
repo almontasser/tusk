@@ -11,6 +11,7 @@ import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, isFacade, isModelMethod, isModelProperty, onModelsRead, readModels, rereadModels } from "./eloquent";
 import { withoutMagic } from "./magic";
+import { docblockHasParam } from "./phptypes";
 
 type M = typeof monaco.languages;
 
@@ -127,6 +128,17 @@ function withoutEloquentMagic(model: monaco.editor.ITextModel, list: L.Diagnosti
   });
 }
 
+/**
+ * Phpactor's "Method "send" is missing @param $body" when the docblock has it: Phpactor's docblock parser drops a
+ * `@param` whose type it can't read, such as a PHPStan array shape with quoted keys (`array{'code': string}`).
+ */
+function documentedAfterAll(model: monaco.editor.ITextModel, d: L.Diagnostic): boolean {
+  if (d.code !== "worse.docblock_missing_param") return false;
+  const name = (typeof d.message === "string" ? d.message : d.message.value).match(/@param \$(\w+)/)?.[1];
+  const at = model.getOffsetAt({ lineNumber: d.range.start.line + 1, column: d.range.start.character + 1 });
+  return !!name && docblockHasParam(textOf(model), at, name);
+}
+
 /** The last diagnostics each server sent for each model, so they can be filtered again once the models are read. */
 const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner: string; list: L.Diagnostic[] }>();
 onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
@@ -137,7 +149,7 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
   lastDiagnostics.set(key, { model, owner, list });
   if (isLibrary(model)) list = [];
   if (list.length && isPestFile(model)) list = list.filter((d) => !pestFalsePositive(model, d));
-  if (list.length && model.getLanguageId() === "php") list = withoutEloquentMagic(model, list);
+  if (list.length && model.getLanguageId() === "php") list = withoutEloquentMagic(model, list).filter((d) => !documentedAfterAll(model, d));
   monaco.editor.setModelMarkers(
     model,
     owner,

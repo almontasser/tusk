@@ -308,6 +308,16 @@ In development, Tauri copies `filament-lsp/` into `target/debug/tools/` only
 when the Rust side rebuilds, so a change to `introspect.php` reaches the running
 app after the next Rust rebuild.
 
+### Docblocks Phpactor can't read
+
+Phpactor's docblock parser drops a `@param` whose type it can't read, such as a
+PHPStan array shape with quoted keys (`array{'code': string}`; unquoted keys
+parse), and then reports `worse.docblock_missing_param` for a parameter the
+docblock does document. `documentedAfterAll` in `lsp.ts` finds the docblock of
+the function around the report (`docblockHasParam` in `phptypes.ts`: the
+`/** … */` right before `function`, with only modifiers and attributes between)
+and drops the report when it has `@param … $name`.
+
 ### Unfinished first builds
 
 Phpactor finds classes through Composer's autoloader even without an index,
