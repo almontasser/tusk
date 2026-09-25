@@ -200,7 +200,6 @@ export function forgetProblems() {
 export function forgetPath(path: string) {
   const inside = (p: string) => p === path || p.startsWith(`${path}/`);
   [...scanned.keys()].filter(inside).forEach((p) => scanned.delete(p));
-  [...diagnosed].filter(inside).forEach((p) => diagnosed.delete(p));
   renderSoon();
 }
 
