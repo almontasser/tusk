@@ -78,6 +78,7 @@ test("shows unproven types as warnings and mixed values as hints", () => {
   assert.equal(severityOf(d("invalid-iterator", "It resolved to type `mixed`, which is not iterable.")), 4);
   assert.equal(severityOf(d("invalid-iterator", "It resolved to type `int`, which is not iterable.")), 1);
   assert.equal(severityOf(d("non-existent-class")), 1);
+  assert.equal(severityOf(d("invalid-return-tag")), 2);
 });
 
 test("reads Mago's report with UTF-8 byte offsets", () => {

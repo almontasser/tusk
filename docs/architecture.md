@@ -434,8 +434,10 @@ Laravel's magic (above), it drops:
 
 `severityOf` shows Mago's issues about types it can't prove as warnings rather
 than errors: `possibly-*`, `less-specific-*`, a closure parameter narrower than
-the callable asks for, a missing template argument, and a class named by a
-variable. Issues about using a `mixed` value, such as a `foreach` over one,
+the callable asks for, a missing template argument, a class named by a
+variable, and a docblock Mago can't read (`invalid-docblock`, `invalid-*-tag`),
+such as an intersection of array types (`array<mixed>&array{id: string}`),
+which PHPStan reads and `array{id: string, ...}` says for Mago too. Issues about using a `mixed` value, such as a `foreach` over one,
 show as hints, like the `mixed-*` ones. After these, the remaining errors in
 that project were all real: wrong `@var` and `@return` types, a package in
 composer.json that `vendor` didn't have, a test calling `addMonth(3)`, and the
@@ -474,6 +476,9 @@ keeps its View Problem and Quick Fix links. Monaco lists the newest hover
 provider first, so the hover is registered again after each server's
 providers. Markers no longer carry a source; the rule's code stays, for
 turning a rule off in `mago.toml`.
+
+Phpactor's hover over a docblock returns its parser's node name, such as
+`ClassMembersNode`; the hover provider drops a hover that's only such a name.
 
 The link runs `problems.openPage`, which `showProblemPage` in `problems.ts`
 handles: a page in the editor area, like the diff view, with the message

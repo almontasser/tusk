@@ -545,7 +545,9 @@ async function startServer(
         async provideHover(model, pos, token) {
           const h = await request<L.Hover | null>("textDocument/hover", at(model, pos), token);
           if (!h) return null;
-          const contents = Array.isArray(h.contents) ? h.contents : [h.contents];
+          // Phpactor answers for a docblock with its parser's node name, such as `ClassMembersNode`.
+          const contents = (Array.isArray(h.contents) ? h.contents : [h.contents]).filter((c) => !/^\s*[A-Z]\w*Node\s*$/.test(typeof c === "string" ? c : c.value));
+          if (!contents.length) return null;
           return { contents: contents.map(markdown), range: h.range && toRange(h.range) };
         },
       }));

@@ -250,9 +250,10 @@ export function realProblems<D extends Diagnostic>(path: string, text: string, l
 /**
  * Mago's issues about types it can't prove rather than mistakes: a value that may be null or false, one of a
  * wider type than expected (`less-specific`), a generic class without its type arguments, or a class named by a
- * variable. The code may well be right, and PhpStorm doesn't treat them as errors either.
+ * variable; and a docblock Mago can't read, such as `array<mixed>&array{id: string}`, which PHPStan reads. The code
+ * may well be right, and PhpStorm doesn't treat them as errors either.
  */
-const unproven = /^(possibl[ey]-|less-specific-|property-type-coercion$|missing-template-parameter$|unknown-class-instantiation$)/;
+const unproven = /^(possibl[ey]-|less-specific-|property-type-coercion$|missing-template-parameter$|unknown-class-instantiation$|invalid-docblock$|invalid-\w+-tag$)/;
 
 /**
  * A closure whose parameter type is narrower than the callable asks for, such as `EloquentCollection $chunk` for
