@@ -507,7 +507,8 @@ show in the tabs:
 | Scripts | JavaScript that runs before the request and after the response, with snippets for common tests |
 | Settings | Title, name for scripts, redirects, cookies, TLS verification, history, timeouts, and a file to save the response to |
 
-The response shows its status, time, size, and test results, with these tabs:
+The response shows its status, time, size, and test results. Choosing a request
+shows its last response from the history. The response has these tabs:
 
 - **Body**: formatted and highlighted, or raw. HTML and images also have a
   preview. Copy it, save it, or open it in an editor tab.

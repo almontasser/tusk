@@ -173,6 +173,14 @@ export async function openRequest(path: string, line: number, focusUrl = false) 
   mark(r.start);
   renderRequest();
   showHttpPanel("HTTP", panel);
+  // Show the request's last response, if the history has one.
+  const same = (x: Exchange) => x.path === path && (r.name ? x.name === r.name : x.line === r.line);
+  if (!shown || !same(shown))
+    history().then((list) => {
+      const last = list.find(same);
+      if (last) showExchange(last);
+      else (shown = null), renderResponse();
+    });
   if (focusUrl) urlInput.focus();
   markActive();
 }
