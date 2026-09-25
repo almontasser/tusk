@@ -88,13 +88,27 @@ function pestFalsePositive(model: monaco.editor.ITextModel, d: L.Diagnostic): bo
   return line <= model.getLineCount() && model.getLineContent(line).includes("$this") && /\$this|TestCase|`mixed`/.test(message);
 }
 
+/**
+ * Mago analyzer rules that Laravel's magic sets off on correct code: a property or method Eloquent, a request, or
+ * a facade resolves at runtime (`$post->author`, `$request->email`) has no declaration, and every call on the value
+ * it returns is then on `mixed`. PhpStorm flags the first only faintly and the rest not at all, so these show as
+ * hints: dots under the code, explained on hover, and not counted as problems.
+ */
+const magicNoise = (d: L.Diagnostic) => /^mago/.test(d.source ?? "") && /^(non-documented-(property|method)|mixed-)/.test(String(d.code ?? ""));
+
 function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diagnostic[]) {
   if (isLibrary(model)) list = [];
   if (list.length && isPestFile(model)) list = list.filter((d) => !pestFalsePositive(model, d));
   monaco.editor.setModelMarkers(
     model,
     owner,
-    list.map((d) => ({ ...toRange(d.range), message: typeof d.message === "string" ? d.message : d.message.value, severity: severity[d.severity ?? 1], source: d.source, code: d.code?.toString() })),
+    list.map((d) => ({
+      ...toRange(d.range),
+      message: typeof d.message === "string" ? d.message : d.message.value,
+      severity: magicNoise(d) ? monaco.MarkerSeverity.Hint : severity[d.severity ?? 1],
+      source: d.source,
+      code: d.code?.toString(),
+    })),
   );
 }
 

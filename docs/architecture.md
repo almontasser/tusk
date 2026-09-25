@@ -255,6 +255,18 @@ would list classes twice. The client sets its own `indexer.index_path` with a
 version suffix (`%project_id%-editor-2`). When the patterns change, bump the
 suffix, and every project gets a fresh index.
 
+### Laravel magic in Mago's results
+
+Mago's analyzer has no Laravel plugin (its plugins are `stdlib`, `psl`,
+`flow-php`, and `psr-container`), and a stub class with `@property` tags in
+`includes` doesn't help: the project's own class wins. So a relationship read
+as a property (`$sender->provider`) is `non-documented-property`, and each call
+on its value is `mixed-method-access`, an error. `setMarkers` in `lsp.ts` shows
+Mago's `non-documented-*` and `mixed-*` issues as hints instead, for every
+class: in Laravel code they come from Eloquent, requests, and facades far more
+often than from real mistakes, and PhpStorm reports the first only as a weak
+warning and the rest not at all.
+
 ### Unfinished first builds
 
 Phpactor finds classes through Composer's autoloader even without an index,

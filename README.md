@@ -1155,7 +1155,11 @@ reads the project and `vendor` but skips hidden folders, `node_modules`, and
 `storage`, two rules that flag normal Laravel code on nearly every file
 (`strict-types` and `literal-named-argument`) are off, and rules about code
 size and complexity (such as `cyclomatic-complexity` and `too-many-methods`)
-show as warnings rather than errors.
+show as warnings rather than errors. Mago's analyzer doesn't know Laravel's
+magic, such as Eloquent attributes and relationships (`$post->author`) or
+request input (`$request->email`), so it reports them as undocumented and every
+call on them as a call on `mixed`; the editor shows those as hints (dots you can
+hover), not as problems.
 
 ## Test app
 
