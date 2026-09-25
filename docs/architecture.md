@@ -2917,7 +2917,8 @@ Problem popups and Problems panel rows show `source(code)`, as VS Code does,
 which reverses the earlier choice to show only the code. The label tells Mago's
 analyzer from its linter and names the rule to turn off in `mago.toml`. It
 shows even when only one checker reports, since `mago` and `mago-lint` would
-make most PHP files count as several checkers anyway.
+make most PHP files count as several checkers anyway. The user confirmed
+keeping the checker's name after trying it.
 
 ### 2026-09-25: Commands that answer problems count as quick fixes
 
