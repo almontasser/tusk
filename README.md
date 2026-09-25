@@ -61,7 +61,7 @@ file to change when you add it.
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. The Composer window lists direct dependencies only, and doesn't explain why a package is installed (`composer why`). Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. Docker setups other than Sail run commands on this Mac. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. The HTTP client has no response history, no `< file` bodies or multipart uploads, and no scripts. |
 | Coverage | There's no coverage per folder, and no list of which tests covered a line. The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
@@ -452,11 +452,17 @@ Environment…** from ⌘⇧A.
 
 The **Composer** tool window (the package icon) lists the project's direct
 dependencies, with dev dependencies marked, and checks Packagist for updates.
+Switch the list to **All installed packages** to include the packages your
+dependencies need, marked **indirect**.
 An update shows in green when it fits the version constraint in
 `composer.json`, and in yellow when it needs a new constraint.
 
 - Click a package to update it, upgrade it to its latest version (which
-  changes the constraint), remove it, or open it on Packagist.
+  changes the constraint), remove it, or open it on Packagist. An indirect
+  package can only be updated within its constraints.
+- Click a package, then **Why Is It Installed?**, to list the packages that
+  require it, with their version constraints. Choose one of them to see why
+  that one is installed, up to `composer.json`.
 - Click **+** to search Packagist and require a package, as a dependency or a
   dev dependency.
 - Click the arrow to run `composer update` for everything.

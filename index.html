@@ -149,6 +149,12 @@
               <button class="icon-button" id="composer-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
             </div>
           </header>
+          <div class="pr-toolbar">
+            <select id="composer-filter" aria-label="Which packages to list">
+              <option value="direct">Direct dependencies</option>
+              <option value="all">All installed packages</option>
+            </select>
+          </div>
           <p id="composer-summary" class="db-connection muted"></p>
           <ul id="composer-list"></ul>
         </section>

@@ -461,7 +461,12 @@ apply. Interim responses, such as `100 Continue`, are skipped when parsing.
 getcomposer.org. The tool window reads `composer show --direct --format=json`
 first, then `composer outdated --direct --format=json`, which asks Packagist
 and takes a second or two. `packages` in `src/composerdata.ts` joins them with
-`require-dev` from `composer.json`. Packagist search goes through curl, like
+`require` and `require-dev` from `composer.json`, which mark dev and direct
+packages. **All installed packages** drops `--direct` from both commands.
+**Why Is It Installed?** runs `composer why <package>`, which has no JSON
+output, so `dependents` reads its text rows (`<name> <version> requires
+<package> (<constraint>)`); the project itself is the row whose version is
+`-`. Packagist search goes through curl, like
 the HTTP client. Commands that change packages run in terminal tabs, and the
 tab's exit reloads the list. The `composer.lock` change they cause also
 reindexes Phpactor.

@@ -1,7 +1,8 @@
-// Composer tool window: the project's direct packages with available updates, and actions to require,
-// update, and remove packages. Commands use the bundled composer.phar and run in terminal tabs.
+// Composer tool window: the project's packages (direct ones, or everything installed) with available updates,
+// why each is installed, and actions to require, update, and remove packages. Commands use the bundled
+// composer.phar and run in terminal tabs.
 import { invoke } from "@tauri-apps/api/core";
-import { packages, type Package } from "./composerdata";
+import { dependents, packages, type Package } from "./composerdata";
 import { confirm, pick } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -33,16 +34,18 @@ export async function loadPackages() {
   const json = await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => null);
   if (json === null) return list.replaceChildren(el("li", "muted", "This project has no composer.json."));
   list.replaceChildren(el("li", "muted", "Loading…"));
+  // Everything installed includes the packages your dependencies need.
+  const scope = ($("composer-filter") as HTMLSelectElement).value === "all" ? [] : ["--direct"];
   let show: string;
   try {
-    show = await capture("show", "--direct", "--format=json");
+    show = await capture("show", ...scope, "--format=json");
   } catch (e) {
     return list.replaceChildren(el("li", "muted", `Can't list packages: ${String(e).trim()}. Run composer install first.`));
   }
   render(packages(show, null, json));
   // Checking for updates asks Packagist, so it comes second.
   $("composer-summary").textContent = "Checking for updates…";
-  const outdated = await capture("outdated", "--direct", "--format=json").catch(() => null);
+  const outdated = await capture("outdated", ...scope, "--format=json").catch(() => null);
   const all = packages(show, outdated, json);
   render(all);
   const updates = all.filter((p) => p.latest).length;
@@ -56,6 +59,7 @@ function render(list: Package[]) {
       li.title = `${p.description}${p.abandoned ? "\n\nAbandoned" : ""}`;
       const name = el("span", "name", p.name);
       if (p.dev) name.append(el("span", "badge", "dev"));
+      if (!p.direct) name.append(el("span", "badge", "indirect"));
       if (p.abandoned) name.append(el("span", "badge warn", "abandoned"));
       const version = el("span", "version", p.version);
       if (p.latest) version.append(el("span", p.status === "semver-safe-update" ? "update safe" : "update major", ` → ${p.latest}`));
@@ -66,9 +70,33 @@ function render(list: Package[]) {
   );
 }
 
+/**
+ * Lists the packages that require `name`, from `composer why`. Choosing one shows why that one is installed,
+ * up to composer.json, so you can follow the chain from a package to the requirement that brought it in.
+ */
+async function why(name: string) {
+  const out = await capture("why", name).catch((e) => (host.status(`Can't tell why ${name} is installed: ${String(e).trim()}`), null));
+  if (out === null) return;
+  const project = JSON.parse(await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => "{}")).name;
+  const list = dependents(out);
+  if (!list.length) return host.status(`Nothing requires ${name}.`);
+  pick(`Why is ${name} installed? Choose a package to see why it is.`, () =>
+    list.map((d) => {
+      // The project itself shows as its composer.json name, without a version.
+      const root = d.version === "-" || d.name === project;
+      return {
+        label: root ? "composer.json" : d.name,
+        detail: `${root ? "" : `${d.version} `}${d.relation} ${d.constraint}`,
+        icon: root ? "codicon-json" : "codicon-package",
+        run: () => (root ? host.status(`${name} is required by composer.json.`) : why(d.name)),
+      };
+    }),
+  );
+}
+
 function packageActions(p: Package) {
   pick(p.name, () => [
-    ...(p.latest
+    ...(p.latest && (p.direct || p.status === "semver-safe-update")
       ? [
           p.status === "semver-safe-update"
             ? { label: `Update to ${p.latest}`, run: () => run(`composer update ${p.name}`, ["update", p.name, "--with-dependencies"]) }
@@ -76,13 +104,19 @@ function packageActions(p: Package) {
         ]
       : []),
     { label: "Update within its constraint", run: () => run(`composer update ${p.name}`, ["update", p.name, "--with-dependencies"]) },
-    {
-      label: "Remove…",
-      run: async () => {
-        if (await confirm(`Remove ${p.name} from the project?`, `Remove ${p.name}`))
-          run(`composer remove ${p.name}`, ["remove", ...(p.dev ? ["--dev"] : []), p.name]);
-      },
-    },
+    { label: "Why Is It Installed?", run: () => why(p.name) },
+    // A package another one needs can't be removed on its own.
+    ...(p.direct
+      ? [
+          {
+            label: "Remove…",
+            run: async () => {
+              if (await confirm(`Remove ${p.name} from the project?`, `Remove ${p.name}`))
+                run(`composer remove ${p.name}`, ["remove", ...(p.dev ? ["--dev"] : []), p.name]);
+            },
+          },
+        ]
+      : []),
     { label: "Open on Packagist", run: () => invoke("run_capture", { cwd: "/", program: "open", args: [`https://packagist.org/packages/${p.name}`], input: null }) },
   ]);
 }
@@ -118,6 +152,7 @@ export const updateAll = () => run("composer update", ["update"]);
 export function initComposer(h: Host) {
   host = h;
   $("composer-refresh").onclick = loadPackages;
+  $("composer-filter").onchange = loadPackages;
   $("composer-require").onclick = requirePackage;
   $("composer-update").onclick = updateAll;
 }
