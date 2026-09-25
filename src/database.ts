@@ -336,7 +336,9 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     submit.title = list.join(";\n");
   };
   changed();
-  results.onkeydown = (e) => e.key === "Enter" && e.metaKey && !submit.disabled && (e.preventDefault(), submit.click());
+  results.onkeydown = (e) => {
+    if (e.key === "Enter" && e.metaKey && !submit.disabled) e.preventDefault(), submit.click();
+  };
 
   rows.forEach((tr, r) => {
     const index = tr.children[0] as HTMLElement;

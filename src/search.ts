@@ -234,8 +234,13 @@ export function initSearch(h: Host) {
   }
   $("find-query").oninput = searchSoon;
   $("find-include").oninput = searchSoon;
-  $("find-query").onkeydown = (e) => e.key === "Enter" && search();
-  $("replace-with").onkeydown = (e) => e.key === "Enter" && replaceAll();
+  // Braces, since a handler that returns false (the `&&` for any other key) cancels the keystroke.
+  $("find-query").onkeydown = (e) => {
+    if (e.key === "Enter") search();
+  };
+  $("replace-with").onkeydown = (e) => {
+    if (e.key === "Enter") replaceAll();
+  };
   $("replace-all").onclick = replaceAll;
 }
 
