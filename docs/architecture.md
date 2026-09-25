@@ -1418,22 +1418,27 @@ the one comment.
 
 #### Pending reviews
 
-GitHub's REST API creates a review with all its comments in one request, but
-can't add comments to a pending review one at a time (GraphQL can). So pending
-comments are drafts in `localStorage`, under `review:<repository URL>#<number>`,
-each with an ID (deletes go by ID, since the sidebar and the diff show the list
-at once) and the head commit it was written against. A review's comments share
-one `commit_id`, and a draft's line numbers belong to its own commit, so
-submitting first posts each draft from before the last push on its own, on its
-commit, where GitHub keeps it on the right lines and marks it outdated. Then one
-POST to `pulls/<n>/reviews`, through `gh api --input -`, sends the verdict
-(`COMMENT`, `APPROVE`, or `REQUEST_CHANGES`), the summary, and the remaining
-drafts, on the head commit. Each draft is deleted only once GitHub accepts it,
-so a failure leaves the rest to submit again. In the diff, a draft from before
-the last push says so, since its lines may have moved. `shown` remembers the
-diff's model, and `drawZones` does nothing once the diff shows something else,
-so a slow reply can't draw threads into, say, a file's history. Replies can't be part
-of a review in the REST API, so they post at once.
+Pending comments live in your pending review on GitHub, so the browser and the
+editor show the same one. GitHub lists a pending review only to its author, so
+`loadPending` finds yours in `pulls/<n>/reviews` (state `PENDING`) and reads its
+comments from `reviews/<id>/comments`. The REST API can add comments to a
+review only while creating it, so the first comment creates the review (a POST
+to `pulls/<n>/reviews` with the comment and no `event`, which leaves it
+pending), and later ones go through GraphQL's `addPullRequestReviewThread`
+with the review's node ID; a reply goes through `addPullRequestReviewThreadReply`,
+since GitHub takes no comment outside a pending review while one exists.
+Deleting a pending comment is a `DELETE` on the comment, and deleting the last
+one also deletes the empty review. Submitting sends the verdict (`COMMENT`,
+`APPROVE`, or `REQUEST_CHANGES`) and the summary to `reviews/<id>/events`;
+without a pending review, a review with only the summary is created. GitHub
+anchors each comment to the review's commit, so comments from before a push
+become outdated there, as in the browser. `shown` remembers the diff's model,
+and `drawZones` does nothing once the diff shows something else, so a slow
+request can't draw threads into, say, a file's history.
+
+An earlier build kept pending comments in `localStorage`
+(`review:<repository URL>#<number>`); those aren't read or moved to GitHub,
+since they were short-lived.
 
 `markdown()` turns `#123` and `@name` in text into links after sanitizing,
 walking the text nodes and skipping links and code, so a reference inside a

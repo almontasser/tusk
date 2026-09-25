@@ -45,7 +45,7 @@ file to change when you add it.
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
-| Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
+| Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | Split editors | Up to four panes. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -880,14 +880,15 @@ To comment on code in the diff:
    **Add to Review** to keep it for your review, or **Comment Now** to post it
    at once. ⌘⏎ adds it to the review, and Escape closes the box.
 
+**Add to Review** puts the comment in your pending review on GitHub, which only
+you can see until you submit it. It's the same review as in the browser: a
+review you started on GitHub shows here, and one started here shows there.
 Pending comments show in the diff with a yellow edge and on the pull request's
-page under **Pending review**, where you can delete them. They're kept on this
-Mac until you submit, so closing the app doesn't lose them. A comment you wrote
-before the author pushed again is posted on its own, on the version you
-commented on, where GitHub marks it outdated. To submit, write an
-optional summary below the conversation and click **Submit Review**,
-**Approve**, or **Request Changes**: all pending comments go to GitHub as one
-review. Without pending comments, **Comment** adds a comment to the
+page under **Pending review**, where you can delete them. While you have a
+pending review, replies join it too, and **Comment Now** isn't offered, since
+GitHub takes no comment outside the review. To submit, write an optional summary
+below the conversation and click **Submit Review**, **Approve**, or **Request
+Changes**. Without a pending review, **Comment** adds a comment to the
 conversation, and **Request Changes** needs one.
 
 Click **Check Out** to switch to the branch. When the current branch has a pull

@@ -143,6 +143,7 @@ export async function showPullRequest(number: number) {
       gh("pr", "view", String(number), "--json", `${FIELDS},body,headRefOid,state,files,comments,reviews`).then(JSON.parse),
       lineComments(number),
       me(),
+      loadPending(number).catch(() => null),
     ]);
   } catch (e) {
     detail.replaceChildren(el("p", "muted", `Can't load #${number}: ${String(e).trim()}`));
@@ -198,7 +199,8 @@ export async function showPullRequest(number: number) {
     conversation.append(item);
   };
   if (pr.body) entry(pr.author.login, "description", pr.body);
-  for (const r of pr.reviews) if (r.body || r.state !== "COMMENTED") entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body);
+  // Your pending review isn't part of the conversation yet; it's listed below.
+  for (const r of pr.reviews) if (r.state !== "PENDING" && (r.body || r.state !== "COMMENTED")) entry(r.author.login, reviews[r.state] ?? r.state.toLowerCase(), r.body);
   for (const c of pr.comments) {
     const id = c.url.match(/#issuecomment-(\d+)$/)?.[1];
     if (id) editable(c.author.login, c.body, `repos/{owner}/{repo}/issues/comments/${id}`);
@@ -214,21 +216,25 @@ export async function showPullRequest(number: number) {
 
   const heading = (text: string) => el("h3", "", text);
   // Your line comments that wait for the review to be submitted. Click one to see it in the diff.
-  const pending = drafts(pr);
+  const pendingComments = pending?.number === number ? pending.comments : [];
   const pendingList = el("ul", "pr-files");
-  pending.forEach((d) => {
+  for (const c of pendingComments) {
     const li = el("li");
-    li.append(el("span", "name", `${d.path}:${d.start_line ? `${d.start_line}–` : ""}${d.line}`), el("span", "muted", ` ${d.body.split("\n")[0]}`));
-    li.onclick = () => showFileDiff(pr, d.path, threads, d);
+    li.append(el("span", "name", `${c.path}:${c.start_line ? `${c.start_line}–` : ""}${c.line}`), el("span", "muted", ` ${c.body.split("\n")[0]}`));
+    li.onclick = () => showFileDiff(pr, c.path, threads, c);
     const remove = el("button", "icon-button codicon codicon-close");
     remove.title = "Delete this pending comment";
-    remove.onclick = (e) => (e.stopPropagation(), deleteDraft(pr, d.id), showPullRequest(number));
+    remove.onclick = (e) => {
+      e.stopPropagation();
+      deletePending(number, c).then(() => showPullRequest(number), (err) => host.status(`Can't delete the pending comment: ${String(err).trim()}`));
+    };
     li.append(remove);
     pendingList.append(li);
-  });
+  }
+  const hasPending = pending?.number === number;
   const review = el("div", "pr-review");
   const box = el("textarea");
-  box.placeholder = pending.length ? "Summarize your review (Markdown, optional)" : "Leave a comment (Markdown)";
+  box.placeholder = hasPending ? "Summarize your review (Markdown, optional)" : "Leave a comment (Markdown)";
   box.setAttribute("aria-label", "Comment");
   const buttons = el("div", "pr-actions");
   // With pending comments, each button submits them as one review. Without, Comment adds a comment
@@ -237,10 +243,10 @@ export async function showPullRequest(number: number) {
     const b = el("button", "", label);
     b.onclick = async () => {
       const body = box.value.trim();
-      if (needsText && !body && !pending.length) return host.status(`Write a comment first: ${label} needs one.`);
+      if (needsText && !body && !pendingComments.length) return host.status(`Write a comment first: ${label} needs one.`);
       buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
       try {
-        if (event === "COMMENT" && !pending.length) await gh("pr", "comment", String(number), "--body", body);
+        if (event === "COMMENT" && !hasPending) await gh("pr", "comment", String(number), "--body", body);
         else await submitReview(pr, event, body);
         host.status(done);
         showPullRequest(number);
@@ -251,7 +257,7 @@ export async function showPullRequest(number: number) {
     };
     buttons.append(b);
   };
-  reply(pending.length ? `Submit Review (${pending.length})` : "Comment", "COMMENT", true, pending.length ? `Submitted your review on #${number}` : `Commented on #${number}`);
+  reply(hasPending ? `Submit Review (${pendingComments.length})` : "Comment", "COMMENT", true, hasPending ? `Submitted your review on #${number}` : `Commented on #${number}`);
   if (pr.state === "OPEN") {
     reply("Approve", "APPROVE", false, `Approved #${number}`);
     reply("Request Changes", "REQUEST_CHANGES", true, `Requested changes on #${number}`);
@@ -269,7 +275,7 @@ export async function showPullRequest(number: number) {
     files,
     heading(`Conversation${threads.length ? ` (${threads.length} line ${threads.length === 1 ? "thread" : "threads"})` : ""}`),
     conversation,
-    ...(pending.length ? [heading(`Pending review (${pending.length} ${pending.length === 1 ? "comment" : "comments"})`), pendingList] : []),
+    ...(pendingComments.length ? [heading(`Pending review (${pendingComments.length} ${pendingComments.length === 1 ? "comment" : "comments"})`), pendingList] : []),
     review,
   );
 }
@@ -434,7 +440,7 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
     return host.status(`Can't show the diff: ${String(e).trim()}`);
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
-  await me();
+  await Promise.all([me(), pending?.number === pr.number ? null : loadPending(pr.number).catch(() => null)]);
   shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
   form = undefined;
   drawZones();
@@ -449,33 +455,65 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
 
 // ---- Line comments and pending reviews ----
 
-/** A line comment saved for a review you haven't submitted yet. `commit` is the head it was written against. */
-type Draft = { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number; body: string; commit: string };
-
-/** The diff on screen, and the view zones (threads, drafts, and the comment form) drawn in it. */
+/** The diff on screen, and the view zones (threads, pending comments, and the comment form) drawn in it. */
 let shown: { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string][]; model?: monaco.editor.ITextModel } | undefined;
 /** The open comment form: a new comment on lines, or a reply to a thread. */
 let form: { side: "LEFT" | "RIGHT"; line: number; start: number; reply?: Thread } | undefined;
 
-// Drafts are kept in localStorage, per pull request, so a reload or a restart doesn't lose them.
-const draftKey = (pr: PullRequest) => `review:${repoUrl(pr)}#${pr.number}`;
-function drafts(pr: PullRequest): Draft[] {
-  try {
-    // Drafts saved before they had IDs get one from their place in the list.
-    return JSON.parse(localStorage.getItem(draftKey(pr)) ?? "[]").map((d: Draft, i: number) => ({ ...d, id: d.id ?? `old-${i}` }));
-  } catch {
-    return [];
-  }
-}
-/** Deletes a pending comment by its ID, which stays right while the sidebar and the diff both show the list. */
-const deleteDraft = (pr: PullRequest, id: string) => saveDrafts(pr, drafts(pr).filter((d) => d.id !== id));
+/**
+ * Your pending review: GitHub's own, which only you can see until you submit it, so it's the same review in the
+ * browser and here. `id` is its REST ID and `node` its GraphQL ID.
+ */
+type Pending = { number: number; id: number; node: string; comments: ReviewComment[] };
+/** The pending review of the pull request on screen, or null when you have none there. */
+let pending: Pending | null = null;
 
-function saveDrafts(pr: PullRequest, list: Draft[]) {
-  try {
-    if (list.length) localStorage.setItem(draftKey(pr), JSON.stringify(list));
-    else localStorage.removeItem(draftKey(pr));
-  } catch {
-    host.status("Can't save the pending review: storage is full or unavailable.");
+/** Loads your pending review of a pull request. GitHub lists a pending review only to its author. */
+async function loadPending(number: number): Promise<Pending | null> {
+  const found = (await gh("api", `repos/{owner}/{repo}/pulls/${number}/reviews`, "--paginate", "--jq", '.[] | select(.state == "PENDING") | {id, node: .node_id}')).trim();
+  if (!found) return (pending = null);
+  const { id, node } = JSON.parse(found.split("\n")[0]);
+  const jq = ".[] | {id, path, line: (.line // .original_line), start_line, side: (.side // \"RIGHT\"), body, user: .user.login, in_reply_to_id}";
+  const out = await gh("api", "--paginate", `repos/{owner}/{repo}/pulls/${number}/reviews/${id}/comments`, "--jq", jq);
+  return (pending = { number, id, node, comments: out.split("\n").filter(Boolean).map((l) => JSON.parse(l)) });
+}
+
+/** A pending comment's place: its lines and side, as GitHub's REST API names them. */
+type Place = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number };
+
+/**
+ * Adds a comment to your pending review, starting one on the head commit when you have none. GitHub's REST API
+ * can only add comments while creating a review, so later ones go through GraphQL's addPullRequestReviewThread.
+ */
+async function addPending(pr: Details, place: Place, body: string) {
+  if (pending?.number !== pr.number) await loadPending(pr.number);
+  if (!pending) {
+    const comment = { path: place.path, line: place.line, side: place.side, body, ...(place.start_line ? { start_line: place.start_line, start_side: place.side } : {}) };
+    await invoke<string>("run_capture", {
+      cwd: host.root(),
+      program: "gh",
+      args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/reviews`, "--input", "-"],
+      // No event: the review stays pending.
+      input: JSON.stringify({ commit_id: pr.headRefOid, comments: [comment] }),
+    });
+  } else {
+    const range = place.start_line ? ["-F", `startLine=${place.start_line}`, "-f", `startSide=${place.side}`] : [];
+    await gh(
+      "api", "graphql",
+      "-f", "query=mutation($review: ID!, $path: String!, $body: String!, $line: Int!, $side: DiffSide!, $startLine: Int, $startSide: DiffSide) { addPullRequestReviewThread(input: { pullRequestReviewId: $review, path: $path, body: $body, line: $line, side: $side, startLine: $startLine, startSide: $startSide }) { thread { id } } }",
+      "-f", `review=${pending.node}`, "-f", `path=${place.path}`, "-f", `body=${body}`, "-F", `line=${place.line}`, "-f", `side=${place.side}`, ...range,
+    );
+  }
+  await loadPending(pr.number);
+}
+
+/** Deletes a pending comment, and the pending review with its last comment, so nothing empty is left on GitHub. */
+async function deletePending(number: number, comment: ReviewComment) {
+  await gh("api", "--method", "DELETE", `repos/{owner}/{repo}/pulls/comments/${comment.id}`);
+  const review = await loadPending(number);
+  if (review && !review.comments.length) {
+    await gh("api", "--method", "DELETE", `repos/{owner}/{repo}/pulls/${number}/reviews/${review.id}`);
+    pending = null;
   }
 }
 
@@ -532,18 +570,17 @@ function drawZones() {
     }
     addZone(editorFor(t.side), t.line, thread);
   }
-  drafts(pr).forEach((d) => {
-    if (d.path !== path) return;
+  for (const c of pending?.number === pr.number ? pending.comments : []) {
+    if (c.path !== path || !c.line) continue;
     const draft = el("div", "pr-thread pending");
     const remove = el("button", "link", "Delete");
-    remove.onclick = () => (deleteDraft(pr, d.id), drawZones());
-    // Written against an earlier push, its line numbers are from that version of the file.
-    const old = d.commit !== pr.headRefOid ? " · written before the last push" : "";
-    const meta = el("div", "pr-meta", `Pending · ${lines(d.start_line, d.line)}${old} · `);
+    remove.onclick = () =>
+      deletePending(pr.number, c).then(drawZones, (e) => host.status(`Can't delete the pending comment: ${String(e).trim()}`));
+    const meta = el("div", "pr-meta", `Pending · ${lines(c.start_line, c.line)} · `);
     meta.append(remove);
-    draft.append(meta, markdown(d.body, repo));
-    addZone(editorFor(d.side), d.line, draft);
-  });
+    draft.append(meta, markdown(c.body, repo));
+    addZone(editorFor(c.side), c.line, draft);
+  }
   if (form && !form.reply) addZone(editorFor(form.side), form.line, commentForm());
 }
 
@@ -565,16 +602,32 @@ function commentForm() {
     };
     buttons.append(b);
   };
-  if (f.reply) button("Reply", (body) => post([`repos/{owner}/{repo}/pulls/${pr.number}/comments/${f.reply!.id}/replies`, "-f", `body=${body}`]), true);
+  // With a pending review, GitHub takes no comment outside it, so a reply joins the review, as on GitHub.
+  const inReview = pending?.number === pr.number;
+  if (f.reply && inReview && f.reply.node) {
+    const thread = f.reply.node;
+    button("Add Reply to Review", async (body) => {
+      await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${pending!.node}`, "-f", `thread=${thread}`, "-f", `body=${body}`).then(
+        async () => (host.status("Added the reply to your pending review."), (form = undefined), await loadPending(pr.number), drawZones()),
+        (e) => host.status(`Can't add the reply: ${String(e).trim()}`),
+      );
+    }, true);
+  } else if (f.reply) button("Reply", (body) => post([`repos/{owner}/{repo}/pulls/${pr.number}/comments/${f.reply!.id}/replies`, "-f", `body=${body}`]), true);
   else {
-    button("Add to Review", (body) => {
-      const start = f.start !== f.line ? { start_line: f.start } : {};
-      saveDrafts(pr, [...drafts(pr), { id: crypto.randomUUID(), path, line: f.line, side: f.side, ...start, body, commit: pr.headRefOid }]);
-      host.status(`Added to your pending review on #${pr.number}. Submit it from the pull request's page.`);
-      close();
+    button("Add to Review", async (body) => {
+      buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      try {
+        await addPending(pr, { path, line: f.line, side: f.side, ...(f.start !== f.line ? { start_line: f.start } : {}) }, body);
+        host.status(`Added to your pending review on #${pr.number}. Submit it from the pull request's page, or on GitHub.`);
+        close();
+      } catch (e) {
+        // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
+        host.status(`Can't add the comment to your review: ${String(e).trim()}`);
+        buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      }
     }, true);
     const range = f.start !== f.line ? ["-F", `start_line=${f.start}`, "-f", `start_side=${f.side}`] : [];
-    button("Comment Now", (body) =>
+    if (!inReview) button("Comment Now", (body) =>
       post([`repos/{owner}/{repo}/pulls/${pr.number}/comments`, "-f", `body=${body}`, "-f", `commit_id=${pr.headRefOid}`, "-f", `path=${path}`, "-F", `line=${f.line}`, "-f", `side=${f.side}`, ...range]),
     );
   }
@@ -619,19 +672,11 @@ function commentAtCursor() {
 
 /** Submits a review: the pending comments, with a summary and a verdict, in one request. */
 async function submitReview(pr: Details, event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) {
-  const location = ({ path, line, side, start_line }: Draft) => ({ path, line, side, ...(start_line ? { start_line, start_side: side } : {}) });
-  const post = (path: string, payload: object) =>
-    invoke<string>("run_capture", { cwd: host.root(), program: "gh", args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/${path}`, "--input", "-"], input: JSON.stringify(payload) });
-  // A review's comments share one commit, but a comment's line numbers belong to the commit it was written
-  // against. So comments from before the last push post one by one on their own commit, where GitHub keeps
-  // them on the right lines and marks them outdated; each leaves the list as soon as it's posted.
-  for (const d of drafts(pr).filter((d) => d.commit !== pr.headRefOid)) {
-    await post("comments", { ...location(d), body: d.body, commit_id: d.commit });
-    deleteDraft(pr, d.id);
-  }
-  const current = drafts(pr);
-  await post("reviews", { commit_id: pr.headRefOid, event, body, comments: current.map((d) => ({ ...location(d), body: d.body })) });
-  saveDrafts(pr, []);
+  const review = pending?.number === pr.number ? pending : await loadPending(pr.number);
+  // Your pending review is submitted with the verdict; without one, a review with only the summary is created.
+  const [path, payload] = review ? [`reviews/${review.id}/events`, { event, body }] : ["reviews", { commit_id: pr.headRefOid, event, body }];
+  await invoke<string>("run_capture", { cwd: host.root(), program: "gh", args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/${path}`, "--input", "-"], input: JSON.stringify(payload) });
+  pending = null;
 }
 
 // ---- Current branch ----
