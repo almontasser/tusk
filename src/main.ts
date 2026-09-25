@@ -468,7 +468,7 @@ async function ensureModel(path: string) {
   const uri = monaco.Uri.file(path);
   const existing = monaco.editor.getModel(uri);
   if (existing) return existing;
-  const text = await invoke<string>("read_file", { path });
+  const text = await invoke<string>("read_file", { path, charset: await charsetOf(path) });
   // Another caller may have created the model while the file was loading.
   return monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, undefined, uri);
 }
@@ -565,7 +565,7 @@ function updateStatusItems() {
   $("cursor-position").textContent = model && pos ? `${pos.lineNumber}:${pos.column}${selected ? ` (${selected} chars)` : ""}` : "";
   const options = model?.getOptions();
   $("indentation").textContent = options ? (options.insertSpaces ? `${options.tabSize} spaces` : `Tab size ${options.tabSize}`) : "";
-  $("encoding").textContent = model ? `UTF-8 · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
+  $("encoding").textContent = model ? `${modelCharsets.get(model) ?? "UTF-8"} · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
   $("language").textContent = model ? languageName(model.getLanguageId()) : "";
 }
 
@@ -801,17 +801,47 @@ async function editorConfigFor(path: string): Promise<Properties> {
   return propertiesFor(path, configs);
 }
 
-/** Sets a model's indentation from .editorconfig. Without one, Monaco's detection from the file's content stays. */
+/** `.editorconfig` charsets that `read_file` and `write_file` understand, with their status bar names. */
+const CHARSETS: Record<string, string> = { "utf-8": "UTF-8", "utf-8-bom": "UTF-8 BOM", latin1: "ISO-8859-1", "utf-16le": "UTF-16LE", "utf-16be": "UTF-16BE" };
+const charsetOf = async (path: string) => {
+  const charset = (await editorConfigFor(path)).charset;
+  return charset in CHARSETS ? charset : undefined;
+};
+/** Each file model's charset, for the status bar. */
+const modelCharsets = new WeakMap<monaco.editor.ITextModel, string>();
+/** `.editorconfig`'s end_of_line as Monaco's line ending. Monaco has no CR-only lines, so `cr` is left alone. */
+const eolOf = (props: Properties) => ({ lf: monaco.editor.EndOfLineSequence.LF, crlf: monaco.editor.EndOfLineSequence.CRLF })[props.end_of_line];
+
+/**
+ * Sets a model's indentation from .editorconfig. Without one, Monaco's detection from the file's content stays.
+ * A file with no line breaks yet, such as a new one, takes end_of_line; other files convert when saved.
+ */
 async function applyEditorConfig(model: monaco.editor.ITextModel) {
-  const options = Object.fromEntries(Object.entries(indentation(await editorConfigFor(model.uri.fsPath))).filter(([, v]) => v !== undefined));
-  if (Object.keys(options).length && !model.isDisposed()) model.updateOptions(options);
+  const props = await editorConfigFor(model.uri.fsPath);
+  if (model.isDisposed()) return;
+  const options = Object.fromEntries(Object.entries(indentation(props)).filter(([, v]) => v !== undefined));
+  if (Object.keys(options).length) model.updateOptions(options);
+  modelCharsets.set(model, CHARSETS[props.charset] ?? "UTF-8");
+  const eol = eolOf(props);
+  if (eol !== undefined && model.getLineCount() === 1 && model.getEndOfLineSequence() !== eol) {
+    // Changing the line ending counts as an edit, but the file's text is the same.
+    const tab = tabs.get(model.uri.fsPath);
+    const clean = tab && !isDirty(tab);
+    model.setEOL(eol);
+    if (clean) (tab.saved = model.getAlternativeVersionId()), showDirty(model.uri.fsPath);
+  }
   if (model === editor.getModel()) updateStatusItems();
 }
 monaco.editor.onDidCreateModel((model) => model.uri.scheme === "file" && applyEditorConfig(model));
 
-/** Trims trailing whitespace and adds or removes the final newline, as .editorconfig asks, as one undoable edit. */
+/**
+ * Converts line endings, trims trailing whitespace, and adds or removes the final newline, as
+ * .editorconfig asks. Each is an undoable edit.
+ */
 async function applySaveRules(model: monaco.editor.ITextModel) {
   const props = await editorConfigFor(model.uri.fsPath);
+  const eol = eolOf(props);
+  if (eol !== undefined && model.getEndOfLineSequence() !== eol) model.pushEOL(eol);
   const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
   const last = model.getLineCount();
   if (props.trim_trailing_whitespace === "true") {
@@ -832,7 +862,7 @@ async function applySaveRules(model: monaco.editor.ITextModel) {
 /** Writes a model that has no tab, such as the merge view's result for a file that isn't open. */
 async function writeModel(path: string) {
   const model = monaco.editor.getModel(monaco.Uri.file(path));
-  if (model) await invoke("write_file", { path, contents: model.getValue() });
+  if (model) await invoke("write_file", { path, contents: model.getValue(), charset: await charsetOf(path) });
 }
 
 async function saveFile(path: string) {
@@ -846,7 +876,7 @@ async function saveFile(path: string) {
   await applySaveRules(tab.model);
   const text = tab.model.getValue();
   try {
-    await invoke("write_file", { path, contents: text });
+    await invoke("write_file", { path, contents: text, charset: await charsetOf(path) });
   } catch (e) {
     return status(`Couldn't save ${relative(path)}: ${e}`);
   }
@@ -931,7 +961,7 @@ listen<string[]>("fs-change", ({ payload }) => {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
       const tab = tabs.get(path);
       if (model && !(tab && isDirty(tab))) {
-        const text = await invoke<string>("read_file", { path }).catch(() => null);
+        const text = await invoke<string>("read_file", { path, charset: await charsetOf(path) }).catch(() => null);
         if (text !== null && text !== model.getValue()) {
           // Another program changed it, such as a git checkout: keep what the editor had first.
           await recordVersion(path, model.getValue());

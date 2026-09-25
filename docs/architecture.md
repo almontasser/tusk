@@ -145,9 +145,22 @@ without a slash matches the file name in any folder. For a file, `main.ts`
 reads the `.editorconfig` of each folder from the project root down, cached
 per folder, and applies the sections in order, so closer files and later
 sections win, and `root = true` ignores the files above. A new model gets
-`insertSpaces`, `tabSize`, and `indentSize` from them. Saving trims trailing
-whitespace and fixes the final newline as one undoable edit, before the text is
-written.
+`insertSpaces`, `tabSize`, and `indentSize` from them. Saving converts line
+endings to `end_of_line` (`pushEOL`), trims trailing whitespace, and fixes the
+final newline, each as an undoable edit, before the text is written. A model
+with no line breaks yet takes `end_of_line` when it opens (`setEOL`), and its
+tab stays clean, since the text on disk is the same. Monaco has only LF and
+CRLF, so `end_of_line = cr` is ignored.
+
+`charset` goes to `read_file` and `write_file` in `fs.rs`, which decode and
+encode by hand: Latin-1 maps bytes to the first 256 code points, UTF-16 uses
+`String::from_utf16_lossy` and `encode_utf16`, and a byte-order mark is
+dropped on reading and written again on saving (`utf-8-bom`, and UTF-16, which
+is written with one). Text that Latin-1 can't hold fails to save with the
+character named, and the tab stays unsaved. Without a `charset`, files are
+read as strict UTF-8 and written back unchanged, so a UTF-8 file with a
+byte-order mark keeps it. The model's charset only shows in the status bar;
+the rest of the editor (git, search, language servers) sees text.
 
 ### External changes
 

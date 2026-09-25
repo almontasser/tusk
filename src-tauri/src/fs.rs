@@ -34,13 +34,63 @@ fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
 }
 
 #[tauri::command]
-pub async fn read_file(path: String) -> Result<String, String> {
-    crate::blocking(move || std::fs::read_to_string(path).map_err(|e| e.to_string())).await
+pub async fn read_file(path: String, charset: Option<String>) -> Result<String, String> {
+    crate::blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        decode(bytes, charset.as_deref())
+    })
+    .await
 }
 
+/// Writes a file, encoded in `charset` (an `.editorconfig` value) or else UTF-8.
 #[tauri::command]
-pub async fn write_file(path: String, contents: String) -> Result<(), String> {
-    crate::blocking(move || std::fs::write(path, contents).map_err(|e| e.to_string())).await
+pub async fn write_file(path: String, contents: String, charset: Option<String>) -> Result<(), String> {
+    crate::blocking(move || {
+        let bytes = encode(&contents, charset.as_deref())?;
+        std::fs::write(path, bytes).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+const BOM: &str = "\u{feff}";
+
+/// Decodes a file in one of `.editorconfig`'s charsets. UTF-8 (the default) must be valid; the
+/// others can't fail. A byte-order mark is dropped, and `encode` adds it back.
+fn decode(bytes: Vec<u8>, charset: Option<&str>) -> Result<String, String> {
+    let utf16 = |bom: [u8; 2], unit: fn([u8; 2]) -> u16| {
+        let body = bytes.strip_prefix(&bom[..]).unwrap_or(&bytes);
+        let units: Vec<u16> = body.chunks_exact(2).map(|c| unit([c[0], c[1]])).collect();
+        String::from_utf16_lossy(&units)
+    };
+    Ok(match charset {
+        Some("latin1") => bytes.iter().map(|&b| b as char).collect(),
+        Some("utf-16le") => utf16([0xff, 0xfe], u16::from_le_bytes),
+        Some("utf-16be") => utf16([0xfe, 0xff], u16::from_be_bytes),
+        Some("utf-8-bom") => {
+            let text = String::from_utf8(bytes).map_err(|_| "The file isn't valid UTF-8.".to_string())?;
+            text.strip_prefix(BOM).map(str::to_string).unwrap_or(text)
+        }
+        _ => String::from_utf8(bytes).map_err(|_| "The file isn't valid UTF-8. If it uses another encoding, set `charset` in .editorconfig.".to_string())?,
+    })
+}
+
+/// Encodes text for `write_file`. Without a charset, the text is written as it is, so a UTF-8
+/// file that starts with a byte-order mark keeps it; with one, the charset decides.
+fn encode(text: &str, charset: Option<&str>) -> Result<Vec<u8>, String> {
+    if charset.is_none() {
+        return Ok(text.as_bytes().to_vec());
+    }
+    let text = text.strip_prefix(BOM).unwrap_or(text);
+    Ok(match charset {
+        Some("latin1") => text
+            .chars()
+            .map(|c| u8::try_from(c as u32).map_err(|_| format!("{c:?} can't be saved in Latin-1, the file's charset in .editorconfig.")))
+            .collect::<Result<_, _>>()?,
+        Some("utf-16le") => [0xff, 0xfe].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect(),
+        Some("utf-16be") => [0xfe, 0xff].into_iter().chain(text.encode_utf16().flat_map(u16::to_be_bytes)).collect(),
+        Some("utf-8-bom") => [BOM, text].concat().into_bytes(),
+        _ => text.as_bytes().to_vec(),
+    })
 }
 
 #[tauri::command(async)]
@@ -123,6 +173,23 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn round_trips_editorconfig_charsets() {
+        let text = "é ✓\n";
+        for charset in ["utf-8", "utf-8-bom", "utf-16le", "utf-16be"] {
+            let bytes = encode(text, Some(charset)).unwrap();
+            assert_eq!(decode(bytes, Some(charset)).unwrap(), text, "{charset}");
+        }
+        assert_eq!(encode("é", Some("latin1")).unwrap(), vec![0xe9]);
+        assert_eq!(decode(vec![0xe9], Some("latin1")).unwrap(), "é");
+        assert!(encode("✓", Some("latin1")).is_err());
+        assert_eq!(&encode("a", Some("utf-8-bom")).unwrap()[..3], &[0xef, 0xbb, 0xbf]);
+        assert_eq!(encode("a", Some("utf-16le")).unwrap(), vec![0xff, 0xfe, b'a', 0]);
+        // Without a charset, a byte-order mark stays, and invalid UTF-8 is refused.
+        assert_eq!(encode("\u{feff}a", None).unwrap(), "\u{feff}a".as_bytes());
+        assert!(decode(vec![0xe9], None).is_err());
+    }
 
     #[test]
     fn never_overwrites_existing_files() {
