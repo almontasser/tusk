@@ -85,6 +85,11 @@ $test("completes a field's default from its enum", function () use ($form, $with
     assert($edit['end']['character'] - $edit['start']['character'] === 3);
 });
 
+$test('offers nothing for an enum it can\'t load', function () use ($form, $withStatus) {
+    $source = $withStatus("->options(Missing::class)->default('");
+    assert(completion($form, $source, after($source, "->default('")) === []);
+});
+
 $test("completes a field's default from a literal options array", function () use ($form, $read, $labels) {
     $source = str_replace("TextInput::make('title')", "TextInput::make('title')->options(['short' => 'Short', 'long' => 'Long'])->default('", $read($form));
     assert($labels(completion($form, $source, after($source, "->default('"))) === ['short', 'long']);

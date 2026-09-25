@@ -17,7 +17,7 @@ const run = (program: string, args: string[], input: string) =>
 /** Languages Prettier can format with its built-in parsers or common plugins. */
 const PRETTIER_LANGUAGES = ["php", "blade", "javascript", "typescript", "css", "scss", "less", "json", "html", "markdown", "yaml", "vue", "svelte", "astro"];
 
-/** Monaco's own formatters, which would compete with Prettier for the same languages. Prettier is always there, so they're off. */
+/** Monaco's own formatters, which would compete with Prettier for the same languages; on only when Node, and so Prettier, is missing. */
 function builtInFormatters(enabled: boolean) {
   const all = [monaco.css.cssDefaults, monaco.css.scssDefaults, monaco.css.lessDefaults, monaco.html.htmlDefaults, monaco.json.jsonDefaults, monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults];
   for (const defaults of all) {
@@ -35,7 +35,11 @@ export async function detectFormatters() {
   const found = prettier2 ? candidates[1] : prettier3 ? candidates[0] : undefined;
   const modules = `${await invoke<string>("tool_path", { name: "node" })}/node_modules`;
   const blade = `${modules}/blade-formatter/bin/blade-formatter.cjs`;
-  if (found) tools = { prettier: `${host.root()}/${found}`, bundled: false, plugins: [], pint, blade };
+  // Prettier and blade-formatter run on Node. Without it, Monaco's own formatters handle what they can.
+  const node = await run("node", ["--version"], "").then(() => true, () => false);
+  builtInFormatters(!node);
+  if (!node) tools = { bundled: false, plugins: [], pint };
+  else if (found) tools = { prettier: `${host.root()}/${found}`, bundled: false, plugins: [], pint, blade };
   else tools = { prettier: `${modules}/prettier/bin/prettier.cjs`, bundled: true, plugins: [`${modules}/prettier-plugin-svelte/plugin.js`, `${modules}/prettier-plugin-astro/dist/index.js`], pint, blade };
 }
 
@@ -65,7 +69,6 @@ async function format(path: string, text: string, language: string): Promise<str
 
 export function initFormatting(h: Host) {
   host = h;
-  builtInFormatters(false);
   // Monaco turns the whole-file result into minimal edits, so the cursor stays put.
   monaco.languages.registerDocumentFormattingEditProvider(PRETTIER_LANGUAGES, {
     async provideDocumentFormattingEdits(model) {

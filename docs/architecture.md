@@ -1332,8 +1332,12 @@ local name contains a slash. Checking out a remote branch runs
 Descriptions and comments are Markdown from other people, and the webview can
 call the app's commands, such as `run_capture`, so rendered HTML is a way to
 run commands on your Mac. `marked` renders them, and DOMPurify removes scripts,
-event handlers, `javascript:` links, iframes, forms, and inline styles. Links
-open in the browser through `open`, never in the webview.
+event handlers, `javascript:` links, iframes, forms, image maps (`<map>` and
+`<area>`, which make links out of images), and inline styles. One click
+handler on the rendered block opens every link in the browser through `open`,
+never in the webview. Behind that, a small Tauri plugin (`stay-in-app` in
+`lib.rs`) refuses any navigation of the window away from the app's own pages,
+so a link that slips through can't replace the editor with another site.
 
 Conversation comments are `gh pr comment`, reviews are a POST to
 `pulls/<n>/reviews` (see [Pending reviews](#pending-reviews)), and merges are
@@ -1392,12 +1396,18 @@ the one comment.
 GitHub's REST API creates a review with all its comments in one request, but
 can't add comments to a pending review one at a time (GraphQL can). So pending
 comments are drafts in `localStorage`, under `review:<repository URL>#<number>`,
-each with the head commit it was written against. Submitting sends one POST to
-`pulls/<n>/reviews` through `gh api --input -`, with the verdict (`COMMENT`,
-`APPROVE`, or `REQUEST_CHANGES`), the summary, and every draft as a comment;
-`commit_id` is the first draft's commit, so comments written before a new push
-land on the lines they were written for, and GitHub marks them outdated. The
-drafts are deleted only after GitHub accepts the review. Replies can't be part
+each with an ID (deletes go by ID, since the sidebar and the diff show the list
+at once) and the head commit it was written against. A review's comments share
+one `commit_id`, and a draft's line numbers belong to its own commit, so
+submitting first posts each draft from before the last push on its own, on its
+commit, where GitHub keeps it on the right lines and marks it outdated. Then one
+POST to `pulls/<n>/reviews`, through `gh api --input -`, sends the verdict
+(`COMMENT`, `APPROVE`, or `REQUEST_CHANGES`), the summary, and the remaining
+drafts, on the head commit. Each draft is deleted only once GitHub accepts it,
+so a failure leaves the rest to submit again. In the diff, a draft from before
+the last push says so, since its lines may have moved. `shown` remembers the
+diff's model, and `drawZones` does nothing once the diff shows something else,
+so a slow reply can't draw threads into, say, a file's history. Replies can't be part
 of a review in the REST API, so they post at once.
 
 `markdown()` turns `#123` and `@name` in text into links after sanitizing,

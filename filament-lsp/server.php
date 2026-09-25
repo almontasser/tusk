@@ -211,11 +211,11 @@ function fieldAt(string $source, int $offset): ?array
 /** The field's enum: from `->options(X::class)` or `->enum(X::class)`, or else the model's cast of the field. */
 function fieldEnum(string $path, string $source, array $field): ?string
 {
-    if (preg_match('/->(?:options|enum)\(\s*([\\\\\w]+)::class/', $field['chain'], $m)) {
-        return resolveClass($source, $m[1]);
-    }
-    $cast = context($path, $source)['model']['casts'][$field['name']] ?? null;
-    return is_string($cast) && !isset(introspect('enum', $cast)['error']) ? $cast : null;
+    $class = preg_match('/->(?:options|enum)\(\s*([\\\\\w]+)::class/', $field['chain'], $m)
+        ? resolveClass($source, $m[1])
+        : (context($path, $source)['model']['casts'][$field['name']] ?? null);
+    // Only an enum the project can load: not a cast such as `datetime`, or a class that doesn't exist.
+    return is_string($class) && !isset(introspect('enum', $class)['error']) ? $class : null;
 }
 
 /** Completion for option values and state paths, or null when the cursor isn't in one. */

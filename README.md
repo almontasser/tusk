@@ -869,7 +869,9 @@ To comment on code in the diff:
 
 Pending comments show in the diff with a yellow edge and on the pull request's
 page under **Pending review**, where you can delete them. They're kept on this
-Mac until you submit, so closing the app doesn't lose them. To submit, write an
+Mac until you submit, so closing the app doesn't lose them. A comment you wrote
+before the author pushed again is posted on its own, on the version you
+commented on, where GitHub marks it outdated. To submit, write an
 optional summary below the conversation and click **Submit Review**,
 **Approve**, or **Request Changes**: all pending comments go to GitHub as one
 review. Without pending comments, **Comment** adds a comment to the

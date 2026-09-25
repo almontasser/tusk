@@ -67,7 +67,8 @@ function markdown(text: string, repo: string): HTMLElement {
   const { marked, DOMPurify } = markdownLibraries!;
   const div = el("div", "pr-body markdown");
   const html = marked.parse(text, { async: false, gfm: true, breaks: true });
-  div.innerHTML = DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "button", "iframe"], FORBID_ATTR: ["style"] });
+  // <map> and <area> make links out of images, which the handler below wouldn't see as <a>.
+  div.innerHTML = DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "button", "iframe", "map", "area"], FORBID_ATTR: ["style"] });
   const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
   const texts: Text[] = [];
   while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest("a, code, pre")) texts.push(walker.currentNode as Text);
@@ -83,12 +84,13 @@ function markdown(text: string, repo: string): HTMLElement {
       }),
     );
   }
-  for (const a of div.querySelectorAll("a")) {
-    a.onclick = (e) => {
-      e.preventDefault();
-      if (/^https?:/.test(a.href)) openUrl(a.href);
-    };
-  }
+  // Every click on a link opens it in the browser, never in the app's window.
+  div.onclick = (e) => {
+    const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
+    if (!link) return;
+    e.preventDefault();
+    if (/^https?:/.test(link.href)) openUrl(link.href);
+  };
   return div;
 }
 
@@ -214,13 +216,13 @@ export async function showPullRequest(number: number) {
   // Your line comments that wait for the review to be submitted. Click one to see it in the diff.
   const pending = drafts(pr);
   const pendingList = el("ul", "pr-files");
-  pending.forEach((d, i) => {
+  pending.forEach((d) => {
     const li = el("li");
     li.append(el("span", "name", `${d.path}:${d.start_line ? `${d.start_line}–` : ""}${d.line}`), el("span", "muted", ` ${d.body.split("\n")[0]}`));
     li.onclick = () => showFileDiff(pr, d.path, threads, d);
     const remove = el("button", "icon-button codicon codicon-close");
     remove.title = "Delete this pending comment";
-    remove.onclick = (e) => (e.stopPropagation(), saveDrafts(pr, drafts(pr).filter((_, j) => j !== i)), showPullRequest(number));
+    remove.onclick = (e) => (e.stopPropagation(), deleteDraft(pr, d.id), showPullRequest(number));
     li.append(remove);
     pendingList.append(li);
   });
@@ -433,7 +435,7 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
   await me();
-  shown = { pr, path, threads, diff, zones: [] };
+  shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
   form = undefined;
   drawZones();
   if (at?.line) {
@@ -448,10 +450,10 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
 // ---- Line comments and pending reviews ----
 
 /** A line comment saved for a review you haven't submitted yet. `commit` is the head it was written against. */
-type Draft = { path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number; body: string; commit: string };
+type Draft = { id: string; path: string; line: number; side: "LEFT" | "RIGHT"; start_line?: number; body: string; commit: string };
 
 /** The diff on screen, and the view zones (threads, drafts, and the comment form) drawn in it. */
-let shown: { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string][] } | undefined;
+let shown: { pr: Details; path: string; threads: Thread[]; diff: monaco.editor.IStandaloneDiffEditor; zones: [monaco.editor.ICodeEditor, string][]; model?: monaco.editor.ITextModel } | undefined;
 /** The open comment form: a new comment on lines, or a reply to a thread. */
 let form: { side: "LEFT" | "RIGHT"; line: number; start: number; reply?: Thread } | undefined;
 
@@ -459,11 +461,15 @@ let form: { side: "LEFT" | "RIGHT"; line: number; start: number; reply?: Thread 
 const draftKey = (pr: PullRequest) => `review:${repoUrl(pr)}#${pr.number}`;
 function drafts(pr: PullRequest): Draft[] {
   try {
-    return JSON.parse(localStorage.getItem(draftKey(pr)) ?? "[]");
+    // Drafts saved before they had IDs get one from their place in the list.
+    return JSON.parse(localStorage.getItem(draftKey(pr)) ?? "[]").map((d: Draft, i: number) => ({ ...d, id: d.id ?? `old-${i}` }));
   } catch {
     return [];
   }
 }
+/** Deletes a pending comment by its ID, which stays right while the sidebar and the diff both show the list. */
+const deleteDraft = (pr: PullRequest, id: string) => saveDrafts(pr, drafts(pr).filter((d) => d.id !== id));
+
 function saveDrafts(pr: PullRequest, list: Draft[]) {
   try {
     if (list.length) localStorage.setItem(draftKey(pr), JSON.stringify(list));
@@ -489,6 +495,8 @@ function addZone(editor: monaco.editor.ICodeEditor, line: number, content: HTMLE
 
 /** Draws the file's threads, your pending comments, and the open comment form under their lines. */
 function drawZones() {
+  // The diff may show something else by now, such as a file's history, after a slow request.
+  if (shown && shown.diff.getModel()?.modified !== shown.model) shown = undefined;
   if (!shown) return;
   const { pr, path, threads, diff } = shown;
   shown.zones.forEach(([editor, id]) => editor.changeViewZones((zones) => zones.removeZone(id)));
@@ -524,12 +532,14 @@ function drawZones() {
     }
     addZone(editorFor(t.side), t.line, thread);
   }
-  drafts(pr).forEach((d, i) => {
+  drafts(pr).forEach((d) => {
     if (d.path !== path) return;
     const draft = el("div", "pr-thread pending");
     const remove = el("button", "link", "Delete");
-    remove.onclick = () => (saveDrafts(pr, drafts(pr).filter((_, j) => j !== i)), drawZones());
-    const meta = el("div", "pr-meta", `Pending · ${lines(d.start_line, d.line)} · `);
+    remove.onclick = () => (deleteDraft(pr, d.id), drawZones());
+    // Written against an earlier push, its line numbers are from that version of the file.
+    const old = d.commit !== pr.headRefOid ? " · written before the last push" : "";
+    const meta = el("div", "pr-meta", `Pending · ${lines(d.start_line, d.line)}${old} · `);
     meta.append(remove);
     draft.append(meta, markdown(d.body, repo));
     addZone(editorFor(d.side), d.line, draft);
@@ -559,7 +569,7 @@ function commentForm() {
   else {
     button("Add to Review", (body) => {
       const start = f.start !== f.line ? { start_line: f.start } : {};
-      saveDrafts(pr, [...drafts(pr), { path, line: f.line, side: f.side, ...start, body, commit: pr.headRefOid }]);
+      saveDrafts(pr, [...drafts(pr), { id: crypto.randomUUID(), path, line: f.line, side: f.side, ...start, body, commit: pr.headRefOid }]);
       host.status(`Added to your pending review on #${pr.number}. Submit it from the pull request's page.`);
       close();
     }, true);
@@ -609,20 +619,18 @@ function commentAtCursor() {
 
 /** Submits a review: the pending comments, with a summary and a verdict, in one request. */
 async function submitReview(pr: Details, event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) {
-  const list = drafts(pr);
-  const review = {
-    // GitHub places each comment on the commit it was written against; later commits mark it outdated.
-    commit_id: list[0]?.commit ?? pr.headRefOid,
-    event,
-    body,
-    comments: list.map(({ path, line, side, start_line, body }) => ({ path, line, side, body, ...(start_line ? { start_line, start_side: side } : {}) })),
-  };
-  await invoke<string>("run_capture", {
-    cwd: host.root(),
-    program: "gh",
-    args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/reviews`, "--input", "-"],
-    input: JSON.stringify(review),
-  });
+  const location = ({ path, line, side, start_line }: Draft) => ({ path, line, side, ...(start_line ? { start_line, start_side: side } : {}) });
+  const post = (path: string, payload: object) =>
+    invoke<string>("run_capture", { cwd: host.root(), program: "gh", args: ["api", "--method", "POST", `repos/{owner}/{repo}/pulls/${pr.number}/${path}`, "--input", "-"], input: JSON.stringify(payload) });
+  // A review's comments share one commit, but a comment's line numbers belong to the commit it was written
+  // against. So comments from before the last push post one by one on their own commit, where GitHub keeps
+  // them on the right lines and marks them outdated; each leaves the list as soon as it's posted.
+  for (const d of drafts(pr).filter((d) => d.commit !== pr.headRefOid)) {
+    await post("comments", { ...location(d), body: d.body, commit_id: d.commit });
+    deleteDraft(pr, d.id);
+  }
+  const current = drafts(pr);
+  await post("reviews", { commit_id: pr.headRefOid, event, body, comments: current.map((d) => ({ ...location(d), body: d.body })) });
   saveDrafts(pr, []);
 }
 

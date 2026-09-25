@@ -49,6 +49,16 @@ pub fn run() {
     }
     builder
         .plugin(tauri_plugin_dialog::init())
+        // The window only ever shows the app. Rendered content, such as a pull request's Markdown, opens its
+        // links in the browser; this stops any link that slips through from replacing the editor.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("stay-in-app")
+                .on_navigation(|_, url| {
+                    matches!(url.scheme(), "tauri" | "about" | "data" | "blob")
+                        || matches!(url.host_str(), Some("localhost" | "tauri.localhost" | "127.0.0.1"))
+                })
+                .build(),
+        )
         .manage(fs::WatchState::default())
         .manage(lsp::LspState::default())
         .manage(lsp::AiRequests::default())

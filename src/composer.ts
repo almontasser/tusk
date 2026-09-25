@@ -27,8 +27,12 @@ async function run(title: string, args: string[]) {
   openTerminal(host.root(), title, ["php", composer, ...args], () => loadPackages());
 }
 
+/** Each load's number, so a slow load that a newer one replaced doesn't draw over it. */
+let loads = 0;
+
 export async function loadPackages() {
   if (!host.root()) return;
+  const load = ++loads;
   composer ||= await invoke<string>("tool_path", { name: "composer.phar" });
   const list = $("composer-list");
   const json = await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => null);
@@ -42,10 +46,12 @@ export async function loadPackages() {
   } catch (e) {
     return list.replaceChildren(el("li", "muted", `Can't list packages: ${String(e).trim()}. Run composer install first.`));
   }
+  if (load !== loads) return;
   render(packages(show, null, json));
   // Checking for updates asks Packagist, so it comes second.
   $("composer-summary").textContent = "Checking for updates…";
   const outdated = await capture("outdated", ...scope, "--format=json").catch(() => null);
+  if (load !== loads) return;
   const all = packages(show, outdated, json);
   render(all);
   const updates = all.filter((p) => p.latest).length;

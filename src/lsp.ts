@@ -772,17 +772,20 @@ let lazyStart: monaco.IDisposable | undefined;
  * TypeScript information through `tsserver/request` notifications, which this forwards.
  * The Svelte and Astro servers run TypeScript themselves, and start with their first file.
  */
-async function startFrontendServersLazily(root: string) {
+async function startFrontendServersLazily(root: string, start: number) {
   const nodeDir = await invoke<string>("tool_path", { name: "node" });
+  // A later start of the language servers replaced this one while the tool path loaded.
+  if (start !== starts) return;
   let ts: Promise<Server | null> | undefined;
   let vue: Promise<Server | null> | undefined;
   const others: Record<string, Promise<Server | null>> = {};
   const tsdk = `${nodeDir}/node_modules/typescript/lib`;
   // Astro's server needs the TypeScript library's folder; Svelte's has its own copy.
   const component = { svelte: ["Svelte", {}], astro: ["Astro", { typescript: { tsdk } }] } as const;
+  // A server that finishes starting after the servers restarted belongs to the old start: stop it.
   const add = (p: Promise<Server>, what: string) =>
     p.then(
-      (s) => (servers.push(s), s),
+      (s) => (start === starts ? (servers.push(s), s) : (s.stop(), null)),
       (e) => (host.status(`${what} server failed: ${e}`), null),
     );
   const startTs = () =>
@@ -817,8 +820,12 @@ async function startFrontendServersLazily(root: string) {
 /** Starts the language servers for a project, stopping those of the previous project. */
 let projectRoot = "";
 
+/** How many times the servers have started, so work from an earlier start can tell it's stale. */
+let starts = 0;
+
 export async function startLsp(root: string, h: Host) {
   host = h;
+  starts++;
   projectRoot = root;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
@@ -858,7 +865,7 @@ export async function startLsp(root: string, h: Host) {
   const typos = settings.spellCheck
     ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
     : null;
-  startFrontendServersLazily(root);
+  startFrontendServersLazily(root, starts);
   for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
