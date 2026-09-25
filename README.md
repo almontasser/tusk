@@ -226,7 +226,7 @@ Press ⌘, to open **Settings**. Changes apply immediately and are saved in
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
-| AI code completion, and its model | Off, Qwen2.5-Coder 1.5B |
+| AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 
 ### EditorConfig
 
@@ -471,13 +471,13 @@ Choose the model in **AI completion model**:
 
 | Model | Download | Notes |
 | --- | --- | --- |
-| Qwen2.5-Coder 1.5B | 1.6 GB | The default: fast, good at finishing a line |
-| Qwen2.5-Coder 3B | 3.3 GB | About 5 points more exact suggestions; each takes about 0.2 s longer |
+| Qwen2.5-Coder 1.5B | 1.6 GB | The fastest: each suggestion takes about 0.2 s less, with about 5–8 fewer exact suggestions in 100 |
+| Qwen2.5-Coder 3B | 3.3 GB | The default: the best suggestions for their speed |
 | Qwen2.5-Coder 7B | 8.1 GB | The best suggestions, but slower, and needs 16 GB of memory or more |
 
 The first start takes about 15 seconds while macOS prepares the GPU code;
 later starts take a second or two. The model uses a little more memory than
-its download size while completion is on (1.9 GB for the 1.5B model). Turning
+its download size while completion is on (1.9 GB for the 1.5B model, 3.5 GB for 3B). Turning
 completion off stops it and frees that memory. To delete a downloaded model,
 remove its file from the `models` folder.
 

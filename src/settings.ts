@@ -34,7 +34,7 @@ const defaults: Settings = {
   formatOnSave: false,
   spellCheck: true,
   aiCompletion: false,
-  aiModel: "qwen2.5-coder-1.5b",
+  aiModel: "qwen2.5-coder-3b",
   keymap: {},
 };
 
@@ -61,8 +61,8 @@ const fields: Field[] = [
     label: "AI completion model",
     type: "select",
     options: [
-      ["qwen2.5-coder-1.5b", "Qwen2.5-Coder 1.5B: fast (1.6 GB)"],
-      ["qwen2.5-coder-3b", "Qwen2.5-Coder 3B: better, slower (3.3 GB)"],
+      ["qwen2.5-coder-1.5b", "Qwen2.5-Coder 1.5B: fastest (1.6 GB)"],
+      ["qwen2.5-coder-3b", "Qwen2.5-Coder 3B: best balance (3.3 GB)"],
       ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
     ],
   },
