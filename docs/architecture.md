@@ -83,7 +83,10 @@ when no other pane has it (`closeFile`). Renames and deletions go through
 current one went away. A pane left with no tabs closes, and Unsplit moves a
 pane's tabs to the pane beside it.
 
-Tabs drag with HTML drag and drop (`placeTab`). A drop within the outer quarter
+Tabs drag with HTML drag and drop (`placeTab`). This needs `dragDropEnabled:
+false` in `tauri.conf.json`: with Tauri's native file-drop handling on, the
+webview gets `dragstart` and `dragend` but never `dragover` or `drop`, so
+nothing can be dropped. The app doesn't use Tauri's file-drop events. A drop within the outer quarter
 of a pane's editor, measured to the nearest edge, splits that pane there
 (`splitPane`, which can put the new pane before or after), unless the tab is
 its own pane's only tab or four panes are open. The `#editor` listeners run in
