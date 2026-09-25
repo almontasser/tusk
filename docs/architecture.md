@@ -190,6 +190,10 @@ script.
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
 | Vue language server | 3.3.11 | npm package, run with Node |
+| Svelte language server | 0.18.4 | npm package, run with Node |
+| Astro language server | 2.17.1 | npm package, run with Node |
+| Prettier, with its Svelte and Astro plugins | 3.9.9 | npm packages, run with Node |
+| `blade-formatter` | 1.44.4 | npm package, run with Node |
 | PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
 | `llama-server` (llama.cpp) | b11165 | Native binary and its libraries, for AI completion |
 | `typos-lsp` | 0.1.56 | Native binary for the build's target |
