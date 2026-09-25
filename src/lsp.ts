@@ -647,8 +647,8 @@ async function startServer(
           }, token);
           return {
             actions: (res ?? []).map((a) => {
-              // A bare Command has no kind. The hover's Quick Fix link and the light bulb list only `quickfix`
-              // actions, so a command answering problems here counts as one.
+              // A bare Command has no kind. The hover's Quick Fix link lists only `quickfix` actions, so a command
+              // answering problems here counts as one.
               const action = typeof a.command === "string" ? { title: a.title, kind: overlapping.length ? "quickfix" : undefined, diagnostics: overlapping } : (a as L.CodeAction);
               return {
                 title: a.title,

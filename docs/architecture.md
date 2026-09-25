@@ -514,10 +514,10 @@ and strike through deprecated code. Stopping a server removes its entries from
 
 `lastDiagnostics` also keeps the diagnostics left after filtering, and a code
 action request sends the ones that overlap the range, so a false problem that
-the filters drop gets no quick fix. The hover's Quick Fix link and the light
-bulb list only actions of kind `quickfix`. A server can answer with a bare
-`Command`, which has no kind, so the client gives such a command the kind
-`quickfix` when problems overlap the range. Each action carries its
+the filters drop gets no quick fix. The hover's Quick Fix link lists only
+actions of kind `quickfix`, while the light bulb lists every kind. A server
+can answer with a bare `Command`, which has no kind, so the client gives such
+a command the kind `quickfix` when problems overlap the range. Each action carries its
 diagnostics as markers: the server's own for a `CodeAction`, and the
 overlapping ones for a command.
 
@@ -2823,8 +2823,8 @@ make most PHP files count as several checkers anyway.
 ### 2026-09-25: Commands that answer problems count as quick fixes
 
 A bare `Command` from `textDocument/codeAction` gets the kind `quickfix` when
-problems overlap the range, so it shows in the hover's Quick Fix link and the
-light bulb. The request sends the markers' filtered diagnostics, kept per model
+problems overlap the range, so it shows in the hover's Quick Fix link. The
+request sends the markers' filtered diagnostics, kept per model
 and server, instead of matching Monaco's markers back to the server's raw
 diagnostics by range, code, and message.
 
