@@ -515,3 +515,11 @@ function onUseStatement<D extends Diagnostic>(lines: string[], d: D): D {
   if (!use || d.range.end.line !== d.range.start.line) return d;
   return { ...d, range: { start: { line: d.range.start.line, character: use[1].length }, end: { line: d.range.start.line, character: use[0].length } } };
 }
+
+/** The files with errors and every folder above them up to `root`, which the tree marks. */
+export function withFolders(files: Iterable<string>, root: string): Set<string> {
+  const paths = new Set<string>();
+  for (let path of files)
+    while (path.startsWith(`${root}/`) && !paths.has(path)) paths.add(path), (path = path.slice(0, path.lastIndexOf("/")));
+  return paths;
+}

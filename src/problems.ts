@@ -94,13 +94,18 @@ function allProblems(): Map<string, Problem[]> {
   return all;
 }
 
-/** Error and warning counts for the status bar: the project's once it has been scanned, otherwise the open files'. */
+/**
+ * Error and warning counts for the status bar, the project's once it has been scanned, otherwise the open files',
+ * and the files with errors, which the tabs and the tree mark.
+ */
 export function problemCounts() {
-  const problems = [...allProblems().values()].flat();
+  const all = allProblems();
+  const problems = [...all.values()].flat();
   return {
     project: scan.root === host.root(),
     errors: problems.filter((p) => p.severity === monaco.MarkerSeverity.Error).length,
     warnings: problems.filter((p) => p.severity === monaco.MarkerSeverity.Warning).length,
+    errorFiles: [...all].filter(([, p]) => p.some((p) => p.severity === monaco.MarkerSeverity.Error)).map(([path]) => path),
   };
 }
 

@@ -478,6 +478,13 @@ without publishing; **Scan Project** does nothing while a scan runs. The panel's
 Warnings toggles filter the list, not the status bar counts, and are kept in
 `localStorage` (`problemsShown`).
 
+`problemCounts` also returns the files with errors. `updateProblems` in
+`main.ts`, which runs after the panel's debounced render and after the tabs
+redraw, adds the folders above them (`withFolders` in `diagnostics.ts`) and
+sets the `has-error` class on each matching tree row and tab. `renderDir` sets
+it again on the rows it draws. The same function puts the error count, capped
+at 99+, on the Problems button in the activity bar.
+
 ### Deprecations
 
 Neither Phpactor nor Mago tags its deprecation reports as deprecated, so
@@ -2915,6 +2922,13 @@ so problems don't flicker while you type. The cost is that a file you fix
 keeps its last problems for up to 4 seconds. Checking open files one at a time
 waits for results from both Mago checkers, or 5 seconds of quiet, rather than
 3 seconds of quiet, which could move on while Mago was still running.
+
+### 2026-09-25: The tree and tabs mark errors only
+
+A file with errors shows its name in red with a wavy underline in the tree and
+its tab, and the folders above it show their names in red, as in PhpStorm.
+Warnings get no mark, and there's no setting for them: most PHP files have a
+warning, so marking them would color most of the tree.
 
 ### Editor font and ligatures
 

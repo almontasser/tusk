@@ -209,6 +209,9 @@ kbd {
 #activitybar button:hover { background: var(--hover); color: var(--text); }
 #activitybar button.active { background: var(--accent); color: var(--on-accent); }
 #activitybar .codicon { font-size: 18px !important; }
+/* The Problems button's error count. */
+#activitybar button[data-count] { position: relative; }
+#activitybar button[data-count]:not([data-count=""])::after { content: attr(data-count); position: absolute; right: -3px; bottom: -2px; min-width: 14px; padding: 0 3px; border-radius: 7px; background: var(--red); color: #fff; font-size: 9px; font-weight: 600; line-height: 14px; text-align: center; }
 
 #sidebar { width: 280px; min-width: 180px; max-width: 60vw; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); }
 #sidebar.collapsed { display: none; }
@@ -246,6 +249,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #tree .row.excluded .name { color: var(--orange); opacity: 0.8; }
 #tree .row.git-modified .name { color: var(--blue); }
 #tree .row.git-added .name { color: var(--green); }
+/* A file with errors gets a red wavy name, and the folders above it a red one. */
+#tree .row.has-error .name, .tabs .tab.has-error .name { color: var(--red); }
+#tree .row.file.has-error .name, .tabs .tab.has-error .name { text-decoration: underline wavy var(--red); text-underline-offset: 2px; }
+#tree .row.file.has-error .name { padding-block: 2px; }
 
 .file-icon { flex-shrink: 0; font-size: 15px !important; }
 .icon-php { color: #9a8cf5; }

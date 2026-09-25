@@ -1162,6 +1162,9 @@ The **Problems** panel (⌘6, or click the error and warning counts in the
 status bar) lists errors and warnings across the whole project, grouped by
 file; click one to go to it. The **Errors** and **Warnings** buttons, which show
 their counts, turn each kind on and off, and the panel remembers your choice.
+A file with errors shows its name in red with a wavy underline in the file
+tree and on its tab, and the folders that contain it show their names in red.
+The Problems button in the activity bar shows the error count.
 
 Deprecated methods, classes, and functions show struck through, and unused
 imports faded, as in VS Code. Hovers lay out long signatures with one parameter per line.

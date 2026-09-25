@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, magoConfigText, magoExpect, magoFixes, problemMarkdown, magoIssuesByFile, safeEdits, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -177,4 +177,8 @@ test("reads Mago's fixes and suppresses its issues", () => {
   assert.equal(magoExpect(lines, 1, "analysis", "d")?.text, "// @mago-expect analysis:d\n");
   assert.equal(magoExpect(["    $y = 2;"], 0, "lint", "e")?.text, "    // @mago-expect lint:e\n");
   assert.equal(magoExpect(lines, 0, "lint", "strict-types"), undefined);
+});
+
+test("withFolders marks each file and the folders above it", () => {
+  assert.deepEqual([...withFolders(["/p/a/b.php", "/p/a/c.php", "/p/d.php", "/elsewhere/e.php"], "/p")], ["/p/a/b.php", "/p/a", "/p/a/c.php", "/p/d.php"]);
 });

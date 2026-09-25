@@ -33,6 +33,7 @@ import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./b
 import { editSnippets, initSnippets } from "./snippets";
 import { hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
+import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
@@ -589,12 +590,23 @@ function languageName(id: string) {
   return languageNames.get(id)!;
 }
 
+/** Files with errors and the folders above them, which the tree and the tabs show in red. */
+let errorPaths = new Set<string>();
+
 /** Error and warning counts, across the project once the Problems panel has scanned it; clicking shows the panel. */
 function updateProblems() {
-  const { project, errors, warnings } = problemCounts();
+  const { project, errors, warnings, errorFiles } = problemCounts();
   $("error-count").textContent = String(errors);
   $("warning-count").textContent = String(warnings);
   $("problems").title = project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)";
+  document.querySelector<HTMLElement>('#activitybar [data-panel="problems"]')!.dataset.count = errors > 99 ? "99+" : errors ? String(errors) : "";
+  errorPaths = withFolders(errorFiles, root);
+  markErrors();
+}
+
+function markErrors() {
+  for (const el of document.querySelectorAll<HTMLElement>("#tree .row[data-path], #editor .tab[data-path]"))
+    if (el.classList.contains("has-error") !== errorPaths.has(el.dataset.path!)) el.classList.toggle("has-error");
 }
 $("problems").onclick = () => root && showProblems();
 
@@ -685,6 +697,7 @@ async function renderDir(ul: HTMLUListElement, dir: string, onlyIfChanged = fals
     }),
   );
   markActiveInTree();
+  markErrors();
 }
 
 function toggleDir(path: string, row: HTMLElement, children: HTMLUListElement) {
