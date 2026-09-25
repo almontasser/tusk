@@ -6,12 +6,13 @@
  *   php introspect.php <project root> resource <Resource class> [<context class>]
  *   php introspect.php <project root> resources
  *   php introspect.php <project root> models
+ *   php introspect.php <project root> enum <Enum class>
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
  * related model of its relationship. `resources` maps each model to its resources.
  * `models` describes every model under app/ for AI completion: columns with their
- * database types, casts, and relationships.
+ * database types, casts, and relationships. `enum` lists an enum's cases with their values.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -100,7 +101,7 @@ function describeModel(string $class, bool $withRelated = true): ?array
             $relation['relations'] = array_column($related['relations'] ?? [], 'name');
         }
     }
-    return ['class' => $class] + location(new ReflectionClass($class)) + ['columns' => columns($model), 'relations' => $relations];
+    return ['class' => $class] + location(new ReflectionClass($class)) + ['columns' => columns($model), 'casts' => $model->getCasts(), 'relations' => $relations];
 }
 
 /** Resource classes declared under app/Filament, found by file name. */
@@ -181,6 +182,10 @@ function describeResource(string $resource, ?string $context): array
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
+        // Cases with their values; a pure enum's cases have no value.
+        'enum' => enum_exists($argv[3])
+            ? array_map(fn ($case) => ['name' => $case->name, 'value' => $case instanceof BackedEnum ? $case->value : null], $argv[3]::cases())
+            : throw new InvalidArgumentException("Not an enum: {$argv[3]}"),
         'resources' => (function () use ($root) {
             $map = [];
             foreach (resourceClasses($root) as $resource) {

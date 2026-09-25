@@ -67,6 +67,35 @@ $test('uses the related model in relation managers', function () use ($resources
     assert(in_array('published', $labels(completion($file, $source, after($source, "TextInput::make('"))), true));
 });
 
+// A status field added after the title, with its chain ending where the cursor is.
+$withStatus = fn(string $chain) => str_replace("TextInput::make('title')", "Select::make('status')$chain,\n                TextInput::make('title')", $read($form));
+
+$test('suggests the enum the model casts a field to', function () use ($form, $withStatus, $labels) {
+    $source = $withStatus('->options(');
+    assert($labels(completion($form, $source, after($source, '->options('))) === ['\\App\\Enums\\PostStatus::class']);
+});
+
+$test("completes a field's default from its enum", function () use ($form, $withStatus, $labels) {
+    $source = $withStatus("->default('");
+    assert($labels(completion($form, $source, after($source, "->default('"))) === ['draft', 'published', 'archived']);
+    $source = str_replace("use Filament\\Schemas\\Schema;", "use Filament\\Schemas\\Schema;\nuse App\\Enums\\PostStatus;", $withStatus('->options(PostStatus::class)->default(Pub'));
+    $items = completion($form, $source, after($source, '->default(Pub'));
+    assert($labels($items)[1] === 'PostStatus::Published');
+    $edit = $items[0]['textEdit']['range'];
+    assert($edit['end']['character'] - $edit['start']['character'] === 3);
+});
+
+$test("completes a field's default from a literal options array", function () use ($form, $read, $labels) {
+    $source = str_replace("TextInput::make('title')", "TextInput::make('title')->options(['short' => 'Short', 'long' => 'Long'])->default('", $read($form));
+    assert($labels(completion($form, $source, after($source, "->default('"))) === ['short', 'long']);
+});
+
+$test('completes state paths in $get and $set', function () use ($form, $read, $labels) {
+    $source = str_replace("->required(),\n                TextInput", "->visible(fn (\$get) => \$get('),\n                TextInput", $read($form));
+    $found = $labels(completion($form, $source, after($source, "\$get('")));
+    assert(in_array('author_id', $found, true) && in_array('published', $found, true));
+});
+
 $test('goes to the relationship method', function () use ($table, $read, $root) {
     $source = $read($table);
     $location = definition($table, $source, after($source, "make('aut"));

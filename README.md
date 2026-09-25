@@ -44,7 +44,7 @@ file to change when you add it.
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
-| Filament | The Filament server knows field names, relationships, and resource structure. It doesn't check column names (virtual attributes make that unreliable), suggest enum or option values, or understand custom `->state()` paths. |
+| Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only, without SSH tunnels or TLS. Results stop at 1,000 rows. Edits apply one at a time, with no batch of pending changes to review first. |
 | Pull requests | A pending review is kept on this Mac, not on GitHub, so it doesn't show in the browser until you submit it, and a pending review started on GitHub doesn't show here. Replies post at once. Comments on lines outside the diff's changes are rejected by GitHub. You can't edit or delete posted comments, or resolve threads. |
 | Split editors | Up to four panes. |
@@ -597,6 +597,14 @@ Eloquent models:
   suggests the related model's columns. In `->relationship('…')`, it suggests
   relationship names. In the second argument, such as
   `->relationship('author', '…')`, it suggests the related model's columns.
+- **Options and state paths.** In `->options(` or `->enum(` on a field the
+  model casts to an enum, it suggests that enum, such as `PostStatus::class`.
+  In `->default('…')`, it suggests the field's option values: the backed
+  values of its enum (from `->options(…::class)`, `->enum(…::class)`, or the
+  model's cast), or the keys of a literal `->options([...])` array. Without
+  quotes, `->default(` suggests the enum's cases, such as
+  `PostStatus::Published`. In `$get('…')` and `$set('…')`, it suggests the
+  names of the fields in the file.
 - **Go to declaration.** ⌘B on `'author'` in `->relationship('author')` or
   `'author.name'` opens the model's `author()` method.
 - **Warnings.** A relationship name that the model doesn't define is
@@ -1083,7 +1091,7 @@ reads the project and `vendor` but skips hidden folders, `node_modules`, and
 ## Test app
 
 `scripts/make-fixture.sh` creates `fixtures/demo`, a Laravel 12 app with
-Filament 4, an `Author` model, a `Post` model, a Filament resource for posts,
+Filament 4, an `Author` model, a `Post` model with a `PostStatus` enum cast, a Filament resource for posts,
 and Pest with one Pest test file next to Laravel's PHPUnit examples.
 Use it to try navigation and refactoring by hand. The `fixtures` folder isn't
 committed.

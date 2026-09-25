@@ -29,11 +29,26 @@ class Author extends Model
 }
 PHP
 
+mkdir -p app/Enums
+cat > app/Enums/PostStatus.php <<'PHP'
+<?php
+
+namespace App\Enums;
+
+enum PostStatus: string
+{
+    case Draft = 'draft';
+    case Published = 'published';
+    case Archived = 'archived';
+}
+PHP
+
 cat > app/Models/Post.php <<'PHP'
 <?php
 
 namespace App\Models;
 
+use App\Enums\PostStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -41,6 +56,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Post extends Model
 {
     protected $fillable = ['title', 'body', 'published', 'author_id'];
+
+    protected $casts = ['status' => PostStatus::class];
 
     public function author(): BelongsTo
     {

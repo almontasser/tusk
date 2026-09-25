@@ -8,6 +8,10 @@
  *   TextColumn::make('author.name')          relationship paths
  *   Select::make('author_id')
  *       ->relationship('author', 'name')     relationship names and related columns
+ *   Select::make('status')
+ *       ->options(Status::class)             the enum the model casts the field to
+ *       ->default('draft')                   the field's option values
+ *   $get('status')                           the form's field names (state paths)
  *
  * It offers completion, go to definition, diagnostics for unknown relationships, and
  * code lenses that link resources, pages, relation managers, and models.
@@ -169,6 +173,90 @@ function relation(?array $model, string $name): ?array
     return null;
 }
 
+/** A class name as written in `$source`, resolved through its `use` statements and namespace. */
+function resolveClass(string $source, string $name): string
+{
+    if ($name[0] === '\\') {
+        return substr($name, 1);
+    }
+    $quoted = preg_quote($name, '/');
+    if (preg_match("/^use\\s+([\\w\\\\]+\\\\$quoted)\\s*;/m", $source, $use) || preg_match("/^use\\s+([\\w\\\\]+)\\s+as\\s+$quoted\\s*;/m", $source, $use)) {
+        return $use[1];
+    }
+    return preg_match('/^namespace\s+([^;]+);/m', $source, $ns) ? "$ns[1]\\$name" : $name;
+}
+
+/** How to write a class in `$source`: its short name when imported or in the same namespace, otherwise fully qualified. */
+function classReference(string $source, string $class): string
+{
+    $short = substr($class, (int) strrpos("\\$class", '\\'));
+    return resolveClass($source, $short) === $class ? $short : "\\$class";
+}
+
+/**
+ * The field whose method chain contains byte `$offset`: `Select::make('status')` up to the next
+ * field or the end of the statement. ponytail: a `;` inside a closure in the chain ends it early.
+ */
+function fieldAt(string $source, int $offset): ?array
+{
+    if (!preg_match_all('/\b(\w+)::make\(\s*[\'"]([\w.]+)[\'"]/', substr($source, 0, $offset), $all, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+        return null;
+    }
+    $make = end($all);
+    $rest = substr($source, $make[0][1]);
+    $end = preg_match('/::make\(|;/', $rest, $next, PREG_OFFSET_CAPTURE, strlen($make[0][0])) ? $next[0][1] : strlen($rest);
+    return $make[0][1] + $end < $offset ? null : ['name' => $make[2][0], 'chain' => substr($rest, 0, $end)];
+}
+
+/** The field's enum: from `->options(X::class)` or `->enum(X::class)`, or else the model's cast of the field. */
+function fieldEnum(string $path, string $source, array $field): ?string
+{
+    if (preg_match('/->(?:options|enum)\(\s*([\\\\\w]+)::class/', $field['chain'], $m)) {
+        return resolveClass($source, $m[1]);
+    }
+    $cast = context($path, $source)['model']['casts'][$field['name']] ?? null;
+    return is_string($cast) && !isset(introspect('enum', $cast)['error']) ? $cast : null;
+}
+
+/** Completion for option values and state paths, or null when the cursor isn't in one. */
+function valueCompletion(string $path, string $source, int $offset, array $position): ?array
+{
+    $prefix = substr($source, 0, $offset);
+    $item = fn(string $label, int $kind, string $detail, string $typed) => [
+        'label' => $label, 'kind' => $kind, 'detail' => $detail,
+        'textEdit' => ['range' => lspRange($position['line'], $position['character'] - utf16Length($typed), $position['character']), 'newText' => $label],
+    ];
+
+    // $get('…') and $set('…') in a form: the names of its fields.
+    if (preg_match('/\$(?:get|set)\(\s*[\'"]([\w.]*)$/', $prefix, $m)) {
+        preg_match_all('/::make\(\s*[\'"]([\w.]+)[\'"]/', $source, $names);
+        return array_map(fn($n) => $item($n, 5, 'field', $m[1]), array_values(array_unique($names[1])));
+    }
+    if (!preg_match('/->(default|options|enum)\(\s*([\'"]?)([\w\\\\:]*)$/', $prefix, $m) || !($field = fieldAt($source, $offset))) {
+        return null;
+    }
+    [, $method, $quote, $typed] = $m;
+    $enum = fieldEnum($path, $source, $field);
+
+    // ->options( and ->enum(: the enum the model casts the field to.
+    if ($method !== 'default') {
+        return $enum && !$quote ? [$item(classReference($source, $enum) . '::class', 13, "cast of {$field['name']}", $typed)] : [];
+    }
+    if ($enum) {
+        $cases = introspect('enum', $enum);
+        $class = classReference($source, $enum);
+        return $quote
+            ? array_map(fn($c) => $item((string) $c['value'], 20, "$class::{$c['name']}", $typed), array_filter($cases, fn($c) => $c['value'] !== null))
+            : array_map(fn($c) => $item("$class::{$c['name']}", 20, $c['value'] === null ? 'case' : "= {$c['value']}", $typed), $cases);
+    }
+    // Keys of a literal options array.
+    if ($quote && preg_match('/->options\(\s*\[(.*?)\]\s*\)/s', $field['chain'], $options)) {
+        preg_match_all('/[\'"]([^\'"]+)[\'"]\s*=>\s*(?:[\'"]([^\'"]*)[\'"])?/', $options[1], $keys, PREG_SET_ORDER);
+        return array_map(fn($k) => $item($k[1], 20, $k[2] ?? 'option', $typed), $keys);
+    }
+    return [];
+}
+
 // ---- Features ----
 
 /** Completion items for the string being typed at the cursor. */
@@ -177,6 +265,11 @@ function completion(string $path, string $source, array $position): array
     $lines = explode("\n", $source);
     $line = $lines[$position['line']] ?? '';
     $prefix = substr($line, 0, byteOffset($line, $position['character']));
+    $offset = strlen(implode("\n", array_slice($lines, 0, $position['line']))) + ($position['line'] ? 1 : 0) + strlen($prefix);
+    $values = valueCompletion($path, $source, $offset, $position);
+    if ($values !== null) {
+        return array_values($values);
+    }
 
     $patterns = [
         'relatedColumn' => '/->relationship\(\s*[\'"](\w+)[\'"]\s*,\s*[\'"](\w*)$/',
@@ -333,7 +426,7 @@ while (($message = readMessage()) !== null) {
             case 'initialize':
                 $result = ['capabilities' => [
                     'textDocumentSync' => ['openClose' => true, 'change' => 1, 'save' => true],
-                    'completionProvider' => ['triggerCharacters' => ["'", '"', '.']],
+                    'completionProvider' => ['triggerCharacters' => ["'", '"', '.', '(']],
                     'definitionProvider' => true,
                     'codeLensProvider' => ['resolveProvider' => false],
                 ], 'serverInfo' => ['name' => 'filament-lsp']];

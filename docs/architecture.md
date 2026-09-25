@@ -1386,6 +1386,24 @@ The server finds strings with line-based patterns: `::make('…')`,
 relationship names (from `->relationship()` and dotted `::make()` paths),
 because plain field names can be virtual attributes that aren't columns.
 
+### Options and state paths
+
+`valueCompletion` runs before the string completions. `fieldAt` finds the
+field a position belongs to: the last `X::make('name')` before it, whose chain
+runs to the next `::make(` or `;`. So an option set after the cursor, as in
+`->default('')->options(Status::class)`, still counts, and a `;` inside a
+closure in the chain ends it early. `fieldEnum` takes the enum from
+`->options(X::class)` or `->enum(X::class)`, resolving `X` through the file's
+`use` statements and namespace, or else from the model's cast of the field
+(`describeModel` reports `getCasts()`). `introspect.php enum <class>` lists
+the cases with `cases()`; a class that isn't an enum returns an error, which
+also filters casts such as `datetime`. Completions insert the enum's short
+name when the file imports it or shares its namespace, and the fully qualified
+name otherwise. `$get('…')` and `$set('…')` offer every `::make()` name in the
+file, from the text alone. `(` is a trigger character, so `->options(` opens
+the list without a keystroke; every other `(` in PHP gets an empty answer from
+a few regexes.
+
 ### Links
 
 Code lenses carry the command `phpEditor.open` with a file URI and a line.
