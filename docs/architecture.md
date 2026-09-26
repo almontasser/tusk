@@ -183,6 +183,21 @@ key handler, the palette, and Find Action all see the current shortcuts. The
 recorder listens in the capture phase and sets `recording`, which the global
 key handlers check, so the combination you press doesn't also run an action.
 
+### Menu bar
+
+`src/menu.ts` lists the menus as action labels, separators, and native items
+(Undo, Copy, Hide, Quit), and builds them with Tauri's JavaScript menu API.
+`main.ts` rebuilds the menu when `settings.keymap` changes, and the old menu is
+closed. Inside a submenu, a label loses the submenu's prefix, so "HTTP Client:
+Import…" reads "Import…". A label with no matching action logs an error and is
+left out.
+
+The web view gets a key before the menu does, and the menu gets it only when
+the page doesn't call `preventDefault`. That's why ⌘W closes a tab and not the
+window. An editor-only action, or one with `when`, passes keys on in some cases,
+so the menu would run it anyway. Those items, and double taps such as ⇧⇧, get
+no accelerator (`accelerator()`, tested in `menu.test.ts`).
+
 ### EditorConfig
 
 `src/editorconfig.ts` parses `.editorconfig` files and turns their section

@@ -166,6 +166,12 @@ corner.
 Shortcuts follow PhpStorm's macOS keymap. To see every action and its
 shortcut, press ⌘⇧A (**Find Action**).
 
+The menu bar (File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
+Window, and Help) runs the same actions. It shows the shortcuts of actions that
+work everywhere. Editor-only actions, such as **Duplicate Line**, and debugger
+steps don't show their shortcuts there, so the keys still reach text fields and
+the terminal. To search the menus, use the search field in Help.
+
 To change a shortcut, run **Keymap…** from ⌘⇧A (or click **Keymap…** in
 Settings), choose the action, and press the new shortcut. Backspace removes the
 shortcut, and **Reset to Default** restores it. If another action had that
@@ -1675,6 +1681,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/icons.ts` | File and folder icons |
 | `src/themes.ts` | The color theme list, imported themes, and applying a theme |
 | `src/colortheme.ts` | Converts VS Code, TextMate, and Monaco themes for the editor, interface, and terminal |
+| `src/menu.ts` | The menu bar, built from the actions |
 | `src/palette.ts` | The picker used by search and actions, and fuzzy matching |
 | `src-tauri/src/lib.rs` | Tauri setup and command registration |
 | `src-tauri/src/fs.rs` | File system commands and the file watcher |

@@ -40,6 +40,7 @@ import { hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
+import { setMenu } from "./menu";
 import { closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1250,6 +1251,11 @@ onSettings((s) =>
     a.keys = custom === undefined ? defaultKeys.get(a.label) : custom || undefined;
   }),
 );
+// The menu bar shows the shortcuts, so rebuild it when they change.
+let menuKeymap = "";
+onSettings((s) => {
+  if (JSON.stringify(s.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(s.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
+});
 setKeymapEditor(() => editKeymap());
 
 // Turning spell checking on or off starts or stops its language server.
