@@ -42,7 +42,46 @@ pub async fn read_file(path: String, charset: Option<String>) -> Result<String, 
     .await
 }
 
-/// Writes a file, encoded in `charset` (an `.editorconfig` value) or else UTF-8.
+#[derive(Serialize)]
+pub struct Text {
+    text: String,
+    /// The encoding detected for a file that isn't valid UTF-8, when no charset was given.
+    charset: Option<String>,
+}
+
+/// Reads a project file like `read_file`, but without a charset, a file that isn't valid UTF-8
+/// opens in the encoding it most likely has, which `write_file` then takes.
+#[tauri::command]
+pub async fn read_text(path: String, charset: Option<String>) -> Result<Text, String> {
+    crate::blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        if charset.is_some() || std::str::from_utf8(&bytes).is_ok() {
+            return Ok(Text { text: decode(bytes, charset.as_deref())?, charset: None });
+        }
+        let detected = detect(&bytes)?;
+        Ok(Text { text: decode(bytes, Some(detected))?, charset: Some(detected.to_string()) })
+    })
+    .await
+}
+
+/// The encoding of text that isn't UTF-8: UTF-16 from its byte-order mark, or chardetng's guess.
+fn detect(bytes: &[u8]) -> Result<&'static str, String> {
+    match encoding_rs::Encoding::for_bom(bytes) {
+        Some((e, _)) if e == encoding_rs::UTF_16LE => return Ok("utf-16le"),
+        Some((e, _)) if e == encoding_rs::UTF_16BE => return Ok("utf-16be"),
+        _ => {}
+    }
+    if bytes.contains(&0) {
+        return Err("The file looks binary.".to_string());
+    }
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    detector.feed(bytes, true);
+    let guess = detector.guess(None, chardetng::Utf8Detection::Deny);
+    // A guess that can't decode every byte would lose some when saved. Windows-1252 decodes any bytes.
+    Ok(if guess.decode_without_bom_handling_and_without_replacement(bytes).is_some() { guess } else { encoding_rs::WINDOWS_1252 }.name())
+}
+
+/// Writes a file, encoded in `charset` (an `.editorconfig` value or an encoding name) or else UTF-8.
 #[tauri::command]
 pub async fn write_file(path: String, contents: String, charset: Option<String>) -> Result<(), String> {
     crate::blocking(move || {
@@ -54,8 +93,9 @@ pub async fn write_file(path: String, contents: String, charset: Option<String>)
 
 const BOM: &str = "\u{feff}";
 
-/// Decodes a file in one of `.editorconfig`'s charsets. UTF-8 (the default) must be valid; the
-/// others can't fail. A byte-order mark is dropped, and `encode` adds it back.
+/// Decodes a file in one of `.editorconfig`'s charsets, or in an encoding by name. Every one is
+/// strict, so the text saves back as the same bytes. A byte-order mark is dropped, and `encode`
+/// adds it back.
 fn decode(bytes: Vec<u8>, charset: Option<&str>) -> Result<String, String> {
     // Strict, like UTF-8: a file that isn't really UTF-16 would lose bytes when saved again.
     let utf16 = |bom: [u8; 2], unit: fn([u8; 2]) -> u16| {
@@ -74,6 +114,10 @@ fn decode(bytes: Vec<u8>, charset: Option<&str>) -> Result<String, String> {
             let text = String::from_utf8(bytes).map_err(|_| "The file isn't valid UTF-8.".to_string())?;
             text.strip_prefix(BOM).map(str::to_string).unwrap_or(text)
         }
+        Some(label) if label != "utf-8" => encoding(label)?
+            .decode_without_bom_handling_and_without_replacement(&bytes)
+            .ok_or_else(|| format!("The file isn't valid {label}."))?
+            .into_owned(),
         _ => String::from_utf8(bytes).map_err(|_| "The file isn't valid UTF-8. If it uses another encoding, set `charset` in .editorconfig.".to_string())?,
     })
 }
@@ -93,8 +137,20 @@ fn encode(text: &str, charset: Option<&str>) -> Result<Vec<u8>, String> {
         Some("utf-16le") => [0xff, 0xfe].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect(),
         Some("utf-16be") => [0xfe, 0xff].into_iter().chain(text.encode_utf16().flat_map(u16::to_be_bytes)).collect(),
         Some("utf-8-bom") => [BOM, text].concat().into_bytes(),
+        Some(label) if label != "utf-8" => {
+            let (bytes, _, unmappable) = encoding(label)?.encode(text);
+            if unmappable {
+                return Err(format!("The text has characters that {label}, the file's encoding, can't hold."));
+            }
+            bytes.into_owned()
+        }
         _ => text.as_bytes().to_vec(),
     })
+}
+
+/// An encoding by name, such as `windows-1252` or `Shift_JIS`.
+fn encoding(label: &str) -> Result<&'static encoding_rs::Encoding, String> {
+    encoding_rs::Encoding::for_label(label.as_bytes()).ok_or_else(|| format!("Unknown encoding {label}."))
 }
 
 #[tauri::command(async)]
@@ -194,6 +250,26 @@ mod tests {
         assert_eq!(encode("\u{feff}a", None).unwrap(), "\u{feff}a".as_bytes());
         assert!(decode(vec![0xe9], None).is_err());
         assert!(decode(vec![0xff, 0xfe, b'a'], Some("utf-16le")).is_err());
+    }
+
+    #[test]
+    fn detects_other_encodings() {
+        // "Größe café" in Windows-1252.
+        let latin = b"Gr\xf6\xdfe caf\xe9".to_vec();
+        assert_eq!(detect(&latin).unwrap(), "windows-1252");
+        let text = decode(latin.clone(), Some("windows-1252")).unwrap();
+        assert_eq!(text, "Größe café");
+        assert_eq!(encode(&text, Some("windows-1252")).unwrap(), latin);
+        assert!(encode("✓", Some("windows-1252")).is_err());
+        // Bytes Windows-1252 leaves undefined still save back as they were.
+        let odd = b"\x81\x8d\x8f\x90\x9d".to_vec();
+        assert_eq!(encode(&decode(odd.clone(), Some("windows-1252")).unwrap(), Some("windows-1252")).unwrap(), odd);
+        // "日本語のテキスト" in Shift_JIS.
+        let sjis = b"\x93\xfa\x96\x7b\x8c\xea\x82\xcc\x83\x65\x83\x4c\x83\x58\x83\x67".to_vec();
+        assert_eq!(detect(&sjis).unwrap(), "Shift_JIS");
+        assert_eq!(decode(sjis, Some("Shift_JIS")).unwrap(), "日本語のテキスト");
+        assert_eq!(detect(&[0xff, 0xfe, b'a', 0]).unwrap(), "utf-16le");
+        assert!(detect(&[0x89, b'P', b'N', b'G', 0, 0]).is_err());
     }
 
     #[test]

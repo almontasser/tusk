@@ -10,7 +10,7 @@ const native = (name: Native["native"]): Native => ({ native: name });
 
 const LAYOUT: [string, Entry[]][] = [
   ["Tusk", ["About", "Check for Updates…", "-", "Settings…", "Keymap…", "-", native("Services"), "-", native("Hide"), native("HideOthers"), native("ShowAll"), "-", native("Quit")]],
-  ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", "Move File to Trash", "Copy Path", "Reveal in Finder", "-",
+  ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", "Move File to Trash", "Copy Path", "Reveal in Finder", "Change File Encoding…", "-",
     ["Compare", ["Compare with Clipboard", "Compare with File…"]],
     ["Local History", ["Show Local History", "Local History: Deleted Files…"]]]],
   ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-", "Find in Files", "Replace in Files", "-",

@@ -378,6 +378,9 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 button.status-item:hover { background: var(--hover); color: var(--text); }
 .status-item .codicon { font-size: 14px !important; }
 .status-item:empty { display: none; }
+/* monaco-vim shows each editor's mode and : command line in its own span; only the last focused one shows. */
+#vim-status > span:not(.current) { display: none !important; }
+#vim-status input { font: inherit; color: inherit; background: transparent; border: none; outline: none; }
 .status-spacer { flex: 1; }
 #problems .codicon-error { color: var(--red); }
 #problems .codicon-warning { color: var(--yellow); }

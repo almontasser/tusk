@@ -123,6 +123,17 @@ when `theme` is `system`, which follows `prefers-color-scheme` as it changes.
 Other modules react through `onSettings`. No editor is created with a `theme`
 option, because that would reset Monaco's global theme.
 
+`apply` also calls `setVim` in `src/vim.ts` for each editor, and
+`removeEditor` turns Vim off before a pane's editor is disposed. `monaco-vim`
+loads with a dynamic `import()` the first time Vim is on, as its own chunk.
+Each editor gets a span in `#vim-status` for monaco-vim's status bar (the
+mode and the `:` input), and only the last focused editor's span shows. With
+Vim on, the global key handler passes ⌃ and a letter (and ⌃[) to the editor
+when it has focus, so Vim's ⌃D, ⌃R, and ⌃V work. `vite.config.ts` aliases
+`monaco-vim` to its ES module build, since the `browser` export is UMD, and
+maps its `monaco-editor/esm/vs/...` imports to monaco-editor 0.56's export
+paths.
+
 ### Color themes
 
 `src/themes.ts` lists every theme (`themeList`) and applies one
@@ -182,6 +193,9 @@ listener sets each action's `keys` from the defaults and the overrides, so the
 key handler, the palette, and Find Action all see the current shortcuts. The
 recorder listens in the capture phase and sets `recording`, which the global
 key handlers check, so the combination you press doesn't also run an action.
+Double taps are keys such as `Shift Shift`: `doubleTap` sees two presses of the
+same modifier within 350 ms with no key between, for both the global handler
+and the recorder, so any of ⇧, ⌃, ⌥, and ⌘ tapped twice can be assigned.
 
 ### Menu bar
 
@@ -211,7 +225,11 @@ endings to `end_of_line` (`pushEOL`), trims trailing whitespace, and fixes the
 final newline, each as an undoable edit, before the text is written. A model
 with no line breaks yet takes `end_of_line` when it opens (`setEOL`), and its
 tab stays clean, since the text on disk is the same. Monaco has only LF and
-CRLF, so `end_of_line = cr` is ignored.
+CRLF, so CR lines convert outside it: `readText` turns a file with CR alone
+(`isCrOnly`) into LF and remembers the path, and `writeText` turns the text
+back into CR (`toCr`) when `end_of_line = cr`, or when there's no
+`end_of_line` and the file was read with CR (`savesCr`). The status bar shows
+CR for such a model.
 
 `charset` goes to `read_file` and `write_file` in `fs.rs`, through
 `readText` and `writeText` in `src/projectfiles.ts`, which every feature that
@@ -224,7 +242,19 @@ is written with one). UTF-16 is decoded strictly, like UTF-8: an odd number of
 bytes or an unpaired surrogate fails to open rather than losing bytes on save. Text that Latin-1 can't hold fails to save with the
 character named, and the tab stays unsaved. Without a `charset`, files are
 read as strict UTF-8 and written back unchanged, so a UTF-8 file with a
-byte-order mark keeps it. The model's charset only shows in the status bar;
+byte-order mark keeps it.
+
+`readText` calls `read_text`, which is `read_file` plus detection: without a
+charset, a file that isn't valid UTF-8 gets UTF-16 from its byte-order mark,
+or else chardetng's guess, and fails as binary if it has a NUL byte. A guess
+that can't decode every byte falls back to Windows-1252, which decodes any
+byte, so nothing is lost on save. `projectfiles.ts` remembers the detected
+encoding by path and `writeText` passes it back; any encoding name that
+`encoding_rs` knows is decoded strictly and encoded with an error for
+characters it can't hold. **Change File Encoding…** (or a click on the status
+bar item) sets an encoding for the path that wins over `.editorconfig` for the
+rest of the session: Reopen reads the file again in it, and Convert and Save
+marks the tab changed and saves. The model's charset only shows in the status bar;
 the rest of the editor (git, search, language servers) sees text.
 
 ### External changes
@@ -3580,3 +3610,40 @@ macOS may ask once per release to let Tusk read a saved password.
 `config/database.php`'s other connections are read by booting the app, as
 Laravel resolves them, rather than by parsing the PHP, since they're mostly
 `env()` calls.
+
+### 2026-09-26: CR line endings convert on read and save
+
+Monaco's text model has only LF and CRLF, and it would read a file with CR
+alone as lines but save it with LF. Rather than patch Monaco, `readText` and
+`writeText` convert at the edge, so every feature sees LF text and a CR file,
+or a file under `end_of_line = cr`, is written with CR. The cost is that the
+conversion isn't an undoable edit, unlike LF and CRLF.
+
+### 2026-09-26: Detect the encoding of files that aren't UTF-8
+
+A legacy file used to fail to open until you set `charset` in `.editorconfig`.
+Now `read_text` guesses with chardetng, the detector Firefox uses, and decodes
+with `encoding_rs` (already in the dependency tree). Both are small pure-Rust
+crates, so nothing is installed. Detection runs only when the bytes aren't
+valid UTF-8, so UTF-8 files are never misread, and decoding stays strict,
+falling back to Windows-1252, so a wrong guess shows odd characters but saves
+the same bytes back. `read_file` keeps its strict UTF-8 default for the
+callers that read config files.
+
+### 2026-09-26: Double taps are shortcuts like any other
+
+⇧⇧ and ⌃⌃ were hard-coded to Search Everywhere and Run Anything. The recorder
+now records a double tap of any modifier and saves it in `keymap` like a
+combination, and the double-tap handler runs whichever action has it. Double
+taps of ⌥ and ⌘ come for free, since detection doesn't care which modifier it
+is.
+
+### 2026-09-26: Vim emulation with monaco-vim
+
+monaco-vim ports CodeMirror's Vim keymap, the most complete Vim emulation for
+Monaco, and is bundled from npm, so nothing is installed. It's off by default
+and loads only when turned on, which keeps about 100 KB out of startup. It
+targets older Monaco releases, so a few commands that reach into Monaco's
+internals, such as `>>` on an empty line, may not behave like Vim. ⌃ letter
+keys go to Vim in the editor, since Vim users expect ⌃D and ⌃R; the actions on
+them (Type Hierarchy, Rerun) still work from ⌘⇧A or outside the editor.

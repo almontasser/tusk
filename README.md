@@ -57,7 +57,6 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
@@ -207,7 +206,8 @@ steps don't show their shortcuts there, so the keys still reach text fields and
 the terminal. To search the menus, use the search field in Help.
 
 To change a shortcut, run **Keymap…** from ⌘⇧A (or click **Keymap…** in
-Settings), choose the action, and press the new shortcut. Backspace removes the
+Settings), choose the action, and press the new shortcut, or tap ⇧, ⌃, ⌥, or ⌘
+twice for a double tap such as ⇧⇧. Backspace removes the
 shortcut, and **Reset to Default** restores it. If another action had that
 shortcut, the other action loses it. Changes are saved in `settings.json` as
 `keymap`.
@@ -289,10 +289,19 @@ AI, and Spelling. Changes apply immediately and are saved in
 | Show the minimap | Off |
 | Show inlay hints | On |
 | Show the cursor line's problem at the end of the line | Off |
+| Vim emulation | Off |
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+
+### Vim emulation
+
+Turn on **Vim emulation** in Settings to edit with Vim keys, through
+[monaco-vim](https://github.com/brijeshb42/monaco-vim). It switches on and off
+at once, without a restart. The status bar shows the mode, such as `--NORMAL--`,
+and the `:` command line. While you type in the editor, ⌃ and a letter, such
+as ⌃D or ⌃R, go to Vim instead of the app's shortcut; ⌘ shortcuts still work.
 
 ### Color themes
 
@@ -330,10 +339,19 @@ status bar shows it), and saving applies `trim_trailing_whitespace` and
 `insert_final_newline`. `charset` sets the encoding files are read and saved
 in: `utf-8`, `utf-8-bom`, `latin1`, `utf-16le`, or `utf-16be` (the status bar
 shows it). `end_of_line` (`lf` or `crlf`) applies to new files, and converts a
-file's line endings when you save it; ⌘Z undoes the conversion. Without
-`.editorconfig`, the editor detects indentation from each file's content,
-keeps each file's line endings, and reads files as UTF-8. Changes to
+file's line endings when you save it; ⌘Z undoes the conversion. `cr` (old Mac
+line endings) converts when saving too, but the editor shows CR lines as LF, so
+⌘Z can't undo it. Without `.editorconfig`, the editor detects indentation from
+each file's content, keeps each file's line endings (CR included), and reads
+files as UTF-8. Changes to
 `.editorconfig` apply to open files at once.
+
+Without a `charset`, a file that isn't valid UTF-8 opens in the encoding it
+most likely has, such as Windows-1252 or Shift_JIS, and saves back in it. The
+status bar shows the encoding and line endings. To pick another encoding,
+click it, or run **Change File Encoding…**: **Reopen** reads the file again in
+that encoding, and **Convert and Save** saves the text in it. The choice lasts
+until you restart the app.
 
 Press ⌘\ to split the editor to the right, or ⌘⇧\ to split it down: the
 current file opens in a new pane, up to four panes. With four, ⌘\ moves to the

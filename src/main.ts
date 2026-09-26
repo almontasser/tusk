@@ -3,13 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
-import { choose, type Item, pick, rank } from "./palette";
+import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
-import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
+import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
@@ -712,7 +712,7 @@ function updateStatusItems() {
   $("cursor-position").textContent = model && pos ? `${pos.lineNumber}:${pos.column}${selected ? ` (${selected} chars)` : ""}` : "";
   const options = model?.getOptions();
   $("indentation").textContent = options ? (options.insertSpaces ? `${options.tabSize} spaces` : `Tab size ${options.tabSize}`) : "";
-  $("encoding").textContent = model ? `${modelCharsets.get(model) ?? "UTF-8"} · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
+  $("encoding").textContent = model ? `${modelCharsets.get(model) ?? "UTF-8"} · ${crModels.has(model) ? "CR" : model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
   $("language").textContent = model ? languageName(model.getLanguageId()) : "";
 }
 
@@ -744,6 +744,7 @@ function markErrors() {
     if (el.classList.contains("has-error") !== errorPaths.has(el.dataset.path!)) el.classList.toggle("has-error");
 }
 $("problems").onclick = () => root && showProblems();
+$("encoding").onclick = () => changeEncoding();
 
 // ---- Recent projects and the welcome screen ----
 
@@ -939,7 +940,9 @@ monaco.languages.registerDefinitionProvider("blade", {
 
 /** Each file model's charset, for the status bar. */
 const modelCharsets = new WeakMap<monaco.editor.ITextModel, string>();
-/** `.editorconfig`'s end_of_line as Monaco's line ending. Monaco has no CR-only lines, so `cr` is left alone. */
+/** Models whose file is saved with CR line endings, which Monaco doesn't have, so the editor shows them as LF. */
+const crModels = new WeakSet<monaco.editor.ITextModel>();
+/** `.editorconfig`'s end_of_line as Monaco's line ending. `cr` is left to `writeText`. */
 const eolOf = (props: Properties) => ({ lf: monaco.editor.EndOfLineSequence.LF, crlf: monaco.editor.EndOfLineSequence.CRLF })[props.end_of_line];
 
 /**
@@ -951,7 +954,9 @@ async function applyEditorConfig(model: monaco.editor.ITextModel) {
   if (model.isDisposed()) return;
   const options = Object.fromEntries(Object.entries(indentation(props)).filter(([, v]) => v !== undefined));
   if (Object.keys(options).length) model.updateOptions(options);
-  modelCharsets.set(model, CHARSETS[props.charset] ?? "UTF-8");
+  modelCharsets.set(model, charsetName(model.uri.fsPath, props));
+  if (savesCr(model.uri.fsPath, props)) crModels.add(model);
+  else crModels.delete(model);
   const eol = eolOf(props);
   if (eol !== undefined && model.getLineCount() === 1 && model.getEndOfLineSequence() !== eol) {
     // Changing the line ending counts as an edit, but the file's text is the same.
@@ -963,6 +968,42 @@ async function applyEditorConfig(model: monaco.editor.ITextModel) {
   if (model === editor.getModel()) updateStatusItems();
 }
 monaco.editor.onDidCreateModel((model) => model.uri.scheme === "file" && applyEditorConfig(model));
+
+/** `.editorconfig` charsets and encoding names for Change File Encoding. */
+const ENCODINGS = ["utf-8", "utf-8-bom", "utf-16le", "utf-16be", "latin1", "windows-1252", "ISO-8859-15", "windows-1250", "windows-1251", "KOI8-R", "macintosh", "Shift_JIS", "EUC-JP", "EUC-KR", "GBK", "gb18030", "Big5"];
+
+/** Reads the active file again in another encoding, or converts it to one and saves it. */
+function changeEncoding() {
+  const path = active;
+  const tab = tabs.get(path);
+  if (!tab) return;
+  const name = (charset: string) => CHARSETS[charset] ?? charset;
+  pick(`Encoding of ${relative(path)}`, (q) =>
+    rank(
+      q,
+      ENCODINGS.map((charset) => ({
+        label: name(charset),
+        run: async () => {
+          const how = await choose(`Reopen ${nameOf(path)} as ${name(charset)}, or convert its text to ${name(charset)}?`, ["Reopen", "Convert and Save", "Cancel"]);
+          if (how === "Convert and Save") {
+            setCharset(path, charset);
+            tab.saved = -1;
+            await saveFile(path);
+          } else if (how === "Reopen") {
+            if (isDirty(tab) && !(await confirm(`Reopen ${nameOf(path)}? Its unsaved changes are lost.`, "Reopen"))) return;
+            setCharset(path, charset);
+            const text = await readText(path).catch((e) => (setCharset(path, undefined), status(`Couldn't reopen ${relative(path)}: ${e}`), null));
+            if (text === null) return;
+            tab.model.setValue(text);
+            tab.saved = tab.model.getAlternativeVersionId();
+          } else return;
+          showDirty(path);
+          applyEditorConfig(tab.model);
+        },
+      })),
+    ),
+  );
+}
 
 /**
  * Converts line endings, trims trailing whitespace, and adds or removes the final newline, as
@@ -1331,6 +1372,7 @@ const actions: Action[] = [
   { label: "Split Down", keys: "Meta+Shift+Backslash", run: () => split("col") },
   { label: "Move Tab to Next Pane", run: moveTabToNextPane },
   { label: "Unsplit", run: () => unsplit() },
+  { label: "Change File Encoding…", run: () => changeEncoding() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Problems", keys: "Meta+6", run: () => root && showProblems() },
   { label: "Scan Project for Problems", run: () => root && (showProblems(), scanProject()) },
@@ -1425,7 +1467,7 @@ async function chooseDockerService() {
 }
 
 const symbolsFor = (keys?: string) =>
-  keys?.replace("Shift Shift", "⇧⇧").replace("Ctrl Ctrl", "⌃⌃").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
+  keys?.replace(/^(\w+) \1$/, "$1+$1+").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
 const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
@@ -1473,7 +1515,7 @@ function recordShortcut(action: Action) {
   recording = true;
   const overlay = document.createElement("div");
   overlay.id = "shortcut-recorder";
-  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, or a function key. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
+  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
   overlay.querySelector("h2")!.textContent = action.label;
   document.body.append(overlay);
   const save = (keys: string | undefined) => {
@@ -1494,6 +1536,8 @@ function recordShortcut(action: Action) {
   const onKey = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const tap = e.repeat ? undefined : doubleTap(e);
+    if (tap) return save(tap), finish();
     if (["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
     const plain = !(e.metaKey || e.ctrlKey || e.altKey);
     if (plain && e.key === "Escape") return finish();
@@ -1542,6 +1586,8 @@ window.addEventListener(
     const combo = comboOf(e);
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
     if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
+    // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
+    if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
     const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
     if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
@@ -1552,17 +1598,22 @@ window.addEventListener(
   true,
 );
 
-// Double Shift and double Ctrl: two presses within 350 ms with no other key between them.
+// Double taps of a modifier, such as ⇧⇧: two presses within 350 ms with no other key between them.
+const tapNames: Record<string, string> = { Shift: "Shift", Control: "Ctrl", Alt: "Alt", Meta: "Meta" };
 let lastTap = { key: "", time: 0 };
+/** The double tap, such as "Shift Shift", that this key press completes, if any. */
+function doubleTap(e: KeyboardEvent) {
+  const now = performance.now();
+  const name = tapNames[e.key];
+  if (name && lastTap.key === e.key && now - lastTap.time < 350) return (lastTap = { key: "", time: 0 }), `${name} ${name}`;
+  lastTap = { key: e.key, time: now };
+}
 window.addEventListener(
   "keydown",
   (e) => {
     if (e.repeat || recording) return;
-    const now = performance.now();
-    if ((e.key === "Shift" || e.key === "Control") && lastTap.key === e.key && now - lastTap.time < 350) {
-      lastTap = { key: "", time: 0 };
-      actions.find((a) => a.keys === (e.key === "Shift" ? "Shift Shift" : "Ctrl Ctrl"))?.run();
-    } else lastTap = { key: e.key, time: now };
+    const tap = doubleTap(e);
+    if (tap) actions.find((a) => a.keys === tap)?.run();
   },
   true,
 );

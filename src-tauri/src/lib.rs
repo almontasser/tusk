@@ -204,6 +204,7 @@ pub fn run() {
             db::db_set_password,
             fs::read_dir,
             fs::read_file,
+            fs::read_text,
             profile::parse_profile,
             fs::write_file,
             fs::rename_path,

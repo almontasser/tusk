@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { globToRegex, indentation, parse, propertiesFor } from "./editorconfig.ts";
+import { globToRegex, indentation, isCrOnly, parse, propertiesFor, toCr } from "./editorconfig.ts";
 
 const laravel = `root = true
 
@@ -53,4 +53,11 @@ test("resolves a file's properties", () => {
   assert.deepEqual(indentation(propertiesFor("/app/legacy/a.php", nested)), { insertSpaces: false, tabSize: 4, indentSize: 4 });
   const rooted = [{ dir: "/", text: "[*]\nindent_size = 8\n" }, { dir: "/app", text: "root = true\n[*]\nindent_style = tab\n" }];
   assert.equal(propertiesFor("/app/a.php", rooted).indent_size, undefined);
+});
+
+test("recognizes and writes CR line endings", () => {
+  assert.ok(isCrOnly("a\rb\r"));
+  assert.ok(!isCrOnly("a\r\nb"));
+  assert.ok(!isCrOnly("ab"));
+  assert.equal(toCr("a\r\nb\nc"), "a\rb\rc");
 });

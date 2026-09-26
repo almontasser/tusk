@@ -82,3 +82,9 @@ export function indentation(props: Properties): { insertSpaces?: boolean; tabSiz
     indentSize: size,
   };
 }
+
+/** Whether text has old Mac line endings: CR alone, never LF. */
+export const isCrOnly = (text: string) => text.includes("\r") && !text.includes("\n");
+
+/** Text with LF or CRLF lines, given CR line endings. */
+export const toCr = (text: string) => text.replace(/\r?\n/g, "\r");
