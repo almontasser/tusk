@@ -24,12 +24,22 @@ pub struct QueryResult {
     rows: Vec<Vec<Option<String>>>,
     affected: u64,
     truncated: bool,
+    /// Every row the statement returned, including those skipped and those past the page.
+    total: u64,
+    /// Rows to skip before the page starts.
+    #[serde(skip)]
+    skip: u64,
 }
 
+/// Rows per page. `database.ts` asks for the next page with an offset.
 const MAX_ROWS: usize = 1000;
 
 impl QueryResult {
     fn push(&mut self, row: Vec<Option<String>>) {
+        self.total += 1;
+        if self.total <= self.skip {
+            return;
+        }
         if self.rows.len() < MAX_ROWS {
             self.rows.push(row);
         } else {
@@ -38,14 +48,17 @@ impl QueryResult {
     }
 }
 
-/// Runs one statement and returns its rows, or the number of rows it changed.
-// ponytail: connects for every query; keep a connection per project if that gets slow on remote hosts.
+/// Runs one statement and returns a page of its rows, from `offset`, or the number of rows it changed.
+// ponytail: connects for every query, and each page runs the statement again and reads every row, which the
+// drivers do anyway (MySQL drains the rest, PostgreSQL's simple query buffers it); a server-side cursor on a
+// kept connection if that gets slow on remote hosts.
 #[tauri::command]
-pub async fn db_query(connection: Connection, sql: String) -> Result<QueryResult, String> {
+pub async fn db_query(connection: Connection, sql: String, offset: Option<u64>) -> Result<QueryResult, String> {
+    let skip = offset.unwrap_or(0);
     tauri::async_runtime::spawn_blocking(move || match connection.driver.as_str() {
-        "sqlite" => sqlite(&connection, &sql),
-        "mysql" | "mariadb" => mysql(&connection, &sql),
-        "pgsql" => pgsql(&connection, &sql),
+        "sqlite" => sqlite(&connection, &sql, skip),
+        "mysql" | "mariadb" => mysql(&connection, &sql, skip),
+        "pgsql" => pgsql(&connection, &sql, skip),
         other => Err(format!("The {other} driver isn't supported.")),
     })
     .await
@@ -167,12 +180,12 @@ fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
         .map_err(pgsql_error)
 }
 
-fn sqlite(c: &Connection, sql: &str) -> Result<QueryResult, String> {
+fn sqlite(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     use rusqlite::types::ValueRef;
     let err = |e: rusqlite::Error| e.to_string();
     let db = open_sqlite(c)?;
     let mut stmt = db.prepare(sql).map_err(err)?;
-    let mut result = QueryResult { columns: stmt.column_names().iter().map(|s| s.to_string()).collect(), ..Default::default() };
+    let mut result = QueryResult { columns: stmt.column_names().iter().map(|s| s.to_string()).collect(), skip, ..Default::default() };
     if result.columns.is_empty() {
         result.affected = stmt.execute([]).map_err(err)? as u64;
         return Ok(result);
@@ -194,13 +207,13 @@ fn sqlite(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     Ok(result)
 }
 
-fn mysql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
+fn mysql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     use mysql::prelude::Queryable;
     let err = mysql_error;
     let mut conn = open_mysql(c)?;
     // The text protocol returns every value as bytes, so each cell reads as a string.
     let mut rows = conn.query_iter(sql).map_err(err)?;
-    let mut result = QueryResult { affected: rows.affected_rows(), ..Default::default() };
+    let mut result = QueryResult { affected: rows.affected_rows(), skip, ..Default::default() };
     result.columns = rows.columns().as_ref().iter().map(|c| c.name_str().into_owned()).collect();
     for row in rows.by_ref() {
         let cells = row
@@ -218,12 +231,12 @@ fn mysql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
     Ok(result)
 }
 
-fn pgsql(c: &Connection, sql: &str) -> Result<QueryResult, String> {
+fn pgsql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     use postgres::SimpleQueryMessage;
     let err = pgsql_error;
     let mut client = open_pgsql(c)?;
     // The simple query protocol returns every value as text.
-    let mut result = QueryResult::default();
+    let mut result = QueryResult { skip, ..Default::default() };
     for message in client.simple_query(sql).map_err(err)? {
         match message {
             SimpleQueryMessage::RowDescription(columns) => result.columns = columns.iter().map(|c| c.name().into()).collect(),
@@ -298,21 +311,24 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         rusqlite::Connection::open(&path).unwrap();
         let c = Connection { driver: "sqlite".into(), host: String::new(), port: 0, database: path.to_string_lossy().into(), username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() };
-        sqlite(&c, "CREATE TABLE t (id INTEGER, name TEXT)").unwrap();
-        assert_eq!(sqlite(&c, "INSERT INTO t VALUES (1, 'a'), (2, NULL)").unwrap().affected, 2);
-        let r = sqlite(&c, "SELECT * FROM t").unwrap();
+        sqlite(&c, "CREATE TABLE t (id INTEGER, name TEXT)", 0).unwrap();
+        assert_eq!(sqlite(&c, "INSERT INTO t VALUES (1, 'a'), (2, NULL)", 0).unwrap().affected, 2);
+        let r = sqlite(&c, "SELECT * FROM t", 0).unwrap();
         assert_eq!(r.columns, ["id", "name"]);
         assert_eq!(r.rows, [vec![Some("1".into()), Some("a".into())], vec![Some("2".into()), None]]);
+        // A page from an offset still counts every row.
+        let page = sqlite(&c, "SELECT id FROM t ORDER BY id", 1).unwrap();
+        assert_eq!((page.rows, page.total, page.truncated), (vec![vec![Some("2".into())]], 2, false));
 
         // A batch applies all its statements, or none when one fails.
         let batch = |statements: &[&str]| tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, statements.iter().map(|s| s.to_string()).collect(), None));
         assert_eq!(batch(&["UPDATE t SET name = 'b' WHERE id = 1", "DELETE FROM t WHERE id = 2"]).unwrap(), [1, 1]);
         assert!(batch(&["INSERT INTO t VALUES (3, 'c')", "INSERT INTO missing VALUES (1)"]).is_err());
-        assert_eq!(sqlite(&c, "SELECT count(*) FROM t").unwrap().rows, [vec![Some("1".into())]]);
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0).unwrap().rows, [vec![Some("1".into())]]);
         // A grid edit that matches no row undoes the others.
         let exact = tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, vec!["DELETE FROM t WHERE id = 1".into(), "DELETE FROM t WHERE id = 99".into()], Some(true)));
         assert!(exact.unwrap_err().contains("change 2 of 2"));
-        assert_eq!(sqlite(&c, "SELECT count(*) FROM t").unwrap().rows, [vec![Some("1".into())]]);
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0).unwrap().rows, [vec![Some("1".into())]]);
     }
 
     /// Against throwaway servers: `docker run -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=laravel -p 33066:3306 mysql:8`
@@ -322,7 +338,7 @@ mod tests {
     fn queries_servers() {
         for (driver, port, user) in [("mysql", 33066, "root"), ("pgsql", 54329, "postgres")] {
             let c = Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
-            let run = |sql: &str| if driver == "mysql" { mysql(&c, sql) } else { pgsql(&c, sql) }.unwrap();
+            let run = |sql: &str| if driver == "mysql" { mysql(&c, sql, 0) } else { pgsql(&c, sql, 0) }.unwrap();
             run("DROP TABLE IF EXISTS t");
             run("CREATE TABLE t (id INTEGER, name TEXT, at TIMESTAMP NULL)");
             assert_eq!(run("INSERT INTO t VALUES (1, 'a', '2026-01-02 03:04:05'), (2, NULL, NULL)").affected, 2, "{driver}");
@@ -337,7 +353,7 @@ mod tests {
             assert_eq!(run("SELECT count(*) FROM t").rows, [vec![Some("1".into())]], "{driver}");
         }
         // MySQL 8 serves TLS with a certificate it made itself, which `require` accepts and `verify-full` refuses.
-        let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'");
+        let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'", 0);
         assert_ne!(tls("require").unwrap().rows[0][1], Some(String::new()));
         assert!(tls("verify-full").is_err());
     }

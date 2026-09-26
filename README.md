@@ -47,7 +47,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
+| Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. There's no gRPC. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Imports read JSON only, not YAML. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
@@ -1552,9 +1552,12 @@ password), and `DB_HOST` and `DB_PORT` are then as the server sees them, such
 as `127.0.0.1:3306`. Leave the destination empty to connect directly again.
 
 - Click a table to see its columns. A `?` after a type marks a nullable column.
-- Double-click a table to show its first 500 rows. Double-click a cell to
-  edit it, and press Enter to keep the change, or Escape to cancel. Type
-  `NULL` for a null value. Tables without a primary key are read-only.
+- Double-click a table to show its rows, 1,000 at a time. Click **Next** and
+  **Previous** to page through a table or a query's results; the summary shows
+  which rows you see, and how many there are. Pages don't change while you
+  have pending changes.
+- Double-click a cell to edit it, and press Enter to keep the change, or
+  Escape to cancel. Type `NULL` for a null value. Tables without a primary key are read-only.
 - To add a row, click **Add Row**, fill in the values, and press Enter. Leave a
   value empty to use the column's default.
 - To delete rows, click a row's number to select it (⌘-click to select

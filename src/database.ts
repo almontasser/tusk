@@ -22,7 +22,7 @@ import { pick } from "./palette";
 import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
-type Result = { columns: string[]; rows: (string | null)[][]; affected: number; truncated: boolean };
+type Result = { columns: string[]; rows: (string | null)[][]; affected: number; truncated: boolean; total: number };
 type Host = { root(): string; openFile(path: string): Promise<unknown>; status(text: string): void };
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -39,7 +39,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
 }
 const icon = (name: string) => el("span", `codicon codicon-${name}`);
 
-const query = (sql: string) => invoke<Result>("db_query", { connection, sql });
+const query = (sql: string, offset = 0) => invoke<Result>("db_query", { connection, sql, offset });
+/** Rows per page, as db.rs's MAX_ROWS. */
+const PAGE = 1000;
 
 /** The SSH destination the project's database is reached through, or "" to connect directly. */
 const sshKey = () => `db:ssh:${host.root()}`;
@@ -126,7 +128,7 @@ function tableRow(table: string) {
       columns.append(el("li", "muted", String(e)));
     }
   };
-  row.ondblclick = () => run(`SELECT * FROM ${quoteIdentifier(connection!.driver, table)} LIMIT 500`, table);
+  row.ondblclick = () => run(`SELECT * FROM ${quoteIdentifier(connection!.driver, table)}`, table);
   li.append(row, columns);
   return li;
 }
@@ -197,8 +199,20 @@ async function provideCompletionItems(model: monaco.editor.ITextModel, position:
 
 const results = el("div", "db-results");
 
-/** Runs a query and shows its rows. With `table`, cells can be edited when the rows include the primary key. */
-async function run(sql: string, table?: string) {
+function button(parent: HTMLElement, label: string, name: string, onclick: () => unknown) {
+  const b = el("button", "db-action");
+  b.append(icon(name), label);
+  b.onclick = onclick;
+  parent.append(b);
+  return b;
+}
+
+/**
+ * Runs a query and shows a page of its rows. With `table`, cells can be edited when the rows include the primary key.
+ * A table's page is a LIMIT in the SQL, so the database reads only that page, and its count is a COUNT(*). Another
+ * statement's page is skipped to in db.rs, which counts every row the statement returns.
+ */
+async function run(sql: string, table?: string, page = 0) {
   if (!connection) await loadConnection();
   results.onkeydown = null; // ⌘⏎ submits the grid's own changes, set up again by makeEditable.
   const summary = el("div", "db-summary muted", "Running…");
@@ -207,7 +221,7 @@ async function run(sql: string, table?: string) {
   const started = performance.now();
   let result: Result;
   try {
-    result = await query(sql);
+    result = table ? await query(`${sql} LIMIT ${PAGE + 1} OFFSET ${page * PAGE}`) : await query(sql, page * PAGE);
   } catch (e) {
     summary.replaceChildren(el("span", "db-error", String(e)));
     return;
@@ -218,8 +232,17 @@ async function run(sql: string, table?: string) {
     schema = null; // The statement may have changed the schema.
     return;
   }
-  const count = `${result.rows.length}${result.truncated ? "+" : ""} ${result.rows.length === 1 ? "row" : "rows"}`;
-  summary.textContent = `${table ?? "Query"} · ${count} in ${ms} ms${result.truncated ? " (showing the first 1000)" : ""}`;
+  const offset = page * PAGE;
+  const n = result.rows.length;
+  const paged = page > 0 || result.truncated;
+  const count = el("span", "", paged ? `rows ${(offset + 1).toLocaleString()}–${(offset + n).toLocaleString()}` : `${n} ${n === 1 ? "row" : "rows"}`);
+  summary.replaceChildren(`${table ?? "Query"} · `, count, ` in ${ms} ms`);
+  const total = (t: number) => (count.textContent += ` of ${t.toLocaleString()}`);
+  if (paged && !table) total(result.total);
+  if (paged && table) query(`SELECT COUNT(*) FROM ${quoteIdentifier(connection!.driver, table)}`).then((r) => count.isConnected && total(Number(r.rows[0][0])), () => {});
+  // Pages change only without pending changes: makeEditable disables these while there are some.
+  if (page > 0) button(summary, "Previous", "chevron-left", () => run(sql, table, page - 1)).classList.add("db-page");
+  if (result.truncated) button(summary, "Next", "chevron-right", () => run(sql, table, page + 1)).classList.add("db-page");
   const grid = el("table");
   const head = el("tr");
   head.append(el("th", "", "#"), ...result.columns.map((c) => el("th", "", c)));
@@ -227,14 +250,14 @@ async function run(sql: string, table?: string) {
   const body = grid.createTBody();
   const rows = result.rows.map((cells, i) => {
     const tr = el("tr");
-    tr.append(el("td", "index", String(i + 1)), ...cells.map((v) => cell(el("td"), v)));
+    tr.append(el("td", "index", String(offset + i + 1)), ...cells.map((v) => cell(el("td"), v)));
     body.append(tr);
     return tr;
   });
   const scroll = el("div", "db-grid");
   scroll.append(grid);
   results.append(scroll);
-  if (table) makeEditable(sql, table, result, rows, summary, body);
+  if (table) makeEditable(() => run(sql, table, page), table, result, rows, summary, body);
 }
 
 function cell(td: HTMLElement, value: string | null) {
@@ -248,7 +271,7 @@ function cell(td: HTMLElement, value: string | null) {
  * it (⌘-click for several) for Delete Rows, and Add Row adds one. Changes wait, marked in the grid, until
  * Submit (or ⌘⏎) applies them all in one transaction; Revert drops them.
  */
-async function makeEditable(sql: string, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
+async function makeEditable(again: () => void, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
   const driver = connection!.driver;
   const keys = (await query(primaryKeyQuery(driver, table)).catch(() => ({ rows: [] }))).rows.map((r) => r[0]!);
   const keyIndexes = keys.map((k) => result.columns.indexOf(k));
@@ -257,13 +280,7 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     return;
   }
   const keyOf = (cells: (string | null)[]) => Object.fromEntries(keys.map((k, i) => [k, cells[keyIndexes[i]]]));
-  const button = (label: string, name: string, onclick: () => unknown) => {
-    const b = el("button", "db-action");
-    b.append(icon(name), label);
-    b.onclick = onclick;
-    summary.append(b);
-    return b;
-  };
+  const action = (label: string, name: string, onclick: () => unknown) => button(summary, label, name, onclick);
 
   // Pending changes: new values by row and column, rows to delete, and rows to add.
   const edits = new Map<number, Map<number, string | null>>();
@@ -277,7 +294,7 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     ...inserts.map((values) => insertStatement(driver, table, values)),
   ];
 
-  button("Add Row", "add", () => {
+  action("Add Row", "add", () => {
     if (body.querySelector(".new-row")) return;
     const tr = el("tr", "new-row");
     const inputs = result.columns.map((c) => {
@@ -307,7 +324,7 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
   });
 
   const selected = new Set<number>();
-  const remove = button("Delete Rows", "trash", () => {
+  const remove = action("Delete Rows", "trash", () => {
     for (const r of selected) deletes.add(r), rows[r].classList.add("deleted");
     selected.clear();
     rows.forEach((row) => row.classList.remove("selected"));
@@ -315,26 +332,27 @@ async function makeEditable(sql: string, table: string, result: Result, rows: HT
     changed();
   });
   remove.disabled = true;
-  const submit = button("Submit", "check", async () => {
+  const submit = action("Submit", "check", async () => {
     const list = statements();
     if (!list.length) return;
     submit.disabled = true;
     try {
       await invoke("db_batch", { connection, statements: list, oneRowEach: true });
       host.status(`Saved ${list.length} ${list.length === 1 ? "change" : "changes"} to ${table}`);
-      run(sql, table);
+      again();
     } catch (e) {
       host.status(`Can't save the changes to ${table}: ${String(e)}`);
       submit.disabled = false;
     }
   });
-  const revert = button("Revert", "discard", () => run(sql, table));
+  const revert = action("Revert", "discard", again);
   /** Updates the Submit and Revert buttons after a change, with the SQL they'd run as Submit's tooltip. */
   const changed = () => {
     const list = statements();
     submit.disabled = revert.disabled = !list.length;
     submit.lastChild!.textContent = list.length ? `Submit ${list.length} ${list.length === 1 ? "Change" : "Changes"}` : "Submit";
     submit.title = list.join(";\n");
+    summary.querySelectorAll<HTMLButtonElement>(".db-page").forEach((b) => (b.disabled = !!list.length));
   };
   changed();
   results.onkeydown = (e) => {

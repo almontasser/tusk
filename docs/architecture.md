@@ -2710,8 +2710,15 @@ fill its pipe and stop ssh. Tunnels are kept per destination and address, and re
 ssh runs. `database.ts` keeps the destination per project in `localStorage`
 (`db:ssh:<root>`) and connects to the tunnel's port instead of `.env`'s.
 
-Each query opens a new connection, and results stop at 1,000 rows. The query
-runs on a blocking thread, so a slow server doesn't stall the app.
+Each query opens a new connection and runs on a blocking thread, so a slow
+server doesn't stall the app. Results come in pages of 1,000 rows. A table's
+page is `LIMIT 1001 OFFSET n` in its SQL (the extra row tells whether there's a
+next page), and its count is a `COUNT(*)` that fills in after the rows show.
+For any other statement, `db_query` takes an `offset`, skips that many rows,
+and returns `total`, every row the statement returned: MySQL's driver drains
+the rest of a result anyway, and PostgreSQL's simple query protocol buffers it,
+so counting costs nothing more. **Next** and **Previous** are disabled while
+the grid has pending changes.
 
 `src/dbconfig.ts` reads `.env` and fills in Laravel's defaults from
 `config/database.php`. It also holds the schema queries: `sqlite_master` and
@@ -3425,3 +3432,13 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Result pages run the query again
+
+Results stopped at 1,000 rows. Now they come in pages, and each page runs its
+statement again. A server-side cursor would read only what you page to, but
+needs a connection kept open between pages, and every query opens its own. A
+query wrapped as `SELECT * FROM (…) LIMIT … OFFSET …` breaks on duplicate
+column names in MySQL and loses the inner `ORDER BY` on MariaDB, so only table
+browsing, whose SQL the editor writes, pages in SQL. Other statements skip rows
+in Rust, which read every row before this change too.
