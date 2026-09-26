@@ -102,6 +102,20 @@ and the two sides of the border trade pixels. Sizes go into the session as
 `grow`. A new split takes half of the pane's `flex-grow`, and a new group takes
 over the pane's.
 
+### Markdown preview
+
+`markdownpreview.ts` shows a Markdown model's preview as an editor view
+(`showEditorView`), one per file. `markdown.ts` renders it with `marked`,
+parsing each top-level block on its own inside a `<div data-line>` that holds
+the block's first line, with the document's link definitions passed along.
+DOMPurify sanitizes the HTML into a fragment, where relative image paths are
+swapped for blob URLs of the file's bytes (`read_file_bytes`, a
+`tauri::ipc::Response`, so no base64) before the fragment joins the page. The
+preview renders again 150 ms after you stop typing. Every Monaco editor gets a
+scroll listener once (`onDidCreateEditor`), and the preview for the editor's
+model scrolls to the block at its top line, interpolating toward the next
+block (`previewScrollTop`). The sync runs one way, editor to preview.
+
 ### Saving
 
 `saveFile` writes one tab if it has unsaved changes, then marks it saved, sends
@@ -312,6 +326,7 @@ check and is killed partway through a large run.
 | Vue language server | 3.3.11 | npm package, run with Node |
 | Svelte language server | 0.18.4 | npm package, run with Node |
 | Astro language server | 2.17.1 | npm package, run with Node |
+| Angular language server | 22.2.0, with TypeScript 6.0.3 | npm package, run with Node |
 | Prettier, with its Svelte and Astro plugins | 3.9.9 | npm packages, run with Node |
 | `blade-formatter` | 1.44.4 | npm package, run with Node |
 | PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
@@ -2512,6 +2527,21 @@ Two client features were added for it, and any server can use them:
 - **`textDocument/documentColor`** and **`textDocument/colorPresentation`**,
   mapped to a Monaco color provider, which draws swatches and a color picker.
 
+## JSON schemas
+
+`jsonschemas.ts` feeds Monaco's JSON worker its schemas through
+`jsonDefaults.setDiagnosticsOptions({ schemas, enableSchemaRequest: false })`.
+The bundled schemas live in `src/schemas`, fetched and minified by
+`scripts/fetch-schemas.ts`, and load as separate chunks with the first JSON
+model. Each one's `uri` is its `$id` or published URL, so a `$schema` or a
+`$ref` naming that URL resolves to the bundled copy. The script replaces a
+`$ref` to a schema that isn't bundled (package.json's refs to nodemon, ava,
+stylelint, and others) with `{}`, since an unresolved one shows as a warning on
+line 1 of every file using the schema. For a `$schema` that's a path
+(`localSchemaPath` in `links.ts`), the worker resolves it against the file's
+URI; the client reads that file, adds it under the same `file://` URI, and
+updates it as you edit it in an open tab.
+
 ## Formatting (frontend step 2)
 
 `src/format.ts` registers one formatting provider for PHP, Blade, JavaScript,
@@ -2574,7 +2604,17 @@ bundled tools, next to the Vue plugin. Svelte's server reports a missing Svelte
 config in `vite.config` as an error on line 1, which is right for a Svelte
 project and harmless in a Laravel one that has a stray `.svelte` file. With
 Prettier and `yaml-language-server` (Astro's frontmatter), these add about
-60 MB to the bundled Node tools. While vtsls runs, Monaco's built-in TypeScript features are turned off,
+60 MB to the bundled Node tools.
+
+The Angular server (`@angular/language-server`) starts only when the project's
+`package.json` names `@angular/core`, with the first `typescript` or `html`
+model, and serves both: `.html` templates and inline `template:` strings in
+components. It runs next to vtsls, not through it, and Monaco merges their
+answers. `lsp_start` passes `--tsProbeLocations` (the project root, then the
+server's folder) and `--ngProbeLocations` (the server's folder), so the server
+prefers the project's TypeScript and falls back to its own nested 6.0.3, and
+always uses the bundled `@angular/language-service`. Its `angular/…` progress
+notifications are ignored. While vtsls runs, Monaco's built-in TypeScript features are turned off,
 so completions and diagnostics don't appear twice. Formatting stays with
 `format.ts`: the client doesn't register formatting providers from language
 servers.
@@ -3789,3 +3829,26 @@ Splitting a commit at an edit stop is `git reset HEAD~` followed by ordinary
 commits, as git's documentation describes, so the app adds only the button and
 leaves the parts to the Commit view, whose line-level staging already picks
 what goes in each commit. A dedicated split dialog would repeat that staging UI.
+
+### 2026-09-26: Angular templates through Angular's own language server
+
+`@angular/language-server` is the server VS Code's Angular extension runs, so
+templates get the same checks as `ng build`'s strict templates. It adds about
+50 MB to the Node tools, half of it its own TypeScript, and a second TypeScript
+program in memory. Starting it only for projects with `@angular/core` keeps
+that off Laravel projects that only have a stray `.html` file.
+
+### 2026-09-26: Markdown preview with the libraries pull requests already load
+
+The preview reuses `marked` and DOMPurify, already loaded for pull request
+descriptions, instead of Monaco's Markdown renderer, which can't map blocks to
+lines. Images go through a bytes command rather than Tauri's asset protocol,
+which would need a new Cargo feature and a file scope in `tauri.conf.json`.
+
+### 2026-09-26: Bundle JSON schemas instead of letting Monaco download them
+
+Monaco can fetch a schema by URL, but that sends requests from a page that can
+call the app's commands, fails offline, and would download schemastore.org's
+schemas at every launch. About 600 KB of schemas, loaded only with the first
+JSON file, cover the config files PHP and frontend projects have. Refs to
+schemas left out validate nothing rather than failing.

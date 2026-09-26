@@ -207,6 +207,7 @@ pub fn run() {
             fs::read_dir,
             fs::read_file,
             fs::read_text,
+            fs::read_file_bytes,
             profile::parse_profile,
             fs::write_file,
             fs::rename_path,

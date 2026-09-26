@@ -53,13 +53,16 @@ pub fn tool(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     Ok(tools_dir(app)?.join(path))
 }
 
-/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, `vue`, `svelte`, or `astro`) for `root`, replacing a running one with the
+/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, `vue`, `svelte`, `astro`, or `angular`) for `root`, replacing a running one with the
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
 #[tauri::command(async)]
 pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root: String) -> Result<u32, String> {
     crate::login_path();
+    // The Angular server loads TypeScript and its language service from these folders: the project's first, then its own.
+    let ng_dir = tool(&app, "node/node_modules/@angular/language-server")?.to_string_lossy().into_owned();
+    let ts_probe = format!("{root},{ng_dir}");
     // (runtime, script inside the tools folder, arguments)
     let (runtime, script, args): (&str, &str, &[&str]) = match name.as_str() {
         "phpactor" => ("php", "phpactor/phpactor.phar", &["language-server"]),
@@ -70,6 +73,7 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         "vue" => ("node", "node/node_modules/@vue/language-server/bin/vue-language-server.js", &["--stdio"]),
         "svelte" => ("node", "node/node_modules/svelte-language-server/bin/server.js", &["--stdio"]),
         "astro" => ("node", "node/node_modules/@astrojs/language-server/bin/nodeServer.js", &["--stdio"]),
+        "angular" => ("node", "node/node_modules/@angular/language-server/index.js", &["--stdio", "--tsProbeLocations", &ts_probe, "--ngProbeLocations", &ng_dir]),
         // A native binary: the watchdog execs it directly (the runtime is the program itself).
         "typos" => ("", "typos-lsp/typos-lsp", &[]),
         // Not a language server: the Xdebug debug adapter. DAP frames messages the same way.

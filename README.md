@@ -59,7 +59,6 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
-| Frontend languages | Angular templates aren't supported. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
@@ -429,6 +428,15 @@ Drag a file or folder onto a folder to move it there.
   their files and keep unsaved changes.
 - **Deleting** moves files to the macOS Trash, so you can restore them.
 - **No overwrites.** Renaming or creating never replaces an existing file.
+
+### Markdown preview
+
+To preview a Markdown file, run **Markdown Preview** from ⌘⇧A, or right-click
+its tab and choose **Open Preview**. The preview opens in the pane to the
+right, splitting the editor when there's only one pane. It updates as you type
+and scrolls with the editor. Images with relative paths load from the file's
+folder. Links to other files open them in the editor, and web links open in
+your browser. Raw HTML in the file is sanitized, so scripts don't run.
 
 ## Find and replace in files
 
@@ -1199,6 +1207,12 @@ their own language servers (Svelte's and Astro's), with completion, hover, go
 to definition, and type errors in markup, scripts, and styles. Each starts the
 first time you open one of its files. TypeScript files see the types of the
 Svelte and Astro components they import.
+
+In a project whose `package.json` lists `@angular/core`, the Angular language
+server adds completion, hover, go to definition, and type errors to component
+templates, both `.html` files and inline `template:` strings. It starts the
+first time you open a TypeScript or HTML file, and uses the project's
+TypeScript when `node_modules/typescript` exists.
 ## Tests and commands
 
 In test files, a green ▶ appears in the gutter beside PHPUnit test methods
@@ -1715,6 +1729,15 @@ A file with errors shows its name in red with a wavy underline in the file
 tree and on its tab, and the folders that contain it show their names in red.
 The Problems button in the activity bar shows the error count.
 
+JSON config files are checked against their schemas, with completion and
+hovers from them too: `composer.json`, `package.json`, `tsconfig.json` (and
+`tsconfig.*.json`), `jsconfig.json`, `.eslintrc.json`, `.prettierrc.json`,
+`.babelrc.json`, and `babel.config.json`. The schemas ship with the editor, so
+this works offline. A file whose `$schema` names one of these schemas' URLs
+gets the bundled copy, and a file whose `$schema` is a path, such as
+`"./config.schema.json"`, is checked against that file. Other URLs aren't
+downloaded.
+
 Deprecated methods, classes, and functions show struck through, and unused
 imports faded, as in VS Code. Hovers lay out long signatures with one parameter per line.
 
@@ -1862,6 +1885,10 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/bookmarks.ts` | Bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
+| `src/markdownpreview.ts` | The Markdown preview tab |
+| `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
+| `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |
+| `src/jsonschemas.ts` | Checks JSON config files against the bundled schemas in `src/schemas` |
 | `src/localhistory.ts` | Local history of saved, changed, and deleted files |
 | `src/retention.ts` | Which local history versions to delete |
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
@@ -1911,6 +1938,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `filament-lsp/tests.php` | Filament server tests |
 | `node-tools/` | The pinned Node language servers (`package.json` and lockfile) |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools, one folder per tool |
+| `scripts/fetch-schemas.ts` | Downloads the JSON schemas in `src/schemas` |
 | `scripts/publish-tools.ts` | Publishes the tools the app downloads |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |

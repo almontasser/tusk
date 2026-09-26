@@ -81,6 +81,12 @@ fn detect(bytes: &[u8]) -> Result<&'static str, String> {
     Ok(if guess.decode_without_bom_handling_and_without_replacement(bytes).is_some() { guess } else { encoding_rs::WINDOWS_1252 }.name())
 }
 
+/// A file's bytes, such as an image in a Markdown preview, which the page gets as an `ArrayBuffer`.
+#[tauri::command]
+pub async fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    crate::blocking(move || std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())).await
+}
+
 /// Writes a file, encoded in `charset` (an `.editorconfig` value or an encoding name) or else UTF-8.
 #[tauri::command]
 pub async fn write_file(path: String, contents: String, charset: Option<String>) -> Result<(), String> {
