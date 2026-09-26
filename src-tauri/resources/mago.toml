@@ -12,8 +12,9 @@ paths = ["."]
 # The editor adds Laravel's alias stubs (`use DB;`) to this list, so keep it on one line.
 includes = ["vendor"]
 # Hidden folders can hold whole copies of the project, such as git worktrees in .claude/. The editor adds
-# vendor files it gives Mago corrected copies of, so keep this on one line too.
-excludes = [".*", "node_modules", "storage", "bootstrap/cache"]
+# vendor files it gives Mago corrected copies of, so keep this on one line too. AWS's API data and Carbon's
+# translations are arrays that declare nothing, and AWS's alone is over a third of a typical vendor folder.
+excludes = [".*", "node_modules", "storage", "bootstrap/cache", "vendor/aws/aws-sdk-php/src/data", "vendor/nesbot/carbon/src/Carbon/Lang"]
 
 [linter]
 integrations = ["laravel"]

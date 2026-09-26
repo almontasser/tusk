@@ -944,11 +944,19 @@ const phpactorIndexer = {
     "/node_modules/**/*",
     "/storage/**/*",
     "/bootstrap/cache/**/*",
+    // Vendor data that declares no symbols: arrays, translations, and Blade views. AWS's API data alone is
+    // over a third of a typical vendor folder's PHP, and these folders together about a quarter of the files.
+    "/vendor/aws/aws-sdk-php/src/data/**/*",
+    "/vendor/nesbot/carbon/src/Carbon/Lang/**/*",
+    "/vendor/voku/portable-ascii/src/voku/helper/data/**/*",
+    "/vendor/**/resources/lang/**/*",
+    "/vendor/**/resources/views/**/*",
   ],
   // Phpactor keeps entries for files that later become excluded. Bump the suffix whenever
   // the patterns change, so projects get a fresh index instead of stale duplicates.
   // -editor-2: indexes built before full builds were tracked may be missing whole folders of vendor.
-  "indexer.index_path": "%cache%/index/%project_id%-editor-2",
+  // -editor-3: vendor data folders excluded.
+  "indexer.index_path": "%cache%/index/%project_id%-editor-3",
 };
 /** The editor's index, for running Phpactor's command line against the same index as the server. */
 export const PHPACTOR_INDEX = { "indexer.index_path": phpactorIndexer["indexer.index_path"] };

@@ -385,9 +385,19 @@ and `bootstrap/cache` to Phpactor's defaults. On a project with three git
 worktrees under `.claude/`, this cut the index from 125,859 files to about
 26,700.
 
+The patterns also skip vendor folders that declare no classes, functions, or
+constants: AWS's API data, Carbon's and every package's translations, package
+Blade views, and `voku/portable-ascii`'s tables. On a Laravel and Filament app,
+all 6,154 such files declared nothing, and skipping them took a full build
+from 26,781 files and 87 seconds to 18,614 files and 62 seconds. AWS's data is
+39 MB of that app's 110 MB of vendor PHP. Rector's bundled `vendor` stays,
+since its `vendor/rector` holds the rule sets `rector.php` uses. Introspection
+and the Filament server load classes through Composer's autoloader, not the
+index, so they're unaffected.
+
 Phpactor keeps index entries for files that later become excluded, which
 would list classes twice. The client sets its own `indexer.index_path` with a
-version suffix (`%project_id%-editor-2`). When the patterns change, bump the
+version suffix (`%project_id%-editor-3`). When the patterns change, bump the
 suffix, and every project gets a fresh index.
 
 ### Laravel magic in Mago's results
@@ -783,7 +793,7 @@ file changes don't trigger the update pass, which would only move the timestamp
 past the missing files. `reindex(false)` sets `awaitingFullIndex`; the next
 `$/progress` run titled "Indexing…" is the full build, and its end marks the
 index complete. `-editor-2` replaced `-editor-1`, whose indexes may be
-incomplete; the old folders under `~/.cache/phpactor/index` can be deleted.
+incomplete, and `-editor-3` skips vendor data folders; the old folders under `~/.cache/phpactor/index` can be deleted.
 
 ### Reindexing after Composer changes
 
@@ -1775,7 +1785,9 @@ context, and reports problems only in the file it received. The bundled
   `includes`, because Mago never lints included files.
 - `excludes` for hidden folders (`.*`), `node_modules`, `storage`, and
   `bootstrap/cache`. Hidden folders can hold whole copies of the project, such
-  as git worktrees in `.claude/`.
+  as git worktrees in `.claude/`. It also excludes AWS's API data and Carbon's
+  translations, arrays that declare nothing, which cut each check from 1.65 to
+  1.23 seconds of CPU on a Laravel and Filament app.
 - The Laravel lint integration, with `strict-types` and
   `literal-named-argument` turned off. On the test app, those two rules
   produced 154 warnings on standard Laravel code.
@@ -3343,6 +3355,22 @@ measurement.
   `Promise.all`, and the servers start before saved terminals reopen. Settings
   load before the project opens, so the servers start once, with the right
   settings.
+
+### Measuring indexing
+
+Time Phpactor's command line against a project, with its cache and settings in
+a temporary folder so your real index stays:
+
+```sh
+mkdir -p /tmp/idx/cfg/phpactor
+echo '{"indexer.exclude_patterns": [...]}' > /tmp/idx/cfg/phpactor/phpactor.json
+time XDG_CACHE_HOME=/tmp/idx/cache XDG_CONFIG_HOME=/tmp/idx/cfg \
+  php phpactor.phar index:build --working-dir="$PWD"
+```
+
+Copy the patterns from `phpactorIndexer` in `src/lsp.ts`. PHP's own settings
+don't matter: with Xdebug off, with `-n`, and with opcache and JIT, 2,000 files
+index in 8 to 9 seconds each way. The time follows the files parsed.
 
 ### Measuring typing
 
