@@ -1076,6 +1076,9 @@ export async function startLsp(root: string, h: Host) {
     // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
     // settings, so it would use the default index path and report functions from newer packages as not found.
     "language_server.diagnostic_outsource": false,
+    // Getters named getTitle, as PhpStorm writes them; Phpactor's default is title.
+    "code_transform.refactor.generate_accessor.prefix": "get",
+    "code_transform.refactor.generate_accessor.upper_case_first": true,
     "language_server_worse_reflection.inlay_hints.enable": true,
     "language_server_worse_reflection.inlay_hints.types": true,
     "language_server_worse_reflection.inlay_hints.params": true,

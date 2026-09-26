@@ -1,5 +1,6 @@
 // Text-level PHP helpers for Inline Variable and Change Signature. Free of editor imports so Node
 // can test it. ponytail: a scanner for brackets and strings, not a PHP parser; heredocs aren't handled.
+import { commentMask } from "./comments.ts";
 
 /** The index of the bracket that closes the one at `open`, skipping strings and nested brackets. -1 if none. */
 export function matchBracket(text: string, open: number): number {
@@ -153,4 +154,39 @@ export function planInline(lines: string[], name: string, from: number, to: numb
   const flat = value.replace(/\s*\n\s*/g, "");
   const simple = /^(\$?[\w\\]+|'[^']*'|"[^"]*"|\d+(\.\d+)?)((->|\?->|::)\$?\w+)*(\([^()]*\))?((->|\?->|::)\w+(\([^()]*\))?)*$/.test(flat) || /^\[.*\]$/s.test(flat);
   return { assignment, assignmentEnd, value: simple ? value : `(${value})`, uses };
+}
+
+export type Property = { name: string; type: string; isStatic: boolean; readonly: boolean; hasDefault: boolean; promoted: boolean; end: number };
+
+// Modifiers, then an optional type: groups 1 and 2.
+const MODIFIERS = String.raw`((?:(?:public|protected|private|var|static|readonly)(?:\(set\))?\s+)+)(?:([?\w\\|&()]+)\s+)?`;
+
+/**
+ * The properties a class body (the text between its braces) declares, in order, then its promoted constructor
+ * parameters. `end` is the offset of a declaration's `;`, or -1 for a promoted one. ponytail: `public $a, $b;`
+ * yields only `$a`.
+ */
+export function classProperties(body: string): Property[] {
+  const code = commentMask(`<?php ${body}`).slice(6);
+  // Only the top level: each method body becomes spaces ending in `;`, so the next declaration still follows one.
+  let top = "";
+  for (let i = 0; i < code.length; i++) {
+    const end = code[i] === "{" ? matchBracket(code, i) : -1;
+    if (end < 0) top += code[i];
+    else (top += " ".repeat(end - i) + ";"), (i = end);
+  }
+  const props: Property[] = [];
+  for (const m of top.matchAll(new RegExp(String.raw`(?:^|[;\]])\s*${MODIFIERS}\$(\w+)\s*(=)?`, "g"))) {
+    const mods = m[1].split(/\s+/);
+    const end = top.indexOf(";", m.index + m[0].length);
+    props.push({ name: m[3], type: m[2] ?? "", isStatic: mods.includes("static"), readonly: mods.includes("readonly"), hasDefault: !!m[4], promoted: false, end });
+  }
+  const ctor = top.match(/\bfunction\s+__construct\s*\(/i);
+  const close = ctor ? matchBracket(code, ctor.index! + ctor[0].length - 1) : -1;
+  if (close >= 0)
+    for (const param of splitTopLevel(code.slice(ctor!.index! + ctor![0].length, close))) {
+      const m = param.match(new RegExp(String.raw`^${MODIFIERS}&?\s*\$(\w+)`));
+      if (m) props.push({ name: m[3], type: m[2] ?? "", isStatic: false, readonly: m[1].includes("readonly"), hasDefault: false, promoted: true, end: -1 });
+    }
+  return props;
 }

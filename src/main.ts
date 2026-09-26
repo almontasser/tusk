@@ -24,6 +24,7 @@ import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
+import { generate, initGenerate } from "./generate";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
@@ -1244,6 +1245,8 @@ const editorAction = (label: string, keys: string, id: string): Action => ({
 // Shortcuts follow PhpStorm's macOS keymap.
 const actions: Action[] = [
   { label: "Open Folder…", run: () => openFolder() },
+  // ⌘N generates code in a PHP editor, as in PhpStorm, and creates a file everywhere else.
+  { label: "Generate…", keys: "Meta+N", run: () => generate(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "New File…", keys: "Meta+N", run: () => root && newFile() },
   { label: "New Folder…", run: () => root && newFolder() },
   { label: "Rename File…", run: () => rename() },
@@ -1524,8 +1527,9 @@ window.addEventListener(
   (e) => {
     if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
     const combo = comboOf(e);
-    const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
-    if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
+    // The first action for the keys that applies here, so an editor-only action can share its keys with another.
+    const action = actions.find((a) => a.keys && canonical(a.keys) === combo && !(a.editorOnly && !editor.hasTextFocus()) && !(a.when && !a.when()));
+    if (!action) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
     const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
     if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
@@ -1656,6 +1660,7 @@ initComposer({ root: () => root, status });
 initRefactor({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
+initGenerate({ status });
 initCallHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,

@@ -946,6 +946,26 @@ the type declared at or above the cursor line in the current file.
 Children load when a row expands, so a large hierarchy, such as `Model`'s,
 costs nothing until you open it.
 
+### Generate
+
+`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Phpactor writes what it can:
+getters and setters through its `generate_accessors` and `generate_mutators`
+commands, called with the property names directly (its code action offers
+only the properties inside the selection), and Implement Methods, Override
+Methods, and the constructor transformers through its code actions for the
+cursor, filtered by kind. The editor sets Phpactor's accessor prefix to `get`,
+so getters match PhpStorm's names. Phpactor has no action that writes a
+constructor from properties or a `__toString()`, so those are snippets:
+`classProperties` in `src/refactorparse.ts` reads the class body's top-level
+declarations and promoted parameters, and the snippet goes after the last
+property or before the class's closing brace, indented with the file's
+indentation.
+
+⌘N is also **New File…**. The shortcut handler now takes the first action for
+the keys that applies (an editor-only action needs the editor focused, and
+`when` must pass), so **Generate…** runs in a PHP editor and **New File…**
+everywhere else.
+
 ### Call hierarchy
 
 Phpactor has no `textDocument/prepareCallHierarchy` either, so
@@ -3467,3 +3487,11 @@ Phpactor doesn't implement the call hierarchy requests. Callers reuse the
 reference search that Change Signature and Safe Delete already trust, and
 callees are one definition request per call in the body. That's a request per
 call, but a method body has few, and they load only when a row expands.
+
+### 2026-09-26: Generate reuses Phpactor where it can
+
+Phpactor already writes getters, setters, implemented and overridden methods,
+and completes constructors, so Generate lists those actions instead of
+writing its own. It calls the accessor commands itself, since the code action
+needs a selection over the properties. Only the constructor from properties
+and `__toString()`, which Phpactor lacks, are written by the editor.

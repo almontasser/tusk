@@ -249,7 +249,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⌫ | Delete the line |
 | ⌃⌥O | Optimize imports |
 | ⌥⌘L | Reformat the file with the project's formatter |
-| ⌘N | New file in the selected folder |
+| ⌘N | In a PHP file, generate code (constructor, getters and setters, `__toString()`, methods to implement or override); elsewhere, a new file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
@@ -547,6 +547,23 @@ enum that the cursor is in.
 
 Click a type to open it. Types that Phpactor's index doesn't know are listed
 without a file.
+
+## Generate code
+
+Press ⌘N in a PHP file, or choose **Code > Generate…**, to add code to the
+class, trait, or enum at the cursor. The list offers what the class lacks:
+
+- **Constructor**: takes and assigns each property that has no default value
+  and isn't static. It's offered when the class has no constructor.
+- **Getters**, **Setters**, and **Getters and Setters**: `getTitle()` and
+  `setTitle()` for each property, including promoted ones, that doesn't have
+  one yet. Readonly properties get no setter. Phpactor writes them.
+- **`__toString()`**, with the cursor in its `return`.
+- **Implement Methods…** and **Override Methods…**, from Phpactor, when the
+  class has interface or abstract methods to write, or parent methods to
+  override. Override asks which method.
+- Phpactor's **Complete Constructor**, **Promote Constructor**, and **Add
+  missing properties**, when they apply.
 
 ## Call hierarchy
 
