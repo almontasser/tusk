@@ -48,7 +48,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode (its experimental `--watch` reads files on disk, not unsaved text), so it parses the project again for each check: about 0.9 seconds of wall time and 1.2 seconds of CPU on a Laravel and Filament app. Without a `mago.toml`, Mago also skips the project's index exclusions. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis values can't be edited in the grid; change them with commands in the console. A key's value is read whole, so a list or set with millions of items is slow to show, and listing keys runs SCAN to the end. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
+| Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
@@ -1867,14 +1867,46 @@ Results show in the **Database** tab of the bottom panel. After you change
 ### Redis
 
 With a Redis connection selected, the tool window lists keys instead of
-tables, sorted, 1,000 at a time. Click a key to see its value: a string's text,
-a hash's fields, a list's or set's members, a sorted set's members and scores,
-or a stream's entries. ⌘⇧F10 opens a Redis console, where ⌘⏎ runs the command
-on the caret's line, such as `TTL laravel_cache:greeting` or
-`DEL laravel_cache:greeting`, or the selection as one command. Quote an
-argument that has spaces, as in `redis-cli`. `SCAN` follows its cursor to the
-end, so `SCAN 0 MATCH laravel_cache:*` lists every matching key. Lines
-starting with `#` are comments.
+tables, in folders by `:`, as `cache:users:1` goes in **cache** then **users**.
+Each key has a badge for its type: STR, HASH, LIST, SET, ZSET, STRM (stream),
+or JSON (RedisJSON). Keys load 500 at a time with `SCAN`, which doesn't block
+the server; click **Load More** at the bottom for the next batch, which also
+shows how many keys the database has.
+
+- Type in the filter box to show keys that contain the text, or type a
+  pattern such as `laravel_cache:*` or `user:?`. Press Escape to clear it.
+- Click a key, or select it and press Enter, to see its value in the
+  **Database** tab. ↑ and ↓ move through the tree, and → and ← open and close
+  folders.
+- Right-click a key to copy its name, rename it, set when it expires, or
+  delete it. Right-click a folder to show only its keys, copy its pattern, add
+  a key in it, or delete every key in it (all of them, not only those loaded,
+  after telling you how many). ⌘⌫ deletes the selected key or folder.
+- Click **+** (**Add Key…**) to create a key: choose its type, then type its
+  name and first value.
+
+The key's header shows its type, size, memory use, and time to live, which
+counts down. Click the time to live to change it; leave it empty for no expiry.
+
+- A string opens in an editor. JSON values are marked and highlighted, and
+  **Format JSON** indents one. Values from PHP's `serialize()`, which Laravel's
+  cache and sessions use, are marked. Press ⌘S or click **Save** to write the
+  value back; its expiry stays. A value that isn't text, such as a compressed
+  cache entry, shows as hex and is read-only.
+- A hash, list, set, sorted set, or stream shows in the grid, 1,000 rows at a
+  time, with **Next** and **Previous**. A list's rows are numbered by their
+  Redis index, from 0. Edit, add, and delete rows as in a table; **Submit**
+  applies the changes in one transaction. A stream's entries can only be
+  deleted.
+
+⌘⇧F10 opens a Redis console, where ⌘⏎ runs the command on the caret's line,
+such as `TTL laravel_cache:greeting`, or each line of the selection, with a
+row per command. Quote an argument that has spaces, as in `redis-cli`.
+Completion suggests commands, with their syntax, and keys; hover over a command
+to see what it does. `SCAN` follows its cursor to the end, so
+`SCAN 0 MATCH laravel_cache:*` lists every matching key. Commands that affect
+the whole database or server, such as `FLUSHDB`, ask first. Lines starting
+with `#` are comments.
 
 ## Diagnostics and formatting
 
@@ -2085,8 +2117,11 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |
 | `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
 | `src/debugexceptions.ts` | Where an exception was thrown, the class of an uncaught one, and where Laravel renders them, for pausing on exceptions |
-| `src/database.ts` | The Database tool window, query console, and results grid |
+| `src/database.ts` | The Database tool window, query console, and results |
 | `src/dbconfig.ts` | Database connections from `.env`, URLs, and `config/database.php`, schema queries, and cell updates |
+| `src/dbgrid.ts` | The results grid and its editing, shared by SQL tables and Redis keys |
+| `src/redis.ts` | The Redis key browser, key view, and console completion |
+| `src/redisdata.ts` | The Redis key tree, TTLs, filters, command syntax, and the commands that apply grid edits |
 | `src/composer.ts` | The Composer tool window |
 | `src/composerdata.ts` | Joins `composer show` and `composer outdated` output |
 | `src/httpclient.ts` | The HTTP client's sending, variables, cookies, history, and `http` language |

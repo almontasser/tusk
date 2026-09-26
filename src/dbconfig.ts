@@ -129,6 +129,8 @@ export function repeatsEnv(c: Connection, env: Record<string, string>, root: str
 export const describe = (c: Connection, root: string) =>
   c.driver === "sqlite"
     ? `SQLite · ${c.database.replace(root + "/", "")}`
+    : c.driver === "redis"
+    ? `Redis · ${c.username ? `${c.username}@` : ""}${c.host}:${c.port} · db ${c.database || 0}${c.ssl_mode && c.ssl_mode !== "disable" ? " · TLS" : ""}`
     : `${c.driver} · ${c.username ? `${c.username}@` : ""}${c.host}:${c.port}/${c.database}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
 
 /** The statement around an offset, as PhpStorm runs the statement under the caret. */
@@ -148,16 +150,13 @@ export function statementAt(text: string, offset: number): string {
 /** False for text that is only whitespace and comments, which the database would reject. */
 export const hasCode = (sql: string) => sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim() !== "";
 
-/** A quoted table or column name, or for Redis, a key quoted as an argument of a command. */
 export const quoteIdentifier = (driver: string, name: string) =>
-  driver === "mysql" || driver === "mariadb" ? `\`${name.replace(/`/g, "``")}\`` : driver === "redis" ? `"${name.replace(/[\\"]/g, "\\$&")}"` : `"${name.replace(/"/g, '""')}"`;
+  driver === "mysql" || driver === "mariadb" ? `\`${name.replace(/`/g, "``")}\`` : `"${name.replace(/"/g, '""')}"`;
 
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const schema = (driver: string) => (driver === "pgsql" ? "current_schema()" : "DATABASE()");
 
-/** For Redis, the keys: db.rs follows SCAN's cursor to the end. */
 export function tablesQuery(driver: string): string {
-  if (driver === "redis") return "SCAN 0 COUNT 1000";
   if (driver === "sqlite") return "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
   return `SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema(driver)} ORDER BY table_name`;
 }

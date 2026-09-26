@@ -3223,24 +3223,59 @@ the grid has pending changes.
 
 ### Redis
 
-For Redis, `db_query`'s statement is a command line, which `split_command`
-splits as `redis-cli` does (double quotes take `\n`-style escapes, and single
-quotes take text as it is). `Redis::open` connects, signs in with `AUTH` (with
-the user name when there is one, for ACLs), and runs `SELECT` for a database
-other than 0. TLS uses the same `tls_connector` as PostgreSQL, so `ssl_mode`
-means the same thing, and a `rediss://` URL defaults to `verify-full`, as
-phpredis checks certificates by default. A read times out after 60 seconds,
-so a blocking command such as `BLPOP 0` can't hold its thread.
+`db.rs` speaks RESP2 itself (see the decision log). `Redis::open` connects
+with a 10-second timeout, signs in with `AUTH` (with the user name when there
+is one, for ACLs), and runs `SELECT` for a database other than 0. TLS uses the
+same `tls_connector` as PostgreSQL, so `ssl_mode` means the same thing, and a
+`rediss://` URL defaults to `verify-full`, as phpredis checks certificates by
+default. A read times out after 60 seconds, so a blocking command such as
+`BLPOP 0` can't hold its thread.
 
-A reply becomes a grid in one of three shapes. An array from a command that
-alternates names and values (`HGETALL`, `CONFIG GET`, or any command with
-`WITHSCORES` or `WITHVALUES`) is a row per pair. An array of arrays, such as
-`XRANGE`'s, is a row per inner array, with numbered columns, and a deeper array
-is a JSON array in its cell. Anything else is one `value` column. The command
-names are the only per-command knowledge in `db.rs`, since RESP2 has no map
-type. `SCAN` follows the cursor to the end, as `redis-cli --scan` does, and
-sorts the keys, so the sidebar's list (`tablesQuery("redis")`) is complete and
-pages like any other result.
+Connections are pooled (`REDIS_POOL`), up to four idle ones per server, user,
+and database, since the key browser makes a call per click and a new
+connection costs a TLS handshake and `AUTH`. A connection is taken out of the
+pool while it's used, so concurrent calls never share one. `with_redis` runs a
+call on a pooled connection, and when that fails with an I/O error, as after
+the server's idle timeout or the Mac's sleep, runs it again on a new one.
+
+Two commands reach Redis:
+
+- `redis_call` sends several commands in one write and reads their replies,
+  as JSON: a string, a number, null, an array, `{"error": …}`, or
+  `{"binary": length, "hex": …}` for a value that isn't UTF-8, which the
+  frontend shows as hex and never writes back. With `atomic`, the commands go
+  between `MULTI` and `EXEC`, so a command Redis refuses discards them all.
+  The key browser uses it for everything.
+- `db_query`, for one console command, splits the line with `split_command`
+  (as `redis-cli` does) and shapes the reply into the SQL grid: pairs for
+  `HGETALL`, `CONFIG GET`, and `WITHSCORES` or `WITHVALUES`, a row per inner
+  array for replies such as `XRANGE`'s, and a `value` column otherwise. `SCAN`
+  follows its cursor to the end and sorts the keys.
+
+`src/redis.ts` is the key browser. It scans in batches: `SCAN` with
+`COUNT 1000` until 500 new keys or a second has passed, then one pipelined
+`TYPE` per key, so a batch is a few round trips. `DBSIZE` rides along with
+the first. A newer scan, such as after a filter change, bumps a generation
+number, and an older one drops its results. `keyTree` and `visibleRows` in
+`src/redisdata.ts` build the folder tree, which renders as a flat list with
+indentation, so the arrow keys move through it in order.
+
+A key shows in the panel with `TYPE`, `PTTL`, and `MEMORY USAGE` in one call,
+then its value. A string or RedisJSON document opens in Monaco, and ⌘S saves
+with `SET … KEEPTTL` (Redis 6) or `JSON.SET`. A hash, list, set, sorted set, or
+stream shows in the grid from `src/dbgrid.ts`, the same editing as SQL tables.
+Pages are 1,000 rows: `LRANGE` and `ZRANGE` by index, `HSCAN` and `SSCAN` by
+cursor (reading until a page's worth, since `COUNT` is a hint), and `XRANGE`
+from the last entry's ID, exclusive with `(`, which needs Redis 6.2. Each page
+remembers its offset and where it started, so **Previous** goes back without
+reading again from the start. `editCommands` turns the grid's changes into
+commands for `redis_call`'s transaction. A list has no delete by index, so a
+deleted element is set to a unique marker and `LREM` removes the markers.
+
+Console completion reads `COMMAND DOCS` (Redis 7) once per connection and
+builds each command's syntax from its arguments (`commandDocs`); older servers
+get `COMMAND`'s names. Keys come from the tree and from one `SCAN` for the
+typed prefix. Signature help shows the command's syntax after a space.
 
 `redisFromEnv` in `dbconfig.ts` builds Laravel's `default` and `cache` Redis
 connections from `.env`, as `config/database.php` does, and `database.ts`
@@ -3248,10 +3283,7 @@ lists them as **redis** and **redis cache**, reached through
 `namedConnection` like `config/database.php`'s. They come from `.env` rather
 than from the booted config because the config's `redis` section isn't in
 `database.connections`, and because Sail's `REDIS_HOST=redis` needs
-`FORWARD_REDIS_PORT` on this Mac. Clicking a key runs `TYPE`, then the command
-that reads that type whole. The Redis console is `console.redis` beside
-`console.sql`, in Monaco's built-in `redis` language, and **Execute Query**
-runs the caret's line there.
+`FORWARD_REDIS_PORT` on this Mac.
 
 `src/dbconfig.ts` reads `.env` and fills in Laravel's defaults from
 `config/database.php`. It also holds the schema queries: `sqlite_master` and
@@ -4220,3 +4252,17 @@ connection with text replies. RESP2 is a line-based protocol, so a reader and
 writer take about 60 lines, and TLS reuses `native-tls`, which was already in
 the build. RESP3's maps would name hash replies by type, but they need Redis 6
 (`HELLO 3`), so the few commands that return pairs are named instead.
+
+### 2026-09-27: Redis keys in a tree, with the frontend driving commands
+
+The first Redis support ran one command per click through `db_query`, which
+opened a connection each time and returned only text in a grid. The key
+browser needs more: types for a whole batch of keys, several reads per key,
+and edits that apply together. So the backend gained one generic primitive,
+`redis_call`, a pipeline with an optional transaction that returns replies as
+JSON. The frontend builds every browser feature on it, which keeps the Rust
+side free of per-command knowledge and puts the logic where Node tests it.
+Connections are pooled because a TLS handshake per click is visible on a
+remote server. Keys load in batches instead of all at once, since `SCAN` to
+the end on a production keyspace of millions takes minutes.
+

@@ -2,7 +2,7 @@
 // Every value comes back as text (or null), which is all a results grid needs.
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Connection {
     driver: String, // sqlite, mysql, mariadb, or pgsql, as in Laravel's DB_CONNECTION, or redis
     host: String,
@@ -255,10 +255,11 @@ fn pgsql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     Ok(result)
 }
 
-/// A Redis reply, as RESP2 sends it.
+/// A Redis reply, as RESP2 sends it. A bulk string that isn't UTF-8, such as a compressed cache value, is bytes.
 enum Reply {
     Nil,
     Text(String),
+    Bytes(Vec<u8>),
     Int(i64),
     Array(Vec<Reply>),
     Error(String),
@@ -267,22 +268,33 @@ enum Reply {
 trait Stream: std::io::Read + std::io::Write + Send {}
 impl<T: std::io::Read + std::io::Write + Send> Stream for T {}
 
-/// A Redis connection that speaks RESP2, which every Redis and Valkey version does. Values are read as text.
+/// A Redis connection that speaks RESP2, which every Redis and Valkey version does.
 struct Redis(std::io::BufReader<Box<dyn Stream>>);
 
 impl Redis {
     /// Connects, over TLS when `ssl_mode` is set (a `rediss://` URL), then signs in and selects `database`.
     fn open(c: &Connection) -> Result<Self, String> {
-        let tcp = std::net::TcpStream::connect((c.host.as_str(), c.port)).map_err(|e| format!("Can't connect to {}:{}: {e}", c.host, c.port))?;
+        use std::net::ToSocketAddrs;
+        let unreachable = |e: &dyn std::fmt::Display| format!("Can't connect to Redis at {}:{}: {e}", c.host, c.port);
+        let addresses: Vec<_> = (c.host.as_str(), c.port).to_socket_addrs().map_err(|e| unreachable(&e))?.collect();
+        let mut last = None;
+        let tcp = addresses
+            .iter()
+            .find_map(|a| std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(10)).map_err(|e| last = Some(e)).ok())
+            .ok_or_else(|| unreachable(&last.map_or("no address".into(), |e| e.to_string())))?;
         // A blocking command, such as BLPOP, can't hold the query forever.
         let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
+        let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(30)));
+        let _ = tcp.set_nodelay(true);
         let stream: Box<dyn Stream> = match c.ssl_mode.as_str() {
             "" | "disable" => Box::new(tcp),
-            mode => Box::new(tls_connector(c, mode)?.connect(&c.host, tcp).map_err(|e| e.to_string())?),
+            mode => Box::new(tls_connector(c, mode)?.connect(&c.host, tcp).map_err(|e| unreachable(&e))?),
         };
         let mut redis = Redis(std::io::BufReader::new(stream));
         if !c.password.is_empty() {
-            let auth = if c.username.is_empty() { vec!["AUTH".into(), c.password.clone()] } else { vec!["AUTH".into(), c.username.clone(), c.password.clone()] };
+            let mut auth = vec!["AUTH".to_string()];
+            auth.extend((!c.username.is_empty()).then(|| c.username.clone()));
+            auth.push(c.password.clone());
             redis.call(&auth)?;
         }
         if !matches!(c.database.as_str(), "" | "0") {
@@ -291,50 +303,135 @@ impl Redis {
         Ok(redis)
     }
 
-    /// Sends a command and reads its reply. An error reply is an Err.
-    fn call(&mut self, args: &[String]) -> Result<Reply, String> {
+    /// Writes commands without waiting for their replies, so several make one round trip.
+    fn send(&mut self, commands: &[Vec<String>]) -> std::io::Result<()> {
         use std::io::Write;
-        let mut command = format!("*{}\r\n", args.len()).into_bytes();
-        for arg in args {
-            command.extend(format!("${}\r\n{arg}\r\n", arg.len()).into_bytes());
+        let mut bytes = Vec::new();
+        for args in commands {
+            bytes.extend(format!("*{}\r\n", args.len()).into_bytes());
+            for arg in args {
+                bytes.extend(format!("${}\r\n", arg.len()).into_bytes());
+                bytes.extend(arg.as_bytes());
+                bytes.extend(b"\r\n");
+            }
         }
-        self.0.get_mut().write_all(&command).map_err(|e| e.to_string())?;
-        match self.read()? {
-            Reply::Error(message) => Err(message),
-            reply => Ok(reply),
-        }
+        self.0.get_mut().write_all(&bytes)
     }
 
-    fn read(&mut self) -> Result<Reply, String> {
-        use std::io::{BufRead, Read};
+    fn read(&mut self) -> std::io::Result<Reply> {
+        use std::io::{BufRead, Error, ErrorKind, Read};
         let mut line = Vec::new();
-        self.0.read_until(b'\n', &mut line).map_err(|e| e.to_string())?;
+        self.0.read_until(b'\n', &mut line)?;
         if line.len() < 3 {
-            return Err("Redis closed the connection.".into());
+            return Err(Error::new(ErrorKind::UnexpectedEof, "Redis closed the connection."));
         }
         let text = String::from_utf8_lossy(&line[1..line.len() - 2]).into_owned();
-        let number = text.parse::<i64>().map_err(|_| format!("Unexpected reply from Redis: {text}"));
+        let bad = || Error::new(ErrorKind::InvalidData, format!("Unexpected reply from Redis: {text}"));
+        let number = text.parse::<i64>().map_err(|_| bad());
         Ok(match line[0] {
             b'+' => Reply::Text(text),
             b'-' => Reply::Error(text),
             b':' => Reply::Int(number?),
-            b'$' | b'*' if number.clone()? < 0 => Reply::Nil,
+            b'$' | b'*' if number.as_ref().is_ok_and(|n| *n < 0) => Reply::Nil,
             b'$' => {
                 let mut bytes = vec![0; number? as usize + 2];
-                self.0.read_exact(&mut bytes).map_err(|e| e.to_string())?;
-                Reply::Text(String::from_utf8_lossy(&bytes[..bytes.len() - 2]).into_owned())
+                self.0.read_exact(&mut bytes)?;
+                bytes.truncate(bytes.len() - 2);
+                String::from_utf8(bytes).map_or_else(|e| Reply::Bytes(e.into_bytes()), Reply::Text)
             }
             b'*' => Reply::Array((0..number?).map(|_| self.read()).collect::<Result<_, _>>()?),
-            _ => return Err(format!("Unexpected reply from Redis: {text}")),
+            _ => return Err(bad()),
         })
+    }
+
+    /// Sends one command and reads its reply. An error reply is an Err, as is a broken connection.
+    fn call(&mut self, args: &[String]) -> Result<Reply, String> {
+        self.send(&[args.to_vec()]).map_err(|e| e.to_string())?;
+        match self.read().map_err(|e| e.to_string())? {
+            Reply::Error(message) => Err(message),
+            reply => Ok(reply),
+        }
     }
 }
 
-/// A reply as a cell: a nested array reads as a JSON array.
+/// Open connections by server, user, and database, so a click in the key list doesn't connect, negotiate TLS,
+/// and sign in again. A connection is taken out while it's used, so concurrent calls never share one.
+static REDIS_POOL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Vec<Redis>>>> = std::sync::LazyLock::new(Default::default);
+/// Idle connections kept per server and database.
+const REDIS_IDLE: usize = 4;
+
+/// Runs `f` on a pooled connection, or a new one. A pooled connection the server has since closed, such as
+/// after its idle timeout or the Mac's sleep, fails with an I/O error, and `f` runs again on a new one.
+fn with_redis<T>(c: &Connection, mut f: impl FnMut(&mut Redis) -> std::io::Result<T>) -> Result<T, String> {
+    let key = format!("{}|{}|{}|{}|{}|{}|{}", c.host, c.port, c.username, c.password, c.database, c.ssl_mode, c.ssl_ca);
+    let pooled = REDIS_POOL.lock().unwrap().get_mut(&key).and_then(Vec::pop);
+    let give_back = |redis: Redis| {
+        let mut pool = REDIS_POOL.lock().unwrap();
+        let idle = pool.entry(key.clone()).or_default();
+        if idle.len() < REDIS_IDLE {
+            idle.push(redis);
+        }
+    };
+    if let Some(mut redis) = pooled {
+        if let Ok(value) = f(&mut redis) {
+            give_back(redis);
+            return Ok(value);
+        }
+    }
+    let mut redis = Redis::open(c)?;
+    let value = f(&mut redis).map_err(|e| e.to_string())?;
+    give_back(redis);
+    Ok(value)
+}
+
+/// A reply as JSON for the frontend: null, a string, a number, an array, `{"error": message}`, or, for bytes that
+/// aren't text, `{"binary": length, "hex": the first 1,024 bytes}`.
+fn reply_json(reply: &Reply) -> serde_json::Value {
+    use serde_json::{json, Value};
+    match reply {
+        Reply::Nil => Value::Null,
+        Reply::Text(s) => json!(s),
+        Reply::Int(n) => json!(n),
+        Reply::Error(e) => json!({ "error": e }),
+        Reply::Bytes(b) => json!({ "binary": b.len(), "hex": b.iter().take(1024).map(|x| format!("{x:02x}")).collect::<String>() }),
+        Reply::Array(items) => Value::Array(items.iter().map(reply_json).collect()),
+    }
+}
+
+/// Runs Redis commands in one round trip and returns each reply, for the key browser. With `atomic`, they run in a
+/// MULTI transaction: a command Redis refuses, such as one with a missing argument, discards them all.
+#[tauri::command]
+pub async fn redis_call(connection: Connection, commands: Vec<Vec<String>>, atomic: Option<bool>) -> Result<Vec<serde_json::Value>, String> {
+    let atomic = atomic == Some(true);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut all = commands;
+        if atomic {
+            all.insert(0, vec!["MULTI".into()]);
+            all.push(vec!["EXEC".into()]);
+        }
+        let mut replies = with_redis(&connection, |r| {
+            r.send(&all)?;
+            (0..all.len()).map(|_| r.read()).collect::<std::io::Result<Vec<_>>>()
+        })?;
+        if atomic {
+            // MULTI's OK, a QUEUED per command, then EXEC's array of replies, or an error when a command was refused.
+            return match replies.pop() {
+                Some(Reply::Array(items)) => Ok(items.iter().map(reply_json).collect()),
+                _ => Err(replies.iter().find_map(|r| if let Reply::Error(e) = r { Some(e.clone()) } else { None }).unwrap_or_else(|| "Redis discarded the transaction.".into())),
+            };
+        }
+        Ok(replies.iter().map(reply_json).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A reply as a cell: a nested array reads as a JSON array, and bytes that aren't text by their length.
 fn reply_text(reply: &Reply) -> Option<String> {
     match reply {
         Reply::Nil => None,
         Reply::Text(s) | Reply::Error(s) => Some(s.clone()),
+        Reply::Bytes(b) => Some(format!("<binary, {} bytes>", b.len())),
         Reply::Int(n) => Some(n.to_string()),
         Reply::Array(items) => serde_json::to_string(&items.iter().map(reply_text).collect::<Vec<_>>()).ok(),
     }
@@ -381,24 +478,32 @@ fn split_command(line: &str) -> Result<Vec<String>, String> {
 // ponytail: SCAN reads every matching key, and each page runs the command again; SCAN's cursor kept between
 // pages if keyspaces of millions get slow.
 fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String> {
-    let mut args = split_command(command)?;
+    let args = split_command(command)?;
     let Some(name) = args.first().map(|a| a.to_uppercase()) else { return Err("Type a command.".into()) };
-    let mut db = Redis::open(c)?;
     let mut result = QueryResult { skip, columns: vec!["value".into()], ..Default::default() };
     if name == "SCAN" {
         let mut keys = Vec::new();
-        loop {
-            let Reply::Array(mut reply) = db.call(&args)? else { return Err("Unexpected reply to SCAN.".into()) };
-            if let (Some(Reply::Array(batch)), Some(Reply::Text(cursor))) = (reply.pop(), reply.pop()) {
-                keys.extend(batch.iter().filter_map(reply_text));
-                if cursor == "0" {
-                    break;
+        with_redis(c, |db| {
+            keys.clear();
+            let mut args = args.clone();
+            loop {
+                db.send(&[args.clone()])?;
+                match db.read()? {
+                    Reply::Array(mut reply) => match (reply.pop(), reply.pop()) {
+                        (Some(Reply::Array(batch)), Some(Reply::Text(cursor))) => {
+                            keys.extend(batch.iter().filter_map(reply_text));
+                            if cursor == "0" {
+                                return Ok(Ok(()));
+                            }
+                            args[1] = cursor;
+                        }
+                        _ => return Ok(Err("Unexpected reply to SCAN.".to_string())),
+                    },
+                    Reply::Error(e) => return Ok(Err(e)),
+                    _ => return Ok(Err("Unexpected reply to SCAN.".to_string())),
                 }
-                args[1] = cursor;
-            } else {
-                return Err("Unexpected reply to SCAN.".into());
             }
-        }
+        })??;
         keys.sort();
         result.columns = vec!["key".into()];
         keys.into_iter().for_each(|k| result.push(vec![Some(k)]));
@@ -412,7 +517,12 @@ fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String
         _ if has("WITHVALUES") => Some(["field", "value"]),
         _ => None,
     };
-    match db.call(&args)? {
+    let reply = with_redis(c, |db| {
+        db.send(&[args.clone()])?;
+        db.read()
+    })?;
+    match reply {
+        Reply::Error(e) => return Err(e),
         Reply::Array(items) if pairs.is_some() => {
             result.columns = pairs.unwrap().map(String::from).to_vec();
             items.chunks(2).for_each(|pair| result.push(pair.iter().map(reply_text).collect()));
@@ -593,8 +703,32 @@ mod tests {
         let keys = redis(&c, "SCAN 0 MATCH k* COUNT 10", 100).unwrap();
         assert_eq!((keys.total, keys.rows[0][0].as_deref()), (250, Some("k100")));
         assert!(redis(&c, "NOSUCHCOMMAND", 0).err().unwrap().contains("unknown command"));
-        let wrong = Connection { password: "nope".into(), ..c };
+        let wrong = Connection { password: "nope".into(), ..c.clone() };
         assert!(redis(&wrong, "PING", 0).is_err());
+
+        // Pipelined calls return every reply, errors included; a transaction with a refused command applies nothing.
+        let call = |commands: &[&[&str]], atomic: bool| {
+            let commands = commands.iter().map(|c| c.iter().map(|s| s.to_string()).collect()).collect();
+            tauri::async_runtime::block_on(redis_call(c.clone(), commands, Some(atomic)))
+        };
+        let replies = call(&[&["SET", "p", "1"], &["INCR", "p"], &["HGET", "p", "x"], &["GET", "none"]], false).unwrap();
+        assert_eq!(replies[1], serde_json::json!(2));
+        assert!(replies[2]["error"].as_str().unwrap().starts_with("WRONGTYPE"));
+        assert_eq!(replies[3], serde_json::Value::Null);
+        assert_eq!(call(&[&["SET", "p", "a"], &["SET", "q", "b"]], true).unwrap(), [serde_json::json!("OK"), serde_json::json!("OK")]);
+        assert!(call(&[&["SET", "p", "changed"], &["SET", "q"]], true).unwrap_err().contains("wrong number of arguments"));
+        assert_eq!(call(&[&["GET", "p"]], false).unwrap(), [serde_json::json!("a")]);
+        // A value that isn't UTF-8 comes back as bytes, not mangled text.
+        with_redis(&c, |r| {
+            use std::io::Write;
+            r.0.get_mut().write_all(b"*3\r\n$3\r\nSET\r\n$3\r\nbin\r\n$2\r\n\xff\xfe\r\n")?;
+            r.read()
+        })
+        .unwrap();
+        assert_eq!(call(&[&["GET", "bin"]], false).unwrap()[0], serde_json::json!({ "binary": 2, "hex": "fffe" }));
+        // A pooled connection the server closed is replaced without an error.
+        call(&[&["CLIENT", "KILL", "TYPE", "normal", "SKIPME", "no"]], false).ok();
+        assert_eq!(call(&[&["PING"]], false).unwrap(), [serde_json::json!("PONG")]);
     }
 
     /// Writes to the login Keychain, so it runs only when asked.

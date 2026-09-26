@@ -24,7 +24,10 @@ import {
   tablesQuery,
   updateStatement,
 } from "./dbconfig";
+import { button, type Changes, el, grid, icon, makeEditable } from "./dbgrid";
 import { monaco } from "./editor";
+import { confirmCommands, initRedis, loadKeys, runLines, showRedisSidebar } from "./redis";
+import { splitCommand } from "./redisdata";
 import { type Item, pick, rank } from "./palette";
 import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
@@ -38,13 +41,6 @@ let connection: Connection | null = null;
 /** Columns per table, loaded once per connection for completion. */
 let schema: Promise<Map<string, { name: string; type: string }[]>> | null = null;
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = "") {
-  const e = document.createElement(tag);
-  e.className = className;
-  e.textContent = text;
-  return e;
-}
-const icon = (name: string) => el("span", `codicon codicon-${name}`);
 
 const query = (sql: string, offset = 0) => invoke<Result>("db_query", { connection, sql, offset });
 /** Rows per page, as db.rs's MAX_ROWS. */
@@ -121,6 +117,7 @@ async function loadConnection() {
   let c = name ? await namedConnection(name) : null;
   if (!c) (name = ""), setItem(selectedKey(), ""), (c = await envConnection());
   schema = null;
+  showRedisSidebar(c.driver === "redis");
   const ssh = c.driver === "sqlite" ? "" : sshDestination();
   $("db-connection-name").textContent = `${name || ".env"} · ${describe(c, host.root())}${ssh ? ` · via ${ssh}` : ""}`;
   connection = null;
@@ -231,13 +228,13 @@ export async function loadTables() {
   if (list.dataset.root !== key) (list.dataset.root = key), list.replaceChildren(el("li", "muted", "Loading…"));
   try {
     await loadConnection();
+    if (isRedis()) return await loadKeys();
     const result = await query(tablesQuery(connection!.driver));
     const tables = result.rows.map((r) => r[0] ?? "");
-    const none = isRedis() ? "No keys." : "No tables. Run the migrations with php artisan migrate.";
-    list.replaceChildren(...(tables.length ? tables.map(isRedis() ? keyRow : tableRow) : [el("li", "muted", none)]));
-    if (result.truncated) list.append(el("li", "muted", `The first ${PAGE.toLocaleString()} of ${result.total.toLocaleString()}.${isRedis() ? " Run SCAN 0 MATCH pattern in the console to find others." : ""}`));
+    list.replaceChildren(...(tables.length ? tables.map(tableRow) : [el("li", "muted", "No tables. Run the migrations with php artisan migrate.")]));
+    if (result.truncated) list.append(el("li", "muted", `The first ${PAGE.toLocaleString()} of ${result.total.toLocaleString()} tables.`));
   } catch (e) {
-    list.replaceChildren(el("li", "muted", `Can't connect: ${String(e)}`));
+    list.replaceChildren(el("li", "muted", `Can't connect: ${friendlyError(String(e))}`));
   }
 }
 
@@ -268,26 +265,6 @@ function tableRow(table: string) {
   return li;
 }
 
-/** A Redis key, whose value shows in the grid when clicked. */
-function keyRow(key: string) {
-  const li = el("li");
-  const row = el("div", "row");
-  row.append(el("span", "chevron"), icon("key"), el("span", "name", key));
-  row.title = "Click to show the value";
-  row.onclick = () => showKey(key);
-  li.append(row);
-  return li;
-}
-
-/** Shows a Redis key's value with the command that reads its type whole. */
-async function showKey(key: string) {
-  const k = quoteIdentifier("redis", key);
-  const type = await query(`TYPE ${k}`).then((r) => r.rows[0]?.[0] ?? "", () => "");
-  const read: Record<string, string> = { string: `GET ${k}`, hash: `HGETALL ${k}`, list: `LRANGE ${k} 0 -1`, set: `SMEMBERS ${k}`, zset: `ZRANGE ${k} 0 -1 WITHSCORES`, stream: `XRANGE ${k} - +` };
-  // An unknown type, or a key deleted since the list loaded (type "none"), shows as TYPE's reply.
-  run(read[type] ?? `TYPE ${k}`);
-}
-
 // ---- Console ----
 
 /**
@@ -301,7 +278,7 @@ export async function openConsole() {
   const path = `${dir}/console.${isRedis() ? "redis" : "sql"}`;
   if (!(await invoke<boolean>("path_exists", { path }))) {
     await invoke("create_dir", { path: dir });
-    const hint = isRedis() ? "# ⌘⏎ runs the command on the caret's line, or the selection as one command." : "-- ⌘⏎ runs the statement under the caret, or the selection.";
+    const hint = isRedis() ? "# ⌘⏎ runs the command on the caret's line, or each line of the selection. Completion suggests commands and keys." : "-- ⌘⏎ runs the statement under the caret, or the selection.";
     await invoke("write_file", { path, contents: `${hint}\n\n` });
   }
   await host.openFile(path);
@@ -312,14 +289,24 @@ export function runFromEditor(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();
   const selection = editor.getSelection();
   if (!model || !selection) return;
-  if (model.getLanguageId() === "redis") {
-    // Lines starting with # are the console's comments; Redis itself has none.
-    const command = (selection.isEmpty() ? model.getLineContent(selection.positionLineNumber) : model.getValueInRange(selection)).trim();
-    if (command && !command.startsWith("#")) run(command);
-    return;
-  }
+  if (model.getLanguageId() === "redis") return runRedis(selection.isEmpty() ? model.getLineContent(selection.positionLineNumber) : model.getValueInRange(selection));
   const sql = selection.isEmpty() ? statementAt(model.getValue(), model.getOffsetAt(selection.getPosition())) : model.getValueInRange(selection);
   if (hasCode(sql)) run(sql);
+}
+
+/**
+ * Runs Redis console lines: one command shows its reply in the grid, and several run in one round trip with a row
+ * each. Lines starting with # are the console's comments; Redis itself has none.
+ */
+async function runRedis(text: string) {
+  if (!connection) await loadConnection();
+  if (!isRedis()) return host.status("Select a Redis connection in the Database tool to run Redis commands.");
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  if (lines.length > 1) return runLines(lines);
+  if (!lines.length) return;
+  const args = splitCommand(lines[0]);
+  if (args && !(await confirmCommands([args]))) return;
+  run(lines[0], undefined, 0, lines[0]);
 }
 
 // ---- Completion ----
@@ -364,22 +351,15 @@ async function provideCompletionItems(model: monaco.editor.ITextModel, position:
 
 // ---- Results ----
 
-const results = el("div", "db-results");
-
-function button(parent: HTMLElement, label: string, name: string, onclick: () => unknown) {
-  const b = el("button", "db-action");
-  b.append(icon(name), label);
-  b.onclick = onclick;
-  parent.append(b);
-  return b;
-}
+export const results = el("div", "db-results");
 
 /**
  * Runs a query and shows a page of its rows. With `table`, cells can be edited when the rows include the primary key.
  * A table's page is a LIMIT in the SQL, so the database reads only that page, and its count is a COUNT(*). Another
- * statement's page is skipped to in db.rs, which counts every row the statement returns.
+ * statement's page is skipped to in db.rs, which counts every row the statement returns. `label` names the rows in
+ * the summary, which is the table's name, or "Query".
  */
-async function run(sql: string, table?: string, page = 0) {
+export async function run(sql: string, table?: string, page = 0, label = table ?? "Query") {
   if (!connection) await loadConnection();
   results.onkeydown = null; // ⌘⏎ submits the grid's own changes, set up again by makeEditable.
   const summary = el("div", "db-summary muted", "Running…");
@@ -390,7 +370,7 @@ async function run(sql: string, table?: string, page = 0) {
   try {
     result = table ? await query(`${sql} LIMIT ${PAGE + 1} OFFSET ${page * PAGE}`) : await query(sql, page * PAGE);
   } catch (e) {
-    summary.replaceChildren(el("span", "db-error", String(e)));
+    summary.replaceChildren(el("span", "db-error", friendlyError(String(e))));
     return;
   }
   const ms = Math.round(performance.now() - started);
@@ -403,42 +383,21 @@ async function run(sql: string, table?: string, page = 0) {
   const n = result.rows.length;
   const paged = page > 0 || result.truncated;
   const count = el("span", "", paged ? `rows ${(offset + 1).toLocaleString()}–${(offset + n).toLocaleString()}` : `${n} ${n === 1 ? "row" : "rows"}`);
-  summary.replaceChildren(`${table ?? "Query"} · `, count, ` in ${ms} ms`);
+  summary.replaceChildren(el("span", "db-label", label), " · ", count, ` in ${ms} ms`);
+  summary.title = sql;
   const total = (t: number) => (count.textContent += ` of ${t.toLocaleString()}`);
   if (paged && !table) total(result.total);
   if (paged && table) query(`SELECT COUNT(*) FROM ${quoteIdentifier(connection!.driver, table)}`).then((r) => count.isConnected && total(Number(r.rows[0][0])), () => {});
   // Pages change only without pending changes: makeEditable disables these while there are some.
-  if (page > 0) button(summary, "Previous", "chevron-left", () => run(sql, table, page - 1)).classList.add("db-page");
-  if (result.truncated) button(summary, "Next", "chevron-right", () => run(sql, table, page + 1)).classList.add("db-page");
-  const grid = el("table");
-  const head = el("tr");
-  head.append(el("th", "", "#"), ...result.columns.map((c) => el("th", "", c)));
-  grid.createTHead().append(head);
-  const body = grid.createTBody();
-  const rows = result.rows.map((cells, i) => {
-    const tr = el("tr");
-    tr.append(el("td", "index", String(offset + i + 1)), ...cells.map((v) => cell(el("td"), v)));
-    body.append(tr);
-    return tr;
-  });
-  const scroll = el("div", "db-grid");
-  scroll.append(grid);
+  if (page > 0) button(summary, "Previous", "chevron-left", () => run(sql, table, page - 1, label)).classList.add("db-page");
+  if (result.truncated) button(summary, "Next", "chevron-right", () => run(sql, table, page + 1, label)).classList.add("db-page");
+  const { scroll, body, rows } = grid(result.columns, result.rows, offset + 1);
   results.append(scroll);
-  if (table) makeEditable(() => run(sql, table, page), table, result, rows, summary, body);
+  if (table) editTable(() => run(sql, table, page), table, result, rows, summary, body);
 }
 
-function cell(td: HTMLElement, value: string | null) {
-  td.className = value === null ? "null" : "";
-  td.textContent = value === null ? "NULL" : value.length > 200 ? `${value.slice(0, 200)}…` : value;
-  return td;
-}
-
-/**
- * Double-click a cell to edit it, Enter keeps the change, and Escape cancels. Click a row's number to select
- * it (⌘-click for several) for Delete Rows, and Add Row adds one. Changes wait, marked in the grid, until
- * Submit (or ⌘⏎) applies them all in one transaction; Revert drops them.
- */
-async function makeEditable(again: () => void, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
+/** Makes a table's rows editable when they include its primary key, which finds each row again. */
+async function editTable(again: () => void, table: string, result: Result, rows: HTMLElement[], summary: HTMLElement, body: HTMLTableSectionElement) {
   const driver = connection!.driver;
   const keys = (await query(primaryKeyQuery(driver, table)).catch(() => ({ rows: [] }))).rows.map((r) => r[0]!);
   const keyIndexes = keys.map((k) => result.columns.indexOf(k));
@@ -447,141 +406,41 @@ async function makeEditable(again: () => void, table: string, result: Result, ro
     return;
   }
   const keyOf = (cells: (string | null)[]) => Object.fromEntries(keys.map((k, i) => [k, cells[keyIndexes[i]]]));
-  const action = (label: string, name: string, onclick: () => unknown) => button(summary, label, name, onclick);
-
-  // Pending changes: new values by row and column, rows to delete, and rows to add.
-  const edits = new Map<number, Map<number, string | null>>();
-  const deletes = new Set<number>();
-  const inserts: Record<string, string | null>[] = [];
   // Deletes first, so a row edited to take a deleted row's key doesn't collide with it. Updates are keyed on
   // each row's values before the change, so editing a key column still finds its row.
-  const statements = () => [
+  const statements = ({ edits, deletes, inserts }: Changes) => [
     ...[...deletes].map((r) => deleteStatement(driver, table, keyOf(result.rows[r]))),
     ...[...edits].filter(([r]) => !deletes.has(r)).map(([r, cells]) => updateStatement(driver, table, Object.fromEntries([...cells].map(([c, v]) => [result.columns[c], v])), keyOf(result.rows[r]))),
     ...inserts.map((values) => insertStatement(driver, table, values)),
   ];
+  makeEditable({
+    summary,
+    results,
+    body,
+    rows,
+    columns: result.columns,
+    values: result.rows,
+    nulls: true,
+    empty: "default",
+    describe: statements,
+    submit: (changes) => invoke("db_batch", { connection, statements: statements(changes), oneRowEach: true }),
+    target: table,
+    status: host.status,
+    again,
+  });
+}
 
-  action("Add Row", "add", () => {
-    if (body.querySelector(".new-row")) return;
-    const tr = el("tr", "new-row");
-    const inputs = result.columns.map((c) => {
-      const input = el("input");
-      input.placeholder = "default";
-      input.title = `${c}: leave empty for the column's default, or type NULL`;
-      const td = el("td", "editing");
-      td.append(input);
-      return { c, input, td };
-    });
-    tr.append(el("td", "index", "new"), ...inputs.map((i) => i.td));
-    body.prepend(tr);
-    tr.parentElement!.parentElement!.parentElement!.scrollTop = 0;
-    inputs[0]?.input.focus();
-    tr.onkeydown = (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") tr.remove();
-      if (e.key !== "Enter" || e.metaKey) return;
-      const values = Object.fromEntries(inputs.filter((i) => i.input.value !== "").map((i) => [i.c, i.input.value === "NULL" ? null : i.input.value]));
-      inserts.push(values);
-      // The row stays, showing what will be added.
-      tr.className = "added";
-      tr.onkeydown = null;
-      inputs.forEach((i) => cell(i.td, i.input.value === "" ? "default" : values[i.c] ?? null));
-      changed();
-    };
-  });
-
-  const selected = new Set<number>();
-  const remove = action("Delete Rows", "trash", () => {
-    for (const r of selected) deletes.add(r), rows[r].classList.add("deleted");
-    selected.clear();
-    rows.forEach((row) => row.classList.remove("selected"));
-    remove.disabled = true;
-    changed();
-  });
-  remove.disabled = true;
-  const submit = action("Submit", "check", async () => {
-    const list = statements();
-    if (!list.length) return;
-    submit.disabled = true;
-    try {
-      await invoke("db_batch", { connection, statements: list, oneRowEach: true });
-      host.status(`Saved ${list.length} ${list.length === 1 ? "change" : "changes"} to ${table}`);
-      again();
-    } catch (e) {
-      host.status(`Can't save the changes to ${table}: ${String(e)}`);
-      submit.disabled = false;
-    }
-  });
-  const revert = action("Revert", "discard", again);
-  /** Updates the Submit and Revert buttons after a change, with the SQL they'd run as Submit's tooltip. */
-  const changed = () => {
-    const list = statements();
-    submit.disabled = revert.disabled = !list.length;
-    submit.lastChild!.textContent = list.length ? `Submit ${list.length} ${list.length === 1 ? "Change" : "Changes"}` : "Submit";
-    submit.title = list.join(";\n");
-    summary.querySelectorAll<HTMLButtonElement>(".db-page").forEach((b) => (b.disabled = !!list.length));
-  };
-  changed();
-  results.onkeydown = (e) => {
-    if (e.key === "Enter" && e.metaKey && !submit.disabled) e.preventDefault(), submit.click();
-  };
-
-  rows.forEach((tr, r) => {
-    const index = tr.children[0] as HTMLElement;
-    index.title = "Click to select the row, ⌘-click to select several";
-    index.onclick = (e) => {
-      if (!e.metaKey) {
-        if (!selected.has(r) || selected.size > 1) selected.clear();
-        rows.forEach((row) => row.classList.remove("selected"));
-      }
-      selected.has(r) ? selected.delete(r) : selected.add(r);
-      for (const i of selected) rows[i].classList.add("selected");
-      remove.disabled = !selected.size;
-    };
-  });
-  rows.forEach((tr, r) =>
-    result.columns.forEach((_, c) => {
-      const td = tr.children[c + 1] as HTMLElement;
-      td.title = "Double-click to edit. Type NULL for a null value.";
-      const current = () => (edits.get(r)?.has(c) ? edits.get(r)!.get(c)! : result.rows[r][c]);
-      const show = () => (cell(td, current()), td.classList.toggle("changed", !!edits.get(r)?.has(c)));
-      td.ondblclick = () => {
-        if (deletes.has(r)) return;
-        const input = el("input");
-        input.value = current() ?? "NULL";
-        td.replaceChildren(input);
-        td.classList.add("editing");
-        input.focus();
-        input.select();
-        let done = false;
-        const finish = (keep: boolean) => {
-          if (done) return;
-          done = true;
-          td.classList.remove("editing");
-          if (keep) {
-            const value = input.value === "NULL" ? null : input.value;
-            const row = edits.get(r) ?? edits.set(r, new Map()).get(r)!;
-            // Back to the original value is no change at all.
-            value === result.rows[r][c] ? row.delete(c) : row.set(c, value);
-            if (!row.size) edits.delete(r);
-            changed();
-          }
-          show();
-        };
-        input.onkeydown = (e) => {
-          if (e.key === "Enter") finish(true);
-          if (e.key === "Escape") finish(false);
-          // ⌘⏎ goes on to the grid, which submits, with this edit kept first.
-          if (!(e.key === "Enter" && e.metaKey)) e.stopPropagation();
-        };
-        input.onblur = () => finish(true);
-      };
-    }),
-  );
+/** An error with a hint for the common ones, such as a server that isn't running. */
+export function friendlyError(message: string): string {
+  if (/NOAUTH/.test(message)) return `${message} Redis needs a password: add it to the connection's URL, or set REDIS_PASSWORD in .env.`;
+  if (/WRONGPASS/.test(message)) return `${message} Check the password in the connection's URL, or REDIS_PASSWORD and REDIS_USERNAME in .env.`;
+  if (/Connection refused/i.test(message)) return `${message}. Is the server running? For Sail, run sail up.`;
+  return message;
 }
 
 export function initDatabase(h: Host) {
   host = h;
+  initRedis({ connection: () => connection, results, status: (text) => host.status(text), friendlyError });
   $("db-refresh").onclick = () => ((config = undefined), loadTables());
   $("db-connection").onclick = chooseConnection;
   monaco.languages.registerCompletionItemProvider("sql", { triggerCharacters: ["."], provideCompletionItems });

@@ -766,6 +766,35 @@ button.link:hover { text-decoration: underline; }
 .db-action { margin-left: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; font-size: 12px; }
 .db-action .codicon { font-size: 13px; }
 .db-grid td.editing input { width: 100%; min-width: 120px; padding: 2px 9px; border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 0 0 1px var(--accent); }
+.db-label { color: var(--text); font-family: var(--mono); max-width: 50%; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.db-summary .db-error { margin-left: 8px; }
+.db-grid td.db-error { color: var(--red); }
+
+/* Redis: the key tree, and a key's header and value in the panel. */
+#db-tables:focus { outline: none; }
+#db-tables.redis-keys:focus .row.selected { box-shadow: inset 0 0 0 1px var(--accent); }
+#db-tables .row.selected, #db-tables .row.selected:hover { background: var(--selected); }
+#db-tables .redis-folder .codicon-folder, #db-tables .redis-folder .codicon-folder-opened { color: var(--muted); }
+#db-tables .redis-note { padding: 6px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+#db-tables .redis-note .db-action { margin-left: 0; }
+#view-database .pr-toolbar input { flex: 1; min-width: 0; }
+.redis-type { font: 600 9px var(--mono); width: 34px; flex-shrink: 0; text-align: center; padding: 1px 0; border-radius: 3px; color: var(--muted); background: color-mix(in srgb, currentColor 14%, transparent); }
+.redis-type[data-type="string"] { color: var(--blue); }
+.redis-type[data-type="hash"] { color: var(--purple); }
+.redis-type[data-type="list"] { color: var(--green); }
+.redis-type[data-type="set"] { color: var(--orange); }
+.redis-type[data-type="zset"] { color: var(--yellow); }
+.redis-type[data-type="stream"] { color: var(--red); }
+.redis-key-header { display: flex; align-items: center; gap: 8px; padding: 4px 10px 6px; flex-shrink: 0; min-width: 0; }
+.redis-key-header .redis-type { font-size: 10px; width: 40px; padding: 2px 0; }
+.redis-key-name { font: 600 13px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; -webkit-user-select: text; user-select: text; }
+.redis-meta { color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.redis-meta .badge { margin-right: 0; }
+.redis-ttl { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.redis-ttl:hover { color: var(--text); text-decoration: underline; }
+.redis-ttl.soon { color: var(--orange); }
+.redis-key-actions { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
+.redis-value { flex: 1; min-height: 0; border-top: 1px solid var(--border-subtle); }
 .bookmark { color: var(--blue); font-size: 13px !important; padding-top: 3px; }
 .test-run { color: var(--green); font-size: 13px !important; padding-top: 3px; cursor: pointer; }
 .breakpoint.log { background: var(--orange); border-radius: 2px; transform: rotate(45deg) scale(0.85); }

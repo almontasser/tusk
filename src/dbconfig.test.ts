@@ -91,7 +91,6 @@ test("reads Redis connections from URLs and .env", () => {
   assert.deepEqual([sail.redis.host, sail.redis.port, sail.redis.database], ["127.0.0.1", 6380, "3"]);
   const url = redisFromEnv({ REDIS_URL: "rediss://u:p@h:1234", REDIS_CACHE_DB: "5" }, "/app");
   assert.deepEqual([url.redis.host, url.redis.port, url.redis.password, url.redis.ssl_mode, url["redis cache"].database], ["h", 1234, "p", "verify-full", "5"]);
-  assert.equal(quoteIdentifier("redis", 'a "b" \\c'), '"a \\"b\\" \\\\c"');
 });
 
 test("reads config/database.php's connections", () => {
