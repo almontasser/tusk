@@ -484,10 +484,11 @@ async function openFolder(dir: unknown = null) {
   if (session) await restoreSession(session);
   restartServers();
   // Terminals reopen after the language servers have started: shells in their last folder, and
-  // commands such as a dev server run again. Sessions from before terminals were saved kept a count of shells.
+  // commands such as a dev server run again, each with its earlier output. Sessions from before terminals were saved
+  // kept a count of shells.
   const terminals: Restore[] = session?.terminals ?? Array.from({ length: session?.shells ?? 0 }, () => ({ title: "Terminal", cwd: root }));
   const found = terminals.length ? await invoke<boolean[]>("paths_exist", { paths: terminals.map((t) => t.cwd) }) : [];
-  for (const [i, t] of terminals.entries()) await openTerminal(found[i] ? t.cwd : root, t.title, t.command, undefined, undefined, !!t.command);
+  for (const [i, t] of terminals.entries()) await openTerminal(found[i] ? t.cwd : root, t.title, t.command, undefined, undefined, !!t.command, t.scrollback);
   if (terminals.length && !session?.panel) toggleTerminal(root);
 }
 
@@ -535,7 +536,10 @@ function saveSession() {
   try {
     localStorage.setItem(sessionKey(), JSON.stringify(session));
   } catch {
-    // Storage can be unavailable or full; a lost session only costs the open tabs.
+    // Storage can be unavailable or full. When it's full, the terminals' output goes first; a lost session only costs
+    // the open tabs.
+    session.terminals = session.terminals?.map(({ scrollback: _, ...t }) => t);
+    try { localStorage.setItem(sessionKey(), JSON.stringify(session)); } catch {}
   }
 }
 

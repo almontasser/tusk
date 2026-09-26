@@ -5,10 +5,14 @@ import { listen } from "@tauri-apps/api/event";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { showMenu } from "./files";
+import { scrollbackText } from "./scrollback";
 import { onTheme } from "./themes";
 
-/** What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again. */
-export type Restore = { title: string; cwd: string; command?: string[] };
+/**
+ * What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again,
+ * with the tab's earlier output.
+ */
+export type Restore = { title: string; cwd: string; command?: string[]; scrollback?: string };
 /** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
 type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore; icon?: string; editorOnly?: boolean };
 /** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
@@ -38,8 +42,9 @@ onTheme((t) => {
   [...sessions, ...docked].forEach((s) => s.term && (s.term.options.theme = theme()));
 });
 
-/** The shells and restorable commands that are still running, in tab order, for the session. */
-export const runningTerminals = () => [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => s.restore!);
+/** The shells and restorable commands that are still running, in tab order, with their output, for the session. */
+export const runningTerminals = (): Restore[] =>
+  [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => ({ ...s.restore!, scrollback: scrollbackText(s.term!.buffer.normal) }));
 export const panelShown = () => panelVisible;
 
 // xterm.js loads with the first terminal, not with the app.
@@ -48,9 +53,10 @@ const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addo
 /**
  * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
  * ends; `onClose` runs when its tab closes, even while the process still runs. Shells, and commands
- * opened with `restorable` (such as a dev server), reopen with the project while they still run.
+ * opened with `restorable` (such as a dev server), reopen with the project while they still run. `scrollback` is
+ * output from the last session to show first.
  */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false) {
+export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false, scrollback?: string) {
   showPanel(true);
   const [{ Terminal }, { FitAddon }] = await loadXterm();
   const el = document.createElement("div");
@@ -61,6 +67,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   term.loadAddon(fit);
   term.open(el);
   fit.fit();
+  if (scrollback) term.write(`${scrollback.replaceAll("\n", "\r\n")}\r\n\x1b[2m[Restored from the last session]\x1b[0m\r\n`);
   el.oncontextmenu = (e) => {
     e.preventDefault();
     showMenu(e.clientX, e.clientY, [

@@ -2317,7 +2317,7 @@ Each project's session is saved in `localStorage` under `session:<root>`:
 | `dirs` | Expanded folders in the tree |
 | `view` | The sidebar view: project, commit, or pull requests |
 | `panes`, `focused` | Each pane's file, left to right, and the focused pane |
-| `terminals`, `panel` | The running shells (title and folder) and restorable commands (title, folder, and command), and whether the panel showed. Older sessions have `shells`, a count of shells. |
+| `terminals`, `panel` | The running shells (title and folder) and restorable commands (title, folder, and command), each with its earlier output (`scrollback`), and whether the panel showed. Older sessions have `shells`, a count of shells. |
 
 The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
 sidebar view), when the page unloads or the window loses focus, and before it
@@ -2330,6 +2330,16 @@ after you press Enter in a shell, it asks for the shell process's working
 directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
 `PROC_PIDVNODEPATHINFO` (no subprocess). A folder that no longer exists falls
 back to the project folder.
+
+Each reopened terminal writes its earlier output before its process starts,
+followed by a dimmed `[Restored from the last session]` line. `scrollbackText`
+in `src/scrollback.ts` reads xterm.js's normal buffer (not the alternate one
+that `vim` or `less` draws on) as text: it joins the lines the terminal wrapped,
+so they wrap again at the new width, drops trailing blank lines, and keeps the
+last 50,000 characters, from a line start. With xterm.js's default of 1,000
+lines of scrollback, that's most of a terminal's output. If `localStorage` is
+full, `saveSession` saves the session again without the output, so the tabs
+aren't lost.
 
 A command tab comes back only if its caller opened it as restorable and it was
 still running: Run Anything commands that keep running until stopped
@@ -3425,3 +3435,12 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Terminal output saved as plain text
+
+A reopened terminal shows its earlier output, saved in the session as text
+without colors. xterm.js's serialize addon would keep colors, but it's another
+dependency, and escape codes make the saved text larger; the output is there to
+read, not to run again. Each terminal keeps its last 50,000 characters, so a
+few terminals in a few projects stay well under WebKit's 5 MB `localStorage`
+limit.
