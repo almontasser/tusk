@@ -151,10 +151,12 @@ scripts/release.sh 0.2.0
 ```
 
 The script sets the version, builds the universal app, signs the update
-archive with the key in `~/.tauri/tusk.key`, writes `latest.json`, commits and
-tags the version, and creates the GitHub release with `gh`. Keep a backup of
-that key: without it, installed copies can't verify a new version, and you
-must ship a new key in a DMG that everyone installs by hand.
+archive with the private key from the `tusk-signing-key` note in Bitwarden
+(through the `bw` CLI, which asks for your master password if the vault is
+locked), writes `latest.json`, commits and tags the version, and creates the
+GitHub release with `gh`. The key is kept only in Bitwarden: without it,
+installed copies can't verify a new version, and you must ship a new key in a
+DMG that everyone installs by hand.
 
 ## The window
 
