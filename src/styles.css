@@ -389,8 +389,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 
 #welcome { position: fixed; inset: 40px 0 0 0; z-index: 50; display: grid; place-items: center; background: var(--bg); }
 .welcome-card { width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column; align-items: center; text-align: center; }
-.welcome-logo { width: 120px; height: 120px; display: block; margin: 0 auto -8px; }
-.welcome-card h1 { font-size: 22px; margin: 16px 0 2px; }
+.welcome-card h1 { font-size: 22px; margin: 0 0 2px; }
 .welcome-sub { margin: 0 0 20px; color: var(--muted); }
 #welcome-open { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; }
 #welcome-open .codicon { font-size: 15px !important; }

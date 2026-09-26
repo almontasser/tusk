@@ -1,7 +1,6 @@
-# Tusk's icon and mascot
+# Tusk's icon
 
 - `icon.svg`: the app icon, an ivory tusk on an indigo tile in the size and corner radius of Apple's icon grid.
-- `mascot.svg`: the mascot, an elephant, shown on the welcome screen (a copy is `public/tusk.svg`).
 
 To change the icon, edit `icon.svg`, render it to `icon.png` at 1024 × 1024 with a transparent background, then run
 `pnpm tauri icon design/icon.png` to make the app's icon files in `src-tauri/icons/`. Chrome renders the SVG

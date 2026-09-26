@@ -4,7 +4,7 @@
 
 Tusk is a fast macOS desktop editor for PHP, Laravel, and Filament projects. It
 aims for PhpStorm-class navigation and refactoring using only free, open-source
-language servers. Its name and its mascot, an elephant, come from PHP's
+language servers. Its name comes from PHP's
 elePHPant.
 
 The app is built with Tauri 2 (Rust backend) and the Monaco editor.

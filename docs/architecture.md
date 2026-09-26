@@ -3236,9 +3236,10 @@ domain. A new identifier means new folders for settings, models, caches, and
 web storage; the author's own folders were moved by hand, since nobody else
 used the app yet. The npm package, the Rust crate, and the repository keep the name
 `php-editor`: nothing a user sees shows them, and the dev build's web storage
-folder is named after the crate's binary. The icon and the mascot are SVG in
+folder is named after the crate's binary. The icon is SVG in
 `design/`, rendered with headless Chrome; `pnpm tauri icon design/icon.png`
-makes the app's icon files.
+makes the app's icon files. The welcome screen showed an elephant mascot at first;
+it was removed the same day, and the screen now opens with the name.
 
 ### 2026-09-26: The website is one static page
 
