@@ -1116,14 +1116,16 @@ export let magoConfigPath: string | undefined;
  */
 async function projectMagoConfig(root: string, bundled: string, aliasDir: string | undefined): Promise<string> {
   const dir = await projectCache("mago-stubs", root);
-  const [text, composer, previous] = await Promise.all([
+  const [text, composer, previous, top] = await Promise.all([
     invoke<string>("read_file", { path: bundled }),
     invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"),
     invoke<string>("read_file", { path: `${dir}/replaced.json` }).then(JSON.parse, () => []),
+    // ponytail: a top-level folder made later is read only after the next start.
+    invoke<{ name: string; is_dir: boolean }[]>("read_dir", { path: root }).catch(() => []),
   ]);
   const config = `${dir}/mago.toml`;
   const write = (replaced: string[]) =>
-    invoke("write_file", { path: config, contents: magoConfigText(text, composer, [...(aliasDir ? [aliasDir] : []), ...(replaced.length ? [dir] : [])], replaced) });
+    invoke("write_file", { path: config, contents: magoConfigText(text, composer, [...(aliasDir ? [aliasDir] : []), ...(replaced.length ? [dir] : [])], replaced, top) });
   await invoke("create_dir", { path: dir });
   await write(previous);
   introspect(root, "mago-stubs", dir).then(async (replaced) => {

@@ -104,6 +104,10 @@ test("writes the project's Mago settings", () => {
   const bundled = '[source]\nincludes = ["vendor"]\nexcludes = [".*"]\n';
   const text = magoConfigText(bundled, '{"require": {"php": "^8.2|^8.3"}}', ["/stubs"], ["vendor/a.php"]);
   assert.equal(text, 'php-version = "8.2.0"\n[source]\nincludes = ["vendor", "/stubs"]\nexcludes = [".*", "vendor/a.php"]\n');
+  const dirs = [".claude", "app", "node_modules", "storage", "vendor"].map((name) => ({ name, is_dir: true }));
+  const top = [...dirs, ...["artisan", "rector.php"].map((name) => ({ name, is_dir: false }))];
+  assert.equal(magoConfigText('paths = ["."]\n', "{}", [], [], top), 'paths = ["app", "rector.php"]\n');
+  assert.equal(magoConfigText('paths = ["."]\n', "{}", [], [], []), 'paths = ["."]\n');
 });
 
 test("formats messages for hovers and the problem page", () => {
