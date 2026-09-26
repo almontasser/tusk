@@ -1764,7 +1764,7 @@ initHttpClient({
   showDiff: (path, original, modified, label) => showDiff(path, original, modified, label),
 });
 initComposer({ root: () => root, status });
-initRefactor({ root: () => root, status });
+initRefactor({ root: () => root, status, ensureModel });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initGenerate({ status });

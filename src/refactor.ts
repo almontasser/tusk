@@ -4,10 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath, typeSymbol } from "./lsp";
-import { constructorCalls, deletionLines, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
-import { declarationParts, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
+import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
+import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { constantAt, constantDeclaration, constantRefs, functionScope, inlinedValue, literalType, occurrences, variableName, type Expr } from "./extractparse";
+import { constantAt, constantDeclaration, constantRefs, declarationPoint, enclosingFunctionName, expressionsAt, functionScope, inlineCall, inlinedValue, literalType, methodToInline, occurrences, variableName, type Expr, type Inlinable } from "./extractparse";
 import { chosenExpression, chosenUses } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
@@ -16,7 +16,7 @@ import { editSignature } from "./signaturedialog";
 import { symbolAt } from "./safedelete";
 import { readText } from "./projectfiles";
 
-type Host = { root(): string; status(text: string): void };
+type Host = { root(): string; status(text: string): void; ensureModel(path: string): Promise<monaco.editor.ITextModel> };
 let host: Host;
 
 const symbolsOf = async (model: monaco.editor.ITextModel) =>
@@ -26,9 +26,197 @@ const symbolsOf = async (model: monaco.editor.ITextModel) =>
 
 // ---- Inline ----
 
-/** Inline (⌥⌘N), as in PhpStorm: the class constant at the cursor, or else the variable. */
+/** Inline (⌥⌘N), as in PhpStorm: the method or function called or declared at the cursor, the class constant, or else the variable. */
 export async function inline(editor: monaco.editor.ICodeEditor) {
-  if (!(await inlineConstant(editor))) await inlineVariable(editor);
+  if (!(await inlineMethod(editor)) && !(await inlineConstant(editor))) await inlineVariable(editor);
+}
+
+/** Asks in the palette; null for Escape. */
+const choose = (question: string, options: string[]) =>
+  new Promise<string | null>((resolve) => pick(question, () => options.map((label) => ({ label, run: () => resolve(label) })), 0, { value: "", onCancel: () => resolve(null) }));
+
+/**
+ * Class names in code moved from the owner's file written in full, so its imports don't matter elsewhere:
+ * `X::`, `new X`, `instanceof X`, and `catch (X`. `self::` and `static::` name the owner outside it.
+ */
+function qualifyNames(code: string, ownerSource: string, owner: string | null, insideOwner: boolean): string {
+  const { resolve } = nameResolver(ownerSource);
+  return outsideStrings(code, (c) =>
+    c
+      .replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
+        const lower = n.toLowerCase();
+        if (lower === "self" || lower === "static") return insideOwner || !owner ? n : `\\${owner}`;
+        return lower === "parent" ? n : `\\${resolve(n)}`;
+      })
+      .replace(/\b(new|instanceof|catch\s*\()\s+(?![\\$]|class\b|static\b|self\b)([A-Za-z_][\w\\]*)/g, (_, kw: string, n: string) => `${kw} \\${resolve(n)}`),
+  );
+}
+
+/** A block of code re-indented to `indent`: its own common indentation removed, blank lines at the ends dropped. */
+function reindent(code: string, indent: string): string[] {
+  const lines = code.replace(/^\s*\n/, "").replace(/\s+$/, "").split("\n");
+  if (!lines.join("").trim()) return [];
+  const common = Math.min(...lines.filter((l) => l.trim()).map((l) => l.match(/^[ \t]*/)![0].length));
+  return lines.map((l) => (l.trim() ? indent + l.slice(common) : ""));
+}
+
+/**
+ * Inline Method: replaces calls of the method or function at the cursor with its body. From its declaration,
+ * every call, then the method goes unless you keep it; from a call, that call or all of them. False when the
+ * cursor isn't on a method or function name followed by `(`.
+ */
+async function inlineMethod(editor: monaco.editor.ICodeEditor): Promise<boolean> {
+  const model = editor.getModel();
+  const pos = editor.getPosition();
+  const word = model && pos ? model.getWordAtPosition(pos) : null;
+  if (!model || !pos || !word || model.getLanguageId() !== "php") return false;
+  const text = model.getValue();
+  const wordStart = model.getOffsetAt({ lineNumber: pos.lineNumber, column: word.startColumn });
+  const wordEnd = wordStart + word.word.length;
+  if (!/^\s*\(/.test(text.slice(wordEnd)) || /\$$/.test(text.slice(0, wordStart))) return false;
+  // The declaration: here, or where Go to Definition leads from a call.
+  let def = model;
+  let at: L.Position = { line: pos.lineNumber - 1, character: pos.column - 1 };
+  const onDeclaration = /\bfunction\s+&?$/.test(text.slice(0, wordStart));
+  if (!onDeclaration) {
+    if (/\bnew\s+$/.test(text.slice(0, wordStart))) return false;
+    const found = await phpactorRequest<L.Location[] | L.Location | null>("textDocument/definition", { textDocument: { uri: model.uri.toString() }, position: at }).catch(() => null);
+    const loc = Array.isArray(found) ? found[0] : found;
+    if (!loc) return host.status(`Can't find the declaration of ${word.word}. Phpactor must be running.`), true;
+    if (!loc.uri.startsWith("file:") || loc.uri.includes(".phar") || loc.uri.includes("/vendor/")) return host.status(`${word.word} is declared in a library, which can't be inlined.`), true;
+    def = await host.ensureModel(monaco.Uri.parse(loc.uri).fsPath);
+    at = loc.range.start;
+  }
+  const found = symbolAt(await symbolsOf(def), at.line, at.character);
+  if (!found || ![6, 12].includes(found.symbol.kind) || found.symbol.name !== word.word) return false;
+  const { symbol, container } = found;
+  const label = container ? `${container.name}::${symbol.name}()` : `${symbol.name}()`;
+  if (isConstructor(symbol)) return host.status("A constructor can't be inlined."), true;
+  const defText = def.getValue();
+  const method = methodToInline(defText, offsetAt(defText, symbol.selectionRange.end));
+  if ("error" in method) return host.status(`Can't inline ${label}: ${method.error}.`), true;
+  const owner = container ? fqnOf(def, container) : null;
+  if (container && (await overridesOf(def, container, symbol.name)).length) return host.status(`Can't inline ${label}: a subclass overrides it, so a call may run the override.`), true;
+
+  host.status(`Looking for calls to ${label}…`);
+  const refs = (await callsOf(def, symbol, container)).filter(
+    (r) => !(r.uri === def.uri.toString() && r.range.start.line >= symbol.range.start.line && r.range.start.line <= symbol.range.end.line),
+  );
+  const recursive = (await callsOf(def, symbol, container)).length !== refs.length;
+  host.status("");
+  const here = onDeclaration ? null : refs.find((r) => r.uri === model.uri.toString() && offsetAt(text, r.range.start) === wordStart);
+  if (!refs.length) return host.status(`Nothing calls ${label}.`), true;
+  const calls = refs.length === 1 ? "the only call" : `all ${refs.length} calls`;
+  const all = `Inline ${calls} and remove the ${container ? "method" : "function"}`;
+  const keep = `Inline ${calls} and keep it`;
+  const options = here && refs.length > 1 ? [all, keep, "Inline this call only"] : [all, keep];
+  const answer = await choose(`Inline ${label}`, recursive ? options.filter((o) => o !== all) : options);
+  editor.focus();
+  if (!answer) return true;
+  const chosen = answer === "Inline this call only" ? [here!] : refs;
+
+  const texts = new Map<string, string>();
+  const raw = new Map<string, { start: number; end: number; text: string }[]>();
+  const skipped: Skipped[] = [];
+  let inlined = 0;
+  for (const ref of chosen) {
+    const path = monaco.Uri.parse(ref.uri).fsPath;
+    const source = texts.get(ref.uri) ?? (await textOf(path).catch(() => null));
+    if (source === null) continue;
+    texts.set(ref.uri, source);
+    const line = ref.range.start.line + 1;
+    const skip = (reason: string) => skipped.push({ path, line, reason });
+    const result = inlineAt(source, offsetAt(source, ref.range.start), symbol.name, method, defText, owner);
+    if ("error" in result) {
+      skip(result.error);
+      continue;
+    }
+    const edits = raw.get(ref.uri) ?? [];
+    if (result.edits.some((e) => edits.some((o) => e.start < o.end && o.start < e.end))) {
+      skip("it's inside another call being inlined");
+      continue;
+    }
+    raw.set(ref.uri, [...edits, ...result.edits]);
+    inlined++;
+  }
+  // The declaration goes once every call is inlined, with its docblock.
+  if (answer === all && !skipped.length) {
+    const lines = defText.split("\n");
+    const [first, last] = deletionLines(lines, symbol.range.start.line + 1, symbol.range.end.line + 1);
+    const start = offsetAt(defText, { line: first - 1, character: 0 });
+    const end = last < lines.length ? offsetAt(defText, { line: last, character: 0 }) : defText.length;
+    texts.set(def.uri.toString(), defText);
+    raw.set(def.uri.toString(), [...(raw.get(def.uri.toString()) ?? []), { start, end, text: "" }]);
+  }
+  const changes: Record<string, L.TextEdit[]> = {};
+  for (const [u, edits] of raw) changes[u] = edits.map((e) => ({ range: { start: positionAt(texts.get(u)!, e.start), end: positionAt(texts.get(u)!, e.end) }, newText: e.text }));
+  const apply = () =>
+    applyWorkspaceEdit({ changes }).then(() =>
+      host.status(`Inlined ${label} in ${inlined} ${inlined === 1 ? "place" : "places"}${answer === all && !skipped.length ? " and removed it" : ""}.${Object.keys(changes).length > 1 ? " ⌘Z undoes it in every file." : ""}`),
+    );
+  if (skipped.length) showRefactorPreview(`Inline ${label}`, changes, texts, skipped, apply);
+  else await apply();
+  return true;
+}
+
+/** The edits that inline one call, whose name starts at `nameStart`, or why it can't be. */
+function inlineAt(source: string, nameStart: number, name: string, method: Inlinable, ownerSource: string, owner: string | null): { edits: { start: number; end: number; text: string }[] } | { error: string } {
+  const nameEnd = nameStart + name.length;
+  const paren = source.slice(nameEnd).match(/^\s*\(/);
+  if (!paren) return { error: "not a call, such as a callable string" };
+  const argsOpen = nameEnd + paren[0].length - 1;
+  const argsClose = matchBracket(source, argsOpen);
+  if (argsClose < 0) return { error: "its arguments couldn't be read" };
+  const inner = source.slice(argsOpen + 1, argsClose);
+  if (inner.trim() === "...") return { error: "a first-class callable" };
+  const call = expressionsAt(source, nameStart).find((e) => e.end === argsClose + 1 && e.start <= nameStart);
+  if (!call) return { error: "the call couldn't be read" };
+  const through = source.slice(call.start, nameStart).trim();
+  if (through.endsWith("?->")) return { error: "a nullsafe call (?->)" };
+  const receiver = through.endsWith("->") ? through.slice(0, -2).trim() : null;
+  const types = parseTypeDeclarations(source);
+  const inside = owner !== null && [...types].reverse().find((t) => t.offset < nameStart)?.fqn === owner;
+  if (method.usesThis && !inside && receiver !== null && receiver !== "$this") {
+    // $this's private and protected members aren't reachable from another class.
+    if (/\$this\s*->\s*\w/.test(`${method.statements}${method.result ?? ""}`)) return { error: "the method uses its object's members, which may be private outside its class" };
+  }
+  if (!inside && /\bparent\s*::/.test(`${method.statements}${method.result ?? ""}`)) return { error: "the method calls parent::" };
+  const qualify = (code: string) => (source === ownerSource ? code : shortenNames(qualifyNames(code, ownerSource, owner, inside), source));
+  const m: Inlinable = {
+    ...method,
+    statements: qualify(method.statements),
+    result: method.result === null ? null : qualify(method.result),
+    params: method.params.map((p) => (p.defaultValue ? { ...p, defaultValue: qualify(p.defaultValue) } : p)),
+  };
+  const [from, to] = functionScope(source, nameStart);
+  const taken = new Set([...source.slice(from, to).matchAll(/\$(\w+)/g)].map((x) => x[1]));
+  const r = inlineCall(m, splitTopLevel(inner), receiver, taken);
+  if ("error" in r) return r;
+  const point = declarationPoint(source, [call]);
+  if ("error" in point) return point;
+  const body = reindent(r.body, point.indent);
+  const intro = [...r.statements.map((l) => point.indent + l), ...body];
+  const pure = (e: string) => /^(\$\w+|-?\d[\d_.]*|'[^']*'|true|false|null)$/i.test(e.trim());
+  if (point.replace) {
+    // The call is a statement of its own: the body takes its place.
+    const semicolon = source.indexOf(";", call.end);
+    const tail = r.result && !pure(r.result) ? [`${point.indent}${r.result};`] : [];
+    const code = [...intro, ...tail].join("\n").slice(point.indent.length);
+    return { edits: [{ start: call.start, end: semicolon + 1, text: code || "" }] };
+  }
+  if (r.result === null) return { error: "it returns nothing, but the call's value is used" };
+  const value = /^[\w$\\]+(\s*(->|::)\s*\$?\w+(\([^()]*\))?)*$|^\w+\([^()]*\)$/.test(r.result.trim()) ? r.result : `(${r.result})`;
+  if (!intro.length) return { edits: [{ start: call.start, end: call.end, text: value }] };
+  // Statements run before the statement holding the call, which is safe only where nothing else runs first.
+  const lead = source.slice(point.offset, call.start);
+  const follows = source.slice(call.end).match(/^\s*;/);
+  if (!follows || !/^(\$\w+(\s*->\s*\w+|\[[^\]]*\])*\s*=|return|echo|yield|throw)?\s*$/.test(lead)) return { error: "the method has statements, which can't run in the middle of this expression" };
+  return {
+    edits: [
+      { start: point.offset, end: point.offset, text: `${intro.join("\n").slice(point.indent.length)}\n${point.indent}` },
+      { start: call.start, end: call.end, text: value },
+    ],
+  };
 }
 
 /**
@@ -162,7 +350,9 @@ export async function changeSignature(editor: monaco.editor.ICodeEditor, introdu
     // else as the value passed in existing calls.
     const { expr } = introduce;
     const constant = !!constantAt(text, expr.start, expr.end);
-    const taken = new Set(params.map((p) => p.name));
+    // The body's variables too, so the parameter doesn't take a local's name.
+    const [from, to] = functionScope(text, expr.start);
+    const taken = new Set([...params.map((p) => p.name), ...[...text.slice(from, to).matchAll(/\$(\w+)/g)].map((m) => m[1])]);
     const at = params.findIndex((p) => p.variadic);
     focus = at < 0 ? params.length : at;
     params.splice(focus, 0, { text: "", type: literalType(expr.text), name: variableName(expr.text, taken), byRef: false, variadic: false, defaultValue: constant ? expr.text : undefined, callValue: constant ? undefined : expr.text });
@@ -426,18 +616,16 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
       const inner = applyRaw(original, site.argsOpen + 1, inside);
       // A default written into a call must mean the same there: self:: and imported names are spelled out.
       const here = [...types].reverse().find((t) => t.offset < site.nameStart)?.fqn;
-      const after = site.after.map((p) =>
-        p.defaultValue && site.owner ? { ...p, defaultValue: shortenNames(inlinedValue(p.defaultValue, site.owner.text, site.owner.fqn, here === site.owner.fqn), text) } : p,
-      );
+      const spell = (value: string | undefined) => (value && site.owner ? shortenNames(inlinedValue(value, site.owner.text, site.owner.fqn, here === site.owner.fqn), text) : value);
+      const after = site.after.map((p) => ({ ...p, defaultValue: spell(p.defaultValue), callValue: spell(p.callValue) }));
       const result = rewriteArgs(splitTopLevel(inner), site.before, after);
       if ("error" in result) {
         skipped.push({ path: site.path, line: site.line, reason: result.error });
         continue;
       }
       if (result.args.join("\0") !== splitTopLevel(original).join("\0")) {
-        // Arguments one per line stay that way.
-        const indent = inner.match(/\n([ \t]*)\S/)?.[1];
-        const args = indent === undefined ? result.args.join(", ") : `\n${result.args.map((a) => `${indent}${a},`).join("\n")}\n${inner.match(/\n([ \t]*)$/)?.[1] ?? ""}`;
+        const lineIndent = text.slice(text.lastIndexOf("\n", site.argsOpen) + 1).match(/^[ \t]*/)![0];
+        const args = formatArgs(result.args, inner, lineIndent);
         raw.set(siteUri, [...edits.filter((e) => !inside.includes(e)), { start: site.argsOpen + 1, end: site.argsClose, text: args }]);
       }
       if (renamed) edit(siteUri, text, site.nameStart, site.nameEnd, s.name);
@@ -475,6 +663,8 @@ export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
   const text = model.getValue();
   const [from, to] = functionScope(text, expr.start);
   if (from === 0) return host.status("Introduce Parameter works inside a method or function.");
+  // In a closure, the parameter would belong to the method around it, which the closure can't see.
+  if (!enclosingFunctionName(text, expr.start)) return host.status("Introduce Parameter works in a method or function's own body, not in a closure.");
   if (/\$(?!this\b)\w/.test(expr.text.replace(/'(?:[^'\\]|\\.)*'/g, ""))) return host.status("The expression uses the method's variables, which calls can't pass. Extract a variable instead (⌥⌘V).");
   if (/\$this\b/.test(expr.text)) return host.status("The expression uses $this, which calls outside the class can't pass.");
   const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));

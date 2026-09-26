@@ -60,7 +60,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. There's no Inline Method, Pull Members Up, or Extract Interface. |
+| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. There's no Pull Members Up or Extract Interface. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -230,7 +230,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘M | Extract the selection into a method |
 | ⌥⌘F | Introduce a field (property) for the expression at the cursor |
 | ⌥⌘P | Introduce a parameter for the expression at the cursor |
-| ⌥⌘N | Inline the variable or class constant at the cursor |
+| ⌥⌘N | Inline the method, class constant, or variable at the cursor |
 | F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
@@ -598,6 +598,24 @@ method. Phpactor writes the method with its parameters and return type; you
 then type its name in place.
 
 ## Inline
+
+Press ⌥⌘N on a method or function, at its declaration or at a call, to replace
+calls with its body, PhpStorm's **Inline Method**. Choose to inline every call
+and remove it, every call and keep it, or only the call under the cursor.
+
+- Arguments take their parameters' places. One that's read more than once, or
+  not at all, and does more than read a value, such as `f()`, runs once into a
+  variable first. A missing argument gets the default.
+- `$this` becomes the object the call was made on, and a local variable whose
+  name the caller already uses gets a number, such as `$line2`.
+- A call that's a statement of its own becomes the body's statements. A call
+  whose value is used becomes the method's `return` expression, with any
+  statements before it placed ahead of the statement, which works for
+  `$x = …`, `return …`, and `echo …`.
+- It refuses, and says why, for a method with more than one `return`, one that
+  changes a parameter, a generator, a method a subclass overrides, and a call
+  from another class to a method that uses its object's members, which may be
+  private there. Calls it can't inline show in the **Refactoring Preview**.
 
 Press ⌥⌘N on a class constant, at its declaration or at a use such as
 `Order::LIMIT`, to replace it with its value. From the declaration, every use in

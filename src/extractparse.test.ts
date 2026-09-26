@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { enclosingFunctionName, inlineCall, methodToInline, literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -101,13 +101,15 @@ test("reads a constant's declaration and references, and writes its value elsewh
   assert.equal(decl.value, "self::BASE * 2");
   assert.ok(owner.slice(decl.start, decl.end).startsWith("public const LIMIT"));
   assert.deepEqual(constantDeclaration(owner, "BASE", owner.indexOf("{")), { error: "BASE is declared with other constants in one statement" });
+  assert.deepEqual(constantDeclaration(owner, "OTHER", owner.indexOf("{")), { error: "OTHER is declared with other constants in one statement" });
   assert.deepEqual(constantRefs(owner, "LIMIT").map((r) => [owner.slice(r.start, r.end), r.owner]), [["self::LIMIT", "App\\Order"], ["static::LIMIT", "App\\Order"]]);
   const user = "<?php\nuse App\\Order as O;\n$a = O::LIMIT; $b = 'O::LIMIT'; $c = $o::LIMIT;";
   assert.deepEqual(constantRefs(user, "LIMIT").map((r) => r.owner), ["App\\Order"]);
   assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", false), "(\\App\\Order::BASE * 2)");
   assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", true), "(self::BASE * 2)");
   assert.equal(inlinedValue("Status::Open", owner, "App\\Order", false), "\\App\\Enums\\Status::Open");
-  assert.equal(inlinedValue("-1", owner, "App\\Order", false), "-1");
+  assert.equal(inlinedValue("-1", owner, "App\\Order", false), "(-1)");
+  assert.equal(inlinedValue("1", owner, "App\\Order", false), "1");
   assert.equal(inlinedValue("'Helper::format'", owner, "App\\Order", false), "'Helper::format'");
   assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
 });
@@ -132,4 +134,64 @@ test("handles precedence of prefixes, for headers, class bodies, parameters, and
   const closure = "<?php\nfunction f($item, $xs) {\n    $a = $item->price;\n    array_map(function ($item) { return $item->price; }, $xs);\n}";
   const e = expressionsAt(closure, closure.indexOf("price"))[0];
   assert.equal(occurrences(closure, e, ...functionScope(closure, e.start)).length, 1);
+});
+
+test("reads a method to inline and substitutes a call", () => {
+  const cls = [
+    "<?php",
+    "class A {",
+    "    public function total(int $qty, float $price = 1.5): float",
+    "    {",
+    "        $sum = $qty * $price;",
+    "        // don't round",
+    "        return $sum + $this->fee;",
+    "    }",
+    "    public function twice($x) { return $x + $x; }",
+    "    public function log(string $m) { echo $m; }",
+    "    public function many($a) { if ($a) { return 1; } return 2; }",
+    "    public function bump($a) { $a++; return $a; }",
+    "    public function gen() { yield 1; }",
+    "    public function hi($name) { return \"hi $name\"; }",
+    "    public function cb($a) { return array_map(function ($x) { return $x; }, $a); }",
+    "}",
+  ].join("\n");
+  const at = (name: string) => cls.indexOf(`function ${name}`) + 9 + name.length;
+  const total = methodToInline(cls, at("total"));
+  assert.ok(!("error" in total));
+  assert.equal(total.result, "$sum + $this->fee");
+  assert.deepEqual(total.locals, ["sum"]);
+  assert.ok(total.usesThis);
+  // A caller that already has $sum gets $sum2; $order stands in for $this.
+  const call = inlineCall(total, ["$n", "price: 2"], "$order", new Set(["sum", "n", "order"]));
+  assert.ok(!("error" in call));
+  assert.match(call.body, /\$sum2 = \$n \* 2;/);
+  assert.equal(call.result, "$sum2 + $order->fee");
+  // A complex argument read twice is evaluated once into a variable.
+  const twice = methodToInline(cls, at("twice"));
+  assert.ok(!("error" in twice));
+  assert.deepEqual(inlineCall(twice, ["f()"], null, new Set()), { statements: ["$x = f();"], body: " ", result: "$x + $x" });
+  assert.deepEqual(inlineCall(twice, ["$a->b"], null, new Set()), { statements: [], body: " ", result: "$a->b + $a->b" });
+  assert.deepEqual(inlineCall(twice, ["$a->b()"], null, new Set()), { statements: ["$x = $a->b();"], body: " ", result: "$x + $x" });
+  const log = methodToInline(cls, at("log"));
+  assert.ok(!("error" in log));
+  const echoed = inlineCall(log, ["strtoupper($s)"], null, new Set());
+  assert.ok(!("error" in echoed) && echoed.body.trim() === "echo strtoupper($s);");
+  assert.ok(!("error" in log) && log.result === null);
+  // Refusals.
+  for (const name of ["many", "bump", "gen", "hi"]) assert.ok("error" in methodToInline(cls, at(name)), name);
+  // A closure's own return doesn't count as the method's.
+  const cb = methodToInline(cls, at("cb"));
+  assert.ok(!("error" in cb) && cb.result?.startsWith("array_map"));
+  assert.ok("error" in inlineCall(twice, [], null, new Set()));
+});
+
+test("finds a constant's occurrences in every method, and refuses static:: as a constant", () => {
+  const code = "<?php\nclass A {\n  function a() { return 'x'; }\n  function b() { return 'x'; }\n}";
+  const x = constantAt(code, code.indexOf("'x'") + 1, code.indexOf("'x'") + 1)!;
+  assert.equal(occurrences(code, x, code.indexOf("{"), code.length, false).length, 2);
+  const st = "<?php\nclass A { function f() { return static::X + 1; } }";
+  assert.equal(constantAt(st, st.indexOf("static"), st.indexOf(" + 1") + 4), null);
+  const fn = "<?php\nclass A { function run() { return array_map(function ($i) { return $i * 10; }, []); } }";
+  assert.equal(enclosingFunctionName(fn, fn.indexOf("10")), null);
+  assert.equal(enclosingFunctionName(fn, fn.indexOf("array_map")), "run");
 });

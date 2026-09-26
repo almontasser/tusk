@@ -217,3 +217,7 @@ test("leaves strings alone when rewriting names", () => {
   assert.equal(abstractMethods(trait)[0].signature, "function f(string $s = 'a, b'): \\App\\Foo");
   assert.equal(outsideStrings("'x' y", (c) => c.toUpperCase()), "'x' Y");
 });
+
+test("leaves heredocs and comments alone when rewriting names", () => {
+  assert.equal(outsideStrings("<<<EOT\nit's A\nEOT . A // A's\n", (c) => c.replace(/A/g, "B")), "<<<EOT\nit's A\nEOT . B // A's\n");
+});

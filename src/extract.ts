@@ -169,7 +169,8 @@ export async function extractConstant(editor: Editor) {
   const open = type ? text.indexOf("{", type.offset) : -1;
   const close = open >= 0 ? matchBracket(text, open) : -1;
   if (!type || close < expr.end) return host.status("Extract Constant works inside a class, trait, interface, or enum.");
-  const uses = await chosenUses(editor, expr, occurrences(text, expr, open, close));
+  // Constants read the same anywhere in the class, closures included.
+  const uses = await chosenUses(editor, expr, occurrences(text, expr, open, close, false));
   if (!uses || model.getVersionId() !== version) return;
   const point = constantPoint(text, open);
   const { insertSpaces, indentSize } = model.getOptions();
@@ -203,7 +204,8 @@ export async function introduceField(editor: Editor) {
   const [from, to] = functionScope(text, expr.start);
   if (!type || close < expr.end || from === 0) return host.status("Introduce Field works in a method of a class or trait.");
   if (type.kind === "interface" || type.kind === "enum") return host.status(`An ${type.kind} can't have properties.`);
-  const isStatic = /\bstatic\s+(?:(?:public|protected|private|final|abstract)\s+)*function\b[^{;]*$|\b(?:public|protected|private)\s+static\s+function\b[^{;]*$/.test(text.slice(0, from));
+  // The method's header, before its body's `{`.
+  const isStatic = /\bstatic\s+(?:(?:public|protected|private|final|abstract)\s+)*function\b[^{;]*$|\b(?:public|protected|private)\s+static\s+function\b[^{;]*$/.test(text.slice(0, from - 1));
   const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
   if (!uses || model.getVersionId() !== version) return;
   const ref = isStatic ? "self::$\0" : "$this->\0";
@@ -296,7 +298,8 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   const word = model.getWordAtPosition(pos);
   const before = word ? line.slice(0, word.startColumn - 1) : "";
   const onConstant = !!word && (/::\s*$/.test(before) || /\bconst\s+(?:[\w\\|?]+\s+)?$/.test(before));
-  if (onVariable || onConstant) names.push("Inline…");
+  const onCall = !!word && /^\s*\(/.test(line.slice(word.endColumn - 1)) && !/(\$|\bnew\s+)$/.test(before);
+  if (onVariable || onConstant || onCall) names.push("Inline…");
   if (found) names.push("Safe Delete…");
   if (parseTypeDeclarations(text).length === 1) names.push("Move Class…");
   // Phpactor's own refactorings, other than the extractions above.

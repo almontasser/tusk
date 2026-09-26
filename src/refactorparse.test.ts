@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classProperties, declarationParts, formatParams, matchBracket, paramText, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
+import { classProperties, declarationParts, formatArgs, formatParams, matchBracket, paramText, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
 
 test("splits arguments at top-level commas", () => {
   assert.deepEqual(splitTopLevel(`$a, foo($b, [1, 2]), 'x, y', "q\\", r"`), ["$a", "foo($b, [1, 2])", "'x, y'", `"q\\", r"`]);
@@ -118,4 +118,10 @@ test("skips comments when matching brackets and splitting", () => {
   assert.equal(matchBracket(body, 0), body.length - 1);
   assert.deepEqual(splitTopLevel("$a, // b's\n$c"), ["$a", "// b's\n$c"]);
   assert.deepEqual(rewriteArgs(["..."], parseParams("$a"), parseParams("$b = 1, $a")), { args: ["..."] });
+});
+
+test("writes arguments back without letting a line comment swallow the rest", () => {
+  assert.equal(formatArgs(["$a", "$b"], "$b, $a", "    "), "$a, $b");
+  assert.equal(formatArgs(["$b // why", "5"], "$a, $b // why\n", "    "), "\n        $b, // why\n        5,\n");
+  assert.equal(formatArgs(["1", "2"], "\n  1,\n  2,\n", ""), "\n  1,\n  2,\n");
 });

@@ -4,6 +4,7 @@
 // aren't tokenized, and ternaries (? :) and closures are boundaries rather than expressions.
 import { commentMask } from "./comments.ts";
 import { nameResolver, outsideStrings, parseTypeDeclarations } from "./phptypes.ts";
+import { declarationParts, type Param } from "./refactorparse.ts";
 
 type Tok = { type: "str" | "var" | "num" | "name" | "open" | "close" | "op"; text: string; start: number; end: number; match: number };
 /** An expression in the source, as offsets. `text` is the source between them. */
@@ -206,7 +207,7 @@ export function expressionIn(source: string, start: number, end: number): Expr |
  * Occurrences of `expr` between offsets `from` and `to`, in order, including `expr` itself: the same tokens,
  * whatever the spacing, where they form a whole expression, so `$a + $b` doesn't match inside `$a + $b * $c`.
  */
-export function occurrences(source: string, expr: Expr, from = 0, to = source.length): Expr[] {
+export function occurrences(source: string, expr: Expr, from = 0, to = source.length, sameScope = true): Expr[] {
   const toks = tokenize(source);
   const first = toks.findIndex((t) => t.start === expr.start);
   const last = toks.findIndex((t) => t.end === expr.end);
@@ -218,8 +219,7 @@ export function occurrences(source: string, expr: Expr, from = 0, to = source.le
     if (toks[i].start < from || toks[i + seq.length - 1].end > to || seq.some((text, j) => toks[i + j].text !== text)) continue;
     const range: [number, number] = [i, i + seq.length - 1];
     // A closure inside the scope has variables of its own: `$item` there isn't the one outside.
-    const sameScope = scopeOpen(toks, i) === home;
-    if (i === first || (sameScope && candidates(toks, i).some(([a, b]) => a === range[0] && b === range[1]))) found.push(toExpr(source, toks, range));
+    if (i === first || ((!sameScope || scopeOpen(toks, i) === home) && candidates(toks, i).some(([a, b]) => a === range[0] && b === range[1]))) found.push(toExpr(source, toks, range));
   }
   return found.length ? found : [expr];
 }
@@ -291,6 +291,19 @@ export function functionScope(source: string, offset: number): [number, number] 
   return open < 0 ? [0, source.length] : [toks[open].end, toks[toks[open].match].start];
 }
 
+/** The name of the function or method whose body holds the offset directly, or null in a closure or outside any. */
+export function enclosingFunctionName(source: string, offset: number): string | null {
+  const toks = tokenize(source);
+  let k = toks.findIndex((t) => t.end > offset);
+  if (k < 0) k = toks.length;
+  const open = scopeOpen(toks, k);
+  if (open < 0) return null;
+  let j = open - 1;
+  while (j >= 0 && toks[j].text !== ")") j--;
+  const before = toks[toks[j].match - 1];
+  return before?.type === "name" && !/^(function|use)$/i.test(before.text) ? before.text : null;
+}
+
 /** The `{` token that opens the innermost function, method, or closure body around token `k`, or -1. */
 function scopeOpen(toks: Tok[], k: number): number {
   for (let open = enclosing(toks, k); open >= 0; open = enclosing(toks, open)) {
@@ -321,7 +334,7 @@ export function constantAt(source: string, start: number, end: number): Expr | n
   const inside = toks.filter((t) => t.start >= expr.start && t.end <= expr.end);
   const constant = inside.every((t, i) =>
     t.type === "num" || (t.type === "str" && !(t.text.startsWith('"') && t.text.includes("$"))) || (t.type === "op" && t.text !== "->" && t.text !== "?->") ||
-    (t.type === "open" && t.text !== "{") || (t.type === "close" && t.text !== "}") || (t.type === "name" && inside[i + 1]?.text !== "("),
+    (t.type === "open" && t.text !== "{") || (t.type === "close" && t.text !== "}") || (t.type === "name" && inside[i + 1]?.text !== "(" && !/^static$/i.test(t.text)),
   );
   return constant ? expr : null;
 }
@@ -412,7 +425,15 @@ export function constantDeclaration(source: string, name: string, open: number):
     else if (/^const$/i.test(t.text)) {
       let j = i + 1;
       while (j < close && toks[j].text !== "=" && toks[j].text !== ";") j++;
-      if (toks[j - 1]?.text !== name || toks[j]?.text !== "=") continue;
+      if (toks[j - 1]?.text !== name || toks[j]?.text !== "=") {
+        // A later constant of the same statement, as in `const A = 1, B = 2;`.
+        let k = j;
+        while (k < close && toks[k].text !== ";") {
+          if (toks[k].text === name && toks[k - 1]?.text === "," && toks[k + 1]?.text === "=") return { error: `${name} is declared with other constants in one statement` };
+          k = toks[k].type === "open" && toks[k].match > 0 ? toks[k].match + 1 : k + 1;
+        }
+        continue;
+      }
       let end = j + 1;
       while (end < close && toks[end].text !== ";" && toks[end].text !== ",") end = toks[end].type === "open" && toks[end].match > 0 ? toks[end].match + 1 : end + 1;
       if (toks[end]?.text === ",") return { error: `${name} is declared with other constants in one statement` };
@@ -460,7 +481,8 @@ export function inlinedValue(value: string, ownerSource: string, owner: string, 
   // Parentheses when an operator outside brackets and strings would bind to the code around it.
   let outer = out.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
   while (/\([^()]*\)|\[[^[\]]*\]/.test(outer)) outer = outer.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");
-  if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/^-?\d+(\.\d+)?$/, ""))) out = `(${out})`;
+  // A sign counts too: `10 - -1` must not become `10--1`.
+  if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/\d\.\d/g, "0"))) out = `(${out})`;
   return out;
 }
 
@@ -473,4 +495,133 @@ export function literalType(expr: string): string {
   if (/^(true|false)$/i.test(t)) return "bool";
   if (/^\[[\s\S]*\]$|^array\s*\(/i.test(t)) return "array";
   return t.match(/^new\s+(\\?[A-Za-z_][\w\\]*)\s*(\(|$)/)?.[1] ?? "";
+}
+
+// ---- Inline Method ----
+
+/** A method ready to inline: its parameters, the statements before its result, and the result, null when void. */
+export type Inlinable = { params: Param[]; statements: string; result: string | null; usesThis: boolean; locals: string[] };
+
+const SUPERGLOBALS = new Set(["$this", "$GLOBALS", "$_GET", "$_POST", "$_SERVER", "$_COOKIE", "$_FILES", "$_ENV", "$_REQUEST", "$_SESSION"]);
+
+/** Whether an expression can be read more than once, or not at all, without a difference: no calls, `new`, or writes. */
+const isPure = (expr: string) => !/[(]|\bnew\b|\+\+|--|(?<![=!<>])=(?![=>])/.test(outsideStrings(expr, (c) => c));
+/** Whether an expression can stand in place of a variable without parentheses. */
+const CALL_ARGS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+const ATOMIC = new RegExp(String.raw`^(-?\d[\d_.]*|'(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*"|true|false|null|(\$\w+|[\\\w]+)(${CALL_ARGS})?(\s*(->|\?->|::)\s*\$?\w+(${CALL_ARGS})?)*)$`, "is");
+const isAtomic = (expr: string) => ATOMIC.test(expr.trim());
+
+/**
+ * Reads the method whose name ends at `nameEnd` for Inline Method: its parameters, and its body as statements
+ * followed by at most one `return` at the end. An error says why it can't be inlined.
+ */
+export function methodToInline(source: string, nameEnd: number): Inlinable | { error: string } {
+  const parts = declarationParts(source, nameEnd);
+  if (!parts) return { error: "its declaration couldn't be read" };
+  if (parts.params.some((p) => p.variadic)) return { error: "it takes variadic arguments" };
+  const brace = source.slice(parts.end).match(/^\s*\{/);
+  if (!brace) return { error: "it has no body" };
+  const open = parts.end + brace[0].length - 1;
+  const toks = tokenize(source);
+  const openTok = toks.findIndex((t) => t.start === open);
+  const closeTok = toks[openTok]?.match ?? -1;
+  if (closeTok < 0) return { error: "its body couldn't be read" };
+  const body = source.slice(open + 1, toks[closeTok].start);
+  if (/<<</.test(commentMask(body))) return { error: "it has a heredoc" };
+  const inner = toks.slice(openTok + 1, closeTok);
+  // Tokens of the method itself, not of closures in it.
+  const own = (i: number) => scopeOpen(toks, openTok + 1 + i) === openTok;
+  const returns = inner.map((t, i) => (/^return$/i.test(t.text) && own(i) ? i : -1)).filter((i) => i >= 0);
+  if (inner.some((t, i) => /^(yield)$/i.test(t.text) && own(i))) return { error: "it's a generator" };
+  if (inner.some((t, i) => /^(static|global)$/i.test(t.text) && inner[i + 1]?.type === "var" && own(i))) return { error: "it has static or global variables" };
+  if (inner.some((t) => /^(func_get_args|func_num_args|get_defined_vars|compact|extract)$/i.test(t.text))) return { error: "it reads its variables by name" };
+  let statements = body;
+  let result: string | null = null;
+  if (returns.length) {
+    const last = returns.at(-1)!;
+    let semi = last + 1;
+    while (semi < inner.length && inner[semi].text !== ";") semi = inner[semi].type === "open" && inner[semi].match > 0 ? inner[semi].match - openTok : semi + 1;
+    if (returns.length > 1 || semi < inner.length - 1) return { error: "it returns from more than one place" };
+    statements = source.slice(open + 1, inner[last].start);
+    const value = source.slice(inner[last].end, inner[semi]?.start ?? inner[last].end).trim();
+    result = value || null;
+  }
+  const params = parts.params;
+  for (const [i, t] of inner.entries()) {
+    if (t.type !== "var") continue;
+    const p = params.find((q) => `$${q.name}` === t.text);
+    if (!p) continue;
+    let after = i + 1;
+    while (inner[after]?.text === "[" && inner[after].match > 0) after = inner[after].match - openTok;
+    const next = inner[after]?.text ?? "";
+    const prev = inner[i - 1]?.text ?? "";
+    if (ASSIGNMENT.has(next) || next === "++" || next === "--" || prev === "++" || prev === "--" || prev === "&" || /^as$/i.test(prev)) return { error: `it changes its parameter $${p.name}` };
+  }
+  // Variables inside strings would need renaming inside the strings.
+  const names = [...params.map((p) => `$${p.name}`), "$this"];
+  if (inner.some((t) => t.type === "str" && t.text.startsWith('"') && names.some((n) => new RegExp(`\\${n}\\b`).test(t.text)))) return { error: "it uses a parameter or $this inside a string" };
+  const locals = [...new Set(inner.filter((t) => t.type === "var" && !SUPERGLOBALS.has(t.text) && !names.includes(t.text)).map((t) => t.text.slice(1)))];
+  return { params, statements, result, usesThis: inner.some((t) => t.text === "$this"), locals };
+}
+
+/**
+ * The code that replaces a call of `m`, given the call's arguments and receiver (`$order` in `$order->total()`,
+ * null for `$this` or a function). Arguments take their parameters' places; one that's read more than once, or
+ * never, and isn't pure is evaluated once into a variable first. Locals that clash with `taken`, the caller's
+ * variable names, get a number. `statements` run before the call's statement; `result` replaces the call.
+ */
+export function inlineCall(m: Inlinable, args: string[], receiver: string | null, taken: Set<string>): { statements: string[]; body: string; result: string | null } | { error: string } {
+  if (args.some((a) => a.startsWith("..."))) return { error: "it spreads its arguments" };
+  const values = new Map<string, string>();
+  let positional = 0;
+  for (const a of args) {
+    const named = a.match(/^(\w+)\s*:(?!:)\s*([\s\S]*)$/);
+    const p = named ? m.params.find((q) => q.name === named[1]) : m.params[positional++];
+    if (!p) return { error: named ? `it names no parameter $${named[1]}` : "it passes more arguments than the method takes" };
+    values.set(p.name, named ? named[2] : a);
+  }
+  const used = new Set(taken);
+  const unique = (name: string) => {
+    let n = name;
+    for (let i = 2; used.has(n); i++) n = `${name}${i}`;
+    used.add(n);
+    return n;
+  };
+  const text = `${m.statements}\u0000${m.result ?? ""}`;
+  const toks = tokenize(text);
+  const count = (name: string) => toks.filter((t) => t.text === name).length;
+  const inUse = (name: string) => toks.some((t, i) => t.text === name && /^use$/i.test(toks[enclosing(toks, i) - 1]?.text ?? ""));
+  const before: string[] = [];
+  const replace = new Map<string, string>();
+  // The method's locals first, so a temporary can't take a local's name.
+  for (const local of m.locals) if (used.has(local)) replace.set(`$${local}`, `$${unique(local)}`);
+  else used.add(local);
+  for (const p of m.params) {
+    const value = values.get(p.name) ?? p.defaultValue;
+    if (value === undefined) return { error: `it doesn't pass $${p.name}, which has no default` };
+    const name = `$${p.name}`;
+    const n = count(name);
+    // An unused argument still runs, for its side effects.
+    if (n === 0) {
+      if (!isPure(value)) before.push(`${value};`);
+    } else if (/^\$\w+$/.test(value) && value !== "$this") replace.set(name, value);
+    else if ((isPure(value) || n === 1) && !inUse(name)) replace.set(name, isAtomic(value) ? value : `(${value})`);
+    else {
+      const temp = `$${unique(p.name)}`;
+      before.push(`${temp} = ${value};`);
+      replace.set(name, temp);
+    }
+  }
+  if (m.usesThis && receiver && receiver !== "$this") {
+    if (/^\$\w+$/.test(receiver)) replace.set("$this", receiver);
+    else {
+      const temp = `$${unique("object")}`;
+      before.unshift(`${temp} = ${receiver};`);
+      replace.set("$this", temp);
+    }
+  }
+  let out = text;
+  for (const t of [...toks].reverse()) if (t.type === "var" && replace.has(t.text)) out = out.slice(0, t.start) + replace.get(t.text) + out.slice(t.end);
+  const [statements, result] = out.split("\u0000");
+  return { statements: before, body: statements, result: m.result === null ? null : result };
 }

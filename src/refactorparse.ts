@@ -61,6 +61,31 @@ export function splitTopLevel(text: string): string[] {
   return parts.map((p) => p.trim()).filter((p, i, all) => p || i < all.length - 1);
 }
 
+/** An argument's code and the line comment that ends it, if any: `$b // why` gives `$b` and `// why`. */
+function trailingComment(arg: string): [string, string] {
+  for (let i = 0; i < arg.length; i++) {
+    const skip = skipQuoted(arg, i);
+    if (skip < 0) continue;
+    const line = (arg[i] === "/" && arg[i + 1] === "/") || (arg[i] === "#" && arg[i + 1] !== "[");
+    if (line && skip >= arg.length - 1) return [arg.slice(0, i).trimEnd(), arg.slice(i)];
+    i = skip;
+  }
+  return [arg, ""];
+}
+
+/**
+ * A call's new arguments, written as the old ones were: one per line with trailing commas when they were, and
+ * always when one ends in a line comment, which would otherwise swallow what follows it. `lineIndent` is the
+ * indentation of the call's line, for a list that wasn't one per line before.
+ */
+export function formatArgs(args: string[], original: string, lineIndent: string, unit = "    "): string {
+  const indent = original.match(/\n([ \t]*)\S/)?.[1];
+  const parts = args.map(trailingComment);
+  if (indent === undefined && !parts.some(([, c]) => c)) return args.join(", ");
+  const close = original.match(/\n([ \t]*)$/)?.[1] ?? lineIndent;
+  return `\n${parts.map(([code, c]) => `${indent ?? lineIndent + unit}${code},${c ? ` ${c}` : ""}`).join("\n")}\n${close}`;
+}
+
 /**
  * A parameter. `type` is everything before the name: attributes, a promoted property's modifiers, and the type.
  * In a new signature, `from` is the old parameter's name, and `callValue` the value to pass in existing calls

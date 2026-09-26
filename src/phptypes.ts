@@ -296,9 +296,18 @@ export function constructorCalls(source: string, classes: Set<string>): [number,
   return calls;
 }
 
-/** Applies `fn` to the text outside string literals only, so a rewrite of names leaves `"\t"` and `'a, b'` alone. */
+// Strings, heredocs, and comments, which name rewrites leave alone.
+const LITERALS = /'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"|<<<[ \t]*(['"]?)([A-Za-z_]\w*)\1\r?\n[\s\S]*?\n[ \t]*\2\b|\/\/[^\n]*|#(?!\[)[^\n]*|\/\*[\s\S]*?\*\//g;
+
+/** Applies `fn` to the code outside strings, heredocs, and comments, so a rewrite of names leaves `"\t"` and `'a, b'` alone. */
 export function outsideStrings(text: string, fn: (code: string) => string): string {
-  return text.split(/('(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*")/).map((part, i) => (i % 2 ? part : fn(part))).join("");
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(LITERALS)) {
+    out += fn(text.slice(last, m.index)) + m[0];
+    last = m.index! + m[0].length;
+  }
+  return out + fn(text.slice(last));
 }
 
 const BUILTIN_TYPES = new Set("int float string bool array callable iterable object mixed void null never false true self static parent".split(" "));

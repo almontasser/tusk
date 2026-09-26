@@ -1080,6 +1080,27 @@ subclass that doesn't redeclare it. `inlinedValue` writes the owner's class
 names in full and `shortenNames` shortens them again where the target file
 imports them.
 
+### Inline method
+
+`methodToInline` in `src/extractparse.ts` reads the method: its parameters,
+and its body split into statements and one final `return`, counting only the
+method's own tokens (`scopeOpen`), so a closure's `return` doesn't count. It
+refuses what a text substitution can't keep correct: several returns, a
+changed parameter, `yield`, `static` or `global` variables, `compact()` and the
+like, and parameters inside double-quoted strings. `inlineCall` then maps a
+call's arguments (positional and named) to the parameters: a variable renames
+the parameter, a pure or once-read value replaces it, and anything else is
+assigned to a temporary first, in argument order, after the receiver, as PHP
+evaluates them. Locals that clash with the caller's variables get a number.
+
+`inlineMethod` in `src/refactor.ts` finds the declaration with Go to
+Definition, refuses methods a subclass overrides, and places each call's code
+with `declarationPoint`: statements before the statement holding the call,
+which it allows only for `$x = …`, `return …`, `echo …`, and the like, where
+nothing else in the statement runs first. `qualifyNames` writes the method's
+class names in full for another file (`X::`, `new X`, `instanceof X`,
+`catch (X`), and `shortenNames` shortens them where that file imports them.
+
 ### Move class
 
 `moveClass` in `src/refactor.ts` reuses the file tree's move (`move` in
