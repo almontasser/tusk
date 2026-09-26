@@ -1599,6 +1599,14 @@ the rest arrives, so multibyte text never turns into replacement characters.
 pseudo-terminal whenever the panel changes size. You can drag the top edge of
 the panel to resize it.
 
+Panel tabs reorder with HTML drag and drop on the tab bar: `dragover` marks the
+tab under the pointer, and `drop` moves the dragged session before it in
+`sessions`, or last on the bar's empty end. The tab and terminal context menus
+use `showMenu` from `files.ts`. A capture-phase `pointerdown` and `focusin`
+listener records whether you last used the panel, and **Close Tab** (⌘W) calls
+`closeFocusedPanelTab` first, falling back to the editor tab. Clicks count, not
+only focus, because panel views such as **Tests** have nothing that takes focus.
+
 When the app exits, the operating system closes the pseudo-terminals, and the
 processes in them receive `SIGHUP`. Terminal processes don't need the language
 server watchdog.

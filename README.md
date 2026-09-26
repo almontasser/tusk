@@ -313,6 +313,14 @@ between two panes to resize them. Run **Unsplit** to close the focused pane and
 move its tabs to the pane beside it. The panes, and the shell terminals, come
 back when the project reopens.
 
+Right-click an editor tab to close it, the others, or all of its pane's tabs, to
+split it right or down, or to copy or reveal its path. Bottom panel tabs, such
+as the terminals, **Tests**, and **Problems**, work the same way: right-click
+one to close it, the others, or all; middle-click to close it; and drag it along
+the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in the
+panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
+select all, or clear it.
+
 Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving
 off, closing a changed tab asks whether to save it.

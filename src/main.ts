@@ -27,7 +27,7 @@ import { closeProblemPage, followEditor, forgetPath, forgetProblems, initProblem
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
-import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder } from "./files";
+import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, showMenu } from "./files";
 import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
@@ -41,7 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
-import { closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeFocusedPanelTab, closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -920,6 +920,24 @@ function renderTabs() {
         el.querySelector(".name")!.textContent = nameOf(path);
         el.onclick = () => (focusPane(pane), openFile(path));
         el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
+        el.oncontextmenu = (e) => {
+          e.preventDefault();
+          const closeAll = async (keep?: string) => {
+            for (const p of pane.paths.filter((p) => p !== keep)) await closeTab(p, pane);
+          };
+          showMenu(e.clientX, e.clientY, [
+            { label: "Close", run: () => closeTab(path, pane) },
+            { label: "Close Others", run: () => closeAll(path) },
+            { label: "Close All", run: () => closeAll() },
+            "-",
+            { label: "Split Right", run: () => (focusPane(pane), openFile(path).then(() => split("row"))) },
+            { label: "Split Down", run: () => (focusPane(pane), openFile(path).then(() => split("col"))) },
+            "-",
+            { label: "Copy Path", run: () => copyPath(path) },
+            { label: "Copy Relative Path", run: () => copyPath(path, true) },
+            { label: "Reveal in Finder", run: () => revealInFinder(path) },
+          ]);
+        };
         el.draggable = true;
         el.ondragstart = (e) => ((draggedTab = { path, from: pane }), e.dataTransfer?.setData("application/x-editor-tab", path));
         const close = document.createElement("span");
@@ -1125,7 +1143,7 @@ const actions: Action[] = [
   { label: "Color Theme…", keys: "Ctrl+Backquote", run: pickTheme },
   { label: "Import Color Theme…", run: importTheme },
   { label: "Remove Imported Color Theme…", run: removeTheme },
-  { label: "Close Tab", keys: "Meta+W", run: () => closeTab(active) },
+  { label: "Close Tab", keys: "Meta+W", run: () => closeFocusedPanelTab() || closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },
   { label: "Go to File", keys: "Meta+Shift+O", run: goToFile },

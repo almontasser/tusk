@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
+import { showMenu } from "./files";
 import { onTheme } from "./themes";
 
 /** What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again. */
@@ -15,6 +16,11 @@ const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
 let active: Session | undefined;
 let panelVisible = false;
+// Whether you last clicked or focused inside the panel, so ⌘W closes a panel tab instead of an editor tab.
+let panelFocused = false;
+const track = (e: Event) => (panelFocused = $("panel").contains(e.target as Node));
+addEventListener("pointerdown", track, true);
+addEventListener("focusin", track, true);
 
 // The built-in themes' terminal colors; other themes bring their own.
 const builtIn = {
@@ -50,6 +56,15 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   term.loadAddon(fit);
   term.open(el);
   fit.fit();
+  el.oncontextmenu = (e) => {
+    e.preventDefault();
+    showMenu(e.clientX, e.clientY, [
+      { label: "Copy", run: () => navigator.clipboard.writeText(term.getSelection()) },
+      { label: "Paste", run: async () => term.paste(await navigator.clipboard.readText()) },
+      { label: "Select All", run: () => term.selectAll() },
+      { label: "Clear", run: () => term.clear() },
+    ]);
+  };
 
   const id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
   const restore = !command || restorable ? { title, cwd, command } : undefined;
@@ -105,6 +120,13 @@ function activate(session: Session | undefined) {
   session?.term?.focus();
 }
 
+/** Closes the active panel tab when you last used the panel, and says whether it did. */
+export function closeFocusedPanelTab() {
+  if (!panelFocused || !panelVisible || !active) return false;
+  close(active);
+  return true;
+}
+
 function close(session: Session) {
   session.dispose();
   sessions.splice(sessions.indexOf(session), 1);
@@ -116,6 +138,27 @@ function close(session: Session) {
 const viewIcons: Record<string, string> = {
   Problems: "warning", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
 };
+
+// Drag a tab onto another to put it before that one, or onto the bar's empty end to put it last.
+let dragged: Session | undefined;
+const bar = $("terminal-tabs");
+const clearMarks = () => bar.querySelectorAll(".drop-before").forEach((t) => t.classList.remove("drop-before"));
+bar.ondragover = (e) => {
+  if (!dragged) return;
+  e.preventDefault();
+  clearMarks();
+  (e.target as HTMLElement).closest(".tab")?.classList.add("drop-before");
+};
+bar.ondragleave = clearMarks;
+bar.ondrop = (e) => {
+  if (!dragged) return;
+  e.preventDefault();
+  const target = sessions[[...bar.children].indexOf((e.target as HTMLElement).closest(".tab")!)];
+  sessions.splice(sessions.indexOf(dragged), 1);
+  sessions.splice(target ? sessions.indexOf(target) : sessions.length, 0, dragged);
+  renderTabs();
+};
+addEventListener("dragend", () => ((dragged = undefined), clearMarks()));
 
 function renderTabs() {
   // The activity bar's panel buttons light up while their view is the one showing.
@@ -131,6 +174,17 @@ function renderTabs() {
       icon.className = `codicon codicon-${s.term ? "terminal" : (viewIcons[s.title] ?? "globe")}`;
       tab.append(icon, s.title);
       tab.onclick = () => activate(s);
+      tab.onauxclick = (e) => e.button === 1 && close(s);
+      tab.oncontextmenu = (e) => {
+        e.preventDefault();
+        showMenu(e.clientX, e.clientY, [
+          { label: "Close", run: () => close(s) },
+          { label: "Close Others", run: () => sessions.filter((o) => o !== s).forEach(close) },
+          { label: "Close All", run: () => [...sessions].forEach(close) },
+        ]);
+      };
+      tab.draggable = true;
+      tab.ondragstart = (e) => ((dragged = s), e.dataTransfer?.setData("application/x-panel-tab", s.title));
       const x = document.createElement("span");
       x.className = "close";
       x.textContent = "×";
