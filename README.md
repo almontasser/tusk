@@ -58,7 +58,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
-| Settings | Without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
+| Settings | Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
@@ -337,6 +337,13 @@ line endings) converts when saving too, but the editor shows CR lines as LF, so
 each file's content, keeps each file's line endings (CR included), and reads
 files as UTF-8. Changes to
 `.editorconfig` apply to open files at once.
+
+Without a `charset`, a file that isn't valid UTF-8 opens in the encoding it
+most likely has, such as Windows-1252 or Shift_JIS, and saves back in it. The
+status bar shows the encoding and line endings. To pick another encoding,
+click it, or run **Change File Encoding…**: **Reopen** reads the file again in
+that encoding, and **Convert and Save** saves the text in it. The choice lasts
+until you restart the app.
 
 Press ⌘\ to split the editor to the right, or ⌘⇧\ to split it down: the
 current file opens in a new pane, up to four panes. With four, ⌘\ moves to the

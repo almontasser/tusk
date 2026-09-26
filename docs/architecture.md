@@ -228,7 +228,19 @@ is written with one). UTF-16 is decoded strictly, like UTF-8: an odd number of
 bytes or an unpaired surrogate fails to open rather than losing bytes on save. Text that Latin-1 can't hold fails to save with the
 character named, and the tab stays unsaved. Without a `charset`, files are
 read as strict UTF-8 and written back unchanged, so a UTF-8 file with a
-byte-order mark keeps it. The model's charset only shows in the status bar;
+byte-order mark keeps it.
+
+`readText` calls `read_text`, which is `read_file` plus detection: without a
+charset, a file that isn't valid UTF-8 gets UTF-16 from its byte-order mark,
+or else chardetng's guess, and fails as binary if it has a NUL byte. A guess
+that can't decode every byte falls back to Windows-1252, which decodes any
+byte, so nothing is lost on save. `projectfiles.ts` remembers the detected
+encoding by path and `writeText` passes it back; any encoding name that
+`encoding_rs` knows is decoded strictly and encoded with an error for
+characters it can't hold. **Change File Encoding…** (or a click on the status
+bar item) sets an encoding for the path that wins over `.editorconfig` for the
+rest of the session: Reopen reads the file again in it, and Convert and Save
+marks the tab changed and saves. The model's charset only shows in the status bar;
 the rest of the editor (git, search, language servers) sees text.
 
 ### External changes
@@ -3437,3 +3449,14 @@ alone as lines but save it with LF. Rather than patch Monaco, `readText` and
 `writeText` convert at the edge, so every feature sees LF text and a CR file,
 or a file under `end_of_line = cr`, is written with CR. The cost is that the
 conversion isn't an undoable edit, unlike LF and CRLF.
+
+### 2026-09-26: Detect the encoding of files that aren't UTF-8
+
+A legacy file used to fail to open until you set `charset` in `.editorconfig`.
+Now `read_text` guesses with chardetng, the detector Firefox uses, and decodes
+with `encoding_rs` (already in the dependency tree). Both are small pure-Rust
+crates, so nothing is installed. Detection runs only when the bytes aren't
+valid UTF-8, so UTF-8 files are never misread, and decoding stays strict,
+falling back to Windows-1252, so a wrong guess shows odd characters but saves
+the same bytes back. `read_file` keeps its strict UTF-8 default for the
+callers that read config files.

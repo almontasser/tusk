@@ -3,13 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
-import { choose, type Item, pick, rank } from "./palette";
+import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
-import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, writeText } from "./projectfiles";
+import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
@@ -728,6 +728,7 @@ function markErrors() {
     if (el.classList.contains("has-error") !== errorPaths.has(el.dataset.path!)) el.classList.toggle("has-error");
 }
 $("problems").onclick = () => root && showProblems();
+$("encoding").onclick = () => changeEncoding();
 
 // ---- Recent projects and the welcome screen ----
 
@@ -937,7 +938,7 @@ async function applyEditorConfig(model: monaco.editor.ITextModel) {
   if (model.isDisposed()) return;
   const options = Object.fromEntries(Object.entries(indentation(props)).filter(([, v]) => v !== undefined));
   if (Object.keys(options).length) model.updateOptions(options);
-  modelCharsets.set(model, CHARSETS[props.charset] ?? "UTF-8");
+  modelCharsets.set(model, charsetName(model.uri.fsPath, props));
   if (savesCr(model.uri.fsPath, props)) crModels.add(model);
   else crModels.delete(model);
   const eol = eolOf(props);
@@ -951,6 +952,42 @@ async function applyEditorConfig(model: monaco.editor.ITextModel) {
   if (model === editor.getModel()) updateStatusItems();
 }
 monaco.editor.onDidCreateModel((model) => model.uri.scheme === "file" && applyEditorConfig(model));
+
+/** `.editorconfig` charsets and encoding names for Change File Encoding. */
+const ENCODINGS = ["utf-8", "utf-8-bom", "utf-16le", "utf-16be", "latin1", "windows-1252", "ISO-8859-15", "windows-1250", "windows-1251", "KOI8-R", "macintosh", "Shift_JIS", "EUC-JP", "EUC-KR", "GBK", "gb18030", "Big5"];
+
+/** Reads the active file again in another encoding, or converts it to one and saves it. */
+function changeEncoding() {
+  const path = active;
+  const tab = tabs.get(path);
+  if (!tab) return;
+  const name = (charset: string) => CHARSETS[charset] ?? charset;
+  pick(`Encoding of ${relative(path)}`, (q) =>
+    rank(
+      q,
+      ENCODINGS.map((charset) => ({
+        label: name(charset),
+        run: async () => {
+          const how = await choose(`Reopen ${nameOf(path)} as ${name(charset)}, or convert its text to ${name(charset)}?`, ["Reopen", "Convert and Save", "Cancel"]);
+          if (how === "Convert and Save") {
+            setCharset(path, charset);
+            tab.saved = -1;
+            await saveFile(path);
+          } else if (how === "Reopen") {
+            if (isDirty(tab) && !(await confirm(`Reopen ${nameOf(path)}? Its unsaved changes are lost.`, "Reopen"))) return;
+            setCharset(path, charset);
+            const text = await readText(path).catch((e) => (setCharset(path, undefined), status(`Couldn't reopen ${relative(path)}: ${e}`), null));
+            if (text === null) return;
+            tab.model.setValue(text);
+            tab.saved = tab.model.getAlternativeVersionId();
+          } else return;
+          showDirty(path);
+          applyEditorConfig(tab.model);
+        },
+      })),
+    ),
+  );
+}
 
 /**
  * Converts line endings, trims trailing whitespace, and adds or removes the final newline, as
@@ -1319,6 +1356,7 @@ const actions: Action[] = [
   { label: "Split Down", keys: "Meta+Shift+Backslash", run: () => split("col") },
   { label: "Move Tab to Next Pane", run: moveTabToNextPane },
   { label: "Unsplit", run: () => unsplit() },
+  { label: "Change File Encoding…", run: () => changeEncoding() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Problems", keys: "Meta+6", run: () => root && showProblems() },
   { label: "Scan Project for Problems", run: () => root && (showProblems(), scanProject()) },
