@@ -231,6 +231,7 @@ pub fn run() {
             search::search_text,
             search::files_matching,
             search::replace_text,
+            search::symbol_free_folders,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

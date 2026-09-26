@@ -409,6 +409,15 @@ full build. An index takes 300 to 550 MB on a large Laravel app, so a folder per
 list would pile up. When the fixed patterns in `PHPACTOR_EXCLUDES` change,
 delete the folders the same way.
 
+`symbol_free_folders` in `search.rs` suggests more folders to skip. It reads
+every PHP file in `vendor` except tests and `vendor/composer`, checks each with a
+regex for a class, interface, trait, enum, function, constant, `define(`, or
+`class_alias(` declaration, and returns the topmost folders where no file
+declares anything, at 100 KB or more. The regex errs toward seeing a
+declaration, so a wrong call only leaves a folder out. Opening the files is
+most of the cost, so they're read on every core: 0.6 seconds for 26,000 files,
+against 3.8 seconds one after another.
+
 ### Laravel magic in Mago's results
 
 Mago's analyzer has no Laravel plugin (its plugins are `stdlib`, `psl`,
