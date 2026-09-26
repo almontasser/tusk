@@ -370,8 +370,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 
 #welcome { position: fixed; inset: 40px 0 0 0; z-index: 50; display: grid; place-items: center; background: var(--bg); }
 .welcome-card { width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column; align-items: center; text-align: center; }
-.welcome-logo { width: 64px; height: 64px; border-radius: 16px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #6f5bd6, #3574f0); box-shadow: 0 8px 24px #3574f055; }
-.welcome-logo .codicon { font-size: 34px !important; }
+.welcome-logo { width: 120px; height: 120px; display: block; margin: 0 auto -8px; }
 .welcome-card h1 { font-size: 22px; margin: 16px 0 2px; }
 .welcome-sub { margin: 0 0 20px; color: var(--muted); }
 #welcome-open { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; }

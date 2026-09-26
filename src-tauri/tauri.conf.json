@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "PHP Editor",
+  "productName": "Tusk",
   "version": "0.1.0",
-  "identifier": "dev.almontasser.phpeditor",
+  "identifier": "ly.almontasser.tusk",
   "build": {
     "beforeDevCommand": "sh scripts/fetch-tools.sh && pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "PHP Editor",
+        "title": "Tusk",
         "width": 1400,
         "height": 900,
         "titleBarStyle": "Overlay",

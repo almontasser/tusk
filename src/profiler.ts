@@ -53,7 +53,7 @@ if (($file = getenv('PHP_EDITOR_SQL_TRACE')) && function_exists('xdebug_set_filt
 `,
   });
   await invoke("write_file", {
-    path: `${dir}/ini/zz-php-editor.ini`,
+    path: `${dir}/ini/zz-tusk.ini`,
     contents: `; Written by the editor for profiled runs.\nauto_prepend_file="${dir}/prepend.php"\nxdebug.trace_format=1\nxdebug.trace_output_name=trace.%t.%p.%R\nxdebug.var_display_max_data=4096\nxdebug.var_display_max_children=128\nxdebug.var_display_max_depth=3\n`,
   });
   return `${dir}/ini`;

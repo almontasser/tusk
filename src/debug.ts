@@ -298,7 +298,7 @@ export async function startDebugging() {
   render();
   try {
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
-    await request("initialize", { adapterID: "php", clientID: "php-editor", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
+    await request("initialize", { adapterID: "php", clientID: "tusk", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
     const mappings = parseMappings(await serverPaths());
     const pathMappings = Object.keys(mappings).length ? mappings : undefined;

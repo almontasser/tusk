@@ -672,7 +672,7 @@ const HEADERS: Record<string, string[]> = {
   "If-None-Match": [],
   Origin: ["{{host}}"],
   Referer: ["{{host}}/"],
-  "User-Agent": ["PHP Editor"],
+  "User-Agent": ["Tusk"],
   "X-Requested-With": ["XMLHttpRequest"],
   "X-XSRF-TOKEN": ["{{xsrf}}"],
 };

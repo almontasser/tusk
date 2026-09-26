@@ -1,8 +1,11 @@
-# PHP Editor
+<p align="center"><img src="design/icon.png" width="128" alt="Tusk's icon: an ivory tusk on an indigo tile" /></p>
 
-A fast macOS desktop editor for PHP, Laravel, and Filament projects. It aims for
-PhpStorm-class navigation and refactoring using only free, open-source language
-servers.
+# Tusk
+
+Tusk is a fast macOS desktop editor for PHP, Laravel, and Filament projects. It
+aims for PhpStorm-class navigation and refactoring using only free, open-source
+language servers. Its name and its mascot, an elephant, come from PHP's
+elePHPant.
 
 The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 
@@ -234,7 +237,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Changes apply immediately and are saved in
-`~/Library/Application Support/dev.almontasser.phpeditor/settings.json`.
+`~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
 | Setting | Default |
 | --- | --- |
@@ -857,7 +860,7 @@ selected item; press Escape to close the list and see it.
 To turn it on, select **AI code completion** in Settings, or run
 **Toggle AI Completion** from the palette. The first time, the editor
 downloads the model into
-`~/Library/Application Support/dev.almontasser.phpeditor/models/`, and the
+`~/Library/Application Support/ly.almontasser.tusk/models/`, and the
 status bar shows the progress. While it's on, the status bar shows **AI**;
 click it to turn completion off.
 
