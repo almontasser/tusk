@@ -1599,6 +1599,27 @@ the rest arrives, so multibyte text never turns into replacement characters.
 pseudo-terminal whenever the panel changes size. You can drag the top edge of
 the panel to resize it.
 
+Panel tabs reorder with HTML drag and drop on the tab bar: `dragover` marks the
+tab under the pointer, and `drop` moves the dragged session before it in
+`sessions`, or last on the bar's empty end. The tab and terminal context menus
+use `showMenu` from `files.ts`. A capture-phase `pointerdown` and `focusin`
+listener records whether you last used the panel, and **Close Tab** (⌘W) calls
+`closeFocusedPanelTab` first, falling back to the editor tab. Clicks count, not
+only focus, because panel views such as **Tests** have nothing that takes focus.
+
+A panel tab dropped on an editor pane leaves `sessions` for `docked` in
+`terminal.ts`, still running, and `main.ts` gives it a `view:N` path in the
+pane's `paths`. No file path starts with `view:`, so tab order, dragging
+between panes, splitting, and closing all work on it unchanged. `renderTabs`
+calls `showViews`, which puts the shown view's element inside `.pane-editor`,
+over the editor, and hides the others; the editor has no model meanwhile.
+`activeFile()` is `""` while a view shows, so file actions, the breadcrumbs,
+and the project tree ignore it. When code calls `showPanelView` for a view in a
+pane, `terminal.ts` asks the editor to reveal that tab instead of adding a
+second one. The session doesn't save views in panes: `runningTerminals`
+includes docked terminals, which reopen in the panel. Opening another project
+moves every view back to the panel first, so `closeTerminals` reaches them.
+
 When the app exits, the operating system closes the pseudo-terminals, and the
 processes in them receive `SIGHUP`. Terminal processes don't need the language
 server watchdog.
