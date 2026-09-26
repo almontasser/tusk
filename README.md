@@ -58,13 +58,13 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
-| Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
+| Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
-| Coverage | The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
+| Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Code signing | The app is ad-hoc signed, not notarized, so on another Mac, Gatekeeper blocks the first install until you allow it in **System Settings > Privacy & Security**. Notarizing needs a paid Apple Developer account. |
@@ -1148,16 +1148,19 @@ and the gutter marks each executable line: green if it ran, red if it didn't.
 Hover over a mark to see how many times the line ran and which tests ran it.
 To list those tests, put the cursor on the line and run **Show Tests Covering
 Line** from ⌘⇧A; choose one to open it. Marks follow their lines as you edit
-and stay until the next coverage run, or until you run **Hide Coverage**. ⌃R
-reruns with coverage too.
+and stay until the next coverage run, or until you run **Hide Coverage**. A line
+you change gets a dashed gray mark instead, since the run didn't see its new
+code; undo the change and its mark comes back. ⌃R reruns with coverage too.
 
 The **Coverage** tab in the bottom panel starts with each folder's coverage,
 nested, such as `app/Models 45% · 9/20`. Click a folder to list only its
 files, and click it again to list them all. Below, it lists every file with
 uncovered lines, least covered first, with each file's percentage. Under each file, a row shows
 a run of uncovered lines, such as `15–17`, and the code on its first line.
-Click a row to open it there. The tab's buttons rerun with coverage and hide
-coverage.
+Click a row to open it there. The tab follows your edits: its line numbers and
+code are the lines as they are now, and lines you changed count as neither
+covered nor uncovered, so the summary and each file show how many changed. The
+tab's buttons rerun with coverage and hide coverage.
 
 Coverage needs PCOV or Xdebug for PHP. PHPUnit uses PCOV when it's loaded, and
 the editor sets `XDEBUG_MODE=coverage` for Xdebug. Only the folders in
@@ -1392,11 +1395,24 @@ execution pauses, expand like variables, and are saved with the project.
 
 To pause wherever an exception is thrown, even if the code catches it, turn
 on **Pause on exceptions** (the lightning icon in the Debug tab). The log
-shows the exception's class and message. To pause only on some classes,
-right-click the icon, or run **Pause on Exception Classes…** from ⌘⇧A, and
-enter them separated by commas, such as `App\Exceptions\PaymentFailed`. Their
-subclasses count too. Leave the field empty to pause on every exception again.
-The classes are saved per project.
+shows the exception's class and message. To narrow it, right-click the icon,
+or run **Pause on Exceptions Options…** from ⌘⇧A:
+
+- **Classes:** enter them separated by commas, such as
+  `App\Exceptions\PaymentFailed`. Their subclasses count too. Leave the field
+  empty to pause on every exception again. **Pause on Exception Classes…** in
+  ⌘⇧A opens the same field.
+- **When:** choose **Only uncaught** to skip exceptions that code catches. In a
+  Laravel project, execution then pauses in Laravel's exception handler, as it
+  starts to render the exception into an error page or console output, with the
+  exception in `$e`; the log names its class, message, and where it was thrown.
+  Elsewhere, execution pauses at PHP's fatal error for the exception, at the
+  line that threw it, where the log shows PHP's stack trace but the variables
+  are gone.
+- **Skip exceptions thrown in:** enter path patterns relative to the project,
+  such as `vendor/**`, to keep going when the exception comes from those files.
+
+The options are saved per project.
 
 ### Docker and Sail
 
@@ -1743,6 +1759,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |
 | `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
+| `src/debugexceptions.ts` | Where an exception was thrown, the class of an uncaught one, and where Laravel renders them, for pausing on exceptions |
 | `src/database.ts` | The Database tool window, query console, and results grid |
 | `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
 | `src/composer.ts` | The Composer tool window |

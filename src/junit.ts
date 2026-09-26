@@ -175,6 +175,26 @@ export function uncoveredRanges(lines: Map<number, number>): [number, number][] 
   return ranges;
 }
 
+/** A statement line of a coverage report: its hit count, its line in the report, and its text when first shown. */
+export type Mark = { count: number; at: number; text?: string; stale?: boolean };
+
+/**
+ * A file's marks by the lines edits moved them to, given each mark's line now and the file's text. A mark
+ * whose line's text changed since it was first shown is stale, and a mark past the end of the file is dropped.
+ * A deleted line's mark lands on a neighbor's line, where a mark that isn't stale wins.
+ */
+export function moveMarks(placed: [number, Mark][], textAt: (line: number) => string | undefined): Map<number, Mark> {
+  const moved = new Map<number, Mark>();
+  for (const [line, mark] of placed) {
+    const text = textAt(line);
+    if (text === undefined) continue;
+    mark.text ??= text;
+    mark.stale = text !== mark.text;
+    if (!moved.get(line) || moved.get(line)!.stale) moved.set(line, mark);
+  }
+  return moved;
+}
+
 /**
  * Reads the index of PHPUnit's XML coverage (`--coverage-xml`): the folder the report's paths are relative
  * to, and each source file's report, relative to the index, by the source file's path.

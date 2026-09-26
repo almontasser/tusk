@@ -1805,12 +1805,26 @@ start at 5, so both show on a changed line. Decorations stick to their lines
 as you edit, and models created later, such as a file opened after the run,
 get their marks in `onDidCreateModel`.
 
+Each line of the report is a `Mark`: its hit count, its line in the report
+(`at`), and its text when first decorated. `coverage` keeps each file's marks
+by their line now. 300 ms after an edit, `sync` reads each decoration's line
+and `moveMarks` (in `src/junit.ts`) rebuilds the file's map: a mark whose
+line's text differs from its snapshot is stale, and a deleted line's mark,
+which Monaco collapses onto a neighbor, loses to the neighbor's own mark. Then
+the model is decorated again, stale marks with `coverage-stale`, and the
+Coverage tab renders again. A model's marks sync once more when it's disposed,
+so a closed file keeps its moved lines. Per-test lookups use `at`, since
+PHPUnit's per-file reports number lines as they were at the run.
+
 The Coverage tab is a panel view (`showPanelView`) that reuses the Tests tab's
 toolbar styles and the Find view's file groups (`fileGroup` in `src/search.ts`,
 generic over its items). `uncoveredRanges` in `src/junit.ts` joins uncovered
 statement lines into runs, splitting a run only at a covered statement, since
-blank lines and comments aren't in the report. A file's text is read when its
-rows first show, so collapsed files cost nothing.
+blank lines and comments aren't in the report. A stale line goes to it with a
+count of -1, so it splits runs like a covered line, and it's left out of the
+percentages. A file's text comes from its model when it's open, and otherwise
+is read when its rows first show, so collapsed files cost nothing. Rendering
+again keeps each file group open or closed, by the `data-path` on its row.
 
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
@@ -2529,7 +2543,31 @@ Xdebug exception breakpoint on that class name, whatever the name (its own
 filter list, such as `Notice`, is only what it suggests), and Xdebug also
 matches subclasses. Without chosen classes the filters are `Exception` and
 `Error`, which cover every `Throwable`. Turning it on or off is app-wide; the
-classes are per project, both in `localStorage`.
+classes and the other options are per project, all in `localStorage`.
+
+Xdebug pauses at the throw, before PHP searches for a catch, and DBGp has no
+notion of caught, so **Only uncaught** pauses where an uncaught exception
+ends up instead. PHP turns one into an `E_ERROR` named `Fatal error`, and
+Xdebug matches exception breakpoints on PHP error names too, so the filter
+becomes `"Fatal error"`. The quotes are part of the name: the adapter writes
+the filter unquoted into `breakpoint_set -x`, and Xdebug rejects a bare space.
+At that pause the stack has unwound and the adapter can't evaluate, so the
+class comes from the message (`uncaughtClass`) and matches by name only.
+Laravel catches every exception itself, so for Laravel projects
+`findHandler` reads `vendor/.../Foundation/Exceptions/Handler.php` when the
+debugger starts, and `handlerLines` finds the first statement of `render` and
+`renderForConsole`. `sendBreakpoints` adds a breakpoint there whose condition
+is `$e instanceof \Class || …` for the chosen classes, so subclasses count.
+When execution stops on one, `exceptionPause` evaluates `$e`'s class,
+message, file, and line for the log.
+
+**Skip exceptions thrown in** is checked by the client, since the adapter's
+own `ignore` globs are a `launch` argument that can't change mid-session. On
+an exception pause, `exceptionPause` matches the top frame's path (the
+throw, or the file PHP's fatal error names), or at Laravel's handler,
+`$e->getFile()` mapped to a local path, against the patterns with
+`globToRegex` from `editorconfig.ts` (`thrownIn`), and resumes without
+showing the pause when one matches.
 
 Changing a variable sends `setVariable` with the reference of the scope or
 value that holds it. The adapter sets it through Xdebug's `property_set`, which
@@ -3467,3 +3505,28 @@ functions. Saving the profiling server's command instead would reuse a port
 that may be taken now, and skip writing the PHP settings its command points
 to. Starting them again is safe: the debugger only listens, and the server
 serves on `127.0.0.1`.
+
+### 2026-09-26: Coverage follows edits by line text
+
+The Coverage tab showed the report's line numbers and the file's text on disk,
+so after an edit its rows pointed at the wrong code. Now marks move with
+Monaco's decorations and the tab renders from the moved lines. Deciding which
+lines an edit made stale compares each line's text with its text at the run,
+rather than tracking which lines each change touched: pressing Enter at the
+end of a line doesn't change it, and undoing a change makes its line fresh
+again. A line whose text only moved between lines, such as two swapped lines,
+counts as changed, which is the safe side.
+
+### 2026-09-26: Uncaught exceptions pause where they end up
+
+Xdebug decides to pause on an exception in its throw hook, before the engine
+looks for a `catch`, and DBGp reports nothing about catching, so the editor
+can't know at the throw whether code will catch it. Guessing from the source,
+by finding `try` blocks around each frame's call, would miss catches in
+`vendor` code and `finally` rethrows. Instead, **Only uncaught** pauses where
+an uncaught exception is sure to arrive: PHP's fatal error, and in Laravel,
+which catches everything, the start of its handler's `render` methods. Both
+come after the stack unwinds, so the pause isn't at the throw; in Laravel, `$e`
+still holds the exception, and the log says where it was thrown. Skipping by
+path runs in the client rather than through the adapter's `ignore` globs, so
+changing it doesn't restart the listener.
