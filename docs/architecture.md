@@ -2756,6 +2756,13 @@ the debugger.
   config folder, in VS Code's format. One completion provider for every
   language (`"*"`) filters them by `scope`. While the file is open in a tab, the
   provider reads the tab's text, so changes apply without a save or reload.
+- **Postfix completion** is a second completion provider in `src/snippets.ts`,
+  for PHP. `postfixStart` in `src/postfix.ts` walks back from the dot over
+  names, `->`, `?->`, `::`, and bracket groups to find the expression, and
+  rejects a bare word, so a sentence's period offers nothing. Each item's range
+  starts at the expression and its `filterText` is `expr.key`, so Monaco
+  filters on what you typed after the dot and replaces the expression with the
+  template.
 - **TODO** (`loadTodos` in `src/search.ts`) is a sidebar view that reuses
   `search_text` with a case-sensitive regex, so it respects `.gitignore` and
   the 20,000-match limit. `inComment` from `src/comments.ts` then keeps the
@@ -3425,3 +3432,11 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Postfix templates as completion items
+
+PhpStorm's postfix completion is a completion item whose range reaches back over
+the expression, so Monaco's own list, filtering, and snippet placeholders do the
+work, and no key handling is needed. There's no `.` trigger character: the list
+would open after every concatenation such as `$a.`, and Enter would pick a
+template. The list opens once you type a letter after the dot.

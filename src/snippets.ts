@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
+import { POSTFIX_TEMPLATES, postfixStart, snippetText } from "./postfix";
 
 type Snippet = { prefix: string | string[]; body: string | string[]; description?: string; scope?: string };
 
@@ -70,6 +71,28 @@ export async function initSnippets() {
             range,
           })),
         );
+      return { suggestions };
+    },
+  });
+
+  // Postfix templates: `$user.if` offers `if ($user) {}`, replacing the expression and the dot. The filter text
+  // starts with the expression, so Monaco matches it against everything from the expression to the cursor.
+  monaco.languages.registerCompletionItemProvider("php", {
+    provideCompletionItems(model, position) {
+      const line = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+      const typed = line.match(/\.\w*$/)?.[0];
+      const start = typed ? postfixStart(line, line.length - typed.length) : -1;
+      if (start < 0) return { suggestions: [] };
+      const expr = line.slice(start, line.length - typed!.length);
+      const range = new monaco.Range(position.lineNumber, start + 1, position.lineNumber, position.column);
+      const suggestions = Object.entries(POSTFIX_TEMPLATES).map(([key, t]) => ({
+        label: { label: `.${key}`, description: t.description },
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        filterText: `${expr}.${key}`,
+        insertText: t.body.replace("EXPR", () => snippetText(expr)),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range,
+      }));
       return { suggestions };
     },
   });

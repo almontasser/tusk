@@ -471,6 +471,21 @@ format, so you can paste snippets from VS Code:
 `scope` lists language IDs, such as `php,blade`. Leave it out to offer the
 snippet in every file. Changes apply as you type in the file.
 
+### Postfix completion
+
+In PHP files, type a dot and a template name after an expression to wrap it, as
+in PhpStorm: `$user.if` becomes `if ($user) {}`. The expression can be a
+variable, a call, or a chain such as `$this->posts()->first()`.
+
+| Template | Result |
+| --- | --- |
+| `.if`, `.notnull`, `.null`, `.isset` | `if (expr)`, `if (expr !== null)`, `if (expr === null)`, `if (isset(expr))` |
+| `.foreach` | `foreach (expr as $item)` |
+| `.return`, `.throw` | `return expr;`, `throw expr;` |
+| `.var` | `$var = expr;` |
+| `.not`, `.par` | `!expr`, `(expr)` |
+| `.dd`, `.dump` | `dd(expr);`, `dump(expr);` |
+
 ## Compare files
 
 With a file open, run one of these from ⌘⇧A to open the diff view:
