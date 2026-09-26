@@ -13,7 +13,7 @@
 // defs, full, types). `nomodels` is full context without the models' columns. `wide` is full context with twice the budget for definitions and similar code. `types` is
 // full context plus the classes of the names before `->` near the cursor, from Phpactor's command
 // line, as the editor gets them from Phpactor. For a project without vendor/, build Phpactor's index
-// first: php src-tauri/resources/tools/phpactor.phar index:build --working-dir=<project>
+// first: php src-tauri/target/tools/phpactor/phpactor.phar index:build --working-dir=<project>
 // CASES=columns keeps only cases that read a model's column after `->`, to measure the models' columns.
 // DEBUG=1 prints each case's expected text and the model's reply.
 // NO_TYPING=1 skips timing a request after typing, which takes two more requests per case.
@@ -25,7 +25,7 @@ import { psr4From } from "../src/psr4.ts";
 
 const [root, modelPath, count = "80", only = "none,defs,full,types", task = "line"] = process.argv.slice(2);
 if (!root || !modelPath) throw new Error("Usage: node scripts/ai-bench.ts <project> <model.gguf> [cases] [configs]");
-const tools = new URL("../src-tauri/resources/tools/", import.meta.url).pathname;
+const tools = new URL("../src-tauri/target/tools/", import.meta.url).pathname;
 
 // ---- The project, indexed as the editor indexes it ----
 const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" })
@@ -233,7 +233,7 @@ function typeAt(file: string, offset: number) {
   if (!typeCache.has(key)) {
     const out = (() => {
       try {
-        return execFileSync("php", [`${tools}phpactor.phar`, "offset:info", `${root}/${file}`, String(offset + 1), `--working-dir=${root}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+        return execFileSync("php", [`${tools}phpactor/phpactor.phar`, "offset:info", `${root}/${file}`, String(offset + 1), `--working-dir=${root}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
       } catch {
         return "";
       }

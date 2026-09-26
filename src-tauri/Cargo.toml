@@ -39,6 +39,12 @@ tungstenite = { version = "0.28", features = ["native-tls"] }
 base64 = "0.22"
 flate2 = "1"
 rustc-hash = "2"
+# Downloading the language tools. The same versions and features tauri-plugin-updater already builds.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+minisign-verify = "0.2"
+sha2 = "0.10"
+tar = "0.4"
 tauri-plugin-updater = "2.12.0"
 
 

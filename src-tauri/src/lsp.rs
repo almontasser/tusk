@@ -39,8 +39,18 @@ impl LspState {
     }
 }
 
+/// Where the app downloads the language tools (see `tools::tools_ensure`), one folder per tool.
 pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools"))
+    Ok(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("tools"))
+}
+
+/// The path of a tool's file, such as `mago/mago`. The editor's mago.toml and the Filament server are
+/// small files from this repository, so they ship inside the app instead.
+pub fn tool(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    if path == "mago.toml" || path.starts_with("filament-lsp/") {
+        return Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools").join(path));
+    }
+    Ok(tools_dir(app)?.join(path))
 }
 
 /// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, `vue`, `svelte`, or `astro`) for `root`, replacing a running one with the
@@ -52,8 +62,8 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
     crate::login_path();
     // (runtime, script inside the tools folder, arguments)
     let (runtime, script, args): (&str, &str, &[&str]) = match name.as_str() {
-        "phpactor" => ("php", "phpactor.phar", &["language-server"]),
-        "laravel" => ("php", "laravel-lsp.phar", &[]),
+        "phpactor" => ("php", "phpactor/phpactor.phar", &["language-server"]),
+        "laravel" => ("php", "laravel-lsp/laravel-lsp.phar", &[]),
         "filament" => ("php", "filament-lsp/server.php", &[]),
         "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         "typescript" => ("node", "node/node_modules/@vtsls/language-server/bin/vtsls.js", &["--stdio"]),
@@ -61,16 +71,15 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         "svelte" => ("node", "node/node_modules/svelte-language-server/bin/server.js", &["--stdio"]),
         "astro" => ("node", "node/node_modules/@astrojs/language-server/bin/nodeServer.js", &["--stdio"]),
         // A native binary: the watchdog execs it directly (the runtime is the program itself).
-        "typos" => ("", "typos-lsp", &[]),
+        "typos" => ("", "typos-lsp/typos-lsp", &[]),
         // Not a language server: the Xdebug debug adapter. DAP frames messages the same way.
         "xdebug" => ("node", "php-debug/out/phpDebug.js", &[]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
-    let tools = tools_dir(&app)?;
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
         .args((!runtime.is_empty()).then_some(runtime))
-        .arg(tools.join(script))
+        .arg(tool(&app, script)?)
         .args(args)
         .current_dir(&root)
         .stdin(Stdio::piped())
@@ -104,7 +113,7 @@ pub fn ai_start(app: AppHandle, state: State<'_, LspState>, model: String, key: 
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
-        .arg(tools_dir(&app)?.join("llama/llama-server"))
+        .arg(tool(&app, "llama/llama-server")?)
         // --cache-reuse lets a request reuse the processed prompt even after text before the cursor shifts.
         // The server keeps up to 3/4 of -b tokens before the cursor, so 2048 allows about 150 lines.
         .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string(), "--api-key", &key])

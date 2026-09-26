@@ -1,16 +1,17 @@
 #!/bin/sh
-# Downloads the pinned language tools that ship inside the app bundle.
-# Each download is verified against its SHA-256 checksum. To upgrade a tool,
-# change its URL and checksum here, then test the editor against it.
-# Native binaries are fetched for the build's target: the one Tauri passes in
-# TAURI_ENV_TARGET_TRIPLE, or this Mac's. For universal-apple-darwin (or with
-# --universal), both architectures are fetched and joined with lipo.
+# Downloads the pinned language tools into TOOLS_DEST (default src-tauri/target/tools), one folder per tool,
+# the layout the app installs them in. scripts/publish-tools.ts packs and publishes them for the app to
+# download. Each download is verified against its SHA-256 checksum. To upgrade a tool, change its URL and
+# checksum here, then publish.
+# Native binaries are fetched for the target in the first argument (or TAURI_ENV_TARGET_TRIPLE), or
+# this Mac's. For universal-apple-darwin (or --universal), both architectures are joined with lipo.
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-dest="$root/src-tauri/resources/tools"
+dest="${TOOLS_DEST:-$root/src-tauri/target/tools}"
 cache="$root/src-tauri/target/tool-cache"
-mkdir -p "$dest" "$cache"
+mkdir -p "$dest" && dest="$(cd "$dest" && pwd)"
+mkdir -p "$dest/phpactor" "$dest/laravel-lsp" "$dest/composer" "$dest/mago" "$dest/typos-lsp" "$cache"
 
 # fetch <cache file name> <url> <sha256>: downloads into the cache once, verified.
 fetch() {
@@ -26,18 +27,18 @@ fetch() {
 fetch phpactor-2026.06.23.0.phar \
   https://github.com/phpactor/phpactor/releases/download/2026.06.23.0/phpactor.phar \
   25645647d9aa2dc69536fb4f75c976e33ef1a7b5533534a8456736e5e6fd5079
-cp "$cache/phpactor-2026.06.23.0.phar" "$dest/phpactor.phar"
+cp "$cache/phpactor-2026.06.23.0.phar" "$dest/phpactor/phpactor.phar"
 
 fetch laravel-lsp-0.0.32.phar \
   https://github.com/laravel/lsp/releases/download/v0.0.32/laravel-lsp \
   86d43f017b2247f1da428891a84a7db66d1f4443a0858301fe3a0d38482c5a51
-cp "$cache/laravel-lsp-0.0.32.phar" "$dest/laravel-lsp.phar"
+cp "$cache/laravel-lsp-0.0.32.phar" "$dest/laravel-lsp/laravel-lsp.phar"
 
 # Composer, for the Composer tool window. Checksum from getcomposer.org.
 fetch composer-2.10.2.phar \
   https://getcomposer.org/download/2.10.2/composer.phar \
   5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027
-cp "$cache/composer-2.10.2.phar" "$dest/composer.phar"
+cp "$cache/composer-2.10.2.phar" "$dest/composer/composer.phar"
 
 case "${1:-${TAURI_ENV_TARGET_TRIPLE:-}}" in
   --universal | universal-apple-darwin) archs="aarch64 x86_64" ;;
@@ -83,8 +84,8 @@ for arch in $archs; do
   tar -xzf "$cache/mago-1.50.0-$arch.tar.gz" -C "$cache/$arch" --strip-components 1 "mago-1.50.0-$arch-apple-darwin/mago"
   tar -xzf "$cache/typos-lsp-0.1.56-$arch.tar.gz" -C "$cache/$arch" typos-lsp
 done
-join "$dest/mago" $(for a in $archs; do echo "$cache/$a/mago"; done)
-join "$dest/typos-lsp" $(for a in $archs; do echo "$cache/$a/typos-lsp"; done)
+join "$dest/mago/mago" $(for a in $archs; do echo "$cache/$a/mago"; done)
+join "$dest/typos-lsp/typos-lsp" $(for a in $archs; do echo "$cache/$a/typos-lsp"; done)
 
 # Node-based language servers, pinned by node-tools/package-lock.json. npm ci checks every
 # package against the lockfile's integrity hashes. Install scripts are skipped, since the

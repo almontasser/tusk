@@ -6,7 +6,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
 import { buildContext, chunk, leastLikely, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outlineFile, replacedAfter, similarCode, typedNames } from "./aicontext";
-import { phpactorRequest } from "./lsp";
+import { ensureTools, phpactorRequest } from "./lsp";
 import { parseTypeDeclaration } from "./phptypes";
 import { type Psr4, psr4From } from "./psr4";
 import { onSettings, settings, updateSetting } from "./settings";
@@ -113,6 +113,7 @@ async function apply() {
     if (wanted !== id) return;
     status(`Loading ${m.label}…`, "ai:progress");
     key = crypto.randomUUID();
+    await ensureTools();
     const p = await invoke<number>("ai_start", { model: path, key });
     for (let i = 0; i < 120 && wanted === id && !port; i++) {
       if (await curl(["-sf", `http://127.0.0.1:${p}/health`]).then(() => true, () => false)) port = p;

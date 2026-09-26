@@ -4,9 +4,9 @@
   "version": "0.1.2",
   "identifier": "ly.almontasser.tusk",
   "build": {
-    "beforeDevCommand": "sh scripts/fetch-tools.sh && pnpm dev",
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "sh scripts/fetch-tools.sh && pnpm build",
+    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -42,7 +42,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/tools/": "tools/",
       "resources/mago.toml": "tools/mago.toml",
       "../filament-lsp/": "tools/filament-lsp/"
     },

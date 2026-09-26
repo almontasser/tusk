@@ -4,6 +4,7 @@
 // composer.phar and run in terminal tabs.
 import { invoke } from "@tauri-apps/api/core";
 import { type Advisory, advisories, dependents, namespaceChecks, packages, type Package, requiredBy } from "./composerdata";
+import { toolPath } from "./lsp";
 import { confirm, pick } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -24,7 +25,7 @@ const capture = (...args: string[]) => invoke<string>("run_capture", { cwd: host
 
 /** Runs a Composer command in a terminal tab, then reloads the list. */
 async function run(title: string, args: string[]) {
-  composer ||= await invoke<string>("tool_path", { name: "composer.phar" });
+  composer ||= await toolPath("composer/composer.phar");
   openTerminal(host.root(), title, ["php", composer, ...args], () => loadPackages());
 }
 
@@ -34,7 +35,7 @@ let loads = 0;
 export async function loadPackages() {
   if (!host.root()) return;
   const load = ++loads;
-  composer ||= await invoke<string>("tool_path", { name: "composer.phar" });
+  composer ||= await toolPath("composer/composer.phar");
   const list = $("composer-list");
   const json = await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => null);
   if (json === null) return list.replaceChildren(el("li", "muted", "This project has no composer.json."));

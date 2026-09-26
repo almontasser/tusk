@@ -1,12 +1,12 @@
-use crate::lsp::tools_dir;
+use crate::lsp::{tool, tools_dir};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use tauri::AppHandle;
 
-/// Path of a bundled tool, for tools the frontend passes to a language server.
+/// Path of a tool's file, such as `mago/mago`, for tools the frontend runs or passes to a language server.
 #[tauri::command(async)]
 pub fn tool_path(app: AppHandle, name: String) -> Result<String, String> {
-    Ok(tools_dir(&app)?.join(name).to_string_lossy().into())
+    Ok(tool(&app, &name)?.to_string_lossy().into())
 }
 
 #[tauri::command(async)]
@@ -49,4 +49,164 @@ fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String
         return Err(String::from_utf8_lossy(&out.stderr).into());
     }
     Ok(String::from_utf8_lossy(&out.stdout).into())
+}
+
+// Language tools are downloaded, not bundled, so the app stays small and tools update without an app
+// release. scripts/publish-tools.ts packs each tool (per chip when it's native) as a `tools` GitHub release
+// asset, listed with its checksum in tools.json, which is signed with the updater's key. Each tool unpacks
+// into its own folder under `tools_dir`, with the package's ID in `.tusk-id`.
+
+const MANIFEST: &str = "https://github.com/almontasser/tusk/releases/download/tools/tools.json";
+
+#[derive(serde::Deserialize)]
+struct Manifest {
+    packages: Vec<Package>,
+}
+
+#[derive(serde::Deserialize)]
+struct Package {
+    name: String,
+    /// `any`, `aarch64`, or `x86_64`.
+    arch: String,
+    /// A hash of the tool's files, which changes when the tool does.
+    id: String,
+    url: String,
+    sha256: String,
+    size: u64,
+}
+
+impl Manifest {
+    /// The packages this Mac's chip needs.
+    fn here(&self) -> impl Iterator<Item = &Package> {
+        self.packages.iter().filter(|p| p.arch == "any" || p.arch == std::env::consts::ARCH)
+    }
+}
+
+/// One install at a time, so a reload during a background update waits instead of swapping in a half-written folder.
+static INSTALLING: tauri::async_runtime::Mutex<()> = tauri::async_runtime::Mutex::const_new(());
+/// Staged updates are swapped in once per run, before any tool starts.
+static SWAPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes sure the language tools are installed before the servers start. The first launch downloads them,
+/// with progress as `tools-progress` events. After that it returns at once and checks for newer tools in the
+/// background; those are staged beside the live ones and swapped in at the next launch, so a running server
+/// never sees its files change.
+#[tauri::command]
+pub async fn tools_ensure(app: AppHandle) -> Result<(), String> {
+    let dir = tools_dir(&app)?;
+    let lock = INSTALLING.lock().await;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if !SWAPPED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+            if let Some(name) = entry.file_name().to_str().and_then(|n| n.strip_prefix(".next-")) {
+                swap_in(&dir, name)?;
+            }
+        }
+    }
+    let cached = std::fs::read(dir.join("tools.json")).ok().and_then(|b| serde_json::from_slice::<Manifest>(&b).ok());
+    if !cached.is_some_and(|m| m.here().all(|p| dir.join(&p.name).is_dir())) {
+        let manifest = fetch_manifest(&app, &dir).await.map_err(|e| format!("Couldn't download the language tools: {e}"))?;
+        return install(&app, &dir, &manifest, false).await.map_err(|e| format!("Couldn't install the language tools: {e}"));
+    }
+    drop(lock);
+    tauri::async_runtime::spawn(async move {
+        let _lock = INSTALLING.lock().await;
+        if let Ok(manifest) = fetch_manifest(&app, &dir).await {
+            let _ = install(&app, &dir, &manifest, true).await;
+        }
+    });
+    Ok(())
+}
+
+fn client() -> Result<reqwest::Client, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder().user_agent("Tusk").build().map_err(|e| e.to_string())
+}
+
+/// Downloads tools.json, checks its signature against the updater's public key, and caches it.
+async fn fetch_manifest(app: &AppHandle, dir: &std::path::Path) -> Result<Manifest, String> {
+    use base64::Engine;
+    let client = client()?;
+    let get = |url: String| {
+        let request = client.get(url);
+        async move { request.send().await?.error_for_status()?.bytes().await }
+    };
+    let json = get(MANIFEST.into()).await.map_err(|e| e.to_string())?;
+    let sig = get(format!("{MANIFEST}.sig")).await.map_err(|e| e.to_string())?;
+    let text = |b64: &[u8]| {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim_ascii()).map_err(|e| e.to_string())?;
+        String::from_utf8(bytes).map_err(|e| e.to_string())
+    };
+    let key = app.config().plugins.0.get("updater").and_then(|u| u["pubkey"].as_str()).ok_or("No public key")?;
+    let key = minisign_verify::PublicKey::decode(&text(key.as_bytes())?).map_err(|e| e.to_string())?;
+    let sig = minisign_verify::Signature::decode(&text(&sig)?).map_err(|e| e.to_string())?;
+    key.verify(&json, &sig, true).map_err(|_| "tools.json isn't signed with Tusk's key".to_string())?;
+    let manifest = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("tools.json"), &json).map_err(|e| e.to_string())?;
+    Ok(manifest)
+}
+
+/// Downloads and unpacks every package that isn't installed at its current ID. With `later`, each is left
+/// staged as `.next-<name>`, for the next launch; otherwise it replaces the live folder now.
+async fn install(app: &AppHandle, dir: &std::path::Path, manifest: &Manifest, later: bool) -> Result<(), String> {
+    use sha2::Digest;
+    use tauri::Emitter;
+    let id = |folder: String| std::fs::read_to_string(dir.join(folder).join(".tusk-id")).unwrap_or_default();
+    let needed: Vec<_> = manifest
+        .here()
+        .filter(|p| id(p.name.clone()) != p.id && !(later && id(format!(".next-{}", p.name)) == p.id))
+        .collect();
+    let total = needed.iter().map(|p| p.size).sum::<u64>().max(1);
+    let verb = if later { "Updating" } else { "Downloading" };
+    let (client, mut done, mut shown) = (client()?, 0, u64::MAX);
+    let result = async {
+        for p in needed {
+            let archive = dir.join(format!(".download-{}", p.name));
+            let mut file = std::fs::File::create(&archive).map_err(|e| e.to_string())?;
+            let mut hash = sha2::Sha256::new();
+            let mut response = client.get(&p.url).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
+            while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+                hash.update(&chunk);
+                file.write_all(&chunk).map_err(|e| e.to_string())?;
+                done += chunk.len() as u64;
+                if done * 100 / total != shown {
+                    shown = done * 100 / total;
+                    let _ = app.emit("tools-progress", format!("{verb} language tools: {shown}%"));
+                }
+            }
+            drop(file);
+            if format!("{:x}", hash.finalize()) != p.sha256 {
+                let _ = std::fs::remove_file(&archive);
+                return Err(format!("{} doesn't match its checksum", p.name));
+            }
+            let (dir, name, id) = (dir.to_path_buf(), p.name.clone(), p.id.clone());
+            crate::blocking(move || {
+                let part = dir.join(format!(".part-{name}"));
+                let _ = std::fs::remove_dir_all(&part);
+                let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(std::fs::File::open(&archive).map_err(|e| e.to_string())?));
+                tar.set_preserve_permissions(true);
+                tar.unpack(&part).map_err(|e| format!("{name}: {e}"))?;
+                std::fs::write(part.join(".tusk-id"), id).map_err(|e| e.to_string())?;
+                let _ = std::fs::remove_file(&archive);
+                let next = dir.join(format!(".next-{name}"));
+                let _ = std::fs::remove_dir_all(&next);
+                std::fs::rename(&part, &next).map_err(|e| e.to_string())?;
+                if later { Ok(()) } else { swap_in(&dir, &name) }
+            })
+            .await?;
+        }
+        Ok(())
+    }
+    .await;
+    let _ = app.emit("tools-progress", "");
+    result
+}
+
+/// Replaces a tool's live folder with its staged `.next-<name>` folder.
+fn swap_in(dir: &std::path::Path, name: &str) -> Result<(), String> {
+    let live = dir.join(name);
+    if live.exists() {
+        std::fs::remove_dir_all(&live).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(dir.join(format!(".next-{name}")), live).map_err(|e| e.to_string())
 }

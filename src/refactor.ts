@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest } from "./lsp";
+import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath } from "./lsp";
 import { pick } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse";
@@ -108,7 +108,7 @@ export async function callsOf(model: monaco.editor.ITextModel, symbol: L.Documen
 
 /** References to a class's method from Phpactor's command line, without the declaration (0-based line), or null if it fails. */
 async function memberCalls(fqn: string, method: string, declaration: { path: string; line: number }): Promise<L.Location[] | null> {
-  const phar = await invoke<string>("tool_path", { name: "phpactor.phar" });
+  const phar = await toolPath("phpactor/phpactor.phar");
   const args = [phar, "references:member", fqn, method, "--format=json", `--config-extra=${JSON.stringify(PHPACTOR_INDEX)}`];
   const out = await invoke<string>("run_capture", { cwd: host.root(), program: "php", args, input: null }).catch(() => "");
   try {

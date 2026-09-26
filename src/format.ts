@@ -3,6 +3,7 @@
 // Blade that the project's Prettier can't format goes to the bundled blade-formatter.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
+import { toolPath } from "./lsp";
 
 type Host = { root(): string; status(text: string): void };
 /** `plugins` are passed to Prettier with `--plugin`: the bundled Prettier's, which the project doesn't configure. */
@@ -33,7 +34,7 @@ export async function detectFormatters() {
   const [prettier3, prettier2, pint] = await Promise.all([...candidates, "vendor/bin/pint"].map(exists));
   // The later candidate won when both existed.
   const found = prettier2 ? candidates[1] : prettier3 ? candidates[0] : undefined;
-  const modules = `${await invoke<string>("tool_path", { name: "node" })}/node_modules`;
+  const modules = `${await toolPath("node")}/node_modules`;
   const blade = `${modules}/blade-formatter/bin/blade-formatter.cjs`;
   // Prettier and blade-formatter run on Node. Without it, Monaco's own formatters handle what they can.
   const node = await run("node", ["--version"], "").then(() => true, () => false);
@@ -63,7 +64,7 @@ async function format(path: string, text: string, language: string): Promise<str
   if (language === "blade" && tools.blade) return run("node", [tools.blade, "--stdin"], text);
   if (language !== "php") return null;
   if (tools.pint) return run("php", ["vendor/bin/pint", "-", `--stdin-filename=${rel}`], text);
-  const mago = await invoke<string>("tool_path", { name: "mago" });
+  const mago = await toolPath("mago/mago");
   return run(mago, ["format", "--stdin-input", "--stdin-filepath", rel], text);
 }
 

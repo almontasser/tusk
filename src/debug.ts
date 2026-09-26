@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
 import type { MenuItem } from "./files";
+import { ensureTools } from "./lsp";
 import { pick } from "./palette";
 import { composeService, usesSail } from "./sail";
 import { showPanelView } from "./terminal";
@@ -344,6 +345,7 @@ export async function startDebugging() {
   running = true;
   render();
   try {
+    await ensureTools();
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
     await request("initialize", { adapterID: "php", clientID: "tusk", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.

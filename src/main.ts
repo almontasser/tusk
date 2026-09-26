@@ -1006,6 +1006,7 @@ const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 // Update download progress, and Restart Now after an update installs. Unsaved edits are saved or asked
 // about first, as closing a tab does.
 listen<string>("update-progress", (e) => status(e.payload, "update:progress"));
+listen<string>("tools-progress", (e) => status(e.payload, "tools:progress"));
 listen("update-restart", async () => {
   if ([...tabs.values()].some(isDirty)) {
     const choice = settings.autoSave ? "Save" : await choose("Save your changes before restarting?", ["Save", "Don't Save", "Cancel"]);

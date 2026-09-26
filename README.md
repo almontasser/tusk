@@ -86,12 +86,14 @@ To build the app, you also need:
 - Rust 1.97 or later
 - Node.js 24 or later, and pnpm
 
-The app bundles its tools (Phpactor, Laravel LSP, Mago, Composer, `typos-lsp`,
+The app manages its own tools (Phpactor, Laravel LSP, Mago, Composer, `typos-lsp`,
 the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, TypeScript, and Vue language
 servers), and compiles in the database drivers, so you don't install them
-yourself. Sail support needs Docker, which Sail itself needs. If your project has PHPStan or Larastan in
-`vendor/bin/phpstan`, the app runs it too. The build downloads pinned versions with `scripts/fetch-tools.sh` and
-checks each download against its SHA-256 checksum.
+yourself. The first launch downloads the tools for your Mac's chip (about
+90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
+later launches pick up newer versions in the background. Sail support needs
+Docker, which Sail itself needs. If your project has PHPStan or Larastan in
+`vendor/bin/phpstan`, the app runs it too.
 
 ## Run in development
 
@@ -137,8 +139,22 @@ rustup target add x86_64-apple-darwin
 pnpm tauri build --target universal-apple-darwin
 ```
 
-The tools are then fetched for both chips and joined into universal binaries.
 The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle/`.
+
+### Publish new tools
+
+To upgrade a language tool, change its URL and checksum in
+`scripts/fetch-tools.sh` (or its version in `node-tools/package.json`), then
+run:
+
+```sh
+node scripts/publish-tools.ts
+```
+
+The script fetches the tools for both chips, packs each tool whose files
+changed, and uploads them to the `tools` GitHub release with a `tools.json`
+list signed with the key in Bitwarden. Installed copies download the changes
+in the background and use them from the next launch. No app release is needed.
 
 ### Publish an update
 
@@ -1764,7 +1780,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `filament-lsp/introspect.php` | Reads resources and models from the project |
 | `filament-lsp/tests.php` | Filament server tests |
 | `node-tools/` | The pinned Node language servers (`package.json` and lockfile) |
-| `scripts/fetch-tools.sh` | Downloads the pinned language tools |
+| `scripts/fetch-tools.sh` | Downloads the pinned language tools, one folder per tool |
+| `scripts/publish-tools.ts` | Publishes the tools the app downloads |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |
 | `website/` | The Tusk website |

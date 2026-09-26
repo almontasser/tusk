@@ -215,6 +215,7 @@ pub fn run() {
             lsp::ai_request,
             lsp::ai_cancel,
             tools::tool_path,
+            tools::tools_ensure,
             tools::path_exists,
             tools::paths_exist,
             tools::run_capture,

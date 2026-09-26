@@ -235,19 +235,39 @@ overwrites unsaved edits.
 
 ## PHP intelligence (milestone 2)
 
-### Bundled tools
+### Downloaded tools
 
 `scripts/fetch-tools.sh` downloads each language tool at a pinned version,
-checks its SHA-256 checksum, and stores it in `src-tauri/resources/tools/`.
-Tauri runs the script before `dev` and `build`, and copies the folder into the
-app bundle as `tools/`. To upgrade a tool, change its URL and checksum in the
-script.
+checks its SHA-256 checksum, and stores it in its own folder, such as
+`mago/mago` or `node/node_modules`. `scripts/publish-tools.ts` runs it for each
+chip, packs each tool as a `.tar.gz` (once for tools without native code),
+and uploads the packages that changed to the `tools` GitHub release, a
+prerelease so the app's updater never reads it. `tools.json` lists every
+package with its chip, checksum, size, and ID, a hash of the tool's files, so
+a tool that didn't change keeps its package. The list is signed with the
+updater's key. To upgrade a tool, change its URL and checksum in the script,
+then publish.
 
-In development, Tauri copies the tools into `target/debug/tools/` over the
-previous build's files. macOS caches a binary's code signature per file, so a
-tool rewritten in place after the app ran it fails its signature check, and
-macOS kills it partway through a large run, such as Mago analyzing a whole
-project. `build.rs` then writes each executable again as a new file.
+The app keeps the tools in its data folder
+(`~/Library/Application Support/ly.almontasser.tusk/tools/`).
+`tools_ensure` in `tools.rs` runs once per launch, before any tool runs: the
+frontend's `ensureTools` and `toolPath` in `lsp.ts` wait for it, and the
+language servers, formatter, Composer, Problems, refactorings, debugger, and AI
+completion all go through them. It
+checks the list's signature against the public key in `tauri.conf.json`,
+downloads each package it needs for this chip, checks its SHA-256, and
+unpacks it into `.part-<name>`, renamed to `.next-<name>` once complete. With a
+tool missing, as on the first launch, it swaps each one in right away and the
+tools wait, with progress in the status bar. Otherwise it returns at once and
+checks in the background; updates stay staged and are swapped in at the next
+launch, before anything runs, so a running server never has its files
+replaced. Each installed folder records its package's ID in `.tusk-id`. The
+editor's `mago.toml` and the Filament server still ship inside the app, since
+they're part of this repository.
+
+Every tool gets new files, never files rewritten in place: macOS caches a
+binary's code signature per file, and a binary rewritten after it ran fails its
+check and is killed partway through a large run.
 
 | Tool | Version | Form |
 | --- | --- | --- |
@@ -281,7 +301,7 @@ Downloads are cached in `src-tauri/target/tool-cache/`, so a rebuild doesn't
 download again.
 
 Node-based servers are listed in `node-tools/package.json` with a committed
-lockfile. The fetch script copies both into `resources/tools/node/` and runs
+lockfile. The fetch script copies both into the `node/` folder and runs
 `npm ci --omit=dev --ignore-scripts`, which checks every package against the
 lockfile's integrity hashes and runs no install scripts. It reinstalls only when
 the lockfile changes. To upgrade, change the version in `node-tools/package.json`
@@ -2915,7 +2935,7 @@ for choosing a folder.
 
 The editor must work on any machine. A global `composer global require` works
 only where someone ran it, and it drifts to versions the editor wasn't tested
-with. Bundled tools are pinned, verified by checksum, and work offline. PHP is
+with. Managed tools are pinned, verified by checksum, and work offline once downloaded. PHP is
 the only requirement, and every Laravel project needs it anyway.
 
 ### 2026-09-24: A small custom LSP client instead of `monaco-languageclient`
@@ -3390,3 +3410,15 @@ closing a tab does, then calls the `restart` command; it uses
 **Later** leaves the new version for the next launch.
 `scripts/release.sh` builds and publishes, since releases are built on this
 Mac rather than in CI.
+
+### 2026-09-26: Download the tools instead of bundling them
+
+Bundled tools made the app about 380 MB, twice what one Mac needs, since the
+universal build carried both chips' binaries, and every tool upgrade needed an
+app release. The app now downloads its chip's tools on the first launch (about
+90 MB compressed) and picks up newer ones in the background. They're still
+pinned and checked by checksum, and the signed list means a changed release
+asset can't swap in a tool; the cost is that the first launch needs the
+network before the language servers start. The app itself stays universal:
+without the tools, the second chip adds only the app's own binary, and one
+download and one update archive serve every Mac.

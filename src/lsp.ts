@@ -178,7 +178,7 @@ function magoFixesOf(model: monaco.editor.ITextModel): Promise<MagoFix[]> {
   if (lint?.version !== version) {
     const text = textOf(model);
     const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "lint", "--stdin-input", model.uri.fsPath.slice(projectRoot.length + 1), "--reporting-format", "json"];
-    const fixes = invoke<string>("tool_path", { name: "mago" })
+    const fixes = toolPath("mago/mago")
       .then((mago) => invoke<string>("run_capture", { cwd: projectRoot, program: mago, args, input: text, anyStatus: true }))
       .then((json) => magoFixes(json, text))
       .catch((e) => (host.status(`Mago lint failed: ${e}`), []));
@@ -981,7 +981,7 @@ let lazyStart: monaco.IDisposable | undefined;
  * The Svelte and Astro servers run TypeScript themselves, and start with their first file.
  */
 async function startFrontendServersLazily(root: string, start: number) {
-  const nodeDir = await invoke<string>("tool_path", { name: "node" });
+  const nodeDir = await toolPath("node");
   // A later start of the language servers replaced this one while the tool path loaded.
   if (start !== starts) return;
   let ts: Promise<Server | null> | undefined;
@@ -1025,6 +1025,19 @@ async function startFrontendServersLazily(root: string, start: number) {
   lazyStart = monaco.editor.onDidCreateModel(onModel);
 }
 
+let toolsReady: Promise<unknown> | undefined;
+
+/** Waits for the language tools, which the first launch downloads. A failure is retried on the next call. */
+export function ensureTools() {
+  return (toolsReady ??= invoke("tools_ensure").catch((e) => ((toolsReady = undefined), Promise.reject(e))));
+}
+
+/** The path of a downloaded tool's file, such as `mago/mago`, once the tools are installed. */
+export async function toolPath(name: string) {
+  await ensureTools();
+  return invoke<string>("tool_path", { name });
+}
+
 /** Starts the language servers for a project, stopping those of the previous project. */
 let projectRoot = "";
 
@@ -1032,6 +1045,7 @@ let projectRoot = "";
 let starts = 0;
 
 export async function startLsp(root: string, h: Host) {
+  await ensureTools();
   host = h;
   readModels(root);
   starts++;
@@ -1041,17 +1055,17 @@ export async function startLsp(root: string, h: Host) {
   lazyStart?.dispose();
   builtInTypeScript(true);
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
-  const tool = (name: string) => invoke<string>("tool_path", { name });
+  const tool = toolPath;
   // Every check at once, rather than one round trip after another before the first server starts.
   const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson, phar, aliasDir] = await Promise.all([
-    tool("mago"),
+    tool("mago/mago"),
     tool("mago.toml"),
     exists("mago.toml"),
     exists("vendor/bin/phpstan"),
     exists("artisan"),
     exists("vendor/filament/filament"),
     invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => ""),
-    tool("phpactor.phar"),
+    tool("phpactor/phpactor.phar"),
     // Phpactor indexes stub paths only once, so a changed alias list needs a full reindex.
     aliasStubs(root, () => reindex()).catch(() => null),
   ]);

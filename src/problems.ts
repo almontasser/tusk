@@ -7,7 +7,7 @@ import { facts, projectCache, readModels } from "./eloquent";
 import { formatType, inlineProblem, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
-import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
+import { diagnosed, magoConfigPath, PHPACTOR_INDEX, toolPath } from "./lsp";
 import { settings, onSettings } from "./settings";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
@@ -356,7 +356,7 @@ export async function scanProject(useCache = false) {
     const add = (rel: string, list: Diagnostic[]) => results.set(rel, [...(results.get(rel) ?? []), ...list]);
 
     // Mago: the analyzer and the linter over the whole project, in one run each.
-    const mago = await invoke<string>("tool_path", { name: "mago" });
+    const mago = await toolPath("mago/mago");
     const config = magoConfigPath ? ["--config", magoConfigPath] : [];
     const runMago = (command: string, source: "mago" | "mago-lint") =>
       invoke<string>("run_capture", { cwd: root, program: mago, args: [...config, command, "--reporting-format", "json", "--minimum-report-level", "warning"], input: null, anyStatus: true })
@@ -391,7 +391,7 @@ export async function scanProject(useCache = false) {
     const cache: Record<string, { hash: number; list: Diagnostic[] }> = useCache
       ? await invoke<string>("read_file", { path: cachePath }).then(JSON.parse, () => ({}))
       : {};
-    const phar = await invoke<string>("tool_path", { name: "phpactor.phar" });
+    const phar = await toolPath("phpactor/phpactor.phar");
     const extra = JSON.stringify({ ...PHPACTOR_INDEX, "language_server_mago.enabled": false, "language_server_phpstan.enabled": false });
     let done = 0;
     const next = [...files];
@@ -499,7 +499,7 @@ function ruleDescription(code: string) {
   const key = `${host.root()}\0${magoConfigPath ?? ""}`;
   if (rules?.key !== key) {
     const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "lint", "--list-rules", "--json"];
-    const descriptions = invoke<string>("tool_path", { name: "mago" })
+    const descriptions = toolPath("mago/mago")
       .then((mago) => invoke<string>("run_capture", { cwd: host.root(), program: mago, args, input: null, anyStatus: true }))
       .then((json) => new Map((JSON.parse(json) as { code: string; description: string }[]).map((r) => [r.code, r.description])))
       .catch(() => new Map<string, string>());
