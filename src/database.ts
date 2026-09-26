@@ -118,7 +118,7 @@ async function loadConnection() {
   if (!c) (name = ""), setItem(selectedKey(), ""), (c = await envConnection());
   schema = null;
   const ssh = c.driver === "sqlite" ? "" : sshDestination();
-  $("db-connection").textContent = `${name || ".env"} · ${describe(c, host.root())}${ssh ? ` · via ${ssh}` : ""}`;
+  $("db-connection-name").textContent = `${name || ".env"} · ${describe(c, host.root())}${ssh ? ` · via ${ssh}` : ""}`;
   connection = null;
   // Through SSH, the host and port are as the SSH server sees them, such as 127.0.0.1:3306 on the server.
   connection = ssh ? { ...c, host: "127.0.0.1", port: await invoke<number>("db_tunnel", { destination: ssh, host: c.host, port: c.port }) } : c;

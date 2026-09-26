@@ -709,7 +709,9 @@ button.link:hover { text-decoration: underline; }
    ========================================================================== */
 
 .db-connection { margin: 0 12px 6px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#db-connection { cursor: pointer; }
+#db-connection { cursor: pointer; display: flex; align-items: center; gap: 2px; }
+#db-connection-name { overflow: hidden; text-overflow: ellipsis; }
+#db-connection .codicon { flex-shrink: 0; font-size: 14px; }
 #db-connection:hover { color: var(--text); }
 #db-tables, #db-tables ul { list-style: none; margin: 0; padding: 0; }
 #db-tables > li.muted { padding: 4px 12px; }
