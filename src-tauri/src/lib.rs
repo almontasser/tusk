@@ -60,6 +60,26 @@ fn webview_configuration() -> objc2::rc::Retained<objc2_web_kit::WKWebViewConfig
     }
 }
 
+/// macOS 27 shows its "Write with Siri" button beside the caret of any text client that allows the Writing
+/// Tools affordance, and `writingToolsBehavior` doesn't stop it. WKWebView answers yes, so the webview's own
+/// class (wry's subclass) gets an `allowsWritingToolsAffordance` that answers no. Older macOS never asks.
+#[cfg(target_os = "macos")]
+fn hide_writing_tools_affordance(webview: *mut std::ffi::c_void) {
+    use std::ffi::{c_char, c_void};
+    extern "C" {
+        fn object_getClass(obj: *const c_void) -> *const c_void;
+        fn sel_registerName(name: *const c_char) -> *const c_void;
+        fn class_replaceMethod(cls: *const c_void, sel: *const c_void, imp: *const c_void, types: *const c_char) -> *const c_void;
+    }
+    extern "C" fn no(_this: *const c_void, _sel: *const c_void) -> bool {
+        false
+    }
+    // Safety: adds a method that takes no arguments and returns BOOL ("B@:") to the webview's class.
+    unsafe {
+        class_replaceMethod(object_getClass(webview), sel_registerName(c"allowsWritingToolsAffordance".as_ptr()), no as *const c_void, c"B@:".as_ptr());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::thread::spawn(login_path);
@@ -86,7 +106,9 @@ pub fn run() {
             let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
             #[cfg(target_os = "macos")]
             let window = window.with_webview_configuration(webview_configuration());
-            window.build()?;
+            let built = window.build()?;
+            #[cfg(target_os = "macos")]
+            built.with_webview(|w| hide_writing_tools_affordance(w.inner()))?;
             Ok(())
         })
         .manage(fs::WatchState::default())
