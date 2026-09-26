@@ -3356,17 +3356,17 @@ covered. Now the diff, merge, and problem page are editor tabs through the
 tab, as in PhpStorm. Switching away is a tab click, and nothing needs to
 restore a covered view.
 
-### 2026-09-26: No Writing Tools button
+### 2026-09-26: Write with Siri is a setting, off by default
 
 macOS 27 shows a "Write with Siri" button beside the caret in any text field of
 a WebKit view, including the terminal's and Monaco's hidden textareas. VS Code
 (Chromium) and PhpStorm (Java) don't use WebKit's text input, so they never
-show it. Neither `writingsuggestions="false"` on `<html>` nor a
-`WKWebViewConfiguration` whose `writingToolsBehavior` is none stopped it: the
-button asks the text client `allowsWritingToolsAffordance`, which WKWebView
-answers yes. `lib.rs` creates the window itself (`"create": false` in
-`tauri.conf.json`) and replaces that method on the webview's class (wry's
-`WKWebView` subclass) with one that answers no. The configuration setting stays,
-and turns off Writing Tools' menus and panel. The method was found by listing
-the Objective-C runtime's classes in the running app, since Apple doesn't
-document it; older macOS versions never call it.
+show it. Neither `writingsuggestions="false"` nor a `WKWebViewConfiguration`
+whose `writingToolsBehavior` is none stopped it: the button asks the text
+client `allowsWritingToolsAffordance`, which WKWebView always answers yes. In
+`setup`, `lib.rs` replaces that method on the webview's class (wry's `WKWebView`
+subclass) with one that returns `WRITING_TOOLS`, which the **Show Write with
+Siri** setting sets through `set_writing_tools`, so the setting applies without
+a restart. The setting also sets `writingsuggestions` on `<html>`. The method
+was found by listing the Objective-C runtime's classes in the running app,
+since Apple doesn't document it; older macOS versions never call it.

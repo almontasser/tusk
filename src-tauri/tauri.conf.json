@@ -13,7 +13,6 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "create": false,
         "title": "Tusk",
         "width": 1400,
         "height": 900,
