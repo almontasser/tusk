@@ -71,8 +71,18 @@ for (const [name, native] of TOOLS) {
     console.log(`Packed ${name} (${arch}), ${(data.length / 2 ** 20).toFixed(1)} MB`);
   }
 }
+/** Deletes the packages tools.json no longer lists. A copy that read the old list moments before retries next time. */
+function deleteUnlisted() {
+  const listed = new Set(packages.map((p) => p.url.split("/").at(-1)));
+  const assets = execFileSync("gh", ["release", "view", TAG, "-R", REPO, "--json", "assets", "-q", ".assets[].name"], { encoding: "utf8" }).split("\n");
+  for (const name of assets.filter((a) => a.endsWith(".tar.gz") && !listed.has(a))) {
+    run("gh", ["release", "delete-asset", TAG, name, "-R", REPO, "-y"]);
+  }
+}
+
 if (!uploads.length && published.packages.length) {
   console.log("Every tool is already published.");
+  deleteUnlisted();
   process.exit(0);
 }
 
@@ -89,4 +99,4 @@ try {
 // Packages first, so tools.json never lists a file that isn't there yet.
 if (uploads.length) run("gh", ["release", "upload", TAG, "-R", REPO, ...uploads]);
 run("gh", ["release", "upload", TAG, "-R", REPO, "--clobber", manifest, `${manifest}.sig`]);
-// ponytail: replaced packages stay on the release; delete old ones by hand if the release grows too big.
+deleteUnlisted();

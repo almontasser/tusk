@@ -89,7 +89,7 @@ static SWAPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 
 /// Makes sure the language tools are installed before the servers start. The first launch downloads them,
 /// with progress as `tools-progress` events. After that it returns at once and checks for newer tools in the
-/// background; those are staged beside the live ones and swapped in at the next launch, so a running server
+/// background (`check_tools`); those are staged beside the live ones and swapped in at the next launch, so a running server
 /// never sees its files change.
 #[tauri::command]
 pub async fn tools_ensure(app: AppHandle) -> Result<(), String> {
@@ -109,13 +109,17 @@ pub async fn tools_ensure(app: AppHandle) -> Result<(), String> {
         return install(&app, &dir, &manifest, false).await.map_err(|e| format!("Couldn't install the language tools: {e}"));
     }
     drop(lock);
-    tauri::async_runtime::spawn(async move {
-        let _lock = INSTALLING.lock().await;
-        if let Ok(manifest) = fetch_manifest(&app, &dir).await {
-            let _ = install(&app, &dir, &manifest, true).await;
-        }
-    });
+    tauri::async_runtime::spawn(check_tools(app));
     Ok(())
+}
+
+/// Downloads newer tools in the background, staged for the next launch. Runs at launch and every six hours.
+pub async fn check_tools(app: AppHandle) {
+    let _lock = INSTALLING.lock().await;
+    let Ok(dir) = tools_dir(&app) else { return };
+    if let Ok(manifest) = fetch_manifest(&app, &dir).await {
+        let _ = install(&app, &dir, &manifest, true).await;
+    }
 }
 
 fn client() -> Result<reqwest::Client, String> {

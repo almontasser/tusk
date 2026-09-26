@@ -245,7 +245,9 @@ and uploads the packages that changed to the `tools` GitHub release, a
 prerelease so the app's updater never reads it. `tools.json` lists every
 package with its chip, checksum, size, and ID, a hash of the tool's files, so
 a tool that didn't change keeps its package. The list is signed with the
-updater's key. To upgrade a tool, change its URL and checksum in the script,
+updater's key. After uploading it, the script deletes the packages it no
+longer lists; a copy that read the old list just before fails that download
+and tries again at its next check. To upgrade a tool, change its URL and checksum in the script,
 then publish.
 
 The app keeps the tools in its data folder
@@ -259,7 +261,8 @@ downloads each package it needs for this chip, checks its SHA-256, and
 unpacks it into `.part-<name>`, renamed to `.next-<name>` once complete. With a
 tool missing, as on the first launch, it swaps each one in right away and the
 tools wait, with progress in the status bar. Otherwise it returns at once and
-checks in the background; updates stay staged and are swapped in at the next
+checks in the background (`check_tools`, which release builds also run every
+six hours); updates stay staged and are swapped in at the next
 launch, before anything runs, so a running server never has its files
 replaced. Each installed folder records its package's ID in `.tusk-id`. The
 editor's `mago.toml` and the Filament server still ship inside the app, since

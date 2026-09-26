@@ -91,7 +91,7 @@ the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, Type
 servers), and compiles in the database drivers, so you don't install them
 yourself. The first launch downloads the tools for your Mac's chip (about
 90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
-later launches pick up newer versions in the background. Sail support needs
+checks for newer versions at launch and every six hours. Sail support needs
 Docker, which Sail itself needs. If your project has PHPStan or Larastan in
 `vendor/bin/phpstan`, the app runs it too.
 
@@ -153,8 +153,10 @@ node scripts/publish-tools.ts
 
 The script fetches the tools for both chips, packs each tool whose files
 changed, and uploads them to the `tools` GitHub release with a `tools.json`
-list signed with the key in Bitwarden. Installed copies download the changes
-in the background and use them from the next launch. No app release is needed.
+list signed with the key in Bitwarden, then deletes packages the list no longer
+uses. Installed copies check at launch and every six hours, download the
+changes in the background, and use them from the next launch. No app release
+is needed.
 
 ### Publish an update
 

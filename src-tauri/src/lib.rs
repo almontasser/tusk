@@ -181,9 +181,11 @@ pub fn run() {
             #[cfg(not(debug_assertions))]
             {
                 let app = _app.handle().clone();
+                // Tools are also checked at launch, by `tools_ensure` once the tools are known to be installed.
                 std::thread::spawn(move || loop {
                     tauri::async_runtime::block_on(update_check(app.clone(), false));
                     std::thread::sleep(std::time::Duration::from_secs(6 * 60 * 60));
+                    tauri::async_runtime::block_on(tools::check_tools(app.clone()));
                 });
             }
             Ok(())
