@@ -5,7 +5,7 @@ import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath } from "./lsp";
 import { pick } from "./palette";
-import { parseTypeDeclarations } from "./phptypes";
+import { constructorCalls, parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse";
 import { symbolAt } from "./safedelete";
 import { readText } from "./projectfiles";
@@ -88,13 +88,13 @@ type Member = { references: { line_no: number; col_no: number }[]; file: string 
 /**
  * Calls of a method, from Phpactor's command line: it scans the project's files, where the language
  * server's reference search relies on its index and can miss files it hasn't indexed yet. Functions
- * aren't covered by the command, so they use the language server.
+ * aren't covered by the command, so they use the language server. Constructors, called through `new`,
+ * come from a text search.
  */
 export async function callsOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container?: L.DocumentSymbol): Promise<L.Location[]> {
+  if (isConstructor(symbol) && container) return constructorCallsOf(model, container);
   if (symbol.kind === 6 && container) {
-    const namespace = model.getValue().match(/^\s*namespace\s+([\w\\]+)\s*;/m)?.[1];
-    const fqn = namespace ? `${namespace}\\${container.name}` : container.name;
-    const calls = await memberCalls(fqn, symbol.name, { path: model.uri.fsPath, line: symbol.selectionRange.start.line });
+    const calls = await memberCalls(fqnOf(model, container), symbol.name, { path: model.uri.fsPath, line: symbol.selectionRange.start.line });
     if (calls) return calls;
   }
   return (
@@ -129,21 +129,20 @@ async function memberCalls(fqn: string, method: string, declaration: { path: str
 type Override = { path: string; fqn: string; line: number; open: number; close: number; text: string };
 
 type Match = { path: string };
+type Descendant = { path: string; text: string; type: TypeDeclaration; body: string };
 
 /**
- * The method's declarations in every project class that extends or implements its class, directly or further
- * down. A text search finds them rather than Phpactor's Go to Implementation, which answers from its index
- * and misses classes the index hasn't seen yet. ponytail: an `extends` or `implements` list broken over
- * several lines is missed.
+ * Every project type that extends or implements `fqn`, directly or further down, parents before their children.
+ * A text search finds them rather than Phpactor's Go to Implementation, which answers from its index and misses
+ * classes the index hasn't seen yet. The search looks for the short name alone, so an `extends` or `implements`
+ * list broken over several lines is found, and the file's declarations decide.
  */
-async function overridesOf(model: monaco.editor.ITextModel, container: L.DocumentSymbol, method: string): Promise<Override[]> {
-  const namespace = model.getValue().match(/^\s*namespace\s+([\w\\]+)\s*;/m)?.[1];
-  const queue = [namespace ? `${namespace}\\${container.name}` : container.name];
+async function descendantsOf(fqn: string): Promise<Descendant[]> {
+  const queue = [fqn];
   const seen = new Set(queue);
-  const overrides: Override[] = [];
+  const found: Descendant[] = [];
   for (let parent = queue.shift(); parent; parent = queue.shift()) {
-    const short = parent.split("\\").pop()!;
-    const query = { text: `\\b(extends|implements)\\b[^{]*\\b${short}\\b`, regex: true, caseSensitive: true, wholeWord: false };
+    const query = { text: parent.split("\\").pop()!, regex: false, caseSensitive: true, wholeWord: true };
     const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
     for (const path of new Set(matches.map((m) => m.path))) {
       const text = await textOf(path).catch(() => null);
@@ -153,17 +152,57 @@ async function overridesOf(model: monaco.editor.ITextModel, container: L.Documen
         if (seen.has(type.fqn) || ![...type.extends, ...type.implements].includes(parent)) return;
         seen.add(type.fqn);
         queue.push(type.fqn);
-        // The method within this type, before the file's next type. A class that doesn't override it has none.
-        const body = text.slice(type.offset, types[i + 1]?.offset ?? text.length);
-        const m = body.match(new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`));
-        if (!m) return;
-        const open = type.offset + m.index! + m[0].length - 1;
-        const close = matchBracket(text, open);
-        if (close >= 0) overrides.push({ path, fqn: type.fqn, line: positionAt(text, open).line, open, close, text });
+        // The type's text runs to the file's next type.
+        found.push({ path, text, type, body: text.slice(type.offset, types[i + 1]?.offset ?? text.length) });
       });
     }
   }
+  return found;
+}
+
+const fqnOf = (model: monaco.editor.ITextModel, container: L.DocumentSymbol) => {
+  const namespace = model.getValue().match(/^\s*namespace\s+([\w\\]+)\s*;/m)?.[1];
+  return namespace ? `${namespace}\\${container.name}` : container.name;
+};
+
+const isConstructor = (symbol: L.DocumentSymbol) => symbol.kind === 6 && symbol.name.toLowerCase() === "__construct";
+
+/** The method's declarations in every project class that extends or implements its class. */
+async function overridesOf(model: monaco.editor.ITextModel, container: L.DocumentSymbol, method: string): Promise<Override[]> {
+  const overrides: Override[] = [];
+  for (const { path, text, type, body } of await descendantsOf(fqnOf(model, container))) {
+    const m = body.match(new RegExp(`\\bfunction\\s+&?${method}\\s*\\(`));
+    if (!m) continue;
+    const open = type.offset + m.index! + m[0].length - 1;
+    const close = matchBracket(text, open);
+    if (close >= 0) overrides.push({ path, fqn: type.fqn, line: positionAt(text, open).line, open, close, text });
+  }
   return overrides;
+}
+
+/**
+ * Calls of a class's constructor: `new` of the class or of a subclass that inherits the constructor, `new self`
+ * and `new static` inside them, and `parent::__construct(` in their direct subclasses. Each range is the name
+ * before the "(".
+ */
+async function constructorCallsOf(model: monaco.editor.ITextModel, container: L.DocumentSymbol): Promise<L.Location[]> {
+  const fqn = fqnOf(model, container);
+  const descendants = await descendantsOf(fqn);
+  const classes = new Set([fqn]);
+  for (const d of descendants)
+    if (classes.has(d.type.extends[0] ?? "") && !/\bfunction\s+&?__construct\s*\(/i.test(d.body)) classes.add(d.type.fqn);
+  const alternatives = [...classes].map((c) => c.split("\\").pop()).join("|");
+  const query = { text: `\\bnew\\s+\\\\?([\\w\\\\]*\\\\)?(${alternatives})\\s*\\(`, regex: true, caseSensitive: false, wholeWord: false };
+  const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
+  const paths = new Set([model.uri.fsPath, ...descendants.map((d) => d.path), ...matches.map((m) => m.path)]);
+  const locations: L.Location[] = [];
+  for (const path of paths) {
+    const text = await textOf(path).catch(() => null);
+    if (text === null) continue;
+    for (const [start, end] of constructorCalls(text, classes))
+      locations.push({ uri: monaco.Uri.file(path).toString(), range: { start: positionAt(text, start), end: positionAt(text, end) } });
+  }
+  return locations;
 }
 
 async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container: L.DocumentSymbol | undefined, open: number, close: number, oldText: string, newText: string) {
@@ -176,7 +215,8 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
     if (!oldParams.some((o) => o.name === p.name) && p.defaultValue === undefined) return host.status(`The new parameter $${p.name} needs a default value, for existing calls.`);
 
   host.status(`Looking for calls to ${symbol.name}…`);
-  const overrides = symbol.kind === 6 && container ? await overridesOf(model, container, symbol.name) : [];
+  // A subclass's constructor has its own parameters, and calls the parent's through parent::__construct().
+  const overrides = symbol.kind === 6 && container && !isConstructor(symbol) ? await overridesOf(model, container, symbol.name) : [];
   const refs = [await callsOf(model, symbol, container)];
   for (const o of overrides) refs.push((await memberCalls(o.fqn, symbol.name, { path: o.path, line: o.line })) ?? []);
   const changes: Record<string, L.TextEdit[]> = {

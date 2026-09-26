@@ -144,6 +144,8 @@ export function planInline(lines: string[], name: string, from: number, to: numb
       if (plain || /^\s*(\[[^\]]*\]|->\w+)*\s*([-+*/.%&|^]|\?\?|<<|>>|\*\*)?=(?!=|>)/.test(after) || /^\s*(\+\+|--)/.test(after) || /(\+\+|--|&)\s*$/.test(before) || /\bas\s+(\$\w+\s*=>\s*)?$/.test(before) || /\b(global|static|unset)\b/.test(before))
         return { error: `$${name} is changed on line ${n}` };
       if (!assignment) return { error: `$${name} is used on line ${n}, before it's assigned` };
+      // A closure's use list takes a variable, not a value.
+      if (/\buse\s*\([^)]*$/.test(before)) return { error: `a closure on line ${n} captures $${name}` };
       uses.push({ line: n, column: m.index! + 1 });
     }
   }

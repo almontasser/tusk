@@ -950,7 +950,8 @@ lines to the docblock, attributes, and one blank line.
 `splitTopLevel` scan brackets and strings (not heredocs), `planInline` checks
 that a variable has exactly one plain assignment, starting its line and
 ending at the first `;` outside brackets and strings (`statementEnd`), so a
-closure or a chain over several lines counts as one, and no other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`),
+closure or a chain over several lines counts as one, and no other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`)
+or closure `use` lists, which take a variable and can't take its value,
 and `rewriteArgs` maps a call's arguments to a new parameter list by name.
 `src/refactor.ts` applies them: inlining is one undoable edit in the model;
 a signature change becomes a `WorkspaceEdit` for `applyWorkspaceEdit`, which
@@ -963,16 +964,31 @@ scans the project's files (`--filesystem=git`), while the language server's
 hadn't indexed. Safe Delete uses the same search for methods. Functions, which
 the command doesn't cover, still use the language server.
 
-Change Signature also changes overrides. `overridesOf` searches project files
-for `extends` or `implements` lines naming the class, keeps the types whose
-parsed declaration really names it, and repeats for each one found, to reach
-grandchildren. Phpactor's Go to Implementation would include `vendor`, but it
+Change Signature also changes overrides. `descendantsOf` searches project
+files for the class's short name as a whole word, keeps the types whose parsed
+declaration really extends or implements it, and repeats for each one found,
+to reach grandchildren. Searching for the name alone, rather than for
+`extends … Name` on one line, finds headers split over several lines; the
+search is line by line, so a pattern can't span them. `overridesOf` then
+takes the method from each type's text. Phpactor's Go to Implementation would include `vendor`, but it
 answers from the index, which misses classes created since the last full
 index: in testing, file change events for new files didn't reach the index
 until a reindex. Each override's parameter list gets the new text, and calls
 through the override (`references:member` on its class) are rewritten too,
 without duplicates. References that are declarations (`function name(`) are
 skipped, since they have their own edit.
+
+Constructors differ: Phpactor's `references:member` doesn't report `new`, and
+a subclass's constructor isn't an override, since it may take different
+parameters. So `callsOf` sends `__construct` to `constructorCallsOf`, which
+collects the class and each descendant that inherits the constructor (no
+`__construct` of its own, and its parent in the set), searches for `new` with
+one of their short names, and reads those files, the class's, and the
+descendants' with `constructorCalls` in `src/phptypes.ts`. That resolves each
+`new Name(` through the file's `use` statements, `new self` and `new static`
+to the enclosing type, and `new parent` and `parent::__construct(` to its
+parent. Call Hierarchy and Safe Delete share `callsOf`, so they see these
+calls too.
 
 ### Type hierarchy
 

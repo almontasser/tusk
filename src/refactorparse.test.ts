@@ -34,6 +34,7 @@ test("plans inlining a variable", () => {
   assert.ok("error" in planInline(["$a = 1;", "$a = 2;"], "a", 1, 2));
   assert.ok("error" in planInline(["echo $a;", "$a = 1;"], "a", 1, 2));
   assert.ok("error" in planInline(["$a = 1;", "foreach ($xs as $a) {}"], "a", 1, 2));
+  assert.ok("error" in planInline(["$a = 1;", "$f = function () use ($b, $a) { return $a; };"], "a", 1, 2));
   // An assignment over several lines, with a ";" inside a closure and a string.
   const chain = ["$posts = Post::query()", "    ->where('t', ';')", "    ->get(); // all", "return $posts;"];
   assert.deepEqual(planInline(chain, "posts", 1, 4), { assignment: 1, assignmentEnd: 3, value: "Post::query()\n    ->where('t', ';')\n    ->get()", uses: [{ line: 4, column: 8 }] });

@@ -271,3 +271,26 @@ export function callSites(source: string): number[] {
     .filter((m) => !NOT_CALLS.has(m[1].toLowerCase()) && !/\b(function|new)\s+&?$/i.test(code.slice(0, m.index)))
     .map((m) => m.index! + m[1].lastIndexOf("\\") + 1);
 }
+
+/**
+ * Where a file calls the constructor of one of `classes` (full names): `new A(`, `new self(` and `new static(`
+ * inside those classes, and `new parent(` and `parent::__construct(` in classes whose parent is one of them.
+ * Each is the [start, end) offsets of the name before the "(". ponytail: `new static` counts even when a
+ * subclass with its own constructor runs it.
+ */
+export function constructorCalls(source: string, classes: Set<string>): [number, number][] {
+  const code = commentMask(source);
+  const { resolve } = nameResolver(code);
+  const types = parseTypeDeclarations(source);
+  const typeAt = (offset: number) => [...types].reverse().find((t) => t.offset < offset);
+  const calls: [number, number][] = [];
+  for (const m of code.matchAll(/\bnew\s+(\\?[\w\\]+)\s*\(|\bparent\s*::\s*(__construct)\s*\(/dgi)) {
+    const [start, end] = (m.indices![1] ?? m.indices![2])!;
+    const name = code.slice(start, end);
+    const lower = name.toLowerCase();
+    const type = typeAt(start);
+    const target = lower === "self" || lower === "static" ? type?.fqn : lower === "parent" || lower === "__construct" ? type?.extends[0] : resolve(name);
+    if (target && classes.has(target)) calls.push([start, end]);
+  }
+  return calls;
+}

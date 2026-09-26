@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { callSites, componentClassPath, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
+import { callSites, componentClassPath, constructorCalls, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -164,4 +164,21 @@ test("finds the calls in a function body", () => {
   }`;
   const names = callSites(body).map((i) => body.slice(i).match(/^\w+/)![0]);
   assert.deepEqual(names, ["foo", "save", "query", "where", "strlen"]);
+});
+
+test("finds constructor calls of classes", () => {
+  const source = [
+    "<?php",
+    "namespace App;",
+    "use Other\\Money as Cash;",
+    "class Price extends Cash {",
+    "    public function __construct() { parent::__construct(1); }",
+    "    public static function make() { return new static(2); }",
+    "}",
+    "// new Cash(0);",
+    "$a = new Cash(3); $b = new \\Other\\Money(4); $c = new Money(5); $d = new Price(6);",
+  ].join("\n");
+  const found = (classes: string[]) => constructorCalls(source, new Set(classes)).map(([s, e]) => source.slice(s, e));
+  assert.deepEqual(found(["Other\\Money"]), ["__construct", "Cash", "\\Other\\Money"]);
+  assert.deepEqual(found(["App\\Price"]), ["static", "Price"]);
 });

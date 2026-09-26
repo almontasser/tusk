@@ -40,7 +40,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed, and so are calls of a constructor through `new`. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
+| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
@@ -60,7 +60,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
+| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -545,8 +545,8 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 Press ⌥⌘N on a variable to replace it with its value and remove the
 assignment. It works when the variable is assigned once, in a statement that
 starts its line (it may continue over several lines, such as a query builder
-chain), and never changed afterwards, within the same function; otherwise it
-says why it can't. The value gets parentheses when it's an expression, such as
+chain), and never changed afterwards, within the same function, and no
+closure captures it with `use`; otherwise it says why it can't. The value gets parentheses when it's an expression, such as
 `($a + $b)`.
 
 Press ⌘F6 in a method or function to change its parameters. Edit the list, for
@@ -556,7 +556,10 @@ change, and on **Apply** rewrites the declaration and the calls: positional
 arguments move with their parameters, named arguments stay named, and a
 skipped position gets the parameter's default. Methods in subclasses and
 implementing classes that override it get the same parameters, and their calls
-change too. Calls it can't rewrite safely,
+change too. For a constructor, the calls are `new` of the class and of
+subclasses that inherit its constructor, `new self` and `new static` inside
+them, and `parent::__construct()` in subclasses; a subclass's own constructor
+keeps its parameters. Calls it can't rewrite safely,
 such as ones that spread `...$args`, are listed and left unchanged.
 
 ## Type hierarchy
