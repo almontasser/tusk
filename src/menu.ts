@@ -31,7 +31,7 @@ const LAYOUT: [string, Entry[]][] = [
     ["Database", ["Open Query Console", "Execute Query", "Database: Connect over SSH…"]],
     ["Composer", ["Composer: Require Package…", "Composer: Update All"]],
     ["Laravel", ["Laravel Tinker", "Routes"]],
-    "-", "Choose Docker Service for Commands…", "Restart Language Servers", "Reindex Project"]],
+    "-", "Choose Docker Service for Commands…", "Restart Language Servers", "Reindex Project", "Index Exclusions…"]],
   ["Git", ["Commit…", "Push…", "Update Project", "-", "Branches…", "Worktrees…", "Stash Changes…", "Stashes…", "Interactive Rebase…", "Resolve Conflicts in Merge Tool", "Stage Selected Changes (in a diff)", "-",
     "Annotate with Git Blame", "Show File History", "-", "Create Pull Request…"]],
   ["Window", [native("Minimize"), native("Maximize")]],

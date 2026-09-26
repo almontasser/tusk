@@ -44,8 +44,8 @@ file to change when you add it.
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
-| First indexing | Phpactor indexes a new project once, which takes about a minute for a Laravel and Filament app with 18,000 files to read. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and vendor folders that declare nothing (translations, views, and data such as AWS's) are skipped. |
-| Mago analysis | Mago has no server mode (its experimental `--watch` reads files on disk, not unsaved text), so it parses the project again for each check: about 0.9 seconds of wall time and 1.2 seconds of CPU on a Laravel and Filament app. Without a `mago.toml`, Mago also skips the vendor folders the index skips. It runs 1 second after you stop typing. |
+| First indexing | Phpactor indexes a new project once, which takes about a minute and a half for a Laravel and Filament app with 24,000 files to read. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
+| Mago analysis | Mago has no server mode (its experimental `--watch` reads files on disk, not unsaved text), so it parses the project again for each check: about 0.9 seconds of wall time and 1.2 seconds of CPU on a Laravel and Filament app. Without a `mago.toml`, Mago also skips the project's index exclusions. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | Only SQLite, MySQL, MariaDB, and PostgreSQL connections work. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
@@ -1930,6 +1930,28 @@ the editor was closed. To do it yourself, run **Reindex Project** from ⌘⇧A.
 PHP files that other programs create or change, such as `php artisan make:model`
 or a `git checkout`, are indexed a few seconds later.
 
+**Index exclusions** make indexing and Mago's checks faster by skipping vendor
+folders whose PHP files declare no classes or functions, such as AWS's API data
+and packages' translations. On a Laravel and Filament app, the default list
+takes a full index from 116 to 94 seconds. To change the list, run **Index
+Exclusions…** from ⌘⇧A:
+
+- **Scan vendor** lists the vendor folders of 100 KB or more where no PHP
+  file declares anything, with their file counts and sizes. Checked folders are
+  skipped when you save.
+- Add a folder by path, such as `vendor/package/data`. `*` matches within a
+  folder name and `**` matches any number of folders, as in
+  `vendor/**/resources/lang`. **Restore Defaults** puts back the starting list.
+- **Share with the project in tusk.json** saves the list in the project's
+  `tusk.json`, as `"indexExclude": [...]`, so your team can commit it.
+  Otherwise, the list is kept in the editor, for this Mac only.
+
+You can also right-click a folder in the Project tree and choose **Exclude
+from Index** or **Include in Index**. The first time you open a project, the
+dialog opens with the scan's suggestions. Saving a changed list rebuilds the
+index from the start. When the project has its own `mago.toml`, Mago uses that
+file's `excludes` instead.
+
 **Formatting** (⌥⌘L) uses your project's own tools:
 
 1. **Prettier**, for every file its configuration can parse: the project's own
@@ -2009,6 +2031,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
 | `src/editor.ts` | Monaco setup, web workers, and the Blade, Vue, Svelte, and Astro grammars |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
+| `src/indexexclude.ts`, `src/indexexcludedialog.ts` | The vendor folders the index and Mago skip, per project, and the dialog that edits them |
 | `src/diagnostics.ts` | Filters false problems out of the servers' diagnostics, and reads Mago's report |
 | `src/problems.ts` | Problems panel: the project's errors and warnings |
 | `src/terminal.ts` | Terminal panel |

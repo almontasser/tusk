@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
-import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceSymbols } from "./lsp";
+import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
@@ -1415,6 +1415,7 @@ const actions: Action[] = [
   { label: "Local History: Deleted Files…", run: showDeletedFiles },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
+  { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
   { label: "Pull Requests", run: () => showView("prs") },

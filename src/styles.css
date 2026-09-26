@@ -1329,6 +1329,34 @@ button.link:hover { text-decoration: underline; }
 #signature .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
 #signature .buttons button:not(.primary):hover:not(:disabled) { background: var(--hover); }
 
+/* Index Exclusions: the folders the index skips, and the scan's suggestions. */
+#index-exclusions { width: min(760px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
+#index-exclusions::backdrop { background: #0007; }
+#index-exclusions form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 18px; max-height: 84vh; }
+#index-exclusions h2 { margin: 0; font-size: 15px; font-weight: 600; }
+#index-exclusions p.muted { margin: -4px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.exclusions-table { overflow: auto; max-height: 30vh; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.exclusions-table table { width: 100%; border-collapse: collapse; }
+.exclusions-table th { position: sticky; top: 0; z-index: 1; background: var(--chrome); text-align: left; font-weight: 500; font-size: 11.5px; color: var(--muted); padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.exclusions-table td { padding: 4px 10px; border-bottom: 1px solid var(--border-subtle); font-size: 12.5px; }
+.exclusions-table tr:last-child td { border-bottom: 0; }
+.exclusions-table td.path { font-family: var(--mono); word-break: break-all; width: 100%; }
+.exclusions-table td.number { text-align: right; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+.exclusions-table td:first-child:has(input[type="checkbox"]) { width: 1px; }
+.exclusions-table .row-actions { width: 1px; padding: 0 4px; opacity: 0; transition: opacity 0.1s; }
+.exclusions-table tr:hover .row-actions, .exclusions-table .row-actions:focus-within { opacity: 1; }
+.exclusions-table tbody:empty::after { content: "Nothing is skipped beyond hidden folders, node_modules, storage, and vendor tests."; display: block; padding: 12px; color: var(--faint); font-size: 12px; }
+.exclusions-tools { display: flex; align-items: center; gap: 8px; }
+.exclusions-tools input { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.exclusions-tools button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); white-space: nowrap; }
+.exclusions-tools button:hover:not(:disabled) { background: var(--hover); }
+.exclusions-tools .muted { font-size: 12px; color: var(--muted); }
+#index-exclusions .buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+#index-exclusions .buttons .shared { margin-right: auto; font-size: 12px; color: var(--muted); }
+#index-exclusions .buttons button { padding: 5px 16px; }
+#index-exclusions .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
+#index-exclusions .buttons button:not(.primary):hover:not(:disabled) { background: var(--hover); }
+
 /* Refactoring Preview: changed lines with what changed marked. */
 .refactor-preview .line-number { color: var(--faint); min-width: 4ch; text-align: right; font: 12px var(--mono); }
 .refactor-preview .preview-text { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; }

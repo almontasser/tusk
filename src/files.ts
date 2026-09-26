@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showFileHistory } from "./history";
 import { recordBeforeDelete, showLocalHistory } from "./localhistory";
-import { updateReferences } from "./lsp";
+import { excludeFolder, exclusionOf, updateReferences } from "./lsp";
 import { confirm, pick } from "./palette";
 import { newFileContent, psr4From } from "./psr4";
 
@@ -174,8 +174,12 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
   addEventListener("keydown", keys, true);
 }
 
-function menuFor(path: string): MenuItem[] {
+async function menuFor(path: string): Promise<MenuItem[]> {
   const dir = isDir(path) ? path : parentOf(path);
+  const root = host.root();
+  const rel = path.slice(root.length + 1);
+  // Folders the index skips. One inside a skipped folder, or matched by a glob, is changed in Index Exclusions.
+  const exclusion = isDir(path) && path !== root ? await exclusionOf(root, rel) : "covered";
   const items: MenuItem[] = [
     { label: "New File…", run: () => newFile(dir) },
     { label: "New Folder…", run: () => newFolder(dir) },
@@ -191,6 +195,7 @@ function menuFor(path: string): MenuItem[] {
     { label: "Copy Relative Path", run: () => copyPath(path, true) },
     { label: "Reveal in Finder", run: () => revealInFinder(path) },
   );
+  if (exclusion !== "covered") items.push("-", { label: exclusion === "entry" ? "Include in Index" : "Exclude from Index", run: () => excludeFolder(root, rel, exclusion === "no") });
   return items;
 }
 
@@ -206,12 +211,12 @@ export function initFiles(h: Host) {
     if (path) select(path);
   });
 
-  $("view-project").addEventListener("contextmenu", (e) => {
+  $("view-project").addEventListener("contextmenu", async (e) => {
     e.preventDefault();
     const path = pathAt(e) ?? host.root();
     if (!path) return;
     select(path);
-    showMenu(e.clientX, e.clientY, menuFor(path));
+    showMenu(e.clientX, e.clientY, await menuFor(path));
   });
 
   tree.addEventListener("keydown", (e) => {

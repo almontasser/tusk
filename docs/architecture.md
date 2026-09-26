@@ -806,11 +806,17 @@ had a 133 MB index where a complete one is 537 MB.)
 
 The client therefore records, per project in `localStorage`
 (`phpactorIndexed:<root>`, set to the index path), that a full build finished.
-Until it has, `checkComposerLock` asks for a full reindex at each start, and
-file changes don't trigger the update pass, which would only move the timestamp
-past the missing files. `reindex(false)` sets `awaitingFullIndex`; the next
-`$/progress` run titled "Indexing…" is the full build, and its end marks the
-index complete. Indexes from earlier builds, under `~/.cache/phpactor/index`
+Until it has, `startLsp` stops Phpactor and deletes the index folder before
+starting it, and file changes don't trigger the update pass, which would only
+move the timestamp past the missing files. Phpactor indexes an empty folder in
+full as it starts, so its first `$/progress` run titled "Indexing…" is the full
+build, and that run's end marks the index complete. Nothing asks for a reindex
+during that run: a reindex cancels the running pass, and its end can pass for
+the full build's. In testing, a start that asked for one marked the index
+complete 40 seconds in, where a full build of that project takes 160. For the same reason, `reindex(false)` forgets the running pass's
+token, and `checkComposerLock` saves the lock's hash but doesn't reindex while
+a build runs. Before it saved the hash then, every new project was built twice:
+once at first open, and again at the next start, when the lock looked new. Indexes from earlier builds, under `~/.cache/phpactor/index`
 and named `-editor-1` to `-editor-3`, are no longer used and can be deleted.
 
 ### Reindexing after Composer changes

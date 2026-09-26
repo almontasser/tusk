@@ -13,7 +13,8 @@ import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
 import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
-import { exclusionsFor, magoExcludes, phpactorPatterns, saveExclusions } from "./indexexclude";
+import { covers, exclusionsFor, magoExcludes, phpactorPatterns, saveExclusions } from "./indexexclude";
+import { editExclusions } from "./indexexcludedialog";
 
 type M = typeof monaco.languages;
 
@@ -1136,6 +1137,16 @@ export async function startLsp(root: string, h: Host) {
     exclusionsFor(root),
   ]);
   indexPath = index;
+  // An unfinished index is missing files that Phpactor's update pass never adds (see indexComplete), so it starts
+  // again from nothing. Phpactor indexes an empty folder in full as it starts, and that first run is the full
+  // build; asking for a reindex as well would cancel it, and its end would pass for the build's.
+  const fullBuild = !indexComplete(root);
+  fullIndexRun = undefined;
+  awaitingFullIndex = fullBuild;
+  if (fullBuild) {
+    await invoke("lsp_stop", { name: "phpactor" });
+    await invoke("remove_path", { path: indexPath }).catch(() => {});
+  }
   const phpactor = startServer("phpactor", root, ["php"], {
     "indexer.exclude_patterns": [...PHPACTOR_EXCLUDES, ...phpactorPatterns(excluded.list)],
     "indexer.index_path": indexPath,
@@ -1173,8 +1184,26 @@ export async function startLsp(root: string, h: Host) {
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
   // New alias stubs get into the index only with a full build.
-  if (aliasDir?.fresh) reindex();
-  else checkComposerLock(root);
+  if (aliasDir?.fresh && !fullBuild) reindex();
+  else checkComposerLock(root, fullBuild);
+  if (!excluded.set) firstIndexReview(root, excluded.list);
+}
+
+/**
+ * Offers a project that never set its index exclusions the scan's suggestions, once. The servers don't wait for
+ * the answer: the dialog opens as the first index starts, and saving a change starts it again from nothing.
+ */
+async function firstIndexReview(root: string, list: string[]) {
+  const key = `indexExcludeReviewed:${root}`;
+  try {
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, "1");
+  } catch {
+    return; // Without storage, it would ask at every start.
+  }
+  const chosen = await editExclusions({ root, list, shared: false, firstIndex: true });
+  const changed = chosen && (chosen.shared || JSON.stringify(chosen.list) !== JSON.stringify(list));
+  if (changed && root === projectRoot) await setExclusions(chosen.list, chosen.shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
 }
 
 /** The Mago settings the servers use, or undefined when the project has its own mago.toml. */
@@ -1214,21 +1243,19 @@ async function projectMagoConfig(root: string, bundled: string, aliasDir: string
  * Reindexes when composer.lock differs from the last time the editor saw it, including installs made
  * while the editor was closed. A simple hash of the file is kept per project.
  */
-export async function checkComposerLock(root: string) {
-  // An index whose full build never finished is missing files, and Phpactor's update pass won't add them.
-  if (!indexComplete(root)) return reindex();
+export async function checkComposerLock(root: string, building = awaitingFullIndex || fullIndexRun !== undefined) {
   const lock = await invoke<string>("read_file", { path: `${root}/composer.lock` }).catch(() => null);
-  if (lock === null) return;
   let hash = 0;
-  for (let i = 0; i < lock.length; i++) hash = (Math.imul(31, hash) + lock.charCodeAt(i)) | 0;
+  for (let i = 0; lock && i < lock.length; i++) hash = (Math.imul(31, hash) + lock.charCodeAt(i)) | 0;
   const key = `composerLock:${root}`;
+  let changed = false;
   try {
-    if (localStorage.getItem(key) === String(hash)) return;
-    localStorage.setItem(key, String(hash));
-  } catch {
-    return; // Without storage, don't reindex on every start.
-  }
-  reindex();
+    changed = lock !== null && localStorage.getItem(key) !== String(hash);
+    // Kept even while a full build runs, which covers the packages too; otherwise the next start would take
+    // the lock for new and build the whole index a second time.
+    if (changed) localStorage.setItem(key, String(hash));
+  } catch {}
+  if (changed && !building) reindex();
 }
 
 /**
@@ -1311,23 +1338,44 @@ export async function phpactorRequest<T>(method: string, params: unknown): Promi
  */
 export function reindex(soft = false) {
   const phpactor = servers.find((s) => s.name === "phpactor");
-  if (!soft && phpactor) awaitingFullIndex = true;
+  // A run this cancels ends too, and that end mustn't pass for the new build's.
+  if (!soft && phpactor) (awaitingFullIndex = true), (fullIndexRun = undefined);
   phpactor?.request("phpactor/indexer/reindex", { soft }).catch((e) => host.status(`Can't reindex: ${e}`));
 }
 
 /**
  * Saves the project's list of folders to skip and builds the index again from nothing, since Phpactor keeps
- * entries for files that become excluded. Phpactor must have exited before its index is deleted.
+ * entries for files that become excluded.
  */
 export async function setExclusions(list: string[], shared: boolean) {
   const root = projectRoot;
   await saveExclusions(root, list, shared);
-  await invoke("lsp_stop", { name: "phpactor" });
-  await invoke("remove_path", { path: indexPath }).catch(() => {});
+  // An index that isn't complete is deleted and built again as the servers start.
   try {
     localStorage.removeItem(indexedKey(root));
   } catch {}
   await startLsp(root, host);
+}
+
+/** Opens the Index Exclusions dialog, and reindexes when the list changes. */
+export async function manageExclusions(root: string) {
+  const chosen = await editExclusions({ root, ...(await exclusionsFor(root)) });
+  if (chosen) await setExclusions(chosen.list, chosen.shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
+}
+
+/**
+ * Whether a folder, relative to the project, is skipped: "entry" when the list names it, so it can be taken
+ * out, "covered" when it's inside a folder the list names or matches a glob, and "no" otherwise.
+ */
+export async function exclusionOf(root: string, rel: string): Promise<"entry" | "covered" | "no"> {
+  const { list } = await exclusionsFor(root);
+  return list.includes(rel) ? "entry" : covers(list, rel) ? "covered" : "no";
+}
+
+/** Adds a folder to the project's list, or takes it out, and reindexes. */
+export async function excludeFolder(root: string, rel: string, exclude: boolean) {
+  const { list, shared } = await exclusionsFor(root);
+  await setExclusions(exclude ? [...list, rel] : list.filter((p) => p !== rel), shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
 }
 
 let reindexTimer: ReturnType<typeof setTimeout> | undefined;
