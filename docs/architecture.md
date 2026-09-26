@@ -1091,7 +1091,8 @@ files work in PhpStorm and VS Code's REST Client.
 - `src/httpimport.ts` has no editor imports, so Node tests it.
   `importCollection` detects a Postman collection (v2), an Insomnia export (v4),
   or an OpenAPI 3 or Swagger 2 document, and returns one file's text and
-  environments. OpenAPI bodies come from examples, or from a skeleton of the
+  environments. It reads JSON with `JSON.parse` and anything else with the
+  `yaml` package. OpenAPI bodies come from examples, or from a skeleton of the
   schema that follows `$ref` and stops at a cycle. `toOpenApi` goes the other
   way, and `junitReport` writes the runner's results as JUnit XML.
   `src/httpteam.ts` is the UI: it chooses the file with the dialog plugin,
@@ -3425,3 +3426,11 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Read YAML imports with the `yaml` package
+
+OpenAPI documents and Insomnia exports are often YAML, and asking you to
+convert them first was a step every import of one needed. The `yaml` package
+has no dependencies and parses YAML 1.2, which covers JSON, but text that
+starts with `{` or `[` still goes through `JSON.parse`, which is faster on
+large Postman collections.

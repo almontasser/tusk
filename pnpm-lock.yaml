@@ -35,6 +35,9 @@ importers:
       tm-themes:
         specifier: ^1.12.12
         version: 1.12.12
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2
@@ -47,7 +50,7 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^8.0.16
-        version: 8.3.0(@types/node@26.6.2)
+        version: 8.3.0(@types/node@26.6.2)(yaml@2.9.1)
       vscode-languageserver-protocol:
         specifier: ^3.18.3
         version: 3.18.3
@@ -461,6 +464,11 @@ packages:
   vscode-languageserver-types@3.18.3:
     resolution: {integrity: sha512-XIlzJ7Qp/jzSI1ds7/FwPAWrPeTZA7pAtlW4hdJ1J6xXWJL6dR9QYnDhJOdLzdKhUQ5Mm6mvUMw+3DcOQQasPw==}
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@oxc-project/types@0.150.0': {}
@@ -703,7 +711,7 @@ snapshots:
 
   undici-types@8.9.0: {}
 
-  vite@8.3.0(@types/node@26.6.2):
+  vite@8.3.0(@types/node@26.6.2)(yaml@2.9.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -713,6 +721,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.2
       fsevents: 2.3.3
+      yaml: 2.9.1
 
   vscode-jsonrpc@9.0.2: {}
 
@@ -722,3 +731,5 @@ snapshots:
       vscode-languageserver-types: 3.18.3
 
   vscode-languageserver-types@3.18.3: {}
+
+  yaml@2.9.1: {}
