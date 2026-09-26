@@ -211,7 +211,11 @@ endings to `end_of_line` (`pushEOL`), trims trailing whitespace, and fixes the
 final newline, each as an undoable edit, before the text is written. A model
 with no line breaks yet takes `end_of_line` when it opens (`setEOL`), and its
 tab stays clean, since the text on disk is the same. Monaco has only LF and
-CRLF, so `end_of_line = cr` is ignored.
+CRLF, so CR lines convert outside it: `readText` turns a file with CR alone
+(`isCrOnly`) into LF and remembers the path, and `writeText` turns the text
+back into CR (`toCr`) when `end_of_line = cr`, or when there's no
+`end_of_line` and the file was read with CR (`savesCr`). The status bar shows
+CR for such a model.
 
 `charset` goes to `read_file` and `write_file` in `fs.rs`, through
 `readText` and `writeText` in `src/projectfiles.ts`, which every feature that
@@ -3425,3 +3429,11 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: CR line endings convert on read and save
+
+Monaco's text model has only LF and CRLF, and it would read a file with CR
+alone as lines but save it with LF. Rather than patch Monaco, `readText` and
+`writeText` convert at the edge, so every feature sees LF text and a CR file,
+or a file under `end_of_line = cr`, is written with CR. The cost is that the
+conversion isn't an undoable edit, unlike LF and CRLF.

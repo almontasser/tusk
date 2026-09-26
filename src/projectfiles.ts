@@ -1,7 +1,7 @@
 // Reads and writes project files in the charset .editorconfig gives them. Every read or write of a project file's
 // text goes through here, so a Latin-1 or UTF-16 file keeps its encoding whichever feature saves it.
 import { invoke } from "@tauri-apps/api/core";
-import { type Properties, propertiesFor } from "./editorconfig";
+import { isCrOnly, type Properties, propertiesFor, toCr } from "./editorconfig";
 
 let root = () => "";
 export const initProjectFiles = (projectRoot: () => string) => (root = projectRoot);
@@ -33,5 +33,21 @@ export async function charsetOf(path: string) {
   return charset in CHARSETS ? charset : undefined;
 }
 
-export const readText = async (path: string) => invoke<string>("read_file", { path, charset: await charsetOf(path) });
-export const writeText = async (path: string, contents: string) => invoke<void>("write_file", { path, contents, charset: await charsetOf(path) });
+/** Files read with old Mac line endings, CR alone, which they keep when saved. */
+const crFiles = new Set<string>();
+
+/** Whether a file is saved with CR line endings: `end_of_line = cr`, or else its own. */
+export const savesCr = (path: string, props: Properties) => props.end_of_line === "cr" || (!props.end_of_line && crFiles.has(path));
+
+/** A file's text. Monaco has no CR-only lines, so they read as LF, and `writeText` turns them back. */
+export async function readText(path: string) {
+  const text = await invoke<string>("read_file", { path, charset: await charsetOf(path) });
+  if (!isCrOnly(text)) return crFiles.delete(path), text;
+  crFiles.add(path);
+  return text.replace(/\r/g, "\n");
+}
+
+export async function writeText(path: string, contents: string) {
+  const cr = savesCr(path, await editorConfigFor(path));
+  return invoke<void>("write_file", { path, contents: cr ? toCr(contents) : contents, charset: await charsetOf(path) });
+}

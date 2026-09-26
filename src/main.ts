@@ -9,7 +9,7 @@ import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
-import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
+import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
@@ -696,7 +696,7 @@ function updateStatusItems() {
   $("cursor-position").textContent = model && pos ? `${pos.lineNumber}:${pos.column}${selected ? ` (${selected} chars)` : ""}` : "";
   const options = model?.getOptions();
   $("indentation").textContent = options ? (options.insertSpaces ? `${options.tabSize} spaces` : `Tab size ${options.tabSize}`) : "";
-  $("encoding").textContent = model ? `${modelCharsets.get(model) ?? "UTF-8"} · ${model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
+  $("encoding").textContent = model ? `${modelCharsets.get(model) ?? "UTF-8"} · ${crModels.has(model) ? "CR" : model.getEOL() === "\n" ? "LF" : "CRLF"}` : "";
   $("language").textContent = model ? languageName(model.getLanguageId()) : "";
 }
 
@@ -923,7 +923,9 @@ monaco.languages.registerDefinitionProvider("blade", {
 
 /** Each file model's charset, for the status bar. */
 const modelCharsets = new WeakMap<monaco.editor.ITextModel, string>();
-/** `.editorconfig`'s end_of_line as Monaco's line ending. Monaco has no CR-only lines, so `cr` is left alone. */
+/** Models whose file is saved with CR line endings, which Monaco doesn't have, so the editor shows them as LF. */
+const crModels = new WeakSet<monaco.editor.ITextModel>();
+/** `.editorconfig`'s end_of_line as Monaco's line ending. `cr` is left to `writeText`. */
 const eolOf = (props: Properties) => ({ lf: monaco.editor.EndOfLineSequence.LF, crlf: monaco.editor.EndOfLineSequence.CRLF })[props.end_of_line];
 
 /**
@@ -936,6 +938,8 @@ async function applyEditorConfig(model: monaco.editor.ITextModel) {
   const options = Object.fromEntries(Object.entries(indentation(props)).filter(([, v]) => v !== undefined));
   if (Object.keys(options).length) model.updateOptions(options);
   modelCharsets.set(model, CHARSETS[props.charset] ?? "UTF-8");
+  if (savesCr(model.uri.fsPath, props)) crModels.add(model);
+  else crModels.delete(model);
   const eol = eolOf(props);
   if (eol !== undefined && model.getLineCount() === 1 && model.getEndOfLineSequence() !== eol) {
     // Changing the line ending counts as an edit, but the file's text is the same.

@@ -58,7 +58,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
-| Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
+| Settings | Without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
@@ -331,9 +331,11 @@ status bar shows it), and saving applies `trim_trailing_whitespace` and
 `insert_final_newline`. `charset` sets the encoding files are read and saved
 in: `utf-8`, `utf-8-bom`, `latin1`, `utf-16le`, or `utf-16be` (the status bar
 shows it). `end_of_line` (`lf` or `crlf`) applies to new files, and converts a
-file's line endings when you save it; ⌘Z undoes the conversion. Without
-`.editorconfig`, the editor detects indentation from each file's content,
-keeps each file's line endings, and reads files as UTF-8. Changes to
+file's line endings when you save it; ⌘Z undoes the conversion. `cr` (old Mac
+line endings) converts when saving too, but the editor shows CR lines as LF, so
+⌘Z can't undo it. Without `.editorconfig`, the editor detects indentation from
+each file's content, keeps each file's line endings (CR included), and reads
+files as UTF-8. Changes to
 `.editorconfig` apply to open files at once.
 
 Press ⌘\ to split the editor to the right, or ⌘⇧\ to split it down: the
