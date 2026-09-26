@@ -2482,9 +2482,14 @@ Memory comes from the second event, `Memory_(bytes)`. Xdebug measures it as
 the growth in memory use over a call, so the own amounts don't add up to a
 caller's, and the table shows only the total, counted like total time.
 
-Profiles parse in a Web Worker (`src/cachegrind.worker.ts`), so a large one
-doesn't freeze the window. Structured cloning keeps the references between
-functions (callers and callees) when the result comes back.
+A long test's profile can be gigabytes of text, too large for one string. The
+editor reads the gzipped file as bytes (`read_bytes`), decompresses it with
+`DecompressionStream`, and feeds the parser line by line
+(`cachegrindParser`), letting the window handle input between chunks. The file
+goes in as 64 KB slices: given one chunk, WebKit's `DecompressionStream`
+returns the whole file in one chunk too. Yields go through a `MessageChannel`
+every 50 ms: while the window is hidden, WebKit runs a page's tasks only a few
+times a second, and `setTimeout` once a second.
 
 Profile URL starts the profiling server when this session hasn't, or when its
 port no longer answers, and requests the path with `curl`. Xdebug finishes a

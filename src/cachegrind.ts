@@ -50,6 +50,13 @@ export type Profile = {
  * outermost calls in its subtree; a caller merges its callees' totals and sets its own.
  */
 export function parseCachegrind(text: string): Profile {
+  const parser = cachegrindParser();
+  for (const line of text.split("\n")) parser.line(line);
+  return parser.end();
+}
+
+/** The same parser, fed one line at a time, so a profile too large for one string can be streamed through it. */
+export function cachegrindParser(): { line(line: string): void; end(): Profile } {
   const names = { fl: new Map<string, string>(), fn: new Map<string, string>() };
   const byName = new Map<string, ProfiledFunction>();
   let command = "";
@@ -109,7 +116,7 @@ export function parseCachegrind(text: string): Profile {
     unclaimed.push(block);
     block = undefined;
   };
-  for (const line of text.split("\n")) {
+  const line = (line: string) => {
     const eq = line.indexOf("=");
     const key = eq > 0 ? line.slice(0, eq) : "";
     if (key === "fl" || key === "fi" || key === "fe") {
@@ -154,31 +161,34 @@ export function parseCachegrind(text: string): Profile {
     } else if (line.startsWith("cmd: ")) command = line.slice(5);
     else if (line.startsWith("events: ") && line.includes("Time_(10ns)")) scale = 1 / 100_000;
     else if (line.startsWith("summary:")) finish();
-  }
-  finish();
-  // What's left unclaimed are the roots: {main}, and anything PHP ran after it, such as shutdown functions.
-  const tree: CallNode = { fn: get("{root}"), calls: 0, time: 0, children: [] };
-  byName.delete("{root}");
-  adopt(tree, unclaimed.map((b) => b.node!));
-  for (const root of unclaimed)
-    for (const [fn, c] of root.totals ?? []) {
-      fn.inclusive += c.time;
-      fn.memory += c.memory;
-    }
-  for (const [caller, out] of edges)
-    for (const call of out.values()) {
-      caller.callees.push(call);
-      call.fn.callers.push({ fn: caller, calls: call.calls, time: call.time });
-    }
-  const functions = [...byName.values()];
-  const main = byName.get("{main}");
-  return {
-    command,
-    functions,
-    total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)),
-    sites,
-    tree: tree.children,
   };
+  const end = (): Profile => {
+    finish();
+    // What's left unclaimed are the roots: {main}, and anything PHP ran after it, such as shutdown functions.
+    const tree: CallNode = { fn: get("{root}"), calls: 0, time: 0, children: [] };
+    byName.delete("{root}");
+    adopt(tree, unclaimed.map((b) => b.node!));
+    for (const root of unclaimed)
+      for (const [fn, c] of root.totals ?? []) {
+        fn.inclusive += c.time;
+        fn.memory += c.memory;
+      }
+    for (const [caller, out] of edges)
+      for (const call of out.values()) {
+        caller.callees.push(call);
+        call.fn.callers.push({ fn: caller, calls: call.calls, time: call.time });
+      }
+    const functions = [...byName.values()];
+    const main = byName.get("{main}");
+    return {
+      command,
+      functions,
+      total: main?.inclusive ?? Math.max(0, ...functions.map((f) => f.inclusive)),
+      sites,
+      tree: tree.children,
+    };
+  };
+  return { line, end };
 }
 
 /**

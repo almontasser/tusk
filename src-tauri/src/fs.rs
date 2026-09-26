@@ -42,6 +42,12 @@ pub async fn read_file(path: String, charset: Option<String>) -> Result<String, 
     .await
 }
 
+/// A file's raw bytes, sent as binary rather than JSON: a gzipped profile can be over 100 MB.
+#[tauri::command]
+pub async fn read_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    crate::blocking(move || std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())).await
+}
+
 /// Writes a file, encoded in `charset` (an `.editorconfig` value) or else UTF-8.
 #[tauri::command]
 pub async fn write_file(path: String, contents: String, charset: Option<String>) -> Result<(), String> {
