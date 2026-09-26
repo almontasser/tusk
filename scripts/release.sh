@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds a universal release and publishes it as a GitHub release that installed copies update from.
 # Usage: scripts/release.sh 0.2.0
-# Needs the Bitwarden CLI (bw) with the tusk-signing-key note, and gh signed in.
+# Needs bwnote in ~/.zshrc with the tusk-signing-key note in Bitwarden, and gh signed in.
 set -eu
 
 version="${1:?Usage: scripts/release.sh <version>}"
@@ -9,8 +9,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 [ -z "$(git status --porcelain)" ] || { echo "Commit your changes first." >&2; exit 1; }
 
-# The updater's private key lives in Bitwarden, never on disk. bw asks for the master password if locked.
-TAURI_SIGNING_PRIVATE_KEY="$(bw get notes tusk-signing-key)" || { echo "Couldn't read tusk-signing-key from Bitwarden." >&2; exit 1; }
+# The updater's private key lives in Bitwarden, never on disk. bwnote (a zsh function in ~/.zshrc) unlocks
+# with Touch ID; its unlock message can come first, so only the last line is the key.
+TAURI_SIGNING_PRIVATE_KEY="$(zsh -ic 'bwnote tusk-signing-key' 2>/dev/null | tail -n 1)"
+echo "$TAURI_SIGNING_PRIVATE_KEY" | grep -Eq '^[A-Za-z0-9+/]{100,}=*$' || { echo "Couldn't read tusk-signing-key with bwnote." >&2; exit 1; }
 export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 
 node -e '

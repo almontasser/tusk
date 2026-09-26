@@ -152,8 +152,8 @@ scripts/release.sh 0.2.0
 
 The script sets the version, builds the universal app, signs the update
 archive with the private key from the `tusk-signing-key` note in Bitwarden
-(through the `bw` CLI, which asks for your master password if the vault is
-locked), writes `latest.json`, commits and tags the version, and creates the
+(through `bwnote` from your `~/.zshrc`, which unlocks the vault with Touch ID
+if it's locked), writes `latest.json`, commits and tags the version, and creates the
 GitHub release with `gh`. The key is kept only in Bitwarden: without it,
 installed copies can't verify a new version, and you must ship a new key in a
 DMG that everyone installs by hand.
