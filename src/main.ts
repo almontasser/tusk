@@ -25,6 +25,8 @@ import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
+import { initRefactorPreview } from "./refactorpreview";
+import { extractConstant, extractMethod, extractVariable, initExtract, pickAtCaret, refactorings } from "./extract";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
@@ -1336,6 +1338,10 @@ const actions: Action[] = [
   { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
   { label: "Inline Variable", keys: "Alt+Meta+N", run: () => inlineVariable(editor), editorOnly: true },
   { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
+  { label: "Extract Variable…", keys: "Alt+Meta+V", run: () => extractVariable(editor), editorOnly: true },
+  { label: "Extract Constant…", keys: "Alt+Meta+C", run: () => extractConstant(editor), editorOnly: true },
+  { label: "Extract Method…", keys: "Alt+Meta+M", run: () => extractMethod(editor), editorOnly: true },
+  { label: "Refactor This…", keys: "Ctrl+T", run: () => refactorThis(), editorOnly: true },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
   { label: "Call Hierarchy", keys: "Ctrl+Alt+H", run: () => showCallHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
@@ -1496,6 +1502,13 @@ const symbolsFor = (keys?: string) =>
 const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
+
+/** ⌃T: the refactorings that apply at the caret or selection, as PhpStorm's Refactor This lists them. */
+async function refactorThis() {
+  const { names, more } = await refactorings(editor);
+  const items = [...names.flatMap((n) => actionItems().filter((a) => a.label === n)), ...more];
+  pickAtCaret(editor, "Refactor This", (q) => rank(q, items));
+}
 
 // ---- Keymap ----
 
@@ -1752,6 +1765,8 @@ initRefactor({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initGenerate({ status });
+initExtract({ status });
+initRefactorPreview({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initCallHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,

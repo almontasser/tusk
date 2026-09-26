@@ -269,19 +269,49 @@ async function locations(result: L.Location | L.Location[] | L.LocationLink[] | 
 
 // ---- Workspace edits ----
 
-/** Applies an edit and saves every touched file, as PhpStorm does for refactorings. */
+/** Writes a model to its file and tells the servers, which update their index for open files on save. */
+async function saveModel(model: monaco.editor.ITextModel) {
+  const path = model.uri.fsPath;
+  await writeText(path, model.getValue());
+  host.markSaved(path);
+  didSave(model);
+}
+
+/**
+ * Makes one ⌘Z undo a refactoring in every file it changed, as PhpStorm does: undoing it in one of them undoes
+ * it in the others too, and saves them all. A file edited after the refactoring leaves the group, since its
+ * next undo is no longer the refactoring's.
+ */
+function linkUndo(models: monaco.editor.ITextModel[]) {
+  const group = new Set(models);
+  if (group.size < 2) return;
+  const listeners = [...group].map((model) =>
+    model.onDidChangeContent((e) => {
+      if (!group.has(model)) return;
+      if (!e.isUndoing) return void group.delete(model);
+      listeners.forEach((l) => l.dispose());
+      const others = [...group].filter((m) => m !== model && !m.isDisposed());
+      for (const m of others) m.undo();
+      for (const m of [model, ...others]) saveModel(m).catch(() => {});
+      host.status(`Undid the refactoring in ${others.length + 1} files.`);
+    }),
+  );
+}
+
+/** Applies an edit and saves every touched file, as PhpStorm does for refactorings. One ⌘Z undoes it in all of them. */
 export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
   const ops: (L.TextDocumentEdit | L.CreateFile | L.RenameFile | L.DeleteFile)[] =
     edit.documentChanges ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri, version: null }, edits }));
+  const edited: monaco.editor.ITextModel[] = [];
   for (const op of ops) {
     if (!("kind" in op)) {
-      const path = pathOf(op.textDocument.uri);
-      const model = await host.ensureModel(path);
+      const model = await host.ensureModel(pathOf(op.textDocument.uri));
+      // Stops on both sides keep the refactoring its own undo step, apart from typing before or after it.
+      model.pushStackElement();
       model.pushEditOperations([], op.edits.map((e) => ({ range: toRange(e.range), text: "newText" in e ? e.newText : "" })), () => null);
-      await writeText(path, model.getValue());
-      host.markSaved(path);
-      // Servers update their index for open files on save, so reference lookups see these edits.
-      didSave(model);
+      model.pushStackElement();
+      await saveModel(model);
+      edited.push(model);
     } else if (op.kind === "create") {
       await invoke("write_file", { path: pathOf(op.uri), contents: "" });
     } else if (op.kind === "rename") {
@@ -292,6 +322,7 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       await invoke("remove_path", { path: pathOf(op.uri) });
     }
   }
+  linkUndo(edited);
 }
 
 // Servers can link to a location with this command, for example in code lenses.

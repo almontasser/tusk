@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classProperties, matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
+import { classProperties, declarationParts, formatParams, matchBracket, paramText, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
 
 test("splits arguments at top-level commas", () => {
   assert.deepEqual(splitTopLevel(`$a, foo($b, [1, 2]), 'x, y', "q\\", r"`), ["$a", "foo($b, [1, 2])", "'x, y'", `"q\\", r"`]);
@@ -79,4 +79,36 @@ test("reads a class's properties", () => {
   );
   assert.equal(body[props[1].end], ";");
   assert.equal(body.slice(0, props[1].end).split("\n").length, 7);
+});
+
+test("renames parameters in calls and fills new ones with a value for calls", () => {
+  const old = parseParams("int $a, string $b = 'x'");
+  const renamed = parseParams("int $amount, string $b = 'x'").map((p, i) => ({ ...p, from: old[i].name }));
+  assert.deepEqual(rewriteArgs(["a: 1"], old, renamed), { args: ["amount: 1"] });
+  assert.deepEqual(rewriteArgs(["1", "'y'"], old, renamed), { args: ["1", "'y'"] });
+  // A new required parameter gets the value for calls, even after the defaults.
+  const added = [...renamed, { ...parseParams("bool $strict")[0], callValue: "true" }];
+  assert.deepEqual(rewriteArgs(["1"], old, added), { args: ["1", "'x'", "true"] });
+  assert.ok("error" in rewriteArgs(["1"], old, [...renamed, parseParams("bool $strict")[0]]));
+  // After a named argument, the rest are named too, so none takes its place.
+  const reordered = [{ ...parseParams("int $qty = 1")[0], from: "qty" }, { ...parseParams("float $percent")[0], from: "rate" }, { ...parseParams("bool $round")[0], callValue: "true" }];
+  const before = parseParams("float $rate, int $qty = 1");
+  assert.deepEqual(rewriteArgs(["rate: 0.2"], before, reordered), { args: ["percent: 0.2", "round: true"] });
+  assert.deepEqual(rewriteArgs(["0.1", "3"], before, reordered), { args: ["3", "0.1", "true"] });
+});
+
+test("reads a declaration's parts and writes parameters back", () => {
+  const text = "    public static function &make(\n        private readonly int $a,\n        #[Sensitive] string ...$rest,\n    ): ?static {}";
+  const parts = declarationParts(text, text.indexOf("make") + 4)!;
+  assert.equal(parts.modifiers, "public static");
+  assert.equal(parts.name, "make");
+  assert.ok(parts.byRef);
+  assert.equal(parts.returnType, "?static");
+  assert.equal(parts.indent, "        ");
+  assert.deepEqual(parts.params.map((p) => [p.type, p.name, p.variadic]), [["private readonly int", "a", false], ["#[Sensitive] string", "rest", true]]);
+  assert.equal(text.slice(parts.end), " {}");
+  assert.equal(formatParams(parts.params, parts.indent, "    "), "\n        private readonly int $a,\n        #[Sensitive] string ...$rest,\n    ");
+  assert.equal(paramText({ ...parseParams("array &$x = []")[0] }), "array &$x = []");
+  const short = "function f($a) {}";
+  assert.equal(declarationParts(short, 10)?.end, 14);
 });

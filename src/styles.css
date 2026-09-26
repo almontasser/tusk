@@ -1266,3 +1266,44 @@ button.link:hover { text-decoration: underline; }
 .change-peek-bar button { display: flex; padding: 3px; border-radius: 4px; }
 .change-peek-bar button:hover { background: var(--hover); }
 .change-peek pre { margin: 0 0 12px; background: color-mix(in srgb, var(--red) 14%, transparent); white-space: pre; overflow: hidden; }
+
+/* What a refactoring's choice would change, while you choose, as PhpStorm highlights it. */
+.monaco-editor .refactor-highlight { background: color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 2px; }
+
+/* Change Signature, laid out as PhpStorm's dialog. */
+#signature { width: min(860px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
+#signature::backdrop { background: #0007; }
+#signature form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px; max-height: 84vh; }
+#signature h2 { margin: 0; font-size: 16px; }
+#signature h2 .muted { font-weight: 400; margin-left: 4px; }
+#signature label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+#signature label.grow { flex: 1; }
+.signature-head { display: flex; gap: 10px; }
+.signature-params { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.signature-params table { width: 100%; border-collapse: collapse; }
+.signature-params th { position: sticky; top: 0; background: var(--chrome); text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.signature-params td { padding: 3px 4px; }
+.signature-params td input { width: 100%; font-family: var(--mono); font-size: 12px; }
+.signature-params tr.added td input:not(:disabled) { border-color: color-mix(in srgb, var(--green) 55%, var(--input-border)); }
+.signature-params .row-actions { white-space: nowrap; width: 1%; }
+.signature-params tbody:empty::after { content: "No parameters"; display: block; padding: 10px; color: var(--faint); }
+.signature-tools { display: flex; align-items: center; gap: 10px; }
+.signature-tools button { padding: 3px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+.signature-tools button:hover { background: var(--hover); }
+.signature-preview { display: block; padding: 8px 10px; background: var(--bg); border-radius: var(--radius); font: 12px var(--mono); white-space: pre-wrap; word-break: break-word; }
+.signature-problem { margin: 0; min-height: 18px; color: var(--red); font-size: 12px; }
+#signature .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+#signature .buttons button { padding: 4px 16px; }
+#signature .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
+#signature .buttons button:not(.primary):hover:not(:disabled) { background: var(--hover); }
+
+/* Refactoring Preview: changed lines with what changed marked. */
+.refactor-preview .line-number { color: var(--faint); min-width: 4ch; text-align: right; font: 12px var(--mono); }
+.refactor-preview .preview-text { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.refactor-preview del { background: color-mix(in srgb, var(--red) 25%, transparent); text-decoration: line-through; }
+.refactor-preview ins { background: color-mix(in srgb, var(--green) 25%, transparent); text-decoration: none; }
+.refactor-preview .codicon-warning { color: var(--yellow); }
+.signature-problem.warning { color: var(--yellow); }
+.signature-params td input:disabled { opacity: 0.35; }
+.hierarchy-toolbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.hierarchy-toolbar button.primary:hover { background: var(--accent-hover); }

@@ -60,7 +60,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
+| Refactoring | Phpactor provides rename and extract method; the editor names the extracted method in place. Moving a file moves its class. Extract Variable and Extract Constant read expressions with their own parser, which treats ternaries (`? :`) and closures as boundaries, so a whole ternary isn't offered. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -223,7 +223,11 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
 | ⌃⌥H | Call hierarchy of the method or function under the cursor, or the one the cursor is in |
+| ⌃T | Refactor This: the refactorings for the caret or selection |
 | ⌘⌦ | Safe delete the class, method, or function at the cursor |
+| ⌥⌘V | Extract the expression at the cursor, or the selection, into a variable |
+| ⌥⌘C | Extract the string or number at the cursor into a class constant |
+| ⌥⌘M | Extract the selection into a method |
 | ⌥⌘N | Inline the variable at the cursor |
 | ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
@@ -540,27 +544,90 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
   its docblock and attributes (undo with ⌘Z). A class that's alone in its file
   moves the file to the Trash.
 
-## Inline variable and change signature
+## Refactor This
+
+Press ⌃T to list the refactorings that apply at the caret or to the selection,
+with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
+Signature, the three Extracts, Inline Variable, and Safe Delete, plus
+Phpactor's other refactoring actions there. The **Refactor** menu has them all.
+
+## Extract variable, constant, and method
+
+Press ⌥⌘V to put an expression in a new variable. With nothing selected, a
+popup at the caret lists the expressions around it, from the innermost, such
+as `$item['price']`, `$item['price'] * $item['qty']`, and the whole product.
+Operator precedence decides what counts as one expression, and the editor
+highlights each as you move through the list. With a selection, the selection
+must be a whole expression.
+
+- When the same expression appears more than once in the function, choose
+  **Replace all N occurrences** or **Replace this occurrence only**.
+- The assignment goes before the statement that holds the first use, in the
+  innermost block that holds them all, so it lands inside a loop or an `else`
+  when the uses are there. A statement that's only the expression, such as
+  `foo();`, becomes the assignment.
+- The editor suggests a name from the expression: `$user->getEmail()` gives
+  `$email`, `$item['unit_price']` gives `$unitPrice`, and `new Invoice()` gives
+  `$invoice`. Type another name and every use follows; press ⏎ or Escape when
+  done.
+
+Press ⌥⌘C on a string or number, or select an expression of literals, to
+extract a class constant. It works the same way: choose the occurrences in the
+class, and type the name. The constant is `private` (`public` in an interface)
+and goes after the class's other constants, or at the top. Uses become
+`self::NAME`.
+
+Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
+method. Phpactor writes the method with its parameters and return type; you
+then type its name in place.
+
+## Inline variable
 
 Press ⌥⌘N on a variable to replace it with its value and remove the
 assignment. It works when the variable is assigned once, in a statement that
 starts its line (it may continue over several lines, such as a query builder
 chain), and never changed afterwards, within the same function, and no
-closure captures it with `use`; otherwise it says why it can't. The value gets parentheses when it's an expression, such as
-`($a + $b)`.
+closure captures it with `use`; otherwise it says why it can't. The value gets
+parentheses when it's an expression, such as `($a + $b)`.
 
-Press ⌘F6 in a method or function to change its parameters. Edit the list, for
-example to reorder, remove, or add parameters, and press ⏎. A new parameter
-needs a default value. The editor finds every call, shows how many it will
-change, and on **Apply** rewrites the declaration and the calls: positional
-arguments move with their parameters, named arguments stay named, and a
-skipped position gets the parameter's default. Methods in subclasses and
-implementing classes that override it get the same parameters, and their calls
-change too. For a constructor, the calls are `new` of the class and of
-subclasses that inherit its constructor, `new self` and `new static` inside
-them, and `parent::__construct()` in subclasses; a subclass's own constructor
-keeps its parameters. Calls it can't rewrite safely,
-such as ones that spread `...$args`, are listed and left unchanged.
+## Change signature
+
+Press ⌘F6 in a method or function to open the **Change Signature** dialog, laid
+out as PhpStorm's:
+
+- Change the visibility, the name, and the return type.
+- Edit each parameter's type, name, and default value. **Add Parameter** or ⌘N
+  adds one after the focused row, the arrows or ⌥↑ and ⌥↓ reorder them, and the
+  trash button removes one.
+- A new parameter needs a default value or a **Value in existing calls**, which
+  goes into every call without becoming a default.
+- The new signature shows as you type, and a problem, such as two parameters
+  with one name, disables **Refactor**. An optional parameter before a required
+  one gets a warning, since PHP deprecates it.
+
+**Refactor** (⏎) applies the change; **Preview** first opens the **Refactoring
+Preview** panel, which lists every changed line by file with what changed
+marked. **Do Refactor** there applies it. The preview also opens on its own
+when some calls can't be rewritten, listing them under **Left unchanged**.
+
+The editor rewrites the declaration and every call: positional arguments move
+with their parameters, named arguments stay named (under a parameter's new
+name), and once an argument must be named, the ones after it are named too. A
+renamed parameter is renamed in the body and the docblock. Methods in
+subclasses and implementing classes that override it change with it, keeping
+their own parameter names unless you renamed one. For a constructor, the calls
+are `new` of the class and of subclasses that inherit its constructor, `new
+self` and `new static` inside them, and `parent::__construct()` in subclasses;
+a subclass's own constructor keeps its parameters, and a promoted property is
+renamed with Rename instead. Arguments one per line stay one per line. Calls it
+can't rewrite safely, such as ones that spread `...$args`, are left unchanged.
+
+## Undo across files
+
+A refactoring that changes several files, such as Rename or Change Signature,
+saves them all, and one ⌘Z in any of them undoes it in every file, as in
+PhpStorm. A file you edit afterwards leaves the group, since its next undo is
+no longer the refactoring's.
 
 ## Type hierarchy
 
@@ -1935,7 +2002,12 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/hierarchy.ts` | The type hierarchy view |
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
-| `src/refactorparse.ts` | Argument, parameter, and assignment parsing for the refactorings |
+| `src/refactorparse.ts` | Argument, parameter, declaration, and assignment parsing for the refactorings |
+| `src/signaturedialog.ts` | The Change Signature dialog |
+| `src/refactorpreview.ts` | The Refactoring Preview panel |
+| `src/extract.ts` | Extract Variable, Extract Constant, Extract Method, naming in place, and Refactor This |
+| `src/extractparse.ts` | The expressions around the caret, their occurrences, and suggested names |
+| `src/dom.ts` | The `h()` helper that builds DOM elements |
 | `src/phptypes.ts` | Reads PHP declarations, Laravel's names for methods and components, and route actions |
 | `src/icons.ts` | File and folder icons |
 | `src/themes.ts` | The color theme list, imported themes, and applying a theme |

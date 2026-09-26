@@ -990,6 +990,73 @@ to the enclosing type, and `new parent` and `parent::__construct(` to its
 parent. Call Hierarchy and Safe Delete share `callsOf`, so they see these
 calls too.
 
+### Change Signature's dialog and preview
+
+`declarationParts` in `src/refactorparse.ts` reads a declaration's modifiers,
+name, parameters (each split into everything before the name, `&`, `...`, the
+name, and the default), and return type, and whether the parameters sit one per
+line. `src/signaturedialog.ts` edits that as a `Signature`, where each parameter
+remembers its old name in `from`, so renames and reorders stay tied to the old
+position; `signatureProblem` and `signatureWarning` check it as you type.
+
+`plan` in `src/refactor.ts` then builds one `WorkspaceEdit`: the header from the
+modifiers to the return type, parameter renames in the docblock and body
+(`renameParams`), each override's header with `forOverride`, which matches its
+parameters by position so it keeps its own names, and each call's name and
+arguments. `rewriteArgs` fills a new parameter with its value for calls (or its
+default only when a later positional argument needs the slot) and, once an
+argument has to be named, names the rest, since a positional one after it
+would take a named one's place. Calls whose arguments don't change keep their
+text, and arguments one per line are written back one per line.
+
+`src/refactorpreview.ts` shows the edit before it's applied. `changedLines`
+applies each file's edits line by line, and each row marks the part between
+the text the old and new line share at both ends, as VS Code's Refactor
+Preview does. The preview opens on its own when calls were left unchanged,
+since those need a look.
+
+### Extract Variable, Extract Constant, and Extract Method
+
+Phpactor's Extract Expression names the variable `$newVariable` and wraps
+whatever the range covers, and it offers no Extract Constant, so both are
+written here. `src/extractparse.ts` tokenizes the file (comments masked, PHP
+tags as `;`) and, for the token at the caret, walks out to the nearest
+boundary (`;`, `,`, `=>`, assignments, a ternary's `?` and `:`, braces, and
+keywords), splits that span into operands and binary operators, and lists the
+operand's own chain (`$this->user()`, then `->name`), the operand with its
+prefix (`!`, casts, `new`), and each enclosing binary expression, found by
+splitting at the loosest operator with PHP 8's precedence. Then it steps out to
+the brackets around the span, so `foo($a * $b)` follows `$a * $b`, stopping at
+control structures' parentheses and at blocks. Assignment targets, foreach
+variables, and an arrow function's body are skipped.
+
+`occurrences` matches the same tokens, whatever the spacing, and keeps only
+matches that are expressions of their own at their position, so `$a + $b`
+doesn't match inside `$a + $b * $c`. `declarationPoint` walks back from the
+first use to its statement's start, passing blocks that end before the last
+use and joining `else`, `catch`, and the like to their statement, so the
+declaration lands in the innermost block that holds every use.
+
+The new name is typed in place: `applyNamed` in `src/extract.ts` replaces the
+text from the first edit to the last with one snippet, the name a placeholder
+at every use, so typing renames them together and ⌘Z undoes the extraction in
+one step. A `tuskNaming` context key makes ⏎ and Escape end it, as PhpStorm's
+in-place rename does, rather than add a line at every copy. Extract Method runs
+Phpactor's `extract_method` and then does the same with the name Phpactor chose,
+found as the one new `function` in the file.
+
+Refactor This (⌃T) lists actions by name from `refactorings`, which checks each
+against the caret, so the shortcuts shown follow the keymap. The choice
+popups open below the caret (`pickAtCaret`), with a `preview` callback that
+highlights what each option would change.
+
+### Undo across files
+
+`applyWorkspaceEdit` wraps each file's edit in undo stops, so it's one step, and
+`linkUndo` watches the models it changed. The first undo in one of them undoes
+the others and saves every file. A model edited in between leaves the group, so
+a later undo there doesn't reach back into the refactoring.
+
 ### Type hierarchy
 
 Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`

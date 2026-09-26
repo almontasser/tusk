@@ -40,13 +40,57 @@ export function splitTopLevel(text: string): string[] {
   return parts.map((p) => p.trim()).filter((p, i, all) => p || i < all.length - 1);
 }
 
-export type Param = { text: string; name: string; defaultValue?: string; variadic: boolean };
+/**
+ * A parameter. `type` is everything before the name: attributes, a promoted property's modifiers, and the type.
+ * In a new signature, `from` is the old parameter's name, and `callValue` the value to pass in existing calls
+ * for a new parameter (its default value when unset).
+ */
+export type Param = { text: string; name: string; type: string; byRef: boolean; defaultValue?: string; variadic: boolean; from?: string; callValue?: string };
 
 export function parseParams(list: string): Param[] {
   return splitTopLevel(list).map((text) => {
-    const m = text.match(/(\.\.\.)?\s*&?\s*\$(\w+)\s*(?:=\s*([\s\S]+))?$/);
-    return { text, name: m?.[2] ?? "", defaultValue: m?.[3]?.trim(), variadic: !!m?.[1] };
+    const m = text.match(/^([\s\S]*?)\s*(&)?\s*(\.\.\.)?\s*\$(\w+)\s*(?:=\s*([\s\S]+))?$/);
+    return { text, type: m?.[1].trim() ?? "", byRef: !!m?.[2], name: m?.[4] ?? "", defaultValue: m?.[5]?.trim(), variadic: !!m?.[3] };
   });
+}
+
+/** A parameter's declaration, as `private readonly int &...$name = 1`. */
+export const paramText = (p: Param) => `${p.type ? `${p.type} ` : ""}${p.byRef ? "&" : ""}${p.variadic ? "..." : ""}$${p.name}${p.defaultValue !== undefined && p.defaultValue !== "" ? ` = ${p.defaultValue}` : ""}`;
+
+/**
+ * The parts of a function's declaration whose name ends at `nameEnd`: offsets of its modifiers' start, its
+ * parameter list's brackets, and the end of its return type (or of the list, without one). `indent` is the
+ * parameters' indentation when they're one per line, or null.
+ */
+export function declarationParts(text: string, nameEnd: number) {
+  const before = text.slice(0, nameEnd).match(/((?:(?:public|protected|private|static|abstract|final)\s+)*)function\s+(&?)\s*(\w+)$/);
+  const open = text.indexOf("(", nameEnd);
+  const close = open >= 0 ? matchBracket(text, open) : -1;
+  if (!before || close < 0) return null;
+  const start = nameEnd - before[0].length;
+  const ret = text.slice(close + 1).match(/^\s*:\s*([^{;]*?)\s*(?=[{;]|$)/);
+  const list = text.slice(open + 1, close);
+  const lineStart = text.lastIndexOf("\n", start) + 1;
+  return {
+    start,
+    open,
+    close,
+    end: ret ? close + 1 + ret[0].trimEnd().length : close + 1,
+    modifiers: before[1].trim(),
+    byRef: before[2] === "&",
+    name: before[3],
+    returnType: ret?.[1] ?? "",
+    params: parseParams(list.replace(/,\s*$/, "")),
+    headerIndent: text.slice(lineStart, start).match(/^[ \t]*/)![0],
+    indent: list.includes("\n") ? (list.match(/\n([ \t]*)\S/)?.[1] ?? null) : null,
+  };
+}
+
+/** A parameter list, one per line with a trailing comma when `indent` is set, as Laravel's style writes long ones. */
+export function formatParams(params: Param[], indent: string | null, closeIndent: string): string {
+  const texts = params.map(paramText);
+  if (indent === null || !texts.length) return texts.join(", ");
+  return `\n${texts.map((t) => `${indent}${t},`).join("\n")}\n${closeIndent}`;
 }
 
 /**
@@ -61,6 +105,7 @@ export function rewriteArgs(args: string[], oldParams: Param[], newParams: Param
   let positional = 0;
   for (const a of args) {
     const m = a.match(/^(\w+)\s*:(?!:)\s*([\s\S]*)$/);
+    // Named arguments are matched to the old parameters by name.
     if (m) {
       byName.set(m[1], m[2]);
       named.push(m[1]);
@@ -74,21 +119,68 @@ export function rewriteArgs(args: string[], oldParams: Param[], newParams: Param
   const out: string[] = [];
   let pending: string[] = [];
   const namedOut: string[] = [];
+  // Once an argument has to be named, every one after it must be too: a positional one would take its place.
+  let naming = false;
   for (const p of newParams) {
-    const value = byName.get(p.name);
+    const old = p.from ?? p.name;
+    let value = byName.get(old);
     if (value === undefined) {
-      if (p.defaultValue === undefined) return { error: `has no value for the new parameter $${p.name}, which has no default` };
-      pending.push(p.defaultValue);
-      continue;
-    }
-    if (named.includes(p.name)) namedOut.push(`${p.name}: ${value}`);
-    else {
+      const fill = p.callValue || p.defaultValue;
+      if (fill === undefined || fill === "") return { error: `has no value for the new parameter $${p.name}, which has no default` };
+      // A default is written only when a later positional argument needs its place; a value for calls always is.
+      if (!p.callValue || p.variadic) {
+        if (!naming) pending.push(fill);
+        continue;
+      }
+      value = fill;
+    } else if (named.includes(old)) naming = true;
+    if (naming) {
+      if (p.variadic) return { error: `would pass the variadic $${p.name} after named arguments` };
+      namedOut.push(`${p.name}: ${value}`);
+    } else {
       out.push(...pending, value);
       pending = [];
     }
   }
   // Named arguments must follow positional ones.
   return { args: [...out, ...namedOut] };
+}
+
+// ---- Change Signature ----
+
+export type Signature = { modifiers: string; name: string; returnType: string; params: Param[] };
+const IDENTIFIER = /^[A-Za-z_\x80-\uffff][\w\x80-\uffff]*$/;
+
+/** The declaration a signature writes, for the preview line. */
+export const signatureText = (s: Signature) =>
+  `${s.modifiers ? `${s.modifiers} ` : ""}function ${s.name}(${s.params.map(paramText).join(", ")})${s.returnType ? `: ${s.returnType}` : ""}`;
+
+/** What's wrong with a signature, or null. `before` is the old one, for parameters that must keep their name. */
+export function signatureProblem(s: Signature, before: Signature, kind: "method" | "function" | "constructor"): string | null {
+  if (!IDENTIFIER.test(s.name)) return "The name must be a valid PHP name.";
+  const names = s.params.map((p) => p.name);
+  const bad = s.params.find((p) => !IDENTIFIER.test(p.name));
+  if (bad) return bad.name ? `$${bad.name} isn't a valid parameter name.` : "Each parameter needs a name.";
+  const twice = names.find((n, i) => names.indexOf(n) !== i);
+  if (twice) return `Two parameters are named $${twice}.`;
+  const variadic = s.params.findIndex((p) => p.variadic);
+  if (variadic >= 0 && variadic < s.params.length - 1) return `The variadic parameter $${s.params[variadic].name} must come last.`;
+  for (const p of s.params) {
+    if (!p.from && !p.defaultValue && !p.callValue && !p.variadic) return `The new parameter $${p.name} needs a default value or a value for existing calls.`;
+    const old = before.params.find((o) => o.name === p.from);
+    // A promoted property's name is also a property name; Rename (⇧F6) changes both.
+    if (kind === "constructor" && old && p.name !== old.name && /\b(public|protected|private|readonly)\b/.test(old.type)) return `$${old.name} is a promoted property. Rename it with Rename (⇧F6).`;
+  }
+  return null;
+}
+
+/** A signature PHP accepts but deprecates: an optional parameter before a required one acts as required. */
+export function signatureWarning(s: Signature): string | null {
+  const isRequired = (p: Param) => !p.defaultValue && !p.variadic;
+  const optional = s.params.findIndex((p, i) => !isRequired(p) && s.params.slice(i + 1).some(isRequired));
+  if (optional < 0) return null;
+  const required = s.params.slice(optional + 1).find(isRequired)!;
+  return `$${s.params[optional].name} is optional but comes before the required $${required.name}, so PHP treats it as required.`;
 }
 
 export type InlinePlan = { error: string } | { assignment: number; assignmentEnd: number; value: string; uses: { line: number; column: number }[] };
