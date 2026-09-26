@@ -976,6 +976,46 @@ the type declared at or above the cursor line in the current file.
 Children load when a row expands, so a large hierarchy, such as `Model`'s,
 costs nothing until you open it.
 
+### Generate
+
+`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Phpactor writes what it can:
+getters and setters through its `generate_accessors` and `generate_mutators`
+commands, called with the property names directly (its code action offers
+only the properties inside the selection), and Implement Methods, Override
+Methods, and the constructor transformers through its code actions for the
+cursor, filtered by kind. The editor sets Phpactor's accessor prefix to `get`,
+so getters match PhpStorm's names. Phpactor has no action that writes a
+constructor from properties or a `__toString()`, so those are snippets:
+`classProperties` in `src/refactorparse.ts` reads the class body's top-level
+declarations and promoted parameters, and the snippet goes after the last
+property or before the class's closing brace, indented with the file's
+indentation.
+
+⌘N is also **New File…**. The shortcut handler now takes the first action for
+the keys that applies (an editor-only action needs the editor focused, and
+`when` must pass), so **Generate…** runs in a PHP editor and **New File…**
+everywhere else.
+
+### Call hierarchy
+
+Phpactor has no `textDocument/prepareCallHierarchy` either, so
+`src/callhierarchy.ts` builds the tree the same way, reusing the type
+hierarchy's styles.
+
+- **Callers**: `callsOf` from `src/refactor.ts` (Phpactor's
+  `references:member` for methods, `textDocument/references` for functions).
+  Each reference is placed in the innermost method, constructor, or function
+  around it, from `textDocument/documentSymbol` of its file.
+- **Callees**: `callSites` in `src/phptypes.ts` finds the names followed by `(`
+  in the body, leaving out language constructs, declarations, `new`, and
+  variable calls. Each one gets `textDocument/definition`, and the declaration
+  around the answer is the callee. Definitions inside Phpactor's `.phar` (PHP's
+  own functions) are dropped, since they can't be opened.
+
+As with types, the starting point is what Go to Definition finds under the
+cursor, when that's a function of the same name; otherwise it's the function
+around the cursor. Rows load their children when expanded.
+
 ### HTTP client
 
 `.http` files stay the one copy of each request. The HTTP tab is a form over a
@@ -2890,6 +2930,13 @@ the debugger.
   config folder, in VS Code's format. One completion provider for every
   language (`"*"`) filters them by `scope`. While the file is open in a tab, the
   provider reads the tab's text, so changes apply without a save or reload.
+- **Postfix completion** is a second completion provider in `src/snippets.ts`,
+  for PHP. `postfixStart` in `src/postfix.ts` walks back from the dot over
+  names, `->`, `?->`, `::`, and bracket groups to find the expression, and
+  rejects a bare word, so a sentence's period offers nothing. Each item's range
+  starts at the expression and its `filterText` is `expr.key`, so Monaco
+  filters on what you typed after the dot and replaces the expression with the
+  template.
 - **TODO** (`loadTodos` in `src/search.ts`) is a sidebar view that reuses
   `search_text` with a case-sensitive regex, so it respects `.gitignore` and
   the 20,000-match limit. `inComment` from `src/comments.ts` then keeps the
@@ -3682,3 +3729,26 @@ generated per service, and protox compiles `.proto` files in Rust, so the
 fallback for servers without reflection needs no `protoc`. A streaming
 response is shown once the call ends, as a JSON array, rather than message by
 message, which keeps it one response the history and scripts understand.
+
+### 2026-09-26: Postfix templates as completion items
+
+PhpStorm's postfix completion is a completion item whose range reaches back over
+the expression, so Monaco's own list, filtering, and snippet placeholders do the
+work, and no key handling is needed. There's no `.` trigger character: the list
+would open after every concatenation such as `$a.`, and Enter would pick a
+template. The list opens once you type a letter after the dot.
+
+### 2026-09-26: Call hierarchy from references and definitions
+
+Phpactor doesn't implement the call hierarchy requests. Callers reuse the
+reference search that Change Signature and Safe Delete already trust, and
+callees are one definition request per call in the body. That's a request per
+call, but a method body has few, and they load only when a row expands.
+
+### 2026-09-26: Generate reuses Phpactor where it can
+
+Phpactor already writes getters, setters, implemented and overridden methods,
+and completes constructors, so Generate lists those actions instead of
+writing its own. It calls the accessor commands itself, since the code action
+needs a selection over the properties. Only the constructor from properties
+and `__toString()`, which Phpactor lacks, are written by the editor.

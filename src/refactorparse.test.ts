@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
+import { classProperties, matchBracket, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
 
 test("splits arguments at top-level commas", () => {
   assert.deepEqual(splitTopLevel(`$a, foo($b, [1, 2]), 'x, y', "q\\", r"`), ["$a", "foo($b, [1, 2])", "'x, y'", `"q\\", r"`]);
@@ -43,4 +43,39 @@ test("plans inlining a variable", () => {
   assert.ok("error" in planInline(["$a = foo(", "echo $a;"], "a", 1, 2));
   // $ab isn't $a.
   assert.deepEqual(planInline(["$a = 1;", "$ab = $a;"], "a", 1, 2), { assignment: 1, assignmentEnd: 1, value: "1", uses: [{ line: 2, column: 7 }] });
+});
+
+test("reads a class's properties", () => {
+  const body = `
+    use HasFactory;
+    const LIMIT = 10;
+    // public $commented;
+    protected static int $count = 0;
+    #[Inject]
+    private ?User $user;
+    public readonly string $title;
+    protected $fillable = ['title'];
+
+    public function __construct(private readonly Clock $clock, int $plain, public array &$tags = []) {
+        $this->title = 'x';
+    }
+
+    public function name(): string { return $this->title; }
+    public $after;
+  `;
+  const props = classProperties(body);
+  assert.deepEqual(
+    props.map((p) => [p.name, p.type, p.isStatic, p.readonly, p.hasDefault, p.promoted]),
+    [
+      ["count", "int", true, false, true, false],
+      ["user", "?User", false, false, false, false],
+      ["title", "string", false, true, false, false],
+      ["fillable", "", false, false, true, false],
+      ["after", "", false, false, false, false],
+      ["clock", "Clock", false, true, false, true],
+      ["tags", "array", false, false, false, true],
+    ],
+  );
+  assert.equal(body[props[1].end], ";");
+  assert.equal(body.slice(0, props[1].end).split("\n").length, 7);
 });

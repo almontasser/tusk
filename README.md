@@ -40,6 +40,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
+| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed, and so are calls of a constructor through `new`. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
@@ -223,6 +224,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
+| ⌃⌥H | Call hierarchy of the method or function under the cursor, or the one the cursor is in |
 | ⌘⌦ | Safe delete the class, method, or function at the cursor |
 | ⌥⌘N | Inline the variable at the cursor |
 | ⌘F6 | Change the signature of the method or function at the cursor |
@@ -246,7 +248,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⌫ | Delete the line |
 | ⌃⌥O | Optimize imports |
 | ⌥⌘L | Reformat the file with the project's formatter |
-| ⌘N | New file in the selected folder |
+| ⌘N | In a PHP file, generate code (constructor, getters and setters, `__toString()`, methods to implement or override); elsewhere, a new file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
@@ -491,6 +493,21 @@ format, so you can paste snippets from VS Code:
 `scope` lists language IDs, such as `php,blade`. Leave it out to offer the
 snippet in every file. Changes apply as you type in the file.
 
+### Postfix completion
+
+In PHP files, type a dot and a template name after an expression to wrap it, as
+in PhpStorm: `$user.if` becomes `if ($user) {}`. The expression can be a
+variable, a call, or a chain such as `$this->posts()->first()`.
+
+| Template | Result |
+| --- | --- |
+| `.if`, `.notnull`, `.null`, `.isset` | `if (expr)`, `if (expr !== null)`, `if (expr === null)`, `if (isset(expr))` |
+| `.foreach` | `foreach (expr as $item)` |
+| `.return`, `.throw` | `return expr;`, `throw expr;` |
+| `.var` | `$var = expr;` |
+| `.not`, `.par` | `!expr`, `(expr)` |
+| `.dd`, `.dump` | `dd(expr);`, `dump(expr);` |
+
 ## Compare files
 
 With a file open, run one of these from ⌘⇧A to open the diff view:
@@ -550,6 +567,36 @@ enum that the cursor is in.
 
 Click a type to open it. Types that Phpactor's index doesn't know are listed
 without a file.
+
+## Generate code
+
+Press ⌘N in a PHP file, or choose **Code > Generate…**, to add code to the
+class, trait, or enum at the cursor. The list offers what the class lacks:
+
+- **Constructor**: takes and assigns each property that has no default value
+  and isn't static. It's offered when the class has no constructor.
+- **Getters**, **Setters**, and **Getters and Setters**: `getTitle()` and
+  `setTitle()` for each property, including promoted ones, that doesn't have
+  one yet. Readonly properties get no setter. Phpactor writes them.
+- **`__toString()`**, with the cursor in its `return`.
+- **Implement Methods…** and **Override Methods…**, from Phpactor, when the
+  class has interface or abstract methods to write, or parent methods to
+  override. Override asks which method.
+- Phpactor's **Complete Constructor**, **Promote Constructor**, and **Add
+  missing properties**, when they apply.
+
+## Call hierarchy
+
+Press ⌃⌥H in a PHP file to open the **Call Hierarchy** tab for the method or
+function called under the cursor, or else the one the cursor is in.
+
+- **Callers** lists the methods and functions that call it, one row per call.
+  Code outside a function, such as a route file, is listed by its file. Expand
+  a caller to see its own callers.
+- **Callees** lists the project's and packages' methods and functions it calls.
+  PHP's own functions aren't listed.
+
+Click a caller to open the call, or a callee to open its declaration.
 
 ## HTTP client
 

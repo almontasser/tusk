@@ -23,6 +23,8 @@ import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
+import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
+import { generate, initGenerate } from "./generate";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
@@ -1300,6 +1302,8 @@ const editorAction = (label: string, keys: string, id: string): Action => ({
 // Shortcuts follow PhpStorm's macOS keymap.
 const actions: Action[] = [
   { label: "Open Folder…", run: () => openFolder() },
+  // ⌘N generates code in a PHP editor, as in PhpStorm, and creates a file everywhere else.
+  { label: "Generate…", keys: "Meta+N", run: () => generate(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "New File…", keys: "Meta+N", run: () => root && newFile() },
   { label: "New Folder…", run: () => root && newFolder() },
   { label: "Rename File…", run: () => rename() },
@@ -1314,6 +1318,7 @@ const actions: Action[] = [
   { label: "Inline Variable", keys: "Alt+Meta+N", run: () => inlineVariable(editor), editorOnly: true },
   { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
+  { label: "Call Hierarchy", keys: "Ctrl+Alt+H", run: () => showCallHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
   editorAction("Next Problem", "F2", "editor.action.marker.next"),
   editorAction("Previous Problem", "Shift+F2", "editor.action.marker.prev"),
@@ -1584,8 +1589,9 @@ window.addEventListener(
   (e) => {
     if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
     const combo = comboOf(e);
-    const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
-    if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
+    // The first action for the keys that applies here, so an editor-only action can share its keys with another.
+    const action = actions.find((a) => a.keys && canonical(a.keys) === combo && !(a.editorOnly && !editor.hasTextFocus()) && !(a.when && !a.when()));
+    if (!action) return;
     // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
     if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
@@ -1724,6 +1730,8 @@ initComposer({ root: () => root, status });
 initRefactor({ root: () => root, status });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
+initGenerate({ status });
+initCallHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initLocalHistory({
   root: () => root,
   status,
