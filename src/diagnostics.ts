@@ -425,12 +425,17 @@ export function phpVersionOf(composerJson: string): string | undefined {
 /**
  * The editor's mago.toml for a project: `bundled` with the lowest PHP version composer.json allows (as PhpStorm
  * takes its language level), and `includes` and `excludes` added to their lists, which the file keeps on one line.
+ * `paths` becomes the project's top-level folders and PHP files (`top`), less hidden ones, `vendor` (an include),
+ * `node_modules`, and `storage`: Mago walks every file under a path before it applies `excludes`, so `.` made each
+ * check walk worktrees in `.claude` and all of `node_modules`.
  */
-export function magoConfigText(bundled: string, composerJson: string, includes: string[], excludes: string[]): string {
+export function magoConfigText(bundled: string, composerJson: string, includes: string[], excludes: string[], top: { name: string; is_dir: boolean }[] = []): string {
   const version = phpVersionOf(composerJson);
   const add = (text: string, key: string, items: string[]) =>
     items.length ? text.replace(new RegExp(`^${key} = \\[(.*)\\]$`, "m"), (_, list: string) => `${key} = [${[list, ...items.map((i) => JSON.stringify(i))].filter(Boolean).join(", ")}]`) : text;
-  const text = add(add(bundled, "includes", includes), "excludes", excludes);
+  const paths = top.filter((e) => !e.name.startsWith(".") && !["vendor", "node_modules", "storage"].includes(e.name) && (e.is_dir || e.name.endsWith(".php"))).map((e) => e.name);
+  const own = paths.length ? bundled.replace(/^paths = \[.*\]$/m, `paths = [${paths.map((p) => JSON.stringify(p)).join(", ")}]`) : bundled;
+  const text = add(add(own, "includes", includes), "excludes", excludes);
   return version ? `php-version = "${version.split(".").length === 2 ? `${version}.0` : version}"\n${text}` : text;
 }
 

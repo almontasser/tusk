@@ -5,7 +5,9 @@
 # The editor sends one file at a time on standard input. Mago reads `paths` as the project's
 # own code and `includes` as library code, and uses both as context, so project classes and
 # framework classes such as Laravel facades resolve. Don't list project folders in
-# `includes`: Mago never lints included files.
+# `includes`: Mago never lints included files. The editor replaces "." with the project's top-level
+# folders and PHP files, less hidden ones, vendor, node_modules, and storage, since Mago walks every
+# file under a path before it applies `excludes`.
 paths = ["."]
 # The editor adds Laravel's alias stubs (`use DB;`) to this list, so keep it on one line.
 includes = ["vendor"]

@@ -483,6 +483,15 @@ level. Mago otherwise assumes its newest (8.5). `magoConfigText` in
 `excludes` on one line each for it. The copies are made again in the background
 at each start, and the last start's list (`replaced.json`) is used until then.
 
+`paths` becomes the project's top-level folders and PHP files, less hidden
+ones, `vendor` (already an include), `node_modules`, and `storage`. Mago walks
+every file under a path before it applies `excludes`, so with `.` each check
+walked the worktrees in `.claude` and all of `node_modules`. A top-level folder
+made later is read after the next start. Phpactor, which runs Mago as you type,
+starts with `MAGO_THREADS` set to half the cores (`lsp_start`), so a check
+costs about half the CPU; the Problems panel's scan and Mago's fixes run Mago
+from the app, on every core.
+
 ### False problems the filters drop
 
 `realProblems` in `src/diagnostics.ts` filters every server's diagnostics
@@ -3908,3 +3917,19 @@ Laravel LSP 0.0.32 already completes, hovers, links, and validates translation
 keys from PHP and JSON files, in PHP and Blade, so the editor adds nothing.
 Checked against the test app with `php artisan lang:publish` and a `lang/en.json`.
 It warns only about keys with a dot, since a sentence key falls back to itself.
+
+### 2026-09-26: Make each Mago check cheaper instead of keeping Mago running
+
+Mago 1.50.0, the newest release, still has no language server or cache between
+runs. Its `analyze --watch` is experimental, reads files on disk rather than
+unsaved text, and prints reports to the terminal, so Phpactor keeps running
+one `mago analyze --stdin-input` per check. A trace (`MAGO_LOG=trace`) of a
+check on lamah-sms-gateway (27,000 PHP files) showed two-thirds of its time in
+loading files, most of it walking folders that `excludes` then dropped. Listing
+the project's own folders in `paths` and giving Phpactor's runs half the cores
+took a check from 2.3 s of wall time and 9.4 s of CPU to 1.3 s and 4.4 s
+(medians of 15 alternating runs on a busy 12-core Mac). On the test app (14,000
+files) it went from 0.9 s and 2.9 s to 0.8 s and 2.0 s. Phpactor already runs
+at most one check per checker, and skips a queued one once newer text arrives.
+Checking only the changed file against a saved codebase would need Mago to
+save one, which it can't.

@@ -86,6 +86,9 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         .arg(tool(&app, script)?)
         .args(args)
         .current_dir(&root)
+        // Phpactor runs Mago after each pause in typing; half the cores costs about half the CPU for
+        // much the same time. The Problems panel's scan runs Mago itself, on every core.
+        .env("MAGO_THREADS", std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(2)).to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
