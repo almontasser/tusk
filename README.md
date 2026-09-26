@@ -1140,8 +1140,9 @@ in terminal tabs, and ⌃R reruns the last one.
 
 The **Commit** tab in the sidebar lists staged changes and unstaged changes,
 including new files. Click a file to see its diff. Hover over a file for
-buttons to open, stage, unstage, or discard it. Write a message and press ⌘⏎
-or click **Commit**. **Commit and Push** also pushes, and sets the upstream
+buttons to open, stage, unstage, or discard it. The message box sits at the
+bottom of the view, and stays in view while a long list of changes scrolls.
+Write a message and press ⌘⏎ or click **Commit**. **Commit and Push** also pushes, and sets the upstream
 branch on the first push.
 
 To stage part of a file, open its diff from **Changes** and click **Stage
