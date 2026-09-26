@@ -3382,7 +3382,11 @@ archive against the public key in `tauri.conf.json`. The check runs in
 dialogs; the frontend only has the **Check for Updates…** action, which calls
 the `check_update` command. The periodic check offers each version once, so
 choosing Later isn't asked again every six hours, and it skips a version that's
-already installed and waiting for the next launch. The new version replaces the app on disk but
-starts at the next launch: restarting would close files with unsaved edits.
+already installed and waiting for the next launch. The download's progress shows in the status bar
+through the `update-progress` event. After installing, **Restart Now** sends
+`update-restart` to the frontend, which saves or asks about unsaved edits as
+closing a tab does, then calls the `restart` command; it uses
+`request_restart`, so the exit handler still stops the language servers.
+**Later** leaves the new version for the next launch.
 `scripts/release.sh` builds and publishes, since releases are built on this
 Mac rather than in CI.

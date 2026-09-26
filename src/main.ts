@@ -1003,6 +1003,19 @@ async function saveFile(path: string) {
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
 const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 
+// Update download progress, and Restart Now after an update installs. Unsaved edits are saved or asked
+// about first, as closing a tab does.
+listen<string>("update-progress", (e) => status(e.payload, "update:progress"));
+listen("update-restart", async () => {
+  if ([...tabs.values()].some(isDirty)) {
+    const choice = settings.autoSave ? "Save" : await choose("Save your changes before restarting?", ["Save", "Don't Save", "Cancel"]);
+    if (choice === "Cancel" || choice === null) return;
+    if (choice === "Save" && (await saveAll(), [...tabs.values()].some(isDirty))) return;
+  }
+  saveSession();
+  await invoke("restart");
+});
+
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
 window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
 

@@ -68,6 +68,7 @@ fn hide_write_with_siri(webview: *mut std::ffi::c_void) {
 /// always answers.
 async fn update_check(app: tauri::AppHandle, manual: bool) {
     use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+    use tauri::Emitter;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
     use tauri_plugin_updater::UpdaterExt;
     static CHECKING: AtomicBool = AtomicBool::new(false);
@@ -99,10 +100,39 @@ async fn update_check(app: tauri::AppHandle, manual: bool) {
                 .buttons(MessageDialogButtons::OkCancelCustom("Install".into(), "Later".into()))
                 .blocking_show();
             if install {
-                match update.download_and_install(|_, _| {}, || {}).await {
+                // Progress shows in the status bar, as the frontend's "update:progress" status.
+                let progress = |text: String| _ = app.emit("update-progress", text);
+                let (mut done, mut shown) = (0, String::new());
+                let result = update
+                    .download_and_install(
+                        |chunk, total| {
+                            done += chunk as u64;
+                            let text = match total {
+                                Some(t) => format!("Downloading Tusk {}: {}%", update.version, done * 100 / t.max(1)),
+                                None => format!("Downloading Tusk {}: {} MB", update.version, done >> 20),
+                            };
+                            if text != shown {
+                                progress(text.clone());
+                                shown = text;
+                            }
+                        },
+                        || progress(format!("Installing Tusk {}", update.version)),
+                    )
+                    .await;
+                progress(String::new());
+                match result {
                     Ok(()) => {
                         *INSTALLED.lock().unwrap() = Some(update.version.clone());
-                        say(format!("Tusk {} is installed. It opens the next time you start Tusk.", update.version));
+                        let restart = app
+                            .dialog()
+                            .message(format!("Tusk {} is installed. Restart now to use it, or it opens the next time you start Tusk.", update.version))
+                            .title("Update installed")
+                            .buttons(MessageDialogButtons::OkCancelCustom("Restart Now".into(), "Later".into()))
+                            .blocking_show();
+                        // The frontend saves or asks about unsaved edits first, then calls `restart`.
+                        if restart {
+                            _ = app.emit("update-restart", ());
+                        }
                     }
                     Err(e) => say(format!("The update couldn't be installed: {e}")),
                 }
@@ -116,6 +146,12 @@ async fn update_check(app: tauri::AppHandle, manual: bool) {
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) {
     update_check(app, true).await;
+}
+
+/// Restarts through the normal exit, so language servers stop first.
+#[tauri::command]
+fn restart(app: tauri::AppHandle) {
+    app.request_restart();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -195,6 +231,7 @@ pub fn run() {
             ws::ws_send,
             ws::ws_close,
             check_update,
+            restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
