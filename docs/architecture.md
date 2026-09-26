@@ -182,6 +182,9 @@ listener sets each action's `keys` from the defaults and the overrides, so the
 key handler, the palette, and Find Action all see the current shortcuts. The
 recorder listens in the capture phase and sets `recording`, which the global
 key handlers check, so the combination you press doesn't also run an action.
+Double taps are keys such as `Shift Shift`: `doubleTap` sees two presses of the
+same modifier within 350 ms with no key between, for both the global handler
+and the recorder, so any of ⇧, ⌃, ⌥, and ⌘ tapped twice can be assigned.
 
 ### Menu bar
 
@@ -3460,3 +3463,11 @@ valid UTF-8, so UTF-8 files are never misread, and decoding stays strict,
 falling back to Windows-1252, so a wrong guess shows odd characters but saves
 the same bytes back. `read_file` keeps its strict UTF-8 default for the
 callers that read config files.
+
+### 2026-09-26: Double taps are shortcuts like any other
+
+⇧⇧ and ⌃⌃ were hard-coded to Search Everywhere and Run Anything. The recorder
+now records a double tap of any modifier and saves it in `keymap` like a
+combination, and the double-tap handler runs whichever action has it. Double
+taps of ⌥ and ⌘ come for free, since detection doesn't care which modifier it
+is.

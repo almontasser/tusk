@@ -58,7 +58,6 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
-| Settings | Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
@@ -208,7 +207,8 @@ steps don't show their shortcuts there, so the keys still reach text fields and
 the terminal. To search the menus, use the search field in Help.
 
 To change a shortcut, run **Keymap…** from ⌘⇧A (or click **Keymap…** in
-Settings), choose the action, and press the new shortcut. Backspace removes the
+Settings), choose the action, and press the new shortcut, or tap ⇧, ⌃, ⌥, or ⌘
+twice for a double tap such as ⇧⇧. Backspace removes the
 shortcut, and **Reset to Default** restores it. If another action had that
 shortcut, the other action loses it. Changes are saved in `settings.json` as
 `keymap`.

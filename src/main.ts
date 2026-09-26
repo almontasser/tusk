@@ -1449,7 +1449,7 @@ async function chooseDockerService() {
 }
 
 const symbolsFor = (keys?: string) =>
-  keys?.replace("Shift Shift", "⇧⇧").replace("Ctrl Ctrl", "⌃⌃").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
+  keys?.replace(/^(\w+) \1$/, "$1+$1+").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
 const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
@@ -1497,7 +1497,7 @@ function recordShortcut(action: Action) {
   recording = true;
   const overlay = document.createElement("div");
   overlay.id = "shortcut-recorder";
-  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, or a function key. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
+  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
   overlay.querySelector("h2")!.textContent = action.label;
   document.body.append(overlay);
   const save = (keys: string | undefined) => {
@@ -1518,6 +1518,8 @@ function recordShortcut(action: Action) {
   const onKey = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const tap = e.repeat ? undefined : doubleTap(e);
+    if (tap) return save(tap), finish();
     if (["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
     const plain = !(e.metaKey || e.ctrlKey || e.altKey);
     if (plain && e.key === "Escape") return finish();
@@ -1576,17 +1578,22 @@ window.addEventListener(
   true,
 );
 
-// Double Shift and double Ctrl: two presses within 350 ms with no other key between them.
+// Double taps of a modifier, such as ⇧⇧: two presses within 350 ms with no other key between them.
+const tapNames: Record<string, string> = { Shift: "Shift", Control: "Ctrl", Alt: "Alt", Meta: "Meta" };
 let lastTap = { key: "", time: 0 };
+/** The double tap, such as "Shift Shift", that this key press completes, if any. */
+function doubleTap(e: KeyboardEvent) {
+  const now = performance.now();
+  const name = tapNames[e.key];
+  if (name && lastTap.key === e.key && now - lastTap.time < 350) return (lastTap = { key: "", time: 0 }), `${name} ${name}`;
+  lastTap = { key: e.key, time: now };
+}
 window.addEventListener(
   "keydown",
   (e) => {
     if (e.repeat || recording) return;
-    const now = performance.now();
-    if ((e.key === "Shift" || e.key === "Control") && lastTap.key === e.key && now - lastTap.time < 350) {
-      lastTap = { key: "", time: 0 };
-      actions.find((a) => a.keys === (e.key === "Shift" ? "Shift Shift" : "Ctrl Ctrl"))?.run();
-    } else lastTap = { key: e.key, time: now };
+    const tap = doubleTap(e);
+    if (tap) actions.find((a) => a.keys === tap)?.run();
   },
   true,
 );
