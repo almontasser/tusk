@@ -143,8 +143,9 @@ The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle
 
 ### Publish an update
 
-Installed copies check the latest GitHub release at launch and offer to
-install it. To publish one, commit your changes, then run:
+Installed copies check the latest GitHub release at launch and every six hours
+after, and offer each new version once. **Tusk > Check for Updates…** checks
+right away. To publish one, commit your changes, then run:
 
 ```sh
 scripts/release.sh 0.2.0

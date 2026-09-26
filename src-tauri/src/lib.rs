@@ -62,30 +62,60 @@ fn hide_write_with_siri(webview: *mut std::ffi::c_void) {
     }
 }
 
-/// Checks the latest GitHub release at launch and, if it's newer, offers to install it. The new version
-/// replaces the app on disk but starts at the next launch, so nothing open, such as unsaved edits, is lost.
-#[cfg(not(debug_assertions))]
-async fn check_for_update(app: tauri::AppHandle) {
+/// Checks the latest GitHub release for a newer version and offers to install it. The new version replaces the
+/// app on disk but starts at the next launch, so nothing open, such as unsaved edits, is lost. The periodic
+/// check (`manual` false) stays quiet when there's nothing new and asks once per version; Check for Updates
+/// always answers.
+async fn update_check(app: tauri::AppHandle, manual: bool) {
+    use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
     use tauri_plugin_updater::UpdaterExt;
-    let Ok(Some(update)) = async { app.updater()?.check().await }.await else {
-        return;
+    static CHECKING: AtomicBool = AtomicBool::new(false);
+    static OFFERED: Mutex<Option<String>> = Mutex::new(None);
+    static INSTALLED: Mutex<Option<String>> = Mutex::new(None);
+    let say = |text: String| {
+        app.dialog().message(text).title("Updates").blocking_show();
     };
-    let ask = format!("Tusk {} is available. You have {}.", update.version, update.current_version);
-    let install = app
-        .dialog()
-        .message(ask)
-        .title("Update available")
-        .buttons(MessageDialogButtons::OkCancelCustom("Install".into(), "Later".into()))
-        .blocking_show();
-    if !install {
+    if cfg!(debug_assertions) {
+        return say("Development builds don't update.".into());
+    }
+    if CHECKING.swap(true, Ordering::SeqCst) {
         return;
     }
-    let done = match update.download_and_install(|_, _| {}, || {}).await {
-        Ok(()) => format!("Tusk {} is installed. It opens the next time you start Tusk.", update.version),
-        Err(e) => format!("The update couldn't be installed: {e}"),
-    };
-    app.dialog().message(done).title("Update").blocking_show();
+    match async { app.updater()?.check().await }.await {
+        Err(e) if manual => say(format!("Couldn't check for updates: {e}")),
+        Ok(None) if manual => say(format!("Tusk {} is the latest version.", app.package_info().version)),
+        Ok(Some(update)) if INSTALLED.lock().unwrap().as_ref() == Some(&update.version) => {
+            if manual {
+                say(format!("Tusk {} is installed. It opens the next time you start Tusk.", update.version));
+            }
+        }
+        Ok(Some(update)) if manual || OFFERED.lock().unwrap().as_ref() != Some(&update.version) => {
+            *OFFERED.lock().unwrap() = Some(update.version.clone());
+            let install = app
+                .dialog()
+                .message(format!("Tusk {} is available. You have {}.", update.version, update.current_version))
+                .title("Update available")
+                .buttons(MessageDialogButtons::OkCancelCustom("Install".into(), "Later".into()))
+                .blocking_show();
+            if install {
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    Ok(()) => {
+                        *INSTALLED.lock().unwrap() = Some(update.version.clone());
+                        say(format!("Tusk {} is installed. It opens the next time you start Tusk.", update.version));
+                    }
+                    Err(e) => say(format!("The update couldn't be installed: {e}")),
+                }
+            }
+        }
+        _ => {}
+    }
+    CHECKING.store(false, Ordering::SeqCst);
+}
+
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) {
+    update_check(app, true).await;
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -115,7 +145,13 @@ pub fn run() {
                 window.with_webview(|w| hide_write_with_siri(w.inner()))?;
             }
             #[cfg(not(debug_assertions))]
-            tauri::async_runtime::spawn(check_for_update(_app.handle().clone()));
+            {
+                let app = _app.handle().clone();
+                std::thread::spawn(move || loop {
+                    tauri::async_runtime::block_on(update_check(app.clone(), false));
+                    std::thread::sleep(std::time::Duration::from_secs(6 * 60 * 60));
+                });
+            }
             Ok(())
         })
         .manage(fs::WatchState::default())
@@ -160,6 +196,7 @@ pub fn run() {
             ws::ws_connect,
             ws::ws_send,
             ws::ws_close,
+            check_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

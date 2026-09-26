@@ -1261,6 +1261,7 @@ const actions: Action[] = [
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
   { label: "Save All", keys: "Meta+S", run: saveAll },
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
+  { label: "Check for Updates…", run: () => invoke("check_update") },
   { label: "Keymap…", run: () => editKeymap() },
   { label: "Color Theme…", keys: "Ctrl+Backquote", run: pickTheme },
   { label: "Import Color Theme…", run: importTheme },

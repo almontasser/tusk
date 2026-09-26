@@ -3378,8 +3378,11 @@ Gatekeeper still asks on the first install; updates don't, because the updater
 downloads without the quarantine flag. `tauri-plugin-updater` reads
 `latest.json` from the repository's latest GitHub release and checks each
 archive against the public key in `tauri.conf.json`. The check runs in
-`lib.rs` at launch, in release builds only, and uses native dialogs, so the
-frontend has no update code. The new version replaces the app on disk but
+`lib.rs` at launch and every six hours, in release builds only, and uses native
+dialogs; the frontend only has the **Check for Updates…** action, which calls
+the `check_update` command. The periodic check offers each version once, so
+choosing Later isn't asked again every six hours, and it skips a version that's
+already installed and waiting for the next launch. The new version replaces the app on disk but
 starts at the next launch: restarting would close files with unsaved edits.
 `scripts/release.sh` builds and publishes, since releases are built on this
 Mac rather than in CI.
