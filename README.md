@@ -1013,6 +1013,14 @@ config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
 
+Translation keys in `__()`, `trans()`, `trans_choice()`, `@lang()`, and
+`Lang::get()` complete from `lang/*/*.php`, `lang/*.json`, and packages'
+translations. Hover shows the value in each locale with its file, and ⌘B or
+⌘-click opens the line that defines it. An unknown key that looks like
+`group.key` shows a warning; a key without a dot, such as `__('Welcome back')`,
+doesn't, since Laravel shows the key itself when no JSON file has it. When a
+project has more than 200 keys, completion lists the keys without their values.
+
 - **Routes**, from ⌘⇧A, lists the app's routes from `php artisan route:list`.
   Search by method, path, route name, or controller, and choose a route to
   open its controller method. Routes to classes in `vendor`, such as Filament

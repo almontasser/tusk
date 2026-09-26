@@ -1437,6 +1437,13 @@ every provider registration:
 | Phpactor | `php` | Always |
 | Laravel LSP | `php`, `blade` | The folder has an `artisan` file |
 
+Laravel LSP covers translation keys on its own (`TranslationDocumentMapper` in
+the phar): completion, hover with each locale's value, definition through its
+links, and a warning for an unknown key that looks like `group.key`, for
+`__`, `trans`, `trans_choice`, `@lang`, `Lang::get`, and the translator's
+methods, reading `lang/*/*.php` and `lang/*.json` through a booted app. It
+lists values in completion only below 200 keys, and packages' keys count.
+
 Monaco combines providers for the same language: it merges completion lists,
 definitions, references, hovers, code actions, and links. Each server writes
 its markers under its own owner (`lsp:phpactor` or `lsp:laravel`), so one
@@ -3467,3 +3474,10 @@ from the controllers that render a view, or from a component's class, would
 catch more, but a view can be rendered from many places with different
 values; `@props` gives names without types, so it adds nothing once undefined
 variables are dropped.
+
+### 2026-09-26: Translation keys from Laravel LSP, not the editor
+
+Laravel LSP 0.0.32 already completes, hovers, links, and validates translation
+keys from PHP and JSON files, in PHP and Blade, so the editor adds nothing.
+Checked against the test app with `php artisan lang:publish` and a `lang/en.json`.
+It warns only about keys with a dot, since a sentence key falls back to itself.
