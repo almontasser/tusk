@@ -1990,6 +1990,14 @@ staged at an edit stop, so **Continue** there first runs
 `git commit --amend --no-edit` when `git diff --cached --quiet` finds staged
 changes.
 
+**Split Commit** at an edit stop runs `git reset HEAD~`, which leaves the
+commit's changes unstaged for the Commit view's partial staging, and puts the
+commit's message in the message box. `detectOperation` then finds HEAD no
+longer at the hash in `rebase-merge/amend` and sets `split`: the banner says to
+commit the changes in parts, Split Commit is hidden, and **Continue** stops
+amending, so staged leftovers aren't folded into the last new commit (git
+itself refuses to continue until they're committed).
+
 ### Stash
 
 Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
@@ -3447,3 +3455,10 @@ drift from it, so git writes it in a throwaway worktree and the dialog edits
 only the picks. The cost is one checkout of HEAD each time the dialog opens for
 such a range; a dry run in the project itself would have needed a clean
 working tree or an autostash that rewrites the user's files.
+
+### 2026-09-26: Split a commit with reset and the Commit view
+
+Splitting a commit at an edit stop is `git reset HEAD~` followed by ordinary
+commits, as git's documentation describes, so the app adds only the button and
+leaves the parts to the Commit view, whose line-level staging already picks
+what goes in each commit. A dedicated split dialog would repeat that staging UI.

@@ -61,7 +61,6 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
-| Git | Interactive rebase can't split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
@@ -1248,7 +1247,11 @@ merge it again, and they stay where they are.
 are stashed and restored. If a commit conflicts, resolve it, then click
 **Continue** in the Commit view. At an **Edit** commit, the rebase stops and
 the Commit view says so: change files, stage what belongs in the commit, and
-click **Continue**. The staged changes are added to that commit.
+click **Continue**. The staged changes are added to that commit. To split the
+commit into several instead, click **Split Commit**: the commit is undone and
+its changes are left unstaged, with its message in the message box. Stage part
+of them, even single lines from the diff, commit, and repeat, then click
+**Continue**.
 
 ### Stash
 
