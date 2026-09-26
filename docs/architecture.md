@@ -1050,6 +1050,17 @@ against the caret, so the shortcuts shown follow the keymap. The choice
 popups open below the caret (`pickAtCaret`), with a `preview` callback that
 highlights what each option would change.
 
+### Move class
+
+`moveClass` in `src/refactor.ts` reuses the file tree's move (`move` in
+`src/files.ts`): it lists namespaces from the folders of the project's PHP
+files (`namespaceFor`), maps the chosen one to a path with `pathsFor`, and
+moves the file there. `updateReferences` then asks Phpactor
+(`workspace/willRenameFiles`) for the namespace and reference edits. Phpactor
+maps paths to class names through Composer's autoloader, loaded when it
+starts, so a project without `vendor/composer` gets no edits; the error it
+returns now reaches the status bar instead of being dropped.
+
 ### Undo across files
 
 `applyWorkspaceEdit` wraps each file's edit in undo stops, so it's one step, and

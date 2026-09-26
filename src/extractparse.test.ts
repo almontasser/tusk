@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -84,4 +84,12 @@ test("suggests names", () => {
   assert.equal(variableName("$this->user()->name"), "name");
   assert.equal(constantName("'pending review'"), "PENDING_REVIEW");
   assert.equal(constantName("1.14", new Set(["VALUE"])), "VALUE_2");
+});
+
+test("finds the function or closure around an offset", () => {
+  const code = "<?php\nclass A {\n  public function f(int $a): ?int {\n    $g = function () use ($a) { return $a + 1; };\n    if ($a) { return $a; }\n  }\n}\n$top = 1;";
+  const body = (at: string) => code.slice(...functionScope(code, code.indexOf(at))).trim();
+  assert.ok(body("if ($a)").startsWith("$g = function"));
+  assert.equal(body("return $a + 1"), "return $a + 1;");
+  assert.equal(body("$top"), code.trim());
 });

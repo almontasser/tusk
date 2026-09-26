@@ -21,7 +21,7 @@ import { goToRequest, httpFilesChanged, initHttpClient, newRequestInteractive, r
 import { runAllRequests } from "./httpload";
 import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
-import { changeSignature, initRefactor, inlineVariable } from "./refactor";
+import { changeSignature, initRefactor, inlineVariable, moveClass } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
@@ -1342,6 +1342,7 @@ const actions: Action[] = [
   { label: "Extract Constant…", keys: "Alt+Meta+C", run: () => extractConstant(editor), editorOnly: true },
   { label: "Extract Method…", keys: "Alt+Meta+M", run: () => extractMethod(editor), editorOnly: true },
   { label: "Refactor This…", keys: "Ctrl+T", run: () => refactorThis(), editorOnly: true },
+  { label: "Move Class…", keys: "F6", run: () => moveClass(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
   { label: "Call Hierarchy", keys: "Ctrl+Alt+H", run: () => showCallHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),

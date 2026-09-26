@@ -1282,12 +1282,15 @@ export async function typeSymbol(fqn: string): Promise<Symbol | undefined> {
  * the references to it, and applies those edits. The LSP method is `workspace/willRenameFiles`,
  * but Phpactor reads each file at its new path, so call this after the move on disk.
  */
-export async function updateReferences(renames: { from: string; to: string }[]) {
+export async function updateReferences(renames: { from: string; to: string }[]): Promise<string | null> {
   const files = renames.map((r) => ({ oldUri: monaco.Uri.file(r.from).toString(), newUri: monaco.Uri.file(r.to).toString() }));
+  let failure: string | null = null;
   for (const server of servers) {
-    const edit = await server.willRename(files).catch(() => null);
+    // A server that can't, such as Phpactor without Composer's autoloader to map files to classes, says why.
+    const edit = await server.willRename(files).catch((e: { message?: string }) => ((failure ??= `${server.name}: ${String(e?.message ?? e).replace(/^Exception \[[^\]]*\\(\w+)\] /, "").replace(/ at (phar:|\/).*$/s, "")}`), null));
     if (edit) await applyWorkspaceEdit(edit);
   }
+  return failure;
 }
 
 /** Sends a request to Phpactor, or returns null when it isn't running. */

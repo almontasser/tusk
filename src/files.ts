@@ -102,12 +102,13 @@ export async function move(from: string, to: string) {
     const php = files.filter((f) => f.endsWith(".php")).map((f) => ({ from: f, to: to + f.slice(from.length) }));
     await invoke("rename_path", { from, to });
     for (const f of files) await host.renamed(f, to + f.slice(from.length));
+    let failure: string | null = null;
     if (php.length) {
       host.status(`Updating references for ${php.length} PHP file${php.length > 1 ? "s" : ""}…`);
-      await updateReferences(php);
+      failure = await updateReferences(php);
     }
     select(to);
-    host.status(`Moved ${relative(from)} to ${relative(to)}.`);
+    host.status(failure ? `Moved ${relative(from)} to ${relative(to)}, but references weren't updated. ${failure}` : `Moved ${relative(from)} to ${relative(to)}.`);
   });
 }
 

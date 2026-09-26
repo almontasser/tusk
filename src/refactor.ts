@@ -7,6 +7,10 @@ import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath } from ".
 import { constructorCalls, parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
+import { functionScope } from "./extractparse";
+import { move } from "./files";
+import { pick, rank, type Item } from "./palette";
+import { namespaceFor, pathsFor, psr4From } from "./psr4";
 import { editSignature } from "./signaturedialog";
 import { symbolAt } from "./safedelete";
 import { readText } from "./projectfiles";
@@ -27,10 +31,9 @@ export async function inlineVariable(editor: monaco.editor.ICodeEditor) {
   const line = model.getLineContent(pos.lineNumber);
   const name = [...line.matchAll(/\$(\w+)/g)].find((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1)?.[1];
   if (!name || name === "this") return host.status("Put the cursor on a variable to inline it.");
-  // The enclosing method or function, or the whole file for top-level code.
-  const found = symbolAt(await symbolsOf(model), pos.lineNumber - 1, pos.column - 1);
-  const inFunction = found && [6, 12].includes(found.symbol.kind);
-  const [from, to] = inFunction ? [found.symbol.range.start.line + 1, found.symbol.range.end.line + 1] : [1, model.getLineCount()];
+  // The enclosing function, method, or closure, or the whole file for top-level code.
+  const [start, end] = functionScope(model.getValue(), model.getOffsetAt(pos));
+  const [from, to] = [model.getPositionAt(start).lineNumber, model.getPositionAt(end).lineNumber];
   const plan = planInline(model.getLinesContent(), name, from, to);
   if ("error" in plan) return host.status(`Can't inline $${name}: ${plan.error}.`);
   const edits: monaco.editor.IIdentifiedSingleEditOperation[] = plan.uses.map((u) => ({
@@ -322,6 +325,47 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
   // Calls it can't rewrite are worth a look before applying, as PhpStorm shows its conflicts first.
   if (preview || skipped.length) showRefactorPreview(`Change Signature of ${title}`, changes, texts, skipped, apply);
   else await apply();
+}
+
+// ---- Move class ----
+
+/**
+ * Moves the class in the current file to another namespace (F6, as in PhpStorm): into the folder composer.json's
+ * PSR-4 map gives that namespace. The file move then has Phpactor update the namespace and every reference.
+ */
+export async function moveClass(editor: monaco.editor.ICodeEditor) {
+  const model = editor.getModel();
+  if (!model || model.getLanguageId() !== "php") return host.status("Move Class works in PHP files.");
+  const types = parseTypeDeclarations(model.getValue());
+  if (types.length !== 1) return host.status(types.length ? `Move Class moves a file with one class; this one declares ${types.length}.` : "This file declares no class to move.");
+  const [type] = types;
+  const short = type.fqn.split("\\").pop()!;
+  const current = type.fqn.slice(0, -short.length - 1);
+  const psr4 = psr4From((await readText(`${host.root()}/composer.json`).catch(() => "")) || "{}");
+  if (!Object.keys(psr4).length) return host.status("Move Class needs a PSR-4 autoload map in composer.json.");
+  // Every namespace that has a folder, from the project's PHP files.
+  const files = await invoke<string[]>("list_files", { root: host.root() }).catch(() => [] as string[]);
+  const namespaces = [...new Set(files.filter((f) => f.endsWith(".php")).map((f) => namespaceFor(f.replace(/^\//, ""), psr4)).filter((n): n is string => !!n))].sort();
+  const target = (ns: string) => pathsFor(ns ? `${ns}\\${short}` : short, psr4)[0];
+  const moveTo = (ns: string) => {
+    const rel = target(ns);
+    if (!rel) return host.status(`No PSR-4 folder in composer.json holds the namespace ${ns}.`);
+    const to = `${host.root()}/${rel}`;
+    if (to === model.uri.fsPath) return;
+    return move(model.uri.fsPath, to);
+  };
+  const item = (ns: string, isNew = false): Item => ({ label: ns || "(global namespace)", detail: isNew ? `New: ${target(ns) ?? "no PSR-4 folder"}` : target(ns), icon: "codicon-symbol-namespace", run: () => moveTo(ns) });
+  pick(
+    `Move ${short} to namespace`,
+    (q) => {
+      const typed = q.trim().replace(/^\\+|\\+$/g, "");
+      const valid = /^[A-Za-z_]\w*(\\[A-Za-z_]\w*)*$/.test(typed);
+      const existing = rank(typed, namespaces.filter((n) => n !== current).map((n) => item(n)));
+      return valid && typed !== current && !namespaces.includes(typed) ? [item(typed, true), ...existing] : existing;
+    },
+    0,
+    { value: current, select: [0, current.length] },
+  );
 }
 
 export function initRefactor(h: Host) {

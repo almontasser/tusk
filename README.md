@@ -229,6 +229,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘C | Extract the string or number at the cursor into a class constant |
 | ⌥⌘M | Extract the selection into a method |
 | ⌥⌘N | Inline the variable at the cursor |
+| F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
 | ⌘⏎ | Run the SQL statement under the caret |
@@ -548,7 +549,7 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 
 Press ⌃T to list the refactorings that apply at the caret or to the selection,
 with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
-Signature, the three Extracts, Inline Variable, and Safe Delete, plus
+Signature, the three Extracts, Inline Variable, Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
@@ -621,6 +622,16 @@ self` and `new static` inside them, and `parent::__construct()` in subclasses;
 a subclass's own constructor keeps its parameters, and a promoted property is
 renamed with Rename instead. Arguments one per line stay one per line. Calls it
 can't rewrite safely, such as ones that spread `...$args`, are left unchanged.
+
+## Move class
+
+Press F6 in a PHP file that declares one class, interface, trait, or enum to
+move it to another namespace. The picker lists the project's namespaces, each
+with the file it would become; type a new one, such as `App\Services\Billing`,
+to create its folder. The file goes where `composer.json`'s PSR-4 map puts that
+namespace, and Phpactor updates the class's namespace and every reference, as
+when you move the file in the tree. If Phpactor can't, for example because the
+project has no `vendor/composer` autoloader yet, the status bar says why.
 
 ## Undo across files
 

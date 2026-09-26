@@ -260,6 +260,29 @@ const tokenCount = (toks: Tok[], from: number, end: number) => {
   return n;
 };
 
+/**
+ * The body of the innermost function, method, or closure around an offset, as offsets inside its braces, or the
+ * whole file for code outside one. A closure is a scope of its own: its variables aren't the enclosing function's.
+ */
+export function functionScope(source: string, offset: number): [number, number] {
+  const toks = tokenize(source);
+  let k = toks.findIndex((t) => t.end > offset);
+  if (k < 0) k = toks.length;
+  for (let open = enclosing(toks, k); open >= 0; open = enclosing(toks, open)) {
+    if (toks[open].text !== "{" || toks[open].match < 0) continue;
+    // Back from the brace: a return type, then `)`, maybe a closure's `use (...)`, then `function name(`.
+    let j = open - 1;
+    while (j >= 0 && (toks[j].type === "name" || ["?", "|", ":"].includes(toks[j].text) || (toks[j].text === "&" && toks[j - 1]?.text !== ")"))) j--;
+    if (toks[j]?.text !== ")" || toks[j].match < 0) continue;
+    j = toks[j].match - 1;
+    if (/^use$/i.test(toks[j]?.text ?? "") && toks[j - 1]?.text === ")") j = toks[j - 1].match - 1;
+    if (toks[j]?.type === "name" && !/^function$/i.test(toks[j].text)) j--;
+    if (toks[j]?.text === "&") j--;
+    if (/^function$/i.test(toks[j]?.text ?? "")) return [toks[open].end, toks[toks[open].match].start];
+  }
+  return [0, source.length];
+}
+
 /** The literal or constant expression for Extract Constant: the selection, or the string or number at the caret. */
 export function constantAt(source: string, start: number, end: number): Expr | null {
   const toks = tokenize(source);

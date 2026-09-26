@@ -10,7 +10,7 @@ import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
 import { matchBracket } from "./refactorparse";
 import { symbolAt } from "./safedelete";
-import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName, type Expr } from "./extractparse";
+import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, functionScope, occurrences, variableName, type Expr } from "./extractparse";
 
 type Host = { status(text: string): void };
 let host: Host;
@@ -100,15 +100,6 @@ function applyNamed(editor: Editor, edits: { start: number; end: number; text: s
 const symbolsOf = async (model: monaco.editor.ITextModel) =>
   (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
 
-/** The offsets of the method or function around an offset, or the whole file for top-level code. */
-async function scopeOf(model: monaco.editor.ITextModel, offset: number): Promise<[number, number]> {
-  const p = model.getPositionAt(offset);
-  const found = symbolAt(await symbolsOf(model), p.lineNumber - 1, p.column - 1);
-  if (!found || ![6, 12].includes(found.symbol.kind)) return [0, model.getValueLength()];
-  const r = found.symbol.range;
-  return [model.getOffsetAt({ lineNumber: r.start.line + 1, column: r.start.character + 1 }), model.getOffsetAt({ lineNumber: r.end.line + 1, column: r.end.character + 1 })];
-}
-
 /** The selected expression, or one chosen among those around the caret. A status explains when there's none. */
 async function chosenExpression(editor: Editor, what: string): Promise<Expr | null> {
   const model = editor.getModel()!;
@@ -149,8 +140,8 @@ export async function extractVariable(editor: Editor) {
   const version = model.getVersionId();
   const expr = await chosenExpression(editor, "extract it into a variable");
   if (!expr) return;
-  const [from, to] = await scopeOf(model, expr.start);
   const text = model.getValue();
+  const [from, to] = functionScope(text, expr.start);
   const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
   if (!uses || model.getVersionId() !== version) return;
   const point = declarationPoint(text, uses);
@@ -250,6 +241,7 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   const line = model.getLineContent(pos.lineNumber);
   if ([...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this")) names.push("Inline Variable");
   if (found) names.push("Safe Delete…");
+  if (parseTypeDeclarations(text).length === 1) names.push("Move Class…");
   // Phpactor's own refactorings, other than the extractions above.
   const actions =
     (await phpactorRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
