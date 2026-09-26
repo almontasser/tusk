@@ -242,7 +242,8 @@ Folder…** action.
 
 ## Settings
 
-Press ⌘, to open **Settings**. Changes apply immediately and are saved in
+Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
+AI, and Spelling. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
 | Setting | Default |

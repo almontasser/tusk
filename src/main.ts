@@ -1027,6 +1027,11 @@ function goToFile() {
 
 // LSP symbol kinds that name types: Class, Enum, Interface, Struct.
 const typeKinds = [5, 10, 11, 23];
+// Codicons for LSP symbol kinds, by kind number; other kinds show as a generic symbol.
+const kindIcons: Record<number, string> = {
+  5: "symbol-class", 6: "symbol-method", 7: "symbol-property", 8: "symbol-field", 9: "symbol-method", 10: "symbol-enum",
+  11: "symbol-interface", 12: "symbol-function", 13: "symbol-variable", 14: "symbol-constant", 22: "symbol-enum-member", 23: "symbol-structure",
+};
 
 async function symbolItems(query: string, typesOnly: boolean): Promise<Item[]> {
   if (!query.trim()) return [];
@@ -1036,6 +1041,7 @@ async function symbolItems(query: string, typesOnly: boolean): Promise<Item[]> {
   );
   const items = symbols.map((s) => ({
     label: s.name,
+    icon: `codicon-${kindIcons[s.kind] ?? "symbol-misc"} symbol-kind-${s.kind}`,
     detail: s.container || relative(s.path),
     run: () => openAt(s.path, s.range && { lineNumber: s.range.startLineNumber, column: s.range.startColumn }),
   }));

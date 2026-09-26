@@ -47,7 +47,8 @@ const defaults: Settings = {
   keymap: {},
 };
 
-type Field = { key: keyof Settings; label: string; help?: string } & (
+/** `section` starts a new group of settings under that heading. */
+type Field = { key: keyof Settings; label: string; help?: string; section?: string } & (
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
   | { type: "text" }
@@ -56,18 +57,18 @@ type Field = { key: keyof Settings; label: string; help?: string } & (
 
 /** The settings form, in order. */
 const fields: Field[] = [
-  { key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
+  { section: "Appearance", key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
   { key: "darkTheme", label: "Dark theme for Match the system", type: "select", options: () => themeOptions(true) },
   { key: "lightTheme", label: "Light theme for Match the system", type: "select", options: () => themeOptions(false) },
   { key: "fontFamily", label: "Editor font", type: "text", help: "A CSS font list; the first installed font is used." },
   { key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
-  { key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
+  { section: "Editor", key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
   { key: "minimap", label: "Show the minimap", type: "checkbox" },
   { key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
   { key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
-  { key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
+  { section: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
   {
     key: "aiModel",
     label: "AI completion model",
@@ -78,7 +79,7 @@ const fields: Field[] = [
       ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
     ],
   },
-  { key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
+  { section: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
 ];
 
 export const settings: Settings = { ...defaults };
@@ -196,6 +197,7 @@ export function openSettings() {
   form.append(heading);
 
   for (const f of fields) {
+    if (f.section) form.append(Object.assign(document.createElement("h3"), { textContent: f.section }));
     const row = document.createElement("label");
     row.className = `setting setting-${f.type}`;
     const name = document.createElement("span");
@@ -245,6 +247,7 @@ export function openSettings() {
   keymap.textContent = "Keymap…";
   keymap.onclick = () => (dialog.close(), keymapEditor());
   const done = document.createElement("button");
+  done.className = "primary";
   done.textContent = "Done";
   const actions = document.createElement("div");
   actions.className = "settings-actions";

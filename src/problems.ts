@@ -218,6 +218,7 @@ function render() {
   summary.textContent = [scan.progress, `${files.length} files`].filter(Boolean).join(" · ");
   rescan.disabled = scan.running;
   rows = [];
+  list.dataset.empty = scan.running ? "Checking the project…" : words || shown.size < 2 || currentOnly ? "No problems match." : "No problems found.";
   list.replaceChildren(
     ...files.map(([path, problems]) => {
       const item = document.createElement("li");

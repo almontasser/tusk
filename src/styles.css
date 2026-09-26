@@ -22,6 +22,8 @@
   --input-bg: #1e1f22;
   --input-border: #4e5157;
   --shadow: 0 12px 32px #0009, 0 0 0 1px #0006;
+  /* Popovers' hairline edge, from the text color so every theme gets one. */
+  --popover-border: color-mix(in srgb, var(--text) 13%, transparent);
   --red: #e06c75;
   --green: #73bd79;
   --blue: #6aa7f8;
@@ -92,10 +94,21 @@ input:not([type="checkbox"]), textarea, select {
 }
 input:not([type="checkbox"]):focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
 input::placeholder, textarea::placeholder { color: var(--faint); }
+/* Selects draw one chevron instead of macOS's up-and-down arrows, so they match the text fields. */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 24px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(-45deg, transparent 50%, var(--muted) 50%);
+  background-position: right 12px center, right 8px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  text-overflow: ellipsis;
+}
 input[type="checkbox"] { accent-color: var(--accent); margin: 0 6px 0 0; vertical-align: -2px; }
 
 /* Standard buttons: neutral by default, .primary for the main action. */
-.primary, #commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, #settings button {
+.primary, #commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, .problems-toolbar button, .hierarchy-toolbar button, #merge header button:not(.icon-button):not(.primary), #problem-page header button:not(.icon-button), .settings-actions button:not(.primary), #rebase .buttons button:not(.primary), #shortcut-recorder .buttons button:not(.primary) {
   border: 1px solid var(--input-border);
   border-radius: var(--radius);
   padding: 3px 12px;
@@ -104,13 +117,13 @@ input[type="checkbox"] { accent-color: var(--accent); margin: 0 6px 0 0; vertica
 }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .primary:hover { background: var(--accent-hover); }
-#commit-push:hover, #diff-open:hover, #diff-action:hover, #history-more:hover, .pr-actions button:hover, .history-actions button:hover, #git-operation button:hover, .debug-toolbar button:hover:not(:disabled), .find-file button:hover { background: var(--hover); }
+:is(#commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, .problems-toolbar button, .hierarchy-toolbar button, #merge header button:not(.icon-button):not(.primary), #problem-page header button:not(.icon-button), .settings-actions button:not(.primary), #rebase .buttons button:not(.primary), #shortcut-recorder .buttons button:not(.primary)):hover:not(:disabled) { background: var(--hover); }
 button:disabled { opacity: 0.4; }
 
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius); color: var(--muted); }
 .icon-button:hover { background: var(--hover); color: var(--text); }
 /* Pressed buttons shade at once, so a click shows before the work it starts finishes. */
-.icon-button:active, .tb-button:active, .tb-icon:active, .tb-search:active, #activitybar button:not(.active):active, button:not(:disabled):active:is(#commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button) { background: color-mix(in srgb, var(--hover), var(--text) 12%); }
+.icon-button:active, .tb-button:active, .tb-icon:active, .tb-search:active, #activitybar button:not(.active):active, button:not(:disabled):active:is(#commit-push, #diff-open, #diff-action, #history-more, .pr-actions button, .history-actions button, #git-operation button, .debug-toolbar button, .find-file button, .problems-toolbar button, .hierarchy-toolbar button, #merge header button:not(.icon-button):not(.primary), #problem-page header button:not(.icon-button), .settings-actions button:not(.primary), #rebase .buttons button:not(.primary), #shortcut-recorder .buttons button:not(.primary)) { background: color-mix(in srgb, var(--hover), var(--text) 12%); }
 .primary:not(:disabled):active { background: color-mix(in srgb, var(--accent), #000 15%); }
 
 /* Monaco's `.codicon[class*='codicon-']` rule sets the size with higher specificity, so sizes below use !important. */
@@ -210,6 +223,8 @@ kbd {
 #activitybar button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: var(--muted); }
 #activitybar button:hover { background: var(--hover); color: var(--text); }
 #activitybar button.active { background: var(--accent); color: var(--on-accent); }
+/* A bottom panel button whose view is showing. */
+#activitybar button.on { background: var(--selected-inactive); color: var(--text); }
 #activitybar .codicon { font-size: 18px !important; }
 /* The Problems button's error count. */
 #activitybar button[data-count] { position: relative; }
@@ -218,6 +233,8 @@ kbd {
 #sidebar { width: 280px; min-width: 180px; max-width: 60vw; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); }
 #sidebar.collapsed { display: none; }
 #sidebar > section { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+/* The view scrolls as a whole, so its parts keep their height instead of squeezing under the list. */
+#sidebar > section > * { flex-shrink: 0; }
 #sidebar-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
 .view-header { height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 0 12px; font-weight: 600; position: sticky; top: 0; background: var(--panel); z-index: 1; }
 .view-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -307,6 +324,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .tabs .tab.dirty .close::before { content: "\ea71"; font-size: 10px; color: var(--text); }
 .tabs .tab.dirty:hover .close::before { content: "\ea76"; font-size: 14px; color: inherit; }
 #terminal-tabs .tab.exited { font-style: italic; }
+#terminal-tabs .tab > .codicon { font-size: 14px !important; color: var(--faint); }
+#terminal-tabs .tab.active > .codicon { color: var(--muted); }
 
 #editor { flex: 1; min-height: 0; }
 .split { display: flex; min-width: 0; min-height: 0; }
@@ -389,7 +408,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
    Palette, menus, dialogs, toasts
    ========================================================================== */
 
-#palette { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); background: var(--panel); border-radius: 10px; box-shadow: var(--shadow); z-index: 100; overflow: hidden; }
+#palette { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); background: var(--panel); border-radius: 10px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); z-index: 100; overflow: hidden; }
 #palette input { width: 100%; padding: 12px 14px; font-size: 15px; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; }
 #palette ul { list-style: none; margin: 0; padding: 4px; max-height: 440px; overflow-y: auto; }
 #palette ul:empty { display: none; }
@@ -399,30 +418,38 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #palette li .label .dir { color: var(--faint); }
 #palette li .detail { margin-left: auto; color: var(--faint); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; font-size: 12px; }
 #palette li.selected { background: var(--selected); }
+/* Symbol kinds in Go to Class and Go to Symbol, colored as in the editor's outline. */
+#palette .symbol-kind-5, #palette .symbol-kind-23 { color: var(--orange); }
+#palette .symbol-kind-6, #palette .symbol-kind-9, #palette .symbol-kind-12 { color: var(--purple); }
+#palette .symbol-kind-7, #palette .symbol-kind-8, #palette .symbol-kind-13 { color: var(--blue); }
+#palette .symbol-kind-10, #palette .symbol-kind-14, #palette .symbol-kind-22 { color: var(--yellow); }
+#palette .symbol-kind-11 { color: var(--green); }
 #palette li.selected .detail { color: var(--muted); }
 :root[data-theme="dark"] #palette li.selected .label b { color: #8fb7ff; }
 
-#menu { position: fixed; z-index: 200; list-style: none; margin: 0; padding: 4px; min-width: 200px; background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); }
+#menu { position: fixed; z-index: 200; list-style: none; margin: 0; padding: 4px; min-width: 200px; background: var(--panel); border-radius: 8px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
 #menu li { padding: 4px 10px; border-radius: 5px; }
-#menu li[role="menuitem"]:hover { background: var(--accent); color: var(--on-accent); }
+#menu li[role="menuitem"]:hover, #menu li.focused { background: var(--accent); color: var(--on-accent); }
 #menu li.separator { height: 1px; padding: 0; margin: 4px 6px; background: var(--border); }
 
-#settings { width: min(540px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 0; border-radius: 12px; box-shadow: var(--shadow); }
+#settings { width: min(620px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
 #settings::backdrop { background: #0007; }
-#settings form { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
-#settings h2 { margin: 0 0 4px; font-size: 16px; }
+#settings form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 0; max-height: calc(100vh - 64px); overflow-y: auto; }
+#settings h2 { margin: 0; font-size: 16px; }
+#settings h3 { margin: 8px 0 -4px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
+#settings h2 + h3 { border-top: 0; padding-top: 0; }
 .setting { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; }
-.setting-checkbox { grid-template-columns: auto 1fr; }
+.setting-checkbox { grid-template-columns: auto 1fr; column-gap: 8px; }
 .setting small { grid-column: 1 / -1; color: var(--faint); }
-.setting-checkbox small { padding-left: 22px; }
-.setting input[type="text"] { width: 280px; }
+.setting-checkbox small { padding-left: 27px; }
+.setting input[type="text"], .setting select { width: 310px; }
 .setting input[type="number"] { width: 72px; }
-.settings-actions { display: flex; gap: 8px; margin-top: 4px; }
-.settings-actions button:hover { background: var(--hover); }
-.settings-actions button:last-child { margin-left: auto; background: var(--accent); border-color: var(--accent); color: var(--on-accent); padding: 3px 20px; }
+/* The buttons stay in view while the settings above them scroll. */
+.settings-actions { display: flex; gap: 8px; position: sticky; bottom: 0; margin: 4px -24px 0; padding: 12px 24px 16px; background: var(--panel); border-top: 1px solid var(--border-subtle); }
+.settings-actions .primary { margin-left: auto; padding: 3px 20px; }
 
 #toasts { position: fixed; right: 16px; bottom: 40px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
-.toast { pointer-events: auto; max-width: 420px; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; -webkit-user-select: text; user-select: text; }
+.toast { pointer-events: auto; max-width: 420px; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-radius: 8px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; -webkit-user-select: text; user-select: text; }
 .toast .codicon { color: var(--red); margin-top: 1px; }
 .toast p { margin: 0; overflow-wrap: anywhere; }
 .toast button { margin-left: 6px; color: var(--faint); }
@@ -830,7 +857,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 
 .hierarchy { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
 .hierarchy-toolbar { display: flex; gap: 4px; align-items: center; padding: 2px 10px 6px 8px; flex-shrink: 0; }
-.hierarchy-toolbar button { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
+.hierarchy-toolbar button { padding: 3px 10px; }
 .hierarchy-toolbar button.on { background: var(--selected); border-color: var(--accent); }
 .hierarchy-title { margin-left: 8px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hierarchy-tree, .hierarchy-tree ul { list-style: none; margin: 0; padding: 0; }
@@ -851,7 +878,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 
 .problems { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
 .problems-toolbar { display: flex; gap: 8px; align-items: center; padding: 2px 10px 6px 8px; flex-shrink: 0; }
-.problems-toolbar button { display: flex; gap: 4px; align-items: center; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
+.problems-toolbar button { display: flex; gap: 4px; align-items: center; padding: 3px 10px; }
 .problems-toolbar .problems-toggle.on { background: var(--selected); border-color: var(--accent); }
 .problems-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .problems-tree, .problems-tree ul { list-style: none; margin: 0; padding: 0; }
@@ -860,6 +887,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .problems-row:hover { background: var(--hover); }
 .problems-row.selected { background: var(--selected-inactive); }
 .problems-tree:focus { outline: none; }
+.problems-tree:empty::before { content: attr(data-empty); display: block; padding: 8px 10px; color: var(--faint); }
 .problems-tree:focus .problems-row.selected { background: var(--selected); }
 .problems-filter { width: 180px; padding: 3px 8px; font-size: 12px; }
 .problems-item { padding-left: 42px; }
@@ -1070,9 +1098,6 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 #merge header .codicon-git-merge { color: var(--muted); }
 #merge-path { font-weight: 600; }
 #merge-count { color: var(--faint); margin-right: auto; }
-#merge header button:not(.icon-button) { padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
-#merge header button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-#merge header button:disabled { opacity: 0.5; }
 .merge-titles { display: grid; grid-template-columns: 1fr 1.2fr 1fr; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border-subtle); color: var(--muted); font-size: 12px; }
 .merge-titles span { padding: 4px 12px; }
 .merge-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr 1fr; }
@@ -1092,7 +1117,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
    Interactive rebase
    ========================================================================== */
 
-#rebase { width: min(720px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 0; border-radius: 12px; box-shadow: var(--shadow); }
+#rebase { width: min(720px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
 #rebase::backdrop { background: #0007; }
 #rebase form { display: flex; flex-direction: column; gap: 10px; padding: 20px 24px; max-height: 80vh; }
 #rebase h2 { margin: 0; font-size: 16px; }
@@ -1133,7 +1158,6 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 #problem-page header { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .problem-page-path { font-weight: 600; }
 .problem-page-rule { color: var(--faint); margin-right: auto; }
-#problem-page header button:not(.icon-button) { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: none; }
 .problem-page-body { flex: 1; overflow: auto; padding: 24px 32px 40px; max-width: 980px; -webkit-user-select: text; user-select: text; line-height: 1.6; }
 .problem-page-title { font-size: 16px; font-weight: 600; margin: 0 0 18px; line-height: 1.6; }
 .problem-page-note { margin: 14px 0; color: var(--muted); }

@@ -2698,6 +2698,14 @@ root element (see [Color themes](#color-themes)). `src/themes.ts` defines
 matching Monaco themes, `editor-dark` and `editor-light`, with syntax colors
 close to PhpStorm's schemes.
 
+Buttons share one neutral style (a bordered button that shades on hover and
+while pressed), with `.primary` for a dialog's main action. Selects draw one
+chevron instead of macOS's up-and-down arrows. Popovers (the palette, menus,
+dialogs, and toasts) have a hairline border mixed from `--text`, so they stand
+out from a dark background in every theme. Each view in the sidebar scrolls as
+a whole and its parts don't shrink, so a line above a long list keeps its
+height.
+
 Icons come from Monaco's icon font (codicons), which the page already loads, so
 there's no icon dependency. Monaco's `.codicon[class*='codicon-']` rule sets
 the icon size with high specificity, so the stylesheet uses `!important` where
@@ -3243,3 +3251,18 @@ The screenshots are real captures of the dev app on the test app, not mockups.
 The design follows laravel.com's: a light page framed by dashed rails and
 hairlines with accent squares at the corners, light-weight display type in
 Instrument Sans, Geist Mono labels, and Tusk's indigo where Laravel uses red.
+
+### 2026-09-26: A UI polish pass
+
+A pass over every view fixed what looked unfinished. The Database view's
+connection line was squeezed under the table list, since flex items in a
+scrolling column shrink. The settings dialog's Done button wasn't blue, since
+an ID rule beat its class rule; it now has `.primary`. Settings are grouped
+under Appearance, Editor, AI, and Spelling, and the buttons stay in view while
+the list scrolls. Toolbar buttons that had no hover shade (Problems, Hierarchy,
+Merge, the problem page, and the rebase dialog's Cancel) now use the standard
+button. Go to Class and Go to Symbol show a symbol icon for each kind, so their
+rows line up with the file rows. Panel tabs have icons, and the activity bar's
+Problems, Debug, and Terminal buttons show when their view is open. An empty
+Problems panel says why it's empty. Context menus take the arrow keys and Enter.
+

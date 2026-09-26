@@ -112,13 +112,24 @@ function close(session: Session) {
   if (!sessions.length) showPanel(false);
 }
 
+// Icons for the panel's views by title; terminal tabs all get the terminal icon.
+const viewIcons: Record<string, string> = {
+  Problems: "warning", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
+};
+
 function renderTabs() {
+  // The activity bar's panel buttons light up while their view is the one showing.
+  const showing = panelVisible && active ? (active.term ? "Terminal" : active.title) : "";
+  for (const [panel, title] of [["problems", "Problems"], ["debug", "Debug"], ["terminal", "Terminal"]])
+    document.querySelector(`#activitybar [data-panel="${panel}"]`)?.classList.toggle("on", showing === title);
   $("terminal-tabs").replaceChildren(
     ...sessions.map((s) => {
       const tab = document.createElement("div");
       tab.className = `tab${s === active ? " active" : ""}${s.exited ? " exited" : ""}`;
       tab.role = "tab";
-      tab.textContent = s.title;
+      const icon = document.createElement("span");
+      icon.className = `codicon codicon-${s.term ? "terminal" : (viewIcons[s.title] ?? "globe")}`;
+      tab.append(icon, s.title);
       tab.onclick = () => activate(s);
       const x = document.createElement("span");
       x.className = "close";
@@ -134,6 +145,7 @@ function showPanel(visible: boolean) {
   panelVisible = visible;
   $("panel").hidden = !visible;
   if (visible) active?.fit?.fit();
+  renderTabs();
 }
 
 /** Shows the panel, focusing the terminal, or hides it when a terminal has focus. */

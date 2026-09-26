@@ -153,12 +153,24 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
   const close = () => {
     menu.remove();
     removeEventListener("mousedown", outside, true);
-    removeEventListener("keydown", escape, true);
+    removeEventListener("keydown", keys, true);
   };
   const outside = (e: MouseEvent) => !menu.contains(e.target as Node) && close();
-  const escape = (e: KeyboardEvent) => e.key === "Escape" && close();
+  // The arrow keys move through the items and Enter picks one, before the editor or tree sees the keys.
+  const rows = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  let index = -1;
+  const keys = (e: KeyboardEvent) => {
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (e.key === "Escape") close();
+    else if (step) index = (index + step + rows.length) % rows.length;
+    else if (e.key === "Enter" && rows[index]) rows[index].click();
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+    rows.forEach((row, i) => row.classList.toggle("focused", i === index));
+  };
   addEventListener("mousedown", outside, true);
-  addEventListener("keydown", escape, true);
+  addEventListener("keydown", keys, true);
 }
 
 function menuFor(path: string): MenuItem[] {
