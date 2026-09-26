@@ -440,3 +440,18 @@ export function parseWorktrees(out: string): Worktree[] {
       return { path, branch, main: i === 0 };
     });
 }
+
+/**
+ * Turns a remote's URL, a commit, a path in the repository, and lines into a link to those lines on the web:
+ * GitHub and GitLab style (`/blob/…#L3-L5`), or Bitbucket's (`/src/…#lines-3:5`).
+ * Returns "" for a remote that isn't a web host, such as a local path.
+ */
+export function remoteLineUrl(remote: string, commit: string, path: string, start: number, end = start): string {
+  // git@host:owner/repo.git, ssh://git@host:22/owner/repo.git, https://user@host/owner/repo.git
+  const m = remote.trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/](.+?)(?:\.git)?\/?$/i);
+  if (!m || !m[1].includes(".")) return "";
+  const [, hostName, repo] = m;
+  const file = path.split("/").map(encodeURIComponent).join("/");
+  if (hostName.includes("bitbucket")) return `https://${hostName}/${repo}/src/${commit}/${file}#lines-${start}${end > start ? `:${end}` : ""}`;
+  return `https://${hostName}/${repo}/blob/${commit}/${file}#L${start}${end > start ? `-L${end}` : ""}`;
+}

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -184,4 +184,13 @@ test("parses worktrees, skipping bare repositories", () => {
     { path: "/code/app-fix", branch: "fix/login", main: false },
     { path: "/code/app-old", branch: "detached", main: false },
   ]);
+});
+
+test("links lines on a remote's web host", () => {
+  const url = (remote: string, end?: number) => remoteLineUrl(remote, "abc123", "app/My File.php", 3, end);
+  assert.equal(url("git@github.com:acme/shop.git"), "https://github.com/acme/shop/blob/abc123/app/My%20File.php#L3");
+  assert.equal(url("https://token@github.com/acme/shop.git", 5), "https://github.com/acme/shop/blob/abc123/app/My%20File.php#L3-L5");
+  assert.equal(url("ssh://git@gitlab.example.com:2222/group/sub/shop"), "https://gitlab.example.com/group/sub/shop/blob/abc123/app/My%20File.php#L3");
+  assert.equal(url("git@bitbucket.org:acme/shop.git", 5), "https://bitbucket.org/acme/shop/src/abc123/app/My%20File.php#lines-3:5");
+  assert.equal(url("/Users/me/shop.git"), "");
 });

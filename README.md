@@ -1305,8 +1305,9 @@ debugging on for the processes it starts.
 
 Right-click the gutter at a line to add, remove, disable, or edit its
 breakpoint, add a conditional breakpoint or a logpoint, remove the file's or
-all breakpoints, annotate the file with Git blame, or copy the line's
-reference (`path:line`). While execution is paused, **Run to Line** resumes
+all breakpoints, annotate the file with Git blame, or copy the line's link on
+the remote, such as GitHub, at the current commit. **Copy Remote URL** in ⌘⇧A
+copies the link to the selected lines. While execution is paused, **Run to Line** resumes
 and pauses at that line once. Press ⇧⌘F8 to edit the breakpoint at the cursor:
 
 - **Condition:** pause only when a PHP expression is true, such as

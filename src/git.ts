@@ -4,7 +4,7 @@ import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
-import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, type Status } from "./gitparse";
+import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -625,6 +625,21 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const refresh = () => (updateMarkers(), updateInline(), updateAnnotations());
   refreshers.add(refresh);
   editor.onDidDispose(() => refreshers.delete(refresh));
+}
+
+/** Copies a link to lines of a file at the current commit on the remote's website, such as GitHub. */
+export async function copyRemoteUrl(path: string, start: number, end = start) {
+  try {
+    // The project can be a folder inside the repository, so the path starts with the folder's prefix.
+    const [[prefix, commit], remote] = await Promise.all([git("rev-parse", "--show-prefix", "HEAD").then((o) => o.split("\n")), git("ls-remote", "--get-url")]);
+    const url = remoteLineUrl(remote, commit, prefix + path.slice(host.root().length + 1), start, end);
+    if (!url) return host.status("This repository has no remote on a website, such as GitHub.");
+    await navigator.clipboard.writeText(url);
+    const pushed = (await git("branch", "-r", "--contains", "HEAD").catch(() => "")).trim();
+    host.status(pushed ? `Copied ${url}` : `Copied ${url}. Push the current commit so the link works.`);
+  } catch (e) {
+    host.status(`Couldn't copy the remote URL: ${e}`);
+  }
 }
 
 export function initGit(h: Host) {

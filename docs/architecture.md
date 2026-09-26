@@ -2427,7 +2427,11 @@ file's breakpoints go out again without it.
 The gutter's context menu comes from Monaco's `onContextMenu` for the glyph
 margin, line numbers, and line decorations, where Monaco shows no menu of its
 own. `debug.ts` supplies the breakpoint items and `main.ts` adds blame and
-Copy Reference.
+Copy Remote URL. The link uses `git ls-remote --get-url` (the branch's remote,
+or `origin`), the HEAD commit, and `git rev-parse --show-prefix` for a project
+inside a larger repository; `remoteLineUrl` in `gitparse.ts` turns SSH and
+HTTPS remotes into GitHub and GitLab `blob` links, or Bitbucket `src` links.
+If no remote branch contains HEAD, the status bar says to push first.
 
 Watches are a list of expressions per project in `localStorage`. After a frame
 is selected, each one goes to `evaluate` with the `watch` context, and the

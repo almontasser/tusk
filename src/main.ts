@@ -7,7 +7,7 @@ import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, copyRemoteUrl, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -86,7 +86,7 @@ function addPane(): Pane {
   return pane;
 }
 
-/** The context menu of the gutter left of the code: breakpoints, blame, and the line's reference. */
+/** The context menu of the gutter left of the code: breakpoints, blame, and the line's link on the remote. */
 function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
   const T = monaco.editor.MouseTargetType;
   const model = ed.getModel();
@@ -97,7 +97,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...breakpointMenu(path, line),
     "-",
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
-    { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
+    { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
 }
 
@@ -1264,6 +1264,14 @@ const actions: Action[] = [
   { label: "Stashes…", run: stashes },
   { label: "Worktrees…", run: worktrees },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
+  {
+    label: "Copy Remote URL",
+    run: () => {
+      const s = editor.getSelection();
+      if (active && s) copyRemoteUrl(active, s.startLineNumber, s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber);
+    },
+    editorOnly: true,
+  },
   { label: "Split Right", keys: "Meta+Backslash", run: () => split("row") },
   { label: "Split Down", keys: "Meta+Shift+Backslash", run: () => split("col") },
   { label: "Move Tab to Next Pane", run: moveTabToNextPane },
