@@ -111,5 +111,5 @@ test("ranks the app's possible addresses", () => {
 });
 
 test("finds the ports PHP listens on in lsof's output", () => {
-  assert.deepEqual(phpPorts("p1\ncphp\nf5\nn127.0.0.1:8000\np2\ncnode\nf3\nn*:5173\np3\ncphp-fpm\nf4\nn127.0.0.1:9000\n"), [8000, 9000]);
+  assert.deepEqual(phpPorts("p1\ncphp\nf5\nn127.0.0.1:8000\np2\ncnode\nf3\nn*:5173\np3\ncphp-fpm\nf4\nn127.0.0.1:9000\np4\ncphp-editor\nf5\nn127.0.0.1:9223\n"), [8000, 9000]);
 });

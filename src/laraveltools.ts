@@ -193,7 +193,8 @@ export function phpPorts(lsof: string): number[] {
   const ports = new Set<number>();
   let php = false;
   for (const line of lsof.split("\n")) {
-    if (line.startsWith("c")) php = /^php/i.test(line.slice(1));
+    // php, php-fpm, php-cgi, or php8.3, but not programs whose names only start with php, such as this editor.
+    if (line.startsWith("c")) php = /^php(?:-fpm|-cgi|\d[\d.]*)?$/i.test(line.slice(1));
     else if (line.startsWith("p")) php = false;
     else if (php && line.startsWith("n")) {
       const port = Number(line.match(/:(\d+)$/)?.[1]);

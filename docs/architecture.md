@@ -979,6 +979,89 @@ files work in PhpStorm and VS Code's REST Client.
   after its seconds. The monitor sends through `probe`, which skips scripts
   and history.
 
+- `src/laraveltools.ts` has no editor imports, so Node tests it. `featureTest`
+  builds a Pest test or PHPUnit method from a prepared request and its response:
+  the path without the origin, the body as a PHP array (`phpValue`), a bearer
+  token as `withToken`, other headers except the ones the helpers set, then
+  `assertStatus` and an `assertJsonStructure` built from the response's keys (three
+  levels, `*` for a list of objects). `addTest` adds a test to an existing file,
+  and a name the file uses gets a number. `parseLaravelLog` reads Monolog's line
+  format into entries, and `fileReferences` finds `file.php:12` and
+  `file.php(12)`. `appAddresses` ranks where the app might answer from facts the
+  caller gathers: `.env`, the compose file, Herd's or Valet's `config.json`,
+  linked sites and certificates, and `lsof` output (`phpPorts`).
+- `src/httplaravel.ts` is the interface for those tools: the Logs and Queries
+  response tabs, **Generate Feature Test…**, and **Detect App Address**, which
+  writes `host` into the shared environment file. It only defines functions, so
+  its import of `httpview.ts`, which imports it back, is safe.
+  `createEnvironmentFile` loads it with a dynamic import for the same reason.
+- `send` and `resend` record the sizes of `laravel.log` and the newest daily log
+  before curl runs. Afterwards they read what the files gained with `tail -c +N`,
+  the last 200 KB at most, into `Exchange.appLog`. A file that shrank was rotated,
+  so all of it counts. **Send with Profiler** gets the profile's path from
+  `openProfileSince`, loads the SQL trace written next to it with `loadQueries`,
+  and saves the queries to the exchange with `updateExchange`, so history keeps
+  them.
+- **Less typing.** `httpfile.ts` holds the pure parts. `jsonPathAt(text, offset)` walks the JSON text and returns the path of the deepest value, key or container at the offset. `CHECKS` defines each check kind's code template. `writeChecks` writes checks between the `// checks:start` and `// checks:end` markers in the response handler. `readChecks` reads them back with patterns built from the same templates, and reports the block as not editable when its code doesn't match. `envTable` and `envFiles` turn the two environment files into a table model and back. A variable in the private file is private, and every environment stays in the shared file so the menus list it.
+- `httpchecks.ts` holds the Checks section of the Scripts tab and the response body's **Save as Variable…** action. The Checks section edits the handler's Monaco editor, so its changes go through the same `updateSoon` path as typing. `httpenv.ts` is the environment editor, shown with `showHttpPanel`. Both import from `httpview.ts`, which imports them back. That's safe because each only uses the other's exports inside functions.
+- `send` passes `response.time` (curl's `time_total` in ms) to the response handler script.
+- `requestItems()` in `httpview.ts` lists every request as palette items. **Go to Request…** and Search Everywhere use it.
+- `src/graphqlschema.ts` has no editor imports, so Node tests it. `schemaFrom`
+  reads an introspection result into a map of types, with fields, arguments,
+  and type strings such as `[User!]!`. `contextAt` walks a document from the
+  start, with a stack of types: an operation's `{` pushes its root type, a
+  field's `{` pushes the field's named type, and `fragment … on T` and
+  `... on T` push `T`. It tracks parentheses, so the cursor is either in a
+  selection set, in a field's arguments at a name, or elsewhere. Strings and
+  comments are skipped.
+- `src/graphqleditor.ts` fetches a schema by sending the request as a
+  `GRAPHQL` request whose body is the introspection query, through `probe`
+  with `readBody`, so it has the request's URL, headers, variables, and auth.
+  Schemas are cached by resolved URL for the session, failures included, so
+  typing never sends a request per keystroke. It registers completion and
+  hover providers for Monaco's built-in `graphql` language (the Query editor,
+  whose model it maps to a schema source) and for `http`, where it reads a
+  `GRAPHQL` request's body from its first line.
+- WebSocket requests connect through `src-tauri/src/ws.rs`, since the webview's
+  `WebSocket` can't set headers. `ws_connect` takes the URL, headers, `insecure`,
+  and a caller-chosen `channel`, like `pty_spawn`, and emits `ws:<channel>`
+  (`{ text }` or `{ binary }` as base64), `ws-error:<channel>`, and
+  `ws-close:<channel>` (`{ code, reason }`). Each connection has a thread that
+  reads with a 50 ms timeout, and between reads it sends the messages
+  `ws_send` and `ws_close` queue.
+- `prepare` carries `proxy`, `clientCert`, `clientKey` (absolute), `http`, and
+  `budget` into `Prepared`. `connectionArgs` turns the first four into curl's
+  `-x`, `--cert`, `--key`, and `--http2` or `--http1.1` for sending, stress
+  tests, and **Copy as cURL**. The proxy comes from `@proxy`, or else the
+  environment's `$proxy`. `overBudget` compares `time_total` with `budget`
+  for the response summary and the runner.
+- `toFetch`, `toAxios`, and `toGuzzle` share `bodyOf`, which classifies the
+  prepared body as JSON, form fields, multipart parts, text, or a file. The
+  JavaScript generators read files with Node's `openAsBlob`.
+- `redact` in `src/httpfile.ts` hides secret values in a prepared request:
+  headers such as Authorization (keeping its scheme) and cookies (keeping their
+  names), and query parameters and JSON, form, and multipart fields whose names
+  match token, secret, password, API key, and the like. It leaves `{{names}}`
+  and already hidden values alone. The history cache in memory keeps real
+  values for the session, so **Send Again** sends them; `saveHistory` writes
+  `index.json` through `withoutSecrets`, which also hides `Set-Cookie` values,
+  and marks an entry that lost secrets with `secrets`. `resend` prepares such
+  an entry again from its file through `send`. The Request tab and copying go
+  through `redact` unless you choose **Show secrets**. Response bodies aren't
+  changed.
+- `src/httpimport.ts` has no editor imports, so Node tests it.
+  `importCollection` detects a Postman collection (v2), an Insomnia export (v4),
+  or an OpenAPI 3 or Swagger 2 document, and returns one file's text and
+  environments. OpenAPI bodies come from examples, or from a skeleton of the
+  schema that follows `$ref` and stops at a cycle. `toOpenApi` goes the other
+  way, and `junitReport` writes the runner's results as JUnit XML.
+  `src/httpteam.ts` is the UI: it chooses the file with the dialog plugin,
+  writes the result to `http/`, and merges environments without replacing
+  existing values, sending secret names to the private file. It replaces the
+  tool window's import action through `setImporter`, like `setRunners`.
+- The runner (`runFiles` in `src/httpload.ts`) runs one file or every file in
+  the project and keeps a `ReportCase` per request for **Save Report…**.
+
 The `http` Monarch grammar embeds JSON bodies and JavaScript scripts. Monarch
 only embeds a language whose tokenizer has loaded, and a zero-width rule enters
 it only with `@rematch`, so the grammar registers after loading both. Hovers,
@@ -3101,4 +3184,24 @@ Rewriting a request's whole block dropped comments among its headers and in its
 body, and joined a URL written over several lines. The parser now keeps those,
 with their positions, and an edit replaces only the lines that differ, so the
 file reads as its author wrote it and diffs stay small.
+
+### 2026-09-26: WebSocket requests use tungstenite in Rust, not the webview
+
+The webview's `WebSocket` can't send headers, so a request couldn't
+authenticate with `Authorization` or a cookie, and couldn't skip TLS
+verification. curl 8.7.1 on macOS has no usable WebSocket client. tungstenite
+was already in `Cargo.lock` through another dependency, and its sync API with
+`native-tls` needs no async runtime. It runs one thread per connection, reading
+with a short timeout so queued messages go out between reads. Events use a
+channel name the caller chooses, as `pty_spawn` does, so the listeners are in
+place before the connection opens.
+
+### 2026-09-26: The history file keeps no secrets
+
+Tokens, passwords, and cookies in `index.json` sat in plain text in the app's
+cache. The history now writes requests through `redact`, and keeps the real
+values in memory for the session only, so **Send Again** still works within a
+session and prepares an older request from its file. Response bodies stay as
+they came: hiding values in arbitrary bodies would change what you're
+debugging.
 

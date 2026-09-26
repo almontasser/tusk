@@ -51,6 +51,11 @@ async function runFiles(paths: string[]) {
     }
     const suite = suites.at(-1)!;
     const name = `${r.method} ${r.title || r.name || r.url}`;
+    // A WebSocket request is a conversation, not one response, so it doesn't run here.
+    if (r.method === "WEBSOCKET") {
+      rows.append(h("tr", {}, h("td", {}, icon("circle-slash")), h("td", {}, name), h("td", { class: "muted" }, "Skipped: connect to it from the HTTP tab"), h("td"), h("td")));
+      continue;
+    }
     const state = h("td", {}, icon("loading codicon-modifier-spin"));
     const row = h("tr", {}, state, h("td", {}, name), h("td"), h("td"), h("td"));
     rows.append(row);

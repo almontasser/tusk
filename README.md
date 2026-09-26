@@ -46,7 +46,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Results stop at 1,000 rows. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | WebSockets go through the webview's WebSocket, which can't send custom headers (`connectWebSocket` in `src/httpview.ts`). GraphQL has no schema completion. There's no gRPC. The history keeps the last 100 unpinned requests per project. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. |
+| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. There's no gRPC. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Imports read JSON only, not YAML. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -481,8 +481,20 @@ at the top.
 - Right-click a request to send, rename, duplicate, delete, or stress test it.
   Right-click a file to add a request to it or run all of its requests.
 - **+** adds a request to a file you choose, or to a new file in `http/`.
-- The terminal icon imports a curl command, such as one from your browser's
-  developer tools (**Copy as cURL**).
+- The import icon imports a curl command, such as one from your browser's
+  developer tools (**Copy as cURL**), a Postman collection (v2 or v2.1), an
+  Insomnia export (v4), or an OpenAPI 3 or Swagger 2 document in JSON. A
+  collection becomes one file in `http/`, with each request titled by its
+  folders. Postman's variables become file variables, and its auth becomes
+  headers; its scripts stay as comments, since they don't run here. An OpenAPI
+  document gives a request per operation, titled `[tag] summary`, with
+  `{{host}}` for the server, a variable per path parameter, and a JSON body
+  from the example or the schema. Environment variables go to
+  `http-client.env.json` (secrets, such as tokens, to
+  `http-client.private.env.json`), keeping values you already have. For YAML,
+  convert the document to JSON first. **HTTP Client: Import…** in ⌘⇧A does the
+  same.
+- The run icon runs every request in the project, file by file.
 - The method icon makes requests from `php artisan route:list`: one route, all
   API routes, or every route. Each gets `{{host}}` for the app's address and a
   variable for each route parameter. A `POST`, `PUT`, or `PATCH` request's JSON
@@ -493,9 +505,15 @@ at the top.
   the message says why.
 - **History** lists the last 100 requests you sent in the project, with their
   responses, and a filter. Click one to see it again. Right-click one to send it
-  again exactly as it went, pin it (pinned requests stay at the top and don't
-  count toward the 100), compare it with the response on screen, or copy it as
-  cURL or Laravel code.
+  again, pin it (pinned requests stay at the top and don't count toward the
+  100), compare it with the response on screen, or copy it as cURL or Laravel
+  code. The history file doesn't keep secrets: tokens, passwords, cookies, and
+  API keys in requests, and cookie values in responses. Response bodies are kept
+  as they came. **Send Again** sends a request from this session exactly as it
+  went, and prepares one from an earlier session again from its file, running
+  its scripts.
+- **Go to Request** (⌥⇧⌘O) finds any request in the project by name. Search
+  Everywhere lists requests too.
 
 ### The HTTP tab
 
@@ -518,8 +536,8 @@ comments and a URL split over several lines, and saves the file.
 | Headers | Headers, each of which you can turn off (it's commented out in the file) |
 | Body | None, JSON (with **Format**), form fields, multipart fields and files, text, or a file (`< ./path`, or `<@ ./path` to replace variables in it) |
 | Auth | A bearer token, a user and password (`Authorization: Basic user password`, encoded when sent, as in PhpStorm), or a Laravel session |
-| Scripts | JavaScript that runs before the request and after the response, with snippets for common tests |
-| Settings | Title, name for scripts, redirects, cookies, TLS verification, history, timeouts, and a file to save the response to |
+| Scripts | Checks you set up without code, and JavaScript that runs before the request and after the response, with snippets for common tests |
+| Settings | Title, name for scripts, redirects, cookies, TLS verification, history, timeouts, a time budget, a proxy, a client certificate and key, the HTTP version, and a file to save the response to |
 
 The response shows its status, time, size, and test results. Choosing a request
 shows its last response from the history. The response has these tabs:
@@ -536,7 +554,22 @@ shows its last response from the history. The response has these tabs:
 - **Timing**: DNS lookup, connecting, TLS, waiting, and downloading.
 - **Tests**: each test's result, and what scripts logged.
 - **Request**: the request as sent, as a curl command and as Laravel `Http::`
-  code, each with **Copy**.
+  code, each with **Copy**, or as fetch, axios, or Guzzle code, chosen in a
+  menu. Secrets, such as tokens, passwords, and cookies, are hidden until you
+  choose **Show secrets**. Copying, here and from menus, uses what's shown.
+  **Generate…** writes a feature test for the request.
+- **Logs** lists what Laravel wrote to `storage/logs/laravel.log`, or to the
+  newest daily `laravel-YYYY-MM-DD.log`, while the request ran: each entry's
+  level, message, and time, with its stack trace folded. Click a file and line
+  to open it; paths in Sail's container map to the project. Other requests
+  running at the same time can add entries too.
+- **Queries** lists the SQL a request ran when you send it with **Send with
+  Profiler**: how many queries and how long they took, grouped by SQL with
+  duplicates and N+1 queries flagged, and each run's bindings and time.
+
+To save a value from a JSON response for later requests, right-click it and
+choose **Save as Variable…**. The request's response handler saves it with
+`client.global.set`, and later requests use it as `{{name}}` right away.
 
 The menu next to **Send** also has:
 
@@ -545,7 +578,13 @@ The menu next to **Send** also has:
   Xdebug in debug mode, as **Start Debug Server** runs it.
 - **Send with Profiler**: sends the request to the profiling server, starting
   it if needed, and opens the request's profile.
-- **Copy as cURL** and **Copy as Laravel HTTP**.
+- **Copy as cURL**, **Copy as Laravel HTTP**, **Copy as fetch**, **Copy as
+  axios**, and **Copy as Guzzle**.
+- **Generate Feature Test…**: writes a test for the request to `tests/Feature`:
+  Pest when the project uses it, or else PHPUnit. It sends the request with
+  Laravel's test helpers (`postJson`, `get`, and so on) and checks the last
+  response's status and, for JSON, its structure. Name the file, such as
+  `NotesTest.php`; an existing file gets the test added.
 - **Run All Requests in File**, **Stress Test…**, and **Monitor…**.
 - **Go to Controller**: opens the controller method of the route the request
   calls, matched by method and path.
@@ -605,6 +644,19 @@ Dynamic values change each time you send: `{{$uuid}}`, `{{$timestamp}}`,
 **Edit Environments…** in the environment menu creates `http-client.env.json`
 with a `local` environment for `APP_URL` from `.env`.
 
+To edit every environment in one table, choose **Edit Environments…** in an
+environment menu, or run **HTTP Client: Edit Environments**. Private variables
+go in `http-client.private.env.json`, which is added to `.gitignore`, and the
+rest go in `http-client.env.json`. Names that look secret start as private.
+Empty cells that other environments fill are highlighted. **Open JSON** and
+**Open Private JSON** open the files.
+
+**Detect App Address…**, in the environment menu or as **HTTP Client: Detect
+App Address** in ⌘⇧A, finds where the app answers and sets it as `host` in the
+selected environment: Sail's `APP_PORT`, a Herd or Valet site for the project
+(https when it's secured), a PHP server such as `artisan serve`, or `APP_URL`.
+A new environment file starts with the best of these.
+
 ### Scripts and tests
 
 Scripts are JavaScript, as in PhpStorm. They run in a worker without access to
@@ -618,6 +670,12 @@ the editor, and stop after 5 seconds.
 | `jsonPath(value, path)` | Reads a path such as `$.data[0].id` |
 
 `> ./script.js` and `< ./script.js` run a script from a file instead.
+
+**Checks** at the top of the Scripts tab test the response without code: *Status
+is*, *JSON path exists*, *JSON path equals*, *Header contains*, *Response time
+under (ms)*, and *Body contains*. They're saved as `client.test()` calls between
+`// checks:start` and `// checks:end` in the response handler, so your own code
+around them stays. Scripts can read `response.time` in milliseconds.
 
 ### Tags
 
@@ -633,6 +691,18 @@ Put these comments above the request line:
 | `# @connection-timeout 2` | Seconds to wait for the connection |
 | `# @insecure` | Accept any TLS certificate. PhpStorm reads it as a comment |
 | `# @laravel-session` | Sign in with Laravel's session, as **Auth** > **Laravel session** sets it. A path after it, such as `/csrf`, is where to get the XSRF token. PhpStorm reads it as a comment |
+| `# @proxy http://127.0.0.1:8888` | Send through a proxy. A `"$proxy"` value in the environment applies to every request without the tag. PhpStorm reads it as a comment |
+| `# @client-cert ./client.pem` | A client certificate for mutual TLS, relative to the `.http` file. PhpStorm reads it as a comment |
+| `# @client-key ./client.key` | The client certificate's key. PhpStorm reads it as a comment |
+| `# @http2`, `# @http1` | Use HTTP/2 or HTTP/1.1. Without them, curl asks for HTTP/2 over HTTPS and uses HTTP/1.1 otherwise. `HTTP/2` on the request line, as PhpStorm writes it, works too. PhpStorm reads the tags as comments |
+| `# @budget 300` | Milliseconds the response may take. A slower response shows **Over budget** and fails in **Run All**. PhpStorm reads it as a comment |
+
+An environment's `"$proxy"` starts with `$` so it can't clash with a variable
+of your own:
+
+```json
+{ "office": { "host": "https://staging.example.com", "$proxy": "http://proxy.internal:3128" } }
+```
 
 After the body, `>> ./out.json` saves the response to a file, adding a number
 when it exists, and `>>! ./out.json` replaces it.
@@ -664,6 +734,13 @@ query Posts($first: Int) { posts(first: $first) { id title } }
 {"first": 10}
 ```
 
+The Query editor highlights GraphQL and completes fields and arguments from the
+endpoint's schema, with their types and descriptions. Hover over a field to see
+its type. The first completion fetches the schema with an introspection query,
+sent with the request's URL, headers, and variables, and keeps it for the
+session. **Refresh Schema** fetches it again. Completion works in `GRAPHQL`
+requests in the editor too.
+
 ### WebSockets
 
 A `WEBSOCKET` request connects when you click **Connect**, and the response
@@ -671,7 +748,9 @@ side becomes a console: what you send and receive, with times and formatted
 JSON, and a box to send more (⌘⏎). The file's messages, each after a line of
 `===`, are sent once connected. A line of `=== wait-for-server` waits for a
 message from the server before the next. Pings from Pusher and Laravel Reverb
-are answered, so the connection stays open.
+are answered, so the connection stays open. The request's headers, such as
+`Authorization`, go with the opening handshake, and `# @insecure` accepts any
+TLS certificate for `wss://`.
 
 ```http
 WEBSOCKET ws://localhost:8080/app/{{reverbKey}}
@@ -684,6 +763,33 @@ WEBSOCKET ws://localhost:8080/app/{{reverbKey}}
 **Run All Requests in File** sends each request in order, so a login request's
 token reaches the requests after it. The **HTTP Runner** tab lists each result,
 with its status, time, and tests. Click one to see its response.
+
+### Running requests in CI
+
+**Run All Requests in File**, and **HTTP Client: Run All Requests in Project**
+in ⌘⇧A, show each request's status, time, and tests. **Save Report…** writes
+the results as JUnit XML: a test suite per file and a test case per request. A
+request fails on a status of 400 or more, no response, a failed `client.test`,
+or a response over its budget, and its failure lists every test's result.
+
+To run the same files in CI, use JetBrains' free `ijhttp` command-line client:
+
+```sh
+ijhttp --env-file http-client.env.json --env local --report http/*.http
+```
+
+`--report` writes JUnit XML to `reports/`. To run it in Docker, use the
+`jetbrains/intellij-http-client` image:
+
+```sh
+docker run --rm -v "$PWD":/workdir jetbrains/intellij-http-client \
+  --env-file http-client.env.json --env local --report http/*.http
+```
+
+ijhttp may not understand the tags and request types only this editor adds,
+such as `# @insecure`, `# @laravel-session`, `# @budget`, and `WEBSOCKET`.
+**HTTP Client: Export to OpenAPI…** writes the project's requests as an OpenAPI
+3.0 document.
 
 ### Stress testing
 
@@ -1535,7 +1641,15 @@ committed.
 | `src/httpview.ts` | The HTTP Client tool window and the HTTP tab |
 | `src/httpload.ts` | The HTTP client's runner and stress test |
 | `src/httpscript.worker.ts` | Runs `.http` request scripts |
-| `src/httpfile.ts` | Reads and writes `.http` files, builds curl arguments, and converts requests |
+| `src/httpfile.ts` | Reads and writes `.http` files, builds curl arguments, converts requests, and hides secrets |
+| `src/httpimport.ts` | Postman, Insomnia, and OpenAPI import, OpenAPI export, and JUnit reports |
+| `src/httpteam.ts` | The HTTP client's import and export commands |
+| `src/httplaravel.ts` | The HTTP client's Laravel tools: logs, queries, feature tests, and the app's address |
+| `src/laraveltools.ts` | Feature test generation, Laravel log parsing, and app address detection |
+| `src/httpchecks.ts` | Checks without code, and Save as Variable |
+| `src/httpenv.ts` | The environment table editor |
+| `src/graphqlschema.ts` | Reads GraphQL schemas and finds the type at the cursor |
+| `src/graphqleditor.ts` | GraphQL schema completion and hovers |
 | `src/hierarchy.ts` | The type hierarchy view |
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
@@ -1552,6 +1666,7 @@ committed.
 | `src-tauri/src/search.rs` | Project file listing, text search, and replace |
 | `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, and PostgreSQL |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
+| `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `filament-lsp/server.php` | Filament language server |
 | `filament-lsp/introspect.php` | Reads resources and models from the project |

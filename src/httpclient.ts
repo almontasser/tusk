@@ -56,6 +56,8 @@ export type CurlInfo = {
   exitcode: number;
 };
 
+const INFO_FIELDS: (keyof CurlInfo)[] = ["time_namelookup", "time_connect", "time_appconnect", "time_pretransfer", "time_starttransfer", "time_total", "size_download", "size_upload", "remote_ip", "remote_port", "http_version", "num_redirects", "url_effective", "errormsg", "exitcode"];
+
 /** A request that was sent, and its response. History keeps these, without the body, which stays in `bodyPath`. */
 export type Exchange = {
   id: string;
@@ -335,7 +337,9 @@ async function transmit(prepared: Prepared, dir: string, store: string, id: stri
   else if (!t.error && at < 0) t.error = out.trim() || "curl failed";
   else if (!t.error) {
     try {
-      t.info = JSON.parse(out.slice(at + INFO_MARKER.length)) as CurlInfo;
+      // curl's JSON has dozens of fields, several with the whole URL; keep the ones the client shows.
+      const all = JSON.parse(out.slice(at + INFO_MARKER.length)) as Record<string, unknown>;
+      t.info = Object.fromEntries(INFO_FIELDS.map((k) => [k, all[k]])) as CurlInfo;
       if (t.info.exitcode) t.error = t.info.errormsg || out.slice(0, at).trim() || `curl failed with exit code ${t.info.exitcode}`;
     } catch {
       t.error = out.trim() || "curl's output couldn't be read";
@@ -557,7 +561,9 @@ async function remember(exchange: Exchange) {
 function withoutSecrets(x: Exchange): Exchange {
   const request = redact(x.request);
   const heads = x.heads.map((head) => ({ ...head, headers: head.headers.map(([k, v]): [string, string] => [k, k.toLowerCase() === "set-cookie" ? redactHeader(k, v) : v]) }));
-  return { ...x, request, heads, secrets: x.secrets || JSON.stringify(request) !== JSON.stringify(x.request) || undefined };
+  // The final URL can carry the same secrets as the request's, such as an API key in the query.
+  const info = x.info && ({ ...Object.fromEntries(INFO_FIELDS.map((k) => [k, x.info![k]])), url_effective: redact({ ...x.request, url: x.info.url_effective ?? "" }).url } as CurlInfo);
+  return { ...x, request, heads, info, secrets: x.secrets || JSON.stringify(request) !== JSON.stringify(x.request) || undefined };
 }
 
 async function saveHistory(list: Exchange[]) {

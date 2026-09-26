@@ -64,7 +64,8 @@ export function addSaveAsVariable(editor: monaco.editor.IStandaloneCodeEditor, b
       const f = filter();
       const filtered = f && f !== "$";
       if (filtered && /\*|\.\./.test(f)) return host.status("Clear the filter, or filter to one value, to save a value from it.");
-      saveAsVariable(filtered ? f + at.slice(1) : at, body);
+      // After the context menu closes, Monaco takes focus back, which would close a palette opened now.
+      setTimeout(() => saveAsVariable(filtered ? f + at.slice(1) : at, body), 50);
     },
   });
 }

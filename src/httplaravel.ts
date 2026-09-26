@@ -4,8 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { groupQueries, withBindings } from "./cachegrind";
-import { dotenv, ENV_FILE, environmentDir, environments, type Environments, type Exchange, history, host, selectedEnvironment, setEnvironment } from "./httpclient";
-import type { HttpRequest } from "./httpfile";
+import { dotenv, ENV_FILE, environmentDir, environments, type Environments, type Exchange, history, host, prepareRequest, requestAt, selectedEnvironment, setEnvironment } from "./httpclient";
+import { type HttpRequest, redact } from "./httpfile";
 import { h, iconButton, localPath } from "./httpview";
 import { type Address, addTest, appAddresses as rankAddresses, featureTest, featureTestFile, fileReferences, parseLaravelLog, phpPorts, requestPath, testFileName } from "./laraveltools";
 import { pick } from "./palette";
@@ -30,14 +30,20 @@ async function usesPest() {
 export async function generateFeatureTest(x: Exchange | undefined) {
   const final = x?.heads.at(-1);
   if (!x || !final) return host.status("Send the request first: the test checks its last response.");
+  // The history file keeps no secrets, so an exchange read from it gets its request prepared again from the file.
+  let request = x.request;
+  if (x.secrets) {
+    const found = await requestAt(x.path, x.line).catch(() => null);
+    if (found?.request) request = (await prepareRequest(x.path, found.request)).prepared;
+  }
   const pest = await usesPest();
   const body = /json/i.test(x.contentType) ? await invoke<string>("read_file", { path: x.bodyPath }).catch(() => "") : "";
-  const suggested = testFileName(requestPath(x.request.url)).replace(/\.php$/, "");
+  const suggested = testFileName(requestPath(request.url)).replace(/\.php$/, "");
   const write = async (name: string) => {
     const path = `${host.root()}/tests/Feature/${name}.php`;
     const exists = await invoke<boolean>("path_exists", { path });
     const model = exists ? await host.ensureModel(path) : null;
-    const test = featureTest({ request: x.request, status: final.status, contentType: x.contentType, body, name: x.name || `${x.request.method} ${requestPath(x.request.url)}`, pest, existing: model?.getValue() });
+    const test = featureTest({ request, status: final.status, contentType: x.contentType, body, name: x.name || `${request.method} ${requestPath(request.url)}`, pest, existing: model?.getValue() });
     let line: number;
     if (model) {
       const added = addTest(model.getValue(), test, pest);
@@ -56,7 +62,7 @@ export async function generateFeatureTest(x: Exchange | undefined) {
     `Feature test file in tests/Feature (${pest ? "Pest" : "PHPUnit"}). An existing file gets the test added.`,
     (q) => {
       const name = (q.trim() || suggested).replace(/\.php$/, "").replace(/\W+/g, "");
-      return name ? [{ label: `tests/Feature/${name}.php`, detail: `${x.request.method} ${requestPath(x.request.url)} · ${final.status}`, icon: "codicon-beaker", run: () => write(name) }] : [];
+      return name ? [{ label: `tests/Feature/${name}.php`, detail: `${request.method} ${requestPath(redact(request).url)} · ${final.status}`, icon: "codicon-beaker", run: () => write(name) }] : [];
     },
     0,
     { value: suggested, select: [0, suggested.length] },
