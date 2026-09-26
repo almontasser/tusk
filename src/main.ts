@@ -1500,8 +1500,16 @@ async function chooseDockerService() {
   ]);
 }
 
+// Keys shown as the Mac draws them.
+const KEY_SYMBOLS: Record<string, string> = { Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space" };
 const symbolsFor = (keys?: string) =>
-  keys?.replace(/^(\w+) \1$/, "$1+$1+").replace(/Ctrl\+/g, "⌃").replace(/Alt\+/g, "⌥").replace(/Shift\+/g, "⇧").replace(/Meta\+/g, "⌘");
+  keys
+    ?.replace(/^(\w+) \1$/, "$1+$1+")
+    .replace(/Ctrl\+/g, "⌃")
+    .replace(/Alt\+/g, "⌥")
+    .replace(/Shift\+/g, "⇧")
+    .replace(/Meta\+/g, "⌘")
+    .replace(/[A-Z][a-z]+[A-Za-z]*$/, (key) => KEY_SYMBOLS[key] ?? key);
 const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));

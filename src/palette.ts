@@ -73,7 +73,13 @@ let close: (() => void) | null = null;
  * `initial` prefills the input, optionally selecting part of it (such as a file name without its extension).
  * `onCancel` runs when the picker closes without a choice. With `anchor`, it opens as a dropdown below that element.
  */
-export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement }) {
+/**
+ * `title` makes a compact popup, as PhpStorm's refactoring popups: a header instead of a search box, which
+ * shows what you type to filter; `numbered` lets 1 to 9 choose a row; `code` sets rows in the editor's font.
+ */
+type Options = { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement; title?: string; numbered?: boolean; code?: boolean };
+
+export function pick(placeholder: string, source: Source, delay = 0, initial?: Options) {
   close?.();
   lowered.clear();
   const overlay = document.createElement("div");
@@ -83,14 +89,32 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
   input.setAttribute("aria-label", placeholder);
   const list = document.createElement("ul");
   list.role = "listbox";
+  const header = document.createElement("div");
+  header.className = "popup-title";
+  if (initial?.title) overlay.append(header);
   overlay.append(input, list);
-  if (initial?.anchor) {
-    const r = initial.anchor.getBoundingClientRect();
-    overlay.className = "dropdown";
-    overlay.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 488))}px`;
-    overlay.style.top = `${r.bottom + 4}px`;
-  }
+  const anchor = initial?.anchor?.getBoundingClientRect();
+  if (anchor) {
+    overlay.className = initial?.title ? "dropdown popup" : "dropdown";
+    overlay.style.left = `${anchor.left}px`;
+    overlay.style.top = `${anchor.bottom + 4}px`;
+  } else if (initial?.title) overlay.className = "popup";
+  if (initial?.code) overlay.classList.add("code");
+  // A numbered popup is chosen from, so its search box hides; a titled one you type into keeps it.
+  if (initial?.numbered) overlay.classList.add("chooser");
   document.body.append(overlay);
+  // Kept inside the window: shifted left at the right edge, and above the anchor when there's no room below.
+  const place = () => {
+    if (!anchor) return;
+    const box = overlay.getBoundingClientRect();
+    overlay.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - box.width - 8))}px`;
+    if (anchor.bottom + 4 + box.height > innerHeight - 8 && anchor.top - 4 - box.height > 8) overlay.style.top = `${anchor.top - 4 - box.height}px`;
+  };
+  const showTitle = () => {
+    if (!initial?.title) return;
+    header.replaceChildren(initial.title);
+    if (input.value) header.append(Object.assign(document.createElement("span"), { className: "popup-search", textContent: input.value }));
+  };
 
   let items: Item[] = [];
   let selected = 0;
@@ -105,6 +129,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
         li.role = "option";
         li.ariaSelected = String(i === selected);
         li.className = i === selected ? "selected" : "";
+        if (initial?.numbered) li.append(Object.assign(document.createElement("span"), { className: "mnemonic", textContent: i < 9 ? String(i + 1) : "" }));
         if (item.icon) {
           const icon = document.createElement("span");
           icon.className = `file-icon codicon ${item.icon}`;
@@ -142,6 +167,8 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
     );
     list.children[selected]?.scrollIntoView({ block: "nearest" });
     items[selected]?.preview?.();
+    showTitle();
+    place();
   };
 
   const update = () => {
@@ -186,6 +213,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
       rows[selected]?.scrollIntoView({ block: "nearest" });
       items[selected]?.preview?.();
     } else if (e.key === "Enter") choose(selected);
+    else if (initial?.numbered && !input.value && /^[1-9]$/.test(e.key) && Number(e.key) <= items.length) choose(Number(e.key) - 1);
     else if (e.key === "Escape") dismiss();
     else return;
     e.preventDefault();

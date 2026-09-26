@@ -1,7 +1,8 @@
 // The Change Signature dialog, laid out as PhpStorm's: visibility, name, and return type, a table of parameters
 // to edit, add, remove, and reorder, and the new signature as you type. ⌥↑ and ⌥↓ move the focused parameter,
 // ⌘N adds one, ⏎ refactors, and Escape cancels.
-import { h, iconButton } from "./dom";
+import { h, icon, iconButton } from "./dom";
+import { monaco } from "./editor";
 import { signatureProblem, signatureText, signatureWarning, type Param, type Signature } from "./refactorparse";
 
 type Kind = "method" | "function" | "constructor";
@@ -25,6 +26,26 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
   for (const v of kind === "function" ? [""] : VISIBILITY) visibilitySelect.append(new Option(v || "—", v, false, v === visibility));
   const rows = h("tbody");
   const preview = h("code", { class: "signature-preview" });
+  // The signature colored as the editor colors PHP. Colorizing is asynchronous, so only the latest one shows.
+  let colorized = 0;
+  const showSignature = async (text: string) => {
+    const current = ++colorized;
+    preview.textContent = text;
+    const html = await monaco.editor.colorize(`<?php ${text}`, "php", {}).catch(() => null);
+    if (current !== colorized || !html) return;
+    const box = document.createElement("div");
+    box.innerHTML = html;
+    // Drop the `<?php ` that only switched the colorizer into PHP.
+    let skip = 6;
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node && skip > 0; node = walker.nextNode()) {
+      const cut = Math.min(skip, node.textContent!.length);
+      node.textContent = node.textContent!.slice(cut);
+      skip -= cut;
+    }
+    box.querySelectorAll("br").forEach((br) => br.remove());
+    preview.replaceChildren(...box.childNodes);
+  };
   const problem = h("p", { class: "signature-problem", role: "alert" });
   const previewButton = h("button", { type: "button", textContent: "Preview" });
   const refactorButton = h("button", { type: "button", class: "primary", textContent: "Refactor" });
@@ -34,7 +55,7 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
     s.name = nameInput.value.trim();
     s.returnType = returnInput.value.trim();
     s.modifiers = [visibilitySelect.value, ...otherModifiers()].filter(Boolean).join(" ");
-    preview.textContent = signatureText(s);
+    showSignature(signatureText(s));
     const why = signatureProblem(s, signature, kind);
     problem.textContent = why ?? signatureWarning(s) ?? "";
     problem.classList.toggle("warning", !why);
@@ -50,7 +71,8 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
       else p[key] = value || undefined;
       update();
     };
-    return h("td", {}, input);
+    // The name's `$` sits in the cell, so it reads as a variable without being typed.
+    return h("td", { class: key === "name" ? "name-cell" : "" }, key === "name" ? h("span", { class: "sigil" }, "$") : null, input);
   };
 
   const render = (focus?: { row: number; column: number }) => {
@@ -76,10 +98,14 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
           cell(p, "type", "Type"),
           cell(p, "name", "Name"),
           cell(p, "defaultValue", "Default value"),
-          cell(p, "callValue", p.from ? "" : "Value in calls", !!p.from),
+          p.from ? h("td", { class: "not-applicable", title: "Existing calls already pass this parameter" }, "—") : cell(p, "callValue", "Value in calls"),
           h("td", { class: "row-actions" }, up, down, remove),
         );
-        tr.addEventListener("focusin", () => (focusedRow = i));
+        tr.addEventListener("focusin", () => {
+          focusedRow = i;
+          rows.querySelectorAll("tr.focused").forEach((r) => r.classList.remove("focused"));
+          tr.classList.add("focused");
+        });
         tr.onkeydown = (e) => {
           if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const by = e.key === "ArrowUp" ? -1 : 1;
@@ -117,7 +143,7 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
         { class: "signature-params" },
         h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Type"), h("th", {}, "Name"), h("th", {}, "Default value"), h("th", {}, "Value in existing calls"), h("th"))), rows),
       ),
-      h("div", { class: "signature-tools" }, h("button", { type: "button", onclick: add }, "Add Parameter"), h("span", { class: "muted" }, "⌘N adds, ⌥↑ ⌥↓ move")),
+      h("div", { class: "signature-tools" }, h("button", { type: "button", onclick: add }, icon("add"), "Add Parameter"), h("span", { class: "muted" }, "⌘N adds a parameter · ⌥↑ ⌥↓ move the focused one")),
       preview,
       problem,
       h("div", { class: "buttons" }, h("button", { type: "button", textContent: "Cancel", onclick: () => dialog.close() }), previewButton, refactorButton),

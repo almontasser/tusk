@@ -550,7 +550,10 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 ## Refactor This
 
 Press ⌃T to list the refactorings that apply at the caret or to the selection,
-with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
+with their shortcuts, as PhpStorm's **Refactor This** does. The refactorings'
+choices open in a small popup below the caret: press a row's number (1 to 9)
+or ⏎ to choose, or type to filter. The popup highlights in the editor what each
+choice would change. The list: Rename, Change
 Signature, the three Extracts, Introduce Field and Parameter, Inline, Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
@@ -571,8 +574,8 @@ must be a whole expression.
   `foo();`, becomes the assignment.
 - The editor suggests a name from the expression: `$user->getEmail()` gives
   `$email`, `$item['unit_price']` gives `$unitPrice`, and `new Invoice()` gives
-  `$invoice`. Type another name and every use follows; press ⏎ or Escape when
-  done.
+  `$invoice`. Every copy of the name is framed; type another name and every
+  copy follows. A hint above it reminds you that ⏎ or Escape finishes.
 
 Press ⌥⌘C on a string or number, or select an expression of literals, to
 extract a class constant. It works the same way: choose the occurrences in the
@@ -648,9 +651,12 @@ out as PhpStorm's:
   with one name, disables **Refactor**. An optional parameter before a required
   one gets a warning, since PHP deprecates it.
 
+The signature below the table is colored as the editor colors PHP.
+
 **Refactor** (⏎) applies the change; **Preview** first opens the **Refactoring
-Preview** panel, which lists every changed line by file with what changed
-marked. **Do Refactor** there applies it. The preview also opens on its own
+Preview** panel, which lists every changed line by file, with the removed and
+added tokens marked. Click a file to fold it, or a line to open it. **Do
+Refactor** there applies it, and Escape cancels. The preview also opens on its own
 when some calls can't be rewritten, listing them under **Left unchanged**.
 
 The editor rewrites the declaration and every call: positional arguments move

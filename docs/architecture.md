@@ -1125,6 +1125,18 @@ maps paths to class names through Composer's autoloader, loaded when it
 starts, so a project without `vendor/composer` gets no edits; the error it
 returns now reaches the status bar instead of being dropped.
 
+### Refactoring popups
+
+The refactorings ask their questions in `pick` (`src/palette.ts`) with a
+`title`, which makes a compact popup: a header instead of a search box (what
+you type to filter shows in the header), rows sized to their content, and,
+with `numbered`, 1 to 9 choosing a row. `pickAtCaret` in `src/extract.ts`
+anchors it below the caret, and `pick` moves it above when there's no room
+below. The Change Signature dialog colors its signature with
+`monaco.editor.colorize`, dropping the `<?php ` that switches the colorizer
+into PHP. While you type a new name, Monaco's snippet placeholders are framed
+and a content widget above the name says how to finish.
+
 ### Undo across files
 
 `applyWorkspaceEdit` wraps each file's edit in undo stops, so it's one step, and

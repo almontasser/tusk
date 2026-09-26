@@ -39,6 +39,10 @@ function diffLine(before: string, after: string) {
   while (start < before.length && before[start] === after[start]) start++;
   let end = 0;
   while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  // Whole tokens read better than parts of them: `0.1, 3` → `3, 0.1` rather than a stray `3`.
+  const boundary = /[\s(),[\]{};]/;
+  while (start > 0 && !boundary.test(after[start - 1])) start--;
+  while (end > 0 && !boundary.test(after[after.length - end])) end--;
   return h(
     "span",
     { class: "preview-text" },
@@ -69,23 +73,46 @@ export function showRefactorPreview(title: string, changes: Record<string, L.Tex
     return div;
   };
   const tree = h("div", { class: "hierarchy-tree" });
+  /** A group with a header that folds its rows, as the Find tool window's files do. */
+  const group = (header: Node[], children: HTMLElement[]) => {
+    const chevron = icon("chevron-down");
+    chevron.classList.add("chevron");
+    const head = row(0, [chevron, ...header], () => {
+      const open = chevron.classList.toggle("codicon-chevron-down");
+      chevron.classList.toggle("codicon-chevron-right", !open);
+      children.forEach((c) => (c.hidden = !open));
+    });
+    head.classList.add("group");
+    tree.append(head, ...children);
+  };
   if (skipped.length)
-    tree.append(
-      row(0, [icon("warning"), h("span", { class: "name" }, `Left unchanged (${skipped.length})`)]),
-      ...skipped.map((s) => row(1, [h("span", { class: "line-number" }, String(s.line)), h("span", { class: "name" }, relative(s.path)), h("span", { class: "namespace" }, s.reason)], () => host.openAt(s.path, s.line))),
+    group(
+      [icon("warning"), h("span", { class: "name" }, "Left unchanged"), h("span", { class: "namespace" }, String(skipped.length))],
+      skipped.map((s) => row(1, [h("span", { class: "line-number" }, String(s.line)), h("span", { class: "name" }, relative(s.path)), h("span", { class: "reason" }, s.reason)], () => host.openAt(s.path, s.line))),
     );
   for (const [uri, edits] of Object.entries(changes)) {
     const path = monaco.Uri.parse(uri).fsPath;
     const lines = changedLines(texts.get(uri) ?? "", edits);
-    tree.append(
-      row(0, [icon("file-code"), h("span", { class: "name" }, relative(path)), h("span", { class: "namespace" }, `${lines.length} ${lines.length === 1 ? "line" : "lines"}`)]),
-      ...lines.map((l) => row(1, [h("span", { class: "line-number" }, String(l.line)), diffLine(l.before, l.after)], () => host.openAt(path, l.line))),
+    const slash = relative(path).lastIndexOf("/");
+    group(
+      [icon("file-code"), h("span", { class: "name" }, relative(path).slice(slash + 1)), h("span", { class: "namespace" }, slash > 0 ? relative(path).slice(0, slash) : ""), h("span", { class: "count" }, String(lines.length))],
+      lines.map((l) => row(1, [h("span", { class: "line-number" }, String(l.line)), diffLine(l.before, l.after)], () => host.openAt(path, l.line))),
     );
   }
   panel.replaceChildren(
-    h("div", { class: "hierarchy-toolbar" }, doRefactor, cancel, h("span", { class: "hierarchy-title" }, `${title}: ${count} ${count === 1 ? "change" : "changes"} in ${files} ${files === 1 ? "file" : "files"}`)),
+    h(
+      "div",
+      { class: "hierarchy-toolbar" },
+      doRefactor,
+      cancel,
+      h("span", { class: "preview-title" }, title),
+      h("span", { class: "hierarchy-title" }, `${count} ${count === 1 ? "change" : "changes"} in ${files} ${files === 1 ? "file" : "files"}${skipped.length ? `, ${skipped.length} left unchanged` : ""}`),
+    ),
     tree,
   );
+  panel.onkeydown = (e) => {
+    if (e.key === "Escape") (e.preventDefault(), closeView(panel));
+  };
   showPanelView("Refactoring Preview", panel);
   doRefactor.focus();
 }

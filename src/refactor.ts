@@ -8,7 +8,7 @@ import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTyp
 import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
 import { constantAt, constantDeclaration, constantRefs, declarationPoint, enclosingFunctionName, expressionsAt, functionScope, inlineCall, reindentCode, inlinedValue, literalType, methodToInline, occurrences, variableName, type Expr, type Inlinable } from "./extractparse";
-import { chosenExpression, chosenUses } from "./extract";
+import { chosenExpression, chosenUses, pickAtCaret } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
@@ -31,9 +31,9 @@ export async function inline(editor: monaco.editor.ICodeEditor) {
   if (!(await inlineMethod(editor)) && !(await inlineConstant(editor))) await inlineVariable(editor);
 }
 
-/** Asks in the palette; null for Escape. */
-const choose = (question: string, options: string[]) =>
-  new Promise<string | null>((resolve) => pick(question, () => options.map((label) => ({ label, run: () => resolve(label) })), 0, { value: "", onCancel: () => resolve(null) }));
+/** Asks in a popup at the caret; null for Escape. */
+const choose = (editor: monaco.editor.ICodeEditor, question: string, options: string[]) =>
+  new Promise<string | null>((resolve) => pickAtCaret(editor, question, options.map((label) => ({ label, run: () => resolve(label) })), () => resolve(null)));
 
 /**
  * Class names in code moved from the owner's file written in full, so its imports don't matter elsewhere:
@@ -108,7 +108,7 @@ async function inlineMethod(editor: monaco.editor.ICodeEditor): Promise<boolean>
   const all = `Inline ${calls} and remove the ${container ? "method" : "function"}`;
   const keep = `Inline ${calls} and keep it`;
   const options = here && refs.length > 1 ? [all, keep, "Inline this call only"] : [all, keep];
-  const answer = await choose(`Inline ${label}`, recursive ? options.filter((o) => o !== all) : options);
+  const answer = await choose(editor, `Inline ${label}`, recursive ? options.filter((o) => o !== all) : options);
   editor.focus();
   if (!answer) return true;
   const chosen = answer === "Inline this call only" ? [here!] : refs;
@@ -262,9 +262,7 @@ async function inlineConstant(editor: monaco.editor.ICodeEditor): Promise<boolea
   let chosen = uses;
   if (here && uses.length > 1) {
     const all = `Inline all ${uses.length} uses and remove ${label}`;
-    const answer = await new Promise<string | null>((resolve) =>
-      pick(`Inline ${label} = ${decl.value}`, () => [all, "Inline this use only"].map((l) => ({ label: l, run: () => resolve(l) })), 0, { value: "", onCancel: () => resolve(null) }),
-    );
+    const answer = await choose(editor, `Inline ${label} = ${decl.value}`, [all, "Inline this use only"]);
     editor.focus();
     if (!answer) return true;
     if (answer !== all) chosen = uses.filter((u) => u.path === model.uri.fsPath && u.start === here.start);
@@ -710,7 +708,7 @@ export async function moveClass(editor: monaco.editor.ICodeEditor) {
       return valid && typed !== current && !namespaces.includes(typed) ? [item(typed, true), ...existing] : existing;
     },
     0,
-    { value: current, select: [0, current.length] },
+    { value: current, select: [0, current.length], title: `Move ${short} to namespace` },
   );
 }
 

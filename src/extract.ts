@@ -4,6 +4,7 @@
 // done here, since its Extract Expression names the variable $newVariable and has no Extract Constant.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
+import { h } from "./dom";
 import { applyWorkspaceEdit, phpactorRequest } from "./lsp";
 import { pick, type Item } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
@@ -23,18 +24,19 @@ const rangeOf = (model: monaco.editor.ITextModel, e: { start: number; end: numbe
 const oneLine = (text: string) => (text.length > 80 ? `${text.slice(0, 77)}…` : text).replace(/\s*\n\s*/g, " ");
 
 /** Opens a picker below the caret, as PhpStorm's refactoring popups open. */
-export function pickAtCaret(editor: Editor, title: string, items: Item[] | ((q: string) => Item[]), onCancel?: () => void) {
+export function pickAtCaret(editor: Editor, title: string, items: Item[] | ((q: string) => Item[]), onCancel?: () => void, code = false) {
   const at = editor.getScrolledVisiblePosition(editor.getPosition()!);
   const box = editor.getDomNode()!.getBoundingClientRect();
   const anchor = document.createElement("div");
   anchor.style.cssText = `position:fixed;left:${box.left + (at?.left ?? 0)}px;top:${box.top + (at?.top ?? 0)}px;height:${at?.height ?? 18}px;width:0`;
   document.body.append(anchor);
-  pick(title, typeof items === "function" ? items : () => items, 0, { value: "", anchor, onCancel });
+  const source = typeof items === "function" ? items : (q: string) => items.filter((i) => i.label.toLowerCase().includes(q.toLowerCase()));
+  pick(title, source, 0, { value: "", anchor, onCancel, title, numbered: true, code });
   anchor.remove();
 }
 
 /** Asks in a popup at the caret, highlighting in the editor what each option would change. Null for Escape. */
-function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; value: T; highlight: Expr[] }[]): Promise<T | null> {
+function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; value: T; highlight: Expr[] }[], code = false): Promise<T | null> {
   const model = editor.getModel()!;
   const marks = editor.createDecorationsCollection();
   const show = (h: Expr[]) => marks.set(h.map((e) => ({ range: rangeOf(model, e), options: { className: "refactor-highlight" } })));
@@ -45,13 +47,36 @@ function ask<T>(editor: Editor, title: string, options: { label: string; detail?
       resolve(value);
     };
     const items: Item[] = options.map((o) => ({ label: o.label, detail: o.detail, run: () => finish(o.value), preview: () => show(o.highlight) }));
-    pickAtCaret(editor, title, items, () => finish(null));
+    pickAtCaret(editor, title, items, () => finish(null), code);
   });
 }
 
 // ---- Naming in place ----
 
 const naming = new WeakMap<Editor, monaco.editor.IContextKey<boolean>>();
+const hints = new WeakMap<Editor, () => void>();
+
+/** A hint above the name being typed, as PhpStorm shows one, until naming ends. */
+function showNamingHint(editor: Editor) {
+  hints.get(editor)?.();
+  const node = h("div", { class: "naming-hint" }, h("kbd", {}, "⏎"), " or ", h("kbd", {}, "Esc"), " to finish");
+  const widget: monaco.editor.IContentWidget = {
+    getId: () => "tusk.namingHint",
+    getDomNode: () => node,
+    getPosition: () => ({
+      position: editor.getSelection()?.getStartPosition() ?? null,
+      preference: [monaco.editor.ContentWidgetPositionPreference.ABOVE, monaco.editor.ContentWidgetPositionPreference.BELOW],
+    }),
+  };
+  editor.addContentWidget(widget);
+  const moved = editor.onDidChangeCursorSelection(() => editor.layoutContentWidget(widget));
+  hints.set(editor, () => {
+    moved.dispose();
+    editor.removeContentWidget(widget);
+    hints.delete(editor);
+  });
+}
+const hideNamingHint = (editor: Editor) => hints.get(editor)?.();
 
 /** Enter and Escape finish the name, as in PhpStorm, instead of adding a line at every copy of it. */
 function namingKey(editor: Editor): monaco.editor.IContextKey<boolean> {
@@ -65,11 +90,12 @@ function namingKey(editor: Editor): monaco.editor.IContextKey<boolean> {
     const end = editor.getSelection()?.getEndPosition();
     snippets(editor).cancel();
     key.set(false);
+    hideNamingHint(editor);
     if (end) editor.setPosition(end);
   };
   standalone.addCommand(monaco.KeyCode.Enter, done, "tuskNaming && !suggestWidgetVisible");
   standalone.addCommand(monaco.KeyCode.Escape, done, "tuskNaming && !suggestWidgetVisible");
-  editor.onDidChangeCursorSelection(() => key.get() && !snippets(editor).isInSnippet() && key.set(false));
+  editor.onDidChangeCursorSelection(() => key.get() && !snippets(editor).isInSnippet() && (key.set(false), hideNamingHint(editor)));
   return key;
 }
 
@@ -93,6 +119,7 @@ function applyNamed(editor: Editor, edits: { start: number; end: number; text: s
   editor.focus();
   snippets(editor).insert(template, { adjustWhitespace: false, undoStopBefore: true, undoStopAfter: true });
   namingKey(editor).set(true);
+  showNamingHint(editor);
 }
 
 // ---- Shared ----
@@ -113,13 +140,13 @@ export async function chosenExpression(editor: Editor, what: string): Promise<Ex
   const list = expressionsAt(text, model.getOffsetAt(sel.getPosition()));
   if (!list.length) return host.status(`Put the cursor in an expression to ${what}.`), null;
   if (list.length === 1) return list[0];
-  return ask(editor, "Expressions", list.map((e) => ({ label: oneLine(e.text), value: e, highlight: [e] })));
+  return ask(editor, "Expressions", list.map((e) => ({ label: oneLine(e.text), value: e, highlight: [e] })), true);
 }
 
 /** Every occurrence, or only `expr`, as chosen when there are several. Null for Escape. */
 export async function chosenUses(editor: Editor, expr: Expr, all: Expr[]): Promise<Expr[] | null> {
   if (all.length < 2) return [expr];
-  return ask(editor, `${all.length} occurrences of ${oneLine(expr.text)}`, [
+  return ask(editor, `${all.length} occurrences found`, [
     { label: `Replace all ${all.length} occurrences`, value: all, highlight: all },
     { label: "Replace this occurrence only", value: [expr], highlight: [expr] },
   ]);
@@ -152,7 +179,6 @@ export async function extractVariable(editor: Editor) {
     ? [{ start: point.replace.start, end: point.replace.end, text: `$\0 = ${expr.text}` }]
     : [{ start: point.offset, end: point.offset, text: `$\0 = ${expr.text};\n${point.indent}` }, ...uses.map((u) => ({ ...u, text: "$\0" }))];
   applyNamed(editor, edits, name);
-  host.status("Type the variable's name, then press ⏎.");
 }
 
 // ---- Extract Constant ----
@@ -181,7 +207,6 @@ export async function extractConstant(editor: Editor) {
   const declaration = `${point.gapBefore ? "\n" : ""}${indent}${visibility} const \0 = ${expr.text};\n${point.gap && next && next !== "}" ? "\n" : ""}`;
   const taken = new Set([...text.slice(open, close).matchAll(/\bconst\s+(?:[\w\\|?]+\s+)?(\w+)\s*=/g)].map((m) => m[1]));
   applyNamed(editor, [{ start: point.offset, end: point.offset, text: declaration }, ...uses.map((u) => ({ ...u, text: "self::\0" }))], constantName(expr.text, taken));
-  host.status("Type the constant's name, then press ⏎.");
 }
 
 // ---- Introduce Field ----
@@ -233,7 +258,6 @@ export async function introduceField(editor: Editor) {
   }
   const taken = new Set(classProperties(text.slice(open + 1, close)).map((p) => p.name));
   applyNamed(editor, [{ start: at, end: at, text: declaration }, ...edits], variableName(expr.text, taken));
-  host.status("Type the field's name, then press ⏎.");
 }
 
 // ---- Extract Method ----
@@ -267,7 +291,6 @@ export async function extractMethod(editor: Editor) {
   // The call and the declaration Phpactor wrote, renamed together.
   const places = [...after.matchAll(new RegExp(`(?:->|::|\\bfunction\\s+&?)(${name})\\s*\\(`, "dg"))].map((m) => ({ start: m.indices![1]![0], end: m.indices![1]![1], text: "\0" }));
   applyNamed(editor, places, name);
-  host.status("Type the method's name, then press ⏎.");
 }
 
 // ---- Refactor This ----

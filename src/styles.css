@@ -419,6 +419,22 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #palette.dropdown { transform: none; width: 480px; }
 #palette.dropdown input { padding: 8px 12px; font-size: 13px; }
 #palette input { width: 100%; padding: 12px 14px; font-size: 15px; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+/* A compact popup for choices, as PhpStorm's refactoring popups: a title instead of a search box, typing filters
+   (shown in the title), rows sized to their content, and 1 to 9 choose. */
+#palette.popup { width: auto; min-width: 260px; max-width: min(620px, calc(100vw - 32px)); border-radius: 8px; }
+#palette.popup:not(.dropdown) { top: max(56px, calc(50vh - 200px)); }
+#palette.chooser input { position: absolute; opacity: 0; pointer-events: none; height: 0; padding: 0; border: 0; }
+#palette .popup-title { display: flex; align-items: center; gap: 8px; padding: 7px 12px 6px; font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+#palette:not(.chooser) .popup-search { display: none; }
+#palette.popup:not(.chooser) { min-width: 420px; }
+#palette.popup:not(.chooser) input { padding: 9px 12px; font-size: 13px; font-family: var(--mono); }
+#palette .popup-search { margin-left: auto; padding: 0 6px; border-radius: 4px; font-weight: 500; color: var(--text); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+#palette.popup ul { padding: 4px; max-height: 360px; }
+#palette.popup li { height: 26px; gap: 8px; padding: 0 8px; }
+#palette.popup li .detail { margin-left: auto; padding-left: 24px; font-family: var(--ui-family); }
+#palette.code li .label { font: 12.5px var(--mono); }
+#palette .mnemonic { width: 14px; flex-shrink: 0; text-align: center; font: 11px var(--mono); color: var(--faint); }
+#palette li.selected .mnemonic { color: var(--muted); }
 #palette ul { list-style: none; margin: 0; padding: 4px; max-height: 440px; overflow-y: auto; }
 #palette ul:empty { display: none; }
 #palette li { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 10px; border-radius: 6px; white-space: nowrap; }
@@ -1268,42 +1284,69 @@ button.link:hover { text-decoration: underline; }
 .change-peek pre { margin: 0 0 12px; background: color-mix(in srgb, var(--red) 14%, transparent); white-space: pre; overflow: hidden; }
 
 /* What a refactoring's choice would change, while you choose, as PhpStorm highlights it. */
-.monaco-editor .refactor-highlight { background: color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 2px; }
+.monaco-editor .refactor-highlight { background: color-mix(in srgb, var(--accent) 30%, transparent); outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 2px; }
 
 /* Change Signature, laid out as PhpStorm's dialog. */
-#signature { width: min(860px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
+#signature { width: min(880px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
 #signature::backdrop { background: #0007; }
-#signature form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px; max-height: 84vh; }
-#signature h2 { margin: 0; font-size: 16px; }
-#signature h2 .muted { font-weight: 400; margin-left: 4px; }
-#signature label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+#signature form { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px 18px; max-height: 84vh; }
+#signature h2 { margin: 0; font-size: 15px; font-weight: 600; }
+#signature h2 .muted { font: 500 13px var(--mono); margin-left: 6px; color: var(--muted); }
+#signature label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
 #signature label.grow { flex: 1; }
+#signature label input { font-family: var(--mono); font-size: 12.5px; }
 .signature-head { display: flex; gap: 10px; }
-.signature-params { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
-.signature-params table { width: 100%; border-collapse: collapse; }
-.signature-params th { position: sticky; top: 0; background: var(--chrome); text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
-.signature-params td { padding: 3px 4px; }
-.signature-params td input { width: 100%; font-family: var(--mono); font-size: 12px; }
-.signature-params tr.added td input:not(:disabled) { border-color: color-mix(in srgb, var(--green) 55%, var(--input-border)); }
-.signature-params .row-actions { white-space: nowrap; width: 1%; }
-.signature-params tbody:empty::after { content: "No parameters"; display: block; padding: 10px; color: var(--faint); }
-.signature-tools { display: flex; align-items: center; gap: 10px; }
-.signature-tools button { padding: 3px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+.signature-head label:first-child { width: 130px; }
+.signature-head label:last-child { width: 180px; }
+.signature-params { overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.signature-params table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.signature-params th { position: sticky; top: 0; z-index: 1; background: var(--chrome); text-align: left; font-weight: 500; font-size: 11.5px; color: var(--muted); padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.signature-params th:last-child { width: 92px; }
+.signature-params td { padding: 3px 4px; border-bottom: 1px solid var(--border-subtle); }
+.signature-params tr:last-child td { border-bottom: 0; }
+.signature-params tr.focused td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.signature-params td input { width: 100%; font-family: var(--mono); font-size: 12.5px; background: transparent; border-color: transparent; }
+.signature-params td input:hover { border-color: var(--input-border); }
+.signature-params td input:focus { background: var(--input-bg); }
+.signature-params .name-cell { position: relative; }
+.signature-params .sigil { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); font: 12.5px var(--mono); color: var(--faint); pointer-events: none; }
+.signature-params .name-cell input { padding-left: 17.5px; }
+.signature-params td input::placeholder, #signature label input::placeholder { font: 11.5px var(--ui-family); color: var(--faint); opacity: 0.8; }
+.signature-params td.not-applicable { color: var(--faint); padding-left: 14px; font-size: 12px; }
+.signature-params tr.added td:first-child { box-shadow: inset 2px 0 var(--green); }
+.signature-params .row-actions { white-space: nowrap; text-align: right; opacity: 0; transition: opacity 0.1s; }
+.signature-params tr:hover .row-actions, .signature-params tr.focused .row-actions, .signature-params .row-actions:focus-within { opacity: 1; }
+.signature-params tbody:empty::after { content: "No parameters. Add one with Add Parameter or ⌘N."; display: block; padding: 14px; color: var(--faint); font-size: 12px; }
+.signature-tools { display: flex; align-items: center; gap: 12px; margin-top: -4px; }
+.signature-tools button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
 .signature-tools button:hover { background: var(--hover); }
-.signature-preview { display: block; padding: 8px 10px; background: var(--bg); border-radius: var(--radius); font: 12px var(--mono); white-space: pre-wrap; word-break: break-word; }
-.signature-problem { margin: 0; min-height: 18px; color: var(--red); font-size: 12px; }
+.signature-tools .muted { font-size: 11.5px; color: var(--faint); }
+.signature-preview { display: block; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 8px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.signature-problem { margin: -4px 0 0; min-height: 18px; color: var(--red); font-size: 12px; }
+.signature-problem.warning { color: var(--yellow); }
 #signature .buttons { display: flex; justify-content: flex-end; gap: 8px; }
-#signature .buttons button { padding: 4px 16px; }
+#signature .buttons button { padding: 5px 16px; }
 #signature .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
 #signature .buttons button:not(.primary):hover:not(:disabled) { background: var(--hover); }
 
 /* Refactoring Preview: changed lines with what changed marked. */
 .refactor-preview .line-number { color: var(--faint); min-width: 4ch; text-align: right; font: 12px var(--mono); }
 .refactor-preview .preview-text { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; }
-.refactor-preview del { background: color-mix(in srgb, var(--red) 25%, transparent); text-decoration: line-through; }
-.refactor-preview ins { background: color-mix(in srgb, var(--green) 25%, transparent); text-decoration: none; }
+.refactor-preview del { background: color-mix(in srgb, var(--red) 22%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 70%, transparent); color: var(--muted); border-radius: 3px; padding: 0 1px; margin-right: 3px; }
+.refactor-preview ins { background: color-mix(in srgb, var(--green) 24%, transparent); text-decoration: none; border-radius: 3px; padding: 0 1px; }
 .refactor-preview .codicon-warning { color: var(--yellow); }
-.signature-problem.warning { color: var(--yellow); }
-.signature-params td input:disabled { opacity: 0.35; }
 .hierarchy-toolbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .hierarchy-toolbar button.primary:hover { background: var(--accent-hover); }
+
+/* Naming in place (Extract, Introduce): every copy of the name framed, and a hint above the one you type. */
+.monaco-editor .view-overlays .snippet-placeholder { background: color-mix(in srgb, var(--accent) 16%, transparent); outline: 1px solid color-mix(in srgb, var(--accent) 65%, transparent); border-radius: 2px; }
+.monaco-editor .view-overlays .finish-snippet-placeholder { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.naming-hint { display: flex; align-items: center; gap: 4px; padding: 2px 7px; margin-bottom: 3px; font: 11px var(--ui-family); color: var(--muted); background: var(--panel); border: 1px solid var(--popover-border); border-radius: 5px; box-shadow: 0 2px 8px #0005; white-space: nowrap; pointer-events: none; }
+.naming-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--hover); color: var(--text); }
+.refactor-preview .hierarchy-row { cursor: pointer; }
+.refactor-preview .hierarchy-row.group .name { font-weight: 500; }
+.refactor-preview .hierarchy-row .chevron { font-size: 14px !important; color: var(--faint); }
+.refactor-preview .count { margin-left: 2px; padding: 0 6px; border-radius: 8px; font-size: 11px; color: var(--muted); background: var(--hover); }
+.refactor-preview .reason { color: var(--yellow); overflow: hidden; text-overflow: ellipsis; }
+.refactor-preview .preview-title { margin-left: 8px; font-weight: 600; white-space: nowrap; }
+.refactor-preview .preview-title + .hierarchy-title { margin-left: 4px; }
