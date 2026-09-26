@@ -3369,3 +3369,17 @@ subclass) with one that answers no. It only rewrites text, which a code editor
 doesn't need, so it has no setting. The method was found by listing the
 Objective-C runtime's classes in the running app, since Apple doesn't document
 it; older macOS versions never call it.
+
+### 2026-09-26: Ad-hoc signing and updates from GitHub releases
+
+Notarizing needs a paid Apple Developer account, so the app is ad-hoc signed
+(`signingIdentity: "-"`), which Apple silicon requires to run at all.
+Gatekeeper still asks on the first install; updates don't, because the updater
+downloads without the quarantine flag. `tauri-plugin-updater` reads
+`latest.json` from the repository's latest GitHub release and checks each
+archive against the public key in `tauri.conf.json`. The check runs in
+`lib.rs` at launch, in release builds only, and uses native dialogs, so the
+frontend has no update code. The new version replaces the app on disk but
+starts at the next launch: restarting would close files with unsaved edits.
+`scripts/release.sh` builds and publishes, since releases are built on this
+Mac rather than in CI.

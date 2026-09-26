@@ -68,8 +68,8 @@ file to change when you add it.
 | Coverage | The Coverage tab shows the code as it was when you opened the tab, even after you edit the file. Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
-| Code signing | The app isn't signed or notarized, so on another Mac, Gatekeeper blocks it until you allow it in **System Settings > Privacy & Security**. Signing needs an Apple Developer account. |
-| Updates | There's no auto-update. Each new version is a new DMG to install. |
+| Code signing | The app is ad-hoc signed, not notarized, so on another Mac, Gatekeeper blocks the first install until you allow it in **System Settings > Privacy & Security**. Notarizing needs a paid Apple Developer account. |
+| Updates | Updates install at the next launch, not with a restart, so open files are never closed for you. |
 
 ## Requirements
 
@@ -140,6 +140,21 @@ pnpm tauri build --target universal-apple-darwin
 
 The tools are then fetched for both chips and joined into universal binaries.
 The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle/`.
+
+### Publish an update
+
+Installed copies check the latest GitHub release at launch and offer to
+install it. To publish one, commit your changes, then run:
+
+```sh
+scripts/release.sh 0.2.0
+```
+
+The script sets the version, builds the universal app, signs the update
+archive with the key in `~/.tauri/tusk.key`, writes `latest.json`, commits and
+tags the version, and creates the GitHub release with `gh`. Keep a backup of
+that key: without it, installed copies can't verify a new version, and you
+must ship a new key in a DMG that everyone installs by hand.
 
 ## The window
 

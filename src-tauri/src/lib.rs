@@ -62,6 +62,32 @@ fn hide_write_with_siri(webview: *mut std::ffi::c_void) {
     }
 }
 
+/// Checks the latest GitHub release at launch and, if it's newer, offers to install it. The new version
+/// replaces the app on disk but starts at the next launch, so nothing open, such as unsaved edits, is lost.
+#[cfg(not(debug_assertions))]
+async fn check_for_update(app: tauri::AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    use tauri_plugin_updater::UpdaterExt;
+    let Ok(Some(update)) = async { app.updater()?.check().await }.await else {
+        return;
+    };
+    let ask = format!("Tusk {} is available. You have {}.", update.version, update.current_version);
+    let install = app
+        .dialog()
+        .message(ask)
+        .title("Update available")
+        .buttons(MessageDialogButtons::OkCancelCustom("Install".into(), "Later".into()))
+        .blocking_show();
+    if !install {
+        return;
+    }
+    let done = match update.download_and_install(|_, _| {}, || {}).await {
+        Ok(()) => format!("Tusk {} is installed. It opens the next time you start Tusk.", update.version),
+        Err(e) => format!("The update couldn't be installed: {e}"),
+    };
+    app.dialog().message(done).title("Update").blocking_show();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::thread::spawn(login_path);
@@ -72,6 +98,7 @@ pub fn run() {
     }
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // The window only ever shows the app. Rendered content, such as a pull request's Markdown, opens its
         // links in the browser; this stops any link that slips through from replacing the editor.
         .plugin(
@@ -87,6 +114,8 @@ pub fn run() {
             if let Some(window) = _app.get_webview_window("main") {
                 window.with_webview(|w| hide_write_with_siri(w.inner()))?;
             }
+            #[cfg(not(debug_assertions))]
+            tauri::async_runtime::spawn(check_for_update(_app.handle().clone()));
             Ok(())
         })
         .manage(fs::WatchState::default())

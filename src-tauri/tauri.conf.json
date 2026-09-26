@@ -45,6 +45,18 @@
       "resources/tools/": "tools/",
       "resources/mago.toml": "tools/mago.toml",
       "../filament-lsp/": "tools/filament-lsp/"
+    },
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENEMzdFRDJEQTNDMjg4RjIKUldUeWlNS2pMZTAzemU2dzdHTmNPMi9pNXhEZ2NZcmdvTDBkbFJQSFprdDFrZjhxTWZkUWs5Z2gK",
+      "endpoints": [
+        "https://github.com/almontasser/tusk/releases/latest/download/latest.json"
+      ]
     }
   }
 }
