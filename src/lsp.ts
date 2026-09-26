@@ -978,9 +978,10 @@ let lazyStart: monaco.IDisposable | undefined;
  * Starts the TypeScript server (vtsls) when the first JavaScript, TypeScript, or Vue file
  * opens, and the Vue server when the first Vue file opens. The Vue server asks vtsls for
  * TypeScript information through `tsserver/request` notifications, which this forwards.
- * The Svelte and Astro servers run TypeScript themselves, and start with their first file.
+ * The Svelte and Astro servers run TypeScript themselves, and start with their first file. In an Angular project,
+ * the Angular server starts with the first TypeScript or HTML file, for component templates in both.
  */
-async function startFrontendServersLazily(root: string, start: number) {
+async function startFrontendServersLazily(root: string, start: number, angular: boolean) {
   const nodeDir = await toolPath("node");
   // A later start of the language servers replaced this one while the tool path loaded.
   if (start !== starts) return;
@@ -1020,6 +1021,7 @@ async function startFrontendServersLazily(root: string, start: number) {
     if (lang === "javascript" || lang === "typescript") startTs();
     if (lang === "vue") startVue();
     if (lang === "svelte" || lang === "astro") others[lang] ??= add(startServer(lang, root, [lang], component[lang][1]), component[lang][0]);
+    if (angular && (lang === "typescript" || lang === "html")) others.angular ??= add(startServer("angular", root, ["typescript", "html"], {}), "Angular");
   };
   monaco.editor.getModels().forEach(onModel);
   lazyStart = monaco.editor.onDidCreateModel(onModel);
@@ -1094,7 +1096,7 @@ export async function startLsp(root: string, h: Host) {
   const typos = settings.spellCheck
     ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
     : null;
-  startFrontendServersLazily(root, starts);
+  startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
   for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);

@@ -282,6 +282,7 @@ check and is killed partway through a large run.
 | Vue language server | 3.3.11 | npm package, run with Node |
 | Svelte language server | 0.18.4 | npm package, run with Node |
 | Astro language server | 2.17.1 | npm package, run with Node |
+| Angular language server | 22.2.0, with TypeScript 6.0.3 | npm package, run with Node |
 | Prettier, with its Svelte and Astro plugins | 3.9.9 | npm packages, run with Node |
 | `blade-formatter` | 1.44.4 | npm package, run with Node |
 | PHP Debug (Xdebug adapter) | 1.40.2 | The `.vsix` from `xdebug/vscode-php-debug`, run with Node |
@@ -2429,7 +2430,17 @@ bundled tools, next to the Vue plugin. Svelte's server reports a missing Svelte
 config in `vite.config` as an error on line 1, which is right for a Svelte
 project and harmless in a Laravel one that has a stray `.svelte` file. With
 Prettier and `yaml-language-server` (Astro's frontmatter), these add about
-60 MB to the bundled Node tools. While vtsls runs, Monaco's built-in TypeScript features are turned off,
+60 MB to the bundled Node tools.
+
+The Angular server (`@angular/language-server`) starts only when the project's
+`package.json` names `@angular/core`, with the first `typescript` or `html`
+model, and serves both: `.html` templates and inline `template:` strings in
+components. It runs next to vtsls, not through it, and Monaco merges their
+answers. `lsp_start` passes `--tsProbeLocations` (the project root, then the
+server's folder) and `--ngProbeLocations` (the server's folder), so the server
+prefers the project's TypeScript and falls back to its own nested 6.0.3, and
+always uses the bundled `@angular/language-service`. Its `angular/…` progress
+notifications are ignored. While vtsls runs, Monaco's built-in TypeScript features are turned off,
 so completions and diagnostics don't appear twice. Formatting stays with
 `format.ts`: the client doesn't register formatting providers from language
 servers.
@@ -3425,3 +3436,11 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Angular templates through Angular's own language server
+
+`@angular/language-server` is the server VS Code's Angular extension runs, so
+templates get the same checks as `ng build`'s strict templates. It adds about
+50 MB to the Node tools, half of it its own TypeScript, and a second TypeScript
+program in memory. Starting it only for projects with `@angular/core` keeps
+that off Laravel projects that only have a stray `.html` file.
