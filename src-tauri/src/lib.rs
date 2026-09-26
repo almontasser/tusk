@@ -41,32 +41,24 @@ fn use_login_shell_path() {
     }
 }
 
-/// Whether macOS 27's "Write with Siri" button shows beside the caret; the Writing Tools setting sets it.
-static WRITING_TOOLS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[tauri::command]
-fn set_writing_tools(enabled: bool) {
-    WRITING_TOOLS.store(enabled, std::sync::atomic::Ordering::Relaxed);
-}
-
 /// macOS 27 shows its "Write with Siri" button beside the caret of any text client that allows the Writing
 /// Tools affordance, including the terminal's and the editor's hidden textareas. WKWebView always allows it,
 /// and neither `writingToolsBehavior` nor `writingsuggestions` stops it, so the webview's own class (wry's
-/// subclass) gets an `allowsWritingToolsAffordance` that follows the setting. Older macOS never asks.
+/// subclass) gets an `allowsWritingToolsAffordance` that answers no. Older macOS never asks.
 #[cfg(target_os = "macos")]
-fn follow_writing_tools_setting(webview: *mut std::ffi::c_void) {
+fn hide_write_with_siri(webview: *mut std::ffi::c_void) {
     use std::ffi::{c_char, c_void};
     extern "C" {
         fn object_getClass(obj: *const c_void) -> *const c_void;
         fn sel_registerName(name: *const c_char) -> *const c_void;
         fn class_replaceMethod(cls: *const c_void, sel: *const c_void, imp: *const c_void, types: *const c_char) -> *const c_void;
     }
-    extern "C" fn allows(_this: *const c_void, _sel: *const c_void) -> bool {
-        WRITING_TOOLS.load(std::sync::atomic::Ordering::Relaxed)
+    extern "C" fn no(_this: *const c_void, _sel: *const c_void) -> bool {
+        false
     }
     // Safety: adds a method that takes no arguments and returns BOOL ("B@:") to the webview's class.
     unsafe {
-        class_replaceMethod(object_getClass(webview), sel_registerName(c"allowsWritingToolsAffordance".as_ptr()), allows as *const c_void, c"B@:".as_ptr());
+        class_replaceMethod(object_getClass(webview), sel_registerName(c"allowsWritingToolsAffordance".as_ptr()), no as *const c_void, c"B@:".as_ptr());
     }
 }
 
@@ -93,7 +85,7 @@ pub fn run() {
         .setup(|_app| {
             #[cfg(target_os = "macos")]
             if let Some(window) = _app.get_webview_window("main") {
-                window.with_webview(|w| follow_writing_tools_setting(w.inner()))?;
+                window.with_webview(|w| hide_write_with_siri(w.inner()))?;
             }
             Ok(())
         })
@@ -139,7 +131,6 @@ pub fn run() {
             ws::ws_connect,
             ws::ws_send,
             ws::ws_close,
-            set_writing_tools,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

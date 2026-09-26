@@ -259,7 +259,6 @@ AI, and Spelling. Changes apply immediately and are saved in
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
-| Show Write with Siri: the macOS 27 button beside the text cursor | Off |
 
 ### Color themes
 

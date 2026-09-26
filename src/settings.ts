@@ -21,8 +21,6 @@ export type Settings = {
   autoSave: boolean;
   formatOnSave: boolean;
   spellCheck: boolean;
-  /** macOS 27's Write with Siri button beside the caret, and the webview's writing suggestions. */
-  writingTools: boolean;
   /** Run buttons for tests in the gutter; off shows Run, Debug, and Profile links above each test instead. */
   testGutterIcons: boolean;
   aiCompletion: boolean;
@@ -46,7 +44,6 @@ const defaults: Settings = {
   autoSave: true,
   formatOnSave: false,
   spellCheck: true,
-  writingTools: false,
   testGutterIcons: true,
   aiCompletion: false,
   aiModel: "qwen2.5-coder-3b",
@@ -86,7 +83,6 @@ const fields: Field[] = [
       ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
     ],
   },
-  { key: "writingTools", label: "Show Write with Siri", type: "checkbox", help: "The macOS button beside the text cursor, in the editor and the terminal." },
   { section: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
 ];
 
@@ -147,8 +143,6 @@ function apply() {
       inlayHints: { enabled: settings.inlayHints ? "on" : "off" },
     });
   }
-  document.documentElement.setAttribute("writingsuggestions", String(settings.writingTools));
-  invoke("set_writing_tools", { enabled: settings.writingTools }).catch(() => {});
   listeners.forEach((fn) => fn(settings));
 }
 systemDark.addEventListener("change", () => settings.theme === "system" && apply());
