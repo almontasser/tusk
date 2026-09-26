@@ -11,7 +11,8 @@ import { formatHoverMarkdown } from "./phptypes";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { isDeprecation, isUnused, magoConfigText, magoExpect, magoFixes, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
+import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
+import { bladeProblems, bladeToPhp } from "./bladephp";
 
 type M = typeof monaco.languages;
 
@@ -167,6 +168,34 @@ function registerProblemHover() {
   });
 }
 registerProblemHover();
+
+// ---- PHP in Blade views ----
+
+/** Whether the servers' Mago settings are ready, so Blade views can be checked with them. */
+let bladeReady = false;
+
+/**
+ * Checks the PHP in a Blade view with Mago's analyzer (see bladephp.ts), as Phpactor runs Mago for PHP files. Only
+ * open views are checked, a second after typing stops, since Mago parses the project again for each file.
+ */
+async function checkBlade(model: monaco.editor.ITextModel) {
+  const [root, version, path] = [projectRoot, model.getVersionId(), model.uri.fsPath];
+  if (!bladeReady || model.getLanguageId() !== "blade" || !path.startsWith(`${root}/`) || isLibrary(path)) return;
+  const rel = path.slice(root.length + 1);
+  const php = bladeToPhp(textOf(model));
+  const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "analyze", "--stdin-input", rel, "--reporting-format", "json"];
+  const json = await invoke<string>("run_capture", { cwd: root, program: await toolPath("mago/mago"), args, input: php, anyStatus: true }).catch(() => "");
+  if (model.isDisposed() || root !== projectRoot || version !== model.getVersionId()) return;
+  const list = realProblems(path, php, "php", magoIssuesByFile(json, "mago").get(rel)?.(php) ?? [], facts);
+  monaco.editor.setModelMarkers(model, "blade", bladeProblems(list).map((d) => toMarker(d as L.Diagnostic, "blade")));
+}
+monaco.editor.onDidCreateModel((model) => {
+  if (model.getLanguageId() !== "blade") return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const listener = model.onDidChangeContent(() => (clearTimeout(timer), (timer = setTimeout(() => checkBlade(model), 1000))));
+  model.onWillDispose(() => (clearTimeout(timer), listener.dispose()));
+  checkBlade(model);
+});
 
 // ---- Mago's fixes and suppressions ----
 
@@ -1053,6 +1082,7 @@ export async function startLsp(root: string, h: Host) {
   starts++;
   projectRoot = root;
   magoConfigPath = undefined;
+  bladeReady = false;
   servers.splice(0).forEach((s) => s.stop());
   lazyStart?.dispose();
   builtInTypeScript(true);
@@ -1090,6 +1120,8 @@ export async function startLsp(root: string, h: Host) {
     ...(!hasMagoToml && { "language_server_mago.config": (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir)) }),
     "language_server_phpstan.enabled": hasPhpstan,
   });
+  bladeReady = true;
+  monaco.editor.getModels().forEach(checkBlade);
   const laravel = hasArtisan ? startServer("laravel", root, ["php", "blade"], {}) : null;
   const filament = hasFilament ? startServer("filament", root, ["php"], {}) : null;
   const tailwind = packageJson.includes('"tailwindcss"')
@@ -1135,6 +1167,7 @@ async function projectMagoConfig(root: string, bundled: string, aliasDir: string
     if (!Array.isArray(replaced)) return;
     await write(replaced);
     await invoke("write_file", { path: `${dir}/replaced.json`, contents: JSON.stringify(replaced) });
+    monaco.editor.getModels().forEach(checkBlade);
   });
   return config;
 }

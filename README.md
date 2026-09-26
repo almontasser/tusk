@@ -43,7 +43,7 @@ file to change when you add it.
 | Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed, and so are calls of a constructor through `new`. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
-| Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
+| Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | First indexing | Phpactor indexes a new project once, which takes minutes for a full Laravel app. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, and `bootstrap/cache` are skipped. |
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
@@ -1109,6 +1109,14 @@ config keys, routes, views, translations, environment variables, middleware,
 and container bindings, in PHP and Blade files. For example, ⌘-click on
 `view('welcome')` opens `resources/views/welcome.blade.php`.
 
+Translation keys in `__()`, `trans()`, `trans_choice()`, `@lang()`, and
+`Lang::get()` complete from `lang/*/*.php`, `lang/*.json`, and packages'
+translations. Hover shows the value in each locale with its file, and ⌘B or
+⌘-click opens the line that defines it. An unknown key that looks like
+`group.key` shows a warning; a key without a dot, such as `__('Welcome back')`,
+doesn't, since Laravel shows the key itself when no JSON file has it. When a
+project has more than 200 keys, completion lists the keys without their values.
+
 - **Routes**, from ⌘⇧A, lists the app's routes from `php artisan route:list`.
   Search by method, path, route name, or controller, and choose a route to
   open its controller method. Routes to classes in `vendor`, such as Filament
@@ -1129,6 +1137,15 @@ directives, and `@php` blocks highlight as Blade and PHP, with the JavaScript
 around them intact; inside `<style>`, echoes and comments do. Laravel LSP
 completes component names after `<x-`. ⌘B on a component tag opens its view,
 and for a class-based component also its class in `app/View/Components`.
+
+Mago checks the PHP in open Blade files a second after you stop typing: echoes,
+`@php` blocks, `<?php` blocks, the arguments of Laravel's directives (`@if`,
+`@foreach`, `@include`, `@class`, `@props`, and the rest), and bound attributes
+on component tags. It reports syntax errors, and unknown classes, functions,
+methods, and constants, and wrong arguments, at their place in the view.
+`@use` imports count. A view's variables come from the controller or component
+that renders it, so the check doesn't report undefined variables or anything
+about a variable's value. Custom directives aren't checked.
 
 Blade files format (⌥⌘L) with the bundled `blade-formatter`, which indents
 Blade, HTML, and scripts, and reads your project's `.bladeformatterrc` when it

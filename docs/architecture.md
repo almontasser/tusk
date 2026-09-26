@@ -1539,6 +1539,13 @@ every provider registration:
 | Phpactor | `php` | Always |
 | Laravel LSP | `php`, `blade` | The folder has an `artisan` file |
 
+Laravel LSP covers translation keys on its own (`TranslationDocumentMapper` in
+the phar): completion, hover with each locale's value, definition through its
+links, and a warning for an unknown key that looks like `group.key`, for
+`__`, `trans`, `trans_choice`, `@lang`, `Lang::get`, and the translator's
+methods, reading `lang/*/*.php` and `lang/*.json` through a booted app. It
+lists values in completion only below 200 keys, and packages' keys count.
+
 Monaco combines providers for the same language: it merges completion lists,
 definitions, references, hovers, code actions, and links. Each server writes
 its markers under its own owner (`lsp:phpactor` or `lsp:laravel`), so one
@@ -1632,6 +1639,34 @@ Prettier plugin for Blade (`@shufo/prettier-plugin-blade`) wraps the same
 formatter but pins its own Prettier, so the formatter itself is bundled. It
 brings about 70 MB of dependencies to the Node tools, mostly Tailwind 3 for
 sorting classes, a PHP parser, and Linguist's language data.
+
+#### Checking the PHP in views
+
+`bladeToPhp` in `src/bladephp.ts` turns a view into one PHP file: a first line
+of `<?php` and the view's `@use` imports, then the view with everything but
+its PHP replaced by spaces, one for each UTF-16 unit, keeping line breaks. So a
+problem's line, less one, and column are the view's, with no position map.
+Each piece of PHP becomes a statement that starts with `;` in place of its
+delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an
+array, since `@include('a', [...])` is a list), a bound component attribute
+`:post="$post"` reads `;[$post]`, and `@foreach`, `@forelse`, `@for`, and
+`@while` keep the loop, as `;foreach (…)`, whose body is the empty statement
+that follows. `@php … @endphp` and `<?php … ?>` keep their code. Only
+Laravel's own directives are read, not every `@word(`, so CSS's `@media` and
+text stay text, as Blade leaves unknown directives; `{{-- --}}`, `@{{`, `@@`,
+and `@verbatim` are skipped. Echo delimiters are found as Blade's own regex
+finds them, without reading strings.
+
+`checkBlade` in `lsp.ts` sends that file to `mago analyze --stdin-input` with
+the view's path and the editor's Mago settings, a second after typing stops,
+and puts the problems under the `blade` owner. They go through `realProblems`
+as a PHP file's do, then `bladeProblems` drops undefined variables, unused
+statements (every echo is one), and Laravel magic and uses of `mixed` values
+(`magicNoise`), since the view's variables have no types. Mago has no server
+mode, so only open views are checked; the project scan reads Blade files as
+PHP with inline HTML, which has nothing to report. Blade views' markers count
+in the Problems panel as soon as the view is open, since no Phpactor check
+has to finish first.
 
 Laravel LSP answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
@@ -3852,3 +3887,24 @@ call the app's commands, fails offline, and would download schemastore.org's
 schemas at every launch. About 600 KB of schemas, loaded only with the first
 JSON file, cover the config files PHP and frontend projects have. Refs to
 schemas left out validate nothing rather than failing.
+
+### 2026-09-26: Check Blade's PHP with Mago, without variables
+
+Blade's PHP went unchecked because a view's variables come from its controller.
+Rather than compile views as Laravel does (`CompilesEchoes` and the rest, which
+needs PHP and a booted app, and maps positions through generated code), the
+editor blanks everything but the PHP, so positions stay put, and runs the Mago
+it already has. Undefined variables and every problem about their `mixed`
+values are dropped, which still leaves syntax errors, unknown classes,
+functions, methods, and constants, and wrong arguments. Reading variable types
+from the controllers that render a view, or from a component's class, would
+catch more, but a view can be rendered from many places with different
+values; `@props` gives names without types, so it adds nothing once undefined
+variables are dropped.
+
+### 2026-09-26: Translation keys from Laravel LSP, not the editor
+
+Laravel LSP 0.0.32 already completes, hovers, links, and validates translation
+keys from PHP and JSON files, in PHP and Blade, so the editor adds nothing.
+Checked against the test app with `php artisan lang:publish` and a `lang/en.json`.
+It warns only about keys with a dot, since a sentence key falls back to itself.
