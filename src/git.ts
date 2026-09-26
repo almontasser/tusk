@@ -7,7 +7,7 @@ import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
 import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
-import { openTerminal } from "./terminal";
+import { closeView, openTerminal, showEditorView } from "./terminal";
 
 type Host = {
   root(): string;
@@ -298,7 +298,7 @@ async function showChange(f: FileStatus, inIndex: boolean) {
     title: `${inIndex ? "Unstage" : "Stage"} the changes that the selection touches (select lines on either side)`,
     run: stageSelected,
   };
-  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree", undefined, action);
+  showDiff(f.path, original, modified, inIndex ? "HEAD ↔ Staged" : f.worktree === "?" ? "New file" : "Staged ↔ Working tree", action);
   staging = { f, inIndex, original, modified };
 }
 
@@ -357,17 +357,11 @@ async function writeIndex(path: string, text: string) {
   }
 }
 
-let diffBack: (() => void) | undefined;
-
 export type DiffAction = { label: string; title?: string; run(): unknown };
 
-/**
- * Shows a diff in place of the editor. `back` runs when the diff closes, instead of showing the editor.
- * `action` adds a button to the header, such as Stage Selected.
- */
-export function showDiff(path: string, original: string, modified: string, label: string, back?: () => void, action?: DiffAction): monaco.editor.IStandaloneDiffEditor {
-  closeDiff(false);
-  diffBack = back;
+/** Shows a diff in an editor tab, replacing the diff it showed before. `action` adds a button to the header, such as Stage Selected. */
+export function showDiff(path: string, original: string, modified: string, label: string, action?: DiffAction): monaco.editor.IStandaloneDiffEditor {
+  clearDiff();
   const button = $("diff-action");
   button.hidden = !action;
   button.textContent = action?.label ?? "";
@@ -395,9 +389,8 @@ export function showDiff(path: string, original: string, modified: string, label
   $("diff-path").textContent = path.startsWith("/") ? path.split("/").pop()! : path;
   $("diff-label").textContent = label;
   // Paths are relative to the project, except files outside it, such as HTTP responses in the app's cache.
-  $("diff-open").onclick = () => (closeDiff(false), host.openFile(path.startsWith("/") ? path : `${host.root()}/${path}`));
-  document.querySelectorAll<HTMLElement>("#editor, #history").forEach((e) => (e.hidden = true));
-  $("diff").hidden = false;
+  $("diff-open").onclick = () => (closeDiff(), host.openFile(path.startsWith("/") ? path : `${host.root()}/${path}`));
+  showEditorView(`${path.split("/").pop()} (diff)`, $("diff"), "diff", clearDiff);
   return diffEditor;
 }
 
@@ -412,19 +405,16 @@ export function diffCursor(): { side: "original" | "modified"; line: number; sta
   return { side: lastSide, line: end, startLine: s.startLineNumber };
 }
 
-/** Closes the diff. By default it returns to where the diff came from, such as the history view. */
-export function closeDiff(goBack = true) {
+/** Closes the diff's tab. */
+export const closeDiff = () => closeView($("diff"));
+
+function clearDiff() {
   staging = undefined;
   $("diff-action").hidden = true;
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
   model?.original.dispose();
   model?.modified.dispose();
-  $("diff").hidden = true;
-  const back = diffBack;
-  diffBack = undefined;
-  if (goBack && back) back();
-  else $("editor").hidden = false;
 }
 
 // ---- Branches ----
@@ -432,39 +422,51 @@ export function closeDiff(goBack = true) {
 export const pushBranch = () =>
   openTerminal(host.root(), "git push", current?.upstream ? ["git", "push"] : ["git", "push", "-u", "origin", "HEAD"]);
 export const updateProject = () => openTerminal(host.root(), "git pull", ["git", "pull"]);
+export const fetchAll = () => openTerminal(host.root(), "git fetch", ["git", "fetch", "--all", "--prune"]);
 
-/** Lists branches to check out, plus fetch, pull, push, and creating a branch from the typed name. */
+/**
+ * Lists branches to check out below the branch button, plus fetch, pull, push, and creating a branch
+ * from the typed name. The current branch comes first, then local and remote branches, newest first.
+ */
 export async function branches() {
   if (!current) return host.status("This folder isn't a git repository.");
-  const out = await git("for-each-ref", "--format=%(refname)\t%(HEAD)", "refs/heads", "refs/remotes");
+  const out = await git("for-each-ref", "--sort=-committerdate", "--format=%(refname)\t%(HEAD)\t%(committerdate:relative)", "refs/heads", "refs/remotes");
   const refs = out
     .split("\n")
     .filter((l) => l && !l.includes("/HEAD\t"))
     .map((l) => {
-      const [ref, head] = l.split("\t");
+      const [ref, head, date] = l.split("\t");
       const remote = ref.startsWith("refs/remotes/");
-      return { name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote, current: head === "*" };
-    });
+      return { name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote, current: head === "*", date };
+    })
+    .sort((a, b) => Number(b.current) - Number(a.current) || Number(a.remote) - Number(b.remote));
   const names = new Set(refs.map((r) => r.name));
   const fixed: Item[] = [
-    { label: "Update Project (git pull)", detail: "⌘T", run: updateProject },
-    { label: "Push (git push)", detail: "⌘⇧K", run: pushBranch },
-    { label: "Fetch (git fetch)", run: () => openTerminal(host.root(), "git fetch", ["git", "fetch", "--prune"]) },
-    { label: "Stash Changes…", run: stashChanges },
-    { label: "Stashes…", run: stashes },
-    { label: "Worktrees…", run: worktrees },
+    { label: "Update Project (git pull)", detail: "⌘T", icon: "codicon-arrow-down", run: updateProject },
+    { label: "Push (git push)", detail: "⌘⇧K", icon: "codicon-arrow-up", run: pushBranch },
+    { label: "Fetch (git fetch)", icon: "codicon-sync", run: fetchAll },
+    { label: "Stash Changes…", icon: "codicon-archive", run: stashChanges },
+    { label: "Stashes…", icon: "codicon-list-unordered", run: stashes },
+    { label: "Worktrees…", icon: "codicon-folder-library", run: worktrees },
   ];
   // Checking out a remote branch such as origin/feature creates a local tracking branch.
   const branchItems: Item[] = refs.map((r) => ({
     label: r.name,
-    detail: r.current ? "current" : r.remote ? "remote" : "local",
+    detail: r.current ? "current" : `${r.remote ? "remote" : "local"} · ${r.date}`,
+    icon: r.current ? "codicon-check" : r.remote ? "codicon-cloud" : "codicon-git-branch",
     run: () => (r.remote ? change("checkout", "--track", r.name) : change("checkout", r.name)),
   }));
-  pick(`Branches (on ${current.branch}). Type a name to create a branch.`, (q) => {
-    const name = q.trim().replace(/\s+/g, "-");
-    const create: Item[] = name && !names.has(name) ? [{ label: `New branch "${name}"`, detail: "from HEAD", run: () => change("checkout", "-b", name) }] : [];
-    return [...create, ...rank(q, branchItems), ...rank(q, fixed)];
-  });
+  pick(
+    `Branches (on ${current.branch}). Type a name to create a branch.`,
+    (q) => {
+      if (!q.trim()) return [...fixed, ...branchItems];
+      const name = q.trim().replace(/\s+/g, "-");
+      const create: Item[] = !names.has(name) ? [{ label: `New branch "${name}"`, detail: "from HEAD", icon: "codicon-add", run: () => change("checkout", "-b", name) }] : [];
+      return [...create, ...rank(q, branchItems), ...rank(q, fixed)];
+    },
+    0,
+    { value: "", anchor: $("branch") },
+  );
 }
 
 // ---- Worktrees ----
@@ -799,11 +801,14 @@ export function changeMenu(editor: monaco.editor.ICodeEditor, line: number): Men
 export function initGit(h: Host) {
   host = h;
   $("branch").onclick = () => branches();
+  $("git-fetch").onclick = fetchAll;
+  $("git-pull").onclick = updateProject;
+  $("git-push").onclick = pushBranch;
   $("commit").onclick = () => commit(false);
   $("commit-push").onclick = () => commit(true);
   $("stage-all").onclick = () => change("add", "--all");
   $("unstage-all").onclick = () => change("reset", "--quiet");
-  $("diff-close").onclick = () => closeDiff();
+  $("diff-close").onclick = closeDiff;
   $("commit-message").onkeydown = (e) => {
     if (e.key === "Enter" && e.metaKey) commit(false);
   };

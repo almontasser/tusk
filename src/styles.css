@@ -326,6 +326,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .tabs .tab.dirty .close::before { content: "\ea71"; font-size: 10px; color: var(--text); }
 .tabs .tab.dirty:hover .close::before { content: "\ea76"; font-size: 14px; color: inherit; }
 #terminal-tabs .tab.exited { font-style: italic; }
+#terminal-tabs .new-terminal { align-self: center; flex-shrink: 0; margin: 0 6px; }
 #terminal-tabs .tab > .codicon { font-size: 14px !important; color: var(--faint); }
 #terminal-tabs .tab.active > .codicon { color: var(--muted); }
 
@@ -410,7 +411,10 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
    Palette, menus, dialogs, toasts
    ========================================================================== */
 
-#palette { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); background: var(--panel); border-radius: 10px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); z-index: 100; overflow: hidden; }
+/* The input stays put as the list grows, and the full-height palette sits in the middle of the window. */
+#palette { position: fixed; top: max(56px, calc(50vh - 260px)); left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); background: var(--panel); border-radius: 10px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); z-index: 100; overflow: hidden; }
+#palette.dropdown { transform: none; width: 480px; }
+#palette.dropdown input { padding: 8px 12px; font-size: 13px; }
 #palette input { width: 100%; padding: 12px 14px; font-size: 15px; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; }
 #palette ul { list-style: none; margin: 0; padding: 4px; max-height: 440px; overflow-y: auto; }
 #palette ul:empty { display: none; }
@@ -468,6 +472,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 /* A panel tab moved into an editor pane covers the pane's editor, under the drop marks. */
 /* Borders rather than padding, since xterm's fit measures the element's content box. */
 .pane-editor > .docked { position: absolute; inset: 0; z-index: 9; border: solid var(--bg); border-width: 6px 0 0 10px; background: var(--bg); overflow: hidden; }
+.pane-editor > .docked:is(#diff, #merge, #problem-page, #history) { border-width: 0; }
 
 /* ==========================================================================
    Commit view
@@ -559,7 +564,6 @@ button.link:hover { text-decoration: underline; }
 .pr-comment-form textarea { width: 100%; box-sizing: border-box; resize: none; font: var(--ui); }
 .pr-comment-form .pr-actions { margin-top: 6px; }
 .pr-files .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .pr-comment { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .pr-body { overflow-wrap: anywhere; margin-top: 4px; -webkit-user-select: text; user-select: text; line-height: 1.5; }
 .markdown > :first-child { margin-top: 0; }
@@ -591,7 +595,6 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 #history-title { font-weight: 600; white-space: nowrap; }
 #history-filter { flex: 1; max-width: 380px; height: 26px; }
 #history header label { color: var(--muted); white-space: nowrap; }
-#history-close { margin-left: auto; }
 .history-body { flex: 1; min-height: 0; display: flex; }
 .history-commits { width: 50%; overflow: auto; border-right: 1px solid var(--border); }
 #history-list { list-style: none; margin: 0; padding: 0; }
@@ -1098,6 +1101,8 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .composer-package .update.safe { color: var(--green); }
 .composer-package .update.major { color: var(--yellow); }
 .composer-package .badge.warn { color: var(--orange); }
+.composer-package .badge.danger { color: var(--red); }
+.composer-package .via { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ==========================================================================
    Merge tool

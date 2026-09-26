@@ -143,8 +143,8 @@ The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle
 
 ## The window
 
-- **Title bar:** the project name (click it to switch to a recent project or open
-  a folder), the current branch and its pull request, a **Search everywhere**
+- **Title bar:** the project name (click it for a dropdown to switch to a
+  recent project or open a folder), the current branch and its pull request, a **Search everywhere**
   box, and buttons for the debug server, the terminal, and settings.
 - **Tool bar on the left:** icons for the **Project**, **Commit**, **Pull
   Requests**, and **Find** views. Click the active icon to hide the sidebar,
@@ -319,7 +319,12 @@ as the terminals, **Tests**, and **Problems**, work the same way: right-click
 one to close it, the others, or all; middle-click to close it; and drag it along
 the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in the
 panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
-select all, or clear it.
+select all, or clear it. Click **+** at the end of the panel's tab bar for a
+new terminal. The terminal button shows the last terminal you used, or opens
+one, even while another panel tab shows.
+
+Diffs, the merge tool, and problem pages open as editor tabs, so your other tabs
+stay in view. The Git Log opens in the bottom panel.
 
 Drag a panel tab into the editor area to open it as an editor tab: onto a
 pane's tabs or editor to add it there, or onto the edge of a pane's editor to
@@ -848,12 +853,19 @@ dependencies need, marked **indirect**.
 An update shows in green when it fits the version constraint in
 `composer.json`, and in yellow when it needs a new constraint.
 
-- Click a package to update it, upgrade it to its latest version (which
-  changes the constraint), remove it, or open it on Packagist. An indirect
-  package can only be updated within its constraints.
-- Click a package, then **Why Is It Installed?**, to list the packages that
-  require it, with their version constraints. Choose one of them to see why
-  that one is installed, up to `composer.json`.
+- Click or right-click a package to update it, upgrade it to its latest version
+  (which changes the constraint), remove it, or open it on Packagist. An
+  indirect package can only be updated within its constraints.
+- An indirect package shows the packages that require it under its name. Click
+  it, then **Why Is It Installed?**, to list them with their version
+  constraints. Choose one of them to see why that one is installed, up to
+  `composer.json`.
+- `composer audit` checks installed packages for security advisories. A package
+  with one is marked **advisory**; click it to open the advisory.
+- A direct dependency is marked **unused?** when no PHP file in the project
+  names its namespace. It may still be used through Laravel's package
+  discovery, a helper function, or configuration, so check before you remove
+  it. Plugins and command-line tools, such as Pint, aren't checked.
 - Click **+** to search Packagist and require a package, as a dependency or a
   dev dependency.
 - Click the arrow to run `composer update` for everything.
@@ -1155,7 +1167,7 @@ last changed it, when, and the commit message. To show the commit, age, and
 author of every line in place of line numbers, run **Annotate with Git Blame**
 from ⌘⇧A. Run it again to hide them.
 
-Press ⌘9 for the **Git Log**: the commits of the current branch, or of every
+Press ⌘9 for the **Git Log** in the bottom panel: the commits of the current branch, or of every
 branch, with branch and tag labels. Filter them by message, author, hash, or
 branch name. Select a commit to see its message and changed files, and click a
 file to see its diff against the previous commit. From a commit, you can copy
@@ -1236,10 +1248,12 @@ open in a tab, and saving it with no conflicts left also marks it resolved.
 For a merge, the commit message is filled in, so you can click **Commit** to
 finish.
 
-The branch name in the status bar shows commits ahead (↑) and behind (↓) the
-upstream branch. Click it to check out a local or remote branch, create a
-branch from the name you type, or pull, push, and fetch. Pull, push, and fetch
-run in a terminal tab, so you can answer credential prompts.
+The branch name in the title bar shows commits ahead (↑) and behind (↓) the
+upstream branch. Click it for a dropdown with pull, push, and fetch at the top,
+then the current branch, local branches, and remote branches, most recently
+committed first. Choose a branch to check it out, or type a name to create one.
+The **Commit** view's header also has fetch, pull, and push buttons. Pull, push,
+and fetch run in a terminal tab, so you can answer credential prompts.
 
 ## Pull requests
 
@@ -1552,8 +1566,8 @@ the checker's notes as paragraphs, and the checker and rule below it, such as
 and the line and column. **Show Details** in that popup, or the button at the
 end of a row in the Problems panel, shows the problem on a page of its own: the
 whole message, with long types such as array shapes laid out one key per line,
-the code around the problem, and **Go to Code**. Escape closes the page and
-brings back the view it covered, such as a diff. For a Mago lint problem, the page
+the code around the problem, and **Go to Code**. The page opens as an editor
+tab, and Escape closes it. For a Mago lint problem, the page
 also shows Mago's explanation of the rule under **About this rule**.
 
 To see the cursor line's worst problem at the end of the line, as the Error Lens

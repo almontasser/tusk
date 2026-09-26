@@ -71,9 +71,9 @@ let close: (() => void) | null = null;
 /**
  * Opens the picker. `source` runs on every query change, after `delay` ms for slow sources.
  * `initial` prefills the input, optionally selecting part of it (such as a file name without its extension).
- * `onCancel` runs when the picker closes without a choice.
+ * `onCancel` runs when the picker closes without a choice. With `anchor`, it opens as a dropdown below that element.
  */
-export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number]; onCancel?: () => void }) {
+export function pick(placeholder: string, source: Source, delay = 0, initial?: { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement }) {
   close?.();
   lowered.clear();
   const overlay = document.createElement("div");
@@ -84,6 +84,12 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: {
   const list = document.createElement("ul");
   list.role = "listbox";
   overlay.append(input, list);
+  if (initial?.anchor) {
+    const r = initial.anchor.getBoundingClientRect();
+    overlay.className = "dropdown";
+    overlay.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 488))}px`;
+    overlay.style.top = `${r.bottom + 4}px`;
+  }
   document.body.append(overlay);
 
   let items: Item[] = [];

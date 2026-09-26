@@ -483,7 +483,7 @@ async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: {
     const show = (spec: string) => git("show", spec).catch(() => "");
     const [original, modified] = await Promise.all([show(`${mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
-    diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, undefined, action);
+    diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
     host.status("");
   } catch (e) {
     return host.status(`Can't show the diff: ${String(e).trim()}`);

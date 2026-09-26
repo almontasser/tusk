@@ -13,7 +13,7 @@ import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readT
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
-import { closeMerge, initMerge, openMerge } from "./merge";
+import { initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
 import { detectAppAddress } from "./httplaravel";
 import { editEnvironments } from "./httpenv";
@@ -23,12 +23,12 @@ import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
-import { closeProblemPage, followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
+import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, showMenu } from "./files";
-import { hideHistory, initHistory, showFileHistory, showLog } from "./history";
+import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
@@ -41,7 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -312,13 +312,13 @@ $("empty-editor").addEventListener("drop", (e) => {
 
 // Drag a panel tab from a pane back onto the panel's tab bar.
 $("terminal-tabs").addEventListener("dragover", (e) => {
-  if (!draggedTab?.path || !isView(draggedTab.path)) return;
+  if (!draggedTab?.path || !isView(draggedTab.path) || views.get(draggedTab.path)?.editorOnly) return;
   e.preventDefault();
   clearDropMarks();
   (e.target as HTMLElement).closest(".tab")?.classList.add("drop-before");
 }, true);
 $("terminal-tabs").addEventListener("drop", (e) => {
-  if (!draggedTab?.path || !isView(draggedTab.path) || !draggedTab.from) return;
+  if (!draggedTab?.path || !isView(draggedTab.path) || !draggedTab.from || views.get(draggedTab.path)?.editorOnly) return;
   e.preventDefault();
   e.stopPropagation();
   const { path, from } = draggedTab;
@@ -331,11 +331,25 @@ $("terminal-tabs").addEventListener("drop", (e) => {
   renderTabs();
 }, true);
 
+const viewPath = (tab: PanelTab) => [...views].find(([, t]) => t === tab)?.[0];
 initDocking({
+  root: () => root || "/",
   reveal(tab) {
-    const path = [...views].find(([, t]) => t === tab)?.[0];
+    const path = viewPath(tab);
     const pane = path && panes.find((p) => p.paths.includes(path));
     if (pane) focusPane(pane), openFile(path);
+  },
+  // A view such as a diff opens as a tab in the focused pane, or shows where it already is.
+  open(tab) {
+    const path = viewPath(tab) ?? addView(tab);
+    const pane = panes.find((p) => p.paths.includes(path));
+    if (pane) focusPane(pane);
+    openFile(path);
+  },
+  close(tab) {
+    const path = viewPath(tab);
+    const pane = path && panes.find((p) => p.paths.includes(path));
+    if (pane) closeTab(path, pane);
   },
 });
 
@@ -439,9 +453,11 @@ async function openFolder(dir: unknown = null) {
   saveSession();
   for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
-  for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), dockBack(tab);
+  // Terminals go back to the panel; editor-only views, such as a diff, belong to the old project.
+  for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), tab.editorOnly ? closeDocked(tab) : dockBack(tab);
   // The old project's shells and servers belong to it; the new project's session reopens its own.
   closeTerminals();
+  closeView($("history"));
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
@@ -736,7 +752,7 @@ function projectItem(dir: string): Item {
 /** The project name in the title bar: switch to a recent project or open a folder. */
 function projectMenu() {
   const items = [{ label: "Open Folder…", icon: "codicon-folder-opened", run: () => openFolder() }, ...recentProjects().filter((d) => d !== root).map(projectItem)];
-  pick("Open a recent project", (q) => rank(q, items));
+  pick("Open a recent project", (q) => rank(q, items), 0, { value: "", anchor: $("project-menu") });
 }
 
 function showWelcome() {
@@ -833,11 +849,6 @@ function addTab(path: string, model: monaco.editor.ITextModel) {
 
 async function openFile(path: string) {
   if (!tabs.has(path) && !isView(path)) addTab(path, await ensureModel(path));
-  // First, since it shows the view it covered, which the next lines then close.
-  closeProblemPage();
-  closeDiff(false);
-  closeMerge();
-  hideHistory();
   if (!isView(path)) recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
   renderTabs();
@@ -1033,7 +1044,9 @@ function renderTabs() {
             { label: "Close", run: () => closeTab(path, pane) },
             { label: "Close Others", run: () => closeAll(path) },
             { label: "Close All", run: () => closeAll() },
-            ...(view
+            ...(view?.editorOnly
+              ? []
+              : view
               ? ["-" as const, { label: "Move to Panel", run: () => (views.delete(path), leave(pane, path), dockBack(view), saveSoon(), renderTabs()) }]
               : [
                   "-" as const,
@@ -1630,11 +1643,11 @@ initLocalHistory({
   root: () => root,
   status,
   showDiff: (path, original, modified, label, action) =>
-    showDiff(path, original, modified, label, undefined, {
+    showDiff(path, original, modified, label, {
       label: action.label,
       run: async () => {
         await action.run();
-        closeDiff(false);
+        closeDiff();
         openFile(`${root}/${path}`);
       },
     }),

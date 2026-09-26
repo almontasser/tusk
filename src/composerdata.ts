@@ -49,3 +49,43 @@ export function dependents(out: string): Dependent[] {
     constraint: m[4],
   }));
 }
+
+type Locked = { name: string; type?: string; bin?: string[]; require?: Record<string, string>; autoload?: { "psr-4"?: Record<string, unknown>; "psr-0"?: Record<string, unknown> } };
+const lockedPackages = (lock: string): Locked[] => {
+  const json = JSON.parse(lock);
+  return [...(json.packages ?? []), ...(json["packages-dev"] ?? [])];
+};
+
+/** For each package in composer.lock, the other locked packages that require it. */
+export function requiredBy(lock: string): Map<string, string[]> {
+  const by = new Map<string, string[]>();
+  for (const p of lockedPackages(lock)) for (const dep of Object.keys(p.require ?? {})) by.set(dep, [...(by.get(dep) ?? []), p.name]);
+  return by;
+}
+
+/**
+ * The direct dependencies that code would name, each with a regex that finds any of its namespaces, such as
+ * `\bSpatie\\{1,2}Permission\b`, which also matches the doubled backslashes in strings. Plugins, command-line
+ * tools, and packages without a namespace are left out: no code names them, so their absence says nothing.
+ */
+export function namespaceChecks(lock: string, composerJson: string): { name: string; pattern: string }[] {
+  const json = JSON.parse(composerJson);
+  const direct = new Set([...Object.keys(json.require ?? {}), ...Object.keys(json["require-dev"] ?? {})]);
+  return lockedPackages(lock)
+    .filter((p) => direct.has(p.name) && !p.bin?.length && !["composer-plugin", "metapackage", "phpstan-extension"].includes(p.type ?? ""))
+    .map((p) => {
+      const namespaces = [...Object.keys(p.autoload?.["psr-4"] ?? {}), ...Object.keys(p.autoload?.["psr-0"] ?? {})]
+        .map((ns) => ns.split("\\").filter(Boolean).join("\\\\{1,2}"))
+        .filter(Boolean);
+      return { name: p.name, pattern: namespaces.length ? `\\b(?:${[...new Set(namespaces)].join("|")})\\b` : "" };
+    })
+    .filter((c) => c.pattern);
+}
+
+export type Advisory = { title: string; cve?: string; severity?: string; link?: string; affectedVersions?: string };
+
+/** Reads `composer audit --format=json`: security advisories by package. Composer writes an empty list as `[]`. */
+export function advisories(out: string): Map<string, Advisory[]> {
+  const found = JSON.parse(out).advisories ?? {};
+  return new Map(Array.isArray(found) ? [] : Object.entries(found).map(([name, list]) => [name, Object.values(list as Record<string, Advisory>)]));
+}

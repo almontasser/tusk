@@ -10,7 +10,7 @@ import { onTheme } from "./themes";
 /** What reopens a terminal tab with the project: a shell (no `command`) in its last folder, or a command to run again. */
 export type Restore = { title: string; cwd: string; command?: string[] };
 /** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore };
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore; icon?: string; editorOnly?: boolean };
 /** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
 export type PanelTab = Session;
 
@@ -18,7 +18,7 @@ const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
 /** Tabs dragged into an editor pane. They keep running there; the editor shows and closes them. */
 const docked: Session[] = [];
-let editorHost: { reveal(tab: PanelTab): void } = { reveal() {} };
+let editorHost: { root(): string; reveal(tab: PanelTab): void; open(tab: PanelTab): void; close(tab: PanelTab): void } = { root: () => "/", reveal() {}, open() {}, close() {} };
 let active: Session | undefined;
 let panelVisible = false;
 // Whether you last clicked or focused inside the panel, so ⌘W closes a panel tab instead of an editor tab.
@@ -140,9 +140,9 @@ function close(session: Session) {
 }
 
 // Icons for the panel's views by title; terminal tabs all get the terminal icon.
-export const tabIcon = (s: Session) => (s.term ? "terminal" : (viewIcons[s.title] ?? "globe"));
+export const tabIcon = (s: Session) => s.icon ?? (s.term ? "terminal" : (viewIcons[s.title] ?? "globe"));
 const viewIcons: Record<string, string> = {
-  Problems: "warning", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
+  Problems: "warning", "Git Log": "history", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
 };
 
 // Drag a tab onto another to put it before that one, or onto the bar's empty end to put it last.
@@ -214,7 +214,7 @@ export function focusTab(s: Session) {
 function renderTabs() {
   // The activity bar's panel buttons light up while their view is the one showing.
   const showing = panelVisible && active ? (active.term ? "Terminal" : active.title) : "";
-  for (const [panel, title] of [["problems", "Problems"], ["debug", "Debug"], ["terminal", "Terminal"]])
+  for (const [panel, title] of [["problems", "Problems"], ["log", "Git Log"], ["debug", "Debug"], ["terminal", "Terminal"]])
     document.querySelector(`#activitybar [data-panel="${panel}"]`)?.classList.toggle("on", showing === title);
   $("terminal-tabs").replaceChildren(
     ...sessions.map((s) => {
@@ -243,8 +243,15 @@ function renderTabs() {
       tab.append(x);
       return tab;
     }),
+    newTerminal,
   );
 }
+
+const newTerminal = document.createElement("button");
+newTerminal.className = "icon-button new-terminal";
+newTerminal.title = "New Terminal";
+newTerminal.innerHTML = '<span class="codicon codicon-add"></span>';
+newTerminal.onclick = () => openTerminal(editorHost.root());
 
 function showPanel(visible: boolean) {
   panelVisible = visible;
@@ -253,12 +260,38 @@ function showPanel(visible: boolean) {
   renderTabs();
 }
 
-/** Shows the panel, focusing the terminal, or hides it when a terminal has focus. */
+/**
+ * Shows the last terminal you used, or a new one, and focuses it. Hides the panel instead when a terminal
+ * is showing and has focus.
+ */
 export function toggleTerminal(cwd: string) {
-  if (!sessions.length) return openTerminal(cwd);
-  const focused = active?.el.contains(document.activeElement);
-  showPanel(!focused || !panelVisible);
-  if (panelVisible) activate(active);
+  if (panelVisible && active?.term && active.el.contains(document.activeElement)) return showPanel(false);
+  const term = active?.term ? active : [...sessions].reverse().find((s) => s.term);
+  if (!term) return openTerminal(cwd);
+  showPanel(true);
+  activate(term);
+}
+
+/** Keeps a closed view's element in the document, hidden, so lookups by ID still find it the next time it opens. */
+const park = (el: HTMLElement) => ((el.hidden = true), el.classList.remove("docked"), document.body.append(el));
+
+/** Shows a view as an editor tab, adding the tab the first time. `onClose` runs when its tab closes. */
+export function showEditorView(title: string, el: HTMLElement, icon: string, onClose: () => void) {
+  let s = docked.find((d) => d.el === el);
+  if (!s) {
+    s = { title, el, icon, editorOnly: true, exited: false, dispose: () => (park(el), onClose()) };
+    docked.push(s);
+  }
+  s.title = title;
+  editorHost.open(s);
+}
+
+/** Closes the tab that shows `el`, in the panel or in an editor pane. */
+export function closeView(el: HTMLElement) {
+  const inPanel = sessions.find((s) => s.el === el);
+  if (inPanel) return close(inPanel);
+  const inEditor = docked.find((s) => s.el === el);
+  if (inEditor) editorHost.close(inEditor);
 }
 
 /** Shows a view as a panel tab, adding the tab the first time. `onClose` runs when its tab closes. */
@@ -270,7 +303,7 @@ export function showPanelView(title: string, el: HTMLElement, onClose: () => voi
   if (!session) {
     el.classList.add("panel-view");
     $("terminals").append(el);
-    session = { title, el, exited: false, dispose: () => (el.remove(), onClose()) };
+    session = { title, el, exited: false, dispose: () => (park(el), onClose()) };
     sessions.push(session);
   }
   session.title = title;

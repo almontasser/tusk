@@ -3,6 +3,7 @@ import { change, git, showDiff } from "./git";
 import { age, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
 import { confirm, pick } from "./palette";
 import { interactiveRebase } from "./rebase";
+import { showPanelView } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
 
@@ -23,7 +24,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
 
 // ---- Opening and closing ----
 
-/** Shows the log of the current branch, or of every branch, in place of the editor. */
+/** Shows the log of the current branch, or of every branch, in the bottom panel. */
 export function showLog() {
   file = undefined;
   return open();
@@ -40,25 +41,13 @@ async function open() {
   if (!host.root()) return;
   $("history-title").textContent = file ? `History of ${file}` : "Git Log";
   $("history-all").parentElement!.hidden = !!file;
-  $("editor").hidden = true;
-  $("diff").hidden = true;
   $("history").hidden = false;
+  showPanelView(file ? `History of ${file.split("/").pop()}` : "Git Log", $("history"));
   commits = [];
   selected = undefined;
   $("history-detail").replaceChildren(el("p", "muted", "Select a commit."));
   await load();
 }
-
-export function hideHistory() {
-  if ($("history").hidden) return;
-  $("history").hidden = true;
-  $("editor").hidden = false;
-}
-
-const reopen = () => {
-  $("editor").hidden = true;
-  $("history").hidden = false;
-};
 
 // ---- Log ----
 
@@ -158,7 +147,7 @@ async function diff(c: Commit, f: ChangedFile) {
   const show = (spec: string) => git("show", spec).catch(() => "");
   const before = c.parents[0] && f.status !== "A" ? await show(`${c.parents[0]}:${f.from ?? f.path}`) : "";
   const after = f.status === "D" ? "" : await show(`${c.hash}:${f.path}`);
-  showDiff(f.path, before, after, `${c.short} ${c.subject}`, reopen);
+  showDiff(f.path, before, after, `${c.short} ${c.subject}`);
 }
 
 async function confirmThen(action: string, question: string, ...args: string[]) {
@@ -177,7 +166,6 @@ function newBranch(c: Commit) {
 
 export function initHistory(h: Host) {
   host = h;
-  $("history-close").onclick = hideHistory;
   let filterTimer: ReturnType<typeof setTimeout> | undefined;
   $("history-filter").oninput = () => (clearTimeout(filterTimer), (filterTimer = setTimeout(render, 150)));
   $("history-all").onchange = () => ((commits = []), load());

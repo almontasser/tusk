@@ -9,7 +9,7 @@ import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, PHPACTOR_INDEX } from "./lsp";
 import { settings, onSettings } from "./settings";
-import { showPanelView } from "./terminal";
+import { closeView, showEditorView, showPanelView } from "./terminal";
 
 type Host = {
   root(): string;
@@ -469,7 +469,6 @@ export function initProblems(h: Host) {
 
 const page = document.createElement("div");
 page.id = "problem-page";
-page.hidden = true;
 let excerpt: monaco.editor.IStandaloneCodeEditor | undefined;
 let excerptDecorations: monaco.editor.IEditorDecorationsCollection | undefined;
 
@@ -511,9 +510,9 @@ function ruleDescription(code: string) {
 
 /** Shows a problem on a page in the editor area: its whole message, the code around it, and a link to the code. */
 export async function showProblemPage(p: Problem & { path: string }) {
-  if (!page.isConnected) {
-    document.querySelector("#workbench main")!.insertBefore(page, document.getElementById("panel"));
-    addEventListener("keydown", (e) => e.key === "Escape" && !page.hidden && closeProblemPage(), true);
+  if (!escapeCloses) {
+    escapeCloses = true;
+    addEventListener("keydown", (e) => e.key === "Escape" && page.isConnected && !page.hidden && closeProblemPage(), true);
   }
   const root = host.root();
   const header = document.createElement("header");
@@ -548,10 +547,8 @@ export async function showProblemPage(p: Problem & { path: string }) {
       body.append(heading, ...about.split(/\n\s*\n/).map((para) => messageLine(para.replace(/\s*\n\s*/g, " ").trim(), "problem-page-note")));
     });
   page.replaceChildren(header, body);
-  const views = [...document.querySelectorAll<HTMLElement>("#editor, #diff, #history, #merge")];
-  if (page.hidden) covered = views.filter((e) => !e.hidden);
-  views.forEach((e) => (e.hidden = true));
-  page.hidden = false;
+  clearExcerpt();
+  showEditorView(`${p.path.split("/").pop()}:${p.range.startLineNumber}`, page, level(p.severity), clearExcerpt);
 
   // The code around the problem, read only, with the problem's range highlighted. A separate scheme keeps the
   // copy away from the language servers.
@@ -590,17 +587,15 @@ export async function showProblemPage(p: Problem & { path: string }) {
   ]);
 }
 
-export function closeProblemPage() {
-  if (page.hidden) return;
-  page.hidden = true;
+const closeProblemPage = () => closeView(page);
+let escapeCloses = false;
+
+function clearExcerpt() {
   excerptDecorations?.clear();
   excerpt?.getModel()?.dispose();
   excerpt?.dispose();
   excerpt = undefined;
-  covered.forEach((e) => (e.hidden = false));
 }
-/** The views the problem page hid, which closing it shows again. */
-let covered: HTMLElement[] = [];
 
 // The hover's Show Details link (lsp.ts).
 monaco.editor.registerCommand("problems.openPage", (_, p: Problem & { path: string }) => showProblemPage(p));

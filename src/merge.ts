@@ -6,6 +6,7 @@ import { accept, acceptAll, type Choice, decorateConflicts } from "./conflicts";
 import { createEditor, monaco } from "./editor";
 import { alignmentGaps, lineChanges, parseConflicts } from "./gitparse";
 import { addEditor } from "./settings";
+import { closeView, showEditorView } from "./terminal";
 
 type Host = {
   root(): string;
@@ -134,7 +135,7 @@ function updateCount() {
 
 /** Opens the merge view for a conflicted file (relative to the project). */
 export async function openMerge(rel: string) {
-  closeMerge();
+  clearMerge();
   if (!panes) createPanes();
   const path = `${host.root()}/${rel}`;
   const [base, ours, theirs, model] = await Promise.all([show(`:1:${rel}`), show(`:2:${rel}`), show(`:3:${rel}`), host.ensureModel(path)]);
@@ -148,13 +149,14 @@ export async function openMerge(rel: string) {
   current = { rel, path, sides, listener: model.onDidChangeContent(updateCount) };
   $("merge-path").textContent = rel;
   updateCount();
-  document.querySelectorAll<HTMLElement>("#editor, #history, #diff").forEach((e) => (e.hidden = true));
-  $("merge").hidden = false;
+  showEditorView(`${rel.split("/").pop()} (merge)`, $("merge"), "git-merge", clearMerge);
   align();
   panes!.result.focus();
 }
 
-export function closeMerge() {
+const closeMerge = () => closeView($("merge"));
+
+function clearMerge() {
   if (!current) return;
   current.listener.dispose();
   panes?.ours.setModel(null);
@@ -163,8 +165,6 @@ export function closeMerge() {
   current.sides.forEach((m) => m.dispose());
   current = null;
   for (const ed of [panes?.ours, panes?.result, panes?.theirs]) if (ed) setZones(ed, []);
-  $("merge").hidden = true;
-  $("editor").hidden = false;
 }
 
 async function markResolved() {

@@ -579,7 +579,8 @@ handles: a page in the editor area, like the diff view, with the message
 (`messageParts`; code longer than 60 characters goes in a block, laid out by
 `formatType` with one array-shape key per line), a read-only editor showing
 four lines around the problem with its range underlined (a `problem` scheme
-keeps it from the language servers), and Go to Code. Opening a file closes it.
+keeps it from the language servers), and Go to Code. It opens as an editor tab
+(`showEditorView`).
 The page remembers which of the editor, diff, history, and merge views it hid,
 and closing it shows those again. For a `mago-lint` problem, the page adds an
 **About this rule** section with the rule's description from
@@ -1094,7 +1095,16 @@ packages. **All installed packages** drops `--direct` from both commands.
 **Why Is It Installed?** runs `composer why <package>`, which has no JSON
 output, so `dependents` reads its text rows (`<name> <version> requires
 <package> (<constraint>)`); the project itself is the row whose version is
-`-`. Packagist search goes through curl, like
+`-`. The list also reads `composer.lock`: `requiredBy` gives each indirect
+package's "via" line without running `composer why` per package.
+`composer audit --format=json` runs beside `composer outdated`, with any exit
+status accepted, since it fails when it finds advisories; `advisories` reads it
+(Composer writes an empty map as `[]`). For **unused?**, `namespaceChecks`
+turns each direct dependency's PSR-4 and PSR-0 namespaces into one regex that
+also matches the doubled backslashes in strings, and `files_matching` runs it
+over the project's PHP files, one package at a time. Plugins, metapackages,
+PHPStan extensions, packages with a `bin`, and packages without a namespace
+are skipped, since code never names them. Packagist search goes through curl, like
 the HTTP client. Commands that change packages run in terminal tabs, and the
 tab's exit reloads the list. The `composer.lock` change they cause also
 reindexes Phpactor.
@@ -1513,6 +1523,12 @@ dropped if a newer one already ran. `fuzzy` scores a subsequence match and
 favors consecutive letters and letters that start a word, such as the `P` and
 `C` in `PostController`. `src/palette.test.ts` covers it.
 
+The palette's input sits where the full-height palette would be centered
+(`top: max(56px, calc(50vh - 260px))`) and the list grows down from it.
+Centering the box as it is would move the input on every keystroke that
+changes the number of results. With `anchor`, `pick` opens as a dropdown below
+an element instead, as the project and branch buttons do.
+
 Go to file, Search everywhere, and Compare with file open the picker at once
 and fill it in when `list_files` returns, instead of waiting for the project
 walk first. The Pull Requests, Composer, and Database views keep their last
@@ -1616,9 +1632,17 @@ over the editor, and hides the others; the editor has no model meanwhile.
 `activeFile()` is `""` while a view shows, so file actions, the breadcrumbs,
 and the project tree ignore it. When code calls `showPanelView` for a view in a
 pane, `terminal.ts` asks the editor to reveal that tab instead of adding a
-second one. The session doesn't save views in panes: `runningTerminals`
+second one. `showEditorView` opens a view straight in an editor tab
+(`editorOnly`), as the diff, the merge tool, and the problem page do; such
+tabs have no **Move to Panel** and can't be dragged to the panel. `closeView`
+closes whichever tab shows an element. A closed view's element is hidden and
+moved back under `body` rather than removed, since its module finds its parts
+by ID. The panel's **+** opens a terminal, and the terminal button shows the
+last terminal (not whatever panel tab is active) or opens one, hiding the
+panel only when a terminal has focus. The session doesn't save views in panes: `runningTerminals`
 includes docked terminals, which reopen in the panel. Opening another project
-moves every view back to the panel first, so `closeTerminals` reaches them.
+moves every view back to the panel first, so `closeTerminals` reaches them, and
+closes editor-only views and the Git Log.
 
 When the app exits, the operating system closes the pseudo-terminals, and the
 processes in them receive `SIGHUP`. Terminal processes don't need the language
@@ -1794,8 +1818,8 @@ The commit view splits files by `git status` letter: a file with an index
 letter is staged, and a file with a working tree letter has unstaged changes.
 A file can be in both lists.
 
-The diff view is a Monaco diff editor that replaces the code editor until you
-close it or open a file. A staged change compares `HEAD` with the index, and an
+The diff view is a Monaco diff editor in an editor tab, which each new diff
+reuses. A staged change compares `HEAD` with the index, and an
 unstaged change compares the index with the file on disk. Both sides are
 read-only models with a `git` URI scheme, so the language servers ignore them.
 
@@ -1858,7 +1882,8 @@ stops read-only commands from writing the index and breaks the loop.
 
 ### History
 
-`src/history.ts` shows the log in place of the editor, like the diff view. It
+`src/history.ts` shows the log as a bottom panel tab (`showPanelView`), as
+PhpStorm does, so the editor tabs stay in view. It
 reads `git log` in pages of 300 with a format of unit-separated fields
 (`LOG_FORMAT`), parsed by `parseLog`. File history adds `--follow` to track
 renames; `--follow` accepts only one file, so a folder's history runs without
@@ -1999,8 +2024,9 @@ id, and the button under the pointer is found by position.
 
 The branch picker reads `git for-each-ref` with full ref names, which tell
 local branches (`refs/heads/`) from remote ones (`refs/remotes/`) even when a
-local name contains a slash. Checking out a remote branch runs
-`git checkout --track`.
+local name contains a slash. It sorts by `-committerdate`, then puts the
+current branch first and local branches before remote ones. Checking out a
+remote branch runs `git checkout --track`.
 
 ### Pull requests
 
@@ -3319,3 +3345,11 @@ rows line up with the file rows. Panel tabs have icons, and the activity bar's
 Problems, Debug, and Terminal buttons show when their view is open. An empty
 Problems panel says why it's empty. Context menus take the arrow keys and Enter.
 
+### 2026-09-26: Views open as tabs, not in place of the editor
+
+The diff, the merge tool, the problem page, and the Git Log used to hide the
+whole editor area, tab bars included, and closing one had to remember what it
+covered. Now the diff, merge, and problem page are editor tabs through the
+`view:N` paths that docked panel tabs already used, and the Git Log is a panel
+tab, as in PhpStorm. Switching away is a tab click, and nothing needs to
+restore a covered view.

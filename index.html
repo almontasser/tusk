@@ -56,7 +56,14 @@
         </section>
 
         <section id="view-commit" hidden>
-          <header class="view-header"><span>Commit</span></header>
+          <header class="view-header">
+            <span>Commit</span>
+            <div class="view-actions">
+              <button class="icon-button" id="git-fetch" title="Fetch (git fetch)"><span class="codicon codicon-sync"></span></button>
+              <button class="icon-button" id="git-pull" title="Update Project (git pull, ⌘T)"><span class="codicon codicon-arrow-down"></span></button>
+              <button class="icon-button" id="git-push" title="Push (git push, ⌘⇧K)"><span class="codicon codicon-arrow-up"></span></button>
+            </div>
+          </header>
           <p id="git-empty" class="empty-note">This folder isn't a git repository.</p>
           <div id="git-changes">
             <div id="git-operation" hidden><span></span><button id="operation-continue">Continue</button><button id="operation-abort">Abort</button></div>
@@ -204,7 +211,6 @@
             <span id="history-title">Git Log</span>
             <input id="history-filter" placeholder="Filter by message, author, hash, or branch" aria-label="Filter commits" spellcheck="false" />
             <label><input type="checkbox" id="history-all" /> All branches</label>
-            <button class="icon-button" id="history-close" aria-label="Close history" title="Close"><span class="codicon codicon-close"></span></button>
           </header>
           <div class="history-body">
             <div class="history-commits">

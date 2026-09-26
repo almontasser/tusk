@@ -1,8 +1,9 @@
 // Composer tool window: the project's packages (direct ones, or everything installed) with available updates,
-// why each is installed, and actions to require, update, and remove packages. Commands use the bundled
+// security advisories, direct dependencies no PHP file names, why each is installed, and actions to require,
+// update, and remove packages. Commands use the bundled
 // composer.phar and run in terminal tabs.
 import { invoke } from "@tauri-apps/api/core";
-import { dependents, packages, type Package } from "./composerdata";
+import { type Advisory, advisories, dependents, namespaceChecks, packages, type Package, requiredBy } from "./composerdata";
 import { confirm, pick } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -49,30 +50,83 @@ export async function loadPackages() {
     return list.replaceChildren(el("li", "muted", `Can't list packages: ${String(e).trim()}. Run composer install first.`));
   }
   if (load !== loads) return;
-  render(packages(show, null, json));
-  // Checking for updates asks Packagist, so it comes second.
-  $("composer-summary").textContent = "Checking for updates…";
-  const outdated = await capture("outdated", ...scope, "--format=json").catch(() => null);
+  const lock = await invoke<string>("read_file", { path: `${host.root()}/composer.lock` }).catch(() => null);
+  const info: Info = { via: lock ? requiredBy(lock) : new Map(), advisories: new Map(), unused: new Set() };
+  render(packages(show, null, json), info);
+  // Updates and advisories come from Packagist, and the unused check reads the project, so they come second.
+  $("composer-summary").textContent = "Checking for updates and advisories…";
+  const [outdated, audit, unused] = await Promise.all([
+    capture("outdated", ...scope, "--format=json").catch(() => null),
+    // Audit exits with an error status when it finds advisories.
+    invoke<string>("run_capture", { cwd: host.root(), program: "php", args: [composer, "audit", "--format=json", "--abandoned=ignore", "--no-interaction"], input: null, anyStatus: true }).catch(() => null),
+    lock ? unreferenced(lock, json) : new Set<string>(),
+  ]);
   if (load !== loads) return;
   const all = packages(show, outdated, json);
-  render(all);
+  let audited = false;
+  try {
+    info.advisories = advisories(audit ?? "");
+    audited = true;
+  } catch {}
+  info.unused = unused;
+  render(all, info);
   const updates = all.filter((p) => p.latest).length;
-  $("composer-summary").textContent = outdated === null ? "Couldn't check for updates." : updates ? `${updates} ${updates === 1 ? "update" : "updates"} available` : "Everything is up to date.";
+  const vulnerable = info.advisories.size;
+  $("composer-summary").textContent = [
+    !audited ? "Couldn't check for advisories." : vulnerable ? `${vulnerable} ${vulnerable === 1 ? "package has" : "packages have"} security advisories.` : "No security advisories.",
+    outdated === null ? "Couldn't check for updates." : updates ? `${updates} ${updates === 1 ? "update" : "updates"} available.` : "Everything is up to date.",
+    unused.size ? `${unused.size} not named in any PHP file.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
-function render(list: Package[]) {
+/** What the list shows beside each package: who requires it, its advisories, and whether any PHP file names it. */
+type Info = { via: Map<string, string[]>; advisories: Map<string, Advisory[]>; unused: Set<string> };
+
+/** Direct dependencies whose namespaces no PHP file in the project (outside vendor) mentions. */
+async function unreferenced(lock: string, json: string) {
+  const unused = new Set<string>();
+  let checks: ReturnType<typeof namespaceChecks> = [];
+  try {
+    checks = namespaceChecks(lock, json);
+  } catch {}
+  // One search at a time, so the search doesn't compete with the rest of the editor for every core.
+  for (const c of checks) {
+    const query = { text: c.pattern, regex: true, caseSensitive: false, wholeWord: false };
+    const files = await invoke<string[]>("files_matching", { root: host.root(), query, include: "*.php" }).catch(() => null);
+    if (files?.length === 0) unused.add(c.name);
+  }
+  return unused;
+}
+
+function render(list: Package[], info: Info) {
   $("composer-list").replaceChildren(
     ...list.map((p) => {
       const li = el("li", "composer-package");
-      li.title = `${p.description}${p.abandoned ? "\n\nAbandoned" : ""}`;
+      const found = info.advisories.get(p.name) ?? [];
+      const via = info.via.get(p.name) ?? [];
+      li.title = [
+        p.description,
+        ...found.map((a) => `⚠ ${a.title}${a.cve ? ` (${a.cve})` : ""}${a.severity ? `, ${a.severity}` : ""}`),
+        info.unused.has(p.name) ? "No PHP file in the project names this package's namespace. It may still be used through Laravel's package discovery, the command line, or configuration." : "",
+        p.abandoned ? "Abandoned" : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const name = el("span", "name", p.name);
       if (p.dev) name.append(el("span", "badge", "dev"));
       if (!p.direct) name.append(el("span", "badge", "indirect"));
+      if (found.length) name.append(el("span", "badge danger", found.length === 1 ? "advisory" : `${found.length} advisories`));
+      if (info.unused.has(p.name)) name.append(el("span", "badge warn", "unused?"));
       if (p.abandoned) name.append(el("span", "badge warn", "abandoned"));
       const version = el("span", "version", p.version);
       if (p.latest) version.append(el("span", p.status === "semver-safe-update" ? "update safe" : "update major", ` → ${p.latest}`));
       li.append(name, version);
-      li.onclick = () => packageActions(p);
+      // Why an indirect package is installed: the packages that require it.
+      if (!p.direct && via.length) li.append(el("span", "via", `via ${via.slice(0, 3).join(", ")}${via.length > 3 ? ` and ${via.length - 3} more` : ""}`));
+      li.onclick = () => packageActions(p, found);
+      li.oncontextmenu = (e) => (e.preventDefault(), packageActions(p, found));
       return li;
     }),
   );
@@ -102,8 +156,16 @@ async function why(name: string) {
   );
 }
 
-function packageActions(p: Package) {
+const open = (url: string) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null });
+
+function packageActions(p: Package, found: Advisory[]) {
   pick(p.name, () => [
+    ...found.map((a) => ({
+      label: `Advisory: ${a.title}`,
+      detail: [a.cve, a.severity, a.affectedVersions].filter(Boolean).join(" · "),
+      icon: "codicon-warning icon-warning",
+      run: () => a.link && open(a.link),
+    })),
     ...(p.latest && (p.direct || p.status === "semver-safe-update")
       ? [
           p.status === "semver-safe-update"
@@ -125,7 +187,7 @@ function packageActions(p: Package) {
           },
         ]
       : []),
-    { label: "Open on Packagist", run: () => invoke("run_capture", { cwd: "/", program: "open", args: [`https://packagist.org/packages/${p.name}`], input: null }) },
+    { label: "Open on Packagist", run: () => open(`https://packagist.org/packages/${p.name}`) },
   ]);
 }
 
