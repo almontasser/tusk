@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -92,4 +92,21 @@ test("finds the function or closure around an offset", () => {
   assert.ok(body("if ($a)").startsWith("$g = function"));
   assert.equal(body("return $a + 1"), "return $a + 1;");
   assert.equal(body("$top"), code.trim());
+});
+
+test("reads a constant's declaration and references, and writes its value elsewhere", () => {
+  const owner = "<?php\nnamespace App;\nuse App\\Enums\\Status;\nclass Order {\n    /** Doc. */\n    public const LIMIT = self::BASE * 2;\n    const BASE = 10, OTHER = 1;\n    const DEFAULT = Status::Open;\n    public function f() { return self::LIMIT + static::LIMIT; }\n}";
+  const decl = constantDeclaration(owner, "LIMIT", owner.indexOf("{"));
+  assert.ok(decl && !("error" in decl));
+  assert.equal(decl.value, "self::BASE * 2");
+  assert.ok(owner.slice(decl.start, decl.end).startsWith("public const LIMIT"));
+  assert.deepEqual(constantDeclaration(owner, "BASE", owner.indexOf("{")), { error: "BASE is declared with other constants in one statement" });
+  assert.deepEqual(constantRefs(owner, "LIMIT").map((r) => [owner.slice(r.start, r.end), r.owner]), [["self::LIMIT", "App\\Order"], ["static::LIMIT", "App\\Order"]]);
+  const user = "<?php\nuse App\\Order as O;\n$a = O::LIMIT; $b = 'O::LIMIT'; $c = $o::LIMIT;";
+  assert.deepEqual(constantRefs(user, "LIMIT").map((r) => r.owner), ["App\\Order"]);
+  assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", false), "(\\App\\Order::BASE * 2)");
+  assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", true), "(self::BASE * 2)");
+  assert.equal(inlinedValue("Status::Open", owner, "App\\Order", false), "\\App\\Enums\\Status::Open");
+  assert.equal(inlinedValue("-1", owner, "App\\Order", false), "-1");
+  assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
 });

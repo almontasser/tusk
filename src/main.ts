@@ -21,7 +21,7 @@ import { goToRequest, httpFilesChanged, initHttpClient, newRequestInteractive, r
 import { runAllRequests } from "./httpload";
 import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
-import { changeSignature, initRefactor, inlineVariable, moveClass } from "./refactor";
+import { changeSignature, initRefactor, inline, moveClass } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
@@ -1336,7 +1336,7 @@ const actions: Action[] = [
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
   editorAction("Find Usages", "Alt+F7", "editor.action.goToReferences"),
   { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
-  { label: "Inline Variable", keys: "Alt+Meta+N", run: () => inlineVariable(editor), editorOnly: true },
+  { label: "Inline…", keys: "Alt+Meta+N", run: () => inline(editor), editorOnly: true },
   { label: "Change Signature…", keys: "Meta+F6", run: () => changeSignature(editor), editorOnly: true },
   { label: "Extract Variable…", keys: "Alt+Meta+V", run: () => extractVariable(editor), editorOnly: true },
   { label: "Extract Constant…", keys: "Alt+Meta+C", run: () => extractConstant(editor), editorOnly: true },

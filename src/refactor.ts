@@ -3,11 +3,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath } from "./lsp";
-import { constructorCalls, parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
+import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath, typeSymbol } from "./lsp";
+import { constructorCalls, deletionLines, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { functionScope } from "./extractparse";
+import { constantDeclaration, constantRefs, functionScope, inlinedValue } from "./extractparse";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
@@ -22,6 +22,80 @@ const symbolsOf = async (model: monaco.editor.ITextModel) =>
   (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
 
 // ---- Inline variable ----
+
+// ---- Inline ----
+
+/** Inline (⌥⌘N), as in PhpStorm: the class constant at the cursor, or else the variable. */
+export async function inline(editor: monaco.editor.ICodeEditor) {
+  if (!(await inlineConstant(editor))) await inlineVariable(editor);
+}
+
+/**
+ * Replaces a class constant with its value, at every use in the project and removing its declaration, or at
+ * the use under the cursor only. False when the cursor isn't on a constant.
+ */
+async function inlineConstant(editor: monaco.editor.ICodeEditor): Promise<boolean> {
+  const model = editor.getModel();
+  const pos = editor.getPosition();
+  const name = model && pos ? model.getWordAtPosition(pos)?.word : undefined;
+  if (!model || !pos || !name || model.getLanguageId() !== "php") return false;
+  const text = model.getValue();
+  const offset = model.getOffsetAt(pos);
+  const types = parseTypeDeclarations(text);
+  const bodyOf = (source: string, t: TypeDeclaration) => source.indexOf("{", t.offset);
+  // On a use (X::NAME) or on the declaration itself.
+  const here = constantRefs(text, name).find((r) => r.start <= offset && offset <= r.end);
+  const around = [...types].reverse().find((t) => t.offset < offset);
+  const declaredHere = around && constantDeclaration(text, name, bodyOf(text, around));
+  const onDeclaration = !here && declaredHere && !("error" in declaredHere) && declaredHere.start <= offset && offset <= declaredHere.end;
+  if (!here && !onDeclaration) return false;
+  const owner = here ? here.owner : around!.fqn;
+  const ownerPath = types.some((t) => t.fqn === owner) ? model.uri.fsPath : (await typeSymbol(owner))?.path;
+  const ownerText = ownerPath ? await textOf(ownerPath).catch(() => null) : null;
+  const ownerType = ownerText ? parseTypeDeclarations(ownerText).find((t) => t.fqn === owner) : undefined;
+  const decl = ownerText && ownerType ? constantDeclaration(ownerText, name, bodyOf(ownerText, ownerType)) : null;
+  if (!decl) return host.status(`Can't find the declaration of ${owner.split("\\").pop()}::${name} in the project.`), true;
+  if ("error" in decl) return host.status(`Can't inline ${name}: ${decl.error}.`), true;
+
+  host.status(`Looking for uses of ${name}…`);
+  // Subclasses that don't declare their own reach it as self::, static::, or by their own name.
+  const heirs = new Set([owner, ...(await descendantsOf(owner)).filter((d) => !constantDeclaration(d.text, name, bodyOf(d.text, d.type))).map((d) => d.type.fqn)]);
+  const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: `::\\s*${name}\\b`, regex: true, caseSensitive: true, wholeWord: false }, include: "*.php" }).catch(() => [] as Match[]);
+  const uses: { path: string; text: string; start: number; end: number }[] = [];
+  for (const path of new Set([model.uri.fsPath, ...matches.map((m) => m.path)])) {
+    const source = await textOf(path).catch(() => null);
+    if (source !== null) for (const r of constantRefs(source, name)) if (heirs.has(r.owner)) uses.push({ path, text: source, start: r.start, end: r.end });
+  }
+  host.status("");
+  const label = `${owner.split("\\").pop()}::${name}`;
+  let chosen = uses;
+  if (here && uses.length > 1) {
+    const all = `Inline all ${uses.length} uses and remove ${label}`;
+    const answer = await new Promise<string | null>((resolve) =>
+      pick(`Inline ${label} = ${decl.value}`, () => [all, "Inline this use only"].map((l) => ({ label: l, run: () => resolve(l) })), 0, { value: "", onCancel: () => resolve(null) }),
+    );
+    editor.focus();
+    if (!answer) return true;
+    if (answer !== all) chosen = uses.filter((u) => u.path === model.uri.fsPath && u.start === here.start);
+  }
+  const changes: Record<string, L.TextEdit[]> = {};
+  const edit = (path: string, source: string, start: number, end: number, newText: string) =>
+    (changes[monaco.Uri.file(path).toString()] ??= []).push({ range: { start: positionAt(source, start), end: positionAt(source, end) }, newText });
+  for (const u of chosen) {
+    const inside = [...parseTypeDeclarations(u.text)].reverse().find((t) => t.offset < u.start)?.fqn === owner;
+    edit(u.path, u.text, u.start, u.end, shortenNames(inlinedValue(decl.value, ownerText!, owner, inside), u.text));
+  }
+  // The declaration goes too once nothing uses it, with its docblock and a blank line.
+  if (chosen.length === uses.length) {
+    const lines = ownerText!.split("\n");
+    const [first, last] = deletionLines(lines, positionAt(ownerText!, decl.start).line + 1, positionAt(ownerText!, decl.end).line + 1);
+    edit(ownerPath!, ownerText!, offsetAt(ownerText!, { line: first - 1, character: 0 }), last < lines.length ? offsetAt(ownerText!, { line: last, character: 0 }) : ownerText!.length, "");
+  }
+  await applyWorkspaceEdit({ changes });
+  const files = Object.keys(changes).length;
+  host.status(`Inlined ${label} in ${chosen.length} ${chosen.length === 1 ? "place" : "places"}${chosen.length === uses.length ? " and removed it" : ""}.${files > 1 ? " ⌘Z undoes it in every file." : ""}`);
+  return true;
+}
 
 /** Replaces the variable at the cursor with its value everywhere in its function, and removes the assignment. */
 export async function inlineVariable(editor: monaco.editor.ICodeEditor) {

@@ -3,6 +3,7 @@
 // can test it. ponytail: a tokenizer and a precedence parser over one statement, not a PHP parser; heredocs
 // aren't tokenized, and ternaries (? :) and closures are boundaries rather than expressions.
 import { commentMask } from "./comments.ts";
+import { nameResolver, parseTypeDeclarations } from "./phptypes.ts";
 
 type Tok = { type: "str" | "var" | "num" | "name" | "open" | "close" | "op"; text: string; start: number; end: number; match: number };
 /** An expression in the source, as offsets. `text` is the source between them. */
@@ -367,4 +368,72 @@ export function constantName(expr: string, taken: Set<string> = new Set()): stri
   let unique = name;
   for (let n = 2; taken.has(unique); n++) unique = `${name}_${n}`;
   return unique;
+}
+
+// ---- Inline Constant ----
+
+/**
+ * The declaration of class constant `name` in the type whose body opens at offset `open`: the statement's offsets
+ * and the value's text, or an error when the statement declares several constants.
+ */
+export function constantDeclaration(source: string, name: string, open: number): { start: number; end: number; value: string } | { error: string } | null {
+  const toks = tokenize(source);
+  const first = toks.findIndex((t) => t.start === open);
+  const close = first >= 0 && toks[first].match > 0 ? toks[first].match : toks.length;
+  let statement = first + 1;
+  for (let i = first + 1; i < close; i++) {
+    const t = toks[i];
+    if (t.text === "{" && t.match > 0) (i = t.match), (statement = i + 1);
+    else if (t.text === ";") statement = i + 1;
+    else if (/^const$/i.test(t.text)) {
+      let j = i + 1;
+      while (j < close && toks[j].text !== "=" && toks[j].text !== ";") j++;
+      if (toks[j - 1]?.text !== name || toks[j]?.text !== "=") continue;
+      let end = j + 1;
+      while (end < close && toks[end].text !== ";" && toks[end].text !== ",") end = toks[end].type === "open" && toks[end].match > 0 ? toks[end].match + 1 : end + 1;
+      if (toks[end]?.text === ",") return { error: `${name} is declared with other constants in one statement` };
+      return { start: toks[statement].start, end: toks[end].end, value: source.slice(toks[j].end, toks[end].start).trim() };
+    }
+  }
+  return null;
+}
+
+/**
+ * References to class constant `name` in a file: each `X::NAME`'s offsets, and the full name of the class it
+ * names, with `self` and `static` read as the type around it and `parent` as that type's parent.
+ */
+export function constantRefs(source: string, name: string): { start: number; end: number; owner: string }[] {
+  const toks = tokenize(source);
+  const { resolve } = nameResolver(commentMask(source));
+  const types = parseTypeDeclarations(source);
+  const found: { start: number; end: number; owner: string }[] = [];
+  for (let i = 2; i < toks.length; i++) {
+    if (toks[i].text !== name || toks[i - 1].text !== "::" || toks[i - 2].type !== "name" || toks[i + 1]?.text === "(") continue;
+    const cls = toks[i - 2];
+    if (toks[i - 3]?.text === "->" || toks[i - 3]?.text === "::") continue;
+    const around = [...types].reverse().find((t) => t.offset < cls.start);
+    const lower = cls.text.toLowerCase();
+    const owner = lower === "self" || lower === "static" ? around?.fqn : lower === "parent" ? around?.extends[0] : resolve(cls.text);
+    if (owner) found.push({ start: cls.start, end: toks[i].end, owner });
+  }
+  return found;
+}
+
+/**
+ * A constant's value for use in another file: class names written in full, so the owner's imports don't matter,
+ * and `self::` and `static::` naming the owner unless the use is inside it. Parentheses keep an expression whole.
+ */
+export function inlinedValue(value: string, ownerSource: string, owner: string, insideOwner: boolean): string {
+  const { resolve } = nameResolver(commentMask(ownerSource));
+  let out = value.replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
+    const lower = n.toLowerCase();
+    if (lower === "self" || lower === "static") return insideOwner ? n : `\\${owner}`;
+    if (lower === "parent") return n;
+    return `\\${resolve(n)}`;
+  });
+  // Parentheses when an operator outside brackets and strings would bind to the code around it.
+  let outer = out.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+  while (/\([^()]*\)|\[[^[\]]*\]/.test(outer)) outer = outer.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");
+  if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/^-?\d+(\.\d+)?$/, ""))) out = `(${out})`;
+  return out;
 }

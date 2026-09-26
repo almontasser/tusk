@@ -228,7 +228,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘V | Extract the expression at the cursor, or the selection, into a variable |
 | ⌥⌘C | Extract the string or number at the cursor into a class constant |
 | ⌥⌘M | Extract the selection into a method |
-| ⌥⌘N | Inline the variable at the cursor |
+| ⌥⌘N | Inline the variable or class constant at the cursor |
 | F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
@@ -549,7 +549,7 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 
 Press ⌃T to list the refactorings that apply at the caret or to the selection,
 with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
-Signature, the three Extracts, Inline Variable, Move Class, and Safe Delete, plus
+Signature, the three Extracts, Inline, Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
@@ -582,7 +582,16 @@ Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
 method. Phpactor writes the method with its parameters and return type; you
 then type its name in place.
 
-## Inline variable
+## Inline
+
+Press ⌥⌘N on a class constant, at its declaration or at a use such as
+`Order::LIMIT`, to replace it with its value. From the declaration, every use in
+the project is replaced and the constant is removed with its docblock; from a
+use, choose between all uses or only that one. Uses through subclasses count,
+unless a subclass declares its own. The value's class names are written so they
+still mean the same class in each file (`self::BASE` becomes `Order::BASE`
+elsewhere), and an expression gets parentheses. Uses in strings, such as
+`constant('Order::LIMIT')`, aren't found.
 
 Press ⌥⌘N on a variable to replace it with its value and remove the
 assignment. It works when the variable is assigned once, in a statement that

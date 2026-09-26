@@ -239,7 +239,11 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   if (constantAt(text, start, end)) names.push("Extract Constant…");
   if (expression || !sel.isEmpty()) names.push("Extract Method…");
   const line = model.getLineContent(pos.lineNumber);
-  if ([...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this")) names.push("Inline Variable");
+  const onVariable = [...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this");
+  const word = model.getWordAtPosition(pos);
+  const before = word ? line.slice(0, word.startColumn - 1) : "";
+  const onConstant = !!word && (/::\s*$/.test(before) || /\bconst\s+(?:[\w\\|?]+\s+)?$/.test(before));
+  if (onVariable || onConstant) names.push("Inline…");
   if (found) names.push("Safe Delete…");
   if (parseTypeDeclarations(text).length === 1) names.push("Move Class…");
   // Phpactor's own refactorings, other than the extractions above.

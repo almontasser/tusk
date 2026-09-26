@@ -1050,6 +1050,19 @@ against the caret, so the shortcuts shown follow the keymap. The choice
 popups open below the caret (`pickAtCaret`), with a `preview` callback that
 highlights what each option would change.
 
+### Inline constant
+
+Inline (⌥⌘N) tries a class constant first and falls back to Inline Variable.
+`constantRefs` in `src/extractparse.ts` finds `X::NAME` tokens (so strings and
+`$obj::NAME` don't count) and resolves `X` through the file's `use` statements,
+`self` and `static` to the type around it, and `parent` to its parent.
+`inlineConstant` in `src/refactor.ts` finds the owner's file through the
+workspace symbols, reads the value with `constantDeclaration`, and searches the
+project for `::NAME`, keeping references whose class is the owner or a
+subclass that doesn't redeclare it. `inlinedValue` writes the owner's class
+names in full and `shortenNames` shortens them again where the target file
+imports them.
+
 ### Move class
 
 `moveClass` in `src/refactor.ts` reuses the file tree's move (`move` in
