@@ -1,6 +1,6 @@
 // Database tool: tables and columns in the sidebar, a query console, and a results grid in the panel.
 // The connection comes from the project's .env, as Laravel reads it, or one saved in the editor or in config/database.php,
-// optionally through an SSH tunnel.
+// optionally through an SSH tunnel. A Redis connection lists keys instead of tables, and its console runs commands.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import {
@@ -17,6 +17,7 @@ import {
   parseEnv,
   primaryKeyQuery,
   quoteIdentifier,
+  redisFromEnv,
   repeatsEnv,
   schemaQuery,
   statementAt,
@@ -81,6 +82,9 @@ const sshDestination = () => getItem(sshKey());
 
 const readEnv = async () => parseEnv(await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => ""));
 const envConnection = async () => connectionFromEnv(await readEnv(), host.root(), await usesSail(host.root()));
+/** Laravel's `redis` and `redis cache` connections, from .env's REDIS_ variables. */
+const envRedis = async () => redisFromEnv(await readEnv(), host.root(), await usesSail(host.root()));
+const isRedis = () => connection?.driver === "redis";
 
 /**
  * config/database.php's connections other than the default, which .env gives, and Laravel's stock entries, which
@@ -108,7 +112,7 @@ function configConnections() {
 
 async function namedConnection(name: string): Promise<Connection | null> {
   const saved = savedConnections().find((s) => s.name === name);
-  const c = saved ? connectionFromUrl(saved.url, host.root()) : (await configConnections()).get(name);
+  const c = saved ? connectionFromUrl(saved.url, host.root()) : ((await configConnections()).get(name) ?? (await envRedis())[name]);
   return c && saved ? { ...c, password: await password(name) } : (c ?? null);
 }
 
@@ -138,6 +142,9 @@ export async function chooseConnection() {
     ...[...(await configConnections())]
       .filter(([n]) => !saved.some((s) => s.name === n))
       .map(([n, c]) => ({ label: n, detail: `config/database.php · ${describe(c, root)}`, icon: mark(n), run: select(n) })),
+    ...Object.entries(await envRedis())
+      .filter(([n]) => !saved.some((s) => s.name === n))
+      .map(([n, c]) => ({ label: n, detail: `.env · ${describe(c, root)}`, icon: mark(n), run: select(n) })),
     { label: "Add Connection…", icon: "codicon-add", run: () => editConnection() },
   ];
   const active = saved.find((s) => s.name === current);
@@ -153,10 +160,10 @@ export async function chooseConnection() {
 function editConnection(existing?: Saved, value = existing?.url ?? "") {
   const root = host.root();
   pick(
-    "Connection URL, such as mysql://user:password@host:3306/database, pgsql://…, or sqlite:database/other.sqlite",
+    "Connection URL, such as mysql://user:password@host:3306/database, pgsql://…, sqlite:database/other.sqlite, or redis://:password@host:6379/0",
     (q) => {
       const c = connectionFromUrl(q, root);
-      if (!c) return [{ label: q.trim() ? "Not a database URL" : "Type a URL", detail: "mysql://, mariadb://, pgsql://, or sqlite:", run: () => editConnection(existing, q) }];
+      if (!c) return [{ label: q.trim() ? "Not a database URL" : "Type a URL", detail: "mysql://, mariadb://, pgsql://, sqlite:, redis://, or rediss://", run: () => editConnection(existing, q) }];
       return [{ label: "Next: name the connection", detail: `${describe(c, root)}${existing && !c.password ? " · keeps the saved password" : ""}`, run: () => nameConnection(c, existing) }];
     },
     0,
@@ -165,7 +172,7 @@ function editConnection(existing?: Saved, value = existing?.url ?? "") {
 }
 
 function nameConnection(c: Connection, existing?: Saved) {
-  const suggested = existing?.name ?? (c.driver === "sqlite" ? c.database.split("/").pop()! : `${c.database}@${c.host}`);
+  const suggested = existing?.name ?? (c.driver === "sqlite" ? c.database.split("/").pop()! : `${c.driver === "redis" ? "redis" : c.database}@${c.host}`);
   pick("Name the connection", (q) => [{ label: `Save as ${q.trim() || suggested}`, detail: describe(c, host.root()), run: () => saveConnection(q.trim() || suggested, c, existing) }], 0, {
     value: suggested,
     select: [0, suggested.length],
@@ -224,8 +231,11 @@ export async function loadTables() {
   if (list.dataset.root !== key) (list.dataset.root = key), list.replaceChildren(el("li", "muted", "Loading…"));
   try {
     await loadConnection();
-    const tables = (await query(tablesQuery(connection!.driver))).rows.map((r) => r[0] ?? "");
-    list.replaceChildren(...(tables.length ? tables.map(tableRow) : [el("li", "muted", "No tables. Run the migrations with php artisan migrate.")]));
+    const result = await query(tablesQuery(connection!.driver));
+    const tables = result.rows.map((r) => r[0] ?? "");
+    const none = isRedis() ? "No keys." : "No tables. Run the migrations with php artisan migrate.";
+    list.replaceChildren(...(tables.length ? tables.map(isRedis() ? keyRow : tableRow) : [el("li", "muted", none)]));
+    if (result.truncated) list.append(el("li", "muted", `The first ${PAGE.toLocaleString()} of ${result.total.toLocaleString()}.${isRedis() ? " Run SCAN 0 MATCH pattern in the console to find others." : ""}`));
   } catch (e) {
     list.replaceChildren(el("li", "muted", `Can't connect: ${String(e)}`));
   }
@@ -258,25 +268,56 @@ function tableRow(table: string) {
   return li;
 }
 
+/** A Redis key, whose value shows in the grid when clicked. */
+function keyRow(key: string) {
+  const li = el("li");
+  const row = el("div", "row");
+  row.append(el("span", "chevron"), icon("key"), el("span", "name", key));
+  row.title = "Click to show the value";
+  row.onclick = () => showKey(key);
+  li.append(row);
+  return li;
+}
+
+/** Shows a Redis key's value with the command that reads its type whole. */
+async function showKey(key: string) {
+  const k = quoteIdentifier("redis", key);
+  const type = await query(`TYPE ${k}`).then((r) => r.rows[0]?.[0] ?? "", () => "");
+  const read: Record<string, string> = { string: `GET ${k}`, hash: `HGETALL ${k}`, list: `LRANGE ${k} 0 -1`, set: `SMEMBERS ${k}`, zset: `ZRANGE ${k} 0 -1 WITHSCORES`, stream: `XRANGE ${k} - +` };
+  // An unknown type, or a key deleted since the list loaded (type "none"), shows as TYPE's reply.
+  run(read[type] ?? `TYPE ${k}`);
+}
+
 // ---- Console ----
 
-/** Opens the project's query console, a .sql file kept in the app's data folder rather than in the project. */
+/**
+ * Opens the project's query console, a .sql file kept in the app's data folder rather than in the project, or for a
+ * Redis connection, a .redis file of commands.
+ */
 export async function openConsole() {
   if (!host.root()) return;
+  if (!connection) await loadConnection().catch(() => {});
   const dir = `${await appDataDir()}/consoles/${host.root().replace(/[^A-Za-z0-9]+/g, "_")}`;
-  const path = `${dir}/console.sql`;
+  const path = `${dir}/console.${isRedis() ? "redis" : "sql"}`;
   if (!(await invoke<boolean>("path_exists", { path }))) {
     await invoke("create_dir", { path: dir });
-    await invoke("write_file", { path, contents: "-- ⌘⏎ runs the statement under the caret, or the selection.\n\n" });
+    const hint = isRedis() ? "# ⌘⏎ runs the command on the caret's line, or the selection as one command." : "-- ⌘⏎ runs the statement under the caret, or the selection.";
+    await invoke("write_file", { path, contents: `${hint}\n\n` });
   }
   await host.openFile(path);
 }
 
-/** Runs the selection, or the statement under the caret, from a .sql editor. */
+/** Runs the selection, or the statement under the caret, from a .sql editor, or the caret's line from a .redis one. */
 export function runFromEditor(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();
   const selection = editor.getSelection();
   if (!model || !selection) return;
+  if (model.getLanguageId() === "redis") {
+    // Lines starting with # are the console's comments; Redis itself has none.
+    const command = (selection.isEmpty() ? model.getLineContent(selection.positionLineNumber) : model.getValueInRange(selection)).trim();
+    if (command && !command.startsWith("#")) run(command);
+    return;
+  }
   const sql = selection.isEmpty() ? statementAt(model.getValue(), model.getOffsetAt(selection.getPosition())) : model.getValueInRange(selection);
   if (hasCode(sql)) run(sql);
 }
@@ -287,6 +328,7 @@ function loadSchema() {
   schema ??= (async () => {
     if (!connection) await loadConnection();
     const tables = new Map<string, { name: string; type: string }[]>();
+    if (isRedis()) return tables;
     for (const [table, name, type] of (await query(schemaQuery(connection!.driver))).rows) {
       if (!tables.has(table!)) tables.set(table!, []);
       tables.get(table!)!.push({ name: name!, type: (type ?? "").toLowerCase() });
@@ -548,7 +590,7 @@ export function initDatabase(h: Host) {
     id: "phpEditor.runSql",
     label: "Execute Query",
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-    precondition: "editorLangId == sql",
+    precondition: "editorLangId == sql || editorLangId == redis",
     contextMenuGroupId: "navigation",
     run: runFromEditor,
   });

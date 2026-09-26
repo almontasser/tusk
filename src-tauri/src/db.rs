@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct Connection {
-    driver: String, // sqlite, mysql, mariadb, or pgsql, as in Laravel's DB_CONNECTION
+    driver: String, // sqlite, mysql, mariadb, or pgsql, as in Laravel's DB_CONNECTION, or redis
     host: String,
     port: u16,
     database: String,
@@ -59,6 +59,7 @@ pub async fn db_query(connection: Connection, sql: String, offset: Option<u64>) 
         "sqlite" => sqlite(&connection, &sql, skip),
         "mysql" | "mariadb" => mysql(&connection, &sql, skip),
         "pgsql" => pgsql(&connection, &sql, skip),
+        "redis" => redis(&connection, &sql, skip),
         other => Err(format!("The {other} driver isn't supported.")),
     })
     .await
@@ -154,17 +155,7 @@ fn pgsql_error(e: postgres::Error) -> String {
 fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
     use postgres::config::SslMode;
     let mode = if c.ssl_mode.is_empty() { "prefer" } else { c.ssl_mode.as_str() };
-    let mut tls = native_tls::TlsConnector::builder();
-    tls.danger_accept_invalid_certs(matches!(mode, "allow" | "prefer" | "require"))
-        .danger_accept_invalid_hostnames(mode != "verify-full");
-    if !c.ssl_ca.is_empty() {
-        // A bundle, such as AWS RDS's, holds many certificates; from_pem takes only one.
-        let pem = std::fs::read(&c.ssl_ca).map_err(|e| format!("Can't read {}: {e}", c.ssl_ca))?;
-        for cert in native_tls::Certificate::stack_from_pem(&pem).map_err(|e| e.to_string())? {
-            tls.add_root_certificate(cert);
-        }
-    }
-    let connector = postgres_native_tls::MakeTlsConnector::new(tls.build().map_err(|e| e.to_string())?);
+    let connector = postgres_native_tls::MakeTlsConnector::new(tls_connector(c, mode)?);
     postgres::Config::new()
         .host(&c.host)
         .port(c.port)
@@ -178,6 +169,22 @@ fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
         })
         .connect(connector)
         .map_err(pgsql_error)
+}
+
+/// A TLS connector for libpq's sslmode: `allow`, `prefer`, and `require` accept any certificate, `verify-ca` checks
+/// it but not the host name, and `verify-full` checks both, against the system's authorities and `ssl_ca`.
+fn tls_connector(c: &Connection, mode: &str) -> Result<native_tls::TlsConnector, String> {
+    let mut tls = native_tls::TlsConnector::builder();
+    tls.danger_accept_invalid_certs(matches!(mode, "allow" | "prefer" | "require"))
+        .danger_accept_invalid_hostnames(mode != "verify-full");
+    if !c.ssl_ca.is_empty() {
+        // A bundle, such as AWS RDS's, holds many certificates; from_pem takes only one.
+        let pem = std::fs::read(&c.ssl_ca).map_err(|e| format!("Can't read {}: {e}", c.ssl_ca))?;
+        for cert in native_tls::Certificate::stack_from_pem(&pem).map_err(|e| e.to_string())? {
+            tls.add_root_certificate(cert);
+        }
+    }
+    tls.build().map_err(|e| e.to_string())
 }
 
 fn sqlite(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
@@ -244,6 +251,183 @@ fn pgsql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
             SimpleQueryMessage::CommandComplete(n) => result.affected = n,
             _ => {}
         }
+    }
+    Ok(result)
+}
+
+/// A Redis reply, as RESP2 sends it.
+enum Reply {
+    Nil,
+    Text(String),
+    Int(i64),
+    Array(Vec<Reply>),
+    Error(String),
+}
+
+trait Stream: std::io::Read + std::io::Write + Send {}
+impl<T: std::io::Read + std::io::Write + Send> Stream for T {}
+
+/// A Redis connection that speaks RESP2, which every Redis and Valkey version does. Values are read as text.
+struct Redis(std::io::BufReader<Box<dyn Stream>>);
+
+impl Redis {
+    /// Connects, over TLS when `ssl_mode` is set (a `rediss://` URL), then signs in and selects `database`.
+    fn open(c: &Connection) -> Result<Self, String> {
+        let tcp = std::net::TcpStream::connect((c.host.as_str(), c.port)).map_err(|e| format!("Can't connect to {}:{}: {e}", c.host, c.port))?;
+        // A blocking command, such as BLPOP, can't hold the query forever.
+        let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
+        let stream: Box<dyn Stream> = match c.ssl_mode.as_str() {
+            "" | "disable" => Box::new(tcp),
+            mode => Box::new(tls_connector(c, mode)?.connect(&c.host, tcp).map_err(|e| e.to_string())?),
+        };
+        let mut redis = Redis(std::io::BufReader::new(stream));
+        if !c.password.is_empty() {
+            let auth = if c.username.is_empty() { vec!["AUTH".into(), c.password.clone()] } else { vec!["AUTH".into(), c.username.clone(), c.password.clone()] };
+            redis.call(&auth)?;
+        }
+        if !matches!(c.database.as_str(), "" | "0") {
+            redis.call(&["SELECT".into(), c.database.clone()])?;
+        }
+        Ok(redis)
+    }
+
+    /// Sends a command and reads its reply. An error reply is an Err.
+    fn call(&mut self, args: &[String]) -> Result<Reply, String> {
+        use std::io::Write;
+        let mut command = format!("*{}\r\n", args.len()).into_bytes();
+        for arg in args {
+            command.extend(format!("${}\r\n{arg}\r\n", arg.len()).into_bytes());
+        }
+        self.0.get_mut().write_all(&command).map_err(|e| e.to_string())?;
+        match self.read()? {
+            Reply::Error(message) => Err(message),
+            reply => Ok(reply),
+        }
+    }
+
+    fn read(&mut self) -> Result<Reply, String> {
+        use std::io::{BufRead, Read};
+        let mut line = Vec::new();
+        self.0.read_until(b'\n', &mut line).map_err(|e| e.to_string())?;
+        if line.len() < 3 {
+            return Err("Redis closed the connection.".into());
+        }
+        let text = String::from_utf8_lossy(&line[1..line.len() - 2]).into_owned();
+        let number = text.parse::<i64>().map_err(|_| format!("Unexpected reply from Redis: {text}"));
+        Ok(match line[0] {
+            b'+' => Reply::Text(text),
+            b'-' => Reply::Error(text),
+            b':' => Reply::Int(number?),
+            b'$' | b'*' if number.clone()? < 0 => Reply::Nil,
+            b'$' => {
+                let mut bytes = vec![0; number? as usize + 2];
+                self.0.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+                Reply::Text(String::from_utf8_lossy(&bytes[..bytes.len() - 2]).into_owned())
+            }
+            b'*' => Reply::Array((0..number?).map(|_| self.read()).collect::<Result<_, _>>()?),
+            _ => return Err(format!("Unexpected reply from Redis: {text}")),
+        })
+    }
+}
+
+/// A reply as a cell: a nested array reads as a JSON array.
+fn reply_text(reply: &Reply) -> Option<String> {
+    match reply {
+        Reply::Nil => None,
+        Reply::Text(s) | Reply::Error(s) => Some(s.clone()),
+        Reply::Int(n) => Some(n.to_string()),
+        Reply::Array(items) => serde_json::to_string(&items.iter().map(reply_text).collect::<Vec<_>>()).ok(),
+    }
+}
+
+/// Splits a command line into arguments as redis-cli does: whitespace separates them, double quotes take `\n`,
+/// `\r`, `\t`, and `\` before any other character, and single quotes take text as it is, except `\'`.
+fn split_command(line: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut chars = line.chars().peekable();
+    loop {
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let Some(&first) = chars.peek() else { return Ok(args) };
+        let mut arg = String::new();
+        if first == '"' || first == '\'' {
+            chars.next();
+            loop {
+                match chars.next() {
+                    None => return Err("The command has an unclosed quote.".into()),
+                    Some(c) if c == first => break,
+                    Some('\\') if first == '"' => match chars.next() {
+                        Some('n') => arg.push('\n'),
+                        Some('r') => arg.push('\r'),
+                        Some('t') => arg.push('\t'),
+                        Some(c) => arg.push(c),
+                        None => return Err("The command has an unclosed quote.".into()),
+                    },
+                    Some('\\') if chars.peek() == Some(&'\'') => arg.push(chars.next().unwrap()),
+                    Some(c) => arg.push(c),
+                }
+            }
+        } else {
+            while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
+                arg.push(c);
+            }
+        }
+        args.push(arg);
+    }
+}
+
+/// Runs one Redis command. An array reply is a row per element, or per pair for replies that alternate names
+/// and values, such as HGETALL's; an array of arrays, such as XRANGE's, is a row per inner array. SCAN follows
+/// the cursor to the end, as `redis-cli --scan` does, and returns the keys sorted.
+// ponytail: SCAN reads every matching key, and each page runs the command again; SCAN's cursor kept between
+// pages if keyspaces of millions get slow.
+fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String> {
+    let mut args = split_command(command)?;
+    let Some(name) = args.first().map(|a| a.to_uppercase()) else { return Err("Type a command.".into()) };
+    let mut db = Redis::open(c)?;
+    let mut result = QueryResult { skip, columns: vec!["value".into()], ..Default::default() };
+    if name == "SCAN" {
+        let mut keys = Vec::new();
+        loop {
+            let Reply::Array(mut reply) = db.call(&args)? else { return Err("Unexpected reply to SCAN.".into()) };
+            if let (Some(Reply::Array(batch)), Some(Reply::Text(cursor))) = (reply.pop(), reply.pop()) {
+                keys.extend(batch.iter().filter_map(reply_text));
+                if cursor == "0" {
+                    break;
+                }
+                args[1] = cursor;
+            } else {
+                return Err("Unexpected reply to SCAN.".into());
+            }
+        }
+        keys.sort();
+        result.columns = vec!["key".into()];
+        keys.into_iter().for_each(|k| result.push(vec![Some(k)]));
+        return Ok(result);
+    }
+    let has = |option: &str| args.iter().skip(1).any(|a| a.eq_ignore_ascii_case(option));
+    let pairs = match name.as_str() {
+        "HGETALL" => Some(["field", "value"]),
+        "CONFIG" => Some(["parameter", "value"]),
+        _ if has("WITHSCORES") => Some(["member", "score"]),
+        _ if has("WITHVALUES") => Some(["field", "value"]),
+        _ => None,
+    };
+    match db.call(&args)? {
+        Reply::Array(items) if pairs.is_some() => {
+            result.columns = pairs.unwrap().map(String::from).to_vec();
+            items.chunks(2).for_each(|pair| result.push(pair.iter().map(reply_text).collect()));
+        }
+        Reply::Array(items) if !items.is_empty() && items.iter().all(|i| matches!(i, Reply::Array(_))) => {
+            let rows: Vec<Vec<Option<String>>> = items.iter().map(|i| if let Reply::Array(a) = i { a.iter().map(reply_text).collect() } else { vec![] }).collect();
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            result.columns = (1..=width).map(|i| i.to_string()).collect();
+            for mut row in rows {
+                row.resize(width, None);
+                result.push(row);
+            }
+        }
+        Reply::Array(items) => items.iter().for_each(|i| result.push(vec![reply_text(i)])),
+        reply => result.push(vec![reply_text(&reply)]),
     }
     Ok(result)
 }
@@ -375,6 +559,42 @@ mod tests {
         let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'", 0);
         assert_ne!(tls("require").unwrap().rows[0][1], Some(String::new()));
         assert!(tls("verify-full").is_err());
+    }
+
+    #[test]
+    fn splits_redis_commands() {
+        assert_eq!(split_command(r#"  SET "a key" 'it\'s' "line\n\"two\"" "#).unwrap(), ["SET", "a key", "it's", "line\n\"two\""]);
+        assert_eq!(split_command("GET laravel_cache:x").unwrap(), ["GET", "laravel_cache:x"]);
+        assert!(split_command(r#"GET "open"#).is_err());
+        assert!(split_command("  ").unwrap().is_empty());
+    }
+
+    /// Against a throwaway server: `docker run --rm -p 63799:6379 redis:7 --requirepass secret`.
+    #[test]
+    #[ignore]
+    fn queries_redis() {
+        let c = Connection { driver: "redis".into(), host: "127.0.0.1".into(), port: 63799, database: "2".into(), username: String::new(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
+        let run = |command: &str| redis(&c, command, 0).unwrap();
+        run("FLUSHDB");
+        assert_eq!(run(r#"SET "a key" "one two""#).rows, [vec![Some("OK".into())]]);
+        assert_eq!(run(r#"GET "a key""#).rows, [vec![Some("one two".into())]]);
+        assert_eq!(run("GET missing").rows, [vec![None]]);
+        run("HSET h f1 v1 f2 v2");
+        let hash = run("HGETALL h");
+        assert_eq!((hash.columns.as_slice(), hash.rows.len()), (["field", "value"].map(String::from).as_slice(), 2));
+        run("ZADD z 1 a 2 b");
+        assert_eq!(run("ZRANGE z 0 -1 WITHSCORES").rows, [vec![Some("a".into()), Some("1".into())], vec![Some("b".into()), Some("2".into())]]);
+        run("XADD s 1-1 f v");
+        assert_eq!(run("XRANGE s - +").rows, [vec![Some("1-1".into()), Some(r#"["f","v"]"#.into())]]);
+        // SCAN follows the cursor past the first batch, and a page skips into the sorted keys.
+        for i in 0..250 {
+            run(&format!("SET k{i:03} {i}"));
+        }
+        let keys = redis(&c, "SCAN 0 MATCH k* COUNT 10", 100).unwrap();
+        assert_eq!((keys.total, keys.rows[0][0].as_deref()), (250, Some("k100")));
+        assert!(redis(&c, "NOSUCHCOMMAND", 0).err().unwrap().contains("unknown command"));
+        let wrong = Connection { password: "nope".into(), ..c };
+        assert!(redis(&wrong, "PING", 0).is_err());
     }
 
     /// Writes to the login Keychain, so it runs only when asked.

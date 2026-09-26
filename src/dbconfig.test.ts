@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionFromConfig, connectionFromEnv, connectionFromUrl, connectionUrl, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, repeatsEnv, statementAt, updateStatement } from "./dbconfig.ts";
+import { connectionFromConfig, connectionFromEnv, connectionFromUrl, connectionUrl, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, redisFromEnv, repeatsEnv, statementAt, updateStatement } from "./dbconfig.ts";
 
 test("parses .env values", () => {
   const env = parseEnv(`# comment\nDB_CONNECTION=mysql\nDB_PASSWORD="se#cret"\nDB_HOST=db # the host\n# DB_PORT=1\nexport DB_USERNAME='sail'\n`);
@@ -69,6 +69,29 @@ test("reads connection URLs and writes them back without the password", () => {
   assert.equal(connectionFromUrl("mysql://root@127.0.0.1:3307/laravel", "/app")!.port, 3307);
   assert.equal(connectionFromUrl("sqlsrv://sa@host/db", "/app"), null);
   assert.equal(connectionFromUrl("forge@203.0.113.5", "/app"), null);
+});
+
+test("reads Redis connections from URLs and .env", () => {
+  const plain = connectionFromUrl("redis://:s%40cret@cache.example.com:6380/2", "/app")!;
+  assert.deepEqual(plain, { driver: "redis", host: "cache.example.com", port: 6380, database: "2", username: "", password: "s@cret", ssl_mode: "", ssl_ca: "" });
+  assert.equal(connectionUrl(plain, "/app"), "redis://cache.example.com:6380/2");
+  const tls = connectionFromUrl("rediss://default:p@cache.example.com", "/app")!;
+  assert.deepEqual([tls.port, tls.database, tls.username, tls.ssl_mode], [6379, "0", "default", "verify-full"]);
+  assert.equal(connectionUrl(tls, "/app"), "rediss://default@cache.example.com:6379/0");
+  assert.deepEqual(connectionFromUrl(connectionUrl(tls, "/app"), "/app"), { ...tls, password: "" });
+  assert.equal(connectionFromUrl("rediss://h?sslmode=require", "/app")!.ssl_mode, "require");
+  assert.equal(connectionUrl(connectionFromUrl("rediss://h?sslmode=require", "/app")!, "/app"), "rediss://h:6379/0?sslmode=require");
+
+  // Laravel's stock .env: REDIS_PASSWORD=null is no password, and the cache uses database 1.
+  const stock = redisFromEnv(parseEnv("REDIS_HOST=127.0.0.1\nREDIS_PASSWORD=null\nREDIS_PORT=6379"), "/app");
+  assert.deepEqual(stock.redis, { driver: "redis", host: "127.0.0.1", port: 6379, database: "0", username: "", password: "", ssl_mode: "", ssl_ca: "" });
+  assert.equal(stock["redis cache"].database, "1");
+  // Sail's container name only resolves inside Docker, so connect to the forwarded port.
+  const sail = redisFromEnv({ REDIS_HOST: "redis", FORWARD_REDIS_PORT: "6380", REDIS_DB: "3" }, "/app", true);
+  assert.deepEqual([sail.redis.host, sail.redis.port, sail.redis.database], ["127.0.0.1", 6380, "3"]);
+  const url = redisFromEnv({ REDIS_URL: "rediss://u:p@h:1234", REDIS_CACHE_DB: "5" }, "/app");
+  assert.deepEqual([url.redis.host, url.redis.port, url.redis.password, url.redis.ssl_mode, url["redis cache"].database], ["h", 1234, "p", "verify-full", "5"]);
+  assert.equal(quoteIdentifier("redis", 'a "b" \\c'), '"a \\"b\\" \\\\c"');
 });
 
 test("reads config/database.php's connections", () => {

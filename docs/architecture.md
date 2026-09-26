@@ -3167,6 +3167,7 @@ leaks into the frontend:
 | SQLite | `rusqlite` with its bundled SQLite | Each `ValueRef` is formatted. Blobs show their size. |
 | MySQL, MariaDB | `mysql`, with `native-tls` | The text protocol (`query_iter`) returns every value as bytes. |
 | PostgreSQL | `postgres`, with `postgres-native-tls` | The simple query protocol returns every value as text. |
+| Redis | None: a RESP2 client in `db.rs`, with `native-tls` for `rediss://` | Bulk strings are read as UTF-8 text, and integers are formatted. |
 
 TLS goes through `native-tls`, which is macOS's Security framework, so the
 system's certificate authorities apply. `ssl_mode` follows libpq: PostgreSQL
@@ -3219,6 +3220,38 @@ and returns `total`, every row the statement returned: MySQL's driver drains
 the rest of a result anyway, and PostgreSQL's simple query protocol buffers it,
 so counting costs nothing more. **Next** and **Previous** are disabled while
 the grid has pending changes.
+
+### Redis
+
+For Redis, `db_query`'s statement is a command line, which `split_command`
+splits as `redis-cli` does (double quotes take `\n`-style escapes, and single
+quotes take text as it is). `Redis::open` connects, signs in with `AUTH` (with
+the user name when there is one, for ACLs), and runs `SELECT` for a database
+other than 0. TLS uses the same `tls_connector` as PostgreSQL, so `ssl_mode`
+means the same thing, and a `rediss://` URL defaults to `verify-full`, as
+phpredis checks certificates by default. A read times out after 60 seconds,
+so a blocking command such as `BLPOP 0` can't hold its thread.
+
+A reply becomes a grid in one of three shapes. An array from a command that
+alternates names and values (`HGETALL`, `CONFIG GET`, or any command with
+`WITHSCORES` or `WITHVALUES`) is a row per pair. An array of arrays, such as
+`XRANGE`'s, is a row per inner array, with numbered columns, and a deeper array
+is a JSON array in its cell. Anything else is one `value` column. The command
+names are the only per-command knowledge in `db.rs`, since RESP2 has no map
+type. `SCAN` follows the cursor to the end, as `redis-cli --scan` does, and
+sorts the keys, so the sidebar's list (`tablesQuery("redis")`) is complete and
+pages like any other result.
+
+`redisFromEnv` in `dbconfig.ts` builds Laravel's `default` and `cache` Redis
+connections from `.env`, as `config/database.php` does, and `database.ts`
+lists them as **redis** and **redis cache**, reached through
+`namedConnection` like `config/database.php`'s. They come from `.env` rather
+than from the booted config because the config's `redis` section isn't in
+`database.connections`, and because Sail's `REDIS_HOST=redis` needs
+`FORWARD_REDIS_PORT` on this Mac. Clicking a key runs `TYPE`, then the command
+that reads that type whole. The Redis console is `console.redis` beside
+`console.sql`, in Monaco's built-in `redis` language, and **Execute Query**
+runs the caret's line there.
 
 `src/dbconfig.ts` reads `.env` and fills in Laravel's defaults from
 `config/database.php`. It also holds the schema queries: `sqlite_master` and
@@ -4178,3 +4211,12 @@ files) it went from 0.9 s and 2.9 s to 0.8 s and 2.0 s. Phpactor already runs
 at most one check per checker, and skips a queued one once newer text arrives.
 Checking only the changed file against a saved codebase would need Mago to
 save one, which it can't.
+
+### 2026-09-27: Redis through a hand-written RESP client
+
+The `redis` crate would bring a connection manager, a parser crate, and
+features for clusters and async, while the tool needs one command per
+connection with text replies. RESP2 is a line-based protocol, so a reader and
+writer take about 60 lines, and TLS reuses `native-tls`, which was already in
+the build. RESP3's maps would name hash replies by type, but they need Redis 6
+(`HELLO 3`), so the few commands that return pairs are named instead.

@@ -48,7 +48,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode (its experimental `--watch` reads files on disk, not unsaved text), so it parses the project again for each check: about 0.9 seconds of wall time and 1.2 seconds of CPU on a Laravel and Filament app. Without a `mago.toml`, Mago also skips the project's index exclusions. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | Only SQLite, MySQL, MariaDB, and PostgreSQL connections work. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
+| Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis values can't be edited in the grid; change them with commands in the console. A key's value is read whole, so a list or set with millions of items is slow to show, and listing keys runs SCAN to the end. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
@@ -1807,15 +1807,19 @@ during profiled runs.
 The **Database** tool window (the cylinder icon) connects to the database in
 your project's `.env`, as Laravel does: `DB_CONNECTION`, `DB_HOST`, `DB_PORT`,
 `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD`, with Laravel's defaults for
-anything missing. SQLite, MySQL, MariaDB, and PostgreSQL work without
+anything missing. SQLite, MySQL, MariaDB, PostgreSQL, and Redis work without
 installing a client, because the drivers are built into the app.
 
 To use another database, click the connection line under the tool window's
 title, or run **Database: Switch Connection…** from ⌘⇧A. The list shows `.env`'s
 connection, the ones you saved, and the other connections in the app's
-`config/database.php`, such as a read replica. **Add Connection…** asks for a
+`config/database.php`, such as a read replica, and the app's Redis
+connections from `.env`: **redis** (`REDIS_DB`) and **redis cache**
+(`REDIS_CACHE_DB`, database 1 unless set), where Laravel's cache store keeps
+its values. **Add Connection…** asks for a
 URL, such as `mysql://forge:secret@203.0.113.5:3306/laravel`,
-`pgsql://user@host/app?sslmode=require`, or `sqlite:database/other.sqlite`,
+`pgsql://user@host/app?sslmode=require`, `sqlite:database/other.sqlite`, or
+`redis://:secret@203.0.113.5:6379/0` (`rediss://` for TLS),
 and then a name. Saved connections are kept per project; their passwords are
 kept in your Mac's Keychain. Select a saved connection to see **Edit** and
 **Remove** in the list. When you edit one, leave the password out of the URL to
@@ -1859,6 +1863,18 @@ Each connection keeps its own SSH destination.
 
 Results show in the **Database** tab of the bottom panel. After you change
 `.env`, click **Refresh** in the tool window.
+
+### Redis
+
+With a Redis connection selected, the tool window lists keys instead of
+tables, sorted, 1,000 at a time. Click a key to see its value: a string's text,
+a hash's fields, a list's or set's members, a sorted set's members and scores,
+or a stream's entries. ⌘⇧F10 opens a Redis console, where ⌘⏎ runs the command
+on the caret's line, such as `TTL laravel_cache:greeting` or
+`DEL laravel_cache:greeting`, or the selection as one command. Quote an
+argument that has spaces, as in `redis-cli`. `SCAN` follows its cursor to the
+end, so `SCAN 0 MATCH laravel_cache:*` lists every matching key. Lines
+starting with `#` are comments.
 
 ## Diagnostics and formatting
 

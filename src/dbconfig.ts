@@ -35,13 +35,30 @@ export function connectionFromEnv(env: Record<string, string>, root: string, sai
   return { driver, host, port, ...credentials };
 }
 
-const defaultPort = (driver: string) => (driver === "pgsql" ? 5432 : 3306);
-const drivers: Record<string, string> = { mysql: "mysql", mariadb: "mariadb", pgsql: "pgsql", postgres: "pgsql", postgresql: "pgsql", sqlite: "sqlite" };
+const defaultPort = (driver: string) => ({ pgsql: 5432, redis: 6379 })[driver] ?? 3306;
+const drivers: Record<string, string> = { mysql: "mysql", mariadb: "mariadb", pgsql: "pgsql", postgres: "pgsql", postgresql: "pgsql", sqlite: "sqlite", redis: "redis", rediss: "redis", tls: "redis" };
+
+/**
+ * Laravel's two Redis connections from .env, as config/database.php builds them: `redis` (database REDIS_DB) and
+ * `redis cache` (REDIS_CACHE_DB), which the cache store uses. Laravel's env() reads `null` as no value, as in the
+ * stock REDIS_PASSWORD=null. In a Sail project, connect to the port Sail forwards, as for the database.
+ */
+export function redisFromEnv(env: Record<string, string>, root: string, sail = false): Record<string, Connection> {
+  const value = (key: string) => (env[key] === "null" ? "" : (env[key] ?? ""));
+  const url = value("REDIS_URL") ? connectionFromUrl(value("REDIS_URL"), root) : null;
+  let host = url?.host || value("REDIS_HOST") || "127.0.0.1";
+  let port = url?.port || Number(value("REDIS_PORT")) || 6379;
+  if (sail && !/^(127\.0\.0\.1|localhost|::1)$/.test(host)) (port = Number(value("FORWARD_REDIS_PORT")) || port), (host = "127.0.0.1");
+  const base = { driver: "redis", host, port, username: url?.username || value("REDIS_USERNAME"), password: url?.password || value("REDIS_PASSWORD"), ssl_mode: url?.ssl_mode ?? "", ssl_ca: url?.ssl_ca ?? "" };
+  const database = (key: string, fallback: string) => (url && new URL(value("REDIS_URL")).pathname.length > 1 ? url.database : value(key) || fallback);
+  return { redis: { ...base, database: database("REDIS_DB", "0") }, "redis cache": { ...base, database: database("REDIS_CACHE_DB", "1") } };
+}
 
 /**
  * A connection from a URL, as Laravel's DB_URL takes one: `mysql://user:password@host:3306/database?sslmode=require`,
  * `pgsql://…` (or `postgres://…`), or `sqlite:database/other.sqlite` (relative to the project) and `sqlite:///absolute/path`.
- * Null if it isn't one.
+ * Or a Redis one, as REDIS_URL takes: `redis://:password@host:6379/0`, or `rediss://…` for TLS, which checks the
+ * certificate unless `sslmode` says otherwise. Null if it isn't one.
  */
 export function connectionFromUrl(text: string, root: string): Connection | null {
   let url: URL;
@@ -57,6 +74,11 @@ export function connectionFromUrl(text: string, root: string): Connection | null
   if (driver === "sqlite") return url.pathname ? { driver, host: "", port: 0, username: "", password: "", database: inProject(d(url.pathname)), ssl_mode: "", ssl_ca: "" } : null;
   if (!url.hostname) return null;
   const param = (name: string) => url.searchParams.get(name) ?? "";
+  const scheme = url.protocol.slice(0, -1);
+  if (driver === "redis") {
+    const tls = scheme === "redis" ? param("sslmode") : param("sslmode") || "verify-full";
+    return { driver, host: url.hostname.replace(/^\[(.*)\]$/, "$1"), port: Number(url.port) || 6379, database: d(url.pathname.slice(1)) || param("database") || "0", username: d(url.username), password: d(url.password), ssl_mode: tls, ssl_ca: inProject(param("sslrootcert") || param("sslca")) };
+  }
   return {
     driver,
     host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
@@ -74,8 +96,10 @@ export function connectionUrl(c: Connection, root: string): string {
   const inProject = (file: string) => (file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file);
   if (c.driver === "sqlite") return `sqlite:${c.database.startsWith(`${root}/`) ? inProject(c.database) : `//${c.database}`}`;
   const e = encodeURIComponent;
-  const params = new URLSearchParams(Object.entries({ sslmode: c.ssl_mode, sslrootcert: inProject(c.ssl_ca) }).filter(([, v]) => v)).toString();
-  return `${c.driver}://${c.username ? `${e(c.username)}@` : ""}${c.host.includes(":") ? `[${c.host}]` : c.host}:${c.port}/${e(c.database)}${params ? `?${params}` : ""}`;
+  // rediss:// means TLS that checks the certificate, so only a looser mode is spelled out.
+  const tls = c.driver === "redis" && c.ssl_mode && c.ssl_mode !== "disable";
+  const params = new URLSearchParams(Object.entries({ sslmode: tls && c.ssl_mode === "verify-full" ? "" : c.ssl_mode, sslrootcert: inProject(c.ssl_ca) }).filter(([, v]) => v)).toString();
+  return `${tls ? "rediss" : c.driver}://${c.username ? `${e(c.username)}@` : ""}${c.host.includes(":") ? `[${c.host}]` : c.host}:${c.port}/${e(c.database)}${params ? `?${params}` : ""}`;
 }
 
 /**
@@ -105,7 +129,7 @@ export function repeatsEnv(c: Connection, env: Record<string, string>, root: str
 export const describe = (c: Connection, root: string) =>
   c.driver === "sqlite"
     ? `SQLite · ${c.database.replace(root + "/", "")}`
-    : `${c.driver} · ${c.username}@${c.host}:${c.port}/${c.database}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
+    : `${c.driver} · ${c.username ? `${c.username}@` : ""}${c.host}:${c.port}/${c.database}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
 
 /** The statement around an offset, as PhpStorm runs the statement under the caret. */
 // ponytail: splits on every semicolon, including ones inside strings and comments.
@@ -124,13 +148,16 @@ export function statementAt(text: string, offset: number): string {
 /** False for text that is only whitespace and comments, which the database would reject. */
 export const hasCode = (sql: string) => sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim() !== "";
 
+/** A quoted table or column name, or for Redis, a key quoted as an argument of a command. */
 export const quoteIdentifier = (driver: string, name: string) =>
-  driver === "mysql" || driver === "mariadb" ? `\`${name.replace(/`/g, "``")}\`` : `"${name.replace(/"/g, '""')}"`;
+  driver === "mysql" || driver === "mariadb" ? `\`${name.replace(/`/g, "``")}\`` : driver === "redis" ? `"${name.replace(/[\\"]/g, "\\$&")}"` : `"${name.replace(/"/g, '""')}"`;
 
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const schema = (driver: string) => (driver === "pgsql" ? "current_schema()" : "DATABASE()");
 
+/** For Redis, the keys: db.rs follows SCAN's cursor to the end. */
 export function tablesQuery(driver: string): string {
+  if (driver === "redis") return "SCAN 0 COUNT 1000";
   if (driver === "sqlite") return "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
   return `SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema(driver)} ORDER BY table_name`;
 }
