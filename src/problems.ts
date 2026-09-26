@@ -117,11 +117,11 @@ const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path)
 
 /**
  * Every file's problems: live markers for open files, and the scan for the rest. An open PHP file shows the scan
- * until Phpactor, which also runs Mago, has checked it.
+ * until Phpactor, which also runs Mago, has checked it. Phpactor doesn't read Blade views, so theirs are always live.
  */
 function allProblems(): Map<string, Problem[]> {
   const root = host.root();
-  const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || diagnosed.has(path));
+  const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || path.endsWith(".blade.php") || diagnosed.has(path));
   const all = new Map([...scanned].filter(([path]) => !live(path)));
   for (const m of monaco.editor.getModelMarkers({})) {
     const path = m.resource.fsPath;

@@ -1531,6 +1531,34 @@ formatter but pins its own Prettier, so the formatter itself is bundled. It
 brings about 70 MB of dependencies to the Node tools, mostly Tailwind 3 for
 sorting classes, a PHP parser, and Linguist's language data.
 
+#### Checking the PHP in views
+
+`bladeToPhp` in `src/bladephp.ts` turns a view into one PHP file: a first line
+of `<?php` and the view's `@use` imports, then the view with everything but
+its PHP replaced by spaces, one for each UTF-16 unit, keeping line breaks. So a
+problem's line, less one, and column are the view's, with no position map.
+Each piece of PHP becomes a statement that starts with `;` in place of its
+delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an
+array, since `@include('a', [...])` is a list), a bound component attribute
+`:post="$post"` reads `;[$post]`, and `@foreach`, `@forelse`, `@for`, and
+`@while` keep the loop, as `;foreach (…)`, whose body is the empty statement
+that follows. `@php … @endphp` and `<?php … ?>` keep their code. Only
+Laravel's own directives are read, not every `@word(`, so CSS's `@media` and
+text stay text, as Blade leaves unknown directives; `{{-- --}}`, `@{{`, `@@`,
+and `@verbatim` are skipped. Echo delimiters are found as Blade's own regex
+finds them, without reading strings.
+
+`checkBlade` in `lsp.ts` sends that file to `mago analyze --stdin-input` with
+the view's path and the editor's Mago settings, a second after typing stops,
+and puts the problems under the `blade` owner. They go through `realProblems`
+as a PHP file's do, then `bladeProblems` drops undefined variables, unused
+statements (every echo is one), and Laravel magic and uses of `mixed` values
+(`magicNoise`), since the view's variables have no types. Mago has no server
+mode, so only open views are checked; the project scan reads Blade files as
+PHP with inline HTML, which has nothing to report. Blade views' markers count
+in the Problems panel as soon as the view is open, since no Phpactor check
+has to finish first.
+
 Laravel LSP answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
 class-based component, from `componentClassPath` in `src/phptypes.ts`.
@@ -3425,3 +3453,17 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Check Blade's PHP with Mago, without variables
+
+Blade's PHP went unchecked because a view's variables come from its controller.
+Rather than compile views as Laravel does (`CompilesEchoes` and the rest, which
+needs PHP and a booted app, and maps positions through generated code), the
+editor blanks everything but the PHP, so positions stay put, and runs the Mago
+it already has. Undefined variables and every problem about their `mixed`
+values are dropped, which still leaves syntax errors, unknown classes,
+functions, methods, and constants, and wrong arguments. Reading variable types
+from the controllers that render a view, or from a component's class, would
+catch more, but a view can be rendered from many places with different
+values; `@props` gives names without types, so it adds nothing once undefined
+variables are dropped.
