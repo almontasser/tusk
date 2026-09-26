@@ -549,6 +549,10 @@ const togglers = new WeakMap<monaco.editor.ICodeEditor, () => void>();
 
 /** Toggles blame annotations (commit, age, and author) in place of line numbers. */
 export const annotate = (editor: monaco.editor.ICodeEditor) => togglers.get(editor)?.();
+export const isAnnotated = (editor: monaco.editor.ICodeEditor) => {
+  const uri = editor.getModel()?.uri;
+  return !!uri && uri.scheme === "file" && annotated.has(uri.fsPath.slice(host.root().length + 1));
+};
 
 /** Adds change markers, inline blame for the cursor line, and blame annotations to an editor. */
 export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {

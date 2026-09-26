@@ -6,8 +6,8 @@ import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceS
 import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { afterSave, annotate, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -73,6 +73,7 @@ function addPane(): Pane {
   trackEditor(ed);
   decorateConflicts(ed);
   attachDebugger(ed);
+  ed.onContextMenu((e) => gutterMenu(ed, e));
   showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
@@ -83,6 +84,21 @@ function addPane(): Pane {
   ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
   ed.onDidChangeCursorPosition((e) => pane.editor === editor && followEditor(active, e.position));
   return pane;
+}
+
+/** The context menu of the gutter left of the code: breakpoints, blame, and the line's reference. */
+function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
+  const T = monaco.editor.MouseTargetType;
+  const model = ed.getModel();
+  const line = e.target.position?.lineNumber;
+  if (![T.GUTTER_GLYPH_MARGIN, T.GUTTER_LINE_NUMBERS, T.GUTTER_LINE_DECORATIONS].includes(e.target.type) || !line || model?.uri.scheme !== "file") return;
+  const path = model.uri.fsPath;
+  showMenu(e.event.posx, e.event.posy, [
+    ...breakpointMenu(path, line),
+    "-",
+    { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
+    { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
+  ]);
 }
 
 const firstPane = addPane();

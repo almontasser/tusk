@@ -1303,7 +1303,11 @@ debugging on for the processes it starts.
 
 ### Breakpoint options, watches, and exceptions
 
-Right-click the gutter at a line, or press ⇧⌘F8, to edit its breakpoint:
+Right-click the gutter at a line to add, remove, disable, or edit its
+breakpoint, add a conditional breakpoint or a logpoint, remove the file's or
+all breakpoints, annotate the file with Git blame, or copy the line's
+reference (`path:line`). While execution is paused, **Run to Line** resumes
+and pauses at that line once. Press ⇧⌘F8 to edit the breakpoint at the cursor:
 
 - **Condition:** pause only when a PHP expression is true, such as
   `$user->id === 5`.
@@ -1312,8 +1316,8 @@ Right-click the gutter at a line, or press ⇧⌘F8, to edit its breakpoint:
 - **Log message:** print a message to the Debug tab instead of pausing. Put
   expressions in braces, such as `Saving {$post->id}`.
 
-A breakpoint with a condition or hit count shows a `?`, and a log breakpoint
-is an orange diamond.
+A breakpoint with a condition or hit count shows a `?`, a log breakpoint
+is an orange diamond, and a disabled breakpoint is hollow.
 
 To watch an expression, type it in the field above the variables in the Debug
 tab and press Enter. Watches are evaluated in the selected frame every time

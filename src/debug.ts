@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
+import type { MenuItem } from "./files";
 import { pick } from "./palette";
 import { composeService, usesSail } from "./sail";
 import { showPanelView } from "./terminal";
@@ -43,8 +44,8 @@ listen<string>("lsp:xdebug", ({ payload }) => {
 // Each breakpoint is a line and its options, kept per file. For files with an open model,
 // decorations track the lines as you edit, so the model is the source of truth there.
 
-/** A breakpoint's options, as the Debug Adapter Protocol names them. Empty means pause every time. */
-export type BreakpointOptions = { condition?: string; hitCondition?: string; logMessage?: string };
+/** A breakpoint's options, as the Debug Adapter Protocol names them, and whether it's off. Empty means pause every time. */
+export type BreakpointOptions = { condition?: string; hitCondition?: string; logMessage?: string; disabled?: boolean };
 type Breakpoints = Map<number, BreakpointOptions>;
 const breakpoints = new Map<string, Breakpoints>();
 const decorations = new Map<string, Map<string, BreakpointOptions>>(); // path → decoration id → options
@@ -65,7 +66,7 @@ function breakpointsOf(path: string): Breakpoints {
 
 function describe(o: BreakpointOptions): string {
   const parts = [o.logMessage ? `Logs \`${o.logMessage}\` without pausing` : "Pauses", o.condition && `when \`${o.condition}\``, o.hitCondition && `on hit ${o.hitCondition}`];
-  return `${parts.filter(Boolean).join(" ")}. Right-click to edit.`;
+  return `${o.disabled ? "Disabled. " : ""}${parts.filter(Boolean).join(" ")}. Right-click to edit.`;
 }
 
 function renderBreakpoints(path: string) {
@@ -77,7 +78,7 @@ function renderBreakpoints(path: string) {
     entries.map(([line, o]) => ({
       range: new monaco.Range(line, 1, line, 1),
       options: {
-        glyphMarginClassName: o.logMessage ? "breakpoint log" : o.condition || o.hitCondition ? "breakpoint conditional" : "breakpoint",
+        glyphMarginClassName: `${o.logMessage ? "breakpoint log" : o.condition || o.hitCondition ? "breakpoint conditional" : "breakpoint"}${o.disabled ? " disabled" : ""}`,
         glyphMarginHoverMessage: { value: describe(o) },
         stickiness: 1,
       },
@@ -125,52 +126,96 @@ export function toggleBreakpoint(path: string, line: number) {
   update(path, (b) => (b.has(line) ? b.delete(line) : b.set(line, {})));
 }
 
-const prompts: { key: keyof BreakpointOptions; name: string; placeholder: string }[] = [
+const prompts: { key: "condition" | "hitCondition" | "logMessage"; name: string; placeholder: string }[] = [
   { key: "condition", name: "Condition", placeholder: "A PHP expression; pause only when it's true, such as $user->id === 5" },
   { key: "hitCondition", name: "Hit count", placeholder: "Pause on a hit count: 5 (the fifth time), >= 5, or % 3 (every third time)" },
   { key: "logMessage", name: "Log message", placeholder: "Log instead of pausing; put expressions in braces, such as Saving {$post->id}" },
 ];
 
+/** Asks for one of a breakpoint's options, adding the breakpoint if there's none. */
+function editOption(path: string, line: number, p: (typeof prompts)[number]) {
+  const current = breakpointsOf(path).get(line) ?? {};
+  pick(
+    p.placeholder,
+    (q) => [
+      {
+        label: q.trim() ? `Set ${p.name.toLowerCase()} to ${q.trim()}` : `No ${p.name.toLowerCase()}`,
+        run: () => update(path, (b) => b.set(line, { ...current, [p.key]: q.trim() || undefined })),
+      },
+    ],
+    0,
+    { value: current[p.key] ?? "" },
+  );
+}
+
 /** Edits a breakpoint's condition, hit count, or log message, adding the breakpoint if there's none. */
 export function editBreakpoint(path: string, line: number) {
   const current = breakpointsOf(path).get(line) ?? {};
   pick(`Breakpoint on line ${line}`, () => [
-    ...prompts.map((p) => ({
-      label: `${p.name}: ${current[p.key] || "none"}`,
-      run: () =>
-        pick(
-          p.placeholder,
-          (q) => [
-            {
-              label: q.trim() ? `Set ${p.name.toLowerCase()} to ${q.trim()}` : `No ${p.name.toLowerCase()}`,
-              run: () => update(path, (b) => b.set(line, { ...current, [p.key]: q.trim() || undefined })),
-            },
-          ],
-          0,
-          { value: current[p.key] ?? "" },
-        ),
-    })),
+    ...prompts.map((p) => ({ label: `${p.name}: ${current[p.key] || "none"}`, run: () => editOption(path, line, p) })),
     ...(breakpointsOf(path).has(line) ? [{ label: "Remove breakpoint", run: () => update(path, (b) => b.delete(line)) }] : []),
   ]);
 }
 
-const sendBreakpoints = (path: string) =>
-  request("setBreakpoints", {
-    source: { path },
-    breakpoints: [...breakpointsOf(path)]
-      .sort(([a], [b]) => a - b)
-      .map(([line, o]) => Object.fromEntries(Object.entries({ line, ...o }).filter(([, v]) => v !== undefined && v !== ""))),
-  }).catch(() => {});
+/** Removes every breakpoint in a file, or in all files. */
+function removeAll(path?: string) {
+  for (const p of path ? [path] : [...breakpoints.keys()]) update(p, (b) => b.clear());
+}
 
-/** Adds breakpoints to an editor's gutter: click toggles one, and right-click edits its condition. */
+/** A line to pause at once, for Run to Line: a breakpoint the adapter gets until execution next pauses. */
+let runTo: { path: string; line: number } | null = null;
+
+async function runToLine(path: string, line: number) {
+  if (!isPaused()) return;
+  runTo = { path, line };
+  await sendBreakpoints(path);
+  resume();
+}
+
+const sendBreakpoints = (path: string) => {
+  const enabled = [...breakpointsOf(path)].filter(([, o]) => !o.disabled);
+  if (runTo?.path === path && !enabled.some(([line]) => line === runTo!.line)) enabled.push([runTo.line, {}]);
+  return request("setBreakpoints", {
+    source: { path },
+    breakpoints: enabled
+      .sort(([a], [b]) => a - b)
+      .map(([line, { disabled, ...o }]) => Object.fromEntries(Object.entries({ line, ...o }).filter(([, v]) => v !== undefined && v !== ""))),
+  }).catch(() => {});
+};
+
+/** The breakpoint items of the gutter's context menu for a line. */
+export function breakpointMenu(path: string, line: number): MenuItem[] {
+  const all = breakpointsOf(path);
+  const b = all.get(line);
+  const [condition, hitCount, logMessage] = prompts;
+  const items: MenuItem[] = b
+    ? [
+        { label: "Remove Breakpoint", run: () => update(path, (bs) => bs.delete(line)) },
+        { label: b.disabled ? "Enable Breakpoint" : "Disable Breakpoint", run: () => update(path, (bs) => bs.set(line, { ...b, disabled: !b.disabled || undefined })) },
+        { label: "Edit Condition…", run: () => editOption(path, line, condition) },
+        { label: "Edit Hit Count…", run: () => editOption(path, line, hitCount) },
+        { label: "Edit Log Message…", run: () => editOption(path, line, logMessage) },
+      ]
+    : [
+        { label: "Add Breakpoint", run: () => toggleBreakpoint(path, line) },
+        { label: "Add Conditional Breakpoint…", run: () => editOption(path, line, condition) },
+        { label: "Add Logpoint…", run: () => editOption(path, line, logMessage) },
+      ];
+  if (isPaused()) items.push("-", { label: "Run to Line", run: () => runToLine(path, line) });
+  const elsewhere = [...breakpoints].some(([p, bs]) => p !== path && bs.size);
+  if (all.size || elsewhere) items.push("-");
+  if (all.size) items.push({ label: "Remove Breakpoints in File", run: () => removeAll(path) });
+  if (all.size || elsewhere) items.push({ label: "Remove All Breakpoints", run: () => removeAll() });
+  return items;
+}
+
+/** Adds breakpoints to an editor's gutter: click toggles one. The gutter's context menu edits them. */
 export function attachDebugger(editor: monaco.editor.IStandaloneCodeEditor) {
   editor.updateOptions({ glyphMargin: true });
   editor.onMouseDown((e) => {
     const model = editor.getModel();
-    if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !model || model.uri.scheme !== "file") return;
-    const line = e.target.position!.lineNumber;
-    if (e.event.rightButton) editBreakpoint(model.uri.fsPath, line);
-    else toggleBreakpoint(model.uri.fsPath, line);
+    if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !e.event.leftButton || !model || model.uri.scheme !== "file") return;
+    toggleBreakpoint(model.uri.fsPath, e.target.position!.lineNumber);
   });
 }
 
@@ -316,6 +361,7 @@ export async function stopDebugging() {
   await Promise.race([request("disconnect", {}).catch(() => {}), new Promise((r) => setTimeout(r, 1000))]);
   await invoke("lsp_stop", { name: "xdebug" }).catch(() => {});
   running = false;
+  runTo = null;
   stoppedThread = null;
   frames = [];
   setCurrent(null);
@@ -330,6 +376,11 @@ async function onEvent(event: string, body: any) {
     await request("configurationDone").catch(() => {});
   } else if (event === "stopped") {
     stoppedThread = body.threadId;
+    if (runTo) {
+      const { path } = runTo;
+      runTo = null;
+      sendBreakpoints(path);
+    }
     const trace = await request<{ stackFrames: Frame[] }>("stackTrace", { threadId: body.threadId, startFrame: 0, levels: 50 });
     frames = trace.stackFrames;
     showPanel();

@@ -2419,6 +2419,16 @@ and `[line, condition]` pairs, still load. `setBreakpoints` sends only the
 options that are set. The adapter prints log messages as `output` events,
 which the Debug tab already shows.
 
+A breakpoint can also be `disabled`; it stays in the gutter and in storage but
+isn't sent. **Run to Line** sets a temporary breakpoint in `runTo`, which
+`setBreakpoints` adds for that file until the next `stopped` event, when the
+file's breakpoints go out again without it.
+
+The gutter's context menu comes from Monaco's `onContextMenu` for the glyph
+margin, line numbers, and line decorations, where Monaco shows no menu of its
+own. `debug.ts` supplies the breakpoint items and `main.ts` adds blame and
+Copy Reference.
+
 Watches are a list of expressions per project in `localStorage`. After a frame
 is selected, each one goes to `evaluate` with the `watch` context, and the
 result renders with the same row as a variable, so objects expand.
