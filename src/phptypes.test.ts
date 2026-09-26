@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abstractMethods, callSites, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
+import { outsideStrings, abstractMethods, callSites, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -209,4 +209,11 @@ test("reads abstract methods with full class names, and shortens them for anothe
 test("reads abstract methods within a range", () => {
   const source = "<?php\nabstract class A { abstract function a(); }\ntrait B { abstract function b(); }";
   assert.deepEqual(abstractMethods(source, source.indexOf("B")).map((m) => m.name), ["b"]);
+});
+
+test("leaves strings alone when rewriting names", () => {
+  assert.equal(shortenNames('"\\t" . \\Closure::class', "<?php\nclass A {}"), '"\\t" . Closure::class');
+  const trait = "<?php\nnamespace App;\ntrait T { abstract function f(string $s = 'a, b'): Foo; }";
+  assert.equal(abstractMethods(trait)[0].signature, "function f(string $s = 'a, b'): \\App\\Foo");
+  assert.equal(outsideStrings("'x' y", (c) => c.toUpperCase()), "'x' Y");
 });

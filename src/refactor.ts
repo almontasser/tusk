@@ -7,7 +7,8 @@ import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath, typeSymb
 import { constructorCalls, deletionLines, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { constantDeclaration, constantRefs, functionScope, inlinedValue } from "./extractparse";
+import { constantAt, constantDeclaration, constantRefs, functionScope, inlinedValue, literalType, occurrences, variableName, type Expr } from "./extractparse";
+import { chosenExpression, chosenUses } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
@@ -141,9 +142,9 @@ const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.file(pa
  * Opens the Change Signature dialog for the method or function at the cursor, then rewrites its declaration, its
  * overrides in classes that extend or implement its class, and every call Phpactor finds.
  */
-export async function changeSignature(editor: monaco.editor.ICodeEditor) {
+export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: { expr: Expr; uses: Expr[] }) {
   const model = editor.getModel();
-  const pos = editor.getPosition();
+  const pos = introduce ? editor.getModel()?.getPositionAt(introduce.expr.start) : editor.getPosition();
   if (!model || !pos || model.getLanguageId() !== "php") return host.status("Change Signature works in PHP files.");
   const found = symbolAt(await symbolsOf(model), pos.lineNumber - 1, pos.column - 1);
   if (!found || ![6, 12].includes(found.symbol.kind)) return host.status("Put the cursor in a method or function to change its signature.");
@@ -154,11 +155,25 @@ export async function changeSignature(editor: monaco.editor.ICodeEditor) {
   if (!parts) return host.status(`Can't read the declaration of ${symbol.name}.`);
   const kind = isConstructor(symbol) ? "constructor" : symbol.kind === 6 ? "method" : "function";
   const title = container ? `${container.name}::${symbol.name}` : symbol.name;
-  const chosen = await editSignature({ title, kind, signature: { modifiers: parts.modifiers, name: parts.name, returnType: parts.returnType, params: parts.params } });
+  const params = [...parts.params];
+  let focus: number | undefined;
+  if (introduce) {
+    // Introduce Parameter: a new last parameter holding the expression, as its default when it's a constant, or
+    // else as the value passed in existing calls.
+    const { expr } = introduce;
+    const constant = !!constantAt(text, expr.start, expr.end);
+    const taken = new Set(params.map((p) => p.name));
+    const at = params.findIndex((p) => p.variadic);
+    focus = at < 0 ? params.length : at;
+    params.splice(focus, 0, { text: "", type: literalType(expr.text), name: variableName(expr.text, taken), byRef: false, variadic: false, defaultValue: constant ? expr.text : undefined, callValue: constant ? undefined : expr.text });
+  }
+  const chosen = await editSignature({ title, kind, heading: introduce ? "Introduce Parameter" : "Change Signature", focus, signature: { modifiers: parts.modifiers, name: parts.name, returnType: parts.returnType, params } });
   editor.focus();
   if (!chosen) return;
   if (model.getVersionId() !== version) return host.status("The file changed while the dialog was open. Run Change Signature again.");
-  await plan(model, symbol, container, title, chosen.signature, chosen.preview);
+  // The expression's uses become the new parameter, if it's still there.
+  const added = introduce && chosen.signature.params.find((p) => !p.from && (p.callValue === introduce.expr.text || p.defaultValue === introduce.expr.text));
+  await plan(model, symbol, container, title, chosen.signature, chosen.preview, added ? introduce!.uses.map((u) => ({ ...u, text: `$${added.name}` })) : []);
 }
 
 type Member = { references: { line_no: number; col_no: number }[]; file: string };
@@ -284,10 +299,11 @@ async function constructorCallsOf(model: monaco.editor.ITextModel, container: L.
 
 /**
  * The same change for an override, which may name its parameters differently: parameters match by position,
- * and keep the override's own name, type, and default unless the change set new ones.
+ * and keep the override's own name, type, and default unless the change set new ones. Parameters only the
+ * override has stay, after the others.
  */
 function forOverride(before: Param[], after: Param[], own: Param[]): Param[] {
-  return after.map((p) => {
+  const mapped = after.map((p) => {
     const i = before.findIndex((b) => b.name === p.from);
     const mine = own[i];
     if (!p.from || !mine) return p;
@@ -300,6 +316,7 @@ function forOverride(before: Param[], after: Param[], own: Param[]): Param[] {
       defaultValue: p.defaultValue === old.defaultValue ? mine.defaultValue : p.defaultValue,
     };
   });
+  return [...mapped, ...own.slice(before.length).map((p) => ({ ...p, from: p.name }))];
 }
 
 /** Renames parameters in a declaration's docblock and body, outside its header [headerStart, headerEnd). */
@@ -316,20 +333,32 @@ function renameParams(text: string, headerStart: number, headerEnd: number, para
   return edits;
 }
 
-async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container: L.DocumentSymbol | undefined, title: string, s: Signature, preview: boolean) {
+type Raw = { start: number; end: number; text: string };
+/** A call to rewrite: its name and argument list's offsets, and the parameters of the method it calls. */
+type Site = { path: string; line: number; nameStart: number; nameEnd: number; argsOpen: number; argsClose: number; before: Param[]; after: Param[]; owner: { fqn: string; text: string } | null };
+
+/** Applies edits (offsets into `text` from `base`) to a slice of it, from the last one back. */
+const applyRaw = (text: string, base: number, edits: Raw[]) =>
+  [...edits].sort((a, b) => b.start - a.start).reduce((t, e) => t.slice(0, e.start - base) + e.text + t.slice(e.end - base), text);
+
+async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container: L.DocumentSymbol | undefined, title: string, s: Signature, preview: boolean, bodyEdits: Raw[] = []) {
   host.status(`Looking for calls to ${symbol.name}…`);
   const texts = new Map<string, string>();
-  const changes: Record<string, L.TextEdit[]> = {};
+  const raw = new Map<string, Raw[]>();
   const edit = (uri: string, text: string, start: number, end: number, newText: string) => {
     texts.set(uri, text);
-    (changes[uri] ??= []).push({ range: { start: positionAt(text, start), end: positionAt(text, end) }, newText });
+    raw.set(uri, [...(raw.get(uri) ?? []), { start, end, text: newText }]);
   };
-  /** Rewrites a declaration's header, keeping its own modifiers unless `modifiers` is given, and its parameters' uses. */
-  const declare = (uri: string, text: string, nameEnd: number, params: Param[], modifiers?: string) => {
+  /**
+   * Rewrites a declaration's header and its parameters' uses. An override keeps its own modifiers, and its own
+   * return type unless the change gave the method a new one.
+   */
+  const declare = (uri: string, text: string, nameEnd: number, params: Param[], own?: { returnTypeWas: string }) => {
     const parts = declarationParts(text, nameEnd);
     if (!parts) return null;
-    const mods = modifiers ?? parts.modifiers;
-    const header = `${mods ? `${mods} ` : ""}function ${parts.byRef ? "&" : ""}${s.name}(${formatParams(params, parts.indent, parts.headerIndent)})${s.returnType ? `: ${s.returnType}` : ""}`;
+    const mods = own ? parts.modifiers : s.modifiers;
+    const returnType = own && parts.returnType !== own.returnTypeWas ? parts.returnType : s.returnType;
+    const header = `${mods ? `${mods} ` : ""}function ${parts.byRef ? "&" : ""}${s.name}(${formatParams(params, parts.indent, parts.headerIndent)})${returnType ? `: ${returnType}` : ""}`;
     edit(uri, text, parts.start, parts.end, header);
     for (const r of renameParams(text, parts.start, parts.end, params)) edit(uri, text, r.start, r.end, r.text);
     return parts;
@@ -337,22 +366,23 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
 
   const uri = model.uri.toString();
   const text = model.getValue();
-  const base = declare(uri, text, offsetAt(text, symbol.selectionRange.end), s.params, s.modifiers)!;
+  const base = declare(uri, text, offsetAt(text, symbol.selectionRange.end), s.params)!;
+  for (const e of bodyEdits) edit(uri, text, e.start, e.end, e.text);
   // A subclass's constructor has its own parameters, and calls the parent's through parent::__construct().
   const overrides = symbol.kind === 6 && container && !isConstructor(symbol) ? await overridesOf(model, container, symbol.name) : [];
   // Each group of calls is rewritten against the parameters of the method it calls.
-  const groups: { refs: L.Location[]; before: Param[]; after: Param[] }[] = [{ refs: await callsOf(model, symbol, container), before: base.params, after: s.params }];
+  const baseOwner = container ? { fqn: fqnOf(model, container), text } : null;
+  const groups: { refs: L.Location[]; before: Param[]; after: Param[]; owner: Site["owner"] }[] = [{ refs: await callsOf(model, symbol, container), before: base.params, after: s.params, owner: baseOwner }];
   for (const o of overrides) {
     const own = declarationParts(o.text, o.nameEnd)?.params ?? [];
     const after = forOverride(base.params, s.params, own);
-    declare(monaco.Uri.file(o.path).toString(), o.text, o.nameEnd, after);
-    groups.push({ refs: (await memberCalls(o.fqn, symbol.name, { path: o.path, line: o.line })) ?? [], before: own, after });
+    declare(monaco.Uri.file(o.path).toString(), o.text, o.nameEnd, after, { returnTypeWas: base.returnType });
+    groups.push({ refs: (await memberCalls(o.fqn, symbol.name, { path: o.path, line: o.line })) ?? [], before: own, after, owner: { fqn: o.fqn, text: o.text } });
   }
-  const renamed = s.name !== base.name;
   const skipped: Skipped[] = [];
-  let calls = 0;
+  const sites = new Map<string, Site[]>();
   const seen = new Set<string>();
-  for (const { refs, before, after } of groups)
+  for (const { refs, before, after, owner } of groups)
     for (const ref of refs) {
       // A call through a subclass can turn up for both the method and its override.
       const id = `${ref.uri}:${ref.range.start.line}:${ref.range.start.character}`;
@@ -361,35 +391,64 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
       const path = monaco.Uri.parse(ref.uri).fsPath;
       const text = texts.get(ref.uri) ?? (await textOf(path).catch(() => null));
       if (text === null) continue;
+      texts.set(ref.uri, text);
       const line = ref.range.start.line + 1;
-      const start = offsetAt(text, ref.range.start);
+      const nameStart = offsetAt(text, ref.range.start);
       // Declarations, such as an override's, have their own edit.
-      if (/\bfunction\s+&?$/.test(text.slice(text.lastIndexOf("\n", start - 1) + 1, start))) continue;
+      if (/\bfunction\s+&?$/.test(text.slice(text.lastIndexOf("\n", nameStart - 1) + 1, nameStart))) continue;
       // The call's parentheses follow the name; a reference without them (a callable string) can't change.
-      const end = offsetAt(text, ref.range.end);
-      const paren = text.slice(end).match(/^\s*\(/);
+      const nameEnd = offsetAt(text, ref.range.end);
+      const paren = text.slice(nameEnd).match(/^\s*\(/);
       if (!paren) {
         skipped.push({ path, line, reason: "not a call, such as a callable string" });
         continue;
       }
-      const argsOpen = end + paren[0].length - 1;
+      const argsOpen = nameEnd + paren[0].length - 1;
       const argsClose = matchBracket(text, argsOpen);
-      if (argsClose < 0) continue;
-      const result = rewriteArgs(splitTopLevel(text.slice(argsOpen + 1, argsClose)), before, after);
-      if ("error" in result) {
-        skipped.push({ path, line, reason: result.error });
+      if (argsClose < 0) {
+        skipped.push({ path, line, reason: "its arguments couldn't be read" });
         continue;
       }
-      if (renamed && !isConstructor(symbol)) edit(ref.uri, text, start, end, s.name);
-      const inner = text.slice(argsOpen + 1, argsClose);
-      if (result.args.join("\0") !== splitTopLevel(inner).join("\0")) {
+      sites.set(ref.uri, [...(sites.get(ref.uri) ?? []), { path, line, nameStart, nameEnd, argsOpen, argsClose, before, after, owner }]);
+    }
+
+  // Calls are rewritten innermost first, and each takes in the edits inside its arguments, such as a nested call
+  // or a renamed parameter, so no two edits overlap.
+  const renamed = s.name !== base.name && !isConstructor(symbol);
+  let calls = 0;
+  for (const [siteUri, list] of sites) {
+    const text = texts.get(siteUri)!;
+    const types = parseTypeDeclarations(text);
+    for (const site of list.sort((a, b) => b.argsOpen - a.argsOpen)) {
+      const edits = raw.get(siteUri) ?? [];
+      const inside = edits.filter((e) => e.start > site.argsOpen && e.end <= site.argsClose);
+      const original = text.slice(site.argsOpen + 1, site.argsClose);
+      const inner = applyRaw(original, site.argsOpen + 1, inside);
+      // A default written into a call must mean the same there: self:: and imported names are spelled out.
+      const here = [...types].reverse().find((t) => t.offset < site.nameStart)?.fqn;
+      const after = site.after.map((p) =>
+        p.defaultValue && site.owner ? { ...p, defaultValue: shortenNames(inlinedValue(p.defaultValue, site.owner.text, site.owner.fqn, here === site.owner.fqn), text) } : p,
+      );
+      const result = rewriteArgs(splitTopLevel(inner), site.before, after);
+      if ("error" in result) {
+        skipped.push({ path: site.path, line: site.line, reason: result.error });
+        continue;
+      }
+      if (result.args.join("\0") !== splitTopLevel(original).join("\0")) {
         // Arguments one per line stay that way.
         const indent = inner.match(/\n([ \t]*)\S/)?.[1];
         const args = indent === undefined ? result.args.join(", ") : `\n${result.args.map((a) => `${indent}${a},`).join("\n")}\n${inner.match(/\n([ \t]*)$/)?.[1] ?? ""}`;
-        edit(ref.uri, text, argsOpen + 1, argsClose, args);
+        raw.set(siteUri, [...edits.filter((e) => !inside.includes(e)), { start: site.argsOpen + 1, end: site.argsClose, text: args }]);
       }
+      if (renamed) edit(siteUri, text, site.nameStart, site.nameEnd, s.name);
       calls++;
     }
+  }
+  const changes: Record<string, L.TextEdit[]> = {};
+  for (const [u, edits] of raw) {
+    const t = texts.get(u)!;
+    changes[u] = edits.map((e) => ({ range: { start: positionAt(t, e.start), end: positionAt(t, e.end) }, newText: e.text }));
+  }
   host.status("");
   const files = Object.keys(changes).length;
   const apply = () =>
@@ -399,6 +458,27 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
   // Calls it can't rewrite are worth a look before applying, as PhpStorm shows its conflicts first.
   if (preview || skipped.length) showRefactorPreview(`Change Signature of ${title}`, changes, texts, skipped, apply);
   else await apply();
+}
+
+// ---- Introduce parameter ----
+
+/**
+ * Introduce Parameter (⌥⌘P): turns an expression in a method into a new parameter, through the Change Signature
+ * dialog, so the name and position can be set there. Calls pass the expression, which must not use the method's
+ * variables, since they don't exist at the call.
+ */
+export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
+  const model = editor.getModel();
+  if (!model || model.getLanguageId() !== "php") return host.status("Introduce Parameter works in PHP files.");
+  const expr = await chosenExpression(editor, "make it a parameter");
+  if (!expr) return;
+  const text = model.getValue();
+  const [from, to] = functionScope(text, expr.start);
+  if (from === 0) return host.status("Introduce Parameter works inside a method or function.");
+  if (/\$(?!this\b)\w/.test(expr.text.replace(/'(?:[^'\\]|\\.)*'/g, ""))) return host.status("The expression uses the method's variables, which calls can't pass. Extract a variable instead (⌥⌘V).");
+  if (/\$this\b/.test(expr.text)) return host.status("The expression uses $this, which calls outside the class can't pass.");
+  const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
+  if (uses) await changeSignature(editor, { expr, uses });
 }
 
 // ---- Move class ----

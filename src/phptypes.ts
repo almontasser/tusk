@@ -296,6 +296,11 @@ export function constructorCalls(source: string, classes: Set<string>): [number,
   return calls;
 }
 
+/** Applies `fn` to the text outside string literals only, so a rewrite of names leaves `"\t"` and `'a, b'` alone. */
+export function outsideStrings(text: string, fn: (code: string) => string): string {
+  return text.split(/('(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*")/).map((part, i) => (i % 2 ? part : fn(part))).join("");
+}
+
 const BUILTIN_TYPES = new Set("int float string bool array callable iterable object mixed void null never false true self static parent".split(" "));
 // A name in a type: after "(", ",", "|", "&", "?", or a return type's ":", and not a call or a constant's class.
 const TYPE_NAME = /(?<=(?:[(,|&?]|(?<!:):)\s*)\\?[A-Za-z_][\w\\]*(?![\w\\(]|\s*::)/g;
@@ -314,10 +319,8 @@ export function abstractMethods(source: string, from = 0, to = source.length): {
     const close = matchBracket(code, m.index! + m[0].length - 1);
     const end = close < 0 ? -1 : code.indexOf(";", close);
     if (end < 0) continue;
-    const signature = source
-      .slice(m.index!, end)
-      .replace(/\babstract\s+/, "")
-      .replace(TYPE_NAME, (name) => (BUILTIN_TYPES.has(name.toLowerCase()) ? name : `\\${resolve(name)}`));
+    const declaration = source.slice(m.index!, end).replace(/\babstract\s+/, "");
+    const signature = outsideStrings(declaration, (code) => code.replace(TYPE_NAME, (name) => (BUILTIN_TYPES.has(name.toLowerCase()) ? name : `\\${resolve(name)}`)));
     methods.push({ name: m[2], signature: signature.trimEnd() });
   }
   return methods;
@@ -326,8 +329,10 @@ export function abstractMethods(source: string, from = 0, to = source.length): {
 /** Writes each full class name (`\App\Models\User`) in `text` by its short name where the file's `use` statements or namespace make that name mean the same class. */
 export function shortenNames(text: string, code: string): string {
   const { resolve } = nameResolver(code);
-  return text.replace(/\\([A-Za-z_][\w\\]*)/g, (full, fqn: string) => {
-    const short = fqn.split("\\").pop()!;
-    return resolve(short) === fqn ? short : full;
-  });
+  return outsideStrings(text, (code) =>
+    code.replace(/\\([A-Za-z_][\w\\]*)/g, (full, fqn: string) => {
+      const short = fqn.split("\\").pop()!;
+      return resolve(short) === fqn ? short : full;
+    }),
+  );
 }

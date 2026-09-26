@@ -2,15 +2,36 @@
 // can test it. ponytail: a scanner for brackets and strings, not a PHP parser; heredocs aren't handled.
 import { commentMask } from "./comments.ts";
 
-/** The index of the bracket that closes the one at `open`, skipping strings and nested brackets. -1 if none. */
+/**
+ * Where a string or comment that starts at `i` ends (its last character), or -1 when none starts there, so a
+ * quote in `// don't` doesn't open a string. `#[` is an attribute, not a comment.
+ */
+function skipQuoted(text: string, i: number): number {
+  const c = text[i];
+  if (c === "'" || c === '"') {
+    for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
+    return i;
+  }
+  if ((c === "/" && text[i + 1] === "/") || (c === "#" && text[i + 1] !== "[")) {
+    const end = text.indexOf("\n", i);
+    return end < 0 ? text.length : end - 1;
+  }
+  if (c === "/" && text[i + 1] === "*") {
+    const end = text.indexOf("*/", i + 2);
+    return end < 0 ? text.length : end + 1;
+  }
+  return -1;
+}
+
+/** The index of the bracket that closes the one at `open`, skipping strings, comments, and nested brackets. -1 if none. */
 export function matchBracket(text: string, open: number): number {
   const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
   const stack: string[] = [];
   for (let i = open; i < text.length; i++) {
     const c = text[i];
-    if (c === "'" || c === '"') {
-      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
-    } else if (pairs[c]) stack.push(pairs[c]);
+    const skip = skipQuoted(text, i);
+    if (skip >= 0) i = skip;
+    else if (pairs[c]) stack.push(pairs[c]);
     else if (c === stack.at(-1)) {
       stack.pop();
       if (!stack.length) return i;
@@ -25,9 +46,9 @@ export function splitTopLevel(text: string): string[] {
   let start = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (c === "'" || c === '"') {
-      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
-    } else if ("([{".includes(c)) {
+    const skip = skipQuoted(text, i);
+    if (skip >= 0) i = skip;
+    else if ("([{".includes(c)) {
       const end = matchBracket(text, i);
       if (end < 0) break;
       i = end;
@@ -99,6 +120,8 @@ export function formatParams(params: Param[], indent: string | null, closeIndent
  * named, and a parameter left out before a later argument gets its default value.
  */
 export function rewriteArgs(args: string[], oldParams: Param[], newParams: Param[]): { args: string[] } | { error: string } {
+  // A first-class callable, foo(...), passes no arguments to rewrite.
+  if (args.length === 1 && args[0] === "...") return { args };
   if (args.some((a) => a.startsWith("..."))) return { error: "spreads its arguments (...)" };
   const byName = new Map<string, string>();
   const named: string[] = [];
@@ -189,9 +212,9 @@ export type InlinePlan = { error: string } | { assignment: number; assignmentEnd
 function statementEnd(text: string): number {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (c === "'" || c === '"') {
-      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
-    } else if ("([{".includes(c)) {
+    const skip = skipQuoted(text, i);
+    if (skip >= 0) i = skip;
+    else if ("([{".includes(c)) {
       const end = matchBracket(text, i);
       if (end < 0) return -1;
       i = end;

@@ -5,13 +5,16 @@ import { h, iconButton } from "./dom";
 import { signatureProblem, signatureText, signatureWarning, type Param, type Signature } from "./refactorparse";
 
 type Kind = "method" | "function" | "constructor";
-type Options = { title: string; kind: Kind; signature: Signature };
+/** `heading` names the refactoring; `focus` is the row whose name gets the focus, such as a parameter just added. */
+type Options = { title: string; kind: Kind; signature: Signature; heading?: string; focus?: number };
 const VISIBILITY = ["public", "protected", "private"];
 
 /** Opens the dialog. Resolves with the new signature and whether to preview first, or null when cancelled. */
-export function editSignature({ title, kind, signature }: Options): Promise<{ signature: Signature; preview: boolean } | null> {
+export function editSignature({ title, kind, signature, heading = "Change Signature", focus }: Options): Promise<{ signature: Signature; preview: boolean } | null> {
   document.getElementById("signature")?.remove();
-  const s: Signature = { ...signature, params: signature.params.map((p) => ({ ...p, from: p.from ?? p.name })) };
+  // Parameters read from the declaration are existing ones; one it's given without text, such as Introduce
+  // Parameter's, is new.
+  const s: Signature = { ...signature, params: signature.params.map((p) => ({ ...p, from: p.from ?? (p.text ? p.name : undefined) })) };
   const visibility = VISIBILITY.find((v) => s.modifiers.split(/\s+/).includes(v)) ?? "";
   const otherModifiers = () => s.modifiers.split(/\s+/).filter((m) => m && !VISIBILITY.includes(m));
 
@@ -101,7 +104,7 @@ export function editSignature({ title, kind, signature }: Options): Promise<{ si
     h(
       "form",
       { method: "dialog" },
-      h("h2", {}, "Change Signature ", h("span", { class: "muted" }, title)),
+      h("h2", {}, `${heading} `, h("span", { class: "muted" }, title)),
       h(
         "div",
         { class: "signature-head" },
@@ -145,6 +148,8 @@ export function editSignature({ title, kind, signature }: Options): Promise<{ si
       resolve(result);
     };
     dialog.showModal();
-    (s.params.length ? rows.querySelector<HTMLInputElement>("input") : nameInput)?.focus();
+    const start = focus !== undefined ? rows.children[focus]?.querySelectorAll("input")[1] : s.params.length ? rows.querySelector("input") : nameInput;
+    start?.focus();
+    if (focus !== undefined) start?.select();
   });
 }

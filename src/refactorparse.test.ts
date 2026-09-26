@@ -112,3 +112,10 @@ test("reads a declaration's parts and writes parameters back", () => {
   const short = "function f($a) {}";
   assert.equal(declarationParts(short, 10)?.end, 14);
 });
+
+test("skips comments when matching brackets and splitting", () => {
+  const body = "{ // don't\n  $a = f('}', /* ) */ 1); # it's\n}";
+  assert.equal(matchBracket(body, 0), body.length - 1);
+  assert.deepEqual(splitTopLevel("$a, // b's\n$c"), ["$a", "// b's\n$c"]);
+  assert.deepEqual(rewriteArgs(["..."], parseParams("$a"), parseParams("$b = 1, $a")), { args: ["..."] });
+});

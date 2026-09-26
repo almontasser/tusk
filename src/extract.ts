@@ -101,7 +101,7 @@ const symbolsOf = async (model: monaco.editor.ITextModel) =>
   (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
 
 /** The selected expression, or one chosen among those around the caret. A status explains when there's none. */
-async function chosenExpression(editor: Editor, what: string): Promise<Expr | null> {
+export async function chosenExpression(editor: Editor, what: string): Promise<Expr | null> {
   const model = editor.getModel()!;
   const text = model.getValue();
   const sel = editor.getSelection()!;
@@ -117,7 +117,7 @@ async function chosenExpression(editor: Editor, what: string): Promise<Expr | nu
 }
 
 /** Every occurrence, or only `expr`, as chosen when there are several. Null for Escape. */
-async function chosenUses(editor: Editor, expr: Expr, all: Expr[]): Promise<Expr[] | null> {
+export async function chosenUses(editor: Editor, expr: Expr, all: Expr[]): Promise<Expr[] | null> {
   if (all.length < 2) return [expr];
   return ask(editor, `${all.length} occurrences of ${oneLine(expr.text)}`, [
     { label: `Replace all ${all.length} occurrences`, value: all, highlight: all },
@@ -290,6 +290,7 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   if (constantAt(text, start, end)) names.push("Extract Constant…");
   if (expression || !sel.isEmpty()) names.push("Extract Method…");
   if (expression && found?.container) names.push("Introduce Field…");
+  if (expression && found && [6, 12].includes(found.symbol.kind)) names.push("Introduce Parameter…");
   const line = model.getLineContent(pos.lineNumber);
   const onVariable = [...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this");
   const word = model.getWordAtPosition(pos);

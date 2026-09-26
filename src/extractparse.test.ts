@@ -108,9 +108,28 @@ test("reads a constant's declaration and references, and writes its value elsewh
   assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", true), "(self::BASE * 2)");
   assert.equal(inlinedValue("Status::Open", owner, "App\\Order", false), "\\App\\Enums\\Status::Open");
   assert.equal(inlinedValue("-1", owner, "App\\Order", false), "-1");
+  assert.equal(inlinedValue("'Helper::format'", owner, "App\\Order", false), "'Helper::format'");
   assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
 });
 
 test("tells a literal's type", () => {
   assert.deepEqual(["42", "1.5", "'a'", '"b$c"', "true", "[1]", "new Money(5)", "$a + 1"].map(literalType), ["int", "float", "string", "", "bool", "array", "Money", ""]);
+});
+
+test("handles precedence of prefixes, for headers, class bodies, parameters, and closures", () => {
+  assert.deepEqual(texts("<?php\n$y = -$x ** 2;", "$x"), ["-$x ** 2"]);
+  assert.deepEqual(texts("<?php\n$y = !$a instanceof Foo;", "$a"), ["!$a instanceof Foo"]);
+  const loop = "<?php\nfunction f($a) {\n    for ($i = 0; $i < count($a); $i++) {}\n}";
+  const point = declarationPoint(loop, [expressionsAt(loop, loop.indexOf("count"))[0]]);
+  assert.ok(!("error" in point) && loop.slice(point.offset).startsWith("for ("));
+  const cls = "<?php\nclass A {\n    private int $ttl = 5 * 60;\n}";
+  assert.ok("error" in declarationPoint(cls, [expressionsAt(cls, cls.indexOf("5"))[0]]));
+  const param = "<?php\nfunction f($a = 5 * 60) {}";
+  assert.ok("error" in declarationPoint(param, [expressionsAt(param, param.indexOf("5"))[0]]));
+  const arg = "<?php\nfunction f($xs) {\n    return array_map(function ($x) { return $x; }, g(1));\n}";
+  const inArg = declarationPoint(arg, [expressionsAt(arg, arg.indexOf("g(1)"))[0]]);
+  assert.ok(!("error" in inArg) && arg.slice(inArg.offset).startsWith("return array_map"));
+  const closure = "<?php\nfunction f($item, $xs) {\n    $a = $item->price;\n    array_map(function ($item) { return $item->price; }, $xs);\n}";
+  const e = expressionsAt(closure, closure.indexOf("price"))[0];
+  assert.equal(occurrences(closure, e, ...functionScope(closure, e.start)).length, 1);
 });

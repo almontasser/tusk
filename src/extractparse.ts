@@ -3,7 +3,7 @@
 // can test it. ponytail: a tokenizer and a precedence parser over one statement, not a PHP parser; heredocs
 // aren't tokenized, and ternaries (? :) and closures are boundaries rather than expressions.
 import { commentMask } from "./comments.ts";
-import { nameResolver, parseTypeDeclarations } from "./phptypes.ts";
+import { nameResolver, outsideStrings, parseTypeDeclarations } from "./phptypes.ts";
 
 type Tok = { type: "str" | "var" | "num" | "name" | "open" | "close" | "op"; text: string; start: number; end: number; match: number };
 /** An expression in the source, as offsets. `text` is the source between them. */
@@ -166,7 +166,8 @@ function candidates(toks: Tok[], k: number): [number, number][] {
       if (at >= 0) {
         const o = list[at];
         for (const end of o.ends) if (end > k && (end - 1 > o.from || toks[o.from].type !== "var")) found.push([o.from, end - 1]);
-        if (o.start < o.from) found.push([o.start, o.end - 1]);
+        // `-$x ** 2` is `-($x ** 2)`, and `!$a instanceof B` is `!($a instanceof B)`: there the prefix isn't the operand's.
+        if (o.start < o.from && ops[at] !== "**" && ops[at] !== "instanceof") found.push([o.start, o.end - 1]);
         for (const [lo, hi] of ancestors(ops, 0, list.length - 1, at)) found.push([list[lo].start, list[hi].end - 1]);
       }
     }
@@ -211,11 +212,14 @@ export function occurrences(source: string, expr: Expr, from = 0, to = source.le
   const last = toks.findIndex((t) => t.end === expr.end);
   if (first < 0 || last < first) return [expr];
   const seq = toks.slice(first, last + 1).map((t) => t.text);
+  const home = scopeOpen(toks, first);
   const found: Expr[] = [];
   for (let i = 0; i + seq.length <= toks.length; i++) {
     if (toks[i].start < from || toks[i + seq.length - 1].end > to || seq.some((text, j) => toks[i + j].text !== text)) continue;
     const range: [number, number] = [i, i + seq.length - 1];
-    if (i === first || candidates(toks, i).some(([a, b]) => a === range[0] && b === range[1])) found.push(toExpr(source, toks, range));
+    // A closure inside the scope has variables of its own: `$item` there isn't the one outside.
+    const sameScope = scopeOpen(toks, i) === home;
+    if (i === first || (sameScope && candidates(toks, i).some(([a, b]) => a === range[0] && b === range[1]))) found.push(toExpr(source, toks, range));
   }
   return found.length ? found : [expr];
 }
@@ -230,7 +234,10 @@ export function declarationPoint(source: string, uses: Expr[]): { offset: number
   const first = toks.findIndex((t) => t.start === uses[0].start);
   const lastEnd = uses.at(-1)!.end;
   if (first < 0) return { error: "the expression isn't code" };
+  // The statement holds every bracket around the use but its block, so a `for (;;)` header's `;`, or a closure's
+  // `}` in another argument, doesn't end it.
   let j = first - 1;
+  for (let open = enclosing(toks, first); open >= 0 && toks[open].text !== "{"; open = enclosing(toks, open)) j = open - 1;
   for (; j >= 0; j--) {
     const t = toks[j];
     if (t.text === ";") break;
@@ -246,13 +253,24 @@ export function declarationPoint(source: string, uses: Expr[]): { offset: number
       const isMatch = owner?.type === "close" && /^match$/i.test(toks[owner.match - 1]?.text ?? "");
       if (t.match < 0 || (!isMatch && toks[t.match].start >= lastEnd)) break;
     } else if (/^fn$/i.test(t.text) && t.type === "name") return { error: "it's inside an arrow function" };
+    else if (/^function$/i.test(t.text) && t.type === "name") return { error: "it's in a function's parameters, which take constant values" };
   }
+  // A class body holds declarations, not statements.
+  if (j >= 0 && toks[j].text === "{" && isTypeBody(toks, j)) return { error: "it isn't inside a method; use Extract Constant or Introduce Field" };
   const start = toks[j + 1];
   const lineStart = source.lastIndexOf("\n", start.start - 1) + 1;
   const indent = source.slice(lineStart, start.start).match(/^[ \t]*/)![0];
   // The statement is just the expression: `foo();` becomes `$name = foo();`.
   const only = start.start === uses[0].start && toks[first + tokenCount(toks, first, uses[0].end)]?.text === ";";
   return { offset: start.start, indent, ...(only && uses.length === 1 ? { replace: uses[0] } : {}) };
+}
+
+/** Whether the `{` at token `open` starts a class, interface, trait, or enum body. */
+function isTypeBody(toks: Tok[], open: number): boolean {
+  let k = open - 1;
+  while (k >= 0 && ((toks[k].type === "name" && !/^(class|interface|trait|enum)$/i.test(toks[k].text)) || toks[k].text === "," || toks[k].text === ":" || toks[k].text === ")"))
+    k = toks[k].text === ")" && toks[k].match >= 0 ? toks[k].match - 1 : k - 1;
+  return /^(class|interface|trait|enum)$/i.test(toks[k]?.text ?? "");
 }
 
 const tokenCount = (toks: Tok[], from: number, end: number) => {
@@ -269,6 +287,12 @@ export function functionScope(source: string, offset: number): [number, number] 
   const toks = tokenize(source);
   let k = toks.findIndex((t) => t.end > offset);
   if (k < 0) k = toks.length;
+  const open = scopeOpen(toks, k);
+  return open < 0 ? [0, source.length] : [toks[open].end, toks[toks[open].match].start];
+}
+
+/** The `{` token that opens the innermost function, method, or closure body around token `k`, or -1. */
+function scopeOpen(toks: Tok[], k: number): number {
   for (let open = enclosing(toks, k); open >= 0; open = enclosing(toks, open)) {
     if (toks[open].text !== "{" || toks[open].match < 0) continue;
     // Back from the brace: a return type, then `)`, maybe a closure's `use (...)`, then `function name(`.
@@ -279,9 +303,9 @@ export function functionScope(source: string, offset: number): [number, number] 
     if (/^use$/i.test(toks[j]?.text ?? "") && toks[j - 1]?.text === ")") j = toks[j - 1].match - 1;
     if (toks[j]?.type === "name" && !/^function$/i.test(toks[j].text)) j--;
     if (toks[j]?.text === "&") j--;
-    if (/^function$/i.test(toks[j]?.text ?? "")) return [toks[open].end, toks[toks[open].match].start];
+    if (/^function$/i.test(toks[j]?.text ?? "")) return open;
   }
-  return [0, source.length];
+  return -1;
 }
 
 /** The literal or constant expression for Extract Constant: the selection, or the string or number at the caret. */
@@ -425,12 +449,14 @@ export function constantRefs(source: string, name: string): { start: number; end
  */
 export function inlinedValue(value: string, ownerSource: string, owner: string, insideOwner: boolean): string {
   const { resolve } = nameResolver(commentMask(ownerSource));
-  let out = value.replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
-    const lower = n.toLowerCase();
-    if (lower === "self" || lower === "static") return insideOwner ? n : `\\${owner}`;
-    if (lower === "parent") return n;
-    return `\\${resolve(n)}`;
-  });
+  let out = outsideStrings(value, (code) =>
+    code.replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
+      const lower = n.toLowerCase();
+      if (lower === "self" || lower === "static") return insideOwner ? n : `\\${owner}`;
+      if (lower === "parent") return n;
+      return `\\${resolve(n)}`;
+    }),
+  );
   // Parentheses when an operator outside brackets and strings would bind to the code around it.
   let outer = out.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
   while (/\([^()]*\)|\[[^[\]]*\]/.test(outer)) outer = outer.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");

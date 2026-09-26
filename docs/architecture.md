@@ -1009,6 +1009,18 @@ argument has to be named, names the rest, since a positional one after it
 would take a named one's place. Calls whose arguments don't change keep their
 text, and arguments one per line are written back one per line.
 
+Edits must not overlap, but a call's arguments can hold other edits: a
+renamed parameter in a recursive call, or a nested call to the same method.
+So calls are collected first and rewritten innermost first (by the offset of
+their `(`, descending), each applying the edits inside its arguments to their
+text before splitting it, and replacing them with one edit. `matchBracket`,
+`splitTopLevel`, and `statementEnd` skip comments as well as strings, so a
+`// don't` doesn't open a string that swallows the rest of the body.
+
+Introduce Parameter reuses the dialog: `changeSignature` adds the parameter
+without text, which the dialog treats as new, and `plan` also replaces the
+expression's uses in the body with the parameter.
+
 `src/refactorpreview.ts` shows the edit before it's applied. `changedLines`
 applies each file's edits line by line, and each row marks the part between
 the text the old and new line share at both ends, as VS Code's Refactor

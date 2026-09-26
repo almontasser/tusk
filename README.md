@@ -229,6 +229,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘C | Extract the string or number at the cursor into a class constant |
 | ⌥⌘M | Extract the selection into a method |
 | ⌥⌘F | Introduce a field (property) for the expression at the cursor |
+| ⌥⌘P | Introduce a parameter for the expression at the cursor |
 | ⌥⌘N | Inline the variable or class constant at the cursor |
 | F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
@@ -550,7 +551,7 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 
 Press ⌃T to list the refactorings that apply at the caret or to the selection,
 with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
-Signature, the three Extracts, Introduce Field, Inline, Move Class, and Safe Delete, plus
+Signature, the three Extracts, Introduce Field and Parameter, Inline, Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
@@ -585,6 +586,12 @@ the property's default; anything else is assigned with `$this->name = …` befor
 its first use, and its uses become `$this->name` (`self::$name` in a static
 method). The property goes after the class's other properties, or after its
 constants, typed when the expression is a literal or `new Foo()`.
+
+Press ⌥⌘P to make an expression a new parameter of its method, PhpStorm's
+**Introduce Parameter**. The **Change Signature** dialog opens with the
+parameter added and its name selected; a constant expression becomes its
+default, and anything else the value passed in existing calls. The expression
+can't use the method's variables or `$this`, which don't exist at the calls.
 
 Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
 method. Phpactor writes the method with its parameters and return type; you
@@ -631,9 +638,11 @@ when some calls can't be rewritten, listing them under **Left unchanged**.
 The editor rewrites the declaration and every call: positional arguments move
 with their parameters, named arguments stay named (under a parameter's new
 name), and once an argument must be named, the ones after it are named too. A
-renamed parameter is renamed in the body and the docblock. Methods in
-subclasses and implementing classes that override it change with it, keeping
-their own parameter names unless you renamed one. For a constructor, the calls
+renamed parameter is renamed in the body and the docblock. A default written
+into a call is spelled so it means the same there, such as `self::LIMIT`
+becoming `Order::LIMIT`. Methods in subclasses and implementing classes that
+override it change with it, keeping their own parameter names, parameters of
+their own, and return type unless you renamed or changed one. For a constructor, the calls
 are `new` of the class and of subclasses that inherit its constructor, `new
 self` and `new static` inside them, and `parent::__construct()` in subclasses;
 a subclass's own constructor keeps its parameters, and a promoted property is
