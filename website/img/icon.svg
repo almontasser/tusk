@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8288DC"/>
+      <stop offset="0.5" stop-color="#5157BD"/>
+      <stop offset="1" stop-color="#2B2E7C"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.18" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ivory" x1="0.1" y1="0.95" x2="0.9" y2="0.05">
+      <stop offset="0" stop-color="#E6D8B6"/>
+      <stop offset="0.5" stop-color="#FAF4E4"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0B0C2E" flood-opacity="0.35"/>
+    </filter>
+    <filter id="tuskShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="14" dy="24" stdDeviation="18" flood-color="#10114A" flood-opacity="0.55"/>
+    </filter>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="184"/></clipPath>
+  </defs>
+
+  <!-- The tile, in the size and corner radius of Apple's icon grid. -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#bg)" filter="url(#drop)"/>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+    <!-- The tusk comes in from the lower-left corner, thick at its base, and curves up to a point. -->
+    <g filter="url(#tuskShadow)">
+      <path d="M 60 760 C 460 760 720 540 770 232 C 800 580 610 880 250 990 L 60 990 Z" fill="url(#ivory)"/>
+      <path d="M 770 232 C 800 580 610 880 250 990 L 236 950 C 580 846 772 570 770 232 Z" fill="#B9A57A" opacity="0.45"/>
+      <path d="M 425 690 Q 430 800 460 884" fill="none" stroke="#CDBB92" stroke-width="11" stroke-linecap="round" opacity="0.75"/>
+      <path d="M 524 634 Q 528 740 530 836" fill="none" stroke="#CDBB92" stroke-width="9" stroke-linecap="round" opacity="0.55"/>
+      <path d="M 150 784 C 470 784 700 590 741 378" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" opacity="0.8"/>
+    </g>
+  </g>
+</svg>

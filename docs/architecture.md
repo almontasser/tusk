@@ -3217,3 +3217,11 @@ folder is named after the crate's binary. The icon and the mascot are SVG in
 `design/`, rendered with headless Chrome; `pnpm tauri icon design/icon.png`
 makes the app's icon files.
 
+### 2026-09-26: The website is one static page
+
+The site at tusk.almontasser.ly is a single HTML file with inline CSS and a few
+lines of script, so it needs no build and hosts anywhere, such as GitHub Pages.
+The waitlist posts to Formspree rather than a server of our own, since a static
+host can't store emails. The site says Tusk is in beta and lists what that means
+(macOS only, unsigned, no auto-update), so nobody downloads it expecting more.
+The screenshots are real captures of the dev app on the test app, not mockups.

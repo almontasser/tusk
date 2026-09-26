@@ -1600,6 +1600,20 @@ committed.
 ./scripts/make-fixture.sh
 ```
 
+## Website
+
+`website/` is the static site for [tusk.almontasser.ly](https://tusk.almontasser.ly):
+one `index.html` with inline CSS, the screenshots in `website/img/`, and a
+`CNAME` file for GitHub Pages. It has no build step; serve the folder as it is.
+
+The waitlist form posts each email as JSON to a Formspree form. Before you
+publish, create a form at [formspree.io](https://formspree.io) and set
+`WAITLIST_ENDPOINT` near the end of `index.html` to its endpoint.
+
+The screenshots come from the dev app with `fixtures/demo` open, taken at
+1400 × 900 through the Tauri MCP bridge, cropped, and saved as WebP with
+`cwebp -q 88`.
+
 ## Project layout
 
 | Path | Contents |
@@ -1678,3 +1692,4 @@ committed.
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |
+| `website/` | The Tusk website |
