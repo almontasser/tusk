@@ -1193,3 +1193,8 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-env-table input:not([type="checkbox"]) { width: 100%; min-width: 110px; font: 12px var(--mono); padding: 3px 7px; }
 .http-env-table input.missing { border-color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, var(--input-bg)); }
 .http-env-private { text-align: center !important; width: 1%; }
+
+/* HTTP client: protocols */
+.http-stat.http-over-budget { padding: 0 8px; border-radius: 10px; background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.http-script-bar .link { margin-left: auto; }
+.http-code-lang { align-self: flex-start; margin-bottom: 4px; }

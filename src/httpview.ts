@@ -2,9 +2,11 @@
 // and the HTTP tab, which edits a request as a form and shows its response. The form writes back to the .http file,
 // so the file stays the one copy of each request, and edits in the editor show in the form.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { showMenu } from "./files";
+import { attachSchema, schemaFor } from "./graphqleditor";
 import {
   clearCookies,
   clearHistory,
@@ -49,6 +51,7 @@ import {
   matchRoute,
   METHODS,
   newRequest,
+  overBudget,
   parseHttp,
   parseSetCookie,
   prepare,
@@ -57,7 +60,10 @@ import {
   requestForRoute,
   type Route,
   STATUS_TEXT,
+  toAxios,
   toCurl,
+  toFetch,
+  toGuzzle,
   toLaravel,
   websocketMessages,
 } from "./httpfile";
@@ -513,14 +519,18 @@ async function chooseFile(): Promise<string | null> {
 function graphqlTab(r: HttpRequest) {
   const parts = graphqlParts(r.body);
   const write = () => updateSoon((q) => (q.body = parts.query.trim() + (parts.variables.trim() ? `\n\n${parts.variables.trim()}` : "")));
-  const query = codeEditor(parts.query, "plaintext", (v) => ((parts.query = v), write()), "http-code http-script-code");
+  const query = codeEditor(parts.query, "graphql", (v) => ((parts.query = v), write()), "http-code http-script-code");
   const variables = codeEditor(parts.variables, "json", (v) => ((parts.variables = v), write()), "http-code http-script-code");
+  const path = current?.path ?? "";
+  const schema = (refresh = false) => schemaFor(path, currentRequest() ?? r, refresh);
+  attachSchema(query.editor.getModel()!, schema);
+  const refresh = h("button", { class: "link", textContent: "Refresh Schema", title: "Fetch the endpoint's schema again, for completion", onclick: () => schema(true) });
   return h(
     "div",
     { class: "http-pane http-scripts" },
-    h("div", { class: "http-script" }, h("div", { class: "http-script-bar" }, h("span", { class: "http-script-title" }, "Query")), query.el),
+    h("div", { class: "http-script" }, h("div", { class: "http-script-bar" }, h("span", { class: "http-script-title" }, "Query"), refresh), query.el),
     h("div", { class: "http-script" }, h("div", { class: "http-script-bar" }, h("span", { class: "http-script-title" }, "Variables (JSON)")), variables.el),
-    h("p", { class: "http-hint" }, "Sent as a POST with the query and variables as JSON. Both may use {{variables}}."),
+    h("p", { class: "http-hint" }, "Sent as a POST with the query and variables as JSON. Both may use {{variables}}. Completion uses the schema the endpoint reports, fetched once per URL."),
   );
 }
 
@@ -529,7 +539,7 @@ function websocketTab(r: HttpRequest) {
   return h(
     "div",
     { class: "http-pane http-body-pane" },
-    h("p", { class: "http-hint" }, "Messages to send once connected, each after a line of ===. A line of === wait-for-server waits for a message from the server first. Pusher and Reverb pings are answered."),
+    h("p", { class: "http-hint" }, "Messages to send once connected, each after a line of ===. A line of === wait-for-server waits for a message from the server first. Pusher and Reverb pings are answered. The request's headers go with the opening handshake."),
     el,
   );
 }
@@ -767,6 +777,15 @@ function settingsTab(r: HttpRequest) {
     check("Keep in history", !r.tags.noLog, (q, v) => (q.tags.noLog = !v || undefined)),
     text("Timeout (seconds)", r.tags.timeout?.toString() ?? "", "60", (q, v) => (q.tags.timeout = number(v))),
     text("Connection timeout (seconds)", r.tags.connectionTimeout?.toString() ?? "", "None", (q, v) => (q.tags.connectionTimeout = number(v))),
+    text("Time budget (ms)", r.tags.budget?.toString() ?? "", "None: a slower response counts as failed", (q, v) => (q.tags.budget = number(v))),
+    text("Proxy", r.tags.proxy ?? "", 'http://127.0.0.1:8888, or "$proxy" in the environment', (q, v) => (q.tags.proxy = v || undefined)),
+    text("Client certificate", r.tags.clientCert ?? "", "./certs/client.pem", (q, v) => (q.tags.clientCert = v || undefined)),
+    text("Client key", r.tags.clientKey ?? "", "./certs/client.key", (q, v) => (q.tags.clientKey = v || undefined)),
+    (() => {
+      const select = h("select", {}, ...[["", "Default: HTTP/2 over HTTPS, else HTTP/1.1"], ["2", "HTTP/2"], ["1.1", "HTTP/1.1"]].map(([value, label]) => h("option", { value, textContent: label, selected: (r.tags.http ?? "") === value })));
+      select.onchange = () => update((q) => (q.tags.http = (select.value || undefined) as HttpRequest["tags"]["http"]));
+      return h("label", {}, "HTTP version", select);
+    })(),
     text("Save the response to", r.output?.path ?? "", "./responses/result.json", (q, v) => (q.output = v ? { path: v, force: q.output?.force ?? false } : undefined)),
     r.output ? check("Replace the file instead of adding a number", r.output.force, (q, v) => q.output && (q.output.force = v)) : null,
   );
@@ -890,13 +909,13 @@ async function sendCurrent(mode: SendMode = "send", extraVars?: Record<string, s
 }
 
 // ---- WebSocket ----
-// Through the webview's WebSocket, which can't set headers: the request's headers only name the messages' type.
+// Through the backend (ws.rs), since the webview's WebSocket can't send headers such as Authorization.
 
-let socket: { ws: WebSocket; key: string } | null = null;
+let socket: { close(): void; key: string } | null = null;
 
 function connectWebSocket(r: HttpRequest) {
   if (socket) {
-    socket.ws.close();
+    socket.close();
     return;
   }
   if (!current) return;
@@ -909,14 +928,10 @@ function connectWebSocket(r: HttpRequest) {
     const log = h("div", { class: "http-ws-log" });
     const state = h("span", { class: "http-status" }, "Connecting");
     const input = h("textarea", { class: "http-ws-input", placeholder: "Message (⌘⏎ sends)", spellcheck: false });
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(url);
-    } catch (e) {
-      resSummary.replaceChildren(h("span", { class: "http-error" }, `Can't connect to ${url}: ${e}`));
-      return;
-    }
-    socket = { ws, key: `${path}:${r.line}` };
+    const headers = r.headers.filter((x) => x.enabled).map((x) => [x.name, resolve(x.value, lookup)]);
+    const channel = `ws-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    let open = false;
+    let id = 0;
     const waiting: (() => void)[] = [];
     const entry = (dir: "in" | "out" | "info", text: string) => {
       let shown = text;
@@ -929,34 +944,32 @@ function connectWebSocket(r: HttpRequest) {
       log.scrollTop = log.scrollHeight;
     };
     const post = (text: string) => {
-      if (ws.readyState !== WebSocket.OPEN) return entry("info", "Not connected.");
-      ws.send(text);
+      if (!open) return entry("info", "Not connected.");
+      invoke("ws_send", { id, text }).catch((e) => entry("info", String(e)));
       entry("out", text);
     };
-    ws.onopen = async () => {
-      state.textContent = "Open";
-      state.className = "http-status good";
-      sendButton.replaceChildren(icon("debug-disconnect"), "Disconnect");
-      for (const m of messages) {
-        if (m.waitForServer) await new Promise<void>((done) => waiting.push(done));
-        post(m.text);
-      }
-    };
-    ws.onmessage = (e) => {
-      const text = typeof e.data === "string" ? e.data : "[binary message]";
-      entry("in", text);
-      // Pusher and Laravel Reverb close a connection that doesn't answer their pings.
-      if (/"event"\s*:\s*"pusher:ping"/.test(text)) post(JSON.stringify({ event: "pusher:pong", data: {} }));
-      waiting.shift()?.();
-    };
-    ws.onerror = () => entry("info", "Connection error.");
-    ws.onclose = (e) => {
-      entry("info", `Closed${e.code ? ` (${e.code}${e.reason ? `: ${e.reason}` : ""})` : ""}.`);
+    const unlisten = await Promise.all([
+      listen<{ text?: string; binary?: string }>(`ws:${channel}`, (e) => {
+        const text = e.payload.text ?? `[binary message, base64] ${e.payload.binary}`;
+        entry("in", text);
+        // Pusher and Laravel Reverb close a connection that doesn't answer their pings.
+        if (/"event"\s*:\s*"pusher:ping"/.test(text)) post(JSON.stringify({ event: "pusher:pong", data: {} }));
+        waiting.shift()?.();
+      }),
+      listen<string>(`ws-error:${channel}`, (e) => entry("info", `Connection error: ${e.payload}`)),
+      listen<{ code: number; reason: string }>(`ws-close:${channel}`, (e) => closed(e.payload.code, e.payload.reason)),
+    ]);
+    const closed = (code: number, reason: string) => {
+      unlisten.forEach((u) => u());
+      open = false;
+      entry("info", `Closed${code ? ` (${code}${reason ? `: ${reason}` : ""})` : ""}.`);
       state.textContent = "Closed";
       state.className = "http-status bad";
-      if (socket?.ws === ws) socket = null;
+      if (socket === connection) socket = null;
       sendButton.replaceChildren(icon("plug"), "Connect");
     };
+    const connection = { close: () => invoke("ws_close", { id }), key: `${path}:${r.line}` };
+    socket = connection;
     input.onkeydown = (e) => {
       if (e.key === "Enter" && e.metaKey) {
         e.preventDefault();
@@ -975,6 +988,24 @@ function connectWebSocket(r: HttpRequest) {
         h("div", { class: "http-ws-send" }, input, h("button", { textContent: "Send", onclick: () => input.value.trim() && (post(input.value), (input.value = "")) })),
       ),
     );
+    try {
+      id = await invoke<number>("ws_connect", { url, headers, insecure: !!r.tags.insecure, channel });
+    } catch (e) {
+      unlisten.forEach((u) => u());
+      socket = null;
+      state.textContent = "Failed";
+      state.className = "http-status bad";
+      entry("info", `Can't connect to ${url}: ${e}`);
+      return;
+    }
+    open = true;
+    state.textContent = "Open";
+    state.className = "http-status good";
+    sendButton.replaceChildren(icon("debug-disconnect"), "Disconnect");
+    for (const m of messages) {
+      if (m.waitForServer) await new Promise<void>((done) => waiting.push(done));
+      post(m.text);
+    }
   })();
 }
 
@@ -1008,6 +1039,7 @@ function showExchange(x: Exchange) {
   resSummary.replaceChildren(
     pill,
     x.info ? h("span", { class: "http-stat", title: "Total time" }, ms(x.info.time_total)) : "",
+    overBudget(x.request, x.info?.time_total) ? h("span", { class: "http-stat http-over-budget", title: "Set with # @budget" }, `Over budget: ${ms(x.info!.time_total)} > ${x.request.budget} ms`) : "",
     x.info ? h("span", { class: "http-stat", title: "Body size" }, bytes(x.info.size_download)) : "",
     x.tests.length ? h("span", { class: `http-stat ${x.tests.every((t) => t.passed) ? "good" : "bad"}` }, `${x.tests.filter((t) => t.passed).length}/${x.tests.length} tests`) : "",
     x.env ? h("span", { class: "http-stat muted" }, x.env) : "",
@@ -1242,18 +1274,33 @@ function testsView(x: Exchange) {
   return pane;
 }
 
+/** Code that sends a request, by the name the Request tab and the menus show. */
+const CODE: [string, (p: Prepared) => string][] = [
+  ["cURL", toCurl],
+  ["Laravel", toLaravel],
+  ["fetch", toFetch],
+  ["axios", toAxios],
+  ["Guzzle", toGuzzle],
+];
+let codeShown = "";
+
 function requestView(x: Exchange) {
-  const curl = toCurl(x.request);
-  const laravel = toLaravel(x.request);
-  return h(
-    "div",
-    { class: "http-pane" },
-    h("h4", {}, "cURL ", h("button", { class: "link", textContent: "Copy", onclick: () => copy(curl, "the curl command") })),
-    h("pre", { class: "http-log" }, curl),
-    h("h4", {}, "Laravel ", h("button", { class: "link", textContent: "Copy", onclick: () => copy(laravel, "the Laravel code") })),
-    h("pre", { class: "http-log" }, laravel),
-    h("h4", {}, "Feature test ", h("button", { class: "link", textContent: "Generate…", title: "Write a Pest or PHPUnit test that sends this request and checks this response", onclick: () => generateFeatureTest(x) })),
-  );
+  const pane = h("div", { class: "http-pane" });
+  const select = h("select", { class: "http-code-lang", title: "Language" }, h("option", { value: "", textContent: "cURL and Laravel" }), ...CODE.slice(2).map(([name]) => h("option", { value: name, textContent: name, selected: codeShown === name })));
+  const render = () => {
+    const shownCode = CODE.filter(([name], i) => (codeShown ? name === codeShown : i < 2));
+    pane.replaceChildren(
+      select,
+      ...shownCode.flatMap(([name, make]) => {
+        const code = make(x.request);
+        return [h("h4", {}, `${name} `, h("button", { class: "link", textContent: "Copy", onclick: () => copy(code, `the ${name} code`) })), h("pre", { class: "http-log" }, code)];
+      }),
+      h("h4", {}, "Feature test ", h("button", { class: "link", textContent: "Generate…", title: "Write a Pest or PHPUnit test that sends this request and checks this response", onclick: () => generateFeatureTest(x) })),
+    );
+  };
+  select.onchange = () => ((codeShown = select.value), render());
+  render();
+  return pane;
 }
 
 // ---- Menus and commands ----
@@ -1276,6 +1323,7 @@ function requestMenu() {
     "-" as const,
     { label: "Copy as cURL", run: async () => { const p = await preparedCurrent(); if (p) copy(toCurl(p), "the curl command"); } },
     { label: "Copy as Laravel HTTP", run: async () => { const p = await preparedCurrent(); if (p) copy(toLaravel(p), "the Laravel code"); } },
+    ...CODE.slice(2).map(([name, make]) => ({ label: `Copy as ${name}`, run: async () => { const p = await preparedCurrent(); if (p) copy(make(p), `the ${name} code`); } })),
     "-" as const,
     { label: "Run All Requests in File", run: () => current && runFile(current.path) },
     { label: "Stress Test…", run: withRequest((path, r) => loadTest(path, r)) },

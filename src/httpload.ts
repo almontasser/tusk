@@ -2,7 +2,7 @@
 // one request many times at once with curl's parallel mode and shows live statistics; and its monitor.
 import { invoke } from "@tauri-apps/api/core";
 import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
-import { histogram, type HttpRequest, loadArgs, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
+import { histogram, type HttpRequest, loadArgs, overBudget, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
 import { bytes, h, icon, openExchange, setRunners, showHttpPanel } from "./httpview";
 
 const ms = (s: number) => (s < 1 ? `${(s * 1000).toFixed(s < 0.01 ? 1 : 0)} ms` : `${s.toFixed(2)} s`);
@@ -46,12 +46,13 @@ async function runFile(path: string) {
       continue;
     }
     const final = x.heads.at(-1);
-    const ok = !x.error && !!final && final.status < 400 && x.tests.every((t) => t.passed);
+    const slow = overBudget(x.request, x.info?.time_total);
+    const ok = !x.error && !!final && final.status < 400 && x.tests.every((t) => t.passed) && !slow;
     ok ? passed++ : failed++;
     state.replaceChildren(icon(ok ? "pass" : "error"));
     state.className = ok ? "good" : "bad";
     row.cells[2].replaceChildren(h("span", { class: `http-code-badge ${statusClass(final?.status ?? 0)}` }, final ? String(final.status) : "ERR"), x.error ? ` ${x.error}` : "");
-    row.cells[3].textContent = x.info ? ms(x.info.time_total) : "";
+    row.cells[3].textContent = x.info ? `${ms(x.info.time_total)}${slow ? ` (over ${x.request.budget} ms)` : ""}` : "";
     row.cells[4].textContent = x.tests.length ? `${x.tests.filter((t) => t.passed).length}/${x.tests.length}` : "";
     row.onclick = () => openExchange(x);
     row.title = "Show the response";

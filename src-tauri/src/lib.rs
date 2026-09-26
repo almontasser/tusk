@@ -4,6 +4,7 @@ mod lsp;
 mod pty;
 mod search;
 mod tools;
+mod ws;
 
 use std::sync::LazyLock;
 use tauri::Manager;
@@ -64,6 +65,7 @@ pub fn run() {
         .manage(lsp::AiRequests::default())
         .manage(pty::PtyState::default())
         .manage(db::Tunnels::default())
+        .manage(ws::WsState::default())
         .invoke_handler(tauri::generate_handler![
             db::db_query,
             db::db_batch,
@@ -96,6 +98,9 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_cwd,
+            ws::ws_connect,
+            ws::ws_send,
+            ws::ws_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
