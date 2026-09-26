@@ -7,7 +7,7 @@ import { facts, projectCache, readModels } from "./eloquent";
 import { formatType, inlineProblem, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
-import { diagnosed, magoConfigPath, PHPACTOR_INDEX, toolPath } from "./lsp";
+import { diagnosed, magoConfigPath, phpactorIndex, toolPath } from "./lsp";
 import { settings, onSettings } from "./settings";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
@@ -392,7 +392,7 @@ export async function scanProject(useCache = false) {
       ? await invoke<string>("read_file", { path: cachePath }).then(JSON.parse, () => ({}))
       : {};
     const phar = await toolPath("phpactor/phpactor.phar");
-    const extra = JSON.stringify({ ...PHPACTOR_INDEX, "language_server_mago.enabled": false, "language_server_phpstan.enabled": false });
+    const extra = JSON.stringify({ ...phpactorIndex(), "language_server_mago.enabled": false, "language_server_phpstan.enabled": false });
     let done = 0;
     const next = [...files];
     const worker = async () => {

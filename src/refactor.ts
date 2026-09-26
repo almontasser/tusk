@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath, typeSymbol } from "./lsp";
+import { applyWorkspaceEdit, phpactorIndex, phpactorRequest, toolPath, typeSymbol } from "./lsp";
 import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
@@ -392,7 +392,7 @@ export async function callsOf(model: monaco.editor.ITextModel, symbol: L.Documen
 /** References to a class's method from Phpactor's command line, without the declaration (0-based line), or null if it fails. */
 async function memberCalls(fqn: string, method: string, declaration: { path: string; line: number }): Promise<L.Location[] | null> {
   const phar = await toolPath("phpactor/phpactor.phar");
-  const args = [phar, "references:member", fqn, method, "--format=json", `--config-extra=${JSON.stringify(PHPACTOR_INDEX)}`];
+  const args = [phar, "references:member", fqn, method, "--format=json", `--config-extra=${JSON.stringify(phpactorIndex())}`];
   const out = await invoke<string>("run_capture", { cwd: host.root(), program: "php", args, input: null }).catch(() => "");
   try {
     const files: Member[] = JSON.parse(out.slice(out.indexOf("{"))).references;

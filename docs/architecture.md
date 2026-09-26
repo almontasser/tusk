@@ -385,9 +385,15 @@ and `bootstrap/cache` to Phpactor's defaults. On a project with three git
 worktrees under `.claude/`, this cut the index from 125,859 files to about
 26,700.
 
-The patterns also skip vendor folders that declare no classes, functions, or
-constants: AWS's API data, Carbon's and every package's translations, package
-Blade views, and `voku/portable-ascii`'s tables. On a Laravel and Filament app,
+Each project also has a list of vendor folders to skip, which
+`src/indexexclude.ts` reads: `tusk.json`'s `indexExclude` when the project has
+one, otherwise the editor's own copy (localStorage `indexExclude:<root>`), and
+`DEFAULT_EXCLUDES` when neither exists. The defaults are folders that declare no
+classes, functions, or constants: AWS's API data, Carbon's and every package's
+translations, package Blade views, and `voku/portable-ascii`'s tables. Each
+folder goes to Phpactor as `/<folder>/**/*` and to Mago's `excludes`, where a
+folder glob needs `/**` because Mago matches globs against files, not folders.
+On a Laravel and Filament app,
 all 6,154 such files declared nothing, and skipping them took a full build
 from 26,781 files and 87 seconds to 18,614 files and 62 seconds. AWS's data is
 39 MB of that app's 110 MB of vendor PHP. Rector's bundled `vendor` stays,
@@ -396,9 +402,12 @@ and the Filament server load classes through Composer's autoloader, not the
 index, so they're unaffected.
 
 Phpactor keeps index entries for files that later become excluded, which
-would list classes twice. The client sets its own `indexer.index_path` with a
-version suffix (`%project_id%-editor-3`). When the patterns change, bump the
-suffix, and every project gets a fresh index.
+would list classes twice. So the index lives in a folder the editor owns,
+`phpactor-index/<project>` in the app's cache, and `setExclusions` stops
+Phpactor, deletes that folder, and starts the servers again, which asks for a
+full build. An index takes 300 to 550 MB on a large Laravel app, so a folder per
+list would pile up. When the fixed patterns in `PHPACTOR_EXCLUDES` change,
+delete the folders the same way.
 
 ### Laravel magic in Mago's results
 
@@ -792,8 +801,8 @@ Until it has, `checkComposerLock` asks for a full reindex at each start, and
 file changes don't trigger the update pass, which would only move the timestamp
 past the missing files. `reindex(false)` sets `awaitingFullIndex`; the next
 `$/progress` run titled "Indexing…" is the full build, and its end marks the
-index complete. `-editor-2` replaced `-editor-1`, whose indexes may be
-incomplete, and `-editor-3` skips vendor data folders; the old folders under `~/.cache/phpactor/index` can be deleted.
+index complete. Indexes from earlier builds, under `~/.cache/phpactor/index`
+and named `-editor-1` to `-editor-3`, are no longer used and can be deleted.
 
 ### Reindexing after Composer changes
 
@@ -1785,9 +1794,10 @@ context, and reports problems only in the file it received. The bundled
   `includes`, because Mago never lints included files.
 - `excludes` for hidden folders (`.*`), `node_modules`, `storage`, and
   `bootstrap/cache`. Hidden folders can hold whole copies of the project, such
-  as git worktrees in `.claude/`. It also excludes AWS's API data and Carbon's
-  translations, arrays that declare nothing, which cut each check from 1.65 to
-  1.23 seconds of CPU on a Laravel and Filament app.
+  as git worktrees in `.claude/`. `projectMagoConfig` adds the project's
+  index exclusions. Skipping AWS's API data and Carbon's translations, arrays
+  that declare nothing, cut each check from 1.65 to 1.23 seconds of CPU on a
+  Laravel and Filament app.
 - The Laravel lint integration, with `strict-types` and
   `literal-named-argument` turned off. On the test app, those two rules
   produced 154 warnings on standard Laravel code.

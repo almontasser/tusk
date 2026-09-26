@@ -13,6 +13,7 @@ import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
 import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
+import { exclusionsFor, magoExcludes, phpactorPatterns, saveExclusions } from "./indexexclude";
 
 type M = typeof monaco.languages;
 
@@ -931,35 +932,27 @@ async function startServer(
 /**
  * Phpactor's indexer ignores .gitignore, so without these patterns it walks copies of the
  * project in hidden folders (such as git worktrees under .claude/ or .idea/), node_modules,
- * and compiled views, and lists every class several times.
+ * and compiled views, and lists every class several times. The project's own list of vendor
+ * folders to skip (indexexclude.ts) is added to these.
  */
-const phpactorIndexer = {
-  "indexer.exclude_patterns": [
-    // Phpactor's defaults, which this list replaces.
-    "/vendor/**/Tests/**/*",
-    "/vendor/**/tests/**/*",
-    "/vendor/composer/**/*",
-    "/vendor/rector/rector/stubs-rector",
-    "/.*/**/*",
-    "/node_modules/**/*",
-    "/storage/**/*",
-    "/bootstrap/cache/**/*",
-    // Vendor data that declares no symbols: arrays, translations, and Blade views. AWS's API data alone is
-    // over a third of a typical vendor folder's PHP, and these folders together about a quarter of the files.
-    "/vendor/aws/aws-sdk-php/src/data/**/*",
-    "/vendor/nesbot/carbon/src/Carbon/Lang/**/*",
-    "/vendor/voku/portable-ascii/src/voku/helper/data/**/*",
-    "/vendor/**/resources/lang/**/*",
-    "/vendor/**/resources/views/**/*",
-  ],
-  // Phpactor keeps entries for files that later become excluded. Bump the suffix whenever
-  // the patterns change, so projects get a fresh index instead of stale duplicates.
-  // -editor-2: indexes built before full builds were tracked may be missing whole folders of vendor.
-  // -editor-3: vendor data folders excluded.
-  "indexer.index_path": "%cache%/index/%project_id%-editor-3",
-};
+const PHPACTOR_EXCLUDES = [
+  // Phpactor's defaults, which this list replaces.
+  "/vendor/**/Tests/**/*",
+  "/vendor/**/tests/**/*",
+  "/vendor/composer/**/*",
+  "/vendor/rector/rector/stubs-rector",
+  "/.*/**/*",
+  "/node_modules/**/*",
+  "/storage/**/*",
+  "/bootstrap/cache/**/*",
+];
+/**
+ * The project's index, in the app's cache rather than Phpactor's, so the editor can delete it: Phpactor keeps
+ * entries for files that later become excluded, so a changed exclusion list needs an index built from nothing.
+ */
+let indexPath = "";
 /** The editor's index, for running Phpactor's command line against the same index as the server. */
-export const PHPACTOR_INDEX = { "indexer.index_path": phpactorIndexer["indexer.index_path"] };
+export const phpactorIndex = () => ({ "indexer.index_path": indexPath });
 
 const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
@@ -1128,7 +1121,7 @@ export async function startLsp(root: string, h: Host) {
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = toolPath;
   // Every check at once, rather than one round trip after another before the first server starts.
-  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson, phar, aliasDir] = await Promise.all([
+  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson, phar, aliasDir, index, excluded] = await Promise.all([
     tool("mago/mago"),
     tool("mago.toml"),
     exists("mago.toml"),
@@ -1139,9 +1132,13 @@ export async function startLsp(root: string, h: Host) {
     tool("phpactor/phpactor.phar"),
     // Phpactor indexes stub paths only once, so a changed alias list needs a full reindex.
     aliasStubs(root, () => reindex()).catch(() => null),
+    projectCache("phpactor-index", root),
+    exclusionsFor(root),
   ]);
+  indexPath = index;
   const phpactor = startServer("phpactor", root, ["php"], {
-    ...phpactorIndexer,
+    "indexer.exclude_patterns": [...PHPACTOR_EXCLUDES, ...phpactorPatterns(excluded.list)],
+    "indexer.index_path": indexPath,
     // PHP's own stubs, which this list replaces, and Laravel's root aliases (`use DB;`).
     "indexer.stub_paths": [`phar://${phar}/vendor/jetbrains/phpstorm-stubs`, ...(aliasDir ? [aliasDir.dir] : [])],
     // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
@@ -1156,7 +1153,7 @@ export async function startLsp(root: string, h: Host) {
     "language_server_mago.enabled": true,
     "language_server_mago.bin": magoBin,
     // Without a project mago.toml, use defaults tuned for Laravel (src-tauri/resources/mago.toml).
-    ...(!hasMagoToml && { "language_server_mago.config": (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir)) }),
+    ...(!hasMagoToml && { "language_server_mago.config": (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir, magoExcludes(excluded.list))) }),
     "language_server_phpstan.enabled": hasPhpstan,
   });
   bladeReady = true;
@@ -1190,7 +1187,7 @@ export let magoConfigPath: string | undefined;
  * the project's, since Mago runs there. The copies are made again in the background at each start, as packages
  * change; until then, the last start's are used.
  */
-async function projectMagoConfig(root: string, bundled: string, aliasDir: string | undefined): Promise<string> {
+async function projectMagoConfig(root: string, bundled: string, aliasDir: string | undefined, excluded: string[]): Promise<string> {
   const dir = await projectCache("mago-stubs", root);
   const [text, composer, previous, top] = await Promise.all([
     invoke<string>("read_file", { path: bundled }),
@@ -1201,7 +1198,7 @@ async function projectMagoConfig(root: string, bundled: string, aliasDir: string
   ]);
   const config = `${dir}/mago.toml`;
   const write = (replaced: string[]) =>
-    invoke("write_file", { path: config, contents: magoConfigText(text, composer, [...(aliasDir ? [aliasDir] : []), ...(replaced.length ? [dir] : [])], replaced, top) });
+    invoke("write_file", { path: config, contents: magoConfigText(text, composer, [...(aliasDir ? [aliasDir] : []), ...(replaced.length ? [dir] : [])], [...excluded, ...replaced], top) });
   await invoke("create_dir", { path: dir });
   await write(previous);
   introspect(root, "mago-stubs", dir).then(async (replaced) => {
@@ -1243,14 +1240,14 @@ export async function checkComposerLock(root: string) {
 const indexedKey = (root: string) => `phpactorIndexed:${root}`;
 function indexComplete(root: string) {
   try {
-    return localStorage.getItem(indexedKey(root)) === phpactorIndexer["indexer.index_path"];
+    return localStorage.getItem(indexedKey(root)) === indexPath;
   } catch {
     return true; // Without storage, don't rebuild on every start.
   }
 }
 function markIndexComplete(root: string) {
   try {
-    localStorage.setItem(indexedKey(root), phpactorIndexer["indexer.index_path"]);
+    localStorage.setItem(indexedKey(root), indexPath);
   } catch {}
 }
 /** A full reindex was asked for and hasn't started; then the progress token of the run that is the full build. */
@@ -1316,6 +1313,21 @@ export function reindex(soft = false) {
   const phpactor = servers.find((s) => s.name === "phpactor");
   if (!soft && phpactor) awaitingFullIndex = true;
   phpactor?.request("phpactor/indexer/reindex", { soft }).catch((e) => host.status(`Can't reindex: ${e}`));
+}
+
+/**
+ * Saves the project's list of folders to skip and builds the index again from nothing, since Phpactor keeps
+ * entries for files that become excluded. Phpactor must have exited before its index is deleted.
+ */
+export async function setExclusions(list: string[], shared: boolean) {
+  const root = projectRoot;
+  await saveExclusions(root, list, shared);
+  await invoke("lsp_stop", { name: "phpactor" });
+  await invoke("remove_path", { path: indexPath }).catch(() => {});
+  try {
+    localStorage.removeItem(indexedKey(root));
+  } catch {}
+  await startLsp(root, host);
 }
 
 let reindexTimer: ReturnType<typeof setTimeout> | undefined;
