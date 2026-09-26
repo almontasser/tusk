@@ -41,6 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
+import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -223,6 +224,22 @@ function moveTabToNextPane() {
   const from = currentPane();
   if (panes.length < 2) split("row");
   placeTab(active, from, panes[(panes.indexOf(from) + 1) % panes.length], null);
+}
+
+/** Opens the current Markdown file's preview in the next pane, splitting right when there's only one. */
+function markdownPreview() {
+  const md = activeFile();
+  const model = tabs.get(md)?.model;
+  if (model?.getLanguageId() !== "markdown") return status("Open a Markdown file to preview it.");
+  const from = currentPane();
+  const splitting = !hasMarkdownPreview(model) && panes.length < 2;
+  if (splitting) split("row");
+  else if (!hasMarkdownPreview(model)) focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]);
+  showMarkdownPreview(model, { openFile: (path) => openFile(path) });
+  // The split showed the file on both sides; the new pane keeps only the preview.
+  if (splitting) leave(currentPane(), md), renderTabs();
+  // Typing goes on in the file, beside its preview.
+  if (currentPane() !== from) focusPane(from), editor.focus();
 }
 
 /** Puts a tab before another in a pane (or last, for null), taking it out of the pane it came from. */
@@ -1066,6 +1083,7 @@ function renderTabs() {
                   "-" as const,
                   { label: "Split Right", run: () => (focusPane(pane), openFile(path).then(() => split("row"))) },
                   { label: "Split Down", run: () => (focusPane(pane), openFile(path).then(() => split("col"))) },
+                  ...(tab?.model.getLanguageId() === "markdown" ? [{ label: "Open Preview", run: () => (focusPane(pane), openFile(path).then(markdownPreview)) }] : []),
                   "-" as const,
                   { label: "Copy Path", run: () => copyPath(path) },
                   { label: "Copy Relative Path", run: () => copyPath(path, true) },
@@ -1314,6 +1332,7 @@ const actions: Action[] = [
   { label: "Split Right", keys: "Meta+Backslash", run: () => split("row") },
   { label: "Split Down", keys: "Meta+Shift+Backslash", run: () => split("col") },
   { label: "Move Tab to Next Pane", run: moveTabToNextPane },
+  { label: "Markdown Preview", run: markdownPreview },
   { label: "Unsplit", run: () => unsplit() },
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Problems", keys: "Meta+6", run: () => root && showProblems() },

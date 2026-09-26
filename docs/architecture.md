@@ -102,6 +102,20 @@ and the two sides of the border trade pixels. Sizes go into the session as
 `grow`. A new split takes half of the pane's `flex-grow`, and a new group takes
 over the pane's.
 
+### Markdown preview
+
+`markdownpreview.ts` shows a Markdown model's preview as an editor view
+(`showEditorView`), one per file. `markdown.ts` renders it with `marked`,
+parsing each top-level block on its own inside a `<div data-line>` that holds
+the block's first line, with the document's link definitions passed along.
+DOMPurify sanitizes the HTML into a fragment, where relative image paths are
+swapped for blob URLs of the file's bytes (`read_file_bytes`, a
+`tauri::ipc::Response`, so no base64) before the fragment joins the page. The
+preview renders again 150 ms after you stop typing. Every Monaco editor gets a
+scroll listener once (`onDidCreateEditor`), and the preview for the editor's
+model scrolls to the block at its top line, interpolating toward the next
+block (`previewScrollTop`). The sync runs one way, editor to preview.
+
 ### Saving
 
 `saveFile` writes one tab if it has unsaved changes, then marks it saved, sends
@@ -3444,3 +3458,10 @@ templates get the same checks as `ng build`'s strict templates. It adds about
 50 MB to the Node tools, half of it its own TypeScript, and a second TypeScript
 program in memory. Starting it only for projects with `@angular/core` keeps
 that off Laravel projects that only have a stray `.html` file.
+
+### 2026-09-26: Markdown preview with the libraries pull requests already load
+
+The preview reuses `marked` and DOMPurify, already loaded for pull request
+descriptions, instead of Monaco's Markdown renderer, which can't map blocks to
+lines. Images go through a bytes command rather than Tauri's asset protocol,
+which would need a new Cargo feature and a file scope in `tauri.conf.json`.

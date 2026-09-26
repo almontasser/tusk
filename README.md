@@ -408,6 +408,15 @@ Drag a file or folder onto a folder to move it there.
 - **Deleting** moves files to the macOS Trash, so you can restore them.
 - **No overwrites.** Renaming or creating never replaces an existing file.
 
+### Markdown preview
+
+To preview a Markdown file, run **Markdown Preview** from ⌘⇧A, or right-click
+its tab and choose **Open Preview**. The preview opens in the pane to the
+right, splitting the editor when there's only one pane. It updates as you type
+and scrolls with the editor. Images with relative paths load from the file's
+folder. Links to other files open them in the editor, and web links open in
+your browser. Raw HTML in the file is sanitized, so scripts don't run.
+
 ## Find and replace in files
 
 Press ⌘⇧F to open the **Find** view in the sidebar, or ⌘⇧R to go straight to

@@ -202,6 +202,7 @@ pub fn run() {
             db::db_tunnel,
             fs::read_dir,
             fs::read_file,
+            fs::read_file_bytes,
             profile::parse_profile,
             fs::write_file,
             fs::rename_path,
