@@ -2707,8 +2707,26 @@ is returned, and `ServerAliveInterval` ends a tunnel whose connection died,
 such as after the Mac sleeps, so the next query opens a new one. Once the
 tunnel works, a thread keeps reading ssh's error output, which would otherwise
 fill its pipe and stop ssh. Tunnels are kept per destination and address, and reused while
-ssh runs. `database.ts` keeps the destination per project in `localStorage`
-(`db:ssh:<root>`) and connects to the tunnel's port instead of `.env`'s.
+ssh runs. `database.ts` keeps the destination per project and connection in
+`localStorage` (`db:ssh:<root>` for `.env`'s, `db:ssh:<root>#<name>` for
+another) and connects to the tunnel's port instead of the connection's.
+
+Besides `.env`'s connection, `database.ts` offers saved ones and
+`config/database.php`'s. Saved connections are a JSON list of names and URLs in
+`localStorage` (`db:connections:<root>`), with the selected name in
+`db:connection:<root>`. Passwords aren't in the URL: `db_password` and
+`db_set_password` in `db.rs` keep them in the login Keychain as generic
+passwords (service `Tusk database`, account `<root>#<name>`), through the
+`security-framework` crate that `native-tls` already builds. `connectionFromUrl`
+and `connectionUrl` in `dbconfig.ts` read and write the URLs, in the form
+Laravel's `DB_URL` takes. `config/database.php`'s connections come from booting
+the app with `php -r`, once per project (again on **Refresh**) and in the
+background when the tool window loads, so the switcher opens at once. The
+default connection is skipped, since `.env` gives it, and so is a connection
+that only repeats `.env`'s `DB_` values under its own driver (`repeatsEnv`),
+which is what Laravel's stock `mysql`, `mariadb`, and `pgsql` entries are.
+Their passwords come from the booted config each time and are never stored.
+A selected connection that no longer exists falls back to `.env`'s.
 
 Each query opens a new connection and runs on a blocking thread, so a slow
 server doesn't stall the app. Results come in pages of 1,000 rows. A table's
@@ -3442,3 +3460,18 @@ query wrapped as `SELECT * FROM (…) LIMIT … OFFSET …` breaks on duplicate
 column names in MySQL and loses the inner `ORDER BY` on MariaDB, so only table
 browsing, whose SQL the editor writes, pages in SQL. Other statements skip rows
 in Rust, which read every row before this change too.
+
+### 2026-09-26: Database connections are URLs, with passwords in the Keychain
+
+The editor connected to `.env`'s database only. Now you can save more per
+project and switch between them. A connection is typed as one URL, in the form
+Laravel's `DB_URL` takes, instead of in a form with a field per setting: the
+command palette's picker already asks for text, and a URL is what hosting
+dashboards hand out. The password goes to the Keychain, not to web storage,
+which is a plain file in the app's data folder. The app had no secret store,
+and `security-framework` was already in the build for TLS, so this adds no
+download. An ad-hoc signed build changes its signature with each release, so
+macOS may ask once per release to let Tusk read a saved password.
+`config/database.php`'s other connections are read by booting the app, as
+Laravel resolves them, rather than by parsing the PHP, since they're mostly
+`env()` calls.

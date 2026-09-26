@@ -3366,6 +3366,7 @@ dependencies = [
  "rusqlite",
  "rustc-hash",
  "rustls",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2 0.10.9",

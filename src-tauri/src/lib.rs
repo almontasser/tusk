@@ -200,6 +200,8 @@ pub fn run() {
             db::db_query,
             db::db_batch,
             db::db_tunnel,
+            db::db_password,
+            db::db_set_password,
             fs::read_dir,
             fs::read_file,
             profile::parse_profile,

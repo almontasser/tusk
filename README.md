@@ -47,7 +47,7 @@ file to change when you add it.
 | Mago analysis | Mago has no server mode, so it parses the project again for each check: about 2 seconds of wall time, and several seconds of CPU, on a project with 27,000 PHP files. It runs 1 second after you stop typing. |
 | Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | The editor connects to the connection in `.env` only. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
+| Database | Only SQLite, MySQL, MariaDB, and PostgreSQL connections work. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. There's no gRPC. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Imports read JSON only, not YAML. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
@@ -1537,6 +1537,17 @@ your project's `.env`, as Laravel does: `DB_CONNECTION`, `DB_HOST`, `DB_PORT`,
 anything missing. SQLite, MySQL, MariaDB, and PostgreSQL work without
 installing a client, because the drivers are built into the app.
 
+To use another database, click the connection line under the tool window's
+title, or run **Database: Switch Connection…** from ⌘⇧A. The list shows `.env`'s
+connection, the ones you saved, and the other connections in the app's
+`config/database.php`, such as a read replica. **Add Connection…** asks for a
+URL, such as `mysql://forge:secret@203.0.113.5:3306/laravel`,
+`pgsql://user@host/app?sslmode=require`, or `sqlite:database/other.sqlite`,
+and then a name. Saved connections are kept per project; their passwords are
+kept in your Mac's Keychain. Select a saved connection to see **Edit** and
+**Remove** in the list. When you edit one, leave the password out of the URL to
+keep the saved password.
+
 TLS follows the same `.env` settings as Laravel's `config/database.php`:
 `DB_SSLMODE` (`disable`, `prefer`, `require`, `verify-ca`, or `verify-full`,
 as in PostgreSQL; PostgreSQL defaults to `prefer`), and `MYSQL_ATTR_SSL_CA` or
@@ -1550,6 +1561,7 @@ and type the SSH destination, such as `forge@203.0.113.5`,
 tunnel with your Mac's `ssh`, using your keys or SSH agent (it can't ask for a
 password), and `DB_HOST` and `DB_PORT` are then as the server sees them, such
 as `127.0.0.1:3306`. Leave the destination empty to connect directly again.
+Each connection keeps its own SSH destination.
 
 - Click a table to see its columns. A `?` after a type marks a nullable column.
 - Double-click a table to show its rows, 1,000 at a time. Click **Next** and
@@ -1745,7 +1757,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |
 | `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
 | `src/database.ts` | The Database tool window, query console, and results grid |
-| `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
+| `src/dbconfig.ts` | Database connections from `.env`, URLs, and `config/database.php`, schema queries, and cell updates |
 | `src/composer.ts` | The Composer tool window |
 | `src/composerdata.ts` | Joins `composer show` and `composer outdated` output |
 | `src/httpclient.ts` | The HTTP client's sending, variables, cookies, history, and `http` language |

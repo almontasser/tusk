@@ -1,24 +1,30 @@
 // Database tool: tables and columns in the sidebar, a query console, and a results grid in the panel.
-// The connection comes from the project's .env, as Laravel reads it, optionally through an SSH tunnel.
+// The connection comes from the project's .env, as Laravel reads it, or one saved in the editor or in config/database.php,
+// optionally through an SSH tunnel.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import {
   columnsQuery,
   type Connection,
+  connectionFromConfig,
   connectionFromEnv,
+  connectionFromUrl,
+  connectionUrl,
+  describe,
   deleteStatement,
   hasCode,
   insertStatement,
   parseEnv,
   primaryKeyQuery,
   quoteIdentifier,
+  repeatsEnv,
   schemaQuery,
   statementAt,
   tablesQuery,
   updateStatement,
 } from "./dbconfig";
 import { monaco } from "./editor";
-import { pick } from "./palette";
+import { type Item, pick, rank } from "./palette";
 import { usesSail } from "./sail";
 import { showPanelView } from "./terminal";
 
@@ -43,31 +49,154 @@ const query = (sql: string, offset = 0) => invoke<Result>("db_query", { connecti
 /** Rows per page, as db.rs's MAX_ROWS. */
 const PAGE = 1000;
 
-/** The SSH destination the project's database is reached through, or "" to connect directly. */
-const sshKey = () => `db:ssh:${host.root()}`;
-function sshDestination() {
+function getItem(key: string) {
   try {
-    return localStorage.getItem(sshKey()) ?? "";
+    return localStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
 }
+function setItem(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {}
+}
+
+/**
+ * Connections saved in the editor, per project, by name and URL without the password, which is in the Keychain.
+ * The selected one is "" for .env's.
+ */
+type Saved = { name: string; url: string };
+const savedKey = () => `db:connections:${host.root()}`;
+const selectedKey = () => `db:connection:${host.root()}`;
+const account = (name: string) => `${host.root()}#${name}`;
+const savedConnections = (): Saved[] => JSON.parse(getItem(savedKey()) || "[]");
+const selectedName = () => getItem(selectedKey());
+const password = async (name: string) => (await invoke<string | null>("db_password", { account: account(name) })) ?? "";
+
+/** The SSH destination a connection is reached through, or "" to connect directly. */
+const sshKey = (name = selectedName()) => `db:ssh:${host.root()}${name ? `#${name}` : ""}`;
+const sshDestination = () => getItem(sshKey());
+
+const readEnv = async () => parseEnv(await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => ""));
+const envConnection = async () => connectionFromEnv(await readEnv(), host.root(), await usesSail(host.root()));
+
+/**
+ * config/database.php's connections other than the default, which .env gives, and Laravel's stock entries, which
+ * repeat it. Read once per project, by booting the app.
+ */
+let config: { root: string; connections: Promise<Map<string, Connection>> } | undefined;
+function configConnections() {
+  const root = host.root();
+  if (config?.root === root) return config.connections;
+  const php = `require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); echo json_encode(['default' => config('database.default'), 'connections' => config('database.connections')]);`;
+  const connections = Promise.all([invoke<string>("run_capture", { cwd: root, program: "php", args: ["-r", php], input: null }), readEnv()])
+    .then(([out, env]) => {
+      const { default: name, connections } = JSON.parse(out.slice(out.indexOf("{")));
+      const map = new Map<string, Connection>();
+      for (const [n, c] of Object.entries<Record<string, unknown>>(connections ?? {})) {
+        const connection = n === name ? null : connectionFromConfig(c, root);
+        if (connection && !repeatsEnv(connection, env, root)) map.set(n, connection);
+      }
+      return map;
+    })
+    .catch(() => new Map<string, Connection>());
+  config = { root, connections };
+  return connections;
+}
+
+async function namedConnection(name: string): Promise<Connection | null> {
+  const saved = savedConnections().find((s) => s.name === name);
+  const c = saved ? connectionFromUrl(saved.url, host.root()) : (await configConnections()).get(name);
+  return c && saved ? { ...c, password: await password(name) } : (c ?? null);
+}
 
 async function loadConnection() {
-  const env = await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => "");
-  const c = connectionFromEnv(parseEnv(env), host.root(), await usesSail(host.root()));
+  let name = selectedName();
+  let c = name ? await namedConnection(name) : null;
+  if (!c) (name = ""), setItem(selectedKey(), ""), (c = await envConnection());
   schema = null;
   const ssh = c.driver === "sqlite" ? "" : sshDestination();
-  $("db-connection").textContent =
-    c.driver === "sqlite"
-      ? `SQLite · ${c.database.replace(host.root() + "/", "")}`
-      : `${c.driver} · ${c.username}@${c.host}:${c.port}/${c.database}${ssh ? ` · via ${ssh}` : ""}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
+  $("db-connection").textContent = `${name || ".env"} · ${describe(c, host.root())}${ssh ? ` · via ${ssh}` : ""}`;
   connection = null;
-  // Through SSH, .env's host and port are as the SSH server sees them, such as 127.0.0.1:3306 on the server.
+  // Through SSH, the host and port are as the SSH server sees them, such as 127.0.0.1:3306 on the server.
   connection = ssh ? { ...c, host: "127.0.0.1", port: await invoke<number>("db_tunnel", { destination: ssh, host: c.host, port: c.port }) } : c;
 }
 
-/** Sets the SSH server to reach the project's database through, or connects directly again. */
+/** Switches between .env's connection, saved ones, and config/database.php's, and adds, edits, or removes saved ones. */
+export async function chooseConnection() {
+  const root = host.root();
+  if (!root) return;
+  const current = selectedName();
+  const saved = savedConnections();
+  const select = (name: string) => () => (setItem(selectedKey(), name), loadTables());
+  const mark = (name: string) => (name === current ? "codicon-check" : "codicon-database");
+  const items: Item[] = [
+    { label: ".env", detail: describe(await envConnection(), root), icon: mark(""), run: select("") },
+    ...saved.map((s) => ({ label: s.name, detail: s.url, icon: mark(s.name), run: select(s.name) })),
+    ...[...(await configConnections())]
+      .filter(([n]) => !saved.some((s) => s.name === n))
+      .map(([n, c]) => ({ label: n, detail: `config/database.php · ${describe(c, root)}`, icon: mark(n), run: select(n) })),
+    { label: "Add Connection…", icon: "codicon-add", run: () => editConnection() },
+  ];
+  const active = saved.find((s) => s.name === current);
+  if (active)
+    items.push(
+      { label: `Edit ${active.name}…`, icon: "codicon-edit", run: () => editConnection(active) },
+      { label: `Remove ${active.name}`, icon: "codicon-trash", run: () => removeConnection(active) },
+    );
+  pick("Switch the database connection", (q) => rank(q, items), 0, { value: "", anchor: $("db-connection") });
+}
+
+/** Asks for a connection's URL, then its name. Without a password in the URL, an edit keeps the saved one. */
+function editConnection(existing?: Saved, value = existing?.url ?? "") {
+  const root = host.root();
+  pick(
+    "Connection URL, such as mysql://user:password@host:3306/database, pgsql://…, or sqlite:database/other.sqlite",
+    (q) => {
+      const c = connectionFromUrl(q, root);
+      if (!c) return [{ label: q.trim() ? "Not a database URL" : "Type a URL", detail: "mysql://, mariadb://, pgsql://, or sqlite:", run: () => editConnection(existing, q) }];
+      return [{ label: "Next: name the connection", detail: `${describe(c, root)}${existing && !c.password ? " · keeps the saved password" : ""}`, run: () => nameConnection(c, existing) }];
+    },
+    0,
+    { value },
+  );
+}
+
+function nameConnection(c: Connection, existing?: Saved) {
+  const suggested = existing?.name ?? (c.driver === "sqlite" ? c.database.split("/").pop()! : `${c.database}@${c.host}`);
+  pick("Name the connection", (q) => [{ label: `Save as ${q.trim() || suggested}`, detail: describe(c, host.root()), run: () => saveConnection(q.trim() || suggested, c, existing) }], 0, {
+    value: suggested,
+    select: [0, suggested.length],
+  });
+}
+
+async function saveConnection(name: string, c: Connection, existing?: Saved) {
+  try {
+    const secret = c.password || (existing ? await password(existing.name) : "");
+    if (existing) await invoke("db_set_password", { account: account(existing.name), password: "" });
+    await invoke("db_set_password", { account: account(name), password: secret });
+  } catch (e) {
+    host.status(`Can't save the password in the Keychain: ${String(e)}`);
+    return;
+  }
+  if (existing && existing.name !== name) setItem(sshKey(name), getItem(sshKey(existing.name))), setItem(sshKey(existing.name), "");
+  const others = savedConnections().filter((s) => s.name !== name && s.name !== existing?.name);
+  setItem(savedKey(), JSON.stringify([...others, { name, url: connectionUrl(c, host.root()) }]));
+  setItem(selectedKey(), name);
+  loadTables();
+}
+
+async function removeConnection(s: Saved) {
+  await invoke("db_set_password", { account: account(s.name), password: "" }).catch(() => {});
+  setItem(sshKey(s.name), "");
+  setItem(savedKey(), JSON.stringify(savedConnections().filter((x) => x.name !== s.name)));
+  setItem(selectedKey(), "");
+  loadTables();
+}
+
+/** Sets the SSH server to reach the selected connection's database through, or connects directly again. */
 export function connectOverSsh() {
   if (!host.root()) return;
   pick(
@@ -75,14 +204,8 @@ export function connectOverSsh() {
     (q) => [
       {
         label: q.trim() ? `Connect through ${q.trim()}` : "Connect directly, without SSH",
-        detail: q.trim() ? "Uses your SSH keys or agent; .env's DB_HOST and DB_PORT are as the server sees them" : "",
-        run: () => {
-          try {
-            if (q.trim()) localStorage.setItem(sshKey(), q.trim());
-            else localStorage.removeItem(sshKey());
-          } catch {}
-          loadTables();
-        },
+        detail: q.trim() ? "Uses your SSH keys or agent; the connection's host and port are as the server sees them" : "",
+        run: () => (setItem(sshKey(), q.trim()), loadTables()),
       },
     ],
     0,
@@ -95,8 +218,10 @@ export function connectOverSsh() {
 export async function loadTables() {
   if (!host.root()) return;
   const list = $("db-tables");
-  // Switching back to the view keeps the last tables while they refresh; a new project starts over.
-  if (list.dataset.root !== host.root()) (list.dataset.root = host.root()), list.replaceChildren(el("li", "muted", "Loading…"));
+  // Switching back to the view keeps the last tables while they refresh; a new project or connection starts over.
+  configConnections(); // In the background, so the switcher opens at once.
+  const key = `${host.root()}#${selectedName()}`;
+  if (list.dataset.root !== key) (list.dataset.root = key), list.replaceChildren(el("li", "muted", "Loading…"));
   try {
     await loadConnection();
     const tables = (await query(tablesQuery(connection!.driver))).rows.map((r) => r[0] ?? "");
@@ -415,7 +540,8 @@ async function makeEditable(again: () => void, table: string, result: Result, ro
 
 export function initDatabase(h: Host) {
   host = h;
-  $("db-refresh").onclick = loadTables;
+  $("db-refresh").onclick = () => ((config = undefined), loadTables());
+  $("db-connection").onclick = chooseConnection;
   monaco.languages.registerCompletionItemProvider("sql", { triggerCharacters: ["."], provideCompletionItems });
   $("db-console").onclick = openConsole;
   monaco.editor.addEditorAction({

@@ -248,6 +248,25 @@ fn pgsql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     Ok(result)
 }
 
+/// Database passwords for connections saved in the editor live in the login Keychain, by project and name.
+const KEYCHAIN_SERVICE: &str = "Tusk database";
+
+#[tauri::command(async)]
+pub fn db_password(account: String) -> Option<String> {
+    security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &account).ok().map(|p| String::from_utf8_lossy(&p).into())
+}
+
+/// Saves a password, or deletes it when it's empty.
+#[tauri::command(async)]
+pub fn db_set_password(account: String, password: String) -> Result<(), String> {
+    use security_framework::passwords::{delete_generic_password, set_generic_password};
+    if password.is_empty() {
+        let _ = delete_generic_password(KEYCHAIN_SERVICE, &account);
+        return Ok(());
+    }
+    set_generic_password(KEYCHAIN_SERVICE, &account, password.as_bytes()).map_err(|e| e.to_string())
+}
+
 /// SSH tunnels by destination and database address, with the local port each listens on.
 #[derive(Default)]
 pub struct Tunnels(std::sync::Mutex<std::collections::HashMap<String, (std::process::Child, u16)>>);
@@ -356,5 +375,16 @@ mod tests {
         let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'", 0);
         assert_ne!(tls("require").unwrap().rows[0][1], Some(String::new()));
         assert!(tls("verify-full").is_err());
+    }
+
+    /// Writes to the login Keychain, so it runs only when asked.
+    #[test]
+    #[ignore]
+    fn keychain_passwords() {
+        let account = "tusk-test|staging".to_string();
+        db_set_password(account.clone(), "p@ss".into()).unwrap();
+        assert_eq!(db_password(account.clone()).as_deref(), Some("p@ss"));
+        db_set_password(account.clone(), String::new()).unwrap();
+        assert_eq!(db_password(account), None);
     }
 }
