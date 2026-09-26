@@ -1639,7 +1639,9 @@ closes whichever tab shows an element. A closed view's element is hidden and
 moved back under `body` rather than removed, since its module finds its parts
 by ID. The panel's **+** opens a terminal, and the terminal button shows the
 last running shell (`isShell`: not a command's tab, such as `git pull`, and not
-exited) or opens one, hiding the panel only when a shell has focus. The session doesn't save views in panes: `runningTerminals`
+exited) or opens one, hiding the panel only when a shell has focus. A command
+opened with the title of a finished command's tab, such as a second `git pull`,
+takes that tab's place instead of adding another. The session doesn't save views in panes: `runningTerminals`
 includes docked terminals, which reopen in the panel. Opening another project
 moves every view back to the panel first, so `closeTerminals` reaches them, and
 closes editor-only views and the Git Log.
@@ -3353,3 +3355,10 @@ covered. Now the diff, merge, and problem page are editor tabs through the
 `view:N` paths that docked panel tabs already used, and the Git Log is a panel
 tab, as in PhpStorm. Switching away is a tab click, and nothing needs to
 restore a covered view.
+
+### 2026-09-26: No Writing Tools button
+
+macOS showed its Writing Tools button beside the caret in the terminal's
+hidden textarea. `writingsuggestions="false"` on `<html>` turns it off
+everywhere, since the attribute is inherited. It suits prose, not code or a
+shell.

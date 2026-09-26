@@ -1254,7 +1254,8 @@ upstream branch. Click it for a dropdown with pull, push, and fetch at the top,
 then the current branch, local branches, and remote branches, most recently
 committed first. Choose a branch to check it out, or type a name to create one.
 The **Commit** view's header also has fetch, pull, and push buttons. Pull, push,
-and fetch run in a terminal tab, so you can answer credential prompts.
+and fetch run in a terminal tab, so you can answer credential prompts. Running one
+again reuses its tab once the last run has finished.
 
 ## Pull requests
 

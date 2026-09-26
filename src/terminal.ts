@@ -108,7 +108,10 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
     term.dispose();
     el.remove();
   };
-  sessions.push(session);
+  // A finished command's tab with the same title, such as an earlier git pull, gives its place to this one.
+  const finished = command && sessions.find((s) => s.term && s.exited && s.title === title);
+  if (finished) finished.dispose(), sessions.splice(sessions.indexOf(finished), 1, session);
+  else sessions.push(session);
   activate(session);
 }
 
