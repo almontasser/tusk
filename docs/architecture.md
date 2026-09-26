@@ -1968,8 +1968,20 @@ dialog writes a todo list (`rebaseTodo` in `src/gitparse.ts`) to the app cache,
 and `GIT_SEQUENCE_EDITOR='cp <todo>'` puts it in place of git's list. A reword
 becomes `pick` plus `exec git commit --amend --file=<message>`, and
 `GIT_EDITOR=true` keeps squash's combined message, so no editor ever opens.
-`--autostash` sets aside uncommitted changes. Ranges that contain merge
-commits are refused, since a plain `rebase -i` would flatten them.
+`--autostash` sets aside uncommitted changes.
+
+A range that contains merge commits is rebased with `--rebase-merges`, since a
+plain `rebase -i` would flatten them. The dialog shows git's own todo list for
+that, rather than rebuilding git's labeling in the app: `mergesTodo` adds a
+throwaway detached worktree in the app cache, runs
+`rebase -i --rebase-merges` there with a sequence editor that copies the list
+out and empties it, so that rebase ends with "nothing to do", then removes the
+worktree. The project's files, index, and HEAD are never touched, and a dirty
+working tree doesn't stop it. Hooks are off for both commands.
+`parseRebaseTodo` turns picks into steps whose action can change and keeps
+`label`, `reset`, `merge`, and `update-ref` lines verbatim in `line`, which
+`rebaseTodo` writes back unchanged. Those rows can't move, and a squash or
+fixup must follow a commit or a merge, not a label or reset.
 
 An `edit` step stops the rebase with the commit applied. git then writes
 `rebase-merge/amend` with the commit's hash, which `detectOperation` reads to
@@ -3425,3 +3437,13 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Rebasing merges uses git's own todo list
+
+Rebasing a range with merges needs `--rebase-merges`, whose todo list names
+branch points with labels that git derives from the history and the merge
+messages. Writing that list in the app would copy a tricky part of git and could
+drift from it, so git writes it in a throwaway worktree and the dialog edits
+only the picks. The cost is one checkout of HEAD each time the dialog opens for
+such a range; a dry run in the project itself would have needed a clean
+working tree or an autostash that rewrites the user's files.

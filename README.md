@@ -61,7 +61,7 @@ file to change when you add it.
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
-| Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
+| Git | Interactive rebase can't split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Phpactor provides rename, extract method, extract constant, generate methods, and import class through ⌥⏎. Moving a file moves its class. Change Signature finds overriding methods only in project files, not `vendor`, and misses a class whose `extends` or `implements` list is split over several lines. Neither it nor Safe Delete sees calls made through dynamic names, such as `$this->$method()`. Inline Variable works within one function. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
@@ -1241,6 +1241,9 @@ choose the commit to rebase onto. The commits after it are listed, oldest
 first. For each, choose **Pick**, **Reword** (and edit its message), **Edit**
 (stop at it to change its files), **Squash into previous**, **Fixup** (squash
 and discard its message), or **Drop**, and use the arrows to reorder them.
+If the commits include merges, the merges are kept: the list also shows git's
+**Label**, **Reset**, and **Merge** steps, which rebuild each merged branch and
+merge it again, and they stay where they are.
 **Start Rebase** runs `git rebase -i` in a terminal tab; uncommitted changes
 are stashed and restored. If a commit conflicts, resolve it, then click
 **Continue** in the Commit view. At an **Edit** commit, the rebase stops and
