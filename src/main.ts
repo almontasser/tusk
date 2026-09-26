@@ -41,7 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
-import { closeFocusedPanelTab, closeTerminals, openTerminal, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -54,6 +54,13 @@ const $ = (id: string) => document.getElementById(id)!;
 
 type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; bar: HTMLElement; paths: string[]; active: string };
 const panes: Pane[] = [];
+// Panel tabs dragged into a pane, such as a terminal, are tabs there too, under a `view:N` path that
+// no file has. The pane shows the tab's element over its editor, which has no model meanwhile.
+const views = new Map<string, PanelTab>();
+let viewCount = 0;
+const isView = (path: string) => path.startsWith("view:");
+/** The focused pane's file, or "" while it shows a panel tab. */
+const activeFile = () => (isView(active) ? "" : active);
 
 function addPane(): Pane {
   const el = document.createElement("div");
@@ -70,6 +77,7 @@ function addPane(): Pane {
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
   ed.onDidFocusEditorText(() => focusPane(pane));
+  el.addEventListener("pointerdown", () => focusPane(pane), true);
   // Moving the cursor changes the selection too, so this one event covers both.
   ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
   ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
@@ -100,6 +108,7 @@ const MAX_PANES = 4;
 
 /** Opens the current file in a new pane to the right (`row`) or below (`col`). With four panes, it moves to the next pane instead. */
 function split(dir: "row" | "col") {
+  if (isView(active)) return;
   if (panes.length >= MAX_PANES) return focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]), editor.focus();
   splitPane(currentPane(), dir, active, false);
   editor.focus();
@@ -192,14 +201,14 @@ function moveTabToNextPane() {
 }
 
 /** Puts a tab before another in a pane (or last, for null), taking it out of the pane it came from. */
-function placeTab(path: string, from: Pane, to: Pane, before: string | null) {
+function placeTab(path: string, from: Pane | null, to: Pane, before: string | null) {
   to.paths = to.paths.filter((p) => p !== path);
   const i = before ? to.paths.indexOf(before) : -1;
   to.paths.splice(i < 0 ? to.paths.length : i, 0, path);
   if (from !== to) {
     focusPane(to);
     openFile(path);
-    leave(from, path);
+    if (from) leave(from, path);
   }
   saveSoon();
   renderTabs();
@@ -207,8 +216,10 @@ function placeTab(path: string, from: Pane, to: Pane, before: string | null) {
 
 // Drag a tab within its bar to reorder it, onto another pane's tabs or editor to move it there,
 // or onto the outer quarter of any pane's editor to split that pane with it.
-let draggedTab: { path: string; from: Pane } | null = null;
+let draggedTab: { path: string; from: Pane | null } | null = null;
 type Edge = "left" | "right" | "top" | "bottom";
+// A panel tab dragged in joins a pane like a tab from another pane; it gets its path on the drop.
+const dragging = () => (draggedTab ??= draggingPanelTab() ? { path: "", from: null } : null);
 const dropTarget = (e: DragEvent) => {
   const pane = panes.find((p) => p.el.contains(e.target as Node));
   if (!pane) return undefined;
@@ -229,7 +240,7 @@ const DROP_MARKS = ["drop-before", "drop-target", "drop-left", "drop-right", "dr
 const clearDropMarks = () => document.querySelectorAll("#editor .pane, #editor .tab").forEach((el) => el.classList.remove(...DROP_MARKS));
 // Capture phase, so Monaco doesn't treat a tab dropped on the editor as text to insert.
 $("editor").addEventListener("dragover", (e) => {
-  const target = draggedTab && dropTarget(e);
+  const target = dragging() && dropTarget(e);
   if (!target) return;
   e.preventDefault();
   e.stopPropagation();
@@ -240,15 +251,16 @@ $("editor").addEventListener("dragover", (e) => {
 }, true);
 $("editor").addEventListener("dragleave", clearDropMarks);
 $("editor").addEventListener("drop", (e) => {
-  const target = draggedTab && dropTarget(e);
+  const target = dragging() && dropTarget(e);
   clearDropMarks();
   if (!target || !draggedTab) return;
   e.preventDefault();
   e.stopPropagation();
-  const { path, from } = draggedTab;
+  const { from } = draggedTab;
+  const path = draggedTab.path || addView(undockDragged()!);
   if (target.edge) {
     splitPane(target.pane, target.edge === "left" || target.edge === "right" ? "row" : "col", path, target.edge === "left" || target.edge === "top");
-    leave(from, path);
+    if (from) leave(from, path);
     saveSoon();
     renderTabs();
   }
@@ -256,7 +268,63 @@ $("editor").addEventListener("drop", (e) => {
   else if (target.before !== path && (target.inBar || target.pane !== from)) placeTab(path, from, target.pane, target.before);
   draggedTab = null;
 }, true);
-$("editor").addEventListener("dragend", () => ((draggedTab = null), clearDropMarks()));
+addEventListener("dragend", () => ((draggedTab = null), clearDropMarks()));
+
+/** Registers a panel tab moved into the editor, and returns its path. */
+function addView(tab: PanelTab) {
+  const path = `view:${++viewCount}`;
+  views.set(path, tab);
+  return path;
+}
+
+// With no files open, the editor is hidden, so a panel tab dropped on the empty area opens in the pane.
+$("empty-editor").addEventListener("dragover", (e) => draggingPanelTab() && e.preventDefault());
+$("empty-editor").addEventListener("drop", (e) => {
+  if (!draggingPanelTab()) return;
+  e.preventDefault();
+  openFile(addView(undockDragged()!));
+});
+
+// Drag a panel tab from a pane back onto the panel's tab bar.
+$("terminal-tabs").addEventListener("dragover", (e) => {
+  if (!draggedTab?.path || !isView(draggedTab.path)) return;
+  e.preventDefault();
+  clearDropMarks();
+  (e.target as HTMLElement).closest(".tab")?.classList.add("drop-before");
+}, true);
+$("terminal-tabs").addEventListener("drop", (e) => {
+  if (!draggedTab?.path || !isView(draggedTab.path) || !draggedTab.from) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const { path, from } = draggedTab;
+  draggedTab = null;
+  const tab = views.get(path)!;
+  views.delete(path);
+  leave(from, path);
+  dockBack(tab, dropIndex(e));
+  saveSoon();
+  renderTabs();
+}, true);
+
+initDocking({
+  reveal(tab) {
+    const path = [...views].find(([, t]) => t === tab)?.[0];
+    const pane = path && panes.find((p) => p.paths.includes(path));
+    if (pane) focusPane(pane), openFile(path);
+  },
+});
+
+/** Shows a pane's panel tab over its editor, or hides them all when it shows a file. */
+function showViews(pane: Pane, shown: string) {
+  const host = pane.el.querySelector(".pane-editor")!;
+  for (const [path, tab] of views) {
+    if (path === shown) {
+      if (tab.el.parentElement !== host) host.append(tab.el);
+      tab.el.classList.add("docked");
+      tab.el.hidden = false;
+    } else if (host.contains(tab.el)) tab.el.hidden = true;
+  }
+}
 
 // Drag the border between two panes to resize them. The border has no element of its own: a press
 // within 4 pixels of a pane's or group's leading edge, next to a sibling, starts the resize.
@@ -346,6 +414,7 @@ async function openFolder(dir: unknown = null) {
   saveSession();
   for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
+  for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), dockBack(tab);
   // The old project's shells and servers belong to it; the new project's session reopens its own.
   closeTerminals();
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
@@ -738,21 +807,30 @@ function addTab(path: string, model: monaco.editor.ITextModel) {
 }
 
 async function openFile(path: string) {
-  if (!tabs.has(path)) addTab(path, await ensureModel(path));
+  if (!tabs.has(path) && !isView(path)) addTab(path, await ensureModel(path));
   // First, since it shows the view it covered, which the next lines then close.
   closeProblemPage();
   closeDiff(false);
   closeMerge();
   hideHistory();
-  recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
+  if (!isView(path)) recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
-  editor.focus();
   renderTabs();
+  if (isView(path)) focusTab(views.get(path)!);
+  else editor.focus();
   markActiveInTree();
 }
 
 /** Closes a tab in one pane. The file stays open if another pane has it; otherwise it closes, saving first. */
 async function closeTab(path: string, pane = currentPane()) {
+  if (isView(path)) {
+    const tab = views.get(path)!;
+    views.delete(path);
+    leave(pane, path);
+    closeDocked(tab);
+    saveSoon();
+    return renderTabs();
+  }
   if (!panes.some((p) => p !== pane && p.paths.includes(path))) return closeFile(path);
   leave(pane, path);
   saveSoon();
@@ -909,15 +987,16 @@ function renderTabs() {
     const shown = pane === currentPane() ? active : pane.active;
     pane.bar.replaceChildren(
       ...pane.paths.map((path) => {
-        const tab = tabs.get(path)!;
+        const tab = tabs.get(path);
+        const view = views.get(path);
         const el = document.createElement("div");
-        el.className = `tab${path === shown ? " active" : ""}${isDirty(tab) ? " dirty" : ""}`;
+        el.className = `tab${path === shown ? " active" : ""}${tab && isDirty(tab) ? " dirty" : ""}`;
         el.dataset.path = path;
         el.role = "tab";
-        el.title = relative(path);
-        const icon = fileIcon(nameOf(path));
+        el.title = view ? view.title : relative(path);
+        const icon = view ? { codicon: tabIcon(view), color: "" } : fileIcon(nameOf(path));
         el.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
-        el.querySelector(".name")!.textContent = nameOf(path);
+        el.querySelector(".name")!.textContent = view ? view.title : nameOf(path);
         el.onclick = () => (focusPane(pane), openFile(path));
         el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
         el.oncontextmenu = (e) => {
@@ -929,13 +1008,17 @@ function renderTabs() {
             { label: "Close", run: () => closeTab(path, pane) },
             { label: "Close Others", run: () => closeAll(path) },
             { label: "Close All", run: () => closeAll() },
-            "-",
-            { label: "Split Right", run: () => (focusPane(pane), openFile(path).then(() => split("row"))) },
-            { label: "Split Down", run: () => (focusPane(pane), openFile(path).then(() => split("col"))) },
-            "-",
-            { label: "Copy Path", run: () => copyPath(path) },
-            { label: "Copy Relative Path", run: () => copyPath(path, true) },
-            { label: "Reveal in Finder", run: () => revealInFinder(path) },
+            ...(view
+              ? ["-" as const, { label: "Move to Panel", run: () => (views.delete(path), leave(pane, path), dockBack(view), saveSoon(), renderTabs()) }]
+              : [
+                  "-" as const,
+                  { label: "Split Right", run: () => (focusPane(pane), openFile(path).then(() => split("row"))) },
+                  { label: "Split Down", run: () => (focusPane(pane), openFile(path).then(() => split("col"))) },
+                  "-" as const,
+                  { label: "Copy Path", run: () => copyPath(path) },
+                  { label: "Copy Relative Path", run: () => copyPath(path, true) },
+                  { label: "Reveal in Finder", run: () => revealInFinder(path) },
+                ]),
           ]);
         };
         el.draggable = true;
@@ -949,12 +1032,13 @@ function renderTabs() {
       }),
     );
     pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    showViews(pane, shown);
   }
-  showBreadcrumbs($("path"), active ? relative(active) : "", editor);
-  followEditor(active, editor.getPosition());
-  $("empty-editor").hidden = tabs.size > 0 || !root;
+  showBreadcrumbs($("path"), activeFile() ? relative(active) : "", editor);
+  followEditor(activeFile(), editor.getPosition());
+  $("empty-editor").hidden = tabs.size + views.size > 0 || !root;
   updateProblems();
-  $("editor").style.display = tabs.size ? "" : "none";
+  $("editor").style.display = tabs.size + views.size ? "" : "none";
   updateStatusItems();
 }
 
@@ -1378,7 +1462,7 @@ window.addEventListener(
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
     if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
-    const inTerminal = document.activeElement?.closest("#terminals");
+    const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
     if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
     e.preventDefault();
     e.stopPropagation();
@@ -1424,7 +1508,7 @@ initProblems({
   unsaved: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!),
   changed: updateProblems,
 });
-initFiles({ root: () => root, active: () => active, openFile, renamed, forget, status });
+initFiles({ root: () => root, active: activeFile, openFile, renamed, forget, status });
 
 /** Switches the sidebar between the project tree and the commit view. */
 function showView(name: string) {

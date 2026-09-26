@@ -321,6 +321,13 @@ the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in th
 panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
 select all, or clear it.
 
+Drag a panel tab into the editor area to open it as an editor tab: onto a
+pane's tabs or editor to add it there, or onto the edge of a pane's editor to
+split that pane with it. A terminal keeps running when it moves. To put the tab
+back, drag it onto the panel's tab bar, or right-click it and choose **Move to
+Panel**. Terminals in the editor area come back in the panel when the project
+reopens.
+
 Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving
 off, closing a changed tab asks whether to save it.

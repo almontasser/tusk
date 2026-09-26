@@ -11,9 +11,14 @@ import { onTheme } from "./themes";
 export type Restore = { title: string; cwd: string; command?: string[] };
 /** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
 type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore };
+/** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
+export type PanelTab = Session;
 
 const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
+/** Tabs dragged into an editor pane. They keep running there; the editor shows and closes them. */
+const docked: Session[] = [];
+let editorHost: { reveal(tab: PanelTab): void } = { reveal() {} };
 let active: Session | undefined;
 let panelVisible = false;
 // Whether you last clicked or focused inside the panel, so ⌘W closes a panel tab instead of an editor tab.
@@ -30,11 +35,11 @@ const builtIn = {
 let theme = () => builtIn.dark as Record<string, string>;
 onTheme((t) => {
   theme = () => t.terminal ?? builtIn[t.dark ? "dark" : "light"];
-  sessions.forEach((s) => s.term && (s.term.options.theme = theme()));
+  [...sessions, ...docked].forEach((s) => s.term && (s.term.options.theme = theme()));
 });
 
 /** The shells and restorable commands that are still running, in tab order, for the session. */
-export const runningTerminals = () => sessions.filter((s) => s.restore && !s.exited).map((s) => s.restore!);
+export const runningTerminals = () => [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => s.restore!);
 export const panelShown = () => panelVisible;
 
 // xterm.js loads with the first terminal, not with the app.
@@ -135,6 +140,7 @@ function close(session: Session) {
 }
 
 // Icons for the panel's views by title; terminal tabs all get the terminal icon.
+export const tabIcon = (s: Session) => (s.term ? "terminal" : (viewIcons[s.title] ?? "globe"));
 const viewIcons: Record<string, string> = {
   Problems: "warning", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
 };
@@ -153,12 +159,57 @@ bar.ondragleave = clearMarks;
 bar.ondrop = (e) => {
   if (!dragged) return;
   e.preventDefault();
-  const target = sessions[[...bar.children].indexOf((e.target as HTMLElement).closest(".tab")!)];
+  const target = sessions[dropIndex(e)];
   sessions.splice(sessions.indexOf(dragged), 1);
   sessions.splice(target ? sessions.indexOf(target) : sessions.length, 0, dragged);
   renderTabs();
 };
 addEventListener("dragend", () => ((dragged = undefined), clearMarks()));
+
+// Moving tabs between the panel and the editor. The editor drops a dragged panel tab into a pane,
+// and drops an editor pane's panel tab back onto this bar.
+export const initDocking = (host: typeof editorHost) => (editorHost = host);
+export const draggingPanelTab = () => !!dragged;
+
+/** Takes the tab being dragged out of the panel, still running, for an editor pane to show. */
+export function undockDragged() {
+  const s = dragged;
+  if (!s) return undefined;
+  dragged = undefined;
+  sessions.splice(sessions.indexOf(s), 1);
+  docked.push(s);
+  if (active === s) activate(sessions.at(-1));
+  if (!sessions.length) showPanel(false);
+  else renderTabs();
+  return s;
+}
+
+/** Puts a tab from an editor pane back in the panel, before the tab at `index`, or last. */
+export function dockBack(s: Session, index = sessions.length) {
+  docked.splice(docked.indexOf(s), 1);
+  $("terminals").append(s.el);
+  sessions.splice(index, 0, s);
+  showPanel(true);
+  activate(s);
+}
+
+/** Closes a tab that an editor pane shows. */
+export function closeDocked(s: Session) {
+  docked.splice(docked.indexOf(s), 1);
+  s.dispose();
+}
+
+/** The panel tab index a drop at this point on the bar goes before. */
+export const dropIndex = (e: DragEvent) => {
+  const i = [...bar.children].indexOf((e.target as HTMLElement).closest(".tab")!);
+  return i < 0 ? sessions.length : i;
+};
+
+export function focusTab(s: Session) {
+  s.el.hidden = false;
+  s.fit?.fit();
+  s.term?.focus();
+}
 
 function renderTabs() {
   // The activity bar's panel buttons light up while their view is the one showing.
@@ -171,7 +222,7 @@ function renderTabs() {
       tab.className = `tab${s === active ? " active" : ""}${s.exited ? " exited" : ""}`;
       tab.role = "tab";
       const icon = document.createElement("span");
-      icon.className = `codicon codicon-${s.term ? "terminal" : (viewIcons[s.title] ?? "globe")}`;
+      icon.className = `codicon codicon-${tabIcon(s)}`;
       tab.append(icon, s.title);
       tab.onclick = () => activate(s);
       tab.onauxclick = (e) => e.button === 1 && close(s);
@@ -212,6 +263,8 @@ export function toggleTerminal(cwd: string) {
 
 /** Shows a view as a panel tab, adding the tab the first time. `onClose` runs when its tab closes. */
 export function showPanelView(title: string, el: HTMLElement, onClose: () => void = () => {}) {
+  const moved = docked.find((s) => s.el === el);
+  if (moved) return (moved.title = title), editorHost.reveal(moved);
   showPanel(true);
   let session = sessions.find((s) => s.el === el);
   if (!session) {

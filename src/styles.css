@@ -463,6 +463,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #panel-resize { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; z-index: 3; }
 #terminals { flex: 1; min-height: 0; padding: 6px 0 0 10px; background: var(--bg); }
 #terminals .term, #terminals .panel-view { height: 100%; }
+/* A panel tab moved into an editor pane covers the pane's editor, under the drop marks. */
+/* Borders rather than padding, since xterm's fit measures the element's content box. */
+.pane-editor > .docked { position: absolute; inset: 0; z-index: 9; border: solid var(--bg); border-width: 6px 0 0 10px; background: var(--bg); overflow: hidden; }
 
 /* ==========================================================================
    Commit view
