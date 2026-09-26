@@ -86,7 +86,7 @@ function addPane(): Pane {
   return pane;
 }
 
-/** The context menu of the gutter left of the code: breakpoints, blame, and the line's link on the remote. */
+/** The context menu of the gutter left of the code: breakpoints, blame, and the line's reference and link on the remote. */
 function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
   const T = monaco.editor.MouseTargetType;
   const model = ed.getModel();
@@ -97,6 +97,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...breakpointMenu(path, line),
     "-",
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
+    { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
 }
