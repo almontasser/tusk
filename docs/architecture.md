@@ -1045,6 +1045,11 @@ in-place rename does, rather than add a line at every copy. Extract Method runs
 Phpactor's `extract_method` and then does the same with the name Phpactor chose,
 found as the one new `function` in the file.
 
+Introduce Field uses the same expression and occurrence search. It places the
+property after the last one `classProperties` finds, or where a constant would
+go (`constantPoint`), and types it with `literalType`, which knows literals
+and `new Foo()`; anything else gets no type rather than a guess.
+
 Refactor This (⌃T) lists actions by name from `refactorings`, which checks each
 against the caret, so the shortcuts shown follow the keymap. The choice
 popups open below the caret (`pickAtCaret`), with a `preview` callback that

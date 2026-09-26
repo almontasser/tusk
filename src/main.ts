@@ -26,7 +26,7 @@ import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
 import { initRefactorPreview } from "./refactorpreview";
-import { extractConstant, extractMethod, extractVariable, initExtract, pickAtCaret, refactorings } from "./extract";
+import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings } from "./extract";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
@@ -1341,6 +1341,7 @@ const actions: Action[] = [
   { label: "Extract Variable…", keys: "Alt+Meta+V", run: () => extractVariable(editor), editorOnly: true },
   { label: "Extract Constant…", keys: "Alt+Meta+C", run: () => extractConstant(editor), editorOnly: true },
   { label: "Extract Method…", keys: "Alt+Meta+M", run: () => extractMethod(editor), editorOnly: true },
+  { label: "Introduce Field…", keys: "Alt+Meta+F", run: () => introduceField(editor), editorOnly: true },
   { label: "Refactor This…", keys: "Ctrl+T", run: () => refactorThis(), editorOnly: true },
   { label: "Move Class…", keys: "F6", run: () => moveClass(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },

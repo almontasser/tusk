@@ -228,6 +228,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘V | Extract the expression at the cursor, or the selection, into a variable |
 | ⌥⌘C | Extract the string or number at the cursor into a class constant |
 | ⌥⌘M | Extract the selection into a method |
+| ⌥⌘F | Introduce a field (property) for the expression at the cursor |
 | ⌥⌘N | Inline the variable or class constant at the cursor |
 | F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
@@ -549,7 +550,7 @@ as `full_name`). So `->relationship('author')` counts as a use of `author()`.
 
 Press ⌃T to list the refactorings that apply at the caret or to the selection,
 with their shortcuts, as PhpStorm's **Refactor This** does: Rename, Change
-Signature, the three Extracts, Inline, Move Class, and Safe Delete, plus
+Signature, the three Extracts, Introduce Field, Inline, Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
@@ -577,6 +578,13 @@ extract a class constant. It works the same way: choose the occurrences in the
 class, and type the name. The constant is `private` (`public` in an interface)
 and goes after the class's other constants, or at the top. Uses become
 `self::NAME`.
+
+Press ⌥⌘F in a method to put an expression in a new private property,
+PhpStorm's **Introduce Field**. A constant expression, such as `1.14`, becomes
+the property's default; anything else is assigned with `$this->name = …` before
+its first use, and its uses become `$this->name` (`self::$name` in a static
+method). The property goes after the class's other properties, or after its
+constants, typed when the expression is a literal or `new Foo()`.
 
 Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
 method. Phpactor writes the method with its parameters and return type; you

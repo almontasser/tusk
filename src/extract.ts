@@ -8,9 +8,9 @@ import { applyWorkspaceEdit, phpactorRequest } from "./lsp";
 import { pick, type Item } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
-import { matchBracket } from "./refactorparse";
+import { classProperties, matchBracket } from "./refactorparse";
 import { symbolAt } from "./safedelete";
-import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, functionScope, occurrences, variableName, type Expr } from "./extractparse";
+import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, functionScope, literalType, occurrences, variableName, type Expr } from "./extractparse";
 
 type Host = { status(text: string): void };
 let host: Host;
@@ -183,6 +183,57 @@ export async function extractConstant(editor: Editor) {
   host.status("Type the constant's name, then press ⏎.");
 }
 
+// ---- Introduce Field ----
+
+/**
+ * Introduce Field (⌥⌘F): puts an expression in a new private property. A constant expression becomes the
+ * property's default; anything else is assigned before its first use in the method, as PhpStorm's
+ * "initialize in current method". The property's type comes from a literal or `new`, when the text tells it.
+ */
+export async function introduceField(editor: Editor) {
+  const model = phpEditor(editor, "Introduce Field");
+  if (!model) return;
+  const version = model.getVersionId();
+  const expr = await chosenExpression(editor, "put it in a field");
+  if (!expr) return;
+  const text = model.getValue();
+  const type = parseTypeDeclarations(text).filter((t) => t.offset <= expr.start).at(-1);
+  const open = type ? text.indexOf("{", type.offset) : -1;
+  const close = open >= 0 ? matchBracket(text, open) : -1;
+  const [from, to] = functionScope(text, expr.start);
+  if (!type || close < expr.end || from === 0) return host.status("Introduce Field works in a method of a class or trait.");
+  if (type.kind === "interface" || type.kind === "enum") return host.status(`An ${type.kind} can't have properties.`);
+  const isStatic = /\bstatic\s+(?:(?:public|protected|private|final|abstract)\s+)*function\b[^{;]*$|\b(?:public|protected|private)\s+static\s+function\b[^{;]*$/.test(text.slice(0, from));
+  const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
+  if (!uses || model.getVersionId() !== version) return;
+  const ref = isStatic ? "self::$\0" : "$this->\0";
+  const constant = !!constantAt(text, expr.start, expr.end);
+  const edits = uses.map((u) => ({ ...u, text: ref }));
+  if (!constant) {
+    const point = declarationPoint(text, uses);
+    if ("error" in point) return host.status(`Can't introduce a field for ${oneLine(expr.text)}: ${point.error}.`);
+    if (point.replace) edits.splice(0, edits.length, { start: point.replace.start, end: point.replace.end, text: `${ref} = ${expr.text}` });
+    else edits.push({ start: point.offset, end: point.offset, text: `${ref} = ${expr.text};\n${point.indent}` });
+  }
+  // The property goes after the class's other properties, or else after its constants and trait uses.
+  const { insertSpaces, indentSize } = model.getOptions();
+  const indent = text.slice(text.lastIndexOf("\n", type.offset) + 1).match(/^[ \t]*/)![0] + (insertSpaces ? " ".repeat(indentSize) : "\t");
+  const props = classProperties(text.slice(open + 1, close)).filter((p) => !p.promoted);
+  const kind = literalType(expr.text);
+  let declaration = `${indent}private ${isStatic ? "static " : ""}${kind ? `${kind} ` : ""}$\0${constant ? ` = ${expr.text}` : ""};\n`;
+  let at: number;
+  if (props.length) at = text.indexOf("\n", open + 1 + Math.max(...props.map((p) => p.end))) + 1;
+  else {
+    const point = constantPoint(text, open);
+    at = point.offset;
+    const next = text.slice(at).split("\n")[0].trim();
+    declaration = `${point.gapBefore || !point.gap ? "\n" : ""}${declaration}${next && next !== "}" ? "\n" : ""}`;
+  }
+  const taken = new Set(classProperties(text.slice(open + 1, close)).map((p) => p.name));
+  applyNamed(editor, [{ start: at, end: at, text: declaration }, ...edits], variableName(expr.text, taken));
+  host.status("Type the field's name, then press ⏎.");
+}
+
 // ---- Extract Method ----
 
 export async function extractMethod(editor: Editor) {
@@ -238,6 +289,7 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   if (expression) names.push("Extract Variable…");
   if (constantAt(text, start, end)) names.push("Extract Constant…");
   if (expression || !sel.isEmpty()) names.push("Extract Method…");
+  if (expression && found?.container) names.push("Introduce Field…");
   const line = model.getLineContent(pos.lineNumber);
   const onVariable = [...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this");
   const word = model.getWordAtPosition(pos);

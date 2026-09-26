@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -109,4 +109,8 @@ test("reads a constant's declaration and references, and writes its value elsewh
   assert.equal(inlinedValue("Status::Open", owner, "App\\Order", false), "\\App\\Enums\\Status::Open");
   assert.equal(inlinedValue("-1", owner, "App\\Order", false), "-1");
   assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
+});
+
+test("tells a literal's type", () => {
+  assert.deepEqual(["42", "1.5", "'a'", '"b$c"', "true", "[1]", "new Money(5)", "$a + 1"].map(literalType), ["int", "float", "string", "", "bool", "array", "Money", ""]);
 });

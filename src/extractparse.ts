@@ -437,3 +437,14 @@ export function inlinedValue(value: string, ownerSource: string, owner: string, 
   if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/^-?\d+(\.\d+)?$/, ""))) out = `(${out})`;
   return out;
 }
+
+/** The type of a literal or `new` expression, for a property's declaration, or "" when it can't be told from the text. */
+export function literalType(expr: string): string {
+  const t = expr.trim();
+  if (/^-?\d[\d_]*$/.test(t) || /^0[xXbBoO][\da-fA-F_]+$/.test(t)) return "int";
+  if (/^-?(\d[\d_]*)?\.\d+([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(t)) return "float";
+  if (/^('(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*")$/s.test(t)) return "string";
+  if (/^(true|false)$/i.test(t)) return "bool";
+  if (/^\[[\s\S]*\]$|^array\s*\(/i.test(t)) return "array";
+  return t.match(/^new\s+(\\?[A-Za-z_][\w\\]*)\s*(\(|$)/)?.[1] ?? "";
+}
