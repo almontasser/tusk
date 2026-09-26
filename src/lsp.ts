@@ -1187,23 +1187,24 @@ export async function startLsp(root: string, h: Host) {
   // New alias stubs get into the index only with a full build.
   if (aliasDir?.fresh && !fullBuild) reindex();
   else checkComposerLock(root, fullBuild);
-  if (!excluded.set) suggestExclusions(root, excluded.list);
 }
 
 /**
- * Once per project that never set its index exclusions, scans vendor for more folders that declare nothing and,
- * when there are some, says so in a toast whose Review opens the dialog with the scan's result. Nothing waits.
+ * Scans vendor for folders that declare nothing, after composer.lock changes (a project's first open included),
+ * and when there are some the list doesn't skip and no earlier scan offered, says so in a toast whose Review
+ * opens the dialog with the scan's result. Nothing waits for it.
  */
-async function suggestExclusions(root: string, list: string[]) {
-  const key = `indexExcludeHinted:${root}`;
+async function suggestExclusions(root: string) {
+  const key = `indexExcludeOffered:${root}`;
+  const [found, { list }] = await Promise.all([invoke<Folder[]>("symbol_free_folders", { root }).catch(() => []), exclusionsFor(root)]);
+  let offered: string[];
   try {
-    if (localStorage.getItem(key)) return;
-    localStorage.setItem(key, "1");
+    offered = JSON.parse(localStorage.getItem(key) ?? "[]");
+    localStorage.setItem(key, JSON.stringify([...new Set([...offered, ...found.map((f) => f.path)])]));
   } catch {
-    return; // Without storage, it would hint at every start.
+    return; // Without storage, it would offer the same folders at every change.
   }
-  const found = await invoke<Folder[]>("symbol_free_folders", { root }).catch(() => []);
-  const more = found.filter((f) => !covers(list, f.path));
+  const more = found.filter((f) => !covers(list, f.path) && !offered.includes(f.path));
   if (!more.length || root !== projectRoot) return;
   const mb = (more.reduce((n, f) => n + f.bytes, 0) / 1024 / 1024).toFixed(1);
   toast(`Indexing can skip ${more.length} more vendor ${more.length === 1 ? "folder" : "folders"} (${mb} MB) whose PHP files declare no classes or functions.`, {
@@ -1262,6 +1263,8 @@ export async function checkComposerLock(root: string, building = awaitingFullInd
     if (changed) localStorage.setItem(key, String(hash));
   } catch {}
   if (changed && !building) reindex();
+  // New packages may bring folders of data that the index can skip.
+  if (changed) suggestExclusions(root);
 }
 
 /**

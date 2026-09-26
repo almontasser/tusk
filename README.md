@@ -1947,10 +1947,11 @@ Exclusions…** from ⌘⇧A:
   Otherwise, the list is kept in the editor, for this Mac only.
 
 You can also right-click a folder in the Project tree and choose **Exclude
-from Index** or **Include in Index**. The first time you open a project that
-has no list of its own, the editor scans `vendor` in the background, and when
-there's more to skip, a hint in the corner offers **Review**, which opens the
-dialog with the scan's suggestions. Saving a changed list rebuilds the
+from Index** or **Include in Index**. When you open a project for the first
+time, and whenever `composer.lock` changes, the editor scans `vendor` in the
+background. If it finds folders to skip that it hasn't suggested before, such
+as a new package's data, a hint in the corner offers **Review**, which opens
+the dialog with the scan's suggestions. Saving a changed list rebuilds the
 index from the start. When the project has its own `mago.toml`, Mago uses that
 file's `excludes` instead.
 

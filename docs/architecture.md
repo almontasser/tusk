@@ -418,11 +418,13 @@ declaration, so a wrong call only leaves a folder out. Opening the files is
 most of the cost, so they're read on every core: 0.6 seconds for 26,000 files,
 against 3.8 seconds one after another.
 
-The first time a project without a list opens, `suggestExclusions` runs the
-scan in the background and, when it finds folders the list doesn't cover,
-shows a hint toast (`toast` in `dom.ts`, with an action) whose **Review** opens
-the dialog with the scan's result. It runs once per project
-(`indexExcludeHinted:<root>`) and never blocks the servers: an earlier version
+Whenever `checkComposerLock` sees a new `composer.lock`, which includes a
+project's first open, `suggestExclusions` runs the scan in the background. When
+it finds folders that the list doesn't cover and no earlier scan offered
+(`indexExcludeOffered:<root>`), it shows a hint toast (`toast` in `dom.ts`,
+with an action) whose **Review** opens the dialog with the scan's result. So a
+package installed later that brings only data gets offered too, and a folder
+you left out isn't offered again. It never blocks the servers: an earlier version
 opened the dialog itself, which asked every user to make a choice before
 they'd written a line.
 
