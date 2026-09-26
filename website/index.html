@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tusk: the PHP editor that speaks Laravel</title>
+<title>Tusk: the PHP editor for Laravel artisans</title>
 <meta name="description" content="Tusk is a fast macOS editor for PHP, Laravel, and Filament, with PhpStorm-class navigation built on free, open-source language servers. Now in beta.">
-<meta property="og:title" content="Tusk: the PHP editor that speaks Laravel">
+<meta property="og:title" content="Tusk: the PHP editor for Laravel artisans">
 <meta property="og:description" content="A fast macOS editor for PHP, Laravel, and Filament. Now in beta.">
 <meta property="og:image" content="https://tusk.almontasser.ly/img/filament.webp">
 <meta property="og:url" content="https://tusk.almontasser.ly/">
@@ -13,534 +13,485 @@
 <link rel="icon" href="img/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0b0c1a;
-  --bg-2: #11132a;
-  --card: #151833;
-  --line: rgba(255, 255, 255, .08);
-  --line-2: rgba(255, 255, 255, .14);
-  --text: #eceefe;
-  --muted: #9aa0c7;
-  --indigo: #6d73e0;
-  --indigo-2: #8288dc;
-  --indigo-deep: #2b2e7c;
-  --ivory: #faf4e4;
-  --ivory-2: #e6d8b6;
-  --green: #5ed39a;
-  --radius: 16px;
+  --bg: #fdfdfc;
+  --ink: #1b1b18;
+  --muted: #706f6c;
+  --line: #e3e3e0;
+  --dash: #d6d6d2;
+  --accent: #5157bd;
+  --accent-dark: #3d42a0;
+  --accent-faded: #e6e7fa;
+  --editor: #1e1f23;
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 16px/1.6 var(--sans);
-  -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
-}
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
 a { color: inherit; text-decoration: none; }
-img { max-width: 100%; display: block; }
-.wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+img { display: block; max-width: 100%; height: auto; }
+h1, h2, h3 { font-weight: 400; margin: 0; }
+p { margin: 0; }
 
-/* Background: a faint grid fading out, with indigo glows, like laravel.com's hero. */
-.backdrop {
-  position: absolute; inset: 0 0 auto 0; height: 1100px; pointer-events: none; z-index: 0;
-  background:
-    radial-gradient(600px 380px at 50% 0%, rgba(109, 115, 224, .35), transparent 70%),
-    radial-gradient(500px 300px at 85% 30%, rgba(230, 216, 182, .08), transparent 70%),
-    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
-    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px;
-  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 30%, transparent 75%);
-          mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 30%, transparent 75%);
+/* The frame: dashed rails on the container's sides, a hairline between bands,
+   and small accent squares where they meet, as on laravel.com. */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+.band { border-top: 1px solid var(--line); position: relative; }
+.band > .rail { max-width: 1280px; margin: 0 auto; border-inline: 1px dashed var(--dash); position: relative; }
+.band > .rail::before, .band > .rail::after {
+  content: ""; position: absolute; top: -3.5px; width: 6px; height: 6px; background: var(--accent); z-index: 2;
 }
+.band > .rail::before { left: -3.5px; }
+.band > .rail::after { right: -3.5px; }
+.band.first { border-top: 0; }
+.band.first > .rail::before, .band.first > .rail::after { display: none; }
+.pad { padding: 88px 48px; }
 
-/* Navigation */
-nav {
-  position: sticky; top: 0; z-index: 20;
-  backdrop-filter: saturate(160%) blur(14px);
-  -webkit-backdrop-filter: saturate(160%) blur(14px);
-  background: rgba(11, 12, 26, .72);
-  border-bottom: 1px solid var(--line);
-}
-nav .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; letter-spacing: -.01em; }
-.brand img { width: 32px; height: 32px; }
-.pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  font: 600 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase;
-  color: var(--ivory); background: rgba(230, 216, 182, .12);
-  border: 1px solid rgba(230, 216, 182, .3); border-radius: 999px; padding: 5px 9px;
-}
-.nav-links { display: flex; gap: 24px; margin-left: auto; font-size: 15px; color: var(--muted); }
-.nav-links a:hover { color: var(--text); }
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font: 600 15px/1 var(--sans); border-radius: 10px; padding: 12px 18px;
-  border: 1px solid transparent; cursor: pointer; transition: transform .15s, background .15s, border-color .15s;
-  white-space: nowrap;
-}
-.btn:hover { transform: translateY(-1px); }
-.btn-primary { background: var(--ivory); color: #1b1d4a; }
-.btn-primary:hover { background: #fff; }
-.btn-ghost { border-color: var(--line-2); color: var(--text); background: rgba(255, 255, 255, .03); }
-.btn-ghost:hover { border-color: rgba(255, 255, 255, .3); }
-.btn-sm { padding: 9px 14px; font-size: 14px; }
+/* Nav */
+nav.top { position: sticky; top: 0; z-index: 30; background: rgba(253, 253, 252, .86); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+nav.top .wrap { display: flex; align-items: center; height: 64px; gap: 36px; }
+.logo { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 21px; letter-spacing: -.02em; color: var(--accent); }
+.logo img { width: 30px; height: 30px; }
+.nav-links { display: flex; gap: 28px; font-size: 15px; }
+.nav-links a:hover { color: var(--accent); }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.gh { display: flex; align-items: center; gap: 6px; font-size: 15px; }
+.gh svg { width: 18px; height: 18px; }
+.tag { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-faded); border-radius: 4px; padding: 4px 6px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 10px; font: 400 17px/1 var(--sans); border-radius: 4px; padding: 14px 22px; border: 1px solid transparent; cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-accent:hover { background: var(--accent-dark); }
+.btn-outline { background: #fff; border-color: var(--line); box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.btn-outline:hover { border-color: #c9c9c5; }
+.btn-sm { font-size: 14.5px; padding: 8px 12px; }
+.btn .arrow { color: var(--accent); }
+.btn-accent .arrow { color: inherit; }
+
+/* Type */
+.display { font-size: clamp(44px, 6.4vw, 78px); line-height: 1.02; letter-spacing: -.045em; }
+.h2 { font-size: clamp(36px, 4.8vw, 64px); line-height: 1.05; letter-spacing: -.04em; }
+.h3 { font-size: clamp(28px, 2.8vw, 36px); line-height: 1.12; letter-spacing: -.03em; }
+.h4 { font-size: 25px; line-height: 1.2; letter-spacing: -.02em; }
+.lede { color: var(--muted); font-size: 19px; line-height: 1.5; }
+.body { color: var(--muted); font-size: 16.5px; line-height: 1.55; }
+.label { font: 400 14px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+code { font: .88em var(--mono); background: #f1f1ee; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+.checks { list-style: none; padding: 0; margin: 22px 0 26px; display: grid; gap: 8px; font-size: 16px; }
+.checks li { padding-left: 26px; position: relative; }
+.checks li::before { content: ""; position: absolute; left: 1px; top: 6px; width: 11px; height: 6px; border-left: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent); transform: rotate(-45deg); }
+
+/* Background grid, faded at the edges */
+.grid-bg { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 48px 48px, linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 48px 48px;
+  opacity: .6; -webkit-mask-image: radial-gradient(ellipse at 72% 45%, #000 10%, transparent 68%); mask-image: radial-gradient(ellipse at 72% 45%, #000 10%, transparent 68%); }
 
 /* Hero */
-header.hero { position: relative; padding: 88px 0 40px; text-align: center; }
-header.hero > .wrap { position: relative; z-index: 1; }
-.announce {
-  display: inline-flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted);
-  border: 1px solid var(--line-2); border-radius: 999px; padding: 6px 14px 6px 6px;
-  background: rgba(255, 255, 255, .03);
-}
-h1 {
-  font-size: clamp(42px, 7vw, 84px); line-height: 1.02; letter-spacing: -.035em; font-weight: 700;
-  margin: 28px auto 20px; max-width: 900px;
-}
-h1 .accent {
-  background: linear-gradient(100deg, var(--ivory) 10%, var(--ivory-2) 45%, var(--indigo-2) 90%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.lede { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 680px; margin: 0 auto 36px; }
-.waitlist { display: flex; gap: 10px; max-width: 480px; margin: 0 auto; }
-.waitlist input[type=email] {
-  flex: 1; min-width: 0; font: 16px var(--sans); color: var(--text);
-  background: rgba(255, 255, 255, .05); border: 1px solid var(--line-2); border-radius: 10px; padding: 12px 14px;
-}
-.waitlist input[type=email]::placeholder { color: #6e7399; }
-.waitlist input[type=email]:focus { outline: 2px solid var(--indigo); outline-offset: 1px; border-color: transparent; }
-.hp { position: absolute; left: -9999px; }
-.form-note { font-size: 14px; color: var(--muted); margin-top: 14px; min-height: 1.6em; }
-.form-note.ok { color: var(--green); }
-.form-note.err { color: #ff8a80; }
+.hero { display: grid; grid-template-columns: 1fr 1fr; align-items: center; min-height: 660px; position: relative; overflow: hidden; }
+.hero-copy { padding: 96px 0 96px 48px; position: relative; z-index: 2; }
+.hero-copy .lede { max-width: 440px; margin: 22px 0 36px; }
+.hero-copy .actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.beta-note { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; font-size: 14.5px; color: var(--muted); }
+.hero-art { position: relative; height: 100%; min-height: 660px; perspective: 2200px; }
+.iso { position: absolute; width: 860px; left: 30px; top: 120px; transform: rotateX(52deg) rotateZ(-32deg); transform-style: preserve-3d; transform-origin: 30% 30%; }
+.iso .layer { position: absolute; inset: 0; border-radius: 12px; }
+.iso .l1 { background: var(--accent-faded); transform: translateZ(-80px); border: 1px solid #cfd1f3; }
+.iso .l2 { background: #fff; transform: translateZ(-40px); border: 1px solid var(--line); box-shadow: 0 30px 60px rgba(81, 87, 189, .12); }
+.iso .shot-3d { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #3a3b44; box-shadow: 0 60px 90px -20px rgba(27, 27, 24, .45); }
+.iso .shot-3d img { width: 100%; }
+.hero-icon { position: absolute; width: 96px; right: 64px; top: 64px; z-index: 3; filter: drop-shadow(0 20px 30px rgba(43, 46, 124, .3)); }
 
-/* Screenshot frame */
-.shot {
-  display: block; position: relative; border-radius: 14px; overflow: hidden;
-  border: 1px solid var(--line-2); background: #1e1f22;
-  box-shadow: 0 40px 120px -20px rgba(43, 46, 124, .8), 0 0 0 1px rgba(0, 0, 0, .4);
-}
-.shot img { width: 100%; height: auto; }
-.hero-shot { margin: 72px auto 0; max-width: 1120px; position: relative; }
-.hero-shot::before {
-  content: ""; position: absolute; inset: -60px -40px auto; height: 70%;
-  background: radial-gradient(closest-side, rgba(109, 115, 224, .45), transparent);
-  filter: blur(40px); z-index: -1;
-}
+/* Strip of tools, in bordered cells */
+.strip { display: flex; overflow: hidden; }
+.strip > div { border-right: 1px solid var(--line); padding: 30px 32px; display: flex; align-items: center; font: 500 17px var(--mono); white-space: nowrap; color: #43433f; }
+.strip > div:last-child { border-right: 0; }
+.strip .cap { font: 400 14.5px/1.6 var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--ink); padding-left: 40px; }
 
-/* Stats */
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 80px auto 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.stat { background: var(--bg); padding: 28px 24px; text-align: left; }
-.stat b { display: block; font-size: 34px; letter-spacing: -.02em; line-height: 1.1; }
-.stat span { color: var(--muted); font-size: 14px; }
+/* Toggle statement */
+.statement { text-align: center; padding: 110px 24px; }
+.toggle { display: inline-block; vertical-align: middle; width: 1.3em; height: .68em; border-radius: 1em; background: var(--accent); position: relative; margin: 0 .12em; box-shadow: 0 10px 30px rgba(81, 87, 189, .45); cursor: pointer; transition: background .25s; border: 0; padding: 0; font-size: inherit; }
+.toggle::after { content: ""; position: absolute; top: .08em; left: calc(100% - .6em); width: .52em; height: .52em; border-radius: 50%; background: #fff; transition: left .25s; }
+.toggle[aria-pressed="false"] { background: #cfcfcb; box-shadow: none; }
+.toggle[aria-pressed="false"]::after { left: .08em; }
 
-/* Stack strip */
-.stack { text-align: center; padding: 72px 0 24px; }
-.stack p { color: var(--muted); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 22px; }
-.stack ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-.stack li { font: 500 14px var(--mono); color: #c7cbee; border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 12px; background: rgba(255, 255, 255, .02); }
+/* Split cell with tabs */
+.split { display: grid; grid-template-columns: 5fr 7fr; position: relative; overflow: hidden; }
+.split .copy { padding: 80px 48px; }
+.split .copy .body { max-width: 420px; margin-top: 18px; }
+.wash { background: radial-gradient(90% 70% at 90% 10%, rgba(81, 87, 189, .1), transparent 70%); }
+.wash-left { background: radial-gradient(80% 70% at 0% 100%, rgba(81, 87, 189, .1), transparent 70%); }
+.showcase { padding: 64px 0 0; display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.tabs { display: flex; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: #fff; margin: 0 48px 24px 0; flex-wrap: wrap; }
+.tabs button { font: 400 15px var(--sans); color: var(--muted); background: none; border: 0; border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, .06); }
+.window { width: 100%; border: 1px solid var(--line); border-right: 0; border-bottom: 0; border-radius: 12px 0 0 0; background: #fff; padding: 8px 0 0 8px; box-shadow: 0 0 0 6px rgba(81, 87, 189, .05); }
+.window .screen { background: var(--editor); border-radius: 6px 0 0 0; aspect-ratio: 1694 / 1300; overflow: hidden; }
+.window .screen img { width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+.window .screen img.fit { object-fit: contain; }
+.window .screen img[hidden] { display: none; }
 
-/* Feature sections */
-section { padding: 96px 0; position: relative; }
-.eyebrow { font: 600 13px var(--mono); color: var(--indigo-2); letter-spacing: .04em; text-transform: uppercase; }
-h2 { font-size: clamp(32px, 4.4vw, 52px); line-height: 1.08; letter-spacing: -.03em; margin: 12px 0 18px; font-weight: 700; }
-h3 { font-size: 20px; letter-spacing: -.01em; margin: 0 0 8px; }
-.section-head { max-width: 720px; margin-bottom: 56px; }
-.section-head p { color: var(--muted); font-size: 18px; margin: 0; }
-.feature { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; padding: 56px 0; }
-.feature.flip { grid-template-columns: 7fr 5fr; }
-.feature.flip .copy { order: 2; }
-.feature > * { min-width: 0; }
-.feature .copy p { color: var(--muted); font-size: 17px; }
-.checks { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 10px; }
-.checks li { padding-left: 30px; position: relative; color: #d4d7f5; }
-.checks li::before {
-  content: ""; position: absolute; left: 0; top: 5px; width: 18px; height: 18px; border-radius: 6px;
-  background: rgba(109, 115, 224, .2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b3b7f5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5'/%3E%3C/svg%3E") center / 12px no-repeat;
-}
-code, kbd { font-family: var(--mono); font-size: .88em; }
-code { color: var(--ivory-2); background: rgba(230, 216, 182, .08); padding: 2px 6px; border-radius: 6px; }
+/* Two-up cells */
+.duo { display: grid; grid-template-columns: 1fr 1fr; }
+.duo > .cell { padding: 72px 48px 0; display: flex; flex-direction: column; overflow: hidden; position: relative; min-width: 0; }
+.duo > .cell + .cell { border-left: 1px solid var(--line); }
+.cell .body { margin-top: 14px; max-width: 520px; }
+.cell .media { margin-top: auto; padding-top: 8px; }
+.cell .media .frame { border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; padding: 8px 8px 0; background: #fff; margin-right: -48px; }
+.cell .media .frame img { border-radius: 6px 6px 0 0; }
 
-/* Bento */
-.bento { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.card {
-  background: linear-gradient(180deg, var(--card), var(--bg-2)); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 28px; position: relative; overflow: hidden;
-}
-.card:hover { border-color: var(--line-2); }
-.card p { color: var(--muted); margin: 0; font-size: 15px; }
-.card .ico {
-  width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; margin-bottom: 18px;
-  background: rgba(109, 115, 224, .16); border: 1px solid rgba(109, 115, 224, .35); color: #c3c6fa;
-}
-.card .ico svg { width: 20px; height: 20px; }
-.card.wide { grid-column: span 2; }
-.ai-demo {
-  margin-top: 22px; font: 13px/1.7 var(--mono); background: #1e1f22; border: 1px solid var(--line);
-  border-radius: 10px; padding: 16px 18px; color: #bcbec4; white-space: pre; overflow-x: auto;
-}
-.ai-demo .k { color: #cf8e6d; } .ai-demo .f { color: #56a8f5; } .ai-demo .s { color: #6aab73; }
-.ai-demo .ghost { color: #6f737a; font-style: italic; }
-.ai-demo .caret { display: inline-block; width: 2px; height: 1.1em; background: #ced0d6; vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+/* AI demo */
+.code { font: 14px/1.75 var(--mono); background: #fff; border: 1px solid var(--line); border-radius: 10px 10px 0 0; border-bottom: 0; padding: 22px 24px 34px; white-space: pre; overflow-x: auto; color: #383a42; margin-right: -48px; }
+.code .tabbar { display: flex; margin: -22px -24px 18px; border-bottom: 1px solid var(--line); font-family: var(--sans); font-size: 15px; }
+.code .tabbar span { padding: 12px 20px; border-right: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+.code .tabbar img { width: 16px; height: 16px; }
+.code .k { color: #a626a4; } .code .f { color: #4078f2; } .code .c { color: #0184bc; }
+.code .ghost { color: #a3a3a0; }
+.code .caret { display: inline-block; width: 2px; height: 1.15em; background: var(--accent); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* Keyboard */
-.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-.key { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: rgba(255, 255, 255, .02); font-size: 15px; color: #d4d7f5; }
-kbd {
-  font-size: 13px; color: var(--text); background: linear-gradient(#262a52, #1a1d3d);
-  border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 6px; padding: 3px 8px; white-space: nowrap;
-}
+/* Feature grid */
+.quad { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); }
+.quad > div { padding: 40px 32px 44px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.quad > div:nth-child(4n) { border-right: 0; }
+.quad > div:nth-last-child(-n+4) { border-bottom: 0; }
+.quad .ico { width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--line); background: #fff; display: grid; place-items: center; color: var(--accent); margin-bottom: 22px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.quad .ico svg { width: 18px; height: 18px; }
+.quad h3 { font-size: 19px; letter-spacing: -.01em; margin-bottom: 8px; font-weight: 500; }
+.quad p { color: var(--muted); font-size: 15px; }
+
+/* Keys */
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 44px; }
+.key { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; font-size: 15px; box-shadow: 0 1px 2px rgba(0, 0, 0, .03); }
+kbd { font: 13px var(--mono); background: #f5f5f2; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
 
 /* Beta */
-.beta {
-  display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; align-items: start;
-  border: 1px solid rgba(230, 216, 182, .25); border-radius: 20px; padding: 44px;
-  background: linear-gradient(135deg, rgba(230, 216, 182, .07), rgba(109, 115, 224, .06));
-}
-.beta ul { margin: 0; padding-left: 20px; color: #d4d7f5; display: grid; gap: 10px; }
-.beta p { color: var(--muted); }
-.beta a.link { color: var(--ivory); border-bottom: 1px solid rgba(230, 216, 182, .4); }
+.beta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; margin-top: 26px; }
+.beta-grid ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.beta-grid li { padding: 16px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 110px 1fr; gap: 16px; font-size: 16px; }
+.beta-grid li b { font: 400 13px/1.9 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+a.u { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 
 /* CTA */
-.cta { text-align: center; padding: 120px 0 110px; position: relative; overflow: hidden; }
-.cta::before {
-  content: ""; position: absolute; left: 50%; top: 40%; width: 900px; height: 500px; transform: translate(-50%, -50%);
-  background: radial-gradient(closest-side, rgba(109, 115, 224, .3), transparent); pointer-events: none;
-}
-.cta > .wrap { position: relative; }
-.cta img.cta-icon { width: 150px; margin: 0 auto 8px; filter: drop-shadow(0 24px 40px rgba(0, 0, 0, .5)); animation: bob 5s ease-in-out infinite; }
-@keyframes bob { 50% { transform: translateY(-8px) rotate(-2deg); } }
-.cta p.lede { margin-bottom: 30px; }
+.cta { text-align: center; padding: 120px 24px; position: relative; overflow: hidden; }
+.cta .grid-bg { -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 5%, transparent 65%); mask-image: radial-gradient(ellipse at 50% 50%, #000 5%, transparent 65%); }
+.cta > * { position: relative; }
+.cta .lede { max-width: 520px; margin: 22px auto 36px; }
+.waitlist { display: flex; gap: 10px; max-width: 500px; margin: 0 auto; }
+.waitlist input[type=email] { flex: 1; min-width: 0; font: 17px var(--sans); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 13px 16px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.waitlist input[type=email]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hp { position: absolute; left: -9999px; }
+.form-note { font-size: 14.5px; color: var(--muted); margin-top: 14px; min-height: 1.5em; }
+.form-note.ok { color: #1a7f4b; }
+.form-note.err { color: #c42602; }
 
-footer { border-top: 1px solid var(--line); padding: 36px 0; color: var(--muted); font-size: 14px; }
-footer .wrap { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
-footer .brand { font-size: 16px; color: var(--text); }
-footer .brand img { width: 24px; height: 24px; }
-footer nav { position: static; background: none; border: 0; backdrop-filter: none; margin-left: auto; display: flex; gap: 20px; }
-footer a:hover { color: var(--text); }
+/* Footer */
+footer { border-top: 1px solid var(--line); }
+footer .rail { max-width: 1280px; margin: 0 auto; }
+footer .inner { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr; gap: 32px; padding: 72px 48px 56px; }
+footer .tagline { color: var(--accent); font-size: 21px; line-height: 1.35; letter-spacing: -.01em; margin-top: 22px; max-width: 320px; font-weight: 500; }
+footer h4 { font-weight: 500; font-size: 16px; margin: 0 0 22px; }
+footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; color: var(--muted); }
+footer ul a:hover { color: var(--ink); }
+footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: var(--muted); font-size: 14px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
-/* Reveal on scroll */
-.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
-.reveal.in { opacity: 1; transform: none; }
-@media (prefers-reduced-motion: reduce) {
-  .reveal { opacity: 1; transform: none; transition: none; }
-  .cta img.cta-icon, .ai-demo .caret { animation: none; }
-  html { scroll-behavior: auto; }
-}
+@media (prefers-reduced-motion: reduce) { .code .caret { animation: none; } html { scroll-behavior: auto; } }
 
-@media (max-width: 960px) {
-  .feature, .feature.flip { grid-template-columns: 1fr; gap: 32px; }
-  .feature.flip .copy { order: 0; }
-  .bento { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1080px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-copy { padding-bottom: 24px; }
+  .hero-art { min-height: 460px; }
+  .iso { width: 700px; left: 10%; top: 40px; }
+  .hero-icon { right: 24px; top: 0; width: 72px; }
+  .split, .duo { grid-template-columns: 1fr; }
+  .split .copy { padding-bottom: 32px; }
+  .showcase { padding: 0 0 0 48px; }
+  .duo > .cell { padding-top: 64px; }
+  .duo > .cell + .cell { border-left: 0; border-top: 1px solid var(--line); }
+  .quad { grid-template-columns: 1fr 1fr; }
+  .quad > div:nth-child(4n) { border-right: 1px solid var(--line); }
+  .quad > div:nth-child(2n) { border-right: 0; }
+  .quad > div:nth-last-child(-n+4) { border-bottom: 1px solid var(--line); }
+  .quad > div:nth-last-child(-n+2) { border-bottom: 0; }
   .keys { grid-template-columns: 1fr 1fr; }
-  .beta { grid-template-columns: 1fr; padding: 32px; }
-  .stats { grid-template-columns: 1fr 1fr; }
-  }
-@media (max-width: 680px) {
-  .wrap { padding: 0 16px; }
+  .beta-grid { grid-template-columns: 1fr; gap: 32px; }
+  footer .inner { grid-template-columns: 1fr 1fr; }
   .nav-links { display: none; }
-  nav .btn { margin-left: auto; }
-  header.hero { padding-top: 56px; }
-  .waitlist { flex-direction: column; }
-  .bento { grid-template-columns: 1fr; }
-  .card.wide { grid-column: auto; }
+}
+@media (max-width: 640px) {
+  .pad { padding: 64px 20px; }
+  .hero-copy { padding: 56px 20px 16px; }
+  .hero-art { min-height: 300px; }
+  .iso { width: 480px; left: 4%; top: 10px; }
+  .hero-icon { display: none; }
+  .strip { flex-wrap: wrap; }
+  .strip > div { padding: 16px 18px; font-size: 15px; border-bottom: 1px solid var(--line); }
+  .strip .cap { width: 100%; padding-left: 20px; border-right: 0; }
+  .statement { padding: 72px 20px; }
+  .split .copy { padding: 56px 20px 24px; }
+  .showcase { padding-left: 20px; }
+  .tabs { margin-right: 20px; }
+  .duo > .cell { padding: 56px 20px 0; }
+  .cell .media .frame, .code { margin-right: -20px; }
+  .quad { grid-template-columns: 1fr; }
+  .quad > div { border-right: 0 !important; border-bottom: 1px solid var(--line) !important; padding: 32px 20px; }
+  .quad > div:last-child { border-bottom: 0 !important; }
   .keys { grid-template-columns: 1fr; }
-  section { padding: 64px 0; }
-  .feature { padding: 36px 0; }
-  .hero-shot { margin-top: 56px; }
-  .announce { font-size: 13px; text-align: left; }
-  .stats { grid-template-columns: 1fr; }
-  }
+  .beta-grid li { grid-template-columns: 1fr; gap: 4px; }
+  .waitlist { flex-direction: column; }
+  .cta { padding: 80px 20px; }
+  footer .inner { grid-template-columns: 1fr; padding: 56px 20px 40px; }
+  footer .legal { padding: 20px; }
+  .gh span { display: none; }
+}
 </style>
 </head>
 <body>
 
-<nav>
+<nav class="top">
   <div class="wrap">
-    <a class="brand" href="#top"><img src="img/icon.svg" alt="">Tusk <span class="pill">Beta</span></a>
+    <a class="logo" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
     <div class="nav-links">
       <a href="#laravel">Laravel</a>
       <a href="#tools">Tools</a>
-      <a href="#everything">Features</a>
+      <a href="#features">Features</a>
       <a href="#beta">Beta</a>
-      <a href="https://github.com/almontasser/tusk">GitHub</a>
     </div>
-    <a class="btn btn-primary btn-sm" href="#waitlist">Join the waitlist</a>
+    <div class="nav-right">
+      <a class="gh" href="https://github.com/almontasser/tusk" aria-label="Tusk on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <a class="btn btn-outline btn-sm" href="#waitlist">Join the waitlist</a>
+    </div>
   </div>
 </nav>
 
-<header class="hero" id="top">
-  <div class="backdrop"></div>
-  <div class="wrap">
-    <a class="announce" href="#beta"><span class="pill">Beta</span> Tusk is in beta on macOS. Join the waitlist →</a>
-    <h1>The PHP editor that <span class="accent">speaks Laravel.</span></h1>
-    <p class="lede">Tusk is a fast macOS editor for PHP, Laravel, and Filament. You get PhpStorm-class navigation and refactoring, an HTTP client, a database console, a debugger, and local AI completion, all in one native window.</p>
-
-    <form class="waitlist" data-waitlist>
-      <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" autocomplete="email">
-      <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
-      <button class="btn btn-primary" type="submit">Join the waitlist</button>
-    </form>
-    <p class="form-note" data-note aria-live="polite">Get an email when the next beta build is ready. No spam.</p>
-
-    <div class="hero-shot reveal">
-      <a class="shot" href="img/filament.webp" target="_blank" rel="noopener">
-        <img src="img/filament.webp" width="2800" height="1800" alt="Tusk editing a Filament form, suggesting the Post model's columns and relationships inside TextInput::make()">
-      </a>
+<div class="band first" id="top">
+  <div class="rail">
+    <div class="hero">
+      <div class="grid-bg"></div>
+      <div class="hero-copy">
+        <div class="beta-note"><span class="tag">Beta</span> Now in beta for macOS</div>
+        <h1 class="display">The PHP editor for Laravel artisans.</h1>
+        <p class="lede">Tusk is a fast macOS editor that understands PHP, Laravel, and Filament, built on free, open-source language servers.</p>
+        <div class="actions">
+          <a class="btn btn-accent" href="#waitlist">Join the waitlist <span class="arrow">→</span></a>
+          <a class="btn btn-outline" href="https://github.com/almontasser/tusk">View on GitHub <span class="arrow">↗</span></a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <img class="hero-icon" src="img/icon.svg" alt="">
+        <div class="iso">
+          <div class="layer l1"></div>
+          <div class="layer l2"></div>
+          <div class="shot-3d"><img src="img/filament.webp" width="2800" height="1800" alt=""></div>
+        </div>
+      </div>
     </div>
-
-    <div class="stats reveal">
-      <div class="stat"><b>~3 ms</b><span>of work per keystroke, even in a 4,800-line file</span></div>
-      <div class="stat"><b>0</b><span>language servers to install: they ship with the app</span></div>
-      <div class="stat"><b>110</b><span>color themes, from Dracula to Solarized</span></div>
-      <div class="stat"><b>100%</b><span>local AI completion; no code leaves your Mac</span></div>
-    </div>
-  </div>
-</header>
-
-<div class="stack">
-  <div class="wrap">
-    <p>Built on the best open-source PHP tools</p>
-    <ul>
-      <li>Phpactor</li><li>Laravel LSP</li><li>Mago</li><li>Larastan</li><li>Xdebug</li>
-      <li>Composer</li><li>Tailwind CSS</li><li>vtsls</li><li>Vue</li><li>Pest</li><li>llama.cpp</li>
-    </ul>
   </div>
 </div>
 
-<section id="laravel">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="eyebrow">Laravel and Filament</div>
-      <h2>It knows your models, routes, and resources.</h2>
-      <p>Tusk understands the strings Laravel and Filament resolve at runtime, so completion and ⌘-click work where other editors see plain text.</p>
-    </div>
-
-    <div class="feature reveal">
-      <div class="copy">
-        <h3>Filament, understood</h3>
-        <p>A Filament language server reads your Eloquent models. In <code>::make('…')</code> it suggests columns and relationships, follows <code>'author.'</code> into the related model, and flags a relationship your model doesn't define.</p>
-        <ul class="checks">
-          <li>Enum options and defaults from your casts</li>
-          <li>⌘B from <code>'author'</code> to the model's <code>author()</code> method</li>
-          <li>Links between resources, pages, and relation managers</li>
-        </ul>
-      </div>
-      <a class="shot" href="img/filament-code.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/filament-code.webp" width="1694" height="1430" alt="Filament column completion in Tusk"></a>
-    </div>
-
-    <div class="feature flip reveal">
-      <div class="copy">
-        <h3>Blade and Tailwind, highlighted properly</h3>
-        <p>Blade files highlight their HTML, the PHP inside <code>{{ }}</code>, directives, and component tags. Tailwind classes complete with their CSS, and colors show a swatch you can click to change.</p>
-        <ul class="checks">
-          <li>⌘-click <code>view('welcome')</code>, routes, config keys, and translations</li>
-          <li>⌘B on <code>&lt;x-card&gt;</code> opens the component</li>
-          <li>Blade formatting with your project's own settings</li>
-        </ul>
-      </div>
-      <a class="shot" href="img/blade.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/blade.webp" width="1914" height="1090" alt="A Blade view in Tusk's light theme with Tailwind color swatches"></a>
-    </div>
-
-    <div class="feature reveal">
-      <div class="copy">
-        <h3>Pest and PHPUnit, one click away</h3>
-        <p>Every test gets <b>Run</b>, <b>Debug</b>, and <b>Profile</b> links. Results land in a tree with timings, failures jump to the line, and coverage shows in the gutter. Run Anything (⌃⌃) starts Artisan commands, <code>npm run dev</code>, or Tinker, in Sail when it's running.</p>
-        <ul class="checks">
-          <li>⌃⇧R runs the test at the cursor, ⌃R reruns the last one</li>
-          <li>Line coverage, and which tests ran each line</li>
-          <li>Servers you started come back when the project reopens</li>
-        </ul>
-      </div>
-      <a class="shot" href="img/tests.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/tests.webp" width="1914" height="760" alt="Pest test results in Tusk"></a>
+<div class="band">
+  <div class="rail">
+    <div class="strip">
+      <div class="cap">Built on the best<br>open-source tools</div>
+      <div>Phpactor</div><div>Laravel LSP</div><div>Mago</div><div>Larastan</div><div>Xdebug</div><div>Tailwind CSS</div><div>Pest</div>
     </div>
   </div>
-</section>
+</div>
 
-<section id="tools">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="eyebrow">Built-in tools</div>
-      <h2>Stop switching apps.</h2>
-      <p>The HTTP client, database console, and git tools you reach for every hour live in the same window as your code.</p>
+<div class="band">
+  <div class="rail">
+    <div class="statement">
+      <h2 class="h2">The editor that speaks<br>Laravel <button class="toggle" aria-pressed="true" aria-label="Laravel fluency"></button> fluently</h2>
     </div>
+  </div>
+</div>
 
-    <div class="feature reveal">
+<div class="band" id="laravel">
+  <div class="rail">
+    <div class="split wash">
       <div class="copy">
-        <h3>An HTTP client for your API</h3>
-        <p>Requests live in <code>.http</code> files that PhpStorm and VS Code also read, so your team commits them with the code. Tusk can write them for you from <code>route:list</code>, with a JSON body built from each FormRequest's rules.</p>
+        <h2 class="h3">An editor for Laravel<br>and Filament developers</h2>
+        <p class="body">Tusk understands the strings Laravel and Filament resolve at runtime, like routes, views, config keys, and model columns, so completion and ⌘-click work where other editors see plain text.</p>
+        <ul class="checks">
+          <li>Filament completion from your Eloquent models</li>
+          <li>Routes, views, and config through Laravel LSP</li>
+          <li>Blade and Tailwind CSS, highlighted and completed</li>
+          <li>Pest and PHPUnit with one-click Run, Debug, and Profile</li>
+        </ul>
+        <a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk#laravel-features">Explore Laravel features <span class="arrow">↗</span></a>
+      </div>
+      <div class="showcase">
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="filament">Filament</button>
+          <button role="tab" aria-selected="false" data-tab="blade">Blade</button>
+          <button role="tab" aria-selected="false" data-tab="tests">Tests</button>
+          <button role="tab" aria-selected="false" data-tab="git">Git</button>
+        </div>
+        <div class="window">
+          <div class="screen">
+            <img data-panel="filament" src="img/filament-code.webp" width="1694" height="1430" alt="Filament column completion in Tusk, suggesting the Post model's columns and relationships">
+            <img data-panel="blade" src="img/blade.webp" width="1914" height="1090" alt="A Blade view in Tusk's light theme with Tailwind color swatches" hidden>
+            <img data-panel="tests" class="fit" src="img/tests.webp" width="1914" height="760" alt="Pest test results in Tusk" hidden>
+            <img data-panel="git" src="img/git.webp" width="2800" height="1160" alt="A side-by-side git diff in Tusk's commit view" hidden>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band" id="tools">
+  <div class="rail">
+    <div class="duo">
+      <div class="cell">
+        <h2 class="h4">An HTTP client that reads your routes</h2>
+        <p class="body">Requests live in <code>.http</code> files your team commits with the code. Tusk writes them from <code>route:list</code>, with JSON bodies built from each FormRequest's rules.</p>
         <ul class="checks">
           <li>Environments, secrets, scripts, and tests</li>
           <li>Import from curl, Postman, Insomnia, and OpenAPI</li>
-          <li>GraphQL, WebSockets, stress tests, and JUnit reports for CI</li>
+          <li>GraphQL, WebSockets, stress tests, and JUnit reports</li>
         </ul>
+        <div><a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk#http-client">Explore the HTTP client <span class="arrow">↗</span></a></div>
+        <div class="media"><div class="frame"><img loading="lazy" src="img/http.webp" width="2800" height="1800" alt="Tusk's HTTP client showing a request and its JSON response"></div></div>
       </div>
-      <a class="shot" href="img/http.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/http.webp" width="2800" height="1800" alt="Tusk's HTTP client showing a request and its JSON response"></a>
-    </div>
-
-    <div class="feature flip reveal">
-      <div class="copy">
-        <h3>Your database, from <code>.env</code></h3>
-        <p>The Database tool window connects the way Laravel does. SQLite, MySQL, MariaDB, and PostgreSQL drivers are built in, so there's no client to install. Browse tables, edit rows, and run SQL with ⌘⏎.</p>
+      <div class="cell wash-left">
+        <h2 class="h4">Your database, straight from <code>.env</code></h2>
+        <p class="body">The Database tool window connects the way Laravel does. SQLite, MySQL, MariaDB, and PostgreSQL drivers are built in, so there's no client to install.</p>
         <ul class="checks">
-          <li>Edit rows in the grid and submit them together</li>
+          <li>Run SQL with ⌘⏎ and edit rows in the grid</li>
           <li>Connect over SSH to a server's database</li>
-          <li>TLS settings read from the same <code>.env</code> keys as Laravel</li>
+          <li>TLS settings from the same keys Laravel reads</li>
         </ul>
+        <div><a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk#database">Explore the database tools <span class="arrow">↗</span></a></div>
+        <div class="media"><div class="frame"><img loading="lazy" src="img/database.webp" width="2240" height="1500" alt="A SQL query and its results in Tusk's database console"></div></div>
       </div>
-      <a class="shot" href="img/database.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/database.webp" width="2240" height="1500" alt="A SQL query and its results in Tusk's database console"></a>
     </div>
+  </div>
+</div>
 
-    <div class="feature reveal">
-      <div class="copy">
-        <h3>Git and pull requests</h3>
-        <p>Stage lines, commit, and push without leaving the editor. Review GitHub pull requests with their checks, diffs, and threads, and comment right on the lines.</p>
+<div class="band">
+  <div class="rail">
+    <div class="duo">
+      <div class="cell wash">
+        <h2 class="h4">AI completion that never leaves your Mac</h2>
+        <p class="body">Qwen2.5-Coder runs locally on your Mac's GPU. It reads the classes your file uses, so its suggestions call methods that exist. Press Tab to accept, or ⌘→ to take one word.</p>
+        <ul class="checks">
+          <li>No account, no subscription, no code sent anywhere</li>
+          <li>Choose a 1.5B, 3B, or 7B model</li>
+        </ul>
+        <div class="media">
+<div class="code" aria-hidden="true"><div class="tabbar"><span><img src="img/icon.svg" alt="">PostController.php</span></div><span class="k">public function</span> <span class="f">publish</span>(<span class="c">Post</span> $post): <span class="c">RedirectResponse</span>
+{
+    <span class="caret"></span><span class="ghost">$post-&gt;update(['status' =&gt; PostStatus::Published]);
+
+    return redirect()-&gt;route('posts.show', $post);</span>
+}
+</div>
+        </div>
+      </div>
+      <div class="cell">
+        <h2 class="h4">Git and pull requests, built in</h2>
+        <p class="body">Stage single lines, commit, and push. Review GitHub pull requests with their checks, diffs, and threads, and comment right on the lines.</p>
         <ul class="checks">
           <li>Blame, log, stash, worktrees, and interactive rebase</li>
           <li>Resolve merge conflicts side by side</li>
           <li>Local history that keeps every save, even without git</li>
         </ul>
-      </div>
-      <a class="shot" href="img/git.webp" target="_blank" rel="noopener"><img loading="lazy" src="img/git.webp" width="2800" height="1160" alt="A side-by-side git diff in Tusk's commit view"></a>
-    </div>
-  </div>
-</section>
-
-<section id="everything">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="eyebrow">And much more</div>
-      <h2>Everything a PHP developer needs.</h2>
-      <p>Tusk bundles its tools and compiles in its database drivers. PHP on your <code>PATH</code> is the only thing you bring.</p>
-    </div>
-
-    <div class="bento">
-      <div class="card wide reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
-        <h3>AI completion that stays on your Mac</h3>
-        <p>Qwen2.5-Coder runs locally on Apple silicon's GPU. It reads the classes your file uses, so suggestions call real methods. Press Tab to accept, or ⌘→ to take one word.</p>
-<div class="ai-demo" aria-hidden="true"><span class="k">public function</span> <span class="f">publish</span>(Post $post): RedirectResponse
-{
-    <span class="caret"></span><span class="ghost">$post-&gt;update(['status' =&gt; PostStatus::Published]);
-
-    return redirect()-&gt;route('posts.show', $post);</span>
-}</div>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M12 10v6M4 12h3M17 12h3M5 7l2.5 2M19 7l-2.5 2M5 18l2.5-2M19 18l-2.5-2M9.5 6.5 8 4M14.5 6.5 16 4"/></svg></div>
-        <h3>Xdebug debugger</h3>
-        <p>Breakpoints with conditions and log messages, watches, and exception filters. Debug a test, a page, or a request from the HTTP client, in Docker and Sail too.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></div>
-        <h3>Profiler</h3>
-        <p>Profile a test or a URL with one command and find the slow function in a sortable call table, with callers and callees.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M4 12h16M4 17h7"/><path d="M17 4l3 3-3 3"/></svg></div>
-        <h3>Refactoring</h3>
-        <p>Rename, extract method, change signature, inline variable, and safe delete. Moving a file moves its class and fixes every reference.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
-        <h3>Search everywhere</h3>
-        <p>Press ⇧⇧ to find classes, files, symbols, actions, and HTTP requests. Find in files handles regex and replaces across the project.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
-        <h3>Static analysis</h3>
-        <p>Mago and your project's Larastan check as you type. Problems show inline, and ⌥⏎ fixes what it can.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="M3.3 7.5 12 12l8.7-4.5M12 22V12"/></svg></div>
-        <h3>Composer</h3>
-        <p>Search Packagist, require and update packages, and see outdated ones, with a bundled Composer.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div>
-        <h3>JavaScript, TypeScript, and Vue</h3>
-        <p>Full language servers for TypeScript, Vue, Svelte, and Astro start the first time you open one of their files.</p>
-      </div>
-      <div class="card reveal">
-        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4A5.6 5.6 0 0 0 22 10c0-4.4-4.5-8-10-8z"/></svg></div>
-        <h3>110 themes</h3>
-        <p>PhpStorm-like Dark and Light, plus One Dark Pro, Dracula, Catppuccin, Tokyo Night, and more. Import any VS Code theme.</p>
+        <div><a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk#git">Explore the git tools <span class="arrow">↗</span></a></div>
+        <div class="media"><div class="frame"><img loading="lazy" src="img/git.webp" width="2800" height="1160" alt="A side-by-side git diff in Tusk's commit view"></div></div>
       </div>
     </div>
   </div>
-</section>
+</div>
 
-<section id="keys">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="eyebrow">Keymap</div>
-      <h2>Your PhpStorm fingers already know it.</h2>
-      <p>Shortcuts follow PhpStorm's macOS keymap, and you can change any of them.</p>
+<div class="band" id="features">
+  <div class="rail">
+    <div class="pad" style="padding-bottom:56px">
+      <div class="label">[ Everything else ]</div>
+      <h2 class="h2" style="margin-top:18px">Batteries included.</h2>
+      <p class="lede" style="max-width:600px;margin-top:18px">Tusk bundles its tools and compiles in its database drivers. PHP on your <code>PATH</code> is the only thing you bring.</p>
     </div>
-    <div class="keys reveal">
-      <div class="key">Search everywhere <kbd>⇧ ⇧</kbd></div>
-      <div class="key">Find action <kbd>⌘ ⇧ A</kbd></div>
-      <div class="key">Go to declaration <kbd>⌘ B</kbd></div>
-      <div class="key">Find usages <kbd>⌥ F7</kbd></div>
-      <div class="key">Rename <kbd>⇧ F6</kbd></div>
-      <div class="key">Quick fixes <kbd>⌥ ⏎</kbd></div>
-      <div class="key">Run anything <kbd>⌃ ⌃</kbd></div>
-      <div class="key">Run test <kbd>⌃ ⇧ R</kbd></div>
+    <div class="quad">
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="6" width="10" height="14" rx="5"/><path d="M12 10v6M4 12h3M17 12h3M5 7l2.5 2M19 7l-2.5 2M5 18l2.5-2M19 18l-2.5-2"/></svg></div><h3>Xdebug debugger</h3><p>Conditional breakpoints, watches, and exception filters, for tests, pages, and Sail.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></div><h3>Profiler</h3><p>Profile a test or a URL and find the slow function in a sortable call table.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M4 12h16M4 17h7"/><path d="M17 4l3 3-3 3"/></svg></div><h3>Refactoring</h3><p>Rename, extract, change signature, inline, and safe delete. Moving a file moves its class.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div><h3>Search everywhere</h3><p>Press ⇧⇧ for classes, files, symbols, actions, and HTTP requests.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div><h3>Static analysis</h3><p>Mago and your project's Larastan check as you type; ⌥⏎ fixes what it can.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="M3.3 7.5 12 12l8.7-4.5M12 22V12"/></svg></div><h3>Composer</h3><p>Search Packagist, require packages, and update outdated ones with a bundled Composer.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div><h3>TypeScript and Vue</h3><p>Full language servers for TypeScript, Vue, Svelte, and Astro, started on demand.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4A5.6 5.6 0 0 0 22 10c0-4.4-4.5-8-10-8z"/></svg></div><h3>110 color themes</h3><p>PhpStorm-like Dark and Light, Dracula, Catppuccin, Tokyo Night, and your VS Code themes.</p></div>
     </div>
   </div>
-</section>
+</div>
 
-<section id="beta">
-  <div class="wrap">
-    <div class="beta reveal">
-      <div>
-        <span class="pill">Beta</span>
-        <h2>Tusk is in beta.</h2>
-        <p>Tusk is usable every day, and it's still young. Expect rough edges, and expect them to get fixed quickly. The code is open on <a class="link" href="https://github.com/almontasser/tusk">GitHub</a>, where you can report what you find.</p>
+<div class="band">
+  <div class="rail">
+    <div class="pad wash">
+      <div class="label">[ Keymap ]</div>
+      <h2 class="h2" style="margin-top:18px">Your PhpStorm fingers<br>already know it.</h2>
+      <div class="keys">
+        <div class="key">Search everywhere <kbd>⇧ ⇧</kbd></div>
+        <div class="key">Find action <kbd>⌘ ⇧ A</kbd></div>
+        <div class="key">Go to declaration <kbd>⌘ B</kbd></div>
+        <div class="key">Find usages <kbd>⌥ F7</kbd></div>
+        <div class="key">Rename <kbd>⇧ F6</kbd></div>
+        <div class="key">Quick fixes <kbd>⌥ ⏎</kbd></div>
+        <div class="key">Run anything <kbd>⌃ ⌃</kbd></div>
+        <div class="key">Run test <kbd>⌃ ⇧ R</kbd></div>
       </div>
-      <div>
-        <p style="margin-top:0">During the beta:</p>
+    </div>
+  </div>
+</div>
+
+<div class="band" id="beta">
+  <div class="rail">
+    <div class="pad">
+      <div class="label">[ Beta ]</div>
+      <h2 class="h2" style="margin-top:18px">Tusk is in beta.</h2>
+      <div class="beta-grid">
+        <p class="lede">Tusk is ready for daily work, and it's still young. Expect rough edges, and expect them to get fixed quickly. The code is open on <a class="u" href="https://github.com/almontasser/tusk">GitHub</a>, where you can report what you find.</p>
         <ul>
-          <li>Tusk runs on macOS only, on Apple silicon and Intel Macs.</li>
-          <li>The app isn't signed yet, so the first time you open it, allow it in <b>System Settings &gt; Privacy &amp; Security</b>.</li>
-          <li>There's no auto-update. Each version is a new download.</li>
-          <li>Some PhpStorm features are missing. The <a class="link" href="https://github.com/almontasser/tusk#known-gaps">known gaps</a> list them.</li>
+          <li><b>Platform</b><span>macOS only, on Apple silicon and Intel Macs.</span></li>
+          <li><b>Signing</b><span>The app isn't signed yet. The first time you open it, allow it in System Settings &gt; Privacy &amp; Security.</span></li>
+          <li><b>Updates</b><span>There's no auto-update. Each version is a new download.</span></li>
+          <li><b>Gaps</b><span>Some PhpStorm features are missing. The <a class="u" href="https://github.com/almontasser/tusk#known-gaps">known gaps</a> list them.</span></li>
         </ul>
       </div>
     </div>
   </div>
-</section>
+</div>
 
-<div class="cta" id="waitlist">
-  <div class="wrap">
-    <img class="cta-icon" src="img/icon.svg" width="160" height="160" alt="Tusk's icon">
-    <h2>Be first in line.</h2>
-    <p class="lede">Join the waitlist, and we'll email you when a beta build is ready to download.</p>
-    <form class="waitlist" data-waitlist>
-      <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" autocomplete="email">
-      <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
-      <button class="btn btn-primary" type="submit">Join the waitlist</button>
-    </form>
-    <p class="form-note" data-note aria-live="polite">One email per release. Unsubscribe anytime.</p>
+<div class="band" id="waitlist">
+  <div class="rail">
+    <div class="cta">
+      <div class="grid-bg"></div>
+      <h2 class="h2">Write less boilerplate.<br>Ship more Laravel.</h2>
+      <p class="lede">Join the waitlist, and we'll email you when a beta build is ready to download.</p>
+      <form class="waitlist" data-waitlist>
+        <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" autocomplete="email">
+        <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <button class="btn btn-accent" type="submit">Join the waitlist <span class="arrow">→</span></button>
+      </form>
+      <p class="form-note" data-note aria-live="polite">One email per release. Unsubscribe anytime.</p>
+    </div>
   </div>
 </div>
 
 <footer>
-  <div class="wrap">
-    <a class="brand" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
-    <span>Named for PHP's elePHPant. Made by Mahmoud Almontasser.</span>
-    <nav>
-      <a href="https://github.com/almontasser/tusk">GitHub</a>
-      <a href="https://github.com/almontasser/tusk/blob/main/docs/architecture.md">Architecture</a>
-      <a href="https://github.com/almontasser/tusk/issues">Report an issue</a>
-    </nav>
+  <div class="rail">
+    <div class="inner">
+      <div>
+        <a class="logo" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
+        <p class="tagline">The fast, focused way to write PHP, Laravel, and Filament on your Mac.</p>
+      </div>
+      <div><h4>Product</h4><ul><li><a href="#laravel">Laravel</a></li><li><a href="#tools">Tools</a></li><li><a href="#features">Features</a></li><li><a href="#beta">Beta</a></li></ul></div>
+      <div><h4>Resources</h4><ul><li><a href="https://github.com/almontasser/tusk#readme">Documentation</a></li><li><a href="https://github.com/almontasser/tusk/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/almontasser/tusk#known-gaps">Known gaps</a></li></ul></div>
+      <div><h4>Community</h4><ul><li><a href="https://github.com/almontasser/tusk">GitHub</a></li><li><a href="https://github.com/almontasser/tusk/issues">Report an issue</a></li></ul></div>
+    </div>
+    <div class="legal"><span>Tusk is named for PHP's elePHPant.</span><span>Made by Mahmoud Almontasser.</span></div>
   </div>
 </footer>
 
@@ -576,15 +527,16 @@ document.querySelectorAll("[data-waitlist]").forEach((form) => {
   });
 });
 
-const observer = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (entry.isIntersecting) {
-      entry.target.classList.add("in");
-      observer.unobserve(entry.target);
-    }
-  }
-}, { rootMargin: "0px 0px -8% 0px" });
-document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+const tabs = document.querySelectorAll("[data-tab]");
+tabs.forEach((tab) => tab.addEventListener("click", () => {
+  tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+  document.querySelectorAll("[data-panel]").forEach((img) => { img.hidden = img.dataset.panel !== tab.dataset.tab; });
+}));
+
+document.querySelector(".toggle").addEventListener("click", (event) => {
+  const on = event.currentTarget.getAttribute("aria-pressed") === "true";
+  event.currentTarget.setAttribute("aria-pressed", String(!on));
+});
 </script>
 </body>
 </html>

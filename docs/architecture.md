@@ -3225,3 +3225,6 @@ The waitlist posts to Formspree rather than a server of our own, since a static
 host can't store emails. The site says Tusk is in beta and lists what that means
 (macOS only, unsigned, no auto-update), so nobody downloads it expecting more.
 The screenshots are real captures of the dev app on the test app, not mockups.
+The design follows laravel.com's: a light page framed by dashed rails and
+hairlines with accent squares at the corners, light-weight display type in
+Instrument Sans, Geist Mono labels, and Tusk's indigo where Laravel uses red.
