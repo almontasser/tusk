@@ -1085,16 +1085,29 @@ imports them.
 `methodToInline` in `src/extractparse.ts` reads the method: its parameters,
 and its body split into statements and one final `return`, counting only the
 method's own tokens (`scopeOpen`), so a closure's `return` doesn't count. It
-refuses what a text substitution can't keep correct: several returns, a
-changed parameter, `yield`, `static` or `global` variables, `compact()` and the
-like, and parameters inside double-quoted strings. `inlineCall` then maps a
-call's arguments (positional and named) to the parameters: a variable renames
-the parameter, a pure or once-read value replaces it, and anything else is
-assigned to a temporary first, in argument order, after the receiver, as PHP
-evaluates them. Locals that clash with the caller's variables get a number.
+refuses several returns, `yield`, `static` or `global` variables, variable
+variables, `compact()` and the like, and parameters inside double-quoted
+strings.
+
+`inlineCall` maps a call's arguments (positional and named) to the parameters.
+`varUses` classifies each use of a parameter: writes (assignment, `++`,
+`unset`, `foreach` and `catch` variables, destructuring, `&`, built-ins that
+take it by reference) and places that need a variable (`isset`, a closure's
+`use`, a closure or arrow function reading it later), skipping closures that
+declare their own variable of that name. An argument replaces its parameter
+only when that can't change what runs: a caller's variable the body only
+reads, a pure value (no call, `new`, `clone`, `include`, or write) where an
+expression may stand, or the one argument with side effects, read once, first,
+and outside any block, loop, or closure. Anything else runs first into a
+variable, in argument order after the receiver, as PHP evaluates them, which
+also lets the body change it. Locals that clash with the caller's variables get
+a number. `reindentCode` moves the body to the call's indentation, leaving the
+lines of multi-line strings alone.
 
 `inlineMethod` in `src/refactor.ts` finds the declaration with Go to
-Definition, refuses methods a subclass overrides, and places each call's code
+Definition, refuses methods a subclass overrides, and, for a call from another
+class, bodies that reach members not declared `public` or call `parent::`. It
+places each call's code
 with `declarationPoint`: statements before the statement holding the call,
 which it allows only for `$x = …`, `return …`, `echo …`, and the like, where
 nothing else in the statement runs first. `qualifyNames` writes the method's

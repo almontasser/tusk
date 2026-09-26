@@ -7,7 +7,7 @@ import { applyWorkspaceEdit, PHPACTOR_INDEX, phpactorRequest, toolPath, typeSymb
 import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { constantAt, constantDeclaration, constantRefs, declarationPoint, enclosingFunctionName, expressionsAt, functionScope, inlineCall, inlinedValue, literalType, methodToInline, occurrences, variableName, type Expr, type Inlinable } from "./extractparse";
+import { constantAt, constantDeclaration, constantRefs, declarationPoint, enclosingFunctionName, expressionsAt, functionScope, inlineCall, reindentCode, inlinedValue, literalType, methodToInline, occurrences, variableName, type Expr, type Inlinable } from "./extractparse";
 import { chosenExpression, chosenUses } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
@@ -41,6 +41,7 @@ const choose = (question: string, options: string[]) =>
  */
 function qualifyNames(code: string, ownerSource: string, owner: string | null, insideOwner: boolean): string {
   const { resolve } = nameResolver(ownerSource);
+  const functions = new Map([...ownerSource.matchAll(/^use\s+function\s+([\w\\]+?)(?:\s+as\s+(\w+))?\s*;/gm)].map((m) => [(m[2] ?? m[1].split("\\").pop()!).toLowerCase(), `\\${m[1]}`]));
   return outsideStrings(code, (c) =>
     c
       .replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
@@ -48,16 +49,13 @@ function qualifyNames(code: string, ownerSource: string, owner: string | null, i
         if (lower === "self" || lower === "static") return insideOwner || !owner ? n : `\\${owner}`;
         return lower === "parent" ? n : `\\${resolve(n)}`;
       })
-      .replace(/\b(new|instanceof|catch\s*\()\s+(?![\\$]|class\b|static\b|self\b)([A-Za-z_][\w\\]*)/g, (_, kw: string, n: string) => `${kw} \\${resolve(n)}`),
+      .replace(/\b(new|instanceof|catch\s*\()\s+(?![\\$]|class\b|static\b|self\b)([A-Za-z_][\w\\]*)/g, (_, kw: string, n: string) => `${kw} \\${resolve(n)}`)
+      // Types in a closure's parameters and return type; PHP's own types are lowercase.
+      .replace(/(?<=[(,]\s*\??)(?<![\\\w$])([A-Z][\w\\]*)(?=\s+&?(?:\.\.\.)?\$)/g, (n) => `\\${resolve(n)}`)
+      .replace(/(\)\s*:\s*\??)([A-Z][\w\\]*)/g, (_, pre: string, n: string) => `${pre}\\${resolve(n)}`)
+      // Functions imported with `use function`.
+      .replace(/(?<![\\\w$>:])([a-z_]\w*)(?=\s*\()/gi, (n) => functions.get(n.toLowerCase()) ?? n),
   );
-}
-
-/** A block of code re-indented to `indent`: its own common indentation removed, blank lines at the ends dropped. */
-function reindent(code: string, indent: string): string[] {
-  const lines = code.replace(/^\s*\n/, "").replace(/\s+$/, "").split("\n");
-  if (!lines.join("").trim()) return [];
-  const common = Math.min(...lines.filter((l) => l.trim()).map((l) => l.match(/^[ \t]*/)![0].length));
-  return lines.map((l) => (l.trim() ? indent + l.slice(common) : ""));
 }
 
 /**
@@ -176,12 +174,16 @@ function inlineAt(source: string, nameStart: number, name: string, method: Inlin
   const receiver = through.endsWith("->") ? through.slice(0, -2).trim() : null;
   const types = parseTypeDeclarations(source);
   const inside = owner !== null && [...types].reverse().find((t) => t.offset < nameStart)?.fqn === owner;
-  if (method.usesThis && !inside && receiver !== null && receiver !== "$this") {
-    // $this's private and protected members aren't reachable from another class.
-    if (/\$this\s*->\s*\w/.test(`${method.statements}${method.result ?? ""}`)) return { error: "the method uses its object's members, which may be private outside its class" };
+  const code = `${method.statements}${method.result ?? ""}`;
+  if (owner && !inside) {
+    // Outside its class, the body may only reach members that are public there.
+    if (/\bparent\s*::/.test(code)) return { error: "the method calls parent::, which means another class here" };
+    const hidden = [...code.matchAll(/(?:\$this\s*->\s*|\b(?:self|static)\s*::\s*\$?)(\w+)(\s*\()?/g)].find(
+      ([, member, call]) => !new RegExp(call ? `\\bpublic\\s+(?:static\\s+)?function\\s+&?${member}\\b` : `\\bpublic\\s+(?:static\\s+|readonly\\s+)*(?:[?\\w\\\\|]+\\s+)?(?:\\$${member}\\b|const\\s+(?:\\w+\\s+)?${member}\\b)|(?:^|[;{}])\\s*const\\s+${member}\\b`).test(ownerSource),
+    );
+    if (hidden) return { error: `the method uses ${hidden[1]}, which isn't public outside its class` };
   }
-  if (!inside && /\bparent\s*::/.test(`${method.statements}${method.result ?? ""}`)) return { error: "the method calls parent::" };
-  const qualify = (code: string) => (source === ownerSource ? code : shortenNames(qualifyNames(code, ownerSource, owner, inside), source));
+  const qualify = (code: string) => (inside || !owner && source === ownerSource ? code : shortenNames(qualifyNames(code, ownerSource, owner, inside), source));
   const m: Inlinable = {
     ...method,
     statements: qualify(method.statements),
@@ -194,7 +196,7 @@ function inlineAt(source: string, nameStart: number, name: string, method: Inlin
   if ("error" in r) return r;
   const point = declarationPoint(source, [call]);
   if ("error" in point) return point;
-  const body = reindent(r.body, point.indent);
+  const body = reindentCode(r.body, point.indent);
   const intro = [...r.statements.map((l) => point.indent + l), ...body];
   const pure = (e: string) => /^(\$\w+|-?\d[\d_.]*|'[^']*'|true|false|null)$/i.test(e.trim());
   if (point.replace) {

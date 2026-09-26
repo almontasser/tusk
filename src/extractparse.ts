@@ -500,16 +500,82 @@ export function literalType(expr: string): string {
 // ---- Inline Method ----
 
 /** A method ready to inline: its parameters, the statements before its result, and the result, null when void. */
-export type Inlinable = { params: Param[]; statements: string; result: string | null; usesThis: boolean; locals: string[] };
+export type Inlinable = { params: Param[]; statements: string; result: string | null; usesThis: boolean; thisInClosure: boolean; locals: string[] };
 
 const SUPERGLOBALS = new Set(["$this", "$GLOBALS", "$_GET", "$_POST", "$_SERVER", "$_COOKIE", "$_FILES", "$_ENV", "$_REQUEST", "$_SESSION"]);
+// Built-in functions that take an argument by reference, so a parameter passed to one is written.
+const BY_REFERENCE = new Set(
+  "sort rsort usort uasort uksort ksort krsort asort arsort natsort natcasesort shuffle array_multisort array_push array_pop array_shift array_unshift array_splice array_walk array_walk_recursive end reset next prev current key each settype preg_match preg_match_all str_replace str_ireplace preg_replace preg_replace_callback parse_str similar_text list extract mb_parse_str openssl_sign sscanf".split(" "),
+);
 
-/** Whether an expression can be read more than once, or not at all, without a difference: no calls, `new`, or writes. */
-const isPure = (expr: string) => !/[(]|\bnew\b|\+\+|--|(?<![=!<>])=(?![=>])/.test(outsideStrings(expr, (c) => c));
-/** Whether an expression can stand in place of a variable without parentheses. */
+/** Whether an expression can be read more than once, or not at all, without a difference: no calls, `new`, writes, or the like. */
+const isPure = (expr: string) =>
+  !/[(`]|\b(new|clone|include|include_once|require|require_once|print|yield|exit|die|eval)\b|\+\+|--|(?<![=!<>])=(?![=>])/i.test(outsideStrings(expr, (c) => c));
 const CALL_ARGS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
-const ATOMIC = new RegExp(String.raw`^(-?\d[\d_.]*|'(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*"|true|false|null|(\$\w+|[\\\w]+)(${CALL_ARGS})?(\s*(->|\?->|::)\s*\$?\w+(${CALL_ARGS})?)*)$`, "is");
+// A sign isn't atomic: `-1` next to `-` would read as `--`.
+const ATOMIC = new RegExp(String.raw`^(\[(?:[^\[\]]|\[[^\[\]]*\])*\]|\d[\d_.]*|'(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*"|true|false|null|(\$\w+|[\\\w]+)(${CALL_ARGS})?(\s*(->|\?->|::)\s*\$?\w+(${CALL_ARGS})?)*)$`, "is");
 const isAtomic = (expr: string) => ATOMIC.test(expr.trim());
+
+/** Each nested closure's or arrow function's tokens (start and end, inclusive) and its own parameter names. */
+function closures(toks: Tok[]): { start: number; end: number; params: Set<string>; uses: Set<string>; arrow: boolean }[] {
+  const found: { start: number; end: number; params: Set<string>; uses: Set<string>; arrow: boolean }[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const arrow = /^fn$/i.test(toks[i].text);
+    if (!arrow && !/^function$/i.test(toks[i].text)) continue;
+    let open = i + 1;
+    if (toks[open]?.text === "&") open++;
+    if (toks[open]?.text !== "(" || toks[open].match < 0) continue;
+    const params = new Set(toks.slice(open + 1, toks[open].match).filter((t) => t.type === "var").map((t) => t.text));
+    let j = toks[open].match + 1;
+    const uses = new Set<string>();
+    if (/^use$/i.test(toks[j]?.text ?? "") && toks[j + 1]?.text === "(") {
+      for (const t of toks.slice(j + 2, toks[j + 1].match)) if (t.type === "var") uses.add(t.text);
+      j = toks[j + 1].match + 1;
+    }
+    if (arrow) {
+      while (j < toks.length && toks[j].text !== "=>") j++;
+      // The arrow function's body runs to the end of its expression.
+      let end = j + 1;
+      while (end < toks.length && ![",", ";", "]", ")", "}"].includes(toks[end].text)) end = toks[end].type === "open" && toks[end].match > 0 ? toks[end].match + 1 : end + 1;
+      found.push({ start: i, end: end - 1, params, uses, arrow });
+    } else {
+      while (j < toks.length && toks[j].text !== "{") j++;
+      if (toks[j]?.match > 0) found.push({ start: i, end: toks[j].match, params, uses, arrow });
+    }
+  }
+  return found;
+}
+
+/**
+ * How the code uses variable `name`: the tokens that are it (not a closure's own variable of that name), whether
+ * any writes it (assignment, `++`, `unset`, a `foreach` or `catch` variable, destructuring, `&`, or a built-in
+ * that takes it by reference), and whether any needs a variable there (`isset`, a closure's `use`, a closure or
+ * arrow function reading it later).
+ */
+function varUses(toks: Tok[], name: string, scopes: ReturnType<typeof closures>) {
+  const tokens: number[] = [];
+  let writes = false;
+  let needsVariable = false;
+  for (let i = 0; i < toks.length; i++) {
+    if (toks[i].text !== name) continue;
+    // Inside a closure, the name is the closure's own unless the closure captures it.
+    const inner = scopes.filter((c) => c.start < i && i <= c.end);
+    if (inner.some((c) => c.params.has(name) || (!c.arrow && !c.uses.has(name) && !(toks[i - 1]?.text === "(" && /^use$/i.test(toks[i - 2]?.text ?? ""))))) continue;
+    tokens.push(i);
+    if (inner.length) needsVariable = true;
+    let after = i + 1;
+    while (toks[after]?.text === "[" && toks[after].match > 0) after = toks[after].match + 1;
+    const next = toks[after]?.text ?? "";
+    const prev = toks[i - 1]?.text ?? "";
+    const open = enclosing(toks, i);
+    const owner = open >= 0 ? (toks[open - 1]?.text.toLowerCase() ?? "") : "";
+    const destructured = open >= 0 && (toks[open].text === "[" || owner === "list") && toks[toks[open].match + 1]?.text === "=";
+    if (ASSIGNMENT.has(next) || next === "++" || next === "--" || prev === "++" || prev === "--" || prev === "&" || /^as$/i.test(prev) || (prev === "=>" && owner === "foreach") || ["unset", "catch"].includes(owner) || BY_REFERENCE.has(owner) || destructured)
+      writes = true;
+    if (owner === "isset" || owner === "use" || (open >= 0 && /^use$/i.test(toks[open - 1]?.text ?? ""))) needsVariable = true;
+  }
+  return { tokens, writes, needsVariable };
+}
 
 /**
  * Reads the method whose name ends at `nameEnd` for Inline Method: its parameters, and its body as statements
@@ -519,6 +585,7 @@ export function methodToInline(source: string, nameEnd: number): Inlinable | { e
   const parts = declarationParts(source, nameEnd);
   if (!parts) return { error: "its declaration couldn't be read" };
   if (parts.params.some((p) => p.variadic)) return { error: "it takes variadic arguments" };
+  if (parts.params.some((p) => p.byRef)) return { error: "it takes arguments by reference" };
   const brace = source.slice(parts.end).match(/^\s*\{/);
   if (!brace) return { error: "it has no body" };
   const open = parts.end + brace[0].length - 1;
@@ -528,6 +595,7 @@ export function methodToInline(source: string, nameEnd: number): Inlinable | { e
   if (closeTok < 0) return { error: "its body couldn't be read" };
   const body = source.slice(open + 1, toks[closeTok].start);
   if (/<<</.test(commentMask(body))) return { error: "it has a heredoc" };
+  if (/\$\$|\$\{/.test(commentMask(body))) return { error: "it uses variable variables" };
   const inner = toks.slice(openTok + 1, closeTok);
   // Tokens of the method itself, not of closures in it.
   const own = (i: number) => scopeOpen(toks, openTok + 1 + i) === openTok;
@@ -547,31 +615,27 @@ export function methodToInline(source: string, nameEnd: number): Inlinable | { e
     result = value || null;
   }
   const params = parts.params;
-  for (const [i, t] of inner.entries()) {
-    if (t.type !== "var") continue;
-    const p = params.find((q) => `$${q.name}` === t.text);
-    if (!p) continue;
-    let after = i + 1;
-    while (inner[after]?.text === "[" && inner[after].match > 0) after = inner[after].match - openTok;
-    const next = inner[after]?.text ?? "";
-    const prev = inner[i - 1]?.text ?? "";
-    if (ASSIGNMENT.has(next) || next === "++" || next === "--" || prev === "++" || prev === "--" || prev === "&" || /^as$/i.test(prev)) return { error: `it changes its parameter $${p.name}` };
-  }
   // Variables inside strings would need renaming inside the strings.
   const names = [...params.map((p) => `$${p.name}`), "$this"];
   if (inner.some((t) => t.type === "str" && t.text.startsWith('"') && names.some((n) => new RegExp(`\\${n}\\b`).test(t.text)))) return { error: "it uses a parameter or $this inside a string" };
+  // $this in a closure is bound to the object; renamed to a variable, the closure couldn't see it.
+  const scopes = closures(inner);
+  const thisInClosure = inner.some((t, i) => t.text === "$this" && scopes.some((c) => !c.arrow && c.start < i && i <= c.end));
   const locals = [...new Set(inner.filter((t) => t.type === "var" && !SUPERGLOBALS.has(t.text) && !names.includes(t.text)).map((t) => t.text.slice(1)))];
-  return { params, statements, result, usesThis: inner.some((t) => t.text === "$this"), locals };
+  return { params, statements, result, usesThis: inner.some((t) => t.text === "$this"), thisInClosure, locals };
 }
 
 /**
  * The code that replaces a call of `m`, given the call's arguments and receiver (`$order` in `$order->total()`,
- * null for `$this` or a function). Arguments take their parameters' places; one that's read more than once, or
- * never, and isn't pure is evaluated once into a variable first. Locals that clash with `taken`, the caller's
- * variable names, get a number. `statements` run before the call's statement; `result` replaces the call.
+ * null for `$this` or a function). An argument replaces its parameter only where that can't change what runs:
+ * a variable the body only reads, a pure value where an expression may stand, or the one argument with side
+ * effects, read once in a lone `return` with nothing running before it. Any other runs first into a variable,
+ * in argument order, which also lets the body change it. Locals that clash with `taken`, the caller's
+ * variable names, get a number. `statements` and `body` run before the call's statement; `result` replaces the call.
  */
 export function inlineCall(m: Inlinable, args: string[], receiver: string | null, taken: Set<string>): { statements: string[]; body: string; result: string | null } | { error: string } {
   if (args.some((a) => a.startsWith("..."))) return { error: "it spreads its arguments" };
+  if (m.thisInClosure && receiver && receiver !== "$this") return { error: "the method uses $this inside a closure, which can't see another object" };
   const values = new Map<string, string>();
   let positional = 0;
   for (const a of args) {
@@ -589,39 +653,69 @@ export function inlineCall(m: Inlinable, args: string[], receiver: string | null
   };
   const text = `${m.statements}\u0000${m.result ?? ""}`;
   const toks = tokenize(text);
-  const count = (name: string) => toks.filter((t) => t.text === name).length;
-  const inUse = (name: string) => toks.some((t, i) => t.text === name && /^use$/i.test(toks[enclosing(toks, i) - 1]?.text ?? ""));
+  const scopes = closures(toks);
   const before: string[] = [];
-  const replace = new Map<string, string>();
+  const replace = new Map<number, string>();
   // The method's locals first, so a temporary can't take a local's name.
-  for (const local of m.locals) if (used.has(local)) replace.set(`$${local}`, `$${unique(local)}`);
-  else used.add(local);
-  for (const p of m.params) {
-    const value = values.get(p.name) ?? p.defaultValue;
-    if (value === undefined) return { error: `it doesn't pass $${p.name}, which has no default` };
-    const name = `$${p.name}`;
-    const n = count(name);
-    // An unused argument still runs, for its side effects.
-    if (n === 0) {
-      if (!isPure(value)) before.push(`${value};`);
-    } else if (/^\$\w+$/.test(value) && value !== "$this") replace.set(name, value);
-    else if ((isPure(value) || n === 1) && !inUse(name)) replace.set(name, isAtomic(value) ? value : `(${value})`);
-    else {
-      const temp = `$${unique(p.name)}`;
-      before.push(`${temp} = ${value};`);
-      replace.set(name, temp);
-    }
+  for (const local of m.locals) {
+    const target = used.has(local) ? `$${unique(local)}` : (used.add(local), null);
+    if (target) for (const i of varUses(toks, `$${local}`, []).tokens) replace.set(i, target);
   }
-  if (m.usesThis && receiver && receiver !== "$this") {
-    if (/^\$\w+$/.test(receiver)) replace.set("$this", receiver);
-    else {
-      const temp = `$${unique("object")}`;
-      before.unshift(`${temp} = ${receiver};`);
-      replace.set("$this", temp);
-    }
+  const argValues = m.params.map((p) => values.get(p.name) ?? p.defaultValue);
+  const missing = m.params.find((_, i) => argValues[i] === undefined);
+  if (missing) return { error: `it doesn't pass $${missing.name}, which has no default` };
+  const impure = argValues.filter((v) => !isPure(v!)).length;
+  if (m.usesThis && receiver && receiver !== "$this" && !/^\$\w+$/.test(receiver)) {
+    const temp = `$${unique("object")}`;
+    before.push(`${temp} = ${receiver};`);
+    receiver = temp;
   }
+  for (const [n, p] of m.params.entries()) {
+    const value = argValues[n]!;
+    const use = varUses(toks, `$${p.name}`, scopes);
+    const pure = isPure(value);
+    const variable = /^\$\w+$/.test(value) && value !== "$this";
+    // The lone argument with side effects may stay in place if nothing runs before its one read.
+    // It runs where it's read, so that read must come first, run once, and not inside a block, loop, or closure.
+    const nothingBefore = () => {
+      const first = use.tokens[0];
+      for (let o = enclosing(toks, first); o >= 0; o = enclosing(toks, o)) if (toks[o].text === "{" || /^(while|for|do)$/i.test(toks[o - 1]?.text ?? "")) return false;
+      if (scopes.some((c) => c.start < first && first <= c.end)) return false;
+      return isPure(text.slice(0, toks[first].start).replace("\u0000", "").replace(/[\w\s]+\($/, "").replace(/^\s*(echo|print|return)\b/, ""));
+    };
+    let into: string | null = null;
+    if (!use.tokens.length) {
+      if (!pure) before.push(`${value};`);
+      continue;
+    } else if (variable && !use.writes) into = value;
+    else if (pure && !use.writes && !use.needsVariable) into = isAtomic(value) ? value : `(${value})`;
+    else if (!pure && impure === 1 && use.tokens.length === 1 && !use.writes && !use.needsVariable && nothingBefore()) into = isAtomic(value) ? value : `(${value})`;
+    if (into === null) {
+      into = `$${unique(p.name)}`;
+      before.push(`${into} = ${value};`);
+    }
+    for (const i of use.tokens) replace.set(i, into);
+  }
+  if (m.usesThis && receiver && receiver !== "$this") for (const [i, t] of toks.entries()) if (t.text === "$this") replace.set(i, receiver);
   let out = text;
-  for (const t of [...toks].reverse()) if (t.type === "var" && replace.has(t.text)) out = out.slice(0, t.start) + replace.get(t.text) + out.slice(t.end);
+  for (const [i, value] of [...replace.entries()].sort((a, b) => b[0] - a[0])) out = out.slice(0, toks[i].start) + value + out.slice(toks[i].end);
   const [statements, result] = out.split("\u0000");
   return { statements: before, body: statements, result: m.result === null ? null : result };
+}
+
+/** Code moved to a new indentation: its common indentation removed and `indent` added, leaving lines inside strings alone. */
+export function reindentCode(code: string, indent: string): string[] {
+  const trimmed = code.replace(/^\s*\n/, "").replace(/\s+$/, "");
+  if (!trimmed.trim()) return [];
+  const toks = tokenize(trimmed);
+  const lines = trimmed.split("\n");
+  // A line that starts inside a multi-line string keeps its text.
+  let offset = 0;
+  const inString = lines.map((l) => {
+    const at = offset;
+    offset += l.length + 1;
+    return toks.some((t) => t.type === "str" && t.start < at && at < t.end);
+  });
+  const common = Math.min(...lines.filter((l, i) => l.trim() && !inString[i]).map((l) => l.match(/^[ \t]*/)![0].length));
+  return lines.map((l, i) => (inString[i] ? l : l.trim() ? indent + l.slice(common) : ""));
 }

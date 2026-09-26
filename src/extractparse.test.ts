@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { enclosingFunctionName, inlineCall, methodToInline, literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { reindentCode, enclosingFunctionName, inlineCall, methodToInline, literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -178,7 +178,11 @@ test("reads a method to inline and substitutes a call", () => {
   assert.ok(!("error" in echoed) && echoed.body.trim() === "echo strtoupper($s);");
   assert.ok(!("error" in log) && log.result === null);
   // Refusals.
-  for (const name of ["many", "bump", "gen", "hi"]) assert.ok("error" in methodToInline(cls, at(name)), name);
+  for (const name of ["many", "gen", "hi"]) assert.ok("error" in methodToInline(cls, at(name)), name);
+  // A method that changes its parameter works on a copy.
+  const bump = methodToInline(cls, at("bump"));
+  assert.ok(!("error" in bump));
+  assert.deepEqual(inlineCall(bump, ["$v"], null, new Set(["v"])), { statements: ["$a = $v;"], body: " $a++; ", result: "$a" });
   // A closure's own return doesn't count as the method's.
   const cb = methodToInline(cls, at("cb"));
   assert.ok(!("error" in cb) && cb.result?.startsWith("array_map"));
@@ -194,4 +198,42 @@ test("finds a constant's occurrences in every method, and refuses static:: as a 
   const fn = "<?php\nclass A { function run() { return array_map(function ($i) { return $i * 10; }, []); } }";
   assert.equal(enclosingFunctionName(fn, fn.indexOf("10")), null);
   assert.equal(enclosingFunctionName(fn, fn.indexOf("array_map")), "run");
+});
+
+test("inlines without changing what runs, or where", () => {
+  const src = (body: string, params = "$a") => `<?php\nfunction m(${params}) { ${body} }`;
+  const read = (body: string, params?: string) => {
+    const m = methodToInline(src(body, params), 16);
+    assert.ok(!("error" in m), JSON.stringify(m));
+    return m;
+  };
+  const call = (m: ReturnType<typeof read>, args: string[], receiver: string | null = null) => {
+    const r = inlineCall(m, args, receiver, new Set(["v", "o"]));
+    assert.ok(!("error" in r), JSON.stringify(r));
+    return r;
+  };
+  // Written by a by-reference built-in, unset, destructuring, foreach, or catch: a copy.
+  for (const body of ["sort($a); return $a;", "unset($a); return 1;", "[$a, $b] = [1, 2]; return $a;", "foreach ([1] as $a) {} return 1;", "try {} catch (E $a) {} return 1;"])
+    assert.equal(call(read(body), ["$v"]).statements[0], "$a = $v;", body);
+  // Arguments with side effects keep their order.
+  const minus = read("return $b - $a;", "$a, $b");
+  assert.deepEqual(call(minus, ["f()", "h()"]), { statements: ["$a = f();", "$b = h();"], body: " ", result: "$b - $a" });
+  const logs = read("logit(); return $a;");
+  assert.deepEqual(call(logs, ["f()"]).statements, ["$a = f();"]);
+  // A lone read with nothing before it stays in place.
+  assert.deepEqual(call(read("return strtoupper($a);"), ["f()"]), { statements: [], body: " ", result: "strtoupper(f())" });
+  // isset() takes a variable, and a closure's own $a isn't the parameter.
+  assert.equal(call(read("return isset($a);"), ["5"]).statements[0], "$a = 5;");
+  const closure = call(read("return array_map(function ($a) { return $a * 2; }, $a);"), ["[1, 2]"]);
+  assert.equal(closure.result, "array_map(function ($a) { return $a * 2; }, [1, 2])");
+  // Signs, clone, and include count.
+  assert.equal(call(read("return -$a;"), ["-1"]).result, "-(-1)");
+  assert.deepEqual(call(read("return [$a, $a];"), ["clone $o"]).statements, ["$a = clone $o;"]);
+  assert.deepEqual(call(read("return 1;"), ["include 'x.php'"]).statements, ["include 'x.php';"]);
+  assert.ok("error" in methodToInline(src("$n = 'a'; return $$n;"), 16));
+  assert.ok("error" in inlineCall(read("return function () { return $this; };"), [], "$o", new Set()));
+});
+
+test("re-indents code but not the lines of a multi-line string", () => {
+  assert.deepEqual(reindentCode("\n        $a = 'x\ny';\n        f();\n", "  "), ["  $a = 'x", "y';", "  f();"]);
 });
