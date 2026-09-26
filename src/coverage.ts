@@ -63,6 +63,8 @@ function decorate(model: monaco.editor.ITextModel, tests = new Map<number, strin
     testsIn(model.uri.fsPath).then((found) => found.size && !model.isDisposed() && coverage.has(model.uri.fsPath) && decorate(model, found));
 }
 
+export const hasCoverage = (path: string) => coverage.has(path);
+
 /** Lists the tests that ran the line with the cursor; choosing one opens it. */
 export async function showTestsCoveringLine(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();

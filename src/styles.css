@@ -726,6 +726,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .db-action .codicon { font-size: 13px; }
 .db-grid td.editing input { width: 100%; min-width: 120px; padding: 2px 9px; border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 0 0 1px var(--accent); }
 .bookmark { color: var(--blue); font-size: 13px !important; padding-top: 3px; }
+.test-run { color: var(--green); font-size: 13px !important; padding-top: 3px; cursor: pointer; }
 .breakpoint.log { background: var(--orange); border-radius: 2px; transform: rotate(45deg) scale(0.85); }
 .breakpoint.conditional::after { content: "?"; display: block; color: #fff; font: bold 9px/11px var(--ui-family); text-align: center; }
 .breakpoint.disabled { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }
@@ -1232,3 +1233,11 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 /* HTTP client: teams */
 .http-secrets { margin-bottom: 8px; }
 .http-runner-table .http-runner-file td { padding-top: 10px; font-weight: 600; color: var(--muted); }
+
+/* The inline diff under a change marker: the lines at HEAD, with buttons to move, stage, and roll back. */
+.change-peek { box-sizing: border-box; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--panel); overflow: hidden; }
+.change-peek-bar { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px 0 10px; color: var(--muted); font: 12px var(--ui-family); }
+.change-peek-bar span:first-child { margin-right: auto; }
+.change-peek-bar button { display: flex; padding: 3px; border-radius: 4px; }
+.change-peek-bar button:hover { background: var(--hover); }
+.change-peek pre { margin: 0 0 12px; padding-left: 10px; background: color-mix(in srgb, var(--red) 14%, transparent); white-space: pre; overflow: hidden; }

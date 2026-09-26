@@ -53,6 +53,8 @@ export function loadBookmarks() {
   for (const path of bookmarks.keys()) render(path);
 }
 
+export const hasBookmark = (path: string, line: number) => linesOf(path).has(line);
+
 export function toggleBookmark(path: string, line: number) {
   const lines = linesOf(path);
   if (!lines.delete(line)) lines.add(line);

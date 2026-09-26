@@ -21,6 +21,8 @@ export type Settings = {
   autoSave: boolean;
   formatOnSave: boolean;
   spellCheck: boolean;
+  /** Run buttons for tests in the gutter; off shows Run, Debug, and Profile links above each test instead. */
+  testGutterIcons: boolean;
   aiCompletion: boolean;
   /** A key of MODELS in ai.ts. */
   aiModel: string;
@@ -42,6 +44,7 @@ const defaults: Settings = {
   autoSave: true,
   formatOnSave: false,
   spellCheck: true,
+  testGutterIcons: true,
   aiCompletion: false,
   aiModel: "qwen2.5-coder-3b",
   keymap: {},
@@ -68,6 +71,7 @@ const fields: Field[] = [
   { key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
+  { key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
   { section: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
   {
     key: "aiModel",

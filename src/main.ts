@@ -7,7 +7,7 @@ import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, copyRemoteUrl, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -33,10 +33,10 @@ import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
-import { initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, tinker } from "./runner";
-import { initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
+import { attachTestRunner, initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
+import { hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
-import { hideCoverage, showTestsCoveringLine } from "./coverage";
+import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
@@ -73,6 +73,7 @@ function addPane(): Pane {
   trackEditor(ed);
   decorateConflicts(ed);
   attachDebugger(ed);
+  attachTestRunner(ed);
   ed.onContextMenu((e) => gutterMenu(ed, e));
   showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
@@ -86,15 +87,22 @@ function addPane(): Pane {
   return pane;
 }
 
-/** The context menu of the gutter left of the code: breakpoints, blame, and the line's reference and link on the remote. */
+/** The context menu of the gutter left of the code: breakpoints, a bookmark, the line's change and tests, blame, and the line's reference and link. */
 function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
   const T = monaco.editor.MouseTargetType;
   const model = ed.getModel();
   const line = e.target.position?.lineNumber;
   if (![T.GUTTER_GLYPH_MARGIN, T.GUTTER_LINE_NUMBERS, T.GUTTER_LINE_DECORATIONS].includes(e.target.type) || !line || model?.uri.scheme !== "file") return;
   const path = model.uri.fsPath;
+  const tests = testMenu(model, line);
   showMenu(e.event.posx, e.event.posy, [
+    ...tests,
+    ...(tests.length ? ["-" as const] : []),
     ...breakpointMenu(path, line),
+    "-",
+    { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", run: () => toggleBookmark(path, line) },
+    ...(hasCoverage(path) ? [{ label: "Show Tests Covering Line", run: () => (ed.setPosition({ lineNumber: line, column: 1 }), showTestsCoveringLine(ed)) }] : []),
+    ...changeMenu(ed, line),
     "-",
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
     { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
@@ -1265,6 +1273,8 @@ const actions: Action[] = [
   { label: "Stashes…", run: stashes },
   { label: "Worktrees…", run: worktrees },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
+  { label: "Next Change", keys: "Ctrl+Alt+Shift+ArrowDown", run: () => goToChange(editor, 1), editorOnly: true },
+  { label: "Previous Change", keys: "Ctrl+Alt+Shift+ArrowUp", run: () => goToChange(editor, -1), editorOnly: true },
   {
     label: "Copy Remote URL",
     run: () => {

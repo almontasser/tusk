@@ -34,7 +34,8 @@ export function parseStatus(out: string): Status {
   return status;
 }
 
-export type LineChange = { kind: "added" | "modified" | "deleted"; start: number; end: number };
+/** Changed lines of the new file (1-based), and, from `lineChanges`, the block that maps them to the old file's lines. */
+export type LineChange = { kind: "added" | "modified" | "deleted"; start: number; end: number; block?: Block };
 
 /** Parses the hunk headers of `git diff -U0` into changed line ranges of the new file (1-based). */
 export function parseHunks(diff: string): LineChange[] {
@@ -96,11 +97,20 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
   const a = before.slice(start, before.length - end);
   const b = after.slice(start, after.length - end);
   if (!a.length && !b.length) return [];
-  const hunk = (removed: number, added: number, at: number): LineChange =>
-    added === 0
-      ? { kind: "deleted", start: Math.max(at, 1), end: Math.max(at, 1) }
-      : { kind: removed === 0 ? "added" : "modified", start: at + 1, end: at + added };
-  if (a.length * b.length > 4_000_000) return [hunk(a.length, b.length, start)];
+  // i and j are where the change ends in a and b.
+  const hunk = (removed: number, added: number, i: number, j: number): LineChange => {
+    const at = start + j - added;
+    const block: Block = {
+      originalStartLineNumber: removed ? start + i - removed + 1 : start + i,
+      originalEndLineNumber: removed ? start + i : 0,
+      modifiedStartLineNumber: added ? at + 1 : at,
+      modifiedEndLineNumber: added ? at + added : 0,
+    };
+    return added === 0
+      ? { kind: "deleted", start: Math.max(at, 1), end: Math.max(at, 1), block }
+      : { kind: removed === 0 ? "added" : "modified", start: at + 1, end: at + added, block };
+  };
+  if (a.length * b.length > 4_000_000) return [hunk(a.length, b.length, a.length, b.length)];
 
   // lcs[i * (b.length + 1) + j] is the LCS length of a[i..] and b[j..].
   const w = b.length + 1;
@@ -115,7 +125,7 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
   let removed = 0;
   let added = 0;
   const flush = () => {
-    if (removed || added) changes.push(hunk(removed, added, start + j - added));
+    if (removed || added) changes.push(hunk(removed, added, i, j));
     removed = added = 0;
   };
   while (i < a.length || j < b.length) {

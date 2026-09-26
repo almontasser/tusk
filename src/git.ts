@@ -4,7 +4,8 @@ import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
-import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
+import type { MenuItem } from "./files";
+import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
 import { openTerminal } from "./terminal";
 
@@ -335,18 +336,25 @@ export async function stageSelected() {
     : inIndex
       ? applyBlocks(modified, original, blocks.map(mirror))
       : applyBlocks(original, modified, blocks);
-  try {
-    const hash = (await gitWithInput(index, "hash-object", "-w", "--stdin", `--path=${f.path}`)).trim();
-    const mode = (await git("ls-files", "--stage", "--", f.path)).split(" ")[0] || "100644";
-    await git("update-index", "--add", "--cacheinfo", `${mode},${hash},${f.path}`);
-  } catch (e) {
-    return host.status(`Can't update the index: ${String(e).trim()}`);
-  }
+  if (!(await writeIndex(f.path, index))) return;
   const scroll = diffEditor.getModifiedEditor().getScrollTop();
   await refreshGit();
   await showChange(f, inIndex);
   diffEditor.getModifiedEditor().setScrollTop(scroll);
   host.status(`${inIndex ? "Unstaged" : "Staged"} ${blocks.length} ${blocks.length === 1 ? "change" : "changes"} in ${f.path}`);
+}
+
+/** Makes `text` the staged version of a file. Returns false, with the error in the status bar, if git refuses. */
+async function writeIndex(path: string, text: string) {
+  try {
+    const hash = (await gitWithInput(text, "hash-object", "-w", "--stdin", `--path=${path}`)).trim();
+    const mode = (await git("ls-files", "--stage", "--", path)).split(" ")[0] || "100644";
+    await git("update-index", "--add", "--cacheinfo", `${mode},${hash},${path}`);
+    return true;
+  } catch (e) {
+    host.status(`Can't update the index: ${String(e).trim()}`);
+    return false;
+  }
 }
 
 let diffBack: (() => void) | undefined;
@@ -571,9 +579,11 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     const model = editor.getModel();
     const rel = model && relOf(model);
     const head = rel ? await headLines(rel) : null;
-    if (!model || head === null || editor.getModel() !== model) return markers.clear();
+    if (!model || !rel || head === null || editor.getModel() !== model) return markers.clear(), changeStates.delete(editor);
+    const changes = lineChanges(head, model.getLinesContent());
+    changeStates.set(editor, { rel, head, changes });
     markers.set(
-      lineChanges(head, model.getLinesContent()).map((c) => ({
+      changes.map((c) => ({
         range: new monaco.Range(c.start, 1, c.end, 1),
         options: { isWholeLine: true, linesDecorationsClassName: `gutter-${c.kind}` },
       })),
@@ -619,8 +629,18 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   });
 
   const updateAnnotations = debounce(applyAnnotations, 300);
-  editor.onDidChangeModel(() => (updateMarkers(), updateInline(), applyAnnotations()));
-  editor.onDidChangeModelContent(() => (updateMarkers(), updateInline(), updateAnnotations()));
+  editor.onDidChangeModel(() => (closePeek(editor), updateMarkers(), updateInline(), applyAnnotations()));
+  editor.onDidChangeModelContent(() => (closePeek(editor), updateMarkers(), updateInline(), updateAnnotations()));
+  // Clicking a change marker shows what the lines were at HEAD.
+  editor.onMouseDown((e) => {
+    const line = e.target.position?.lineNumber;
+    if (!e.event.leftButton || !line || !/\bgutter-(added|modified|deleted)\b/.test(e.target.element?.className ?? "")) return;
+    const c = changeAt(editor, line);
+    if (!c) return;
+    e.event.preventDefault();
+    peeks.get(editor)?.change === c ? closePeek(editor) : peekChange(editor, c);
+  });
+  editor.onKeyDown((e) => peeks.has(editor) && e.keyCode === monaco.KeyCode.Escape && (closePeek(editor), e.preventDefault()));
   editor.onDidChangeCursorPosition(updateInline);
   const refresh = () => (updateMarkers(), updateInline(), updateAnnotations());
   refreshers.add(refresh);
@@ -640,6 +660,137 @@ export async function copyRemoteUrl(path: string, start: number, end = start) {
   } catch (e) {
     host.status(`Couldn't copy the remote URL: ${e}`);
   }
+}
+
+// ---- Editor: the changes behind the markers ----
+
+/** Each editor's changes against HEAD, as its markers show them. */
+const changeStates = new WeakMap<monaco.editor.ICodeEditor, { rel: string; head: string[]; changes: LineChange[] }>();
+/** The open inline diff of each editor. */
+const peeks = new WeakMap<monaco.editor.ICodeEditor, { change: LineChange; close(): void }>();
+
+const changeAt = (editor: monaco.editor.ICodeEditor, line: number) => changeStates.get(editor)?.changes.find((c) => line >= c.start && line <= c.end);
+const closePeek = (editor: monaco.editor.ICodeEditor) => peeks.get(editor)?.close();
+
+/** The HEAD lines a change replaced. */
+const oldLines = (head: string[], b: Block) => (b.originalEndLineNumber ? head.slice(b.originalStartLineNumber - 1, b.originalEndLineNumber) : []);
+
+/** Puts a change's HEAD lines back in the editor, as one undoable edit. */
+function rollbackChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
+  const model = editor.getModel();
+  const state = changeStates.get(editor);
+  if (!model || !state || !c.block) return;
+  const b = c.block;
+  const eol = model.getEOL();
+  const lines = oldLines(state.head, b);
+  const end = (line: number) => model.getLineMaxColumn(line);
+  let range: monaco.Range;
+  let text = lines.join(eol);
+  if (!b.modifiedEndLineNumber) {
+    // Lines were deleted after modifiedStartLineNumber (0 means at the top).
+    const after = b.modifiedStartLineNumber;
+    range = after ? new monaco.Range(after, end(after), after, end(after)) : new monaco.Range(1, 1, 1, 1);
+    text = after ? eol + text : text + eol;
+  } else {
+    const [s, e] = [b.modifiedStartLineNumber, b.modifiedEndLineNumber];
+    if (lines.length) range = new monaco.Range(s, 1, e, end(e));
+    // Added lines go with a line break: the one after them, or before them at the end of the file.
+    else if (e < model.getLineCount()) range = new monaco.Range(s, 1, e + 1, 1);
+    else range = s > 1 ? new monaco.Range(s - 1, end(s - 1), e, end(e)) : new monaco.Range(1, 1, e, end(e));
+  }
+  editor.pushUndoStop();
+  editor.executeEdits("rollback", [{ range, text }]);
+  editor.pushUndoStop();
+}
+
+/** Stages one change: the index gets the editor's lines for it, and keeps what it had elsewhere. */
+async function stageChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
+  const model = editor.getModel();
+  const state = changeStates.get(editor);
+  if (!model || !state) return;
+  const text = model.getValue(monaco.editor.EndOfLinePreference.LF);
+  const staged = await git("show", `:./${state.rel}`).catch(() => null);
+  if (staged === null) return host.status(`${state.rel} isn't in the index. Stage the whole file from the Commit view.`);
+  // The blocks between the index and the editor that overlap the change, which is against HEAD.
+  // A deletion sits between lines, at half a line after the line before it.
+  const span = (b: Block) => (b.modifiedEndLineNumber ? [b.modifiedStartLineNumber, b.modifiedEndLineNumber] : [b.modifiedStartLineNumber + 0.5, b.modifiedStartLineNumber + 0.5]);
+  const [from, to] = span(c.block!);
+  const blocks = lineChanges(staged.split("\n"), text.split("\n"))
+    .map((x) => x.block!)
+    .filter((b) => span(b)[0] <= to && span(b)[1] >= from);
+  if (!blocks.length) return host.status("This change is already staged.");
+  if (!(await writeIndex(state.rel, applyBlocks(staged, text, blocks)))) return;
+  await refreshGit();
+  host.status(`Staged the change at line ${c.start} of ${state.rel}`);
+}
+
+/** Moves the cursor to the next or previous change, wrapping around, and shows it if a diff is open or `show` is set. */
+export function goToChange(editor: monaco.editor.ICodeEditor, direction: 1 | -1, show = peeks.has(editor)) {
+  const changes = changeStates.get(editor)?.changes ?? [];
+  if (!changes.length) return host.status("No changes against HEAD in this file.");
+  const line = peeks.get(editor)?.change.start ?? editor.getPosition()?.lineNumber ?? 1;
+  const c = direction > 0 ? (changes.find((x) => x.start > line) ?? changes[0]) : ([...changes].reverse().find((x) => x.end < line) ?? changes.at(-1)!);
+  editor.setPosition({ lineNumber: c.start, column: 1 });
+  editor.revealLineInCenterIfOutsideViewport(c.start);
+  if (show) peekChange(editor, c);
+}
+
+/** Shows a change's HEAD lines in a box below it, with buttons to roll it back, stage it, or move to another change. */
+function peekChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
+  closePeek(editor);
+  const state = changeStates.get(editor);
+  const model = editor.getModel();
+  if (!state || !model || !c.block) return;
+  const lines = oldLines(state.head, c.block);
+  const count = (n: number) => `${n} ${n === 1 ? "line" : "lines"}`;
+  const size = c.end - c.start + 1;
+  const title = c.kind === "added" ? `Added ${count(size)}` : c.kind === "deleted" ? `Deleted ${count(lines.length)}` : `Changed ${count(lines.length)} to ${count(size)}`;
+  const dom = document.createElement("div");
+  dom.className = "change-peek";
+  dom.innerHTML = `<div class="change-peek-bar"><span></span>${[
+    ["previous", "arrow-up", "Previous change"],
+    ["next", "arrow-down", "Next change"],
+    ["stage", "add", "Stage this change"],
+    ["rollback", "discard", "Roll back this change"],
+    ["close", "close", "Close (Esc)"],
+  ]
+    .map(([run, icon, label]) => `<button data-run="${run}" title="${label}" aria-label="${label}"><span class="codicon codicon-${icon}"></span></button>`)
+    .join("")}</div><pre></pre>`;
+  dom.querySelector("span")!.textContent = `${title} · HEAD`;
+  const pre = dom.querySelector("pre")!;
+  const { fontFamily, fontSize, lineHeight } = editor.getOption(monaco.editor.EditorOption.fontInfo);
+  pre.style.cssText = `font-family: ${fontFamily}; font-size: ${fontSize}px; line-height: ${lineHeight}px`;
+  pre.hidden = !lines.length;
+  if (lines.length) monaco.editor.colorize(lines.join("\n"), model.getLanguageId(), {}).then((html) => (pre.innerHTML = html));
+  const runs: Record<string, () => unknown> = {
+    previous: () => goToChange(editor, -1, true),
+    next: () => goToChange(editor, 1, true),
+    stage: () => stageChange(editor, c),
+    rollback: () => rollbackChange(editor, c),
+    close: () => closePeek(editor),
+  };
+  // Monaco would take the click as one in the text.
+  dom.addEventListener("mousedown", (e) => e.stopPropagation());
+  dom.onclick = (e) => {
+    const run = (e.target as Element).closest<HTMLElement>("[data-run]")?.dataset.run;
+    if (run) runs[run]();
+  };
+  let id = "";
+  editor.changeViewZones((zones) => {
+    id = zones.addZone({ afterLineNumber: c.block!.modifiedEndLineNumber || c.block!.modifiedStartLineNumber, heightInPx: 30 + (lines.length ? lines.length * lineHeight + 12 : 0), domNode: dom });
+  });
+  peeks.set(editor, { change: c, close: () => (editor.changeViewZones((zones) => zones.removeZone(id)), peeks.delete(editor)) });
+}
+
+/** The gutter's context menu items for the change at a line, if there's one. */
+export function changeMenu(editor: monaco.editor.ICodeEditor, line: number): MenuItem[] {
+  const c = changeAt(editor, line);
+  if (!c) return [];
+  return [
+    { label: "Show Change", run: () => peekChange(editor, c) },
+    { label: "Rollback Change", run: () => rollbackChange(editor, c) },
+    { label: "Stage Change", run: () => stageChange(editor, c) },
+  ];
 }
 
 export function initGit(h: Host) {

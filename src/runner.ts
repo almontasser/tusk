@@ -13,6 +13,8 @@ import { workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
 import { formRequestParameter, methodBody, methodLine, routeTarget, validationRules } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
+import { type MenuItem, showMenu } from "./files";
+import { onSettings, settings } from "./settings";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
@@ -274,7 +276,51 @@ export async function openRoute(action: string) {
   openAt(path, methodLine(source, target.method) || 1);
 }
 
-/** Adds run links above tests in test files. */
+/** The ways to run the test at a line, for the gutter's menus. Empty when no test starts there. */
+export function testMenu(model: monaco.editor.ITextModel, line: number): MenuItem[] {
+  const path = model.uri.fsPath;
+  const test = isTestFile(path) ? findTests(model.getValue()).find((t) => t.line === line) : undefined;
+  if (!test) return [];
+  const what = test.filter ? `'${test.name}'` : "All Tests in File";
+  return [
+    { label: `Run ${what}`, run: () => runTest(path, test) },
+    { label: `Debug ${what}`, run: () => runTest(path, test, "debug") },
+    { label: `Run ${what} with Coverage`, run: () => runTest(path, test, "coverage") },
+    { label: `Profile ${what}`, run: () => runTest(path, test, "profile") },
+  ];
+}
+
+/** Run buttons in the gutter of test files, when the setting is on, by model. */
+const runButtons = new Map<monaco.editor.ITextModel, string[]>();
+
+function decorateTests(model: monaco.editor.ITextModel) {
+  const tests = settings.testGutterIcons && isTestFile(model.uri.fsPath) ? findTests(model.getValue()) : [];
+  const ids = model.deltaDecorations(
+    runButtons.get(model) ?? [],
+    tests.map((t) => ({
+      range: new monaco.Range(t.line, 1, t.line, 1),
+      options: {
+        glyphMarginClassName: `codicon codicon-${t.filter ? "run" : "run-all"} test-run`,
+        glyphMarginHoverMessage: { value: t.filter ? `Run ${t.name}` : "Run all tests in file" },
+        glyphMargin: { position: monaco.editor.GlyphMarginLane.Right },
+      },
+    })),
+  );
+  runButtons.set(model, ids);
+}
+
+/** Opens the run menu when you click a test's run button in the gutter. */
+export function attachTestRunner(editor: monaco.editor.ICodeEditor) {
+  editor.onMouseDown((e) => {
+    const model = editor.getModel();
+    const line = e.target.position?.lineNumber;
+    if (!e.event.leftButton || !model || !line || !e.target.element?.classList.contains("test-run")) return;
+    e.event.preventDefault();
+    showMenu(e.event.posx, e.event.posy, testMenu(model, line));
+  });
+}
+
+/** Adds run buttons or links to tests in test files. */
 export function initRunner(
   root: () => string,
   open: (path: string, line: number) => Promise<unknown>,
@@ -288,10 +334,20 @@ export function initRunner(
   initTestResults({ root, openAt: open, rerun, rerunFailed });
   initCoverage({ openAt: open, rerun, status: showStatus });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, mode?: Mode) => runTest(path, test, mode));
-  monaco.languages.registerCodeLensProvider("php", {
+  // The links above tests show when the gutter buttons don't.
+  const lensesChanged = new monaco.Emitter<monaco.languages.CodeLensProvider>();
+  monaco.editor.onDidCreateModel((model) => {
+    if (!isTestFile(model.uri.fsPath)) return;
+    decorateTests(model);
+    let timer: ReturnType<typeof setTimeout>;
+    model.onDidChangeContent(() => (clearTimeout(timer), (timer = setTimeout(() => !model.isDisposed() && decorateTests(model), 300))));
+    model.onWillDispose(() => runButtons.delete(model));
+  });
+  const provider: monaco.languages.CodeLensProvider = {
+    onDidChange: lensesChanged.event,
     provideCodeLenses(model) {
       const path = model.uri.fsPath;
-      const lenses = !isTestFile(path)
+      const lenses = settings.testGutterIcons || !isTestFile(path)
         ? []
         : findTests(model.getValue()).flatMap((test) => {
             const range = new monaco.Range(test.line, 1, test.line, 1);
@@ -303,5 +359,10 @@ export function initRunner(
           });
       return { lenses, dispose() {} };
     },
+  };
+  monaco.languages.registerCodeLensProvider("php", provider);
+  onSettings(() => {
+    lensesChanged.fire(provider);
+    monaco.editor.getModels().forEach(decorateTests);
   });
 }

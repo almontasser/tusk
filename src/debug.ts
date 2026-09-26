@@ -215,6 +215,8 @@ export function attachDebugger(editor: monaco.editor.IStandaloneCodeEditor) {
   editor.onMouseDown((e) => {
     const model = editor.getModel();
     if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !e.event.leftButton || !model || model.uri.scheme !== "file") return;
+    // A test's run button opens its own menu.
+    if (e.target.element?.classList.contains("test-run")) return;
     toggleBreakpoint(model.uri.fsPath, e.target.position!.lineNumber);
   });
 }

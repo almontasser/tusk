@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -52,6 +52,7 @@ test("formats ages", () => {
 
 test("finds added, modified, and deleted lines between two versions", () => {
   const base = ["a", "b", "c", "d", "e"];
+  const lineChanges = (before: string[], after: string[]) => changesOf(before, after).map(({ block, ...c }) => c);
   assert.deepEqual(lineChanges(base, base), []);
   assert.deepEqual(lineChanges(base, ["a", "b", "x", "y", "c", "d", "e"]), [{ kind: "added", start: 3, end: 4 }]);
   assert.deepEqual(lineChanges(base, ["a", "B", "c", "d", "e"]), [{ kind: "modified", start: 2, end: 2 }]);
@@ -62,6 +63,19 @@ test("finds added, modified, and deleted lines between two versions", () => {
     { kind: "added", start: 6, end: 6 },
   ]);
   assert.deepEqual(lineChanges([], ["x"]), [{ kind: "added", start: 1, end: 1 }]);
+});
+
+test("each change's block rolls it back or applies it alone", () => {
+  const base = ["a", "b", "c", "d", "e"];
+  for (const after of [["a", "b", "x", "y", "c", "d", "e"], ["a", "B", "c", "d", "e"], ["a", "d", "e"], ["b", "c", "d", "e"], ["a", "b", "c"], ["x", "a", "B", "c", "e", "f"], ["z"]]) {
+    const changes = changesOf(base, after);
+    assert.equal(applyBlocks(base.join("\n"), after.join("\n"), changes.map((c) => c.block!)), after.join("\n"), `${after}`);
+    for (const c of changes) {
+      const rolledBack = applyBlocks(after.join("\n"), base.join("\n"), [mirror(c.block!)]);
+      // Rolling back one change leaves the others, so only that change is gone.
+      assert.equal(changesOf(base, rolledBack.split("\n")).length, changes.length - 1, `${after} ${c.kind} ${c.start}`);
+    }
+  }
 });
 
 test("summarizes pull request checks", () => {
