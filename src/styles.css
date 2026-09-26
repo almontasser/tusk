@@ -1152,6 +1152,8 @@ button.link:hover { text-decoration: underline; }
 .rebase-step textarea.subject { white-space: pre-wrap; padding: 4px 6px; font: inherit; }
 .rebase-step.action-drop .subject { text-decoration: line-through; color: var(--faint); }
 .rebase-step.action-squash .subject, .rebase-step.action-fixup .subject { color: var(--muted); padding-left: 16px; }
+.rebase-step.command { color: var(--muted); }
+.rebase-step .command-name { width: 170px; flex-shrink: 0; padding: 3px 0 0 8px; }
 #rebase .buttons { display: flex; justify-content: flex-end; gap: 8px; }
 #rebase .buttons button { padding: 4px 16px; }
 .merge-spacer { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--border-subtle) 6px 7px); }

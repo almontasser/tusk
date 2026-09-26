@@ -333,7 +333,27 @@ export function alignmentGaps(
 }
 
 export type RebaseAction = "pick" | "reword" | "edit" | "squash" | "fixup" | "drop";
-export type RebaseStep = { hash: string; subject: string; action: RebaseAction; message?: string };
+/** `line` is a command git wrote for `--rebase-merges` (label, reset, merge, update-ref), kept as it is. */
+export type RebaseStep = { hash: string; subject: string; action: RebaseAction; message?: string; line?: string };
+
+/**
+ * Steps from the todo list `git rebase -i --rebase-merges` writes. Picks become steps whose action can
+ * change; other commands keep their line, with a merge's `-C` commit as their hash. Comments are dropped.
+ */
+export function parseRebaseTodo(text: string): RebaseStep[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"))
+    .map((line) => {
+      const [, command, hash, rest] = /^(\S+)(?: -[Cc] (\S+))? ?(.*)$/.exec(line)!;
+      if (command === "pick" || command === "p") {
+        const [h, ...subject] = rest.split(" ");
+        return { hash: h, subject: subject.join(" ").replace(/^# /, ""), action: "pick" };
+      }
+      return { hash: hash ?? "", subject: rest.replace(/^# /, ""), action: "pick", line };
+    });
+}
 
 /**
  * The todo list for `git rebase -i`, oldest commit first. A reword is a pick followed by an exec that
@@ -343,6 +363,7 @@ export function rebaseTodo(steps: RebaseStep[], messageFile: (i: number) => stri
   const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   return steps
     .flatMap((s, i) => {
+      if (s.line) return [s.line];
       if (s.action === "drop") return [`drop ${s.hash} ${s.subject}`];
       if (s.action === "reword") return [`pick ${s.hash} ${s.subject}`, `exec git commit --amend --quiet --file=${quote(messageFile(i))}`];
       return [`${s.action} ${s.hash} ${s.subject}`];

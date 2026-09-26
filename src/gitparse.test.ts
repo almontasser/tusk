@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -149,6 +149,17 @@ test("writes a rebase todo list", () => {
     (i) => `/tmp/it's msg-${i}.txt`,
   );
   assert.equal(todo, "pick a1 First\nfixup b2 Typo\npick c3 Old words\nexec git commit --amend --quiet --file='/tmp/it'\\''s msg-2.txt'\ndrop d4 Oops\nedit e5 Fix me\n");
+});
+
+test("reads a --rebase-merges todo list and writes it back with the chosen actions", () => {
+  const steps = parseRebaseTodo(
+    "label onto\n\n# Branch feat\nreset onto\npick e0751ea # a1\nlabel feat\n\nreset onto\npick 62b744e a2\nmerge -C 10d27e8 feat # Merge branch 'feat'\n\n# Rebase 0bc..00d onto 0bc\n",
+  );
+  assert.deepEqual(steps[2], { hash: "e0751ea", subject: "a1", action: "pick" });
+  assert.deepEqual(steps[6], { hash: "10d27e8", subject: "feat # Merge branch 'feat'", action: "pick", line: "merge -C 10d27e8 feat # Merge branch 'feat'" });
+  steps[2].action = "edit";
+  steps[5].action = "drop";
+  assert.equal(rebaseTodo(steps, () => ""), "label onto\nreset onto\nedit e0751ea a1\nlabel feat\nreset onto\ndrop 62b744e a2\nmerge -C 10d27e8 feat # Merge branch 'feat'\n");
 });
 
 test("applies only the selected lines of a block", () => {

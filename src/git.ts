@@ -108,8 +108,11 @@ const unstaged = (f: FileStatus) => !isConflict(f) && f.worktree !== " ";
 
 // ---- Merges, rebases, cherry-picks, and reverts in progress ----
 
-/** `editing` is the commit a rebase stopped at for an `edit` step, to change before continuing. */
-type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string; editing?: string };
+/**
+ * `editing` is the commit a rebase stopped at for an `edit` step, to change before continuing. `split` is
+ * set once HEAD has moved off that commit, as after Split Commit, so it's no longer the one to amend.
+ */
+type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string; editing?: string; split?: boolean };
 let operation: Operation | null = null;
 let gitDir: { root: string; path: string } | undefined;
 
@@ -127,8 +130,10 @@ async function detectOperation(): Promise<Operation | null> {
     if (!found[i]) continue;
     // git writes rebase-merge/amend when it stops at an edit step.
     const amend = name === "rebase-merge" ? await invoke<string>("read_file", { path: `${dir}/rebase-merge/amend` }).catch(() => "") : "";
-    const editing = amend.trim() ? (await git("log", "-1", "--format=%h %s", amend.trim()).catch(() => amend.trim().slice(0, 7))).trim() : undefined;
-    return { kind, gitDir: dir, editing };
+    const hash = amend.trim();
+    const editing = hash ? (await git("log", "-1", "--format=%h %s", hash).catch(() => hash.slice(0, 7))).trim() : undefined;
+    const split = !!hash && (await git("rev-parse", "HEAD").catch(() => "")).trim() !== hash;
+    return { kind, gitDir: dir, editing, split };
   }
   return null;
 }
@@ -137,20 +142,31 @@ function renderOperation() {
   const banner = $("git-operation");
   banner.hidden = !operation;
   if (!operation) return;
-  const { kind, gitDir: dir, editing } = operation;
+  const { kind, gitDir: dir, editing, split } = operation;
   const conflicts = current?.files.filter(isConflict).length ?? 0;
   const next = kind === "merge" ? "commit" : "continue";
+  const amending = editing && !conflicts && !split;
   banner.querySelector("span")!.textContent = editing && !conflicts
-    ? `Rebase stopped to edit ${editing}. Change and stage files, then continue: staged changes go into this commit.`
+    ? split
+      ? `Rebase stopped to split ${editing}. Stage and commit its changes in as many commits as you like, then continue.`
+      : `Rebase stopped to edit ${editing}. Change and stage files, then continue: staged changes go into this commit. Or split it into several commits.`
     : `${kind[0].toUpperCase() + kind.slice(1)} in progress. ` + (conflicts ? `Resolve ${conflicts} conflict${conflicts > 1 ? "s" : ""}, then ${next}.` : `No conflicts left: ${next} when ready.`);
   $("operation-abort").onclick = async () => {
     if (await confirm(`Abort the ${kind} and return to the state before it? Conflict resolutions are lost.`, `Abort the ${kind}`)) change(kind, "--abort");
   };
+  const splitButton = $("operation-split");
+  splitButton.hidden = !amending;
+  // Undoes the commit but keeps its changes unstaged, to commit in parts with partial staging.
+  splitButton.onclick = async () => {
+    const message = $("commit-message") as HTMLTextAreaElement;
+    message.value ||= (await git("log", "-1", "--format=%B").catch(() => "")).trim();
+    change("reset", "--quiet", "HEAD~");
+  };
   const continueButton = $("operation-continue");
   continueButton.hidden = kind === "merge"; // A merge finishes with a normal commit.
   // GIT_EDITOR=true accepts git's prepared message instead of opening an editor. At an edit stop, git
-  // refuses to continue with staged changes, so they're amended into the commit first.
-  const amend = editing && !conflicts ? "git diff --cached --quiet || git commit --amend --no-edit --quiet; " : "";
+  // refuses to continue with staged changes, so they're amended into the commit first, unless it was split.
+  const amend = amending ? "git diff --cached --quiet || git commit --amend --no-edit --quiet; " : "";
   continueButton.onclick = () => openTerminal(host.root(), `${kind} --continue`, ["/bin/sh", "-c", `${amend}GIT_EDITOR=true git ${kind} --continue`]);
   // Offer git's prepared merge message, such as "Merge branch 'feature'".
   const message = $("commit-message") as HTMLTextAreaElement;

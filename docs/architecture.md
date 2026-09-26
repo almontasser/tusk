@@ -2069,8 +2069,20 @@ dialog writes a todo list (`rebaseTodo` in `src/gitparse.ts`) to the app cache,
 and `GIT_SEQUENCE_EDITOR='cp <todo>'` puts it in place of git's list. A reword
 becomes `pick` plus `exec git commit --amend --file=<message>`, and
 `GIT_EDITOR=true` keeps squash's combined message, so no editor ever opens.
-`--autostash` sets aside uncommitted changes. Ranges that contain merge
-commits are refused, since a plain `rebase -i` would flatten them.
+`--autostash` sets aside uncommitted changes.
+
+A range that contains merge commits is rebased with `--rebase-merges`, since a
+plain `rebase -i` would flatten them. The dialog shows git's own todo list for
+that, rather than rebuilding git's labeling in the app: `mergesTodo` adds a
+throwaway detached worktree in the app cache, runs
+`rebase -i --rebase-merges` there with a sequence editor that copies the list
+out and empties it, so that rebase ends with "nothing to do", then removes the
+worktree. The project's files, index, and HEAD are never touched, and a dirty
+working tree doesn't stop it. Hooks are off for both commands.
+`parseRebaseTodo` turns picks into steps whose action can change and keeps
+`label`, `reset`, `merge`, and `update-ref` lines verbatim in `line`, which
+`rebaseTodo` writes back unchanged. Those rows can't move, and a squash or
+fixup must follow a commit or a merge, not a label or reset.
 
 An `edit` step stops the rebase with the commit applied. git then writes
 `rebase-merge/amend` with the commit's hash, which `detectOperation` reads to
@@ -2078,6 +2090,14 @@ tell an edit stop from a conflict. git refuses `--continue` while changes are
 staged at an edit stop, so **Continue** there first runs
 `git commit --amend --no-edit` when `git diff --cached --quiet` finds staged
 changes.
+
+**Split Commit** at an edit stop runs `git reset HEAD~`, which leaves the
+commit's changes unstaged for the Commit view's partial staging, and puts the
+commit's message in the message box. `detectOperation` then finds HEAD no
+longer at the hash in `rebase-merge/amend` and sets `split`: the banner says to
+commit the changes in parts, Split Commit is hidden, and **Continue** stops
+amending, so staged leftovers aren't folded into the last new commit (git
+itself refuses to continue until they're committed).
 
 ### Stash
 
@@ -3752,3 +3772,20 @@ and completes constructors, so Generate lists those actions instead of
 writing its own. It calls the accessor commands itself, since the code action
 needs a selection over the properties. Only the constructor from properties
 and `__toString()`, which Phpactor lacks, are written by the editor.
+
+### 2026-09-26: Rebasing merges uses git's own todo list
+
+Rebasing a range with merges needs `--rebase-merges`, whose todo list names
+branch points with labels that git derives from the history and the merge
+messages. Writing that list in the app would copy a tricky part of git and could
+drift from it, so git writes it in a throwaway worktree and the dialog edits
+only the picks. The cost is one checkout of HEAD each time the dialog opens for
+such a range; a dry run in the project itself would have needed a clean
+working tree or an autostash that rewrites the user's files.
+
+### 2026-09-26: Split a commit with reset and the Commit view
+
+Splitting a commit at an edit stop is `git reset HEAD~` followed by ordinary
+commits, as git's documentation describes, so the app adds only the button and
+leaves the parts to the Commit view, whose line-level staging already picks
+what goes in each commit. A dedicated split dialog would repeat that staging UI.
