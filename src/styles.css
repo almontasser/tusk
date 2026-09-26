@@ -79,6 +79,8 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; backg
    copy can: fields, comments and messages, test failures, database cells, and hovers. The editor and the terminal
    handle their own selection. */
 input, textarea, select, [contenteditable], .tests-detail, .db-grid td, .monaco-hover { -webkit-user-select: text; user-select: text; }
+/* In WebKit, Monaco makes the whole editor selectable, so a right-click on the gutter would select the line numbers. */
+.monaco-editor .margin { -webkit-user-select: none; user-select: none; }
 [hidden] { display: none !important; }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
