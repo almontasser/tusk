@@ -1328,3 +1328,84 @@ export function envFiles(t: EnvTable): { shared: EnvFile; secret: EnvFile } {
   }
   return out;
 }
+
+// ---- Hiding secrets ----
+
+/** Names of headers, query parameters, and body fields whose values are secrets. */
+const SECRET_NAME = /token|secret|passw(?:or)?d|api[-_]?key|authori[sz]ation|(?:^|[-_])auth(?:[-_]|$)|credential|signature|private[-_]?key|card[-_]?number|^cv[cv]$/i;
+export const isSecretName = (name: string) => SECRET_NAME.test(name);
+const MASK = "••••";
+
+/** Hides a secret, keeping its last 4 characters when it's long enough that they don't give it away. A {{name}} stays. */
+export const mask = (value: string) => (!value || value.startsWith(MASK) || /^\{\{[^}]+\}\}$/.test(value) ? value : value.length >= 12 ? MASK + value.slice(-4) : MASK);
+
+/** A header's value with its secret hidden: Authorization keeps its scheme, and cookies keep their names. */
+export function redactHeader(name: string, value: string): string {
+  const key = name.toLowerCase();
+  if (key === "cookie") return value.split(";").map((c) => (c.includes("=") ? `${c.slice(0, c.indexOf("="))}=${MASK}` : c)).join(";");
+  if (key === "set-cookie") return value.includes("=") ? `${value.slice(0, value.indexOf("="))}=${MASK}${value.includes(";") ? value.slice(value.indexOf(";")) : ""}` : value;
+  if (!isSecretName(name)) return value;
+  const scheme = key.endsWith("authorization") && value.match(/^([A-Za-z][\w-]*)\s+(\S.*)$/);
+  // Basic's last characters encode the password's, so none show.
+  return scheme ? `${scheme[1]} ${/^basic$/i.test(scheme[1]) && !scheme[2].startsWith("{{") ? MASK : mask(scheme[2])}` : mask(value);
+}
+
+/** `a=1&b=2` pairs, as in a query or a form body, with secret values hidden. */
+const redactPairs = (text: string) =>
+  text
+    .split("&")
+    .map((pair) => {
+      const eq = pair.indexOf("=");
+      if (eq < 0) return pair;
+      let name = pair.slice(0, eq);
+      try {
+        name = decodeURIComponent(name);
+      } catch {
+        // Keep it as written.
+      }
+      return isSecretName(name) ? `${pair.slice(0, eq)}=${mask(pair.slice(eq + 1))}` : pair;
+    })
+    .join("&");
+
+/** A JSON value with the values of secret fields hidden, and everything under a secret field. */
+function redactJson(v: unknown, secret = false): unknown {
+  if (Array.isArray(v)) return v.map((x) => redactJson(x, secret));
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactJson(x, secret || isSecretName(k))]));
+  return secret && v !== null ? mask(String(v)) : v;
+}
+
+function redactBody(body: string, type: string): string {
+  const t = body.trim();
+  if (/^[{[]/.test(t)) {
+    try {
+      const parsed = JSON.parse(t);
+      const out = redactJson(parsed);
+      return JSON.stringify(out) === JSON.stringify(parsed) ? body : JSON.stringify(out, null, t.includes("\n") ? 2 : undefined);
+    } catch {
+      // Not JSON.
+    }
+  }
+  return /x-www-form-urlencoded/i.test(type) || (!type && /^[\w.%[\]-]+=\S*$/.test(t)) ? redactPairs(body) : body;
+}
+
+/**
+ * The request with its secrets hidden, for the history file and for showing and copying: values of secret headers
+ * (Authorization, cookies, and names with token, secret, password, or API key), query parameters, and JSON, form,
+ * and multipart fields. Response bodies aren't changed.
+ */
+export function redact(p: Prepared): Prepared {
+  const q = p.url.indexOf("?");
+  const hashAt = p.url.indexOf("#", q);
+  const query = q < 0 ? "" : p.url.slice(q + 1, hashAt < 0 ? undefined : hashAt);
+  const type = p.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+  return {
+    ...p,
+    url: q < 0 ? p.url : `${p.url.slice(0, q)}?${redactPairs(query)}${hashAt < 0 ? "" : p.url.slice(hashAt)}`,
+    headers: p.headers.map(([k, v]) => [k, redactHeader(k, v)]),
+    ...(p.body !== undefined ? { body: redactBody(p.body, type) } : {}),
+    ...(p.form ? { form: p.form.map((f) => (f.value !== undefined && isSecretName(f.name) ? { ...f, value: mask(f.value) } : f)) } : {}),
+  };
+}
+
+/** Whether redact hides anything in the request. */
+export const hasSecrets = (p: Prepared) => JSON.stringify(redact(p)) !== JSON.stringify(p);

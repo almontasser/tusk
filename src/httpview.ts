@@ -42,6 +42,7 @@ import {
   fromCurl,
   type ExceptionReport,
   graphqlParts,
+  hasSecrets,
   type Header,
   header,
   type HttpRequest,
@@ -55,6 +56,7 @@ import {
   parseHttp,
   parseSetCookie,
   prepare,
+  redact,
   resolve,
   type Prepared,
   requestForRoute,
@@ -1283,16 +1285,27 @@ const CODE: [string, (p: Prepared) => string][] = [
   ["Guzzle", toGuzzle],
 ];
 let codeShown = "";
+/** Whether the Request tab and copying show secrets. They're hidden until you choose Show secrets. */
+let showSecrets = false;
+const visible = (p: Prepared) => (showSecrets ? p : redact(p));
+/** Copies the request as code in one of CODE's languages, as the Request tab shows it. */
+function copyAs(p: Prepared, name: string) {
+  const make = CODE.find(([n]) => n === name)![1];
+  copy(make(visible(p)), `the ${name} code${showSecrets || !hasSecrets(p) ? "" : ", with secrets hidden"}`);
+}
 
 function requestView(x: Exchange) {
   const pane = h("div", { class: "http-pane" });
   const select = h("select", { class: "http-code-lang", title: "Language" }, h("option", { value: "", textContent: "cURL and Laravel" }), ...CODE.slice(2).map(([name]) => h("option", { value: name, textContent: name, selected: codeShown === name })));
+  const toggle = h("button", { class: "link", textContent: showSecrets ? "Hide secrets" : "Show secrets", onclick: () => ((showSecrets = !showSecrets), renderResponse()) });
   const render = () => {
     const shownCode = CODE.filter(([name], i) => (codeShown ? name === codeShown : i < 2));
     pane.replaceChildren(
       select,
+      hasSecrets(x.request) ? h("p", { class: "http-hint http-secrets" }, "Secrets, such as tokens, passwords, and cookies, are hidden here and when you copy. ", toggle) : "",
+      x.secrets ? h("p", { class: "http-hint http-secrets" }, "The history file doesn't keep secrets, so they can't be shown. Send Again prepares the request from its file.") : "",
       ...shownCode.flatMap(([name, make]) => {
-        const code = make(x.request);
+        const code = make(visible(x.request));
         return [h("h4", {}, `${name} `, h("button", { class: "link", textContent: "Copy", onclick: () => copy(code, `the ${name} code`) })), h("pre", { class: "http-log" }, code)];
       }),
       h("h4", {}, "Feature test ", h("button", { class: "link", textContent: "Generate…", title: "Write a Pest or PHPUnit test that sends this request and checks this response", onclick: () => generateFeatureTest(x) })),
@@ -1321,9 +1334,7 @@ function requestMenu() {
     { label: "Send with Debugger", run: () => sendCurrent("debug") },
     { label: "Send with Profiler", run: () => sendCurrent("profile") },
     "-" as const,
-    { label: "Copy as cURL", run: async () => { const p = await preparedCurrent(); if (p) copy(toCurl(p), "the curl command"); } },
-    { label: "Copy as Laravel HTTP", run: async () => { const p = await preparedCurrent(); if (p) copy(toLaravel(p), "the Laravel code"); } },
-    ...CODE.slice(2).map(([name, make]) => ({ label: `Copy as ${name}`, run: async () => { const p = await preparedCurrent(); if (p) copy(make(p), `the ${name} code`); } })),
+    ...CODE.map(([name]) => ({ label: name === "Laravel" ? "Copy as Laravel HTTP" : `Copy as ${name}`, run: async () => { const p = await preparedCurrent(); if (p) copyAs(p, name); } })),
     "-" as const,
     { label: "Run All Requests in File", run: () => current && runFile(current.path) },
     { label: "Stress Test…", run: withRequest((path, r) => loadTest(path, r)) },
@@ -1387,7 +1398,7 @@ async function append(path: string, text: string) {
   return line;
 }
 
-async function httpFiles(): Promise<string[]> {
+export async function httpFiles(): Promise<string[]> {
   const files = await invoke<string[]>("list_files", { root: host.root() });
   return files.filter((f) => /\.(http|rest)$/.test(f)).map((f) => (f.startsWith("/") ? f : `${host.root()}/${f}`));
 }
@@ -1452,7 +1463,11 @@ async function renameRequest(path: string, r: HttpRequest) {
 
 // ---- cURL import ----
 
-function showImport() {
+// Set by httpteam.ts, which offers imports from other tools too.
+let importer: () => unknown = () => showImport();
+export const setImporter = (fn: () => unknown) => (importer = fn);
+
+export function showImport() {
   const area = h("textarea", { class: "http-import-text", placeholder: "curl 'https://example.com/api' -H 'Accept: application/json'", spellcheck: false });
   const view = h(
     "div",
@@ -1649,8 +1664,8 @@ async function renderHistory() {
               { label: x.pinned ? "Unpin" : "Pin", run: () => setPinned(x.id, !x.pinned) },
               ...(shown && shown.id !== x.id ? [{ label: "Compare with the Shown Response", run: () => compareExchanges(x, shown!) }] : []),
               "-" as const,
-              { label: "Copy as cURL", run: () => copy(toCurl(x.request), "the curl command") },
-              { label: "Copy as Laravel HTTP", run: () => copy(toLaravel(x.request), "the Laravel code") },
+              { label: "Copy as cURL", run: () => copyAs(x.request, "cURL") },
+              { label: "Copy as Laravel HTTP", run: () => copyAs(x.request, "Laravel") },
             ]);
           };
           return h("li", {}, row);
@@ -1729,7 +1744,7 @@ export function initHttpClient(h_: Host) {
   monaco.editor.onDidCreateModel((model) => model.getLanguageId() === "http" && model.onDidChangeContent(changed));
 
   $("http-new").onclick = () => newRequestInteractive();
-  $("http-import").onclick = () => showImport();
+  $("http-import").onclick = () => importer();
   $("http-routes").onclick = () => requestsFromRoutes();
   $("http-refresh").onclick = () => refreshTree();
   $("http-clear-history").onclick = async () => (await confirm("Clear the HTTP client's history for this project?", "Clear")) && clearHistory();

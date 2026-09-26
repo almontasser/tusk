@@ -18,7 +18,8 @@ import { clearCookies } from "./httpclient";
 import { detectAppAddress } from "./httplaravel";
 import { editEnvironments } from "./httpenv";
 import { goToRequest, httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, requestItems, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
-import "./httpload";
+import { runAllRequests } from "./httpload";
+import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
@@ -1166,6 +1167,9 @@ const actions: Action[] = [
   { label: "HTTP Client: Detect App Address", run: () => root && detectAppAddress(active ?? "") },
   { label: "HTTP Client: Edit Environments", run: () => root && editEnvironments(/\.(http|rest)$/.test(active ?? "") ? active : "") },
   { label: "Go to Request…", keys: "Alt+Shift+Meta+O", run: () => root && goToRequest() },
+  { label: "HTTP Client: Import…", run: () => root && importRequests() },
+  { label: "HTTP Client: Export to OpenAPI…", run: () => root && exportOpenApi() },
+  { label: "HTTP Client: Run All Requests in Project", run: () => root && runAllRequests() },
   { label: "Select HTTP Environment…", run: () => root && selectEnvironment(active ?? "") },
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },

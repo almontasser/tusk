@@ -15,6 +15,8 @@ import {
   parseHttp,
   prepare,
   type Prepared,
+  redact,
+  redactHeader,
   type ResponseHead,
   type Script,
 } from "./httpfile";
@@ -80,6 +82,8 @@ export type Exchange = {
   appLog?: string;
   /** The database queries the request ran, when it was sent with the profiler. */
   queries?: Query[];
+  /** Set on exchanges read from the history file whose request had secrets, which the file doesn't keep. */
+  secrets?: boolean;
 };
 
 export let host: Host;
@@ -442,8 +446,17 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
   return exchange;
 }
 
-/** Sends an exchange's request again exactly as it went, without scripts, and records the new exchange. */
+/**
+ * Sends an exchange's request again exactly as it went, without scripts, and records the new exchange. The history
+ * file doesn't keep secrets, so a request from an earlier session that had some is prepared again from its file.
+ */
 export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchange> {
+  if (old.secrets) {
+    const { model, request } = await requestAt(old.path, old.line);
+    const named = old.name ? parseHttp(model.getValue()).requests.find((r) => r.name === old.name) : undefined;
+    host.status("The history doesn't keep secrets, so the request was prepared again from its file, with its scripts.");
+    return send(old.path, named ?? request, { cancel });
+  }
   const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false, queries: undefined };
   const cookies = await cookieJar(old.env);
   const log = await logSizes();
@@ -540,9 +553,17 @@ async function remember(exchange: Exchange) {
   for (const old of all.filter((x) => !keep.includes(x))) await invoke("remove_path", { path: old.bodyPath }).catch(() => {});
 }
 
+/** An exchange for the history file, with its request's secrets and its cookies' values hidden. */
+function withoutSecrets(x: Exchange): Exchange {
+  const request = redact(x.request);
+  const heads = x.heads.map((head) => ({ ...head, headers: head.headers.map(([k, v]): [string, string] => [k, k.toLowerCase() === "set-cookie" ? redactHeader(k, v) : v]) }));
+  return { ...x, request, heads, secrets: x.secrets || JSON.stringify(request) !== JSON.stringify(x.request) || undefined };
+}
+
 async function saveHistory(list: Exchange[]) {
+  // The cache keeps secrets for the session, so Send Again sends them; the file doesn't.
   historyCache = list;
-  await invoke("write_file", { path: `${await cacheDir("http-history")}/index.json`, contents: JSON.stringify(list) });
+  await invoke("write_file", { path: `${await cacheDir("http-history")}/index.json`, contents: JSON.stringify(list.map(withoutSecrets)) });
   changed();
 }
 

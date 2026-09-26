@@ -1198,3 +1198,7 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .http-stat.http-over-budget { padding: 0 8px; border-radius: 10px; background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
 .http-script-bar .link { margin-left: auto; }
 .http-code-lang { align-self: flex-start; margin-bottom: 4px; }
+
+/* HTTP client: teams */
+.http-secrets { margin-bottom: 8px; }
+.http-runner-table .http-runner-file td { padding-top: 10px; font-weight: 600; color: var(--muted); }

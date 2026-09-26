@@ -1,9 +1,11 @@
 // The HTTP client's collection runner, which sends every request in a file in order; its stress test, which sends
 // one request many times at once with curl's parallel mode and shows live statistics; and its monitor.
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
 import { histogram, type HttpRequest, loadArgs, overBudget, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
-import { bytes, h, icon, openExchange, setRunners, showHttpPanel } from "./httpview";
+import { junitReport, type ReportCase } from "./httpimport";
+import { bytes, h, httpFiles, icon, openExchange, setRunners, showHttpPanel } from "./httpview";
 
 const ms = (s: number) => (s < 1 ? `${(s * 1000).toFixed(s < 0.01 ? 1 : 0)} ms` : `${s.toFixed(2)} s`);
 const statusClass = (code: number) => (!code || code >= 500 ? "bad" : code >= 400 ? "warn" : code >= 300 ? "redirect" : "good");
@@ -13,25 +15,44 @@ const statusClass = (code: number) => (!code || code >= 500 ? "bad" : code >= 40
 const runner = h("div", { class: "http-client http-runner" });
 let stopRun = false;
 
-async function runFile(path: string) {
-  const model = await host.ensureModel(path);
-  const requests = parseHttp(model.getValue()).requests;
+const runFile = (path: string) => runFiles([path]);
+
+/** Runs every request in the project's .http files, file by file. */
+export async function runAllRequests() {
+  const files = (await httpFiles()).sort();
+  if (!files.length) return host.status("There are no .http files in the project.");
+  runFiles(files);
+}
+
+async function runFiles(paths: string[]) {
+  const relative = (p: string) => p.replace(host.root() + "/", "");
+  const models = await Promise.all(paths.map((p) => host.ensureModel(p)));
+  const requests = paths.flatMap((path, f) => parseHttp(models[f].getValue()).requests.map((r) => ({ path, model: models[f], r })));
   stopRun = false;
   const rows = h("tbody");
   const summary = h("span", { class: "muted" });
   const stop = h("button", { textContent: "Stop", onclick: () => (stopRun = true) });
+  const suites: { name: string; cases: ReportCase[] }[] = [];
+  const report = h("button", { textContent: "Save Report…", title: "Save the results as JUnit XML, which CI servers read", onclick: () => saveReport(suites) });
   runner.replaceChildren(
-    h("div", { class: "http-bar" }, h("strong", {}, `Running ${path.replace(host.root() + "/", "")}`), summary, h("span", { class: "http-spacer" }), stop, h("button", { textContent: "Run Again", onclick: () => runFile(path) })),
+    h("div", { class: "http-bar" }, h("strong", {}, `Running ${paths.length === 1 ? relative(paths[0]) : `${paths.length} files`}`), summary, h("span", { class: "http-spacer" }), stop, report, h("button", { textContent: "Run Again", onclick: () => runFiles(paths) })),
     h("div", { class: "http-runner-list" }, h("table", { class: "http-table http-runner-table" }, h("thead", {}, h("tr", {}, ...["", "Request", "Status", "Time", "Tests"].map((t) => h("th", { textContent: t })))), rows)),
   );
   showHttpPanel("HTTP Runner", runner);
   let passed = 0;
   let failed = 0;
   const started = performance.now();
-  for (const [i, r] of requests.entries()) {
+  for (const [i, { path, model, r }] of requests.entries()) {
     if (stopRun) break;
+    // A test suite per file in the report, and a heading per file in the table.
+    if (suites.at(-1)?.name !== relative(path)) {
+      suites.push({ name: relative(path), cases: [] });
+      if (paths.length > 1) rows.append(h("tr", { class: "http-runner-file" }, h("td", { colSpan: 5 }, relative(path))));
+    }
+    const suite = suites.at(-1)!;
+    const name = `${r.method} ${r.title || r.name || r.url}`;
     const state = h("td", {}, icon("loading codicon-modifier-spin"));
-    const row = h("tr", {}, state, h("td", {}, `${r.method} ${r.title || r.name || r.url}`), h("td"), h("td"), h("td"));
+    const row = h("tr", {}, state, h("td", {}, name), h("td"), h("td"), h("td"));
     rows.append(row);
     summary.textContent = `${i + 1} of ${requests.length}`;
     // Requests later in the file run against the line they had when the run started; edits during a run shift them.
@@ -42,11 +63,13 @@ async function runFile(path: string) {
     } catch (e) {
       state.replaceChildren(icon("error"));
       row.cells[2].textContent = String(e);
+      suite.cases.push({ name, seconds: 0, status: 0, error: String(e), tests: [] });
       failed++;
       continue;
     }
     const final = x.heads.at(-1);
     const slow = overBudget(x.request, x.info?.time_total);
+    suite.cases.push({ name, seconds: x.info?.time_total ?? 0, status: final?.status ?? 0, error: x.error ?? (slow ? `Over budget: ${Math.round((x.info?.time_total ?? 0) * 1000)} ms > ${x.request.budget} ms` : undefined), tests: x.tests });
     const ok = !x.error && !!final && final.status < 400 && x.tests.every((t) => t.passed) && !slow;
     ok ? passed++ : failed++;
     state.replaceChildren(icon(ok ? "pass" : "error"));
@@ -60,6 +83,12 @@ async function runFile(path: string) {
   stop.disabled = true;
   summary.textContent = `${passed} passed, ${failed} failed${stopRun ? ", stopped" : ""} · ${ms((performance.now() - started) / 1000)}`;
   summary.className = failed ? "bad" : "good";
+}
+
+/** Saves the run's results as JUnit XML, a test case per request. */
+async function saveReport(suites: { name: string; cases: ReportCase[] }[]) {
+  const to = await save({ defaultPath: `${host.root()}/http-report.xml`, filters: [{ name: "JUnit XML", extensions: ["xml"] }] });
+  if (to) await invoke("write_file", { path: to, contents: junitReport(suites) }).then(() => host.status(`Saved ${to}`), (e) => host.status(`Couldn't save the report: ${e}`));
 }
 
 // ---- Stress test ----
@@ -390,3 +419,4 @@ function chart(title: string, bars: { label: string; value: number; tip: string;
 }
 
 setRunners(loadTest, runFile, monitor);
+document.getElementById("http-run-all")?.addEventListener("click", () => host.root() && runAllRequests());
