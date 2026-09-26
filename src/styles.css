@@ -698,6 +698,8 @@ button.link:hover { text-decoration: underline; }
    ========================================================================== */
 
 .db-connection { margin: 0 12px 6px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#db-connection { cursor: pointer; }
+#db-connection:hover { color: var(--text); }
 #db-tables, #db-tables ul { list-style: none; margin: 0; padding: 0; }
 #db-tables > li.muted { padding: 4px 12px; }
 #db-tables .row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 8px 0 4px; white-space: nowrap; }

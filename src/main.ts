@@ -25,7 +25,7 @@ import { changeSignature, initRefactor, inlineVariable } from "./refactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
-import { connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
+import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, showMenu } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
@@ -1343,6 +1343,7 @@ const actions: Action[] = [
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
+  { label: "Database: Switch Connection…", run: () => (showView("database"), chooseConnection()) },
   { label: "Database: Connect over SSH…", run: () => (showView("database"), connectOverSsh()) },
   { label: "Composer", run: () => showView("composer") },
   { label: "Composer: Require Package…", run: () => requirePackage() },

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionFromEnv, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, statementAt, updateStatement } from "./dbconfig.ts";
+import { connectionFromConfig, connectionFromEnv, connectionFromUrl, connectionUrl, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, repeatsEnv, statementAt, updateStatement } from "./dbconfig.ts";
 
 test("parses .env values", () => {
   const env = parseEnv(`# comment\nDB_CONNECTION=mysql\nDB_PASSWORD="se#cret"\nDB_HOST=db # the host\n# DB_PORT=1\nexport DB_USERNAME='sail'\n`);
@@ -54,4 +54,35 @@ test("builds row inserts and deletes", () => {
   assert.equal(insertStatement("sqlite", "posts", { title: "Hi", body: null }), `INSERT INTO "posts" ("title", "body") VALUES ('Hi', NULL)`);
   assert.equal(insertStatement("mysql", "t", {}), "INSERT INTO `t` () VALUES ()");
   assert.equal(insertStatement("pgsql", "t", {}), `INSERT INTO "t" DEFAULT VALUES`);
+});
+
+test("reads connection URLs and writes them back without the password", () => {
+  const pg = connectionFromUrl("postgres://me:p%40ss@db.example.com/app?sslmode=verify-full&sslrootcert=storage/ca.pem", "/app")!;
+  assert.deepEqual(pg, { driver: "pgsql", host: "db.example.com", port: 5432, database: "app", username: "me", password: "p@ss", ssl_mode: "verify-full", ssl_ca: "/app/storage/ca.pem" });
+  assert.equal(connectionUrl(pg, "/app"), "pgsql://me@db.example.com:5432/app?sslmode=verify-full&sslrootcert=storage%2Fca.pem");
+  assert.deepEqual(connectionFromUrl(connectionUrl(pg, "/app"), "/app"), { ...pg, password: "" });
+  const lite = connectionFromUrl("sqlite:database/other.sqlite", "/app")!;
+  assert.equal(lite.database, "/app/database/other.sqlite");
+  assert.equal(connectionUrl(lite, "/app"), "sqlite:database/other.sqlite");
+  assert.equal(connectionFromUrl("sqlite:///tmp/x.sqlite", "/app")!.database, "/tmp/x.sqlite");
+  assert.equal(connectionUrl(connectionFromUrl("sqlite:///tmp/x.sqlite", "/app")!, "/app"), "sqlite:///tmp/x.sqlite");
+  assert.equal(connectionFromUrl("mysql://root@127.0.0.1:3307/laravel", "/app")!.port, 3307);
+  assert.equal(connectionFromUrl("sqlsrv://sa@host/db", "/app"), null);
+  assert.equal(connectionFromUrl("forge@203.0.113.5", "/app"), null);
+});
+
+test("reads config/database.php's connections", () => {
+  assert.deepEqual(connectionFromConfig({ driver: "pgsql", host: "replica", port: "6432", database: "app", username: "u", password: "p", sslmode: "prefer" }, "/app"), {
+    driver: "pgsql", host: "replica", port: 6432, database: "app", username: "u", password: "p", ssl_mode: "prefer", ssl_ca: "",
+  });
+  assert.equal(connectionFromConfig({ driver: "mysql", url: "mysql://a@b/c", host: "ignored" }, "/app")!.host, "b");
+  assert.equal(connectionFromConfig({ driver: "sqlite", database: "/app/database/database.sqlite" }, "/app")!.database, "/app/database/database.sqlite");
+  assert.equal(connectionFromConfig({ driver: "sqlsrv" }, "/app"), null);
+  // Laravel's stock entries read the same DB_ variables as the default; a replica doesn't.
+  const env = { DB_CONNECTION: "sqlite" };
+  const stock = (c: Record<string, unknown>) => repeatsEnv(connectionFromConfig(c, "/app")!, env, "/app");
+  assert.equal(stock({ driver: "mysql", host: "127.0.0.1", port: "3306", database: "laravel", username: "root" }), true);
+  assert.equal(stock({ driver: "pgsql", host: "127.0.0.1", port: "5432", database: "laravel", username: "root" }), true);
+  assert.equal(stock({ driver: "sqlite", database: "/app/database/database.sqlite" }), true);
+  assert.equal(stock({ driver: "mysql", host: "replica", port: "3306", database: "laravel", username: "root" }), false);
 });

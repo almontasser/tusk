@@ -28,12 +28,84 @@ export function connectionFromEnv(env: Record<string, string>, root: string, sai
   const inProject = (file: string) => (file.startsWith("/") ? file : `${root}/${file}`);
   const tls = { ssl_mode: env.DB_SSLMODE ?? "", ssl_ca: (env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) ? inProject(env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) : "" };
   if (driver === "sqlite") return { driver, host: "", port: 0, username: "", password: "", database: inProject(env.DB_DATABASE || "database/database.sqlite"), ssl_mode: "", ssl_ca: "" };
-  const port = Number(env.DB_PORT) || (driver === "pgsql" ? 5432 : 3306);
+  const port = Number(env.DB_PORT) || defaultPort(driver);
   const host = env.DB_HOST || "127.0.0.1";
   const credentials = { database: env.DB_DATABASE || "laravel", username: env.DB_USERNAME || "root", password: env.DB_PASSWORD || "", ...tls };
   if (sail && !/^(127\.0\.0\.1|localhost|::1)$/.test(host)) return { driver, host: "127.0.0.1", port: Number(env.FORWARD_DB_PORT) || port, ...credentials };
   return { driver, host, port, ...credentials };
 }
+
+const defaultPort = (driver: string) => (driver === "pgsql" ? 5432 : 3306);
+const drivers: Record<string, string> = { mysql: "mysql", mariadb: "mariadb", pgsql: "pgsql", postgres: "pgsql", postgresql: "pgsql", sqlite: "sqlite" };
+
+/**
+ * A connection from a URL, as Laravel's DB_URL takes one: `mysql://user:password@host:3306/database?sslmode=require`,
+ * `pgsql://…` (or `postgres://…`), or `sqlite:database/other.sqlite` (relative to the project) and `sqlite:///absolute/path`.
+ * Null if it isn't one.
+ */
+export function connectionFromUrl(text: string, root: string): Connection | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  const driver = drivers[url.protocol.slice(0, -1)];
+  const d = decodeURIComponent;
+  if (!driver) return null;
+  const inProject = (file: string) => (file && !file.startsWith("/") ? `${root}/${file}` : file);
+  if (driver === "sqlite") return url.pathname ? { driver, host: "", port: 0, username: "", password: "", database: inProject(d(url.pathname)), ssl_mode: "", ssl_ca: "" } : null;
+  if (!url.hostname) return null;
+  const param = (name: string) => url.searchParams.get(name) ?? "";
+  return {
+    driver,
+    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+    port: Number(url.port) || defaultPort(driver),
+    database: d(url.pathname.slice(1)),
+    username: d(url.username),
+    password: d(url.password),
+    ssl_mode: param("sslmode"),
+    ssl_ca: inProject(param("sslrootcert") || param("sslca")),
+  };
+}
+
+/** The URL connectionFromUrl reads, without the password, with a file in the project relative to it. */
+export function connectionUrl(c: Connection, root: string): string {
+  const inProject = (file: string) => (file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file);
+  if (c.driver === "sqlite") return `sqlite:${c.database.startsWith(`${root}/`) ? inProject(c.database) : `//${c.database}`}`;
+  const e = encodeURIComponent;
+  const params = new URLSearchParams(Object.entries({ sslmode: c.ssl_mode, sslrootcert: inProject(c.ssl_ca) }).filter(([, v]) => v)).toString();
+  return `${c.driver}://${c.username ? `${e(c.username)}@` : ""}${c.host.includes(":") ? `[${c.host}]` : c.host}:${c.port}/${e(c.database)}${params ? `?${params}` : ""}`;
+}
+
+/**
+ * A connection from config/database.php's `connections`, as the booted app reports it. Null for a driver the
+ * editor doesn't support, such as sqlsrv.
+ */
+export function connectionFromConfig(config: Record<string, unknown>, root: string): Connection | null {
+  const s = (key: string) => (config[key] == null ? "" : String(config[key]));
+  if (s("url")) return connectionFromUrl(s("url"), root);
+  const driver = s("driver");
+  if (driver === "sqlite") return { driver, host: "", port: 0, username: "", password: "", database: s("database"), ssl_mode: "", ssl_ca: "" };
+  if (!["mysql", "mariadb", "pgsql"].includes(driver)) return null;
+  const port = Number(s("port")) || defaultPort(driver);
+  return { driver, host: s("host") || "127.0.0.1", port, database: s("database"), username: s("username"), password: s("password"), ssl_mode: s("sslmode"), ssl_ca: s("sslrootcert") };
+}
+
+/**
+ * Whether a config/database.php connection only repeats .env's DB_ variables under its own driver, as Laravel's
+ * stock sqlite, mysql, mariadb, and pgsql entries do, so it's no database of its own.
+ */
+export function repeatsEnv(c: Connection, env: Record<string, string>, root: string): boolean {
+  const e = connectionFromEnv({ ...env, DB_CONNECTION: c.driver }, root);
+  return c.host === e.host && c.port === e.port && c.database === e.database && c.username === e.username;
+}
+
+/** A connection in a line, such as `mysql · root@127.0.0.1:3306/laravel`, without the password. */
+export const describe = (c: Connection, root: string) =>
+  c.driver === "sqlite"
+    ? `SQLite · ${c.database.replace(root + "/", "")}`
+    : `${c.driver} · ${c.username}@${c.host}:${c.port}/${c.database}${c.ssl_mode || c.ssl_ca ? ` · TLS ${c.ssl_mode}`.trimEnd() : ""}`;
 
 /** The statement around an offset, as PhpStorm runs the statement under the caret. */
 // ponytail: splits on every semicolon, including ones inside strings and comments.
