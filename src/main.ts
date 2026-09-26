@@ -6,7 +6,7 @@ import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceS
 import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { attachDebugger, breakpointMenu, editBreakpoint, exceptionOptions, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
@@ -1362,6 +1362,7 @@ const actions: Action[] = [
   { label: "Edit Breakpoint…", keys: "Meta+Shift+F8", run: () => active && editBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Toggle Pause on Exceptions", run: togglePauseOnExceptions },
   { label: "Pause on Exception Classes…", run: () => root && setExceptionClasses() },
+  { label: "Pause on Exceptions Options…", run: () => root && exceptionOptions() },
   { label: "Set Server Paths for Debugging…", run: () => root && setServerRoot() },
   { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },
   { label: "Stop Debugging", keys: "Meta+F2", run: stopDebugging },

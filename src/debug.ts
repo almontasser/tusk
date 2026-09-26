@@ -7,6 +7,7 @@ import type { MenuItem } from "./files";
 import { ensureTools } from "./lsp";
 import { pick } from "./palette";
 import { composeService, usesSail } from "./sail";
+import { handlerLines, thrownIn, uncaughtClass } from "./debugexceptions";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -176,6 +177,8 @@ async function runToLine(path: string, line: number) {
 const sendBreakpoints = (path: string) => {
   const enabled = [...breakpointsOf(path)].filter(([, o]) => !o.disabled);
   if (runTo?.path === path && !enabled.some(([line]) => line === runTo!.line)) enabled.push([runTo.line, {}]);
+  if (handler?.path === path && pauseOnExceptions && uncaughtOnly())
+    for (const line of handler.lines) if (!enabled.some(([l]) => l === line)) enabled.push([line, { condition: exceptionClasses().map((c) => `$e instanceof \\${c}`).join(" || ") || undefined }]);
   return request("setBreakpoints", {
     source: { path },
     breakpoints: enabled
@@ -252,17 +255,79 @@ const writeSetting = (key: string, value: string | null) => {
 let pauseOnExceptions = readSetting("debug:exceptions") === "1";
 /** The classes to pause on, per project. Empty means every exception and error. */
 const exceptionClasses = (): string[] => (readSetting(`debug:exceptionClasses:${host.root()}`) ?? "").split(",").filter(Boolean);
+/** Whether to pause only on exceptions nobody catches, per project. Otherwise every throw pauses, caught or not. */
+const uncaughtOnly = () => readSetting(`debug:exceptionUncaught:${host.root()}`) === "1";
+/** Path patterns, relative to the project, where a thrown exception doesn't pause, such as vendor/**. Per project. */
+const skippedPaths = (): string[] => (readSetting(`debug:exceptionSkip:${host.root()}`) ?? "").split(",").filter(Boolean);
 // The adapter makes each filter an Xdebug exception breakpoint on that class name, and Xdebug also matches
-// subclasses, so Exception and Error cover every Throwable.
-const exceptionFilters = () => (pauseOnExceptions ? (exceptionClasses().length ? exceptionClasses() : ["Exception", "Error"]) : []);
+// subclasses, so Exception and Error cover every Throwable. Xdebug pauses at the throw, before PHP looks for a
+// catch, so it can't tell caught from uncaught there. For uncaught only, the filter is PHP's "Fatal error"
+// instead, which an uncaught exception ends in; the adapter passes the name unquoted, so it carries its own quotes.
+const exceptionFilters = () => (!pauseOnExceptions ? [] : uncaughtOnly() ? ['"Fatal error"'] : exceptionClasses().length ? exceptionClasses() : ["Exception", "Error"]);
 
-const sendExceptionFilters = () => running && request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
+/**
+ * Laravel's exception handler, and the lines where it starts rendering an exception the app didn't catch. Laravel
+ * catches every exception there, so none reaches PHP's fatal error; for uncaught only, those lines get a breakpoint.
+ */
+let handler: { path: string; lines: number[] } | null = null;
+
+async function findHandler() {
+  const path = `${host.root()}/vendor/laravel/framework/src/Illuminate/Foundation/Exceptions/Handler.php`;
+  const text = await invoke<string>("read_file", { path }).catch(() => "");
+  handler = text ? { path, lines: handlerLines(text) } : null;
+}
+
+const sendExceptionFilters = () => {
+  if (!running) return;
+  request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
+  if (handler) sendBreakpoints(handler.path);
+};
 
 export function togglePauseOnExceptions() {
   pauseOnExceptions = !pauseOnExceptions;
   writeSetting("debug:exceptions", pauseOnExceptions ? "1" : null);
   sendExceptionFilters();
   render();
+}
+
+/** Saves an exception option and turns pausing on exceptions on. */
+function setExceptionOption(key: string, value: string | null) {
+  writeSetting(`${key}:${host.root()}`, value);
+  pauseOnExceptions = true;
+  writeSetting("debug:exceptions", "1");
+  sendExceptionFilters();
+  render();
+}
+
+/** Lists the options for pausing on exceptions: the classes, caught or only uncaught, and where they're thrown. */
+export function exceptionOptions() {
+  const classes = exceptionClasses();
+  const skipped = skippedPaths();
+  pick("Pause on exceptions", () => [
+    { label: `Classes: ${classes.length ? classes.join(", ") : "every exception and error"}`, run: setExceptionClasses },
+    uncaughtOnly()
+      ? { label: "When: only uncaught", detail: "Choose to pause wherever one is thrown, caught or not", run: () => setExceptionOption("debug:exceptionUncaught", null) }
+      : { label: "When: wherever thrown, caught or not", detail: "Choose to pause only on exceptions nobody catches", run: () => setExceptionOption("debug:exceptionUncaught", "1") },
+    { label: `Skip exceptions thrown in: ${skipped.length ? skipped.join(", ") : "nothing"}`, run: setSkippedPaths },
+  ]);
+}
+
+/** Asks for the path patterns where a thrown exception doesn't pause. */
+function setSkippedPaths() {
+  pick(
+    "Paths where thrown exceptions don't pause, relative to the project and separated by commas, such as vendor/** (leave empty to pause anywhere)",
+    (q) => {
+      const patterns = q.split(",").map((p) => p.trim()).filter(Boolean);
+      return [
+        {
+          label: patterns.length ? `Skip exceptions thrown in ${patterns.join(", ")}` : "Pause on exceptions wherever they're thrown",
+          run: () => setExceptionOption("debug:exceptionSkip", patterns.length ? patterns.join(",") : null),
+        },
+      ];
+    },
+    0,
+    { value: skippedPaths().join(", ") },
+  );
 }
 
 /** Asks which exception classes to pause on, and turns pausing on exceptions on. */
@@ -274,13 +339,7 @@ export function setExceptionClasses() {
       return [
         {
           label: classes.length ? `Pause on ${classes.join(", ")} and their subclasses` : "Pause on every exception and error",
-          run: () => {
-            writeSetting(`debug:exceptionClasses:${host.root()}`, classes.length ? classes.join(",") : null);
-            pauseOnExceptions = true;
-            writeSetting("debug:exceptions", "1");
-            sendExceptionFilters();
-            render();
-          },
+          run: () => setExceptionOption("debug:exceptionClasses", classes.length ? classes.join(",") : null),
         },
       ];
     },
@@ -348,6 +407,7 @@ export async function startDebugging() {
     await ensureTools();
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
     await request("initialize", { adapterID: "php", clientID: "tusk", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
+    await findHandler();
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
     const mappings = parseMappings(await serverPaths());
     const pathMappings = Object.keys(mappings).length ? mappings : undefined;
@@ -375,7 +435,7 @@ export async function stopDebugging() {
 
 async function onEvent(event: string, body: any) {
   if (event === "initialized") {
-    for (const path of breakpoints.keys()) await sendBreakpoints(path);
+    for (const path of new Set([...breakpoints.keys(), ...(handler ? [handler.path] : [])])) await sendBreakpoints(path);
     await request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(() => {});
     await request("configurationDone").catch(() => {});
   } else if (event === "stopped") {
@@ -387,8 +447,10 @@ async function onEvent(event: string, body: any) {
     }
     const trace = await request<{ stackFrames: Frame[] }>("stackTrace", { threadId: body.threadId, startFrame: 0, levels: 50 });
     frames = trace.stackFrames;
+    const exception = await exceptionPause(body, frames[0]);
+    if (exception?.skip) return resume();
     showPanel();
-    log(`Paused (${body.reason ?? "breakpoint"})${body.text ? `: ${body.text}` : "."}`);
+    log(`Paused (${exception?.reason ?? body.reason ?? "breakpoint"})${exception?.text ? `: ${exception.text}` : body.text ? `: ${body.text}` : "."}`);
     await selectFrame(frames[0]);
   } else if (event === "continued" || (event === "thread" && body.reason === "exited" && body.threadId === stoppedThread)) {
     stoppedThread = null;
@@ -400,6 +462,29 @@ async function onEvent(event: string, body: any) {
   } else if (event === "terminated") {
     stopDebugging();
   }
+}
+
+/**
+ * For a pause on an exception, whether the options skip it, and at Laravel's handler, what reached it. At a throw
+ * or PHP's fatal error, the top frame is where the exception was thrown. At the handler, the exception is `$e`.
+ */
+async function exceptionPause(body: any, top: Frame | undefined): Promise<{ skip: boolean; reason?: string; text?: string } | null> {
+  if (!pauseOnExceptions) return null;
+  const skipped = (path?: string) => !!path && thrownIn(path, host.root(), skippedPaths());
+  if (body.reason === "exception") {
+    // PHP's fatal error names the class, but the stack is gone by then, so only the class itself matches, not subclasses.
+    const classes = uncaughtOnly() ? exceptionClasses() : [];
+    const cls = uncaughtClass(body.text ?? "")?.toLowerCase();
+    const other = classes.length > 0 && !classes.some((c) => c.toLowerCase() === cls);
+    return { skip: other || skipped(top?.source?.path) };
+  }
+  if (!uncaughtOnly() || !top?.source?.path || top.source.path !== handler?.path || !handler.lines.includes(top.line)) return null;
+  const value = (expression: string) =>
+    request<{ result: string }>("evaluate", { expression, frameId: top.id, context: "repl" }).then((r) => r.result.replace(/^"|"$/g, ""), () => "");
+  let file = await value("$e->getFile()");
+  for (const [from, to] of Object.entries(parseMappings(await serverPaths()))) if (file.startsWith(from + "/")) file = to + file.slice(from.length);
+  const text = `${await value("get_class($e)")}: ${await value("$e->getMessage()")}, thrown at ${file.slice(host.root().length + 1) || file}:${await value("$e->getLine()")}`;
+  return { skip: skipped(file), reason: "uncaught exception, in Laravel's handler", text };
 }
 
 // ---- Stepping ----
@@ -478,7 +563,7 @@ const q = <T extends HTMLElement>(sel: string) => panel.querySelector(sel) as T;
 
 const runs: Record<string, () => unknown> = { exceptions: togglePauseOnExceptions, listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
 panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.onclick = () => runs[b.dataset.run!]()));
-q<HTMLElement>('[data-run="exceptions"]').oncontextmenu = (e) => (e.preventDefault(), setExceptionClasses());
+q<HTMLElement>('[data-run="exceptions"]').oncontextmenu = (e) => (e.preventDefault(), exceptionOptions());
 
 function showPanel() {
   showPanelView("Debug", panel, () => stopDebugging());
@@ -490,7 +575,8 @@ function render() {
   const exceptions = q<HTMLElement>('[data-run="exceptions"]');
   exceptions.setAttribute("aria-pressed", String(pauseOnExceptions));
   const classes = host?.root() ? exceptionClasses() : [];
-  exceptions.title = `Pause on ${classes.length ? classes.join(", ") : "exceptions"}. Right-click to choose classes`;
+  const skipped = host?.root() ? skippedPaths() : [];
+  exceptions.title = `Pause on ${host?.root() && uncaughtOnly() ? "uncaught " : ""}${classes.length ? classes.join(", ") : "exceptions"}${skipped.length ? ` not thrown in ${skipped.join(", ")}` : ""}. Right-click for options`;
   exceptions.classList.toggle("on", pauseOnExceptions);
   const enabled: Record<string, boolean> = { exceptions: true, listen: !running, resume: isPaused(), over: isPaused(), into: isPaused(), out: isPaused(), stop: running };
   panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.disabled = !enabled[b.dataset.run!]));

@@ -59,7 +59,7 @@ file to change when you add it.
 | --- | --- |
 | Session restore | Terminals come back without their earlier output. The debug and profiling servers aren't restarted. |
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
-| Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
+| Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Frontend languages | Angular templates aren't supported. |
 | Git | Interactive rebase can't rebase merge commits, or split a commit into several at an edit stop. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
@@ -1393,11 +1393,24 @@ execution pauses, expand like variables, and are saved with the project.
 
 To pause wherever an exception is thrown, even if the code catches it, turn
 on **Pause on exceptions** (the lightning icon in the Debug tab). The log
-shows the exception's class and message. To pause only on some classes,
-right-click the icon, or run **Pause on Exception Classes…** from ⌘⇧A, and
-enter them separated by commas, such as `App\Exceptions\PaymentFailed`. Their
-subclasses count too. Leave the field empty to pause on every exception again.
-The classes are saved per project.
+shows the exception's class and message. To narrow it, right-click the icon,
+or run **Pause on Exceptions Options…** from ⌘⇧A:
+
+- **Classes:** enter them separated by commas, such as
+  `App\Exceptions\PaymentFailed`. Their subclasses count too. Leave the field
+  empty to pause on every exception again. **Pause on Exception Classes…** in
+  ⌘⇧A opens the same field.
+- **When:** choose **Only uncaught** to skip exceptions that code catches. In a
+  Laravel project, execution then pauses in Laravel's exception handler, as it
+  starts to render the exception into an error page or console output, with the
+  exception in `$e`; the log names its class, message, and where it was thrown.
+  Elsewhere, execution pauses at PHP's fatal error for the exception, at the
+  line that threw it, where the log shows PHP's stack trace but the variables
+  are gone.
+- **Skip exceptions thrown in:** enter path patterns relative to the project,
+  such as `vendor/**`, to keep going when the exception comes from those files.
+
+The options are saved per project.
 
 ### Docker and Sail
 
@@ -1744,6 +1757,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |
 | `src/debug.ts` | The Xdebug debugger: breakpoints and their options, watches, stepping, and the Debug panel |
+| `src/debugexceptions.ts` | Where an exception was thrown, the class of an uncaught one, and where Laravel renders them, for pausing on exceptions |
 | `src/database.ts` | The Database tool window, query console, and results grid |
 | `src/dbconfig.ts` | Database connection from `.env`, schema queries, and cell updates |
 | `src/composer.ts` | The Composer tool window |
