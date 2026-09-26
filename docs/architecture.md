@@ -3358,7 +3358,12 @@ restore a covered view.
 
 ### 2026-09-26: No Writing Tools button
 
-macOS showed its Writing Tools button beside the caret in the terminal's
-hidden textarea. `writingsuggestions="false"` on `<html>` turns it off
-everywhere, since the attribute is inherited. It suits prose, not code or a
-shell.
+macOS offers Writing Tools ("Write with Siri") beside the caret in any text
+field of a WebKit view, including the terminal's and Monaco's hidden
+textareas. VS Code (Chromium) and PhpStorm (Java) don't use WebKit's text input,
+so they never show it. The HTML attribute `writingsuggestions="false"` on
+`<html>` wasn't enough, so `lib.rs` creates the window itself (`"create":
+false` in `tauri.conf.json`) with a `WKWebViewConfiguration` whose
+`writingToolsBehavior` is none. The setter exists from macOS 15, so older
+versions skip it. A fresh configuration uses the default website data store,
+as Tauri's own does, so localStorage is unchanged.

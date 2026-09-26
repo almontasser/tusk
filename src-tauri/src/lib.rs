@@ -41,6 +41,25 @@ fn use_login_shell_path() {
     }
 }
 
+/// A webview configuration without Writing Tools ("Write with Siri"), which macOS otherwise offers beside
+/// the caret in every text field, including the terminal's and the editor's hidden ones. Writing Tools
+/// needs macOS 15, so older versions skip the setting.
+#[cfg(target_os = "macos")]
+fn webview_configuration() -> objc2::rc::Retained<objc2_web_kit::WKWebViewConfiguration> {
+    use objc2::{msg_send, sel, MainThreadMarker};
+    let mtm = MainThreadMarker::new().expect("setup runs on the main thread");
+    // Safety: plain Objective-C calls on the main thread; the setter is called only if it exists.
+    unsafe {
+        let config = objc2_web_kit::WKWebViewConfiguration::new(mtm);
+        let available: bool = msg_send![&config, respondsToSelector: sel!(setWritingToolsBehavior:)];
+        if available {
+            // NSWritingToolsBehaviorNone
+            let _: () = msg_send![&config, setWritingToolsBehavior: -1isize];
+        }
+        config
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::thread::spawn(login_path);
@@ -61,6 +80,15 @@ pub fn run() {
                 })
                 .build(),
         )
+        // The window is created here rather than from tauri.conf.json, so macOS can get its own webview settings.
+        .setup(|app| {
+            let config = app.config().app.windows.first().cloned().expect("tauri.conf.json has a window");
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
+            #[cfg(target_os = "macos")]
+            let window = window.with_webview_configuration(webview_configuration());
+            window.build()?;
+            Ok(())
+        })
         .manage(fs::WatchState::default())
         .manage(lsp::LspState::default())
         .manage(lsp::AiRequests::default())
