@@ -3,9 +3,10 @@
 // the constructor from properties and __toString() are written here, since Phpactor has no such action.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, phpactorRequest } from "./lsp";
+import { applyWorkspaceEdit, phpactorRequest, typeSymbol } from "./lsp";
 import { pick, type Item } from "./palette";
-import { parseTypeDeclarations } from "./phptypes";
+import { abstractMethods, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
+import { readText } from "./projectfiles";
 import { snippetText } from "./postfix";
 import { classProperties, matchBracket, type Property } from "./refactorparse";
 
@@ -50,8 +51,15 @@ export async function generate(editor: monaco.editor.ICodeEditor) {
   const unit = insertSpaces ? " ".repeat(indentSize) : "\t";
   const closeLine = model.getPositionAt(close).lineNumber;
   const indent = model.getLineContent(closeLine).match(/^\s*/)![0] + unit;
-  // A new method goes last, after a blank line unless the line before the brace is blank already.
-  const atEnd = (code: string) => insertAt(editor, closeLine, (model.getLineContent(closeLine - 1).trim() ? "\n" : "") + code);
+  // A new method goes last, after a blank line unless the line before the brace is blank already. The brace is
+  // found again, since Phpactor's Implement Methods may have added lines first.
+  const atEnd = (code: string) => {
+    const now = model.getValue();
+    const decl = parseTypeDeclarations(now).find((t) => t.fqn === type.fqn);
+    const brace = decl ? matchBracket(now, now.indexOf("{", decl.offset)) : -1;
+    const line = brace >= 0 ? model.getPositionAt(brace).lineNumber : closeLine;
+    insertAt(editor, line, (model.getLineContent(line - 1).trim() ? "\n" : "") + code);
+  };
   const method = (signature: string, lines: string[]) => [`${indent}${signature}`, `${indent}{`, ...lines.map((l) => `${indent}${unit}${l}`), `${indent}}`, ""].join("\n");
 
   const items: Item[] = [];
@@ -76,14 +84,42 @@ export async function generate(editor: monaco.editor.ICodeEditor) {
       range: { start: { line: pos.lineNumber - 1, character: pos.column - 1 }, end: { line: pos.lineNumber - 1, character: pos.column - 1 } },
       context: { diagnostics: [] },
     }).catch(() => null)) ?? [];
+  // Phpactor implements interfaces and abstract parents, but skips the abstract methods of the class's traits.
+  const stubs = (await traitAbstracts(type)).filter((m) => !has(m.name));
+  const writeStubs = () => atEnd(snippetText(stubs.map((m) => method(shortenNames(m.signature, text), [])).join("\n")));
+  let implemented = false;
   for (const a of actions) {
     const kind = "kind" in a ? a.kind : undefined;
     if (!kind || !PHPACTOR_KINDS.test(kind)) continue;
-    const label = kind.includes("implement_contracts") ? "Implement Methods…" : kind.includes("override_method") ? "Override Methods…" : a.title;
-    items.push({ label, detail: kind.includes("override") ? a.title : undefined, run: () => runAction(a) });
+    const implement = kind.includes("implement_contracts");
+    implemented ||= implement;
+    const label = implement ? "Implement Methods…" : kind.includes("override_method") ? "Override Methods…" : a.title;
+    items.push({ label, detail: kind.includes("override") ? a.title : undefined, run: () => (implement && stubs.length ? runAction(a).then(writeStubs) : runAction(a)) });
   }
+  if (!implemented && stubs.length) items.push({ label: "Implement Methods…", detail: stubs.map((m) => `${m.name}()`).join(", "), run: writeStubs });
   if (!items.length) return host.status("Nothing to generate here.");
   pick("Generate", () => items);
+}
+
+/**
+ * The abstract methods of the traits a type uses, and of the traits those use, each read from its file.
+ * ponytail: a trait that Phpactor's index doesn't know yet, such as one created since the last index, is skipped.
+ */
+async function traitAbstracts(type: TypeDeclaration): Promise<{ name: string; signature: string }[]> {
+  const queue = [...type.uses];
+  const seen = new Set(queue);
+  const methods: { name: string; signature: string }[] = [];
+  for (let fqn = queue.shift(); fqn; fqn = queue.shift()) {
+    const path = (await typeSymbol(fqn))?.path;
+    if (!path) continue;
+    const source = monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? (await readText(path).catch(() => ""));
+    const types = parseTypeDeclarations(source);
+    const i = types.findIndex((t) => t.fqn === fqn);
+    if (i < 0) continue;
+    for (const m of abstractMethods(source, types[i].offset, types[i + 1]?.offset)) if (!methods.some((x) => x.name === m.name)) methods.push(m);
+    for (const u of types[i].uses) if (!seen.has(u)) (seen.add(u), queue.push(u));
+  }
+  return methods;
 }
 
 /** Inserts a constructor that takes and assigns the properties, below the line of `after`: the last property's `;`. */

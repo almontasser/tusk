@@ -1238,6 +1238,14 @@ export async function workspaceSymbols(query: string): Promise<Symbol[]> {
   }));
 }
 
+/** Where a class, interface, trait, or enum is declared, through the workspace symbols, matched on name and namespace. */
+export async function typeSymbol(fqn: string): Promise<Symbol | undefined> {
+  const short = fqn.split("\\").pop()!;
+  const namespace = fqn.slice(0, -short.length - 1);
+  const symbols = await workspaceSymbols(short);
+  return symbols.find((s) => s.name === short && (s.container ?? "") === namespace) ?? symbols.find((s) => s.name === fqn);
+}
+
 /**
  * Asks the servers what to change after files moved, such as a PHP class's namespace and
  * the references to it, and applies those edits. The LSP method is `workspace/willRenameFiles`,

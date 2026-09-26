@@ -589,9 +589,9 @@ class, trait, or enum at the cursor. The list offers what the class lacks:
   `setTitle()` for each property, including promoted ones, that doesn't have
   one yet. Readonly properties get no setter. Phpactor writes them.
 - **`__toString()`**, with the cursor in its `return`.
-- **Implement Methods…** and **Override Methods…**, from Phpactor, when the
-  class has interface or abstract methods to write, or parent methods to
-  override. Override asks which method.
+- **Implement Methods…** and **Override Methods…**, when the class has
+  interface or abstract methods to write, including abstract methods of the
+  traits it uses, or parent methods to override. Override asks which method.
 - Phpactor's **Complete Constructor**, **Promote Constructor**, and **Add
   missing properties**, when they apply.
 

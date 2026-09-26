@@ -4,7 +4,7 @@
 // trait's users from a text search.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
-import { phpactorRequest, workspaceSymbols } from "./lsp";
+import { phpactorRequest, typeSymbol } from "./lsp";
 import { parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { showPanelView } from "./terminal";
 import { readText } from "./projectfiles";
@@ -36,10 +36,7 @@ async function typeAt(path: string, line = 1): Promise<Type | null> {
 
 /** Finds a type's file through Phpactor's workspace symbols. */
 async function locate(fqn: string): Promise<Type> {
-  const short = fqn.split("\\").pop()!;
-  const namespace = fqn.slice(0, -short.length - 1);
-  const match = (await workspaceSymbols(short)).find((s) => s.name === short && (s.container ?? "") === namespace) ??
-    (await workspaceSymbols(short)).find((s) => s.name === fqn);
+  const match = await typeSymbol(fqn);
   if (!match) return { fqn, kind: "unknown", line: 1 };
   return (await typeAt(match.path, (match.range?.startLineNumber ?? 0) || undefined)) ?? { fqn, kind: "unknown", path: match.path, line: 1 };
 }

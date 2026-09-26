@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { callSites, componentClassPath, constructorCalls, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
+import { abstractMethods, callSites, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -181,4 +181,32 @@ test("finds constructor calls of classes", () => {
   const found = (classes: string[]) => constructorCalls(source, new Set(classes)).map(([s, e]) => source.slice(s, e));
   assert.deepEqual(found(["Other\\Money"]), ["__construct", "Cash", "\\Other\\Money"]);
   assert.deepEqual(found(["App\\Price"]), ["static", "Price"]);
+});
+
+test("reads abstract methods with full class names, and shortens them for another file", () => {
+  const trait = [
+    "<?php",
+    "namespace App\\Concerns;",
+    "use App\\Models\\User;",
+    "trait HasOwner {",
+    "    // abstract public function old(): void;",
+    "    abstract protected function owner(?User $user = null, int|Team ...$teams): static;",
+    "    public static abstract function &make(array $a = [], string $s = Foo::BAR): \\Closure;",
+    "    public function concrete(): void {}",
+    "}",
+  ].join("\n");
+  const methods = abstractMethods(trait);
+  assert.deepEqual(methods, [
+    { name: "owner", signature: "protected function owner(?\\App\\Models\\User $user = null, int|\\App\\Concerns\\Team ...$teams): static" },
+    { name: "make", signature: "public static function &make(array $a = [], string $s = Foo::BAR): \\Closure" },
+  ]);
+  const cls = "<?php\nnamespace App\\Concerns;\nuse App\\Models\\User;\nclass Post {}";
+  assert.equal(shortenNames(methods[0].signature, cls), "protected function owner(?User $user = null, int|Team ...$teams): static");
+  assert.equal(shortenNames("\\Closure", cls), "\\Closure");
+  assert.equal(shortenNames("\\Closure", "<?php\nclass A {}"), "Closure");
+});
+
+test("reads abstract methods within a range", () => {
+  const source = "<?php\nabstract class A { abstract function a(); }\ntrait B { abstract function b(); }";
+  assert.deepEqual(abstractMethods(source, source.indexOf("B")).map((m) => m.name), ["b"]);
 });

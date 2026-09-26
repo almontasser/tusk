@@ -1031,6 +1031,18 @@ declarations and promoted parameters, and the snippet goes after the last
 property or before the class's closing brace, indented with the file's
 indentation.
 
+Phpactor's Implement Methods covers interfaces and abstract parent classes,
+but not the abstract methods a trait declares. `traitAbstracts` follows the
+class's traits, and the traits they use, to their files through the workspace
+symbols (`typeSymbol` in `src/lsp.ts`, which Type Hierarchy also uses), and
+`abstractMethods` in `src/phptypes.ts` copies each declaration without
+`abstract`, with class names in its types written in full, since the trait's
+`use` statements don't apply in the class's file. `shortenNames` then writes
+a full name short where the class's file already imports it or shares its
+namespace. The stubs go before the class's closing brace, found again after
+Phpactor's own edit. When Phpactor has nothing to implement, **Implement
+Methods…** still shows for the trait methods alone.
+
 ⌘N is also **New File…**. The shortcut handler now takes the first action for
 the keys that applies (an editor-only action needs the editor focused, and
 `when` must pass), so **Generate…** runs in a PHP editor and **New File…**

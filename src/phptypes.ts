@@ -1,6 +1,7 @@
 // Reads a PHP file's type declarations: their full names, and the full names of their parents, interfaces,
 // and traits. Free of editor imports so Node can test it.
 import { commentMask } from "./comments.ts";
+import { matchBracket } from "./refactorparse.ts";
 
 export type TypeDeclaration = {
   fqn: string;
@@ -293,4 +294,40 @@ export function constructorCalls(source: string, classes: Set<string>): [number,
     if (target && classes.has(target)) calls.push([start, end]);
   }
   return calls;
+}
+
+const BUILTIN_TYPES = new Set("int float string bool array callable iterable object mixed void null never false true self static parent".split(" "));
+// A name in a type: after "(", ",", "|", "&", "?", or a return type's ":", and not a call or a constant's class.
+const TYPE_NAME = /(?<=(?:[(,|&?]|(?<!:):)\s*)\\?[A-Za-z_][\w\\]*(?![\w\\(]|\s*::)/g;
+
+/**
+ * The abstract methods a file declares between offsets `from` and `to`: the name, and the declaration without
+ * `abstract` and its `;`. Class names in its types are written in full (`\App\Models\User`), since the stub goes
+ * into another file.
+ */
+export function abstractMethods(source: string, from = 0, to = source.length): { name: string; signature: string }[] {
+  const code = commentMask(source);
+  const { resolve } = nameResolver(code);
+  const methods: { name: string; signature: string }[] = [];
+  for (const m of code.matchAll(/((?:(?:public|protected|private|static|abstract)\s+)+)function\s+&?\s*(\w+)\s*\(/g)) {
+    if (!/\babstract\b/.test(m[1]) || m.index! < from || m.index! >= to) continue;
+    const close = matchBracket(code, m.index! + m[0].length - 1);
+    const end = close < 0 ? -1 : code.indexOf(";", close);
+    if (end < 0) continue;
+    const signature = source
+      .slice(m.index!, end)
+      .replace(/\babstract\s+/, "")
+      .replace(TYPE_NAME, (name) => (BUILTIN_TYPES.has(name.toLowerCase()) ? name : `\\${resolve(name)}`));
+    methods.push({ name: m[2], signature: signature.trimEnd() });
+  }
+  return methods;
+}
+
+/** Writes each full class name (`\App\Models\User`) in `text` by its short name where the file's `use` statements or namespace make that name mean the same class. */
+export function shortenNames(text: string, code: string): string {
+  const { resolve } = nameResolver(code);
+  return text.replace(/\\([A-Za-z_][\w\\]*)/g, (full, fqn: string) => {
+    const short = fqn.split("\\").pop()!;
+    return resolve(short) === fqn ? short : full;
+  });
 }
