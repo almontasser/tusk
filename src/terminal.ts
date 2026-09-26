@@ -260,13 +260,16 @@ function showPanel(visible: boolean) {
   renderTabs();
 }
 
+/** A shell that still runs, as opposed to a command's tab (such as git pull) or an exited shell. */
+const isShell = (s: Session | undefined) => !!s?.term && !s.exited && !!s.restore && !s.restore.command;
+
 /**
- * Shows the last terminal you used, or a new one, and focuses it. Hides the panel instead when a terminal
+ * Shows the last shell you used, or a new one, and focuses it. Hides the panel instead when a shell
  * is showing and has focus.
  */
 export function toggleTerminal(cwd: string) {
-  if (panelVisible && active?.term && active.el.contains(document.activeElement)) return showPanel(false);
-  const term = active?.term ? active : [...sessions].reverse().find((s) => s.term);
+  if (panelVisible && isShell(active) && active!.el.contains(document.activeElement)) return showPanel(false);
+  const term = isShell(active) ? active : [...sessions].reverse().find(isShell);
   if (!term) return openTerminal(cwd);
   showPanel(true);
   activate(term);

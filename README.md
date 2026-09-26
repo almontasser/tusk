@@ -320,8 +320,9 @@ one to close it, the others, or all; middle-click to close it; and drag it along
 the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in the
 panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
 select all, or clear it. Click **+** at the end of the panel's tab bar for a
-new terminal. The terminal button shows the last terminal you used, or opens
-one, even while another panel tab shows.
+new terminal. The terminal button shows the last shell you used, or opens
+one, even while another panel tab shows. It skips command tabs, such as
+`git pull`, and shells that have exited.
 
 Diffs, the merge tool, and problem pages open as editor tabs, so your other tabs
 stay in view. The Git Log opens in the bottom panel.

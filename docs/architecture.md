@@ -1638,8 +1638,8 @@ tabs have no **Move to Panel** and can't be dragged to the panel. `closeView`
 closes whichever tab shows an element. A closed view's element is hidden and
 moved back under `body` rather than removed, since its module finds its parts
 by ID. The panel's **+** opens a terminal, and the terminal button shows the
-last terminal (not whatever panel tab is active) or opens one, hiding the
-panel only when a terminal has focus. The session doesn't save views in panes: `runningTerminals`
+last running shell (`isShell`: not a command's tab, such as `git pull`, and not
+exited) or opens one, hiding the panel only when a shell has focus. The session doesn't save views in panes: `runningTerminals`
 includes docked terminals, which reopen in the panel. Opening another project
 moves every view back to the panel first, so `closeTerminals` reaches them, and
 closes editor-only views and the Git Log.
