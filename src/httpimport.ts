@@ -1,5 +1,6 @@
 // Converts other tools' formats to and from .http files: Postman collections, Insomnia exports, and OpenAPI or
 // Swagger documents in; OpenAPI and JUnit XML reports out. Free of editor imports so Node can test it.
+import { parse as parseYaml } from "yaml";
 import { formatRequest, type Header, header, type HttpRequest, newRequest } from "./httpfile.ts";
 
 /** Imported files are JSON of many shapes, read defensively. */
@@ -16,13 +17,14 @@ const multipart = (parts: { name: string; value?: string; file?: string }[]) =>
   parts.map((p) => `--${BOUNDARY}\nContent-Disposition: form-data; name="${p.name}"${p.file ? `; filename="${p.file.split("/").pop()}"` : ""}\n\n${p.file ? `< ${p.file}` : (p.value ?? "")}`).join("\n") + `\n--${BOUNDARY}--`;
 const setHeader = (r: HttpRequest, name: string, value: string) => header(r, name) ?? r.headers.push({ name, value, enabled: true });
 
-/** Reads a Postman collection, Insomnia export, or OpenAPI or Swagger document, whichever the JSON is. */
+/** Reads a Postman collection, Insomnia export, or OpenAPI or Swagger document, whichever the JSON or YAML is. */
 export function importCollection(text: string): Imported {
   let doc: J;
   try {
-    doc = JSON.parse(text);
-  } catch {
-    throw new Error("The file isn't JSON. For an OpenAPI document in YAML, convert it to JSON first.");
+    // YAML is a superset of JSON, but JSON.parse is faster and keeps big collections quick.
+    doc = /^\s*[{[]/.test(text) ? JSON.parse(text) : parseYaml(text);
+  } catch (e) {
+    throw new Error(`The file isn't JSON or YAML: ${e instanceof Error ? e.message.split("\n")[0] : e}`);
   }
   if (/postman/.test(doc?.info?.schema ?? "") || (doc?.info && Array.isArray(doc.item))) return fromPostman(doc);
   if (doc?._type === "export" && Array.isArray(doc.resources)) return fromInsomnia(doc);

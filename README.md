@@ -49,7 +49,7 @@ file to change when you add it.
 | Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | Only SQLite, MySQL, MariaDB, and PostgreSQL connections work. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. There's no gRPC. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Imports read JSON only, not YAML. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
+| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -570,7 +570,7 @@ at the top.
 - **+** adds a request to a file you choose, or to a new file in `http/`.
 - The import icon imports a curl command, such as one from your browser's
   developer tools (**Copy as cURL**), a Postman collection (v2 or v2.1), an
-  Insomnia export (v4), or an OpenAPI 3 or Swagger 2 document in JSON. A
+  Insomnia export (v4), or an OpenAPI 3 or Swagger 2 document, in JSON or YAML. A
   collection becomes one file in `http/`, with each request titled by its
   folders. Postman's variables become file variables, and its auth becomes
   headers; its scripts stay as comments, since they don't run here. An OpenAPI
@@ -578,9 +578,8 @@ at the top.
   `{{host}}` for the server, a variable per path parameter, and a JSON body
   from the example or the schema. Environment variables go to
   `http-client.env.json` (secrets, such as tokens, to
-  `http-client.private.env.json`), keeping values you already have. For YAML,
-  convert the document to JSON first. **HTTP Client: Import…** in ⌘⇧A does the
-  same.
+  `http-client.private.env.json`), keeping values you already have.
+  **HTTP Client: Import…** in ⌘⇧A does the same.
 - The run icon runs every request in the project, file by file.
 - The method icon makes requests from `php artisan route:list`: one route, all
   API routes, or every route. Each gets `{{host}}` for the app's address and a
@@ -844,6 +843,29 @@ WEBSOCKET ws://localhost:8080/app/{{reverbKey}}
 ===
 {"event": "pusher:subscribe", "data": {"channel": "posts"}}
 ```
+
+### gRPC
+
+A `GRPC` request calls a method, written as `host:port/package.Service/Method`
+in JetBrains' format, with the request message as JSON. Use `grpcs://` before
+the address for TLS. Headers go as metadata.
+
+```http
+GRPC localhost:50051/helloworld.Greeter/SayHello
+Authorization: Bearer {{token}}
+
+{"name": "Ada"}
+```
+
+The message types come from the server's reflection service. When the server
+doesn't have one, the project's `.proto` files are compiled instead, with
+imports found from the file's folder and each folder above it. There's nothing
+to install: no `protoc`. The response shows as JSON, with every field, and a
+server streaming method's messages as an array. For a client streaming method,
+write the messages one after another. The status shows as the HTTP status gRPC
+maps to, such as `404 NOT_FOUND`, with `grpc-status` and `grpc-message` among
+the headers, so scripts and the runner treat a failed call as a failed request.
+After the address and `/`, completion lists the server's methods.
 
 ### Running a file
 
@@ -1828,6 +1850,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, and PostgreSQL |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
+| `src-tauri/src/grpc.rs` | gRPC calls for the HTTP client, with schemas from server reflection or the project's `.proto` files |
 | `src-tauri/src/profile.rs` | Reads Xdebug's Cachegrind profiles |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `filament-lsp/server.php` | Filament language server |

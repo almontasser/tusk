@@ -386,3 +386,10 @@ test("hides secrets in headers, the query, and bodies", () => {
   assert.equal(redactHeader("Authorization", "Basic dXNlcjpwYXNz"), "Basic ••••");
   assert.equal(hasSecrets({ ...base, url: "/posts?page=1", headers: [["Accept", "*/*"]], body: '{"title": "x"}' }), false);
 });
+
+test("reads a GRPC request", async () => {
+  const [r] = parseHttpFile("### Say\nGRPC {{grpc}}/test.Echo/Say\nx-token: {{token}}\n\n{\"name\": \"{{name}}\"}\n");
+  assert.equal(r.method, "GRPC");
+  const p = await prepare(r, lookupIn([{ grpc: "localhost:50051", token: "t", name: "Ada" }]), "/p", async () => "");
+  assert.deepEqual([p.method, p.url, p.headers, p.body], ["GRPC", "localhost:50051/test.Echo/Say", [["x-token", "t"]], "{\"name\": \"Ada\"}"]);
+});

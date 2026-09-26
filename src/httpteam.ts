@@ -20,7 +20,7 @@ export function importRequests() {
 }
 
 async function importFile(kind: string) {
-  const path = await open({ multiple: false, directory: false, filters: [{ name: `${kind} (JSON)`, extensions: ["json"] }] });
+  const path = await open({ multiple: false, directory: false, filters: [{ name: `${kind} (JSON or YAML)`, extensions: ["json", "yaml", "yml"] }] });
   if (typeof path !== "string") return;
   let result: Imported;
   try {

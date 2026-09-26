@@ -111,7 +111,7 @@ test("imports OpenAPI 3 and Swagger 2 documents", () => {
   assert.equal(users.url, "{{host}}/api/users");
   assert.deepEqual(JSON.parse(users.body), { email: "{{$random.email}}" });
   assert.equal(login.body, "email=");
-  assert.throws(() => importCollection("openapi: 3.0.0"), /isn't JSON/);
+  assert.throws(() => importCollection("title: 3.0.0"), /isn't a Postman collection/);
   assert.throws(() => importCollection("{}"), /isn't a Postman/);
 });
 
@@ -161,4 +161,31 @@ test("writes a JUnit report", () => {
   assert.match(report, /<testcase classname="http\/posts.http" name="GET List &lt;posts&gt;" time="0.100"\/>/);
   assert.match(report, /<failure message="Test failed: has id: no id">Test failed: has id: no id\nFailed: has id \(no id\)<\/failure>/);
   assert.match(report, /<failure message="Could not resolve host">/);
+});
+
+test("imports OpenAPI and Insomnia documents in YAML", () => {
+  const openapi = `openapi: 3.0.0
+info:
+  title: Pets
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /pets/{id}:
+    get:
+      summary: Show pet
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+`;
+  const result = importCollection(openapi);
+  assert.equal(result.name, "Pets");
+  assert.equal(parseHttp(result.text).requests[0].url, "{{host}}/pets/{{id}}");
+  assert.deepEqual(result.env, { local: { host: "https://api.example.com/v1" } });
+  const insomnia = `_type: export
+__export_format: 4
+resources:
+  - { _id: wrk_1, _type: workspace, name: Shop }
+  - { _id: req_1, _type: request, parentId: wrk_1, name: List, method: GET, url: "{{ _.base }}/items" }
+`;
+  assert.equal(parseHttp(importCollection(insomnia).text).requests[0].url, "{{base}}/items");
+  assert.throws(() => importCollection("a: [b"), /isn't JSON or YAML/);
 });

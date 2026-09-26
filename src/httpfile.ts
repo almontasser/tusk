@@ -60,7 +60,7 @@ export type Tags = {
   budget?: number;
 };
 
-export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT", "GRAPHQL", "WEBSOCKET"];
+export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT", "GRAPHQL", "WEBSOCKET", "GRPC"];
 const REQUEST_LINE = new RegExp(`^(${METHODS.join("|")})\\s+(\\S+)(?:\\s+(HTTP\\/[\\d.]+))?\\s*$`, "i");
 const VAR_LINE = /^@([\w.-]+)\s*=\s*(.*?)\s*$/;
 const TAG_LINE = /^\s*(?:#|\/\/)\s*@([\w-]+)(?:\s+(.*?))?\s*$/;

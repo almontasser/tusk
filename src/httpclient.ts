@@ -17,6 +17,7 @@ import {
   type Prepared,
   redact,
   redactHeader,
+  resolve,
   type ResponseHead,
   type Script,
 } from "./httpfile";
@@ -314,6 +315,7 @@ type Transfer = Pick<Exchange, "heads" | "info" | "bodyPath" | "contentType" | "
 async function transmit(prepared: Prepared, dir: string, store: string, id: string, cookies: string | undefined, cancel: Cancel = {}): Promise<Transfer> {
   const t: Transfer = { heads: [], bodyPath: "", contentType: "" };
   for (const d of [store, cookies && parentOf(cookies)]) if (d) await invoke("create_dir", { path: d }).catch(() => {});
+  if (prepared.method === "GRPC") return transmitGrpc(prepared, `${store}/${id}.json`, id, cancel);
   const files = { headers: `${store}/${id}.headers`, body: `${store}/${id}.body`, cookies };
   let p = prepared;
   const requestBody = `${store}/${id}.request`;
@@ -353,6 +355,31 @@ async function transmit(prepared: Prepared, dir: string, store: string, id: stri
     await invoke("rename_path", { from: files.body, to: t.bodyPath }).catch(() => (t.bodyPath = files.body));
   }
   for (const f of [files.headers, requestBody]) await invoke("remove_path", { path: f }).catch(() => {});
+  return t;
+}
+
+type GrpcResponse = { status: number; status_text: string; headers: [string, string][]; body: string; seconds: number };
+
+/**
+ * Makes a gRPC call through `grpc_call` in src-tauri/src/grpc.rs. The response looks like an HTTP one: gRPC's status
+ * as the HTTP status Google maps it to, metadata as headers, and the messages as a JSON body.
+ */
+async function transmitGrpc(p: Prepared, bodyPath: string, id: string, cancel: Cancel): Promise<Transfer> {
+  const t: Transfer = { heads: [], bodyPath, contentType: "application/json" };
+  cancel.current = () => ((cancel.cancelled = true), invoke("grpc_cancel", { id }));
+  try {
+    const r = await invoke<GrpcResponse>("grpc_call", { id, root: host.root(), target: p.url, body: p.body ?? "", metadata: p.headers, timeout: p.timeout, connectTimeout: p.connectTimeout ?? 10 });
+    await invoke("write_file", { path: bodyPath, contents: r.body });
+    t.heads = [{ status: r.status, statusText: r.status_text, httpVersion: "gRPC", headers: r.headers }];
+    const size = (s = "") => new TextEncoder().encode(s).length;
+    t.info = {
+      ...Object.fromEntries(INFO_FIELDS.map((k) => [k, 0])),
+      ...{ time_starttransfer: r.seconds, time_total: r.seconds, size_download: size(r.body), size_upload: size(p.body), remote_ip: p.url.replace(/^\w+:\/\//, "").split("/")[0], url_effective: p.url, http_version: "gRPC", errormsg: null },
+    } as CurlInfo;
+  } catch (e) {
+    t.error = String(e);
+  }
+  cancel.current = undefined;
   return t;
 }
 
@@ -599,7 +626,7 @@ monaco.languages.setLanguageConfiguration("http", {
 });
 // A request line starts the headers; a blank line starts the body, which is JSON when it starts with { or [.
 // Scripts between {% and %} are JavaScript.
-const methods = /(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT)(?=\s)/;
+const methods = /(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT|GRPC)(?=\s)/;
 // Monarch only embeds a language whose grammar has loaded, and Monaco loads JavaScript's and JSON's on first use,
 // so the http grammar loads them first.
 monaco.languages.onLanguage("http", async () => {
@@ -688,8 +715,16 @@ async function variablesFor(model: monaco.editor.ITextModel) {
   return { known, dotenv: s.dotenv, env: s.env };
 }
 
+/** A gRPC server's methods, from its reflection or the project's .proto files, cached for the session like GraphQL schemas. */
+const grpcCache = new Map<string, Promise<string[]>>();
+const grpcMethods = (address: string) => {
+  // An empty list isn't kept, so a server that starts later gets asked again.
+  if (!grpcCache.has(address)) grpcCache.set(address, invoke<string[]>("grpc_methods", { root: host.root(), address }).catch(() => []).then((list) => (list.length || grpcCache.delete(address), list)));
+  return grpcCache.get(address)!;
+};
+
 monaco.languages.registerCompletionItemProvider("http", {
-  triggerCharacters: ["{", "$", "@", ":", " "],
+  triggerCharacters: ["{", "$", "@", ":", " ", "/"],
   provideCompletionItems: async (model, position) => {
     const line = model.getLineContent(position.lineNumber);
     const before = line.slice(0, position.column - 1);
@@ -708,6 +743,13 @@ monaco.languages.registerCompletionItemProvider("http", {
           ...DYNAMIC.map((name) => ({ label: name, kind: Kind.Function, detail: "Dynamic value", insertText: name + close, range: r, sortText: `~${name}` })),
         ].filter((s) => !typed || s.label.toLowerCase().includes(typed.trim().toLowerCase().replace(/^\$/, "")) || s.label.startsWith(typed.trim())),
       };
+    }
+    const grpc = before.match(/^\s*GRPC\s+((?:\w+:\/\/)?[^\s/]+)\/([\w./]*)$/i);
+    if (grpc) {
+      const s = await scopes(model.uri.fsPath, model.getValue());
+      const address = resolve(grpc[1], lookupIn(s.list.map((l) => l.vars), s.dotenv));
+      const r = new monaco.Range(position.lineNumber, position.column - grpc[2].length, position.lineNumber, position.column);
+      return { suggestions: (await grpcMethods(address)).map((m) => ({ label: m, kind: Kind.Method, detail: address, insertText: m, range: r })) };
     }
     if (/^\s*#\s*@[\w-]*$/.test(before)) return { suggestions: TAGS.map((t) => ({ label: t, kind: Kind.Keyword, insertText: t, range })) };
     const { requests } = parseHttp(model.getValue());
