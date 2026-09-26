@@ -1643,7 +1643,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, and Clover coverage reports, and builds rerun filters |
 | `src/coverage.ts` | Code coverage marks in the gutter and the Coverage tab |
 | `src/profiler.ts` | Profiling runs, the profile list, and the Profiler tab |
-| `src/cachegrind.ts` | Reads Xdebug's Cachegrind profiles |
+| `src/cachegrind.ts` | Xdebug's profiles as the Profiler tab uses them, and the queries from its traces |
 | `src/phptests.ts` | Finds PHPUnit and Pest tests in a file |
 | `src/sail.ts` | Runs commands in Laravel Sail or a Docker Compose service when its containers are up |
 | `src/files.ts` | File operations and the tree's context menu |
@@ -1692,6 +1692,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, and PostgreSQL |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
+| `src-tauri/src/profile.rs` | Reads Xdebug's Cachegrind profiles |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `filament-lsp/server.php` | Filament language server |
 | `filament-lsp/introspect.php` | Reads resources and models from the project |

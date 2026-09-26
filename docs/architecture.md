@@ -2482,14 +2482,12 @@ Memory comes from the second event, `Memory_(bytes)`. Xdebug measures it as
 the growth in memory use over a call, so the own amounts don't add up to a
 caller's, and the table shows only the total, counted like total time.
 
-A long test's profile can be gigabytes of text, too large for one string. The
-editor reads the gzipped file as bytes (`read_bytes`), decompresses it with
-`DecompressionStream`, and feeds the parser line by line
-(`cachegrindParser`), letting the window handle input between chunks. The file
-goes in as 64 KB slices: given one chunk, WebKit's `DecompressionStream`
-returns the whole file in one chunk too. Yields go through a `MessageChannel`
-every 50 ms: while the window is hidden, WebKit runs a page's tasks only a few
-times a second, and `setTimeout` once a second.
+Profiles parse in Rust (`parse_profile` in `src-tauri/src/profile.rs`). A long
+test's profile can be gigabytes of text: Rust decompresses it and reads it
+line by line, so it never has to fit in memory, and a 1.6 GB profile parses in
+about 7 seconds in a release build. Names are interned, so functions and files
+are indexes while parsing. The result refers to functions by index, and
+`fromRaw` in `src/cachegrind.ts` turns those into references.
 
 Profile URL starts the profiling server when this session hasn't, or when its
 port no longer answers, and requests the path with `curl`. Xdebug finishes a
@@ -2559,11 +2557,12 @@ deletes older ones, since a Laravel request's profile can be several megabytes.
 The profiling server checks ports from 8000 with `lsof` and takes the first
 free one.
 
-Xdebug gzips profiles by default. macOS's `/usr/bin/gzip -dc` decompresses them
-through `run_capture`, so no Rust crate was added. `stat -f "%m %z %N"` lists
+Xdebug gzips profiles by default. `flate2` decompresses them as they're read.
+The SQL traces next to them are smaller and still go through macOS's
+`/usr/bin/gzip -dc` and `run_capture`. `stat -f "%m %z %N"` lists
 profiles with their time and size.
 
-`parseCachegrind` in `src/cachegrind.ts` reads the format line by line. Xdebug
+`parse` in `src-tauri/src/profile.rs` reads the format line by line. Xdebug
 writes one block per call, after the call returns, so blocks come in post-order:
 a block's callees are the last blocks no caller has claimed yet, one per
 `calls=` line. Each block

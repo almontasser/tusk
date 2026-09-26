@@ -1,6 +1,7 @@
 mod db;
 mod fs;
 mod lsp;
+mod profile;
 mod pty;
 mod search;
 mod tools;
@@ -72,7 +73,7 @@ pub fn run() {
             db::db_tunnel,
             fs::read_dir,
             fs::read_file,
-            fs::read_bytes,
+            profile::parse_profile,
             fs::write_file,
             fs::rename_path,
             fs::remove_path,

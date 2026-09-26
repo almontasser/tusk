@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import { type Call, type CallNode, cachegrindParser, groupQueries, hotSpots, parseSqlTrace, type Profile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
+import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
 import { openTerminal, showPanelView } from "./terminal";
@@ -284,14 +284,12 @@ export async function openProfile(path: string, label?: string) {
 async function load(path: string): Promise<Profile | null> {
   host.status(`Reading ${path.split("/").pop()}…`, "profiler:progress");
   const done = (message = "") => (host.status("", "profiler:progress"), message && host.status(message), null);
-  let bytes: ArrayBuffer;
+  let parsed: Profile;
   try {
-    bytes = await invoke<ArrayBuffer>("read_bytes", { path });
+    parsed = fromRaw(await invoke<RawProfile>("parse_profile", { path }));
   } catch (e) {
     return done(`Couldn't read the profile: ${e}`);
   }
-  const parsed = await parse(bytes, path.endsWith(".gz"), path.split("/").pop()!).catch((e) => done(`Couldn't read the profile: ${path} failed to parse (${e.message}).`));
-  if (!parsed) return null;
   if (!parsed.functions.length) return done(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
   done();
   return parsed;
@@ -402,47 +400,6 @@ function showInsights() {
     row.append(note, stop);
   }
   row.hidden = !row.childElementCount;
-}
-
-/** Lets the window handle input. Not with setTimeout, which WebKit slows to once a second while the window is hidden. */
-const nextTask = () =>
-  new Promise<void>((resolve) => {
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => resolve();
-    channel.port2.postMessage(null);
-  });
-
-/**
- * Decompresses and parses a profile as it streams: a long test's profile can be gigabytes of text, too large for one
- * string. It runs in slices, letting the window handle input between them.
- */
-async function parse(file: ArrayBuffer, gzip: boolean, name: string) {
-  // Fed in small slices: given the file in one chunk, WebKit's DecompressionStream returns it in one chunk too.
-  let offset = 0;
-  let bytes: ReadableStream = new ReadableStream({
-    pull(stream) {
-      if (offset >= file.byteLength) return stream.close();
-      stream.enqueue(new Uint8Array(file, offset, Math.min(65536, file.byteLength - offset)));
-      offset += 65536;
-    },
-  });
-  if (gzip) bytes = bytes.pipeThrough(new DecompressionStream("gzip"));
-  const reader = bytes.pipeThrough(new TextDecoderStream()).getReader();
-  const parser = cachegrindParser();
-  let rest = "";
-  let yielded = performance.now();
-  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
-    const lines = (rest + chunk.value).split("\n");
-    rest = lines.pop()!;
-    for (const line of lines) parser.line(line);
-    // Every 50 ms rather than every chunk: while the window is hidden, WebKit lets a page run only a few tasks a second.
-    if (performance.now() - yielded < 50) continue;
-    host.status(`Reading ${name}… ${Math.floor((offset / file.byteLength) * 100)}%`, "profiler:progress");
-    await nextTask();
-    yielded = performance.now();
-  }
-  parser.line(rest);
-  return parser.end();
 }
 
 // ---- The Profiler tab ----

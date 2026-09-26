@@ -37,6 +37,8 @@ native-tls = "0.2"
 postgres-native-tls = "0.5"
 tungstenite = { version = "0.28", features = ["native-tls"] }
 base64 = "0.22"
+flate2 = "1"
+rustc-hash = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
