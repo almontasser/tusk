@@ -2,7 +2,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import DOMPurify from "dompurify";
 import * as monaco from "monaco-editor";
-import { markdownBlocks, previewScrollTop, resolveLink } from "./markdown";
+import { resolveLink } from "./links";
+import { markdownBlocks, previewScrollTop } from "./markdown";
 import { closeView, showEditorView } from "./terminal";
 
 type Preview = { el: HTMLElement; sync(ed: monaco.editor.ICodeEditor): void; close(): void };

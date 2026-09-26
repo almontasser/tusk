@@ -42,6 +42,7 @@ import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
+import { initJsonSchemas } from "./jsonschemas";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1578,6 +1579,7 @@ const settingsLoaded = initSettings();
 initSnippets();
 initBookmarks({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initFormatting({ root: () => root, status });
+initJsonSchemas();
 initConflicts();
 initHistory({ root: () => root, status });
 initSearch({ root: () => root, openAt, markSaved, status, showView });

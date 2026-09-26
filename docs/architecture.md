@@ -2382,6 +2382,21 @@ Two client features were added for it, and any server can use them:
 - **`textDocument/documentColor`** and **`textDocument/colorPresentation`**,
   mapped to a Monaco color provider, which draws swatches and a color picker.
 
+## JSON schemas
+
+`jsonschemas.ts` feeds Monaco's JSON worker its schemas through
+`jsonDefaults.setDiagnosticsOptions({ schemas, enableSchemaRequest: false })`.
+The bundled schemas live in `src/schemas`, fetched and minified by
+`scripts/fetch-schemas.ts`, and load as separate chunks with the first JSON
+model. Each one's `uri` is its `$id` or published URL, so a `$schema` or a
+`$ref` naming that URL resolves to the bundled copy. The script replaces a
+`$ref` to a schema that isn't bundled (package.json's refs to nodemon, ava,
+stylelint, and others) with `{}`, since an unresolved one shows as a warning on
+line 1 of every file using the schema. For a `$schema` that's a path
+(`localSchemaPath` in `links.ts`), the worker resolves it against the file's
+URI; the client reads that file, adds it under the same `file://` URI, and
+updates it as you edit it in an open tab.
+
 ## Formatting (frontend step 2)
 
 `src/format.ts` registers one formatting provider for PHP, Blade, JavaScript,
@@ -3465,3 +3480,11 @@ The preview reuses `marked` and DOMPurify, already loaded for pull request
 descriptions, instead of Monaco's Markdown renderer, which can't map blocks to
 lines. Images go through a bytes command rather than Tauri's asset protocol,
 which would need a new Cargo feature and a file scope in `tauri.conf.json`.
+
+### 2026-09-26: Bundle JSON schemas instead of letting Monaco download them
+
+Monaco can fetch a schema by URL, but that sends requests from a page that can
+call the app's commands, fails offline, and would download schemastore.org's
+schemas at every launch. About 600 KB of schemas, loaded only with the first
+JSON file, cover the config files PHP and frontend projects have. Refs to
+schemas left out validate nothing rather than failing.

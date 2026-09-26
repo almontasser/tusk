@@ -1603,6 +1603,15 @@ A file with errors shows its name in red with a wavy underline in the file
 tree and on its tab, and the folders that contain it show their names in red.
 The Problems button in the activity bar shows the error count.
 
+JSON config files are checked against their schemas, with completion and
+hovers from them too: `composer.json`, `package.json`, `tsconfig.json` (and
+`tsconfig.*.json`), `jsconfig.json`, `.eslintrc.json`, `.prettierrc.json`,
+`.babelrc.json`, and `babel.config.json`. The schemas ship with the editor, so
+this works offline. A file whose `$schema` names one of these schemas' URLs
+gets the bundled copy, and a file whose `$schema` is a path, such as
+`"./config.schema.json"`, is checked against that file. Other URLs aren't
+downloaded.
+
 Deprecated methods, classes, and functions show struck through, and unused
 imports faded, as in VS Code. Hovers lay out long signatures with one parameter per line.
 
@@ -1750,6 +1759,10 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/bookmarks.ts` | Bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
+| `src/markdownpreview.ts` | The Markdown preview tab |
+| `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
+| `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |
+| `src/jsonschemas.ts` | Checks JSON config files against the bundled schemas in `src/schemas` |
 | `src/localhistory.ts` | Local history of saved, changed, and deleted files |
 | `src/retention.ts` | Which local history versions to delete |
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
@@ -1797,6 +1810,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `filament-lsp/tests.php` | Filament server tests |
 | `node-tools/` | The pinned Node language servers (`package.json` and lockfile) |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools, one folder per tool |
+| `scripts/fetch-schemas.ts` | Downloads the JSON schemas in `src/schemas` |
 | `scripts/publish-tools.ts` | Publishes the tools the app downloads |
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |
