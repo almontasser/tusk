@@ -403,8 +403,9 @@ excludes, such as `vendor`, aren't searched.
 
 Press F3 to bookmark the current line, and F3 again to remove the bookmark. A
 bookmark shows as a blue marker in the gutter and moves with its line as you
-edit. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved per
-project.
+edit. You can also right-click the gutter at a line and choose **Add
+Bookmark**. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved
+per project.
 
 ## Snippets
 
@@ -1064,9 +1065,13 @@ first time you open one of its files. TypeScript files see the types of the
 Svelte and Astro components they import.
 ## Tests and commands
 
-In test files, **▶ Run test** and **▶ Run all tests in file** links appear above
-PHPUnit test methods (`test*` methods, `#[Test]`, and `@test`) and Pest `it()`
-and `test()` calls, including those inside `describe()`. Tests run through
+In test files, a green ▶ appears in the gutter beside PHPUnit test methods
+(`test*` methods, `#[Test]`, and `@test`), Pest `it()` and `test()` calls
+(including those inside `describe()`), and the class, which runs every test in
+the file. Click it, or right-click the gutter at that line, to run, debug, run
+with coverage, or profile the test. To see **▶ Run test**, **Debug**, and
+**Profile** links above each test instead, turn off **Show run buttons for
+tests in the gutter** in Settings. Tests run through
 `php artisan test` in Laravel projects, and through `vendor/bin/pest` or
 `vendor/bin/phpunit` otherwise. To run the whole suite, run **Run All Tests**
 from ⌘⇧A.
@@ -1139,7 +1144,13 @@ Selected**, and works the same way.
 
 The editor marks lines that differ from the last commit in the gutter: green
 for added lines, blue for changed lines, and a gray triangle where lines were
-deleted. The markers update as you type. The line with the cursor shows who
+deleted. The markers update as you type. Click a marker to see the lines as
+they are at HEAD in a box below the change. Its buttons move to the previous
+or next change, stage the change, or roll it back. Press Esc to close it.
+Right-click a changed line for **Show Change**, **Rollback Change**, and
+**Stage Change**. Staging a change adds only that change to the index.
+**Next Change** (⌃⌥⇧↓) and **Previous Change** (⌃⌥⇧↑) move the cursor between
+changes. The line with the cursor shows who
 last changed it, when, and the commit message. To show the commit, age, and
 author of every line in place of line numbers, run **Annotate with Git Blame**
 from ⌘⇧A. Run it again to hide them.

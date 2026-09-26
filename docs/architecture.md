@@ -1653,8 +1653,12 @@ suffix, so `test_a` doesn't also run `test_a_twice`. PHPUnit filters are
 first as `` `group` → ``, so Pest filters are `::(?:.* → )?description`. The module has no editor imports, so `src/phptests.test.ts` runs
 under Node.
 
-`src/runner.ts` registers a Monaco code lens provider for files under `tests/`
-or named `*Test.php`, and runs tests and commands in terminal tabs through
+`src/runner.ts` adds run buttons to files under `tests/` or named `*Test.php`:
+glyph-margin decorations in the right lane, with the class `test-run`, updated
+300 ms after an edit. `attachTestRunner` opens the run menu on a click, and
+the breakpoint click handler skips that class. With the **Show run buttons for
+tests in the gutter** setting off, the decorations go and a code lens provider
+shows the links instead; its `onDidChange` fires on every settings change. It and runs tests and commands in terminal tabs through
 `openTerminal`. It remembers the last run for ⌃R.
 
 Run Anything loads `php artisan list --format=json` once per project through
@@ -1827,7 +1831,15 @@ replacement without the added line.
   with the file at `HEAD` (`git show HEAD:<path>`, kept as lines until `HEAD`
   moves). It trims the lines both versions share at the start and end, then
   runs a longest common subsequence on the rest. It runs 200 ms after you stop
-  typing, so the markers include unsaved edits.
+  typing, so the markers include unsaved edits. Each change carries a `block`
+  in the diff editor's line-change shape, which maps it to the HEAD lines.
+  **Rollback** replaces the block's lines with HEAD's in one undoable edit.
+  **Stage** diffs the index (`git show :./<path>`) against the editor text,
+  takes the blocks that overlap the change, and writes the result with
+  `hash-object` and `update-index`, as Stage Selected does in the diff view.
+  The inline diff is a view zone below the change, with the HEAD lines
+  colorized by `monaco.editor.colorize`. PHP gets an opening tag first, or it
+  colorizes as HTML. The zone closes on any edit, since the changes move.
 - **Inline blame.** For the cursor line, the editor shows the author, age, and
   commit message as text after the line. Blame runs `git blame --porcelain
   --contents -` with the editor text on standard input, so lines you haven't

@@ -1240,4 +1240,4 @@ main:has(#diff:not([hidden])) #empty-editor { display: none; }
 .change-peek-bar span:first-child { margin-right: auto; }
 .change-peek-bar button { display: flex; padding: 3px; border-radius: 4px; }
 .change-peek-bar button:hover { background: var(--hover); }
-.change-peek pre { margin: 0 0 12px; padding-left: 10px; background: color-mix(in srgb, var(--red) 14%, transparent); white-space: pre; overflow: hidden; }
+.change-peek pre { margin: 0 0 12px; background: color-mix(in srgb, var(--red) 14%, transparent); white-space: pre; overflow: hidden; }

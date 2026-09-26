@@ -744,7 +744,7 @@ function peekChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
   const lines = oldLines(state.head, c.block);
   const count = (n: number) => `${n} ${n === 1 ? "line" : "lines"}`;
   const size = c.end - c.start + 1;
-  const title = c.kind === "added" ? `Added ${count(size)}` : c.kind === "deleted" ? `Deleted ${count(lines.length)}` : `Changed ${count(lines.length)} to ${count(size)}`;
+  const title = c.kind === "added" ? `Added ${count(size)}` : c.kind === "deleted" ? `Deleted ${count(lines.length)}` : lines.length === size ? `Changed ${count(size)}` : `Changed ${count(lines.length)} to ${count(size)}`;
   const dom = document.createElement("div");
   dom.className = "change-peek";
   dom.innerHTML = `<div class="change-peek-bar"><span></span>${[
@@ -756,12 +756,15 @@ function peekChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
   ]
     .map(([run, icon, label]) => `<button data-run="${run}" title="${label}" aria-label="${label}"><span class="codicon codicon-${icon}"></span></button>`)
     .join("")}</div><pre></pre>`;
-  dom.querySelector("span")!.textContent = `${title} · HEAD`;
+  dom.querySelector("span")!.textContent = lines.length ? `${title}. At HEAD:` : title;
   const pre = dom.querySelector("pre")!;
   const { fontFamily, fontSize, lineHeight } = editor.getOption(monaco.editor.EditorOption.fontInfo);
   pre.style.cssText = `font-family: ${fontFamily}; font-size: ${fontSize}px; line-height: ${lineHeight}px`;
   pre.hidden = !lines.length;
-  if (lines.length) monaco.editor.colorize(lines.join("\n"), model.getLanguageId(), {}).then((html) => (pre.innerHTML = html));
+  // PHP lines without an opening tag would colorize as HTML, so colorize after one and drop its line.
+  const php = model.getLanguageId() === "php";
+  if (lines.length)
+    monaco.editor.colorize((php ? "<?php\n" : "") + lines.join("\n"), model.getLanguageId(), {}).then((html) => (pre.innerHTML = php ? html.slice(html.indexOf("<br/>") + 5) : html));
   const runs: Record<string, () => unknown> = {
     previous: () => goToChange(editor, -1, true),
     next: () => goToChange(editor, 1, true),
