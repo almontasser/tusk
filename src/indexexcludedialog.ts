@@ -4,22 +4,22 @@ import { invoke } from "@tauri-apps/api/core";
 import { h, icon, iconButton } from "./dom";
 import { covers, DEFAULT_EXCLUDES } from "./indexexclude";
 
-type Folder = { path: string; files: number; bytes: number };
+export type Folder = { path: string; files: number; bytes: number };
 type Options = {
   root: string;
   list: string[];
   shared: boolean;
-  /** Before a project's first index: scans at once, and offers to keep the defaults instead. */
-  firstIndex?: boolean;
+  /** The scan's result, when it has already run. */
+  found?: Folder[];
 };
 
 const size = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`);
 
 /** Opens the dialog. Resolves with the list and where to keep it, or null when cancelled. */
-export function editExclusions({ root, list: initial, shared: initialShared, firstIndex = false }: Options): Promise<{ list: string[]; shared: boolean } | null> {
+export function editExclusions({ root, list: initial, shared: initialShared, found: scanned }: Options): Promise<{ list: string[]; shared: boolean } | null> {
   document.getElementById("index-exclusions")?.remove();
   let list = [...initial];
-  let found: Folder[] | null = null;
+  let found: Folder[] | null = scanned ?? null;
   /** Suggestions left unchecked, by path. */
   const unchecked = new Set<string>();
   let resolved: { list: string[]; shared: boolean } | null = null;
@@ -33,7 +33,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fir
   // Focused first, so Enter adds a folder instead of pressing the first row's remove button.
   const addInput = h("input", { placeholder: "vendor/package/data or vendor/**/fixtures", spellcheck: false, ariaLabel: "Folder to skip", autofocus: true });
   const sharedBox = h("input", { type: "checkbox", checked: initialShared });
-  const saveButton = h("button", { type: "button", class: "primary", textContent: firstIndex ? "Save and Index" : "Save and Reindex" });
+  const saveButton = h("button", { type: "button", class: "primary", textContent: "Save and Reindex" });
 
   const pending = () => (found ?? []).filter((f) => !covers(list, f.path));
   const result = () => [...list, ...pending().filter((f) => !unchecked.has(f.path)).map((f) => f.path)];
@@ -54,7 +54,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fir
     suggestions.hidden = !rows.length;
     if (found) scanStatus.textContent = rows.length ? `${rows.length} ${rows.length === 1 ? "folder declares" : "folders declare"} nothing. Checked ones are skipped when you save.` : "No other vendor folder of 100 KB or more declares nothing.";
     const changed = JSON.stringify(result()) !== JSON.stringify(initial) || sharedBox.checked !== initialShared;
-    saveButton.disabled = !firstIndex && !changed;
+    saveButton.disabled = !changed;
   };
 
   async function scan() {
@@ -78,7 +78,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fir
     h(
       "form",
       { method: "dialog" },
-      h("h2", {}, firstIndex ? "Before the First Index" : "Index Exclusions"),
+      h("h2", {}, "Index Exclusions"),
       h(
         "p",
         { class: "muted" },
@@ -92,7 +92,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fir
         "div",
         { class: "buttons" },
         h("label", { class: "shared", title: `${root}/tusk.json` }, sharedBox, "Share with the project in tusk.json"),
-        h("button", { type: "button", textContent: firstIndex ? "Keep Defaults" : "Cancel", onclick: () => dialog.close() }),
+        h("button", { type: "button", textContent: "Cancel", onclick: () => dialog.close() }),
         saveButton,
       ),
     ),
@@ -107,6 +107,5 @@ export function editExclusions({ root, list: initial, shared: initialShared, fir
       resolve(resolved);
     };
     dialog.showModal();
-    if (firstIndex) scan();
   });
 }

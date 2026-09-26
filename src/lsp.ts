@@ -14,7 +14,8 @@ import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, 
 import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
 import { covers, exclusionsFor, magoExcludes, phpactorPatterns, saveExclusions } from "./indexexclude";
-import { editExclusions } from "./indexexcludedialog";
+import { editExclusions, type Folder } from "./indexexcludedialog";
+import { toast } from "./dom";
 
 type M = typeof monaco.languages;
 
@@ -1186,24 +1187,29 @@ export async function startLsp(root: string, h: Host) {
   // New alias stubs get into the index only with a full build.
   if (aliasDir?.fresh && !fullBuild) reindex();
   else checkComposerLock(root, fullBuild);
-  if (!excluded.set) firstIndexReview(root, excluded.list);
+  if (!excluded.set) suggestExclusions(root, excluded.list);
 }
 
 /**
- * Offers a project that never set its index exclusions the scan's suggestions, once. The servers don't wait for
- * the answer: the dialog opens as the first index starts, and saving a change starts it again from nothing.
+ * Once per project that never set its index exclusions, scans vendor for more folders that declare nothing and,
+ * when there are some, says so in a toast whose Review opens the dialog with the scan's result. Nothing waits.
  */
-async function firstIndexReview(root: string, list: string[]) {
-  const key = `indexExcludeReviewed:${root}`;
+async function suggestExclusions(root: string, list: string[]) {
+  const key = `indexExcludeHinted:${root}`;
   try {
     if (localStorage.getItem(key)) return;
     localStorage.setItem(key, "1");
   } catch {
-    return; // Without storage, it would ask at every start.
+    return; // Without storage, it would hint at every start.
   }
-  const chosen = await editExclusions({ root, list, shared: false, firstIndex: true });
-  const changed = chosen && (chosen.shared || JSON.stringify(chosen.list) !== JSON.stringify(list));
-  if (changed && root === projectRoot) await setExclusions(chosen.list, chosen.shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
+  const found = await invoke<Folder[]>("symbol_free_folders", { root }).catch(() => []);
+  const more = found.filter((f) => !covers(list, f.path));
+  if (!more.length || root !== projectRoot) return;
+  const mb = (more.reduce((n, f) => n + f.bytes, 0) / 1024 / 1024).toFixed(1);
+  toast(`Indexing can skip ${more.length} more vendor ${more.length === 1 ? "folder" : "folders"} (${mb} MB) whose PHP files declare no classes or functions.`, {
+    kind: "info",
+    action: { label: "Review", run: () => manageExclusions(root, found) },
+  });
 }
 
 /** The Mago settings the servers use, or undefined when the project has its own mago.toml. */
@@ -1358,8 +1364,8 @@ export async function setExclusions(list: string[], shared: boolean) {
 }
 
 /** Opens the Index Exclusions dialog, and reindexes when the list changes. */
-export async function manageExclusions(root: string) {
-  const chosen = await editExclusions({ root, ...(await exclusionsFor(root)) });
+export async function manageExclusions(root: string, found?: Folder[]) {
+  const chosen = await editExclusions({ root, ...(await exclusionsFor(root)), found });
   if (chosen) await setExclusions(chosen.list, chosen.shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
 }
 

@@ -476,6 +476,10 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #toasts { position: fixed; right: 16px; bottom: 40px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
 .toast { pointer-events: auto; max-width: 420px; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-radius: 8px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; -webkit-user-select: text; user-select: text; }
 .toast .codicon { color: var(--red); margin-top: 1px; }
+.toast.info .codicon-info { color: var(--accent); }
+.toast .codicon-close { color: var(--faint); }
+.toast .toast-action { flex-shrink: 0; margin-left: 4px; padding: 2px 10px; color: var(--text); border: 1px solid var(--input-border); border-radius: var(--radius); }
+.toast .toast-action:hover { background: var(--hover); }
 .toast p { margin: 0; overflow-wrap: anywhere; }
 .toast button { margin-left: 6px; color: var(--faint); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }

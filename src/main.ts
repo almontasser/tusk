@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
+import { toast } from "./dom";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
@@ -708,20 +709,6 @@ function status(text: string, source = "app") {
   $("lsp-status").classList.toggle("busy", latestSource.endsWith(":progress"));
   // Failures also show as a toast, so they aren't missed in the status bar.
   if (/\b(failed|error|fatal|can't|couldn't|invalid)\b/i.test(text)) toast(text);
-}
-
-/** Shows an error message in the corner for a few seconds. */
-function toast(text: string) {
-  console.warn(`[toast] ${text}`); // So an error can be traced after the toast closes.
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.innerHTML = `<span class="codicon codicon-error"></span><p></p><button class="codicon codicon-close" aria-label="Dismiss"></button>`;
-  // Git's "hint:" lines repeat advice; the first lines carry the error.
-  el.querySelector("p")!.textContent = text.split("\n").filter((l) => l.trim() && !l.startsWith("hint:")).join(" ");
-  const close = () => el.remove();
-  el.querySelector("button")!.onclick = close;
-  $("toasts").append(el);
-  setTimeout(close, 6000);
 }
 
 // ---- Status bar items for the focused editor ----
