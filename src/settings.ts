@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
 import { choose, pick, rank } from "./palette";
 import { applyTheme, importThemeFile, loadImportedThemes, removeImportedTheme, themeList } from "./themes";
+import { setVim } from "./vim";
 
 export type Settings = {
   /** A theme id from themes.ts, or "system" for darkTheme or lightTheme to match macOS. */
@@ -23,6 +24,7 @@ export type Settings = {
   spellCheck: boolean;
   /** Run buttons for tests in the gutter; off shows Run, Debug, and Profile links above each test instead. */
   testGutterIcons: boolean;
+  vim: boolean;
   aiCompletion: boolean;
   /** A key of MODELS in ai.ts. */
   aiModel: string;
@@ -45,6 +47,7 @@ const defaults: Settings = {
   formatOnSave: false,
   spellCheck: true,
   testGutterIcons: true,
+  vim: false,
   aiCompletion: false,
   aiModel: "qwen2.5-coder-3b",
   keymap: {},
@@ -72,6 +75,7 @@ const fields: Field[] = [
   { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
   { key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
+  { key: "vim", label: "Vim emulation", type: "checkbox", help: "The status bar shows the mode. ⌃ keys go to Vim while you type in the editor." },
   { section: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
   {
     key: "aiModel",
@@ -142,6 +146,7 @@ function apply() {
       minimap: { enabled: settings.minimap },
       inlayHints: { enabled: settings.inlayHints ? "on" : "off" },
     });
+    setVim(ed, settings.vim);
   }
   listeners.forEach((fn) => fn(settings));
 }
@@ -171,7 +176,10 @@ export function addEditor(ed: monaco.editor.ICodeEditor) {
 }
 
 /** Stops applying settings to a disposed editor. */
-export const removeEditor = (ed: monaco.editor.ICodeEditor) => (editors = editors.filter((e) => e !== ed));
+export function removeEditor(ed: monaco.editor.ICodeEditor) {
+  editors = editors.filter((e) => e !== ed);
+  setVim(ed, false);
+}
 
 /** Loads settings from disk and applies them. Unknown or invalid values fall back to defaults. */
 export async function initSettings() {

@@ -1568,6 +1568,8 @@ window.addEventListener(
     const combo = comboOf(e);
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo);
     if (!action || (action.editorOnly && !editor.hasTextFocus()) || (action.when && !action.when())) return;
+    // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
+    if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
     const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
     if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;

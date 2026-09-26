@@ -123,6 +123,17 @@ when `theme` is `system`, which follows `prefers-color-scheme` as it changes.
 Other modules react through `onSettings`. No editor is created with a `theme`
 option, because that would reset Monaco's global theme.
 
+`apply` also calls `setVim` in `src/vim.ts` for each editor, and
+`removeEditor` turns Vim off before a pane's editor is disposed. `monaco-vim`
+loads with a dynamic `import()` the first time Vim is on, as its own chunk.
+Each editor gets a span in `#vim-status` for monaco-vim's status bar (the
+mode and the `:` input), and only the last focused editor's span shows. With
+Vim on, the global key handler passes ⌃ and a letter (and ⌃[) to the editor
+when it has focus, so Vim's ⌃D, ⌃R, and ⌃V work. `vite.config.ts` aliases
+`monaco-vim` to its ES module build, since the `browser` export is UMD, and
+maps its `monaco-editor/esm/vs/...` imports to monaco-editor 0.56's export
+paths.
+
 ### Color themes
 
 `src/themes.ts` lists every theme (`themeList`) and applies one
@@ -3471,3 +3482,13 @@ now records a double tap of any modifier and saves it in `keymap` like a
 combination, and the double-tap handler runs whichever action has it. Double
 taps of ⌥ and ⌘ come for free, since detection doesn't care which modifier it
 is.
+
+### 2026-09-26: Vim emulation with monaco-vim
+
+monaco-vim ports CodeMirror's Vim keymap, the most complete Vim emulation for
+Monaco, and is bundled from npm, so nothing is installed. It's off by default
+and loads only when turned on, which keeps about 100 KB out of startup. It
+targets older Monaco releases, so a few commands that reach into Monaco's
+internals, such as `>>` on an empty line, may not behave like Vim. ⌃ letter
+keys go to Vim in the editor, since Vim users expect ⌃D and ⌃R; the actions on
+them (Type Hierarchy, Rerun) still work from ⌘⇧A or outside the editor.

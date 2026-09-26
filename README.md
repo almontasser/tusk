@@ -290,10 +290,19 @@ AI, and Spelling. Changes apply immediately and are saved in
 | Show the minimap | Off |
 | Show inlay hints | On |
 | Show the cursor line's problem at the end of the line | Off |
+| Vim emulation | Off |
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+
+### Vim emulation
+
+Turn on **Vim emulation** in Settings to edit with Vim keys, through
+[monaco-vim](https://github.com/brijeshb42/monaco-vim). It switches on and off
+at once, without a restart. The status bar shows the mode, such as `--NORMAL--`,
+and the `:` command line. While you type in the editor, ⌃ and a letter, such
+as ⌃D or ⌃R, go to Vim instead of the app's shortcut; ⌘ shortcuts still work.
 
 ### Color themes
 
