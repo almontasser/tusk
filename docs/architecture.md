@@ -2322,7 +2322,11 @@ Each project's session is saved in `localStorage` under `session:<root>`:
 
 The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
 sidebar view), when the page unloads or the window loses focus, and before it
-opens another folder. When it opens a folder, it expands the saved folders,
+opens another folder. Quitting with ⌘Q doesn't unload the page, and terminal
+output and panel tabs change without editor events, so a terminal printing or
+the panel's tabs changing (`onPanelChange` in `terminal.ts`) also saves within
+a second. That save is throttled, not debounced, so a dev server that keeps
+logging still gets saved. When it opens a folder, it expands the saved folders,
 reopens the tabs, skips files that no longer exist, splits the panes again,
 and reopens the terminals, after the language servers start.
 

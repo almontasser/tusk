@@ -41,7 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -554,6 +554,10 @@ function saveSession() {
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 const saveSoon = () => (clearTimeout(saveTimer), (saveTimer = setTimeout(saveSession, 500)));
 window.addEventListener("beforeunload", saveSession);
+// Quitting the app doesn't unload the page, and terminal output and panel tabs (such as the debugger's) change without
+// editor events, so save within a second of them. Not debounced: a busy dev server would put the save off for good.
+let panelSave: ReturnType<typeof setTimeout> | undefined;
+onPanelChange(() => (panelSave ??= setTimeout(() => ((panelSave = undefined), saveSession()), 1000)));
 
 async function restoreSession(session: Session) {
   // Read every tab's file at once. Files deleted since the last session are skipped.

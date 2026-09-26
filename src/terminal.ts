@@ -47,6 +47,9 @@ export const runningTerminals = (): Restore[] =>
   [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => ({ ...s.restore!, scrollback: scrollbackText(s.term!.buffer.normal) }));
 export const panelShown = () => panelVisible;
 export const hidePanel = () => showPanel(false);
+let changed = () => {};
+/** Runs `f` when a terminal prints or the panel's tabs change, so the session can save them. */
+export const onPanelChange = (f: () => void) => (changed = f);
 
 // xterm.js loads with the first terminal, not with the app.
 const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css")]);
@@ -93,7 +96,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
     }, 500);
   };
   const unlisteners = await Promise.all([
-    listen<string>(`pty:${id}`, (e) => term.write(e.payload)),
+    listen<string>(`pty:${id}`, (e) => (term.write(e.payload), changed())),
     listen(`pty-exit:${id}`, () => {
       session.exited = true;
       term.write("\r\n\x1b[2m[Process exited]\x1b[0m\r\n");
@@ -223,6 +226,7 @@ export function focusTab(s: Session) {
 }
 
 function renderTabs() {
+  changed();
   // The activity bar's panel buttons light up while their view is the one showing.
   const showing = panelVisible && active ? (active.term ? "Terminal" : active.title) : "";
   for (const [panel, title] of [["problems", "Problems"], ["log", "Git Log"], ["debug", "Debug"], ["terminal", "Terminal"]])
