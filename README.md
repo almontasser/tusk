@@ -57,7 +57,6 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Session restore | The debug and profiling servers aren't restarted. |
 | Settings | `.editorconfig`'s `end_of_line = cr` (old Mac line endings) isn't supported, and without a `charset`, a file that isn't valid UTF-8 doesn't open. Double-tap shortcuts (⇧⇧, ⌃⌃) can't be reassigned. |
 | Debugger | Pause on exceptions filters by class, not by where the exception is thrown or whether it's caught. |
 | Frontend languages | Angular templates aren't supported. |
@@ -381,8 +380,9 @@ tree and the sidebar view come back too. Shells reopen in the folder you last
 `php artisan serve`, `queue:work`, or `sail up`, and Tinker, run again if they
 were still running when you closed the project. Each reopened terminal shows
 its earlier output first, as plain text without colors, up to its last 50,000
-characters. Other commands, tests, git
-commands, and the debug and profiling servers don't run again. Opening another
+characters. If the debugger was listening, it listens again, and the profiling
+server and **Start Debug Server**'s server start again if they were running.
+Other commands, tests, and git commands don't run again. Opening another
 project closes the terminals of the one before. If a project has a
 `.phpactor.json` file, Phpactor asks whether to trust it, because the file can
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename

@@ -46,6 +46,7 @@ onTheme((t) => {
 export const runningTerminals = (): Restore[] =>
   [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => ({ ...s.restore!, scrollback: scrollbackText(s.term!.buffer.normal) }));
 export const panelShown = () => panelVisible;
+export const hidePanel = () => showPanel(false);
 
 // xterm.js loads with the first terminal, not with the app.
 const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css")]);

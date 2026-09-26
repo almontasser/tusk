@@ -2318,6 +2318,7 @@ Each project's session is saved in `localStorage` under `session:<root>`:
 | `view` | The sidebar view: project, commit, or pull requests |
 | `panes`, `focused` | Each pane's file, left to right, and the focused pane |
 | `terminals`, `panel` | The running shells (title and folder) and restorable commands (title, folder, and command), each with its earlier output (`scrollback`), and whether the panel showed. Older sessions have `shells`, a count of shells. |
+| `debugging`, `profiling` | Whether the debugger listened (`isListening`), and whether the profiling server ran (`profilingServerRunning`) |
 
 The editor saves 500 ms after a change (tabs, cursor, scroll, folders, or
 sidebar view), when the page unloads or the window loses focus, and before it
@@ -2345,13 +2346,22 @@ A command tab comes back only if its caller opened it as restorable and it was
 still running: Run Anything commands that keep running until stopped
 (`LONG_RUNNING` in `runner.ts`: `artisan serve`, queue workers, Horizon,
 Reverb, `npm run dev` and other dev or watch scripts, `vite` but not `vite
-build`, and `sail up` or `docker compose up`) and Tinker. `openFolder` closes
+build`, and `sail up` or `docker compose up`), Tinker, and **Start Debug
+Server**'s `artisan serve`. `openFolder` closes
 every terminal (`closeTerminals`) once the old project's tabs have closed, so
 one project's servers never land in another's session. Tests, git and Composer commands, and anything that
 had finished don't run again, since repeating them unasked could push, rebase,
-or change packages. The debug server and the profiling server aren't restored
-either, because each needs its tool's state (the debugger listening, or the
-profile folder) set up first.
+or change packages.
+
+The debugger and the profiling server come back through their own start
+functions, not as saved commands, because each sets up state first: the
+debugger starts its adapter and listens, and the profiling server writes its
+PHP settings and picks a free port. `openFolder` calls `startDebugging` and
+`startProfilingServer` before it reopens the terminals, when the session's
+`debugging` or `profiling` is set. The profiler loads only when used, so
+`profiling` is false while it hasn't loaded. The profiling server's tab clears
+`server` when its process exits or the tab closes. Restoring these tabs shows
+the panel, so `openFolder` hides it again (`hidePanel`) if it was hidden.
 
 ## Tailwind CSS (frontend step 1)
 
@@ -3444,3 +3454,12 @@ dependency, and escape codes make the saved text larger; the output is there to
 read, not to run again. Each terminal keeps its last 50,000 characters, so a
 few terminals in a few projects stay well under WebKit's 5 MB `localStorage`
 limit.
+
+### 2026-09-26: Restart the debugger and profiling server with the session
+
+A session saves whether the debugger listened and whether the profiling
+server ran, and reopening the project starts them again with their own start
+functions. Saving the profiling server's command instead would reuse a port
+that may be taken now, and skip writing the PHP settings its command points
+to. Starting them again is safe: the debugger only listens, and the server
+serves on `127.0.0.1`.

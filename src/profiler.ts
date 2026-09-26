@@ -92,14 +92,17 @@ export async function startProfilingServer(): Promise<number | undefined> {
   while (port < 8100 && (await listening(port))) port++;
   const dir = await profileDir();
   host.status(`Profiling server on http://127.0.0.1:${port}. Each request writes a profile; open it with Open Xdebug Profile….`);
+  const started = (server = { root, port });
+  const ended = () => server === started && (server = undefined);
   // server.php finds the public folder from the working directory, as artisan serve runs it.
-  openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...(await profileEnv(dir, root)), "php", "-S", `127.0.0.1:${port}`, `${root}/${script}`]);
-  server = { root, port };
+  await openTerminal(`${root}/public`, "Profiling server", ["/usr/bin/env", ...(await profileEnv(dir, root)), "php", "-S", `127.0.0.1:${port}`, `${root}/${script}`], ended, ended);
   return port;
 }
 
-/** The profiling server this session started, so Profile URL can reuse it. */
+/** The profiling server this session started, while it runs, so Profile URL can reuse it. */
 let server: { root: string; port: number } | undefined;
+/** Whether the profiling server runs, so the session starts it again. */
+export const profilingServerRunning = () => !!server;
 
 /** Whether something listens on a local port. lsof exits with an error when nothing does. */
 const listening = (port: number) =>

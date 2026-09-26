@@ -6,7 +6,7 @@ import { checkComposerLock, didSave, filesChanged, reindex, startLsp, workspaceS
 import { choose, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { attachDebugger, breakpointMenu, editBreakpoint, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, writeText } from "./projectfiles";
@@ -41,7 +41,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -486,10 +486,13 @@ async function openFolder(dir: unknown = null) {
   // Terminals reopen after the language servers have started: shells in their last folder, and
   // commands such as a dev server run again, each with its earlier output. Sessions from before terminals were saved
   // kept a count of shells.
+  // The debugger listens again, and the profiling server starts again, if they ran when the project closed.
+  if (session?.debugging) await startDebugging();
+  if (session?.profiling) await loadProfiler().then((p) => p.startProfilingServer());
   const terminals: Restore[] = session?.terminals ?? Array.from({ length: session?.shells ?? 0 }, () => ({ title: "Terminal", cwd: root }));
   const found = terminals.length ? await invoke<boolean[]>("paths_exist", { paths: terminals.map((t) => t.cwd) }) : [];
   for (const [i, t] of terminals.entries()) await openTerminal(found[i] ? t.cwd : root, t.title, t.command, undefined, undefined, !!t.command, t.scrollback);
-  if (terminals.length && !session?.panel) toggleTerminal(root);
+  if ((terminals.length || session?.debugging || session?.profiling) && !session?.panel) hidePanel();
 }
 
 // ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
@@ -507,6 +510,9 @@ type Session = {
   terminals?: Restore[];
   shells?: number;
   panel?: boolean;
+  /** Whether the debugger listened, and whether the profiling server ran. */
+  debugging?: boolean;
+  profiling?: boolean;
 };
 const sessionKey = () => `session:${root}`;
 
@@ -532,6 +538,8 @@ function saveSession() {
     focused: paneOrder().indexOf(currentPane()),
     terminals: runningTerminals(),
     panel: panelShown(),
+    debugging: isListening(),
+    profiling: !!profiler?.profilingServerRunning(),
   };
   try {
     localStorage.setItem(sessionKey(), JSON.stringify(session));
@@ -1380,7 +1388,7 @@ const actions: Action[] = [
       if (!root) return;
       await startDebugging();
       // Laravel's serve command passes XDEBUG_MODE and XDEBUG_SESSION to the PHP server it starts.
-      openTerminal(root, "Debug server", ["/usr/bin/env", ...XDEBUG_ENV, "php", "artisan", "serve"]);
+      openTerminal(root, "Debug server", ["/usr/bin/env", ...XDEBUG_ENV, "php", "artisan", "serve"], undefined, undefined, true);
     },
   },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
@@ -1554,8 +1562,9 @@ window.addEventListener(
 );
 
 // The profiler and its views load the first time you use them.
+let profiler: typeof import("./profiler") | undefined;
 const loadProfiler = () =>
-  import("./profiler").then((p) => (p.initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }), p));
+  import("./profiler").then((p) => (p.initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }), (profiler = p)));
 initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status, loadProfiler);
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initAi({ status, root: () => root });
