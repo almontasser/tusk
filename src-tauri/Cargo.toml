@@ -46,6 +46,14 @@ minisign-verify = "0.2"
 sha2 = "0.10"
 tar = "0.4"
 tauri-plugin-updater = "2.12.0"
+tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
+tonic-prost = "0.14"
+tonic-reflection = { version = "0.14", default-features = false }
+prost = "0.14"
+protox = "0.9"
+tokio-stream = "0.1"
+prost-reflect = { version = "0.16", features = ["serde"] }
+tokio = { version = "1", features = ["macros", "sync"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -55,3 +63,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+tonic-reflection = { version = "0.14", features = ["server"] }
+tokio-stream = { version = "0.1", features = ["net"] }

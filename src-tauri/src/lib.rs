@@ -1,5 +1,6 @@
 mod db;
 mod fs;
+mod grpc;
 mod lsp;
 mod profile;
 mod pty;
@@ -196,6 +197,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(db::Tunnels::default())
         .manage(ws::WsState::default())
+        .manage(grpc::GrpcState::default())
         .invoke_handler(tauri::generate_handler![
             db::db_query,
             db::db_batch,
@@ -233,6 +235,9 @@ pub fn run() {
             ws::ws_connect,
             ws::ws_send,
             ws::ws_close,
+            grpc::grpc_call,
+            grpc::grpc_cancel,
+            grpc::grpc_methods,
             check_update,
             restart,
         ])

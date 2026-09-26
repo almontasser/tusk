@@ -1068,6 +1068,22 @@ files work in PhpStorm and VS Code's REST Client.
   `ws-close:<channel>` (`{ code, reason }`). Each connection has a thread that
   reads with a 50 ms timeout, and between reads it sends the messages
   `ws_send` and `ws_close` queue.
+- gRPC calls go through `src-tauri/src/grpc.rs`, since curl can't frame gRPC
+  messages. `transmit` hands a `GRPC` request to `transmitGrpc`, which calls
+  `grpc_call` and writes the JSON it returns as the body, so history, scripts,
+  and the runner treat it as any response. tonic makes the call with a
+  `DynamicCodec` that encodes and decodes prost-reflect's `DynamicMessage`s.
+  Every call goes through tonic's streaming call, which covers the four method
+  kinds: one message for unary, the body's JSON values one after another for
+  client streaming. The schema comes from server reflection (v1, then v1alpha,
+  whose messages are the same on the wire), asking for the file with the
+  service and then each file it imports. Without reflection, `project_pool`
+  compiles the first `.proto` file declaring the service with protox, a Rust
+  protobuf compiler, with the file's folder and each one above it up to the
+  root as import paths. The status maps to an HTTP status as Google's APIs do,
+  so `response.status` checks and the runner's failure rule work unchanged.
+  `grpc_cancel` ends a call through a oneshot channel. `grpc_methods` lists
+  methods for completion; `httpclient.ts` caches non-empty lists per address.
 - `prepare` carries `proxy`, `clientCert`, `clientKey` (absolute), `http`, and
   `budget` into `Prepared`. `connectionArgs` turns the first four into curl's
   `-x`, `--cert`, `--key`, and `--http2` or `--http1.1` for sending, stress
@@ -3434,3 +3450,13 @@ convert them first was a step every import of one needed. The `yaml` package
 has no dependencies and parses YAML 1.2, which covers JSON, but text that
 starts with `{` or `[` still goes through `JSON.parse`, which is faster on
 large Postman collections.
+
+### 2026-09-26: gRPC through tonic, prost-reflect, and protox
+
+gRPC needs HTTP/2 framing and protobuf encoding, which curl can't do. tonic
+already shares hyper and rustls with the updater's reqwest, so it adds little.
+prost-reflect builds messages from a schema at run time, so no code is
+generated per service, and protox compiles `.proto` files in Rust, so the
+fallback for servers without reflection needs no `protoc`. A streaming
+response is shown once the call ends, as a JSON array, rather than message by
+message, which keeps it one response the history and scripts understand.

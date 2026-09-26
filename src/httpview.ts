@@ -546,9 +546,20 @@ function websocketTab(r: HttpRequest) {
   );
 }
 
+function grpcTab(r: HttpRequest) {
+  const { el } = codeEditor(r.body, "json", (v) => updateSoon((q) => (q.body = v)));
+  return h(
+    "div",
+    { class: "http-pane http-body-pane" },
+    h("p", { class: "http-hint" }, "The request message as JSON, or several one after another for a client streaming method. The URL is host:port/package.Service/Method, with grpcs:// for TLS. The schema comes from the server's reflection, or else the project's .proto files. Headers go as metadata."),
+    el,
+  );
+}
+
 function bodyTab(r: HttpRequest) {
   if (r.method === "GRAPHQL") return graphqlTab(r);
   if (r.method === "WEBSOCKET") return websocketTab(r);
+  if (r.method === "GRPC") return grpcTab(r);
   const type = bodyType(r);
   const types: [BodyType, string][] = [
     ["none", "None"],
