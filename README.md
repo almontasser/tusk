@@ -40,6 +40,7 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
+| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed, and so are calls of a constructor through `new`. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | PHP inside Blade isn't checked for errors: a view's variables come from its controller, so a checker would report most of them as undefined. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
@@ -224,6 +225,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
+| ⌃⌥H | Call hierarchy of the method or function under the cursor, or the one the cursor is in |
 | ⌘⌦ | Safe delete the class, method, or function at the cursor |
 | ⌥⌘N | Inline the variable at the cursor |
 | ⌘F6 | Change the signature of the method or function at the cursor |
@@ -545,6 +547,19 @@ enum that the cursor is in.
 
 Click a type to open it. Types that Phpactor's index doesn't know are listed
 without a file.
+
+## Call hierarchy
+
+Press ⌃⌥H in a PHP file to open the **Call Hierarchy** tab for the method or
+function called under the cursor, or else the one the cursor is in.
+
+- **Callers** lists the methods and functions that call it, one row per call.
+  Code outside a function, such as a route file, is listed by its file. Expand
+  a caller to see its own callers.
+- **Callees** lists the project's and packages' methods and functions it calls.
+  PHP's own functions aren't listed.
+
+Click a caller to open the call, or a callee to open its declaration.
 
 ## HTTP client
 

@@ -946,6 +946,26 @@ the type declared at or above the cursor line in the current file.
 Children load when a row expands, so a large hierarchy, such as `Model`'s,
 costs nothing until you open it.
 
+### Call hierarchy
+
+Phpactor has no `textDocument/prepareCallHierarchy` either, so
+`src/callhierarchy.ts` builds the tree the same way, reusing the type
+hierarchy's styles.
+
+- **Callers**: `callsOf` from `src/refactor.ts` (Phpactor's
+  `references:member` for methods, `textDocument/references` for functions).
+  Each reference is placed in the innermost method, constructor, or function
+  around it, from `textDocument/documentSymbol` of its file.
+- **Callees**: `callSites` in `src/phptypes.ts` finds the names followed by `(`
+  in the body, leaving out language constructs, declarations, `new`, and
+  variable calls. Each one gets `textDocument/definition`, and the declaration
+  around the answer is the callee. Definitions inside Phpactor's `.phar` (PHP's
+  own functions) are dropped, since they can't be opened.
+
+As with types, the starting point is what Go to Definition finds under the
+cursor, when that's a function of the same name; otherwise it's the function
+around the cursor. Rows load their children when expanded.
+
 ### HTTP client
 
 `.http` files stay the one copy of each request. The HTTP tab is a form over a
@@ -3440,3 +3460,10 @@ the expression, so Monaco's own list, filtering, and snippet placeholders do the
 work, and no key handling is needed. There's no `.` trigger character: the list
 would open after every concatenation such as `$a.`, and Enter would pick a
 template. The list opens once you type a letter after the dot.
+
+### 2026-09-26: Call hierarchy from references and definitions
+
+Phpactor doesn't implement the call hierarchy requests. Callers reuse the
+reference search that Change Signature and Safe Delete already trust, and
+callees are one definition request per call in the body. That's a request per
+call, but a method body has few, and they load only when a row expands.

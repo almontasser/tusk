@@ -257,3 +257,17 @@ export function formRequestParameter(source: string, method: string): string | n
   const type = [...params.matchAll(/([\\\w]+Request)\s+\$\w+/g)].map((t) => t[1]).find((t) => !/^\\?(Illuminate\\Http\\)?Request$/.test(t));
   return type ? nameResolver(source).resolve(type) : null;
 }
+
+const NOT_CALLS = new Set("if elseif while for foreach switch match catch function fn array list isset empty unset echo print return declare exit die include require include_once require_once new clone and or xor instanceof".split(" "));
+
+/**
+ * The offsets of the function and method names that PHP code calls, in order: `foo(`, `$a->foo(`, and `A::foo(`,
+ * but not language constructs such as `if (`, declarations, `new A(`, or variable calls such as `$f(`. For the
+ * callees in a call hierarchy. ponytail: regexes over the code with comments masked; names in strings count.
+ */
+export function callSites(source: string): number[] {
+  const code = commentMask(`<?php ${source}`).slice(6);
+  return [...code.matchAll(/(?<![$\w\\])([A-Za-z_\\][\w\\]*)\s*\(/g)]
+    .filter((m) => !NOT_CALLS.has(m[1].toLowerCase()) && !/\b(function|new)\s+&?$/i.test(code.slice(0, m.index)))
+    .map((m) => m.index! + m[1].lastIndexOf("\\") + 1);
+}

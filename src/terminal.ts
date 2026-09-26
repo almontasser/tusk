@@ -145,7 +145,7 @@ function close(session: Session) {
 // Icons for the panel's views by title; terminal tabs all get the terminal icon.
 export const tabIcon = (s: Session) => s.icon ?? (s.term ? "terminal" : (viewIcons[s.title] ?? "globe"));
 const viewIcons: Record<string, string> = {
-  Problems: "warning", "Git Log": "history", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", Profiler: "flame",
+  Problems: "warning", "Git Log": "history", Debug: "debug-alt", Tests: "beaker", Coverage: "shield", Database: "database", Hierarchy: "type-hierarchy", "Call Hierarchy": "call-incoming", Profiler: "flame",
 };
 
 // Drag a tab onto another to put it before that one, or onto the bar's empty end to put it last.
