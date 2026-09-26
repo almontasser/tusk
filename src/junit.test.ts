@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf, parseTeamcity } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf, parseTeamcity, moveMarks } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -129,4 +129,14 @@ test("reads live results from a TeamCity log", () => {
   assert.equal(total, 2);
   assert.deepEqual(tests[0], { className: "Tests\\Unit\\ATest", name: "test_fails", status: "failed", file: "/app/tests/Unit/ATest.php", message: "it's [bad]\nFailed", line: 11 });
   assert.equal(tests[1].status, "running");
+});
+
+test("moves coverage marks with their lines and marks changed lines stale", () => {
+  const text = ["<?php", "$a = 1;", "$b = 2;", "$c = 3;"];
+  const marks = moveMarks([[2, { count: 1, at: 2 }], [3, { count: 0, at: 3 }], [4, { count: 1, at: 4 }], [9, { count: 0, at: 9 }]], (l) => text[l - 1]);
+  assert.deepEqual([...marks.keys()], [2, 3, 4]);
+  // Deleting line 2 puts its mark on the next line, whose own mark wins; line 4's text then changes.
+  const edited = ["<?php", "$b = 2;", "$c = 30;"];
+  const moved = moveMarks([[2, marks.get(2)!], [2, marks.get(3)!], [3, marks.get(4)!]], (l) => edited[l - 1]);
+  assert.deepEqual([...moved].map(([l, m]) => [l, m.at, m.stale]), [[2, 3, false], [3, 4, true]]);
 });

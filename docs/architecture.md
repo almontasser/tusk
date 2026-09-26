@@ -1805,12 +1805,26 @@ start at 5, so both show on a changed line. Decorations stick to their lines
 as you edit, and models created later, such as a file opened after the run,
 get their marks in `onDidCreateModel`.
 
+Each line of the report is a `Mark`: its hit count, its line in the report
+(`at`), and its text when first decorated. `coverage` keeps each file's marks
+by their line now. 300 ms after an edit, `sync` reads each decoration's line
+and `moveMarks` (in `src/junit.ts`) rebuilds the file's map: a mark whose
+line's text differs from its snapshot is stale, and a deleted line's mark,
+which Monaco collapses onto a neighbor, loses to the neighbor's own mark. Then
+the model is decorated again, stale marks with `coverage-stale`, and the
+Coverage tab renders again. A model's marks sync once more when it's disposed,
+so a closed file keeps its moved lines. Per-test lookups use `at`, since
+PHPUnit's per-file reports number lines as they were at the run.
+
 The Coverage tab is a panel view (`showPanelView`) that reuses the Tests tab's
 toolbar styles and the Find view's file groups (`fileGroup` in `src/search.ts`,
 generic over its items). `uncoveredRanges` in `src/junit.ts` joins uncovered
 statement lines into runs, splitting a run only at a covered statement, since
-blank lines and comments aren't in the report. A file's text is read when its
-rows first show, so collapsed files cost nothing.
+blank lines and comments aren't in the report. A stale line goes to it with a
+count of -1, so it splits runs like a covered line, and it's left out of the
+percentages. A file's text comes from its model when it's open, and otherwise
+is read when its rows first show, so collapsed files cost nothing. Rendering
+again keeps each file group open or closed, by the `data-path` on its row.
 
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
 ⌃R searches shell history), except ⌥F12, which hides the panel.
@@ -3425,3 +3439,14 @@ asset can't swap in a tool; the cost is that the first launch needs the
 network before the language servers start. The app itself stays universal:
 without the tools, the second chip adds only the app's own binary, and one
 download and one update archive serve every Mac.
+
+### 2026-09-26: Coverage follows edits by line text
+
+The Coverage tab showed the report's line numbers and the file's text on disk,
+so after an edit its rows pointed at the wrong code. Now marks move with
+Monaco's decorations and the tab renders from the moved lines. Deciding which
+lines an edit made stale compares each line's text with its text at the run,
+rather than tracking which lines each change touched: pressing Enter at the
+end of a line doesn't change it, and undoing a change makes its line fresh
+again. A line whose text only moved between lines, such as two swapped lines,
+counts as changed, which is the safe side.
