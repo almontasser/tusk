@@ -113,7 +113,9 @@ fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     let index = index.read();
     let analysis = analyze(&parsed, &arena, &index.codebase, index.config.php_version);
     issues.extend(analysis.issues);
-    issues.iter().filter_map(|issue| to_diagnostic(doc, &parsed, issue)).collect()
+    let mut out: Vec<Diagnostic> = issues.iter().filter_map(|issue| to_diagnostic(doc, &parsed, issue)).collect();
+    out.extend(crate::features::actions::organize::diagnostics(&parsed, doc));
+    out
 }
 
 fn to_diagnostic(doc: &Document, parsed: &Parsed<'_>, issue: &Issue) -> Option<Diagnostic> {

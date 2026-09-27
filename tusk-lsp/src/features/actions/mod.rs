@@ -1,8 +1,10 @@
 //! Code actions and commands. Listing actions is cheap, since the editor asks on every cursor move: each
 //! action carries what it needs in `data`, and its edit is computed by `codeAction/resolve`.
 
+pub mod extract;
 pub mod fixes;
 pub mod generate;
+pub mod organize;
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse, ExecuteCommandParams, Range,
@@ -23,11 +25,13 @@ pub struct Candidate {
     /// Anything the action needs beyond the document and range.
     pub arg: Value,
     pub preferred: bool,
+    /// A command to run instead of resolving an edit, for editors that expect one.
+    pub command: Option<lsp_types::Command>,
 }
 
 impl Candidate {
     pub fn new(title: impl Into<String>, kind: &str, id: &'static str, arg: Value) -> Self {
-        Self { title: title.into(), kind: CodeActionKind::from(kind.to_string()), id, arg, preferred: false }
+        Self { title: title.into(), kind: CodeActionKind::from(kind.to_string()), id, arg, preferred: false, command: None }
     }
 }
 
@@ -55,6 +59,8 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
         let mut out = vec![];
         out.extend(fixes::candidates(ctx, range));
         out.extend(generate::candidates(ctx, range));
+        out.extend(organize::candidates(ctx, range));
+        out.extend(extract::candidates(ctx, range));
         out
     })
     .unwrap_or_default();
@@ -66,6 +72,7 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
                 title: c.title,
                 kind: Some(c.kind),
                 is_preferred: c.preferred.then_some(true),
+                command: c.command,
                 data: serde_json::to_value(Data { uri: uri.clone(), range, id: c.id.to_string(), arg: c.arg }).ok(),
                 ..Default::default()
             })
@@ -90,16 +97,19 @@ fn edit_for(ctx: &Ctx<'_>, id: &str, range: Range, arg: &Value) -> Option<Worksp
     match module {
         "fixes" => fixes::resolve(ctx, action, range, arg),
         "generate" => generate::resolve(ctx, action, range, arg),
+        "organize" => organize::resolve(ctx, action, range, arg),
+        "extract" => extract::resolve(ctx, action, range, arg),
         _ => None,
     }
 }
 
 /// The commands the server runs, which apply their edits through the editor.
-pub const COMMANDS: &[&str] = &["generate_accessors", "generate_mutators"];
+pub const COMMANDS: &[&str] = &["generate_accessors", "generate_mutators", extract::COMMAND];
 
 pub fn execute_command(snap: &Snapshot, params: ExecuteCommandParams) -> Result<Option<Value>, String> {
     let edit = match params.command.as_str() {
         "generate_accessors" | "generate_mutators" => generate::accessors_command(snap, &params.command, &params.arguments)?,
+        extract::COMMAND => Some(extract::command(snap, &params.arguments)?),
         other => return Err(format!("Unknown command {other}")),
     };
     let Some(edit) = edit else { return Ok(None) };
