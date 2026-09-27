@@ -3434,6 +3434,16 @@ returns.
   server. `$/cancelRequest` sets the request's flag (`Snapshot::cancel`): a
   request that hasn't started answers `RequestCancelled` at once, and
   references and project problems check it between files.
+  The pool is plain threads (`RequestPool`), not a rayon pool: a rayon thread
+  waiting on its own parallel work runs other queued jobs meanwhile, and a
+  search holding the index's read lock once picked up a request waiting for
+  the index to catch up with an edit, which the lock blocked. The server
+  stopped answering (`searches_racing_edits_and_other_requests_all_finish` in
+  `tests/protocol.rs` reproduces it).
+- **Parallel work in requests:** references, call hierarchy, rename's file
+  moves, and project problems read files in parallel on the scan pool. That
+  work never takes the index's lock: the request takes it once and passes the
+  index down (`php_problems_in`).
 - **Diagnostics thread:** checks an edited document as soon as the index has
   its change, and the other open documents once edits pause for 600 ms,
   since they may depend on it.
