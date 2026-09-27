@@ -3694,6 +3694,20 @@ and a real Laravel app, which need PHP.
   projects unlike the ones the tests use, such as Symfony, WordPress, and
   Magento. `examples/depth.rs` lists a folder's most deeply nested files (with
   `BRANCHES=1`, those with the most branches in one statement).
+
+  Results on 2026-09-27, 400 sampled files per project, on an M-series Mac:
+
+  | Project | Files indexed | Index | Mean hover | Slowest references |
+  |---|---|---|---|---|
+  | PHP-Parser | 341 | 0.0 s | 0.7 ms | 0.1 s |
+  | Laravel framework | 2,981 | 0.4 s | 1.8 ms | 0.3 s |
+  | Symfony | 11,919 | 0.6 s | 1.5 ms | 3.0 s |
+  | WordPress | 1,899 | 0.2 s | 2.6 ms | 2.4 s |
+  | Magento 2 | 25,580 | 2.4 s | 2.6 ms | 1.1 s |
+
+  No request crashed or hung after the fixes the runs led to. References and
+  rename analyze every project file that mentions the name, so a common name
+  in a large project takes seconds; both can be cancelled.
 - **Benchmark:** `cargo run --release --example index_bench <root> [file]`
   times indexing a real project.
 
