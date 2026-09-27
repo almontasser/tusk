@@ -40,6 +40,7 @@ pub fn find(method: &str) -> Option<Handler> {
         DocumentLinkRequest::METHOD => typed!(DocumentLinkRequest, links::document_links),
         PrepareRenameRequest::METHOD => typed!(PrepareRenameRequest, rename::prepare),
         Rename::METHOD => typed!(Rename, rename::rename),
+        WillRenameFiles::METHOD => typed!(WillRenameFiles, moves::will_rename),
         _ => return None,
     };
     Some(handler)

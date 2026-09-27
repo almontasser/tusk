@@ -5,6 +5,7 @@ pub mod folding;
 pub mod hover;
 pub mod inlay;
 pub mod links;
+pub mod moves;
 pub mod navigation;
 pub mod references;
 pub mod rename;

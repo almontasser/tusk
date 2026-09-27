@@ -125,6 +125,27 @@ pub fn import_edit(doc: &Document, program: &Program<'_>, offset: u32, fqn: &str
     }
 }
 
+/// The edits that import each of `fqns`, merged so imports inserted at the same place come as one sorted edit.
+pub fn import_edits(doc: &Document, program: &Program<'_>, offset: u32, fqns: &[String], kind: NameKind) -> Vec<TextEdit> {
+    let mut edits: Vec<TextEdit> = vec![];
+    for fqn in fqns {
+        let edit = import_edit(doc, program, offset, fqn, kind);
+        match edits.iter_mut().find(|e| e.range == edit.range) {
+            Some(existing) => {
+                let line = edit.new_text.trim().to_string();
+                let mut lines: Vec<String> =
+                    existing.new_text.lines().map(str::to_string).filter(|l| !l.trim().is_empty()).chain(std::iter::once(line)).collect();
+                lines.sort_by_key(|l| l.to_ascii_lowercase());
+                let lead = existing.new_text.len() - existing.new_text.trim_start_matches('\n').len();
+                let trail = existing.new_text.len() - existing.new_text.trim_end_matches('\n').len();
+                existing.new_text = format!("{}{}{}", "\n".repeat(lead), lines.join("\n"), "\n".repeat(trail));
+            }
+            None => edits.push(edit),
+        }
+    }
+    edits
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +185,17 @@ mod tests {
         assert_eq!(out, "<?php\n\nnamespace App;\n\nuse Foo\\Bar;\n\nclass A { HERE }\n");
         let (_, out) = apply("<?php\nHERE\n", "Foo\\Bar");
         assert_eq!(out, "<?php\n\nuse Foo\\Bar;\n\nHERE\n");
+    }
+
+    #[test]
+    fn merges_imports_added_at_the_same_place() {
+        let text = "<?php\nnamespace App;\n\nclass A {}\n";
+        let doc = Document::new(lsp_types::Uri::from_str("file:///t.php").unwrap(), "/t.php".into(), "php".into(), 1, text.into());
+        let arena = LocalArena::new();
+        let parsed = Parsed::new(&arena, &doc.path, text);
+        let edits = import_edits(&doc, parsed.program, 30, &["Z\\B".into(), "A\\C".into()], NameKind::Default);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "\nuse A\\C;\nuse Z\\B;\n");
     }
 
     #[test]

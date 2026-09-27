@@ -121,7 +121,7 @@ pub struct Edits(BTreeMap<PathBuf, Vec<TextEdit>>);
 impl Edits {
     pub fn add(&mut self, path: &Path, edit: TextEdit) {
         let edits = self.0.entry(path.to_path_buf()).or_default();
-        if !edits.iter().any(|e| e.range == edit.range) {
+        if !edits.iter().any(|e| e.range == edit.range && e.new_text == edit.new_text) {
             edits.push(edit);
         }
     }

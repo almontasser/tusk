@@ -35,6 +35,18 @@ pub fn server() -> ServerCapabilities {
         code_lens_provider: Some(CodeLensOptions { resolve_provider: Some(false) }),
         document_link_provider: Some(DocumentLinkOptions { resolve_provider: Some(false), work_done_progress_options: Default::default() }),
         rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
+        workspace: Some(WorkspaceServerCapabilities {
+            workspace_folders: None,
+            file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+                will_rename: Some(FileOperationRegistrationOptions {
+                    filters: vec![FileOperationFilter {
+                        scheme: Some("file".into()),
+                        pattern: FileOperationPattern { glob: "**/*".into(), matches: None, options: None },
+                    }],
+                }),
+                ..Default::default()
+            }),
+        }),
         ..Default::default()
     }
 }
