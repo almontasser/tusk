@@ -673,8 +673,9 @@ function showModel(path: string) {
 /** Starts (or restarts) the language servers for the open folder. */
 function restartServers() {
   if (!root) return;
+  // The first launch downloads the tools, so this fails offline; the toast stays until you retry or dismiss it.
   startLsp(root, { ensureModel, markSaved, renamed, forget, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) =>
-    status(`Language server failed: ${e}`),
+    toast(`Couldn't start the language servers: ${e}`, { action: { label: "Retry", run: restartServers } }),
   );
 }
 
