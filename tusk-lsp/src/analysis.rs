@@ -34,7 +34,7 @@ pub fn parse_balanced<'a>(arena: &'a LocalArena, path: &Path, file_type: FileTyp
     if program.errors.is_empty() {
         return (file, program);
     }
-    let balanced = crate::repair::balance_end(&String::from_utf8_lossy(&file.contents));
+    let balanced = crate::repair::balance_end(&crate::text::decode(&file.contents));
     let file = source_file(path, file_type, balanced.into_bytes());
     let program = parse_file(arena, &file);
     (file, program)

@@ -6,6 +6,18 @@ use std::str::FromStr;
 use lsp_types::{Position, Range, Uri};
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
+/// A file's bytes as text, with each byte that isn't UTF-8 (such as in a Latin-1 file) as `?`. Unlike
+/// `from_utf8_lossy`, which puts a 3-byte character in its place, it keeps every offset where the parser, which reads the
+/// raw bytes, puts it.
+pub fn decode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        out.push_str(chunk.valid());
+        out.extend(std::iter::repeat_n('?', chunk.invalid().len()));
+    }
+    out
+}
+
 /// Byte offsets where each line of a text starts.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
@@ -84,6 +96,14 @@ pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decodes_latin1_bytes_without_moving_offsets() {
+        let bytes = b"<?php // caf\xe9 \xff\xfe\n$\xc3\xa9 = 1;";
+        let text = decode(bytes);
+        assert_eq!(text.len(), bytes.len());
+        assert_eq!(text, "<?php // caf? ??\n$\u{e9} = 1;");
+    }
 
     #[test]
     fn converts_positions_with_utf16_columns() {

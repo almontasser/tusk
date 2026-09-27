@@ -93,7 +93,7 @@ impl Snapshot {
             return Some(doc.clone());
         }
         let text = std::fs::read(&path).ok()?;
-        Some(Arc::new(Document::new(uri.clone(), path, "php".into(), 0, String::from_utf8_lossy(&text).into_owned())))
+        Some(Arc::new(Document::new(uri.clone(), path, "php".into(), 0, crate::text::decode(&text))))
     }
 
     pub fn read(&self, path: &Path) -> Option<String> {

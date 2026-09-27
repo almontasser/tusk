@@ -3680,6 +3680,12 @@ and a real Laravel app, which need PHP.
   and runs each request and every code action's resolve on it. An unfinished
   file parses with its open brackets closed, so spans can run past the
   document's end; slice the parsed text (`Parsed::text`), not the document's.
+  A span from the index can also be stale, such as right after a file changes
+  on disk, so text taken from another file uses `str::get`.
+- **Encodings:** files read from disk go through `text::decode`, which turns
+  each byte that isn't UTF-8 (a Latin-1 file's accents) into `?`, so offsets
+  match the parser's, which reads raw bytes. `from_utf8_lossy` puts a 3-byte
+  character in each one's place.
 - **Stress test:** `cargo run --release --example stress <root> [max files]
   [seed]` runs the real server over a project: every request at random places
   in each file, then with the file cut off at random points. It reports caught

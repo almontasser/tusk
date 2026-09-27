@@ -82,7 +82,7 @@ impl Documents {
     pub fn read(&self, path: &Path) -> Option<String> {
         match self.0.get(path) {
             Some(doc) => Some(doc.text.clone()),
-            None => std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned()),
+            None => std::fs::read(path).ok().map(|b| crate::text::decode(&b)),
         }
     }
 }

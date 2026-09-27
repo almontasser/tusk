@@ -612,16 +612,18 @@ pub fn resolve(snap: &Snapshot, mut item: CompletionItem) -> Result<CompletionIt
     });
     let Some(span) = span else { return Ok(item) };
     let Some(text) = snap.text_of(&index, span.file_id) else { return Ok(item) };
+    // The span is from the index, which may not have the file's latest text yet, such as right after it changed on disk.
+    let Some(declaration) = text.get(span.start.offset as usize..span.end.offset as usize) else { return Ok(item) };
     let mut start = span.start.offset as usize;
     if from_name {
         // The declaration starts at the start of its name's line, after any docblock.
-        start = text[..start.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+        start = text[..start].rfind('\n').map_or(0, |i| i + 1);
         start += text[start..].len() - text[start..].trim_start().len();
     }
     let mut value = String::new();
     if matches!(data, Data::Method { .. } | Data::Function { .. } | Data::Class { .. }) {
-        let end = (span.end.offset as usize).min(text.len());
-        value.push_str(&format!("```php\n<?php\n{}\n```", signature(&text[start..end])));
+        let declaration = if from_name { text.get(start..span.end.offset as usize).unwrap_or(declaration) } else { declaration };
+        value.push_str(&format!("```php\n<?php\n{}\n```", signature(declaration)));
     }
     if let Some(doc) = docblock_before(&text, start).map(|d| docblock_markdown(&d)).filter(|d| !d.is_empty()) {
         if !value.is_empty() {
