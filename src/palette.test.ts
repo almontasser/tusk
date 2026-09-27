@@ -17,6 +17,11 @@ test("word starts and consecutive letters rank first", () => {
   assert.equal(rank("post", [item("app/Models/Post.php"), item("app/Policies/PostPolicy.php")])[0].label, "app/Models/Post.php");
 });
 
+test("the query as a whole word in the file name beats scattered word starts", () => {
+  const ranked = rank("user", [item("tests/Unit/Filament/Admin/SettingResourceTest.php"), item("app/Models/User.php"), item("app/Users/Profile.php")]).map((i) => i.label);
+  assert.deepEqual(ranked, ["app/Models/User.php", "app/Users/Profile.php", "tests/Unit/Filament/Admin/SettingResourceTest.php"]);
+});
+
 test("empty query keeps the original order", () => {
   assert.deepEqual(rank("", [item("b"), item("a")]).map((i) => i.label), ["b", "a"]);
 });

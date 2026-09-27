@@ -284,13 +284,14 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, and Spelling. Changes apply immediately and are saved in
+AI, and Spelling. A setting that depends on another, such as the AI model,
+shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
 | Setting | Default |
 | --- | --- |
 | Theme: one of about 110 color themes, or match the system | Dark |
-| Dark and light themes for Match the system | Dark, Light |
+| Themes in dark and light mode, for Match the system | Dark, Light |
 | Editor font and font size | JetBrains Mono (or its Nerd Font build), or else Menlo, at 13; ligatures are on only with a font that has them |
 | Wrap long lines | Off |
 | Show the minimap | Off |

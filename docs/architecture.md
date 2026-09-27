@@ -2002,7 +2002,10 @@ source function that returns items for a query. Slow sources (language server
 and disk searches) run after a short delay, and results from an older query are
 dropped if a newer one already ran. `fuzzy` scores a subsequence match and
 favors consecutive letters and letters that start a word, such as the `P` and
-`C` in `PostController`. `src/palette.test.ts` covers it.
+`C` in `PostController`. The query as one block scores more, and more again in
+the file name and at its start, so `user` finds `User.php` before
+`tests/Unit/SettingResourceTest.php`, whose word starts spell it out.
+`src/palette.test.ts` covers it.
 
 The palette's input sits where the full-height palette would be centered
 (`top: max(56px, calc(50vh - 260px))`) and the list grows down from it.

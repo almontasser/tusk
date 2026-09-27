@@ -89,7 +89,12 @@ export const bytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${
 const statusClass = (status: number) => (!status ? "bad" : status >= 400 ? "bad" : status >= 300 ? "redirect" : "good");
 function ago(time: number) {
   const s = (Date.now() - time) / 1000;
-  return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : new Date(time).toLocaleDateString();
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  // With the time, so several sends of one request on a day stay apart.
+  const when: Intl.DateTimeFormatOptions = s < 6 * 86400 ? { weekday: "short" } : { month: "short", day: "numeric" };
+  return new Date(time).toLocaleString(undefined, { ...when, hour: "numeric", minute: "2-digit" });
 }
 function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1604,7 +1609,9 @@ function renderTree() {
 }
 
 function requestRow(path: string, r: HttpRequest) {
-  const label = r.title || r.name || r.url.replace(/^\{\{[^}]+\}\}/, "");
+  const title = r.title || r.name || r.url.replace(/^\{\{[^}]+\}\}/, "");
+  // Titles made from routes start with the method, which the badge already shows.
+  const label = title.startsWith(`${r.method} `) ? title.slice(r.method.length + 1) : title;
   const run = iconButton("play", "Send", () => sendAt(path, r.line));
   run.classList.add("http-row-send");
   const row = h("div", { class: "row http-request", title: `${r.method} ${r.url}`, data: { path, line: String(r.line) } }, methodBadge(r.method), h("span", { class: "name" }, label), run);

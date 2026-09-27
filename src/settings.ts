@@ -53,8 +53,8 @@ const defaults: Settings = {
   keymap: {},
 };
 
-/** `section` starts a new group of settings under that heading. */
-type Field = { key: keyof Settings; label: string; help?: string; section?: string } & (
+/** `section` starts a new group of settings under that heading. `shown` hides a setting that doesn't apply. */
+type Field = { key: keyof Settings; label: string; help?: string; section?: string; shown?: () => boolean } & (
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
   | { type: "text" }
@@ -64,8 +64,8 @@ type Field = { key: keyof Settings; label: string; help?: string; section?: stri
 /** The settings form, in order. */
 const fields: Field[] = [
   { section: "Appearance", key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
-  { key: "darkTheme", label: "Dark theme for Match the system", type: "select", options: () => themeOptions(true) },
-  { key: "lightTheme", label: "Light theme for Match the system", type: "select", options: () => themeOptions(false) },
+  { key: "darkTheme", label: "Theme in dark mode", type: "select", options: () => themeOptions(true), shown: () => settings.theme === "system" },
+  { key: "lightTheme", label: "Theme in light mode", type: "select", options: () => themeOptions(false), shown: () => settings.theme === "system" },
   { key: "fontFamily", label: "Editor font", type: "text", help: "A CSS font list; the first installed font is used." },
   { key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
   { section: "Editor", key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
@@ -81,6 +81,7 @@ const fields: Field[] = [
     key: "aiModel",
     label: "AI completion model",
     type: "select",
+    shown: () => settings.aiCompletion,
     options: [
       ["qwen2.5-coder-1.5b", "Qwen2.5-Coder 1.5B: fastest (1.6 GB)"],
       ["qwen2.5-coder-3b", "Qwen2.5-Coder 3B: best balance (3.3 GB)"],
@@ -208,6 +209,8 @@ export function openSettings() {
   heading.textContent = "Settings";
   form.append(heading);
 
+  const conditional: [HTMLElement, () => boolean][] = [];
+  const showApplicable = () => conditional.forEach(([row, shown]) => (row.hidden = !shown()));
   for (const f of fields) {
     if (f.section) form.append(Object.assign(document.createElement("h3"), { textContent: f.section }));
     const row = document.createElement("label");
@@ -239,6 +242,7 @@ export function openSettings() {
       (settings as Record<string, unknown>)[f.key] = value;
       apply();
       persist();
+      showApplicable();
     };
     if (f.type === "checkbox") row.append(input, name);
     else row.append(name, input);
@@ -248,7 +252,9 @@ export function openSettings() {
       row.append(help);
     }
     form.append(row);
+    if (f.shown) conditional.push([row, f.shown]);
   }
+  showApplicable();
 
   const button = (text: string, run: () => void) =>
     Object.assign(document.createElement("button"), { type: "button", textContent: text, onclick: () => (dialog.close(), run()) });

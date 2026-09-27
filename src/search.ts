@@ -37,6 +37,8 @@ async function search() {
     matches = [];
     return render("");
   }
+  // A search over a large project can take a while; say so, but don't flash it for quick ones.
+  const slow = setTimeout(() => current === generation && ($("find-summary").textContent = "Searching…"), 300);
   try {
     const found = await invoke<Match[]>("search_text", { root: host.root(), query: q, include: include() });
     if (current !== generation) return; // A newer search already started.
@@ -46,6 +48,8 @@ async function search() {
     if (current !== generation) return;
     matches = [];
     render(`Invalid search: ${String(e)}`);
+  } finally {
+    clearTimeout(slow);
   }
 }
 

@@ -27,6 +27,14 @@ export function fuzzy(query: string, text: string, lower = text.toLowerCase()): 
     prev = i;
     t = i + 1;
   }
+  // The query as one block beats letters scattered over word starts ("user" in User.php over
+  // tests/Unit/SettingResourceTest.php), and more so in the file name, and at its start.
+  const whole = query.toLowerCase().replace(/\s/g, "");
+  const at = lower.lastIndexOf(whole);
+  if (at >= 0) {
+    const name = Math.max(lower.lastIndexOf("/"), lower.lastIndexOf("\\")) + 1;
+    score += whole.length * 6 + (at >= name ? 20 : 0) + (at === name ? 20 : 0);
+  }
   return score - text.length / 100; // Prefer shorter texts on ties.
 }
 
