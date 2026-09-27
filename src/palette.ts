@@ -83,9 +83,10 @@ let close: (() => void) | null = null;
  */
 /**
  * `title` makes a compact popup, as PhpStorm's refactoring popups: a header instead of a search box, which
- * shows what you type to filter; `numbered` lets 1 to 9 choose a row; `code` sets rows in the editor's font.
+ * shows what you type to filter; `numbered` lets 1 to 9 choose a row; `code` sets rows in the editor's font;
+ * `question` sets the title as a sentence that wraps.
  */
-type Options = { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement; title?: string; numbered?: boolean; code?: boolean };
+type Options = { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement; title?: string; numbered?: boolean; code?: boolean; question?: boolean };
 
 export function pick(placeholder: string, source: Source, delay = 0, initial?: Options) {
   close?.();
@@ -108,6 +109,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
     overlay.style.top = `${anchor.bottom + 4}px`;
   } else if (initial?.title) overlay.className = "popup";
   if (initial?.code) overlay.classList.add("code");
+  if (initial?.question) overlay.classList.add("question");
   // A numbered popup is chosen from, so its search box hides; a titled one you type into keeps it.
   if (initial?.numbered) overlay.classList.add("chooser");
   document.body.append(overlay);
@@ -239,7 +241,7 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
  */
 export const choose = (question: string, options: string[]) =>
   new Promise<string | null>((resolve) =>
-    pick(question, () => options.map((label) => ({ label, run: () => resolve(label) })), 0, { value: "", onCancel: () => resolve(null) }),
+    pick(question, (q) => rank(q, options.map((label) => ({ label, run: () => resolve(label) }))), 0, { value: "", title: question, numbered: true, question: true, onCancel: () => resolve(null) }),
   );
 
 /** Asks a yes-or-no question: `action` confirms, and Cancel or Escape doesn't. */

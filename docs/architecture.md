@@ -3613,7 +3613,9 @@ another palette, counts as no answer. This covers deletes, discards, merges,
 stash drops, Replace All, unsaved changes when closing a tab, and questions
 from language servers (`window/showMessageRequest`), which now also show every
 action a server offers rather than at most three. The dialog plugin remains
-for choosing a folder.
+for choosing a folder. The question shows as the popup's wrapped title
+(`question` in `pick`'s options) with numbered answers, since as the search
+box's placeholder a long one, such as a delete with a deep path, was cut off.
 
 ### 2026-09-24: Bundle pinned tools instead of global installs
 

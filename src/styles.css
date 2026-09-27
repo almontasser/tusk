@@ -428,6 +428,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #palette.chooser input { position: absolute; opacity: 0; pointer-events: none; height: 0; padding: 0; border: 0; }
 #palette .popup-title { display: flex; align-items: center; gap: 8px; padding: 7px 12px 6px; font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
 #palette:not(.chooser) .popup-search { display: none; }
+/* A question (confirm, choose): the whole sentence, wrapped, in the text's color. */
+#palette.question { width: min(460px, calc(100vw - 32px)); }
+#palette.question .popup-title { white-space: normal; overflow-wrap: anywhere; padding: 12px 14px 10px; font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.45; }
 #palette.popup:not(.chooser) { min-width: 420px; }
 #palette.popup:not(.chooser) input { padding: 9px 12px; font-size: 13px; font-family: var(--mono); }
 #palette .popup-search { margin-left: auto; padding: 0 6px; border-radius: 4px; font-weight: 500; color: var(--text); background: color-mix(in srgb, var(--accent) 22%, transparent); }
