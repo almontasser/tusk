@@ -274,6 +274,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧\ | Split the editor down |
 | ⌘9 | Git log |
 | ⌘S | Save all files |
+| ⌘Q | Quit; unsaved changes are saved (with auto-save) or asked about first, as when closing the window |
 | ⌘, | Settings |
 | ⌘W | Close the tab |
 | ⌃\` | Color theme |

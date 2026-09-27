@@ -4375,3 +4375,14 @@ keymap shows in the menu too. It moves the caret to a click outside the
 selection first, as Monaco's menu did. `showMenu` drops separators around empty
 groups, so callers can list groups without checking each one. Other editors
 (the query console, the HTTP response) keep Monaco's menu for their own items.
+
+### 2026-09-27: Quitting waits for unsaved edits
+
+Quitting (⌘Q or the window's close button) ended the app at once, and the
+blur that auto-saves doesn't reliably fire first, so edits could be lost. The
+close button's `CloseRequested` goes to `onCloseRequested` in `src/main.ts`,
+and ⌘Q is the **Quit Tusk** action instead of the native item. Both run
+`readyToLeave`, the check the update restart already used: save with auto-save
+on, otherwise Save, Don't Save, or Cancel. The window is then destroyed, which
+ends the app through the normal exit, so language servers still stop. This
+needs the `core:window:allow-destroy` permission.

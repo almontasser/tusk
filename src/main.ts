@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { toast } from "./dom";
@@ -1161,19 +1162,30 @@ async function saveFile(path: string) {
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
 const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
 
-// Update download progress, and Restart Now after an update installs. Unsaved edits are saved or asked
-// about first, as closing a tab does.
-listen<string>("update-progress", (e) => status(e.payload, "update:progress"));
-listen<string>("tools-progress", (e) => status(e.payload, "tools:progress"));
-listen("update-restart", async () => {
+/**
+ * Saves unsaved edits (with auto-save on) or asks about them, as closing a tab does, before the app restarts or quits,
+ * and saves the session. False when you cancel, or a file couldn't be saved.
+ */
+async function readyToLeave(verb: "restarting" | "quitting") {
   if ([...tabs.values()].some(isDirty)) {
-    const choice = settings.autoSave ? "Save" : await choose("Save your changes before restarting?", ["Save", "Don't Save", "Cancel"]);
-    if (choice === "Cancel" || choice === null) return;
-    if (choice === "Save" && (await saveAll(), [...tabs.values()].some(isDirty))) return;
+    const choice = settings.autoSave ? "Save" : await choose(`Save your changes before ${verb}?`, ["Save", "Don't Save", "Cancel"]);
+    if (choice === "Cancel" || choice === null) return false;
+    if (choice === "Save" && (await saveAll(), [...tabs.values()].some(isDirty))) return false;
   }
   saveSession();
-  await invoke("restart");
+  return true;
+}
+
+/** ⌘Q and the window's close button: the window closes, and with it the app, only once edits are safe. */
+const quit = async () => (await readyToLeave("quitting")) && getCurrentWindow().destroy();
+getCurrentWindow().onCloseRequested(async (e) => {
+  if (!(await readyToLeave("quitting"))) e.preventDefault();
 });
+
+// Update download progress, and Restart Now after an update installs.
+listen<string>("update-progress", (e) => status(e.payload, "update:progress"));
+listen<string>("tools-progress", (e) => status(e.payload, "tools:progress"));
+listen("update-restart", async () => (await readyToLeave("restarting")) && invoke("restart"));
 
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
 window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
@@ -1407,6 +1419,7 @@ const editorAction = (label: string, keys: string, id: string): Action => ({
 // Shortcuts follow PhpStorm's macOS keymap.
 const actions: Action[] = [
   { label: "Open Folder…", run: () => openFolder() },
+  { label: "Quit Tusk", keys: "Meta+Q", run: quit },
   // ⌘N generates code in a PHP editor, as in PhpStorm, and creates a file everywhere else.
   { label: "Generate…", keys: "Meta+N", run: () => generate(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "New File…", keys: "Meta+N", run: () => root && newFile() },

@@ -9,6 +9,7 @@
     "core:default",
     "dialog:default",
     "mcp-bridge:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-destroy"
   ]
 }
