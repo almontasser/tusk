@@ -53,7 +53,10 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     let text = &ctx.doc.text;
     let offset = offset as usize;
     let before = &text[..offset];
-    if in_comment_or_string(ctx, offset as u32) {
+    if in_string(ctx, offset as u32) {
+        return crate::framework::completion(ctx, offset as u32).map(|items| (items, false));
+    }
+    if in_comment(ctx, offset as u32) {
         return None;
     }
     let word_start = before.len() - before.chars().rev().take_while(|c| is_name_char(*c)).map(char::len_utf8).sum::<usize>();
@@ -83,15 +86,16 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     Some((names(ctx, word_start as u32, word, range), true))
 }
 
-/// Whether `offset` is inside a comment or a string, where code completion doesn't apply.
-fn in_comment_or_string(ctx: &Ctx<'_>, offset: u32) -> bool {
-    let in_trivia = ctx.parsed.program.trivia.iter().any(|t| {
+/// Whether `offset` is inside a comment, where code completion doesn't apply.
+fn in_comment(ctx: &Ctx<'_>, offset: u32) -> bool {
+    ctx.parsed.program.trivia.iter().any(|t| {
         let s = t.span();
         t.kind.is_comment() && s.start.offset < offset && offset <= s.end.offset
-    });
-    if in_trivia {
-        return true;
-    }
+    })
+}
+
+/// Whether `offset` is inside a string, where only the framework's completions apply.
+fn in_string(ctx: &Ctx<'_>, offset: u32) -> bool {
     ctx.parsed.path_at(offset).iter().any(|n| match n {
         Node::LiteralString(s) => s.span().start.offset < offset && offset < s.span().end.offset,
         _ => false,

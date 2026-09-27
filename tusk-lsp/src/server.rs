@@ -42,6 +42,7 @@ pub struct Snapshot {
     pub docs: Documents,
     pub index: SharedIndex,
     pub root: PathBuf,
+    pub framework: Arc<crate::framework::State>,
 }
 
 impl Snapshot {
@@ -129,6 +130,7 @@ pub struct Server {
     index: SharedIndex,
     indexer: Indexer,
     diagnostics: Sender<diagnostics::Event>,
+    framework: Arc<crate::framework::State>,
     pool: rayon::ThreadPool,
     root: PathBuf,
     shutting_down: bool,
@@ -198,7 +200,8 @@ impl Server {
         let docs = Arc::new(RwLock::new(Documents::default()));
         let (tx, rx) = crossbeam_channel::unbounded();
         let applied = Arc::new((Mutex::new(0), Condvar::new()));
-        let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone());
+        let framework = Arc::new(crate::framework::State::new(root.clone()));
+        let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone(), framework.clone(), root.clone());
         spawn_indexer(rx, index.clone(), docs.clone(), applied.clone(), client.clone(), diagnostics.clone());
         let indexer = Indexer { tx, queued: AtomicU64::new(0), applied };
         indexer.send(Job::Build);
@@ -208,7 +211,7 @@ impl Server {
             .stack_size(64 << 20)
             .build()
             .expect("the request pool starts");
-        Self { client, docs, index, indexer, diagnostics, pool, root, shutting_down: false }
+        Self { client, docs, index, indexer, diagnostics, framework, pool, root, shutting_down: false }
     }
 
     fn main_loop(&mut self, receiver: &Receiver<Message>) {
@@ -239,7 +242,7 @@ impl Server {
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot { docs: self.docs.read().clone(), index: self.index.clone(), root: self.root.clone() }
+        Snapshot { docs: self.docs.read().clone(), index: self.index.clone(), root: self.root.clone(), framework: self.framework.clone() }
     }
 
     /// Runs a request on the pool after the index catches up. A panic answers with an error instead of taking
@@ -275,6 +278,7 @@ impl Server {
         }
         match method.as_str() {
             "tusk/reindex" => {
+                self.framework.clear();
                 self.indexer.send(Job::Build);
                 self.client.respond(Response::new_ok(id, ()));
             }
@@ -309,12 +313,21 @@ impl Server {
                     version: None,
                 });
             }
-            notification::DidSaveTextDocument::METHOD => {}
+            notification::DidSaveTextDocument::METHOD => {
+                let Some(p) = extract::<DidSaveTextDocumentParams>(note) else { return };
+                if let Some(path) = uri_to_path(&p.text_document.uri) {
+                    self.framework.changed(&path);
+                }
+            }
             notification::DidChangeWatchedFiles::METHOD => {
                 let Some(p) = extract::<DidChangeWatchedFilesParams>(note) else { return };
                 let open = self.docs.read();
                 for change in p.changes {
                     let Some(path) = uri_to_path(&change.uri) else { continue };
+                    self.framework.changed(&path);
+                    if path.extension().is_none_or(|e| e != "php") {
+                        continue;
+                    }
                     // An open document's text wins over the disk until it closes.
                     if open.get(&path).is_some() {
                         continue;
@@ -330,7 +343,10 @@ impl Server {
                         id: "tusk-watch".into(),
                         method: notification::DidChangeWatchedFiles::METHOD.into(),
                         register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                            watchers: vec![FileSystemWatcher { glob_pattern: GlobPattern::String("**/*.php".into()), kind: None }],
+                            watchers: ["**/*.php", "**/.env", "lang/**/*.json", "public/**", "composer.lock"]
+                                .into_iter()
+                                .map(|g| FileSystemWatcher { glob_pattern: GlobPattern::String(g.into()), kind: None })
+                                .collect(),
                         })
                         .ok(),
                     }],

@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use crate::analysis::{Parsed, analyze};
 use crate::documents::{Document, Documents};
 use crate::index::SharedIndex;
-use crate::server::Client;
+use crate::server::{Client, Snapshot};
 
 pub enum Event {
     /// An open document changed. Its index update is queued.
@@ -30,12 +30,24 @@ pub enum Event {
 /// How long edits must pause before documents other than the edited one are checked again.
 const SETTLE: Duration = Duration::from_millis(600);
 
-pub fn spawn(client: Client, docs: Arc<RwLock<Documents>>, index: SharedIndex) -> Sender<Event> {
+pub fn spawn(
+    client: Client,
+    docs: Arc<RwLock<Documents>>,
+    index: SharedIndex,
+    framework: Arc<crate::framework::State>,
+    root: PathBuf,
+) -> Sender<Event> {
     let (tx, rx) = crossbeam_channel::unbounded::<Event>();
     std::thread::Builder::new()
         .name("tusk-diagnostics".into())
         .stack_size(64 << 20)
         .spawn(move || {
+            let snapshot = |docs: &Arc<RwLock<Documents>>| Snapshot {
+                docs: docs.read().clone(),
+                index: index.clone(),
+                root: root.clone(),
+                framework: framework.clone(),
+            };
             let mut edited: HashSet<PathBuf> = HashSet::new();
             let mut others_due = false;
             loop {
@@ -46,9 +58,10 @@ pub fn spawn(client: Client, docs: Arc<RwLock<Documents>>, index: SharedIndex) -
                             edited.insert(path);
                         }
                         Ok(Event::IndexChanged) => {
+                            let snap = snapshot(&docs);
                             for path in edited.drain() {
-                                if let Some(doc) = docs.read().get(&path).cloned() {
-                                    publish(&client, &index, &doc);
+                                if let Some(doc) = snap.docs.get(&path).cloned() {
+                                    publish(&client, &snap, &doc);
                                 }
                             }
                             others_due = true;
@@ -57,9 +70,9 @@ pub fn spawn(client: Client, docs: Arc<RwLock<Documents>>, index: SharedIndex) -
                     },
                     recv(timeout) -> _ => {
                         others_due = false;
-                        let open: Vec<_> = docs.read().iter().cloned().collect();
-                        for doc in open {
-                            publish(&client, &index, &doc);
+                        let snap = snapshot(&docs);
+                        for doc in snap.docs.iter() {
+                            publish(&client, &snap, doc);
                         }
                     }
                 }
@@ -69,11 +82,11 @@ pub fn spawn(client: Client, docs: Arc<RwLock<Documents>>, index: SharedIndex) -
     tx
 }
 
-fn publish(client: &Client, index: &SharedIndex, doc: &Document) {
-    if doc.language != "php" {
+fn publish(client: &Client, snap: &Snapshot, doc: &Document) {
+    if !matches!(doc.language.as_str(), "php" | "blade") {
         return;
     }
-    let diagnostics = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(index, doc))).unwrap_or_default();
+    let diagnostics = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(snap, doc))).unwrap_or_default();
     client.notify::<PublishDiagnostics>(PublishDiagnosticsParams {
         uri: doc.uri.clone(),
         diagnostics,
@@ -81,8 +94,15 @@ fn publish(client: &Client, index: &SharedIndex, doc: &Document) {
     });
 }
 
-/// The problems in `doc`.
-pub fn check(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
+/// The problems in `doc`: Mago's for PHP, and the framework's for PHP and Blade.
+pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
+    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { vec![] };
+    let framework = crate::features::with_ctx(snap, &doc.uri, |ctx| crate::framework::diagnostics(ctx)).unwrap_or_default();
+    out.extend(framework);
+    out
+}
+
+fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.

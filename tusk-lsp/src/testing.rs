@@ -45,7 +45,12 @@ impl Fixture {
         let mut index = Index::empty(IndexConfig::new(ROOT));
         let paths = docs.iter().map(|d| d.path.clone()).collect();
         index.build(paths, |p| docs.get(p).map(|d| d.text.clone().into_bytes()), |_, _| {});
-        let snap = Snapshot { docs, index: Arc::new(RwLock::new(index)), root: PathBuf::from(ROOT) };
+        let snap = Snapshot {
+            docs,
+            index: Arc::new(RwLock::new(index)),
+            root: PathBuf::from(ROOT),
+            framework: Arc::new(crate::framework::State::new(PathBuf::from(ROOT))),
+        };
         Self { snap, cursor }
     }
 

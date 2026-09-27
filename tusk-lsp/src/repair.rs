@@ -21,9 +21,15 @@ fn closers(code: &str, in_php: bool) -> String {
     let input = Input::new(FileId::zero(), code.as_bytes());
     let mut lexer = if in_php { Lexer::scripting(input, LexerSettings::default()) } else { Lexer::new(input, LexerSettings::default()) };
     let mut open: Vec<char> = vec![];
+    // A string still open at the end: its quote closes it before any bracket.
+    let mut quote: Option<char> = None;
+    let mut in_double = false;
     while let Some(token) = lexer.advance() {
         let Ok(token) = token else { continue };
+        quote = None;
         match token.kind {
+            TokenKind::PartialLiteralString => quote = token.value.first().map(|q| *q as char),
+            TokenKind::DoubleQuote => in_double = !in_double,
             TokenKind::LeftBrace | TokenKind::DollarLeftBrace => open.push('}'),
             TokenKind::LeftBracket | TokenKind::HashLeftBracket => open.push(']'),
             TokenKind::LeftParenthesis => open.push(')'),
@@ -34,6 +40,11 @@ fn closers(code: &str, in_php: bool) -> String {
         }
     }
     let mut out = String::new();
+    if let Some(q) = quote {
+        out.push(q);
+    } else if in_double {
+        out.push('"');
+    }
     for closer in open.iter().rev() {
         if *closer == '}' {
             out.push(';');
@@ -49,7 +60,8 @@ fn closers(code: &str, in_php: bool) -> String {
 /// `text` with closers appended for brackets left open at its end and a `;` for an unfinished last
 /// statement, so a class being written at the end of a file still parses.
 pub fn balance_end(text: &str) -> String {
-    format!("{text}{};", closers(text, false))
+    let closers = closers(text, false);
+    format!("{text}{}", if closers.is_empty() { ";" } else { &closers })
 }
 
 /// The text with the statement at `offset` ended there: closers for the brackets opened since the start of
@@ -69,7 +81,20 @@ pub fn at_cursor(parsed: &Parsed<'_>, offset: u32) -> Option<String> {
     })?;
     let open = body.left_brace.end.offset as usize;
     let close = body.right_brace.start.offset as usize;
-    let offset = offset as usize;
+    // Inside a finished string, such as one the editor closed as you typed its opening quote, the statement
+    // ends after the string, so what's typed in it stays a string. A string that runs on past the cursor's
+    // line is one left open, which swallowed the code after it.
+    let offset = path
+        .iter()
+        .rev()
+        .find_map(|n| match n {
+            Node::LiteralString(s) if s.span().start.offset < offset && offset < s.span().end.offset => {
+                let rest = &text[offset as usize..s.span().end.offset as usize];
+                (!rest.contains('\n')).then(|| s.span().end.offset)
+            }
+            _ => None,
+        })
+        .unwrap_or(offset) as usize;
     if !(open <= offset && offset <= close) || body.right_brace.is_zero() {
         return None;
     }
@@ -83,7 +108,6 @@ pub fn at_cursor(parsed: &Parsed<'_>, offset: u32) -> Option<String> {
     out.extend(std::iter::repeat_n(' ', close - offset - closers.len()));
     out.push_str(&text[close..]);
     debug_assert_eq!(out.len(), text.len());
-    let _ = body.span();
     Some(out)
 }
 
@@ -95,8 +119,10 @@ mod tests {
     #[test]
     fn closes_brackets_left_open_at_the_end() {
         let text = "<?php class A { function f() { $x->send('(', [1, // ) ]\n";
-        assert_eq!(balance_end(text), format!("{text}]);}};}};;"));
+        assert_eq!(balance_end(text), format!("{text}]);}};}};"));
         assert_eq!(balance_end("<?php f(1)"), "<?php f(1);");
+        assert_eq!(balance_end("<?php route('ho"), "<?php route('ho');");
+        assert_eq!(balance_end("<?php f(\"a {$b} c"), "<?php f(\"a {$b} c\");");
     }
 
     #[test]

@@ -19,7 +19,9 @@ fn response(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
 pub fn definition(snap: &Snapshot, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>, String> {
     let at = params.text_document_position_params;
     Ok(with_ctx(snap, &at.text_document.uri, |ctx| {
-        let found = ctx.symbol_at(at.position)?;
+        let Some(found) = ctx.symbol_at(at.position) else {
+            return response(crate::framework::definition(ctx, ctx.offset(at.position)));
+        };
         response(definitions(ctx, &found))
     })
     .flatten())

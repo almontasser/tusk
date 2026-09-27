@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod diagnostics;
 pub mod documents;
 pub mod features;
+pub mod framework;
 pub mod handlers;
 pub mod imports;
 pub mod index;

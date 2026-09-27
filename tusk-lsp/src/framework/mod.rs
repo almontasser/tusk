@@ -1,0 +1,452 @@
+//! Laravel and Filament: features on the strings passed to framework calls (`route('home')`,
+//! `->relationship('author')`), fed by facts about the running app that PHP scripts report.
+
+pub mod filament;
+pub mod laravel;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use lsp_types::{CodeLens, CompletionItem, Diagnostic, DocumentLink, Hover, Location};
+use mago_span::HasSpan;
+use mago_syntax::cst::{Argument, Expression, LiteralStringKind, Node, PartialArgument};
+use parking_lot::Mutex;
+use serde_json::Value;
+
+use crate::features::Ctx;
+use crate::locate::walk;
+use crate::symbol::Symbol;
+
+/// What kind of call a string is passed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallKind {
+    /// `route('home')`
+    Function,
+    /// `$request->routeIs('home')`
+    Method,
+    /// `Route::has('home')`
+    Static,
+    /// `new Content(view: 'mail')`
+    New,
+    /// `#[Config('app.name')]`
+    Attribute,
+    /// `$get('field')`, a closure in a variable. `name` holds the variable, such as `$get`.
+    Closure,
+}
+
+/// The call a string is an argument of.
+#[derive(Debug, Clone)]
+pub struct Call {
+    pub kind: CallKind,
+    /// The function's resolved name, the method's name, or the variable for a closure. Empty for `new` and
+    /// attributes.
+    pub name: String,
+    /// The classes the call is on: the receiver's inferred classes, the class of a static call, or the class
+    /// being created. Empty for functions.
+    pub classes: Vec<String>,
+    /// Each argument's name if named, and its value if it's a plain string.
+    pub arguments: Vec<(Option<String>, Option<String>)>,
+    /// The span of the whole call.
+    pub span: (u32, u32),
+}
+
+impl Call {
+    /// Whether the call is on one of `classes` or a subclass of one.
+    pub fn on(&self, codebase: &mago_codex::metadata::CodebaseMetadata, classes: &[&str]) -> bool {
+        self.classes.iter().any(|c| {
+            classes.iter().any(|want| c.eq_ignore_ascii_case(want) || codebase.is_instance_of(c.as_bytes(), want.as_bytes()))
+        })
+    }
+
+    pub fn is_method(&self, names: &[&str]) -> bool {
+        matches!(self.kind, CallKind::Method | CallKind::Static) && names.iter().any(|n| n.eq_ignore_ascii_case(&self.name))
+    }
+
+    pub fn is_function(&self, names: &[&str]) -> bool {
+        self.kind == CallKind::Function && names.iter().any(|n| n.eq_ignore_ascii_case(&self.name))
+    }
+}
+
+/// Where in an array argument a string sits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InArray {
+    Key,
+    /// A value, with its key when that's a plain string.
+    Value(Option<String>),
+}
+
+/// A string literal passed to a call, directly or inside an array argument.
+#[derive(Debug, Clone)]
+pub struct StringArg {
+    /// The contents, without quotes. Escapes are left as written.
+    pub value: String,
+    /// The span of the contents, without the quotes.
+    pub start: u32,
+    pub end: u32,
+    pub double_quoted: bool,
+    pub call: Call,
+    /// The argument's position.
+    pub index: usize,
+    /// The argument's name, if it's named.
+    pub name: Option<String>,
+    pub in_array: Option<InArray>,
+}
+
+fn text_of(ctx: &Ctx<'_>, span: (u32, u32)) -> String {
+    ctx.parsed.text()[span.0 as usize..span.1 as usize].to_string()
+}
+
+fn plain_string(ctx: &Ctx<'_>, expr: &Expression<'_>) -> Option<String> {
+    let Expression::Literal(mago_syntax::cst::Literal::String(s)) = expr else { return None };
+    let (start, end) = (s.span.start.offset + 1, s.span.end.offset.saturating_sub(1));
+    (start <= end).then(|| text_of(ctx, (start, end)))
+}
+
+/// Describes the call node `node`, if it's one.
+fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<Call> {
+    let resolver = ctx.resolver();
+    let span = (node.span().start.offset, node.span().end.offset);
+    let args = |list: &mago_syntax::cst::ArgumentList<'_>| -> Vec<(Option<String>, Option<String>)> {
+        list.arguments
+            .iter()
+            .map(|a| match a {
+                Argument::Positional(p) => (None, plain_string(ctx, p.value)),
+                Argument::Named(n) => (Some(String::from_utf8_lossy(n.name.value).into_owned()), plain_string(ctx, n.value)),
+            })
+            .collect()
+    };
+    let name_of = |selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>| text_of(ctx, (selector.span().start.offset, selector.span().end.offset));
+    Some(match node {
+        Node::FunctionCall(c) => {
+            if let Expression::Variable(v) = c.function {
+                let var = text_of(ctx, (v.span().start.offset, v.span().end.offset));
+                return Some(Call { kind: CallKind::Closure, name: var, classes: vec![], arguments: args(&c.argument_list), span });
+            }
+            let at = c.function.span().end.offset.saturating_sub(1);
+            let name = match resolver.at(at)?.symbols.into_iter().next()? {
+                Symbol::Function(f) => f,
+                _ => return None,
+            };
+            Call { kind: CallKind::Function, name, classes: vec![], arguments: args(&c.argument_list), span }
+        }
+        Node::MethodCall(c) => Call {
+            kind: CallKind::Method,
+            name: name_of(&c.method),
+            classes: resolver.classes_of(c.object),
+            arguments: args(&c.argument_list),
+            span,
+        },
+        Node::NullSafeMethodCall(c) => Call {
+            kind: CallKind::Method,
+            name: name_of(&c.method),
+            classes: resolver.classes_of(c.object),
+            arguments: args(&c.argument_list),
+            span,
+        },
+        Node::StaticMethodCall(c) => Call {
+            kind: CallKind::Static,
+            name: name_of(&c.method),
+            classes: resolver.classes_of_class_expr(c.class, path),
+            arguments: args(&c.argument_list),
+            span,
+        },
+        Node::Instantiation(i) => Call {
+            kind: CallKind::New,
+            name: String::new(),
+            classes: resolver.classes_of_class_expr(i.class, path),
+            arguments: i.argument_list.as_ref().map(args).unwrap_or_default(),
+            span,
+        },
+        Node::Attribute(a) => {
+            let fqn = ctx.parsed.names.resolve(&a.name.span()).map(|n| String::from_utf8_lossy(n).into_owned())?;
+            let arguments = a
+                .argument_list
+                .as_ref()
+                .map(|l| {
+                    l.arguments
+                        .iter()
+                        .map(|a| match a {
+                            PartialArgument::Positional(p) => (None, plain_string(ctx, p.value)),
+                            PartialArgument::Named(n) => (Some(String::from_utf8_lossy(n.name.value).into_owned()), plain_string(ctx, n.value)),
+                            _ => (None, None),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Call { kind: CallKind::Attribute, name: String::new(), classes: vec![fqn], arguments, span }
+        }
+        _ => return None,
+    })
+}
+
+/// The string argument a string literal at the end of `path` is, if any.
+fn string_arg(ctx: &Ctx<'_>, path: &[Node<'_, '_>], literal: &mago_syntax::cst::LiteralString<'_>) -> Option<StringArg> {
+    let (start, end) = (literal.span.start.offset + 1, literal.span.end.offset.saturating_sub(1).max(literal.span.start.offset + 1));
+    let mut in_array = None;
+    let mut i = path.len();
+    // Climb from the literal to the argument that holds it, noting an array on the way.
+    while i > 0 {
+        i -= 1;
+        match &path[i] {
+            Node::Expression(_) | Node::Literal(_) | Node::LiteralString(_) => {}
+            Node::KeyValueArrayElement(el) if in_array.is_none() => {
+                in_array = Some(if el.key.span().start.offset <= literal.span.start.offset && literal.span.end.offset <= el.key.span().end.offset {
+                    InArray::Key
+                } else {
+                    InArray::Value(plain_string(ctx, el.key))
+                });
+            }
+            Node::ValueArrayElement(_) if in_array.is_none() => in_array = Some(InArray::Value(None)),
+            Node::ArrayElement(_) | Node::Array(_) | Node::LegacyArray(_) => {}
+            Node::PositionalArgument(_) | Node::NamedArgument(_) | Node::Argument(_) | Node::PartialArgument(_) => {}
+            Node::ArgumentList(_) | Node::PartialArgumentList(_) => {
+                let call_node = path[..i].iter().rev().find(|n| {
+                    matches!(n, Node::FunctionCall(_) | Node::MethodCall(_) | Node::NullSafeMethodCall(_) | Node::StaticMethodCall(_) | Node::Instantiation(_) | Node::Attribute(_))
+                })?;
+                let call = call_of(ctx, call_node, &path[..i])?;
+                // The argument's position: count arguments that start before the literal's argument.
+                let arg_node = path.get(i + 1)?;
+                let arg_start = arg_node.span().start.offset;
+                let index = match &path[i] {
+                    Node::ArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
+                    Node::PartialArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
+                    _ => 0,
+                };
+                let name = match arg_node {
+                    Node::Argument(Argument::Named(n)) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
+                    Node::NamedArgument(n) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
+                    _ => None,
+                };
+                return Some(StringArg {
+                    value: text_of(ctx, (start, end)),
+                    start,
+                    end,
+                    double_quoted: literal.kind == LiteralStringKind::DoubleQuoted,
+                    call,
+                    index,
+                    name,
+                    in_array,
+                });
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Every string argument in the file.
+pub fn string_args(ctx: &Ctx<'_>) -> Vec<StringArg> {
+    let mut out = vec![];
+    walk(&ctx.parsed, |node, ancestors| {
+        if let Node::LiteralString(literal) = node {
+            let mut path = ancestors.to_vec();
+            path.push(node);
+            if let Some(arg) = string_arg(ctx, &path, literal) {
+                out.push(arg);
+            }
+        }
+    });
+    out
+}
+
+/// The string argument whose contents hold `offset` (between its quotes, or at either end of them).
+pub fn string_arg_at(ctx: &Ctx<'_>, offset: u32) -> Option<StringArg> {
+    let path = ctx.parsed.path_at(offset);
+    let (i, literal) = path.iter().enumerate().rev().find_map(|(i, n)| match n {
+        Node::LiteralString(s) => Some((i, *s)),
+        _ => None,
+    })?;
+    if !(literal.span.start.offset < offset && offset < literal.span.end.offset) {
+        return None;
+    }
+    string_arg(ctx, &path[..=i], literal)
+}
+
+/// Facts about the running app that a PHP script reports, cached until a file they depend on changes.
+pub struct State {
+    root: PathBuf,
+    cache: Mutex<HashMap<String, Cached>>,
+}
+
+struct Cached {
+    value: Arc<Value>,
+    /// Paths (relative to the root) whose changes make it stale; a prefix matches a folder.
+    depends_on: Vec<String>,
+    at: Instant,
+}
+
+/// How long one PHP script may run.
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+impl State {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root, cache: Mutex::new(HashMap::new()) }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The JSON a PHP script prints, run once and cached under `key` until a path in `depends_on` changes.
+    /// The script runs in the project's root with `php`, and its arguments follow it. `None` if PHP fails.
+    pub fn php(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str]) -> Option<Arc<Value>> {
+        if let Some(c) = self.cache.lock().get(key) {
+            return Some(c.value.clone());
+        }
+        let value = Arc::new(run_php(&self.root, script, args).unwrap_or(Value::Null));
+        let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
+        self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
+        (!value.is_null()).then_some(value)
+    }
+
+    /// Stores a value computed without PHP, with the same invalidation.
+    pub fn remember(&self, key: &str, depends_on: &[&str], compute: impl FnOnce() -> Value) -> Arc<Value> {
+        if let Some(c) = self.cache.lock().get(key) {
+            return c.value.clone();
+        }
+        let value = Arc::new(compute());
+        let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
+        self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
+        value
+    }
+
+    /// Forgets cached facts that depend on `path`. A path outside the project forgets nothing.
+    pub fn changed(&self, path: &Path) {
+        let Ok(rel) = path.strip_prefix(&self.root) else { return };
+        let rel = rel.to_string_lossy();
+        self.cache.lock().retain(|_, c| !c.depends_on.iter().any(|d| d == "*" || rel.starts_with(d.as_str())));
+    }
+
+    /// Forgets everything, such as after a reindex.
+    pub fn clear(&self) {
+        self.cache.lock().clear();
+    }
+
+    /// How old a cached value is, for tests and logging.
+    pub fn age(&self, key: &str) -> Option<Duration> {
+        self.cache.lock().get(key).map(|c| c.at.elapsed())
+    }
+}
+
+/// Writes `script` to a temporary file and runs it with PHP, returning the JSON it prints. The output may be
+/// preceded by noise such as deprecation notices, so parsing starts at the first `{` or `[`.
+fn run_php(root: &Path, script: &str, args: &[&str]) -> Option<Value> {
+    let dir = std::env::temp_dir().join("tusk-lsp");
+    std::fs::create_dir_all(&dir).ok()?;
+    // Named by content, so concurrent servers share it and a new build's script replaces the old.
+    let hash = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        script.hash(&mut h);
+        h.finish()
+    };
+    let file = dir.join(format!("script-{hash:016x}.php"));
+    if !file.exists() {
+        std::fs::write(&file, script).ok()?;
+    }
+    let mut child = Command::new("php")
+        .arg(&file)
+        .args(args)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            break;
+        }
+        if started.elapsed() > SCRIPT_TIMEOUT {
+            let _ = child.kill();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let start = text.find(['{', '['])?;
+    serde_json::from_str(&text[start..]).ok()
+}
+
+/// Completions inside a string argument.
+pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
+    let mut items = laravel::completion(ctx, offset).unwrap_or_default();
+    items.extend(filament::completion(ctx, offset).unwrap_or_default());
+    (!items.is_empty()).then_some(items)
+}
+
+/// Where a string argument at `offset` points: a route's definition, a view's file, a relationship's method.
+pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
+    let mut out = laravel::definition(ctx, offset);
+    out.extend(filament::definition(ctx, offset));
+    out
+}
+
+pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
+    laravel::hover(ctx, offset).or_else(|| filament::hover(ctx, offset))
+}
+
+/// Problems with the strings passed to framework calls, such as a route name that doesn't exist.
+pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
+    let mut out = laravel::diagnostics(ctx);
+    out.extend(filament::diagnostics(ctx));
+    out
+}
+
+pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<CodeLens> {
+    filament::code_lenses(ctx)
+}
+
+pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {
+    laravel::document_links(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::with_ctx;
+    use crate::testing::Fixture;
+
+    const LIB: &str = "<?php\nnamespace Illuminate\\Http;\nclass Request { public function routeIs(string ...$p): bool { return true; } }\n";
+
+    #[test]
+    fn finds_strings_passed_to_calls() {
+        let fx = Fixture::new(&[
+            ("lib.php", LIB),
+            ("t.php", "<?php\nfunction route(string $name, array $p = []) {}\nfunction f(\\Illuminate\\Http\\Request $r) {\n    route('home', ['id' => 'x']);\n    $r->routeIs('admin.*');\n    new \\Foo(view: 'mail');\n    $get('email');\n}\n"),
+        ]);
+        let args = with_ctx(&fx.snap, &crate::testing::uri("t.php"), |ctx| string_args(ctx)).unwrap();
+        let summary: Vec<String> = args
+            .iter()
+            .map(|a| format!("{:?} {} {:?} #{} {:?} {:?} = {}", a.call.kind, a.call.name, a.call.classes, a.index, a.name, a.in_array, a.value))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                "Function route [] #0 None None = home",
+                "Function route [] #1 None Some(Key) = id",
+                "Function route [] #1 None Some(Value(Some(\"id\"))) = x",
+                "Method routeIs [\"Illuminate\\\\Http\\\\Request\"] #0 None None = admin.*",
+                "New  [\"Foo\"] #0 Some(\"view\") None = mail",
+                "Closure $get [] #0 None None = email",
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_the_string_at_the_cursor_even_unfinished() {
+        let fx = Fixture::one("<?php\nfunction route($n) {}\nfunction f() {\n    route('ho<|>\n}\n");
+        let at = fx.at();
+        let arg = crate::features::with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| {
+            string_arg_at(ctx, ctx.offset(at.position))
+        })
+        .flatten()
+        .expect("a string argument");
+        assert_eq!((arg.call.name.as_str(), arg.value.as_str()), ("route", "ho"));
+    }
+}

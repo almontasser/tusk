@@ -36,6 +36,8 @@ pub fn find(method: &str) -> Option<Handler> {
         FoldingRangeRequest::METHOD => typed!(FoldingRangeRequest, folding::folding_ranges),
         SelectionRangeRequest::METHOD => typed!(SelectionRangeRequest, folding::selection_ranges),
         InlayHintRequest::METHOD => typed!(InlayHintRequest, inlay::inlay_hints),
+        CodeLensRequest::METHOD => typed!(CodeLensRequest, links::code_lenses),
+        DocumentLinkRequest::METHOD => typed!(DocumentLinkRequest, links::document_links),
         _ => return None,
     };
     Some(handler)

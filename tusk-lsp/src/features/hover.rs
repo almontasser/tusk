@@ -12,7 +12,9 @@ use crate::types::display;
 pub fn hover(snap: &Snapshot, params: HoverParams) -> Result<Option<Hover>, String> {
     let at = params.text_document_position_params;
     Ok(with_ctx(snap, &at.text_document.uri, |ctx| {
-        let found = ctx.symbol_at(at.position)?;
+        let Some(found) = ctx.symbol_at(at.position) else {
+            return crate::framework::hover(ctx, ctx.offset(at.position));
+        };
         let parts: Vec<String> = found.symbols.iter().filter_map(|s| describe(ctx, s, found.start, found.end)).collect();
         if parts.is_empty() {
             return None;

@@ -114,7 +114,7 @@ impl Index {
 
     /// Whether `path` belongs in the index: a PHP file under the root that no exclusion covers, or a stub.
     pub fn includes(&self, path: &Path) -> bool {
-        if path.extension().is_none_or(|e| e != "php") {
+        if path.extension().is_none_or(|e| e != "php") || path.to_string_lossy().ends_with(".blade.php") {
             return false;
         }
         if self.config.stubs.iter().any(|s| path.starts_with(s)) {
@@ -367,6 +367,7 @@ mod tests {
         assert!(!idx.includes(Path::new("/p/storage/framework/views/x.php")));
         assert!(!idx.includes(Path::new("/p/.git/x.php")));
         assert!(!idx.includes(Path::new("/p/app/readme.md")));
+        assert!(!idx.includes(Path::new("/p/resources/views/home.blade.php")));
         assert!(!idx.includes(Path::new("/elsewhere/x.php")));
     }
 }
