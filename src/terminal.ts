@@ -66,7 +66,7 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   const el = document.createElement("div");
   el.className = "term";
   $("terminals").append(el);
-  const term = new Terminal({ theme: theme(), fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace", fontSize: 12, cursorBlink: true });
+  const term = new Terminal({ theme: theme(), fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace", fontSize: 12, cursorBlink: true, minimumContrastRatio: 4.5 });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
