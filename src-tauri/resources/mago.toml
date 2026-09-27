@@ -26,13 +26,22 @@ literal-named-argument = { enabled = false }
 # Filament and the container fill a closure's parameters by name (`$record`, `$livewire`), which a first-class
 # callable such as `$this->print(...)` renames to the method's.
 prefer-first-class-callable = { enabled = false }
-# Code size and complexity are hints to refactor, not errors: warnings, as PhpStorm shows them.
-cyclomatic-complexity = { level = "warning" }
-kan-defect = { level = "warning" }
-too-many-methods = { level = "warning" }
-too-many-properties = { level = "warning" }
-too-many-enum-cases = { level = "warning" }
-excessive-parameter-list = { level = "warning" }
+# Code size and complexity metrics flag long Filament resources and form builders more than real problems.
+cyclomatic-complexity = { enabled = false }
+halstead = { enabled = false }
+kan-defect = { enabled = false }
+too-many-methods = { enabled = false }
+too-many-properties = { enabled = false }
+too-many-enum-cases = { enabled = false }
+excessive-parameter-list = { enabled = false }
+# Taste rather than mistakes, and on almost every Filament closure.
+prefer-static-closure = { enabled = false }
+no-else-clause = { enabled = false }
+prefer-early-continue = { enabled = false }
+no-boolean-flag-parameter = { enabled = false }
+no-isset = { enabled = false }
+readable-literal = { enabled = false }
+assert-description = { enabled = false }
 # Style and hardening advice rather than mistakes.
 no-empty = { level = "warning" }
 no-error-control-operator = { level = "warning" }

@@ -1344,7 +1344,9 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   to `whereHas('author', …)`.
 - **Gates** match the model you pass: `Gate::allows('update', $post)` links to
   the policy for `$post`'s class, and warns when no policy for it defines the
-  ability.
+  ability. A project with a `Gate::before` hook, such as
+  spatie/laravel-permission's, gets no warnings for unknown abilities, since
+  the hook decides them at run time.
 - **Quick fixes** create a missing view (`resources/views/…blade.php`) or
   Inertia page, add a missing variable to `.env` (or the value from
   `.env.example`), and, in `.env` files, add a `VITE_` copy of the selected
@@ -2137,8 +2139,10 @@ reads the project and `vendor` but skips hidden folders, `node_modules`, and
 `storage`, rules that flag normal Laravel code (`strict-types`,
 `literal-named-argument`, and `prefer-first-class-callable`, since Filament
 fills closure parameters by name) are off, rules about code size and
-complexity (such as `cyclomatic-complexity` and `too-many-methods`) and style
-show as warnings rather than errors, and tests, factories, and seeders may
+complexity (such as `cyclomatic-complexity`, `halstead`, and
+`too-many-methods`) and matters of taste (such as `prefer-static-closure` and
+`no-else-clause`) are off, the remaining style rules show as warnings rather
+than errors, and tests, factories, and seeders may
 set literal passwords. Mago checks against the lowest PHP version your
 `composer.json` allows. Mago's analyzer doesn't know Laravel's
 magic, such as Eloquent attributes and relationships (`$post->author`),

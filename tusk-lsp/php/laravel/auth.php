@@ -82,6 +82,8 @@ if (!App::bound('auth')) {
 
     echo json_encode([
         'authenticatable' => vsCodeGetAuthenticatable(),
+        // A `Gate::before` hook, such as spatie/laravel-permission's, grants abilities no policy defines.
+        'before'          => (fn () => $this->beforeCallbacks !== [])->call(Gate::getFacadeRoot()),
         'policies'        => collect(Gate::abilities())
             ->map(function ($policy, $key) {
                 $reflection = new ReflectionFunction($policy);

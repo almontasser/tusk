@@ -641,7 +641,11 @@ and strike through deprecated code. Stopping a server removes its entries from
 
 `lastDiagnostics` also keeps the diagnostics left after filtering, and a code
 action request sends the ones that overlap the range, so a false problem that
-the filters drop gets no quick fix. The hover's Quick Fix link lists only
+the filters drop gets no quick fix. With an empty selection, Monaco widens the
+range to the whole problem under the cursor, so a method-wide problem such as
+`halstead` would take in every problem inside the method. When the focused
+editor's empty selection is inside the range, only the problems at the cursor
+go. The hover's Quick Fix link lists only
 actions of kind `quickfix`, while the light bulb lists every kind. A server
 can answer with a bare `Command`, which has no kind, so the client gives such
 a command the kind `quickfix` when problems overlap the range. Each action carries its

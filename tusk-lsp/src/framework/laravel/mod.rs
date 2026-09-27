@@ -646,6 +646,8 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Translation if !looks_like_translation_key(v) => return None,
         Kind::Translation => ("translation", format!("Translation [{v}] not found.")),
         Kind::Middleware => ("middleware", format!("Middleware [{v}] not found.")),
+        // A `Gate::before` hook decides abilities at run time.
+        Kind::Auth if data.auth().is_some_and(|a| a["before"] == true) => return None,
         // A known ability that no policy for the call's model defines.
         Kind::Auth if found => {
             let model_known = matches!(auth_model(arg), Some(Some(_)));

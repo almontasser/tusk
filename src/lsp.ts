@@ -775,7 +775,11 @@ async function startServer(
         async provideCodeActions(model, range, context, token) {
           // Only the diagnostics left after filtering, so a dropped false problem gets no quick fix.
           const diags = lastDiagnostics.get(`${owner} ${model.uri}`)?.shown ?? [];
-          const overlapping = diags.filter((d) => monaco.Range.areIntersectingOrTouching(toRange(d.range), range));
+          // Monaco widens an empty selection to the whole problem under the cursor, which for a method-sized problem
+          // takes in every problem inside it. Only the ones at the cursor then.
+          const sel = monaco.editor.getEditors().find((e) => e.getModel() === model && e.hasTextFocus())?.getSelection();
+          const at = sel?.isEmpty() && range.containsPosition(sel.getPosition()) ? sel : range;
+          const overlapping = diags.filter((d) => monaco.Range.areIntersectingOrTouching(toRange(d.range), at));
           const res = await request<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
             ...doc(model),
             range: fromRange(range),

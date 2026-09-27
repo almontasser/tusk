@@ -298,6 +298,9 @@ fn matches_policies_to_the_calls_model() {
     // A link needs exactly one matching policy: the typed `$post` and `has()` have it; an untyped model doesn't.
     let lines: Vec<u32> = links.iter().map(|l| l.range.start.line).collect();
     assert_eq!(lines, vec![3, 6]);
+    // A `Gate::before` hook, as spatie/laravel-permission adds, may grant any ability.
+    fx.snap.framework.seed("laravel:auth", json!({"before": true, "policies": {}}));
+    assert!(with_ctx(&fx.snap, &uri("t.php"), diagnostics).unwrap().is_empty());
 }
 
 #[test]
