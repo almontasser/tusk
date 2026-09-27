@@ -47,6 +47,15 @@ pub fn server() -> ServerCapabilities {
                 ..Default::default()
             }),
         }),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: None,
+            resolve_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
+        execute_command_provider: Some(ExecuteCommandOptions {
+            commands: crate::features::actions::COMMANDS.iter().map(|c| c.to_string()).collect(),
+            work_done_progress_options: Default::default(),
+        }),
         ..Default::default()
     }
 }

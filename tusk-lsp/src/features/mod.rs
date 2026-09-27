@@ -1,5 +1,6 @@
 //! Request handlers, one module per feature.
 
+pub mod actions;
 pub mod completion;
 pub mod folding;
 pub mod hover;

@@ -41,6 +41,9 @@ pub fn find(method: &str) -> Option<Handler> {
         PrepareRenameRequest::METHOD => typed!(PrepareRenameRequest, rename::prepare),
         Rename::METHOD => typed!(Rename, rename::rename),
         WillRenameFiles::METHOD => typed!(WillRenameFiles, moves::will_rename),
+        CodeActionRequest::METHOD => typed!(CodeActionRequest, actions::code_actions),
+        CodeActionResolveRequest::METHOD => typed!(CodeActionResolveRequest, actions::resolve),
+        ExecuteCommand::METHOD => typed!(ExecuteCommand, actions::execute_command),
         _ => return None,
     };
     Some(handler)
