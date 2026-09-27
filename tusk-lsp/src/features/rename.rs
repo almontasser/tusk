@@ -26,7 +26,7 @@ fn short(name: &str) -> &str {
     name.rsplit('\\').next().unwrap_or(name)
 }
 
-fn is_identifier(name: &str) -> bool {
+pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_alphabetic() || c == '_' || !c.is_ascii()) && chars.all(|c| c.is_alphanumeric() || c == '_' || !c.is_ascii())
 }
