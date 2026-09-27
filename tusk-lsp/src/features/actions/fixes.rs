@@ -165,6 +165,8 @@ mod tests {
             CodeActionOrCommand::CodeAction(a) => a.title,
             CodeActionOrCommand::Command(c) => c.title,
         })
+        // Organize Imports is offered everywhere.
+        .filter(|t| t != "Organize imports")
         .collect()
     }
 
