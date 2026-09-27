@@ -3583,8 +3583,9 @@ positions an edit may have moved.
   the method or function around each call; code outside one is listed by its
   file (kind `File`). A method is identified by its declaring class, so calls
   through subclasses count. A constructor's calls also include `new` of its
-  class and of subclasses that don't declare their own, and `new self`,
-  `new static`, and `new parent` in the files declaring those classes.
+  class and of subclasses that don't declare their own (one search for all of
+  them, since `Model` has hundreds), and `new self`, `new static`, and
+  `new parent` in the files declaring those classes.
 - **Outgoing calls:** every function call, method call, and `new` inside the
   item's range, resolved as Go to Definition resolves them. Callees without a
   file (PHP's own functions) are left out.
