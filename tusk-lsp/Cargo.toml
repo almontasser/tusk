@@ -1,0 +1,36 @@
+[package]
+name = "tusk-lsp"
+version = "0.1.0"
+description = "Tusk's PHP language server, built on Mago's parser, codebase index and analyzer"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+# Mago's crates change their API between minor versions, so they're pinned and upgraded on purpose.
+mago-allocator = "=1.50.0"
+mago-analyzer = "=1.50.0"
+mago-codex = "=1.50.0"
+mago-database = "=1.50.0"
+mago-names = "=1.50.0"
+mago-php-version = "=1.50.0"
+mago-prelude = { version = "=1.50.0", features = ["build"] }
+mago-reporting = "=1.50.0"
+mago-span = "=1.50.0"
+mago-syntax = "=1.50.0"
+mago-word = "=1.50.0"
+foldhash = "0.2"
+lsp-server = "0.10"
+lsp-types = "0.97"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+rayon = "1"
+ignore = "0.4"
+globset = "0.4"
+percent-encoding = "2"
+
+[dev-dependencies]
+mago-allocator = "=1.50.0"
+mimalloc = "0.1.52"
+tempfile = "3.27.0"

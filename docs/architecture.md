@@ -26,6 +26,7 @@ pushes events to the frontend with Tauri events (`emit`).
 | Terminal | `xterm.js` and `portable-pty` | 4 |
 | Git and pull requests | The `git` and `gh` command-line tools | 5 |
 | Filament intelligence | A custom language server written in PHP (`filament-lsp/`) | 6 |
+| PHP, Laravel, and Filament intelligence | Tusk's own language server in Rust (`tusk-lsp/`), replacing the three above | In progress |
 
 The backend runs each language server as a child process. The frontend starts
 one client per server, and Monaco merges their results.
@@ -3514,6 +3515,65 @@ markers or tabs change.
 one block where it appears whole (its last occurrence, which is usually in the
 file name), or else the letters of a fuzzy match. The folder part of a path is
 dimmed.
+
+## Tusk's language server (in progress)
+
+`tusk-lsp/` is a PHP language server written in Rust. It will replace
+Phpactor, Laravel LSP, and the Filament server. Until it covers everything the
+editor uses them for, the editor doesn't start it.
+
+It's built on Mago's crates, pinned to `=1.50.0` because their API changes
+between minor versions:
+
+- `mago-syntax` parses.
+- `mago-names` resolves names.
+- `mago-codex` holds the codebase's classes, functions, and types.
+- `mago-analyzer` infers expression types and reports problems.
+- `mago-prelude` provides PHP's built-in functions and classes.
+
+### Index
+
+`index.rs` scans every PHP file in the project and `vendor` in parallel into
+one `CodebaseMetadata`, then populates it (resolves inheritance and types).
+
+- **Excluded paths:** the same defaults the editor gave Phpactor (`vendor`
+  tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
+  hidden folders), plus the `exclude` globs in `initializationOptions`.
+- **Changes:** each file keeps the keys of the symbols it added. A change
+  removes those, scans the new text, and repopulates only the file's symbols
+  and the classes that inherit from them. Everything else is passed to the
+  populator as safe.
+- **Measurements** on a Laravel and Filament project with 23,000 PHP files,
+  on an M-series Mac: discovery takes 0.26 s and indexing 1.0 s, and a
+  model's update takes 10 ms. Memory is 1.3 GB, nearly all of it symbol data
+  for `vendor` (147,000 functions and methods).
+
+### Threads
+
+- **Main loop:** applies document changes at once and never waits on
+  analysis.
+- **Indexer thread:** applies index updates, merging a burst of edits into
+  one.
+- **Request pool:** each request runs on the pool once the index has every
+  edit made before it (`Indexer::ticket`), so it sees its own file's latest
+  symbols. A panic in a request answers with an error instead of stopping the
+  server.
+- **Diagnostics thread:** checks an edited document as soon as the index has
+  its change, and the other open documents once edits pause for 600 ms,
+  since they may depend on it.
+- **Stacks:** threads get 64 MB stacks, because Mago's analyzer recurses
+  deeply on large files.
+
+### Tests
+
+Run the tests with `cargo test` in `tusk-lsp/`.
+
+- **Feature tests** build an in-memory project (`testing.rs`) with a `<|>`
+  cursor marker and call handlers directly.
+- **Protocol tests** (`tests/protocol.rs`) run the real server over an
+  in-memory connection.
+- **Benchmark:** `cargo run --release --example index_bench <root> [file]`
+  times indexing a real project.
 
 ## Performance
 
