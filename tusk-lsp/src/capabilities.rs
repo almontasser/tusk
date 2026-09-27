@@ -22,6 +22,11 @@ pub fn server() -> ServerCapabilities {
             retrigger_characters: Some(vec![",".into()]),
             work_done_progress_options: Default::default(),
         }),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+        inlay_hint_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }

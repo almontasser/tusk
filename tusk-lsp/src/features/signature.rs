@@ -11,7 +11,7 @@ use mago_syntax::cst::{ArgumentList, Node};
 use super::hover::{docblock_markdown, source};
 use super::{Ctx, with_ctx_at};
 use crate::server::Snapshot;
-use crate::symbol::Symbol;
+use crate::symbol::{Resolver, Symbol};
 
 pub fn signature_help(snap: &Snapshot, params: SignatureHelpParams) -> Result<Option<SignatureHelp>, String> {
     let at = params.text_document_position_params;
@@ -45,16 +45,21 @@ fn call_at(ctx: &Ctx<'_>, offset: u32) -> Option<(u32, u32, bool)> {
     None
 }
 
+/// The function, method, or constructor a call calls, given the offset of the name it's called by.
+pub(crate) fn called<'c>(ctx: &'c Ctx<'_>, resolver: &Resolver<'_, '_>, name_at: u32, constructor: bool) -> Option<&'c FunctionLikeMetadata> {
+    let found = resolver.at(name_at)?;
+    let codebase = &ctx.index.codebase;
+    match found.symbols.first()? {
+        Symbol::Function(name) => codebase.get_function(name.as_bytes()),
+        Symbol::Method { class, name } => codebase.get_declaring_method(class.as_bytes(), name.as_bytes()),
+        Symbol::Class(class) if constructor => codebase.get_declaring_method(class.as_bytes(), b"__construct"),
+        _ => None,
+    }
+}
+
 fn help(ctx: &Ctx<'_>, offset: u32) -> Option<SignatureHelp> {
     let (args_start, name_at, constructor) = call_at(ctx, offset)?;
-    let found = ctx.resolver().at(name_at)?;
-    let codebase = &ctx.index.codebase;
-    let function: &FunctionLikeMetadata = match found.symbols.first()? {
-        Symbol::Function(name) => codebase.get_function(name.as_bytes())?,
-        Symbol::Method { class, name } => codebase.get_declaring_method(class.as_bytes(), name.as_bytes())?,
-        Symbol::Class(class) if constructor => codebase.get_declaring_method(class.as_bytes(), b"__construct")?,
-        _ => return None,
-    };
+    let function = called(ctx, &ctx.resolver(), name_at, constructor)?;
     let src = source(ctx, function.span);
     let (label, ranges) = match &src {
         Some(s) => label_from_source(&s.signature)?,

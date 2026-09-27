@@ -29,6 +29,11 @@ pub fn find(method: &str) -> Option<Handler> {
         DocumentHighlightRequest::METHOD => typed!(DocumentHighlightRequest, references::highlight),
         HoverRequest::METHOD => typed!(HoverRequest, hover::hover),
         SignatureHelpRequest::METHOD => typed!(SignatureHelpRequest, signature::signature_help),
+        DocumentSymbolRequest::METHOD => typed!(DocumentSymbolRequest, symbols::document_symbols),
+        WorkspaceSymbolRequest::METHOD => typed!(WorkspaceSymbolRequest, symbols::workspace_symbols),
+        FoldingRangeRequest::METHOD => typed!(FoldingRangeRequest, folding::folding_ranges),
+        SelectionRangeRequest::METHOD => typed!(SelectionRangeRequest, folding::selection_ranges),
+        InlayHintRequest::METHOD => typed!(InlayHintRequest, inlay::inlay_hints),
         _ => return None,
     };
     Some(handler)

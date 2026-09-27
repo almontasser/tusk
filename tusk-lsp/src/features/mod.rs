@@ -1,9 +1,12 @@
 //! Request handlers, one module per feature.
 
+pub mod folding;
 pub mod hover;
+pub mod inlay;
 pub mod navigation;
 pub mod references;
 pub mod signature;
+pub mod symbols;
 
 use std::cell::OnceCell;
 use std::sync::Arc;
