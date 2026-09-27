@@ -226,7 +226,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧A | Find action |
 | ⌘O | Go to class |
 | ⌘⇧O | Go to file (press again to include ignored files, such as `vendor`) |
-| ⌥⌘O | Go to symbol in the project |
+| ⌥⌘O | Go to symbol in the project: classes, functions, constants, and methods (`User::save` narrows to a class's) |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |

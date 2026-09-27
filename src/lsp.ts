@@ -1200,6 +1200,9 @@ export const didSave = (model: monaco.editor.ITextModel) => {
 
 export type Symbol = { name: string; kind: L.SymbolKind; container?: string; path: string; range?: monaco.IRange };
 
+/** LSP symbol kinds that name types: Class, Enum, Interface, Struct (Tusk's traits). */
+export const TYPE_KINDS: number[] = [5, 10, 11, 23];
+
 /** Searches symbols across the project in every server that supports it. */
 export async function workspaceSymbols(query: string): Promise<Symbol[]> {
   const results = await Promise.all(servers.map((s) => s.symbols(query).catch(() => [])));
@@ -1216,7 +1219,7 @@ export async function workspaceSymbols(query: string): Promise<Symbol[]> {
 export async function typeSymbol(fqn: string): Promise<Symbol | undefined> {
   const short = fqn.split("\\").pop()!;
   const namespace = fqn.slice(0, -short.length - 1);
-  const symbols = await workspaceSymbols(short);
+  const symbols = (await workspaceSymbols(short)).filter((s) => TYPE_KINDS.includes(s.kind));
   return symbols.find((s) => s.name === short && (s.container ?? "") === namespace) ?? symbols.find((s) => s.name === fqn);
 }
 

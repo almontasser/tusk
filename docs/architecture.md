@@ -3463,13 +3463,18 @@ returns.
     (`safedelete.ts`) looks for that kind.
   - Promoted constructor parameters are listed as properties.
 - **Workspace symbols:** these cover classes, interfaces, traits, enums,
-  functions, and constants, but not methods.
-  - `name` is the short name, and `containerName` the namespace, which is what
-    `typeSymbol` in `lsp.ts` matches.
+  functions, and constants, and the methods of the classes the index has
+  loaded (the project's, and the library classes it reaches).
+  - `name` is the short name, and `containerName` the namespace, or a
+    method's class. `typeSymbol` in `lsp.ts` matches name and namespace among
+    the type kinds (`TYPE_KINDS`), and Go to Symbol labels a method
+    `Class::method`.
   - A query matches the short name, or the fully qualified name when the query
-    has a `\`.
+    has a `\`. A query with `::` matches methods as `Class::method`, by the
+    class's short name.
   - Results rank exact matches first, then prefixes, substrings, and
-    subsequences. Within each rank, project files come before `vendor`.
+    subsequences. Within each rank, types come before methods, and project
+    files before `vendor`.
   - Results are capped at 200. PHP's built-ins have no file, so they're left
     out.
 
