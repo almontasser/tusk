@@ -44,11 +44,10 @@ pub fn member_references(snap: &Snapshot, params: Value) -> Result<Value, String
 /// `tusk/projectProblems`: the problems in every project file, by path relative to the root, as open files get
 /// them. The Problems panel shows these for files that aren't open.
 pub fn project_problems(snap: &Snapshot, _params: Value) -> Result<Value, String> {
-    let paths: Vec<PathBuf> = {
-        let index = snap.index.read();
-        index.project_files().map(|p| p.to_path_buf()).collect()
-    };
-    let results: BTreeMap<String, Vec<Diagnostic>> = paths
+    let index = snap.index.read();
+    let paths: Vec<PathBuf> = index.project_files().map(|p| p.to_path_buf()).collect();
+    let index = &*index;
+    let results: BTreeMap<String, Vec<Diagnostic>> = crate::index::scan_pool().install(|| paths
         .into_par_iter()
         .filter_map(|path| {
             if snap.is_cancelled() {
@@ -56,11 +55,11 @@ pub fn project_problems(snap: &Snapshot, _params: Value) -> Result<Value, String
             }
             let text = snap.read(&path)?;
             let doc = Document::new(path_to_uri(&path), path.clone(), "php".into(), 0, text);
-            let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::diagnostics::php_problems(&snap.index, &doc))).ok()?;
+            let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::diagnostics::php_problems_in(index, &doc))).ok()?;
             let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
             (!problems.is_empty()).then_some((rel, problems))
         })
-        .collect();
+        .collect());
     if snap.is_cancelled() {
         return Err(crate::server::CANCELLED.into());
     }

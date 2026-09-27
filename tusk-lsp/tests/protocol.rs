@@ -274,3 +274,32 @@ fn closing_a_file_goes_back_to_its_text_on_disk() {
     let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Box" }));
     assert!(found.to_string().contains("Box.php"), "{found}");
 }
+
+/// Searches read many files in parallel while holding the index, and other requests wait for the index to
+/// catch up with edits. With requests on a rayon pool, a search waiting on its parallel work picked up a
+/// request that waited for the index, which the search held: the server stopped answering.
+#[test]
+fn searches_racing_edits_and_other_requests_all_finish() {
+    let mut files: Vec<(String, String)> = vec![("src/Box.php".into(), "<?php\nclass Box { public function open(): void {} }\n".into())];
+    for i in 0..300 {
+        files.push((format!("src/use{i}.php"), format!("<?php\nfunction f{i}(Box $b) {{ $b->open(); new Box(); }}\n")));
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let mut c = indexed(&files);
+    let box_uri = c.open("src/Box.php", "<?php\nclass Box { public function open(): void {} }\n");
+    let open = json!({ "textDocument": { "uri": box_uri }, "position": { "line": 1, "character": 30 } });
+    let item = c.request_raw(request::CallHierarchyPrepare::METHOD, open.clone())[0].clone();
+    let mut ids = vec![];
+    for i in 0..40 {
+        ids.push(c.send(request::CallHierarchyIncomingCalls::METHOD, json!({ "item": item })));
+        ids.push(c.send(request::References::METHOD, json!({ "textDocument": { "uri": box_uri }, "position": { "line": 1, "character": 30 }, "context": { "includeDeclaration": true } })));
+        c.notify(notification::DidChangeTextDocument::METHOD, json!({
+            "textDocument": { "uri": box_uri, "version": i + 2 },
+            "contentChanges": [{ "range": { "start": { "line": 1, "character": 12 }, "end": { "line": 1, "character": 12 } },
+                "text": format!("public function m{i}(): void {{}} ") }]
+        }));
+        ids.push(c.send(request::HoverRequest::METHOD, open.clone()));
+    }
+    let answers = c.responses(&ids);
+    assert!(answers.iter().all(|r| r.response_result.is_ok()), "{answers:?}");
+}

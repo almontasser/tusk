@@ -115,6 +115,11 @@ pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
 }
 
 pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
+    php_problems_in(&index.read(), doc)
+}
+
+/// [`php_problems`] with the index already locked, for work that runs in parallel and mustn't take the lock.
+pub fn php_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.
@@ -122,7 +127,6 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     // After the first errors, the rest are mostly the parser losing its way, and each costs a position lookup.
     let syntax: Vec<Issue> = exact.program.errors.iter().take(100).map(Issue::from).collect();
     let parsed = if syntax.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
-    let index = index.read();
     let mago = index.config.mago.clone();
     let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
     let complex = crate::analysis::too_complex(parsed.program);
@@ -135,7 +139,6 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
             .filter(|i| mago.reports_analysis(&rel, i.code.as_deref()))
             .filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")),
     );
-    drop(index);
     if complex {
         return out;
     }

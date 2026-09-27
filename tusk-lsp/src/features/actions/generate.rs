@@ -118,6 +118,8 @@ fn signature_end(text: &str, start: usize) -> usize {
 fn transplant(ctx: &Ctx<'_>, method: &FunctionLikeMetadata, at: u32) -> Option<(String, Vec<String>)> {
     let source = ctx.snap.text_of(&ctx.index, method.span.file_id)?;
     let start = method.span.start.offset as usize;
+    // The index can be ahead of or behind the file's text, so its span may not fit.
+    source.get(start..)?;
     let end = signature_end(&source, start);
     let arena = LocalArena::new();
     let path = std::path::PathBuf::from(String::from_utf8_lossy(&[]).as_ref()).join("declaring.php");

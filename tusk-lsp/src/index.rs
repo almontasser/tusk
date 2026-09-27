@@ -158,9 +158,11 @@ pub fn file_id(path: &Path) -> FileId {
 
 /// A file's symbols, and with `uses`, the lowercase names its code mentions: classes, functions, and constants,
 /// including class names in docblocks.
-/// The threads that parse and scan files in parallel. Their stacks are as large as the server's other threads', since
-/// the parser recurses once per level of nesting; rayon's global pool has the default 2 MB.
-fn scan_pool() -> &'static rayon::ThreadPool {
+/// The threads that parse, scan, and analyze files in parallel, for the index and for requests that read many
+/// files. Their stacks are as large as the server's other threads', since the parser recurses once per level of
+/// nesting; rayon's global pool has the default 2 MB. Work on them must never wait on the index's lock: a
+/// thread waiting for its own parallel work can pick up anyone's.
+pub fn scan_pool() -> &'static rayon::ThreadPool {
     static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
     POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("tusk-scan-{i}")).stack_size(64 << 20).build().expect("the scan pool starts"))
 }

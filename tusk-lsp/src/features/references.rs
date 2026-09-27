@@ -126,7 +126,7 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMen
     paths.sort();
     paths.dedup();
     let php_version = index.config.php_version;
-    paths
+    crate::index::scan_pool().install(|| paths
         .into_par_iter()
         .filter_map(|path| {
             if snap.is_cancelled() {
@@ -144,7 +144,7 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMen
             drop(parsed);
             (!spans.is_empty()).then_some((path, text, spans))
         })
-        .collect()
+        .collect())
 }
 
 pub fn references(snap: &Snapshot, params: ReferenceParams) -> Result<Option<Vec<Location>>, String> {
