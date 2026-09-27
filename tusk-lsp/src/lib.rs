@@ -10,6 +10,7 @@ pub mod handlers;
 pub mod imports;
 pub mod index;
 pub mod locate;
+pub mod mago_config;
 pub mod repair;
 pub mod scope;
 pub mod server;
