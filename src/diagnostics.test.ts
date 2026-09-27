@@ -40,13 +40,11 @@ final class License {
     at(text, "$this->subscription", "non-existent-method", "Method `subscription` does not exist on type `App\\Models\\Subscribes`."),
     at(text, "'widgets.total'", "invalid-property-default-value", "Default value for property `License::$view` is not assignable."),
     at(text, "'widgets.missing'", "invalid-property-default-value", "Default value for property `License::$other` is not assignable."),
-    at(text, "$this->expired_at", "worse.assignment_to_missing_property", 'Property "expired_at" has not been defined', "phpactor"),
     at(text, "sendTo", "possibly-invalid-argument", "expected `App\\Models\\User`, but possibly received `App\\Models\\User|Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>`."),
     at(text, "$mock", "non-existent-method", "Method `moderate` does not exist on type `Mockery\\MockInterface`."),
     at(text, "ReflectionThing", "deprecated-method", "Call to deprecated method: `ReflectionMethod::setAccessible`."),
     at(text, "$undefined", "non-existent-method", "Method `call` does not exist on type `App\\Models\\Other`."),
     at(text, "run(", "too-few-arguments", "Too few arguments provided for function `run`."),
-    at(text, "$undefined", "worse.missing_member", 'Method "call" does not exist on class "App\\Models\\Other"', "phpactor"),
   ];
   assert.deepEqual(kept("/p/app/Models/License.php", text, list), ["invalid-property-default-value", "non-existent-method"]);
 });
@@ -120,21 +118,18 @@ test("formats messages for hovers and the problem page", () => {
   assert.equal(formatType("array{'a': array<int, string>, 'b': list{int}}"), "array{\n  'a': array<int, string>,\n  'b': list{\n    int\n  }\n}");
 });
 
-test("drops Phpactor's missing @return when the docblock has one it can't read", () => {
+test("shows an unused import once when Mago's linter reports it too", () => {
   const text = `<?php
-class A {
-    /**
-     * @return Generator<int, array{id: string, ...}>
-     */
-    private function entries(): Generator {}
-
-    private function other(): array {}
-}`;
+use App\\Models\\User;
+use App\\Models\\Post;
+/** @param Post $p */
+function f($p) {}`;
   const list = [
-    at(text, "entries", "worse.docblock_missing_return_type", "Method entries is missing docblock return type: Generator<mixed>", "phpactor"),
-    at(text, "other", "worse.docblock_missing_return_type", "Method other is missing docblock return type: array", "phpactor"),
+    at(text, "use App\\Models\\User;", "unused_import", "Unused import: `App\\Models\\User`", "tusk"),
+    at(text, "use App\\Models\\User;", "no-redundant-use", "Unused import: `App\\Models\\User`.", "mago-lint"),
+    at(text, "use App\\Models\\Post;", "unused_import", "Unused import: `App\\Models\\Post`", "tusk"),
   ];
-  assert.deepEqual(kept("/p/app/A.php", text, list).length, 1);
+  assert.deepEqual(kept("/p/app/A.php", text, list), ["no-redundant-use"]);
 });
 
 test("narrows a deprecation to the deprecated name", () => {
