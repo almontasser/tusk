@@ -326,9 +326,10 @@ fn calls_of(snap: &Snapshot, index: &Index, target: &Target) -> Vec<FileMentions
             by_file.entry(path).or_insert_with(|| (text, vec![])).1.extend(spans);
         }
     }
-    // `new Foo` names the class, not its constructor.
-    for class in &constructor {
-        for (path, text, spans) in search(snap, index, &[Symbol::Class(class.clone())]) {
+    // `new Foo` names the class, not its constructor: one search for every class whose `new` runs it.
+    if !constructor.is_empty() {
+        let classes: Vec<Symbol> = constructor.iter().map(|c| Symbol::Class(c.clone())).collect();
+        for (path, text, spans) in search(snap, index, &classes) {
             let arena = LocalArena::new();
             let parsed = Parsed::new(&arena, &path, &text);
             let spans: Vec<_> = spans.into_iter().filter(|&(s, _)| is_instantiated(&parsed, s)).collect();

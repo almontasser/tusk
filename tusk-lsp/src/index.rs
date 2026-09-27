@@ -418,6 +418,7 @@ impl Index {
         }
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
+        break_inheritance_cycles(&mut self.codebase, None);
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
         progress(total, total);
@@ -589,6 +590,7 @@ impl Index {
         safe.extend(self.codebase.constants.keys().filter(|k| !dirty.contains(*k)).copied());
         // An empty safe set would repopulate everything, which is also correct.
         let mut refs = SymbolReferences::new();
+        break_inheritance_cycles(&mut self.codebase, Some(&dirty));
         populate_codebase(&mut self.codebase, &mut refs, safe, HashSet::default());
         // The analyzer skips "safe" symbols only in its diff mode, but nothing here needs the set kept.
         self.codebase.safe_symbols.clear();
@@ -649,9 +651,102 @@ impl Index {
 /// An index behind a shared pointer, for passing to request threads.
 pub type SharedIndex = Arc<parking_lot::RwLock<Index>>;
 
+/// Cuts each inheritance cycle at the link that closes it: a class that extends itself, classes that extend each
+/// other, and the same for interfaces. PHP refuses such code, but typing leaves it for a moment, such as
+/// `<?php$x->` swallowing a file's `namespace` so that its `UnexpectedValueException` extends PHP's own. Mago's
+/// populator follows parent chains without a limit and would never finish. A new cycle runs through a class
+/// that changed, so after a change only the `changed` classes' chains are walked.
+fn break_inheritance_cycles(codebase: &mut CodebaseMetadata, changed: Option<&WordSet>) {
+    let lower = |w: &Word| w.as_str_lossy().to_ascii_lowercase();
+    let mut cut_class: Vec<(Word, Word)> = vec![];
+    let mut cut_interface: Vec<(Word, Word)> = vec![];
+    for (key, meta) in codebase.class_likes.iter() {
+        if changed.is_some_and(|c| !c.contains(key)) {
+            continue;
+        }
+        // Parent classes: one chain.
+        let mut seen = vec![lower(key)];
+        let mut current = (*key, meta.direct_parent_class);
+        while let (from, Some(parent)) = current {
+            if seen.contains(&lower(&parent)) {
+                cut_class.push((from, parent));
+                break;
+            }
+            seen.push(lower(&parent));
+            current = (parent, codebase.get_class_like(parent.as_bytes()).and_then(|m| m.direct_parent_class));
+        }
+        // Parent interfaces: a tree, walked depth first along the current path.
+        fn walk(codebase: &CodebaseMetadata, name: Word, path: &mut Vec<String>, cut: &mut Vec<(Word, Word)>, done: &mut HashSet<String>) {
+            let Some(meta) = codebase.get_class_like(name.as_bytes()) else { return };
+            for parent in meta.direct_parent_interfaces.iter() {
+                let p = parent.as_str_lossy().to_ascii_lowercase();
+                if path.contains(&p) {
+                    cut.push((name, *parent));
+                } else if done.insert(p.clone()) {
+                    path.push(p);
+                    walk(codebase, *parent, path, cut, done);
+                    path.pop();
+                }
+            }
+        }
+        if meta.kind == SymbolKind::Interface {
+            walk(codebase, *key, &mut vec![lower(key)], &mut cut_interface, &mut HashSet::default());
+        }
+    }
+    // The map is keyed by lowercase names; a parent is named as written.
+    let key = |w: &Word| mago_word::word(w.as_str_lossy().to_ascii_lowercase().as_bytes());
+    for (class, parent) in cut_class {
+        if let Some(meta) = codebase.class_likes.get_mut(&key(&class))
+            && meta.direct_parent_class == Some(parent)
+        {
+            meta.direct_parent_class = None;
+        }
+    }
+    for (interface, parent) in cut_interface {
+        if let Some(meta) = codebase.class_likes.get_mut(&key(&interface)) {
+            meta.direct_parent_interfaces.remove(&parent);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `f` on a thread, failing if it takes longer than a few seconds.
+    fn finishes(f: impl FnOnce() + Send + 'static) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+            f();
+            let _ = tx.send(());
+        }).unwrap();
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(10)).is_ok(), "it hangs");
+    }
+
+    /// A class that extends itself, or classes that extend each other, as typing can leave them: Mago's
+    /// populator walks parent chains without a limit.
+    #[test]
+    fn inheritance_cycles_dont_hang() {
+        let child = "<?php namespace App; class Child extends \\UnexpectedValueException { public function __toString(): string { return ''; } }";
+        finishes(move || {
+            // PHP's own class, redefined in the global namespace to extend itself.
+            let mut idx = index(&[("app/Child.php", child)]);
+            idx.update(Path::new("/p/app/Own.php"), Some(b"<?php class UnexpectedValueException extends \\UnexpectedValueException {}".to_vec()));
+            // Two project classes that extend each other, below a class that overrides a method.
+            let mut idx = index(&[
+                ("app/A.php", "<?php namespace App; class A extends \\Exception {}"),
+                ("app/B.php", "<?php namespace App; class B extends A { public function __toString(): string { return ''; } }"),
+                ("app/C.php", "<?php namespace App; class C extends B { public function __toString(): string { return ''; } }"),
+            ]);
+            idx.update(Path::new("/p/app/A.php"), Some(b"<?php namespace App; class A extends B {}".to_vec()));
+            assert!(idx.codebase.get_class_like(b"App\\C").is_some());
+            // Interfaces that extend themselves.
+            index(&[
+                ("app/I.php", "<?php namespace App; interface I extends I { public function f(): void; }"),
+                ("app/J.php", "<?php namespace App; class J implements I { public function f(): void {} }"),
+            ]);
+        });
+    }
 
     fn index(files: &[(&str, &str)]) -> Index {
         let mut idx = Index::empty(IndexConfig::new("/p"));

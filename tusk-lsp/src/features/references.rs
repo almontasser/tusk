@@ -68,8 +68,9 @@ fn short_name(symbol: &Symbol) -> String {
     name.to_ascii_lowercase()
 }
 
-/// The spans in one parsed file that mention any of `targets` (already keyed).
-fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadata, targets: &[Symbol], short: &str) -> Vec<(u32, u32)> {
+/// The spans in one parsed file that mention any of `targets` (already keyed), written with one of `shorts`.
+fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadata, targets: &[Symbol], shorts: &[String]) -> Vec<(u32, u32)> {
+    let named = |last: &str| shorts.iter().any(|s| last.eq_ignore_ascii_case(s));
     let resolver = Resolver::new(parsed, Some(analysis), codebase);
     let text = parsed.text();
     let mut candidates = vec![];
@@ -84,7 +85,7 @@ fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadat
         let last = written.rsplit('\\').next().unwrap_or(written);
         // An alias (`use Foo as Bar`) is written differently from the class it names.
         let aliased = matches!(targets.first(), Some(Symbol::Class(_))) && parsed.names.resolve(&node.span()).is_some();
-        if last.eq_ignore_ascii_case(short) || aliased {
+        if named(last) || aliased {
             candidates.push(s);
         }
     });
@@ -93,7 +94,7 @@ fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadat
         for t in parsed.program.trivia.iter().filter(|t| t.kind == mago_syntax::cst::TriviaKind::DocBlockComment) {
             for (s, _, name) in crate::symbol::docblock_type_names(t.value, t.span.start.offset) {
                 let last = name.rsplit('\\').next().unwrap_or(&name);
-                if last.eq_ignore_ascii_case(short) {
+                if named(last) {
                     candidates.push(s);
                 }
             }
@@ -119,8 +120,12 @@ pub type FileMentions = (PathBuf, String, Vec<(u32, u32)>);
 pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMentions> {
     let codebase = &index.codebase;
     let targets: Vec<Symbol> = symbols.iter().map(|s| key(s, codebase)).collect();
-    let Some(first) = symbols.first() else { return vec![] };
-    let short = short_name(first);
+    if symbols.is_empty() {
+        return vec![];
+    }
+    let mut shorts: Vec<String> = symbols.iter().map(short_name).collect();
+    shorts.sort();
+    shorts.dedup();
     let mut paths: Vec<PathBuf> = index.project_files().map(Path::to_path_buf).collect();
     paths.extend(snap.docs.iter().filter(|d| d.language == "php").map(|d| d.path.clone()));
     paths.sort();
@@ -134,13 +139,14 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMen
             }
             let text = snap.read(&path)?;
             // Class names may also appear through an alias, which only the `use` line spells out.
-            if !text.to_ascii_lowercase().contains(&short) {
+            let lower = text.to_ascii_lowercase();
+            if !shorts.iter().any(|s| lower.contains(s.as_str())) {
                 return None;
             }
             let arena = LocalArena::new();
             let parsed = Parsed::new(&arena, &path, &text);
             let analysis = analyze(&parsed, &arena, codebase, php_version);
-            let spans = mentions(&parsed, &analysis, codebase, &targets, &short);
+            let spans = mentions(&parsed, &analysis, codebase, &targets, &shorts);
             drop(parsed);
             (!spans.is_empty()).then_some((path, text, spans))
         })
@@ -189,7 +195,7 @@ pub fn highlight(snap: &Snapshot, params: DocumentHighlightParams) -> Result<Opt
             first => {
                 let codebase = &ctx.index.codebase;
                 let targets: Vec<Symbol> = found.symbols.iter().map(|s| key(s, codebase)).collect();
-                mentions(&ctx.parsed, ctx.analysis(), codebase, &targets, &short_name(first))
+                mentions(&ctx.parsed, ctx.analysis(), codebase, &targets, &[short_name(first)])
             }
         };
         let highlights = spans

@@ -3413,6 +3413,13 @@ returns.
 
 - **Excluded paths:** `vendor`'s tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
   hidden folders), plus the `exclude` globs in `initializationOptions`.
+- **Inheritance cycles:** a class that extends itself, or classes (or
+  interfaces) that extend each other, are cut at the link that closes the
+  cycle before Mago populates (`break_inheritance_cycles`). PHP refuses such
+  code, but typing leaves it for a moment: `<?php$x->` swallows a file's
+  `namespace`, so Symfony's `UnexpectedValueException` extended PHP's own, and
+  Mago's populator, which follows parent chains without a limit, never
+  finished. After a change, only the changed classes' chains are walked.
 - **Changes:** each file keeps the names it declared. A change removes the
   ones the index still has from that file (two files can declare the same
   class, and only one wins the merge), scans the new text, and repopulates
