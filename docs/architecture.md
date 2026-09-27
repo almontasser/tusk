@@ -3564,6 +3564,53 @@ one `CodebaseMetadata`, then populates it (resolves inheritance and types).
 - **Stacks:** threads get 64 MB stacks, because Mago's analyzer recurses
   deeply on large files.
 
+### Symbols
+
+- **Document symbols** (`features/symbols.rs`):
+  - The outline lists classes, interfaces, traits, enums, functions, and
+    constants, including those declared inside an `if`, such as
+    `if (!function_exists())`.
+  - Traits have kind 23 (struct), as Phpactor gave them; Safe Delete
+    (`safedelete.ts`) looks for that kind.
+  - Promoted constructor parameters are listed as properties.
+- **Workspace symbols:** these cover classes, interfaces, traits, enums,
+  functions, and constants, but not methods.
+  - `name` is the short name, and `containerName` the namespace, which is what
+    `typeSymbol` in `lsp.ts` matches.
+  - A query matches the short name, or the fully qualified name when the query
+    has a `\`.
+  - Results rank exact matches first, then prefixes, substrings, and
+    subsequences. Within each rank, project files come before `vendor`.
+  - Results are capped at 200. PHP's built-ins have no file, so they're left
+    out.
+
+### Folding and selection ranges
+
+- **Folding** (`features/folding.rs`):
+  - A bracketed region folds to the line before its closing bracket, so the
+    bracket stays visible, as VS Code folds.
+  - Comments fold whole.
+  - Consecutive `use` lines fold as imports; a blank line splits them into
+    separate groups.
+- **Selection ranges:** the chain of syntax nodes around the cursor, innermost
+  first, with duplicate ranges dropped.
+
+### Inlay hints
+
+`features/inlay.rs` shows two kinds of hints:
+
+- **Parameter names** before positional arguments. There's no hint for an
+  argument written as the parameter's name (such as `$to` for `$to`), and none
+  after a named or unpacked argument. A variadic parameter gets one hint,
+  `...tags:`.
+- **Inferred types** after a variable's first assignment in its function.
+  There's no hint for literals, arrays, or `new`, whose type is plain to see,
+  or for `mixed`.
+
+Signature help and inlay hints find the called function the same way
+(`signature::called`). On a 855-line controller, the whole file's hints take
+about 9 ms (`examples/inlay_bench.rs`).
+
 ### Tests
 
 Run the tests with `cargo test` in `tusk-lsp/`.

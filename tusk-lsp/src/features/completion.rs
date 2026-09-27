@@ -362,8 +362,6 @@ fn variables(ctx: &Ctx<'_>, offset: u32, _word: &str, range: Range) -> Vec<Compl
 /// The parameters of the call whose parentheses hold `offset`, as `name:` items.
 fn named_arguments(ctx: &Ctx<'_>, offset: u32, word: &str, range: Range) -> Vec<CompletionItem> {
     let Some(function) = super::signature::called_function(ctx, offset) else { return vec![] };
-    let codebase = &ctx.index.codebase;
-    let Some(function) = function.get(codebase) else { return vec![] };
     function
         .parameters
         .iter()

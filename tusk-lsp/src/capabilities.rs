@@ -27,6 +27,11 @@ pub fn server() -> ServerCapabilities {
             trigger_characters: Some(crate::features::completion::TRIGGERS.iter().map(|s| s.to_string()).collect()),
             ..Default::default()
         }),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+        inlay_hint_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }
