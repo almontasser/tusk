@@ -336,7 +336,7 @@ mod tests {
         for (from, _) in moves {
             docs.remove(&path(from));
         }
-        let snap = Snapshot { docs, index: fx.snap.index.clone(), root: fx.snap.root.clone(), framework: fx.snap.framework.clone() };
+        let snap = Snapshot { docs, index: fx.snap.index.clone(), root: fx.snap.root.clone(), framework: fx.snap.framework.clone(), client: None };
         let edit = will_rename(&snap, RenameFilesParams {
             files: moves.iter().map(|(f, t)| FileRename { old_uri: crate::testing::uri(f).to_string(), new_uri: crate::testing::uri(t).to_string() }).collect(),
         })

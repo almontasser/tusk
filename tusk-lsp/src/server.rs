@@ -43,6 +43,8 @@ pub struct Snapshot {
     pub index: SharedIndex,
     pub root: PathBuf,
     pub framework: Arc<crate::framework::State>,
+    /// The editor, for requests such as applying an edit. `None` in tests.
+    pub client: Option<Client>,
 }
 
 impl Snapshot {
@@ -99,6 +101,8 @@ fn wait(applied: &(Mutex<u64>, Condvar), ticket: u64) {
 pub struct Client {
     sender: Sender<Message>,
     next_id: Arc<AtomicI32>,
+    /// Requests the server sent and is waiting on, by ID.
+    waiting: Arc<Mutex<HashMap<RequestId, Sender<Response>>>>,
 }
 
 impl Client {
@@ -109,6 +113,33 @@ impl Client {
     pub fn request<R: lsp_types::request::Request>(&self, params: R::Params) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let _ = self.sender.send(Message::Request(Request::new(RequestId::from(format!("tusk/{id}")), R::METHOD.into(), params)));
+    }
+
+    /// Sends a request and waits up to `timeout` for the answer.
+    pub fn request_and_wait<R: lsp_types::request::Request>(&self, params: R::Params, timeout: Duration) -> Option<R::Result> {
+        let id = RequestId::from(format!("tusk/{}", self.next_id.fetch_add(1, Ordering::Relaxed)));
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        self.waiting.lock().insert(id.clone(), tx);
+        let _ = self.sender.send(Message::Request(Request::new(id.clone(), R::METHOD.into(), params)));
+        let answer = rx.recv_timeout(timeout).ok();
+        self.waiting.lock().remove(&id);
+        serde_json::from_value(answer?.response_result.ok()?).ok()
+    }
+
+    /// Asks the editor to apply an edit, and whether it did.
+    pub fn apply_edit(&self, label: &str, edit: WorkspaceEdit) -> bool {
+        self.request_and_wait::<request::ApplyWorkspaceEdit>(
+            ApplyWorkspaceEditParams { label: Some(label.into()), edit },
+            Duration::from_secs(30),
+        )
+        .is_some_and(|r| r.applied)
+    }
+
+    /// Hands an answer to a request the server sent to whoever waits on it.
+    fn answered(&self, response: Response) {
+        if let Some(tx) = self.waiting.lock().remove(&response.id) {
+            let _ = tx.send(response);
+        }
     }
 
     fn respond(&self, response: Response) {
@@ -186,7 +217,7 @@ pub fn parse_php_version(spec: &str) -> Option<mago_php_version::PHPVersion> {
 
 impl Server {
     fn new(sender: Sender<Message>, root: PathBuf, options: Options) -> Self {
-        let client = Client { sender, next_id: Arc::new(AtomicI32::new(1)) };
+        let client = Client { sender, next_id: Arc::new(AtomicI32::new(1)), waiting: Default::default() };
         let mut config = IndexConfig::new(&root);
         config.exclude = options.exclude.clone();
         config.stubs = options.stubs.clone();
@@ -235,14 +266,14 @@ impl Server {
                     }
                     self.notification(note);
                 }
-                // Answers to the server's own requests (progress tokens, registrations) need no handling.
-                Message::Response(_) => {}
+                // Answers to the server's own requests: most (progress tokens, registrations) need no handling.
+                Message::Response(response) => self.client.answered(response),
             }
         }
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot { docs: self.docs.read().clone(), index: self.index.clone(), root: self.root.clone(), framework: self.framework.clone() }
+        Snapshot { docs: self.docs.read().clone(), index: self.index.clone(), root: self.root.clone(), framework: self.framework.clone(), client: Some(self.client.clone()) }
     }
 
     /// Runs a request on the pool after the index catches up. A panic answers with an error instead of taking

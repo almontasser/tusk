@@ -50,6 +50,7 @@ impl Fixture {
             index: Arc::new(RwLock::new(index)),
             root: PathBuf::from(ROOT),
             framework: Arc::new(crate::framework::State::new(PathBuf::from(ROOT))),
+            client: None,
         };
         Self { snap, cursor }
     }

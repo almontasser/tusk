@@ -47,6 +47,7 @@ pub fn spawn(
                 index: index.clone(),
                 root: root.clone(),
                 framework: framework.clone(),
+                client: None,
             };
             let mut edited: HashSet<PathBuf> = HashSet::new();
             let mut others_due = false;
