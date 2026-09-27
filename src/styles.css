@@ -1229,6 +1229,9 @@ button.link:hover { text-decoration: underline; }
 #ai-status.loading { opacity: 0.5; }
 
 /* Breadcrumbs in the status bar's path: the symbols around the cursor. */
+/* The path gives way first, from its start, so the file name and the symbols stay in view. */
+#path .crumb-path { min-width: 3em; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+#path .crumb { flex-shrink: 0; }
 #path .crumb { display: inline-flex; align-items: center; gap: 3px; padding: 0 4px; margin-left: 2px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
 #path .crumb::before { content: "›"; margin-right: 4px; opacity: 0.6; }
 #path .crumb:hover { background: var(--hover); color: var(--text); }

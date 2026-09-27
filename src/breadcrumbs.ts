@@ -38,7 +38,9 @@ export function showBreadcrumbs(el: HTMLElement, rel: string, editor: monaco.edi
   const model = editor.getModel();
   const draw = (symbols: monaco.languages.DocumentSymbol[]) => {
     const path = document.createElement("span");
-    path.textContent = rel;
+    path.className = "crumb-path";
+    // Isolated, so the right-to-left box that puts the ellipsis at the start keeps `.env` and the slashes in order.
+    path.append(Object.assign(document.createElement("bdi"), { textContent: rel }));
     el.replaceChildren(
       path,
       ...symbols.map((s) => {
