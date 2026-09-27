@@ -49,8 +49,8 @@ fn active(ctx: &Ctx<'_>) -> bool {
 /// Runs `introspect.php` in `mode`, or `None` if it fails.
 fn introspect(ctx: &Ctx<'_>, args: &[&str]) -> Option<Arc<Value>> {
     let state = &ctx.snap.framework;
-    let root = state.root().to_string_lossy().into_owned();
-    let mut all = vec![root.as_str()];
+    // The script runs in the project's root, and `.` names it inside a container too.
+    let mut all = vec!["."];
     all.extend(args);
     let value = state.php(&format!("filament:{}", args.join("|")), INTROSPECT, &all, DEPENDS_ON)?;
     value.get("error").is_none().then_some(value)

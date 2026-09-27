@@ -3,10 +3,10 @@
 
 pub mod filament;
 pub mod laravel;
+pub mod php;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -366,6 +366,8 @@ pub fn string_arg_at(ctx: &Ctx<'_>, offset: u32) -> Option<StringArg> {
 pub struct State {
     root: PathBuf,
     cache: Mutex<HashMap<String, Cached>>,
+    /// The project's PHP, found the first time a script runs.
+    php: std::sync::OnceLock<php::Php>,
 }
 
 struct Cached {
@@ -375,12 +377,9 @@ struct Cached {
     at: Instant,
 }
 
-/// How long one PHP script may run.
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
-
 impl State {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, cache: Mutex::new(HashMap::new()) }
+        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new() }
     }
 
     pub fn root(&self) -> &Path {
@@ -388,13 +387,20 @@ impl State {
     }
 
     /// The JSON a PHP script prints, run once and cached under `key` until a path in `depends_on` changes.
-    /// The script runs in the project's root with `php`, and its arguments follow it. `None` if PHP fails.
+    /// The script runs in the project's root with the project's PHP, and its arguments follow it. `None` if
+    /// PHP fails.
     pub fn php(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str]) -> Option<Arc<Value>> {
+        self.php_script(key, script, args, depends_on, false)
+    }
+
+    /// Like [`State::php`], optionally through `artisan tinker`, for an app that can't boot on its own.
+    pub fn php_script(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str], tinker: bool) -> Option<Arc<Value>> {
         if let Some(c) = self.cache.lock().get(key) {
             // A failed run is cached as null, so it isn't retried until a file it depends on changes.
             return (!c.value.is_null()).then(|| c.value.clone());
         }
-        let value = Arc::new(run_php(&self.root, script, args).unwrap_or(Value::Null));
+        let php = self.php.get_or_init(|| php::detect(&self.root));
+        let value = Arc::new(php::run(&self.root, php, script, args, tinker).unwrap_or(Value::Null));
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
         self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
         (!value.is_null()).then_some(value)
@@ -433,55 +439,6 @@ impl State {
     pub fn age(&self, key: &str) -> Option<Duration> {
         self.cache.lock().get(key).map(|c| c.at.elapsed())
     }
-}
-
-/// Writes `script` to a temporary file and runs it with PHP, returning the JSON it prints. The output may be
-/// preceded by noise such as deprecation notices, so parsing starts at the first `{` or `[`.
-fn run_php(root: &Path, script: &str, args: &[&str]) -> Option<Value> {
-    let dir = std::env::temp_dir().join("tusk-lsp");
-    std::fs::create_dir_all(&dir).ok()?;
-    // Named by content, so concurrent servers share it and a new build's script replaces the old.
-    let hash = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        script.hash(&mut h);
-        h.finish()
-    };
-    let file = dir.join(format!("script-{hash:016x}.php"));
-    if !file.exists() {
-        std::fs::write(&file, script).ok()?;
-    }
-    let mut child = Command::new("php")
-        .arg(&file)
-        .args(args)
-        .current_dir(root)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    // Read the output as it comes: a script that prints more than the pipe holds waits until it's read.
-    let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut out = vec![];
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
-        out
-    });
-    let started = Instant::now();
-    loop {
-        if child.try_wait().ok()?.is_some() {
-            break;
-        }
-        if started.elapsed() > SCRIPT_TIMEOUT {
-            let _ = child.kill();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let output = reader.join().ok()?;
-    let text = String::from_utf8_lossy(&output);
-    let start = text.find(['{', '['])?;
-    serde_json::from_str(&text[start..]).ok()
 }
 
 /// Completions inside a string argument.

@@ -51,9 +51,11 @@ impl Data<'_> {
     }
 
     fn script(&self, key: &str, template: &str, depends_on: &[&str]) -> Option<Arc<Value>> {
-        // A project PHP can't boot fails here, and the failure is cached like any result.
-        let script = format!("{BOOT}{}\n{}", body(GLOBAL), body(template));
-        self.0.php(&format!("laravel:{key}"), &script, &[], depends_on)
+        // An app without `vendor/autoload.php` and `bootstrap/app.php` boots through `artisan tinker` instead,
+        // as Laravel LSP does. A project PHP can't boot fails here, and the failure is cached like any result.
+        let bootable = self.root().join("vendor/autoload.php").is_file() && self.root().join("bootstrap/app.php").is_file();
+        let script = format!("{}{}\n{}", if bootable { BOOT } else { "<?php\n" }, body(GLOBAL), body(template));
+        self.0.php_script(&format!("laravel:{key}"), &script, &[], depends_on, !bootable)
     }
 
     pub fn routes(&self) -> Option<Arc<Value>> {
