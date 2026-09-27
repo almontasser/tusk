@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn reports_and_goes_to_relationships() {
         let fx = fixture(&form("Select::make('writer.name'), Select::make('author.name'), Select::make('a')->relationship('au<|>thor')"));
-        let found = with_ctx(&fx.snap, &uri("app/Filament/Resources/Posts/Schemas/PostForm.php"), |ctx| diagnostics(ctx)).unwrap();
+        let found = with_ctx(&fx.snap, &uri("app/Filament/Resources/Posts/Schemas/PostForm.php"), diagnostics).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].message, "App\\Models\\Post has no relationship method writer().");
         let at = fx.at();
@@ -618,12 +618,12 @@ mod tests {
         let fx = fixture(&form(""));
         fx.snap.framework.seed("filament:resource|App\\Filament\\Resources\\Posts\\PostResource|App\\Filament\\Resources\\Posts\\PostResource", context_json());
         let titles = |name: &str| -> Vec<String> {
-            with_ctx(&fx.snap, &uri(name), |ctx| code_lenses(ctx)).unwrap().into_iter().map(|l| l.command.unwrap().title).collect()
+            with_ctx(&fx.snap, &uri(name), code_lenses).unwrap().into_iter().map(|l| l.command.unwrap().title).collect()
         };
         assert_eq!(titles("app/Filament/Resources/Posts/PostResource.php"), vec!["Model: Post", "ListPosts"]);
         assert_eq!(titles("app/Filament/Resources/Posts/Schemas/PostForm.php"), vec!["Resource: PostResource"]);
         fx.snap.framework.seed("filament:resources", json!({"App\\Models\\Post": [{"class": "App\\Filament\\Resources\\Posts\\PostResource", "file": "/x/PostResource.php", "line": 3}]}));
-        let lenses = with_ctx(&fx.snap, &uri("app/Models/Post.php"), |ctx| code_lenses(ctx)).unwrap();
+        let lenses = with_ctx(&fx.snap, &uri("app/Models/Post.php"), code_lenses).unwrap();
         let command = lenses[0].command.as_ref().unwrap();
         assert_eq!(command.title, "Filament: PostResource");
         assert_eq!(command.arguments.as_ref().unwrap()[1], json!(3));
@@ -697,14 +697,14 @@ mod tests {
         let post = read(&root.join("app/Models/Post.php"));
         assert!(post.lines().nth(found[0].range.start.line as usize).unwrap().contains("function author"));
 
-        let diags = |path: &Path, text: String| with_ctx(&open(path, text), &path_to_uri(path), |ctx| diagnostics(ctx)).unwrap();
+        let diags = |path: &Path, text: String| with_ctx(&open(path, text), &path_to_uri(path), diagnostics).unwrap();
         assert!(diags(&form, read(&form)).is_empty());
         assert!(diags(&table, read(&table)).is_empty());
         let found = diags(&table, read(&table).replace("TextColumn::make('author.name')", "TextColumn::make('writer.name')"));
         assert!(found.len() == 1 && found[0].message.contains("writer()"));
 
         let titles = |path: &Path| -> Vec<String> {
-            with_ctx(&open(path, read(path)), &path_to_uri(path), |ctx| code_lenses(ctx)).unwrap().into_iter().map(|l| l.command.unwrap().title).collect()
+            with_ctx(&open(path, read(path)), &path_to_uri(path), code_lenses).unwrap().into_iter().map(|l| l.command.unwrap().title).collect()
         };
         assert_eq!(titles(&resources.join("Posts/PostResource.php")), vec!["Model: Post", "ListPosts", "CreatePost", "EditPost"]);
         assert!(titles(&resources.join("Authors/AuthorResource.php")).contains(&"PostsRelationManager".to_string()));

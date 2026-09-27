@@ -75,7 +75,7 @@ fn help(ctx: &Ctx<'_>, offset: u32) -> Option<SignatureHelp> {
     let text = ctx.parsed.text();
     let args = &text[args_start as usize..offset as usize];
     let names: Vec<String> = function.parameters.iter().map(|p| p.get_name().0.as_str_lossy().trim_start_matches('$').to_string()).collect();
-    let active = active_parameter(args, &names).min(ranges.len().saturating_sub(1).max(0));
+    let active = active_parameter(args, &names).min(ranges.len().saturating_sub(1));
     let parameters = ranges
         .iter()
         .zip(names.iter().map(Some).chain(std::iter::repeat(None)))

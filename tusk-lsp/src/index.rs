@@ -340,7 +340,7 @@ impl Index {
                     move |e| {
                         let Ok(rel) = e.path().strip_prefix(&project) else { return true };
                         let hidden = e.depth() > 0 && e.file_name().to_string_lossy().starts_with('.');
-                        !hidden && !(rel.as_os_str().len() > 0 && excluded.is_match(rel))
+                        !hidden && !(!rel.as_os_str().is_empty() && excluded.is_match(rel))
                     }
                 })
                 .build();
@@ -371,7 +371,7 @@ impl Index {
         let php_version = self.config.php_version;
         let tick = || {
             let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n % 500 == 0 {
+            if n.is_multiple_of(500) {
                 progress(n, total);
             }
         };

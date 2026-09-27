@@ -80,12 +80,11 @@ impl Client {
             return self.notifications.remove(i);
         }
         loop {
-            if let Message::Notification(n) = self.recv() {
-                if f(&n) {
+            if let Message::Notification(n) = self.recv()
+                && f(&n) {
                     self.notifications.retain(|m| m.method != n.method || m.params != n.params);
                     return n;
                 }
-            }
         }
     }
 
@@ -101,11 +100,10 @@ impl Client {
     fn responses(&mut self, ids: &[RequestId]) -> Vec<Response> {
         let mut out = vec![];
         while out.len() < ids.len() {
-            if let Message::Response(r) = self.recv() {
-                if ids.contains(&r.id) {
+            if let Message::Response(r) = self.recv()
+                && ids.contains(&r.id) {
                     out.push(r);
                 }
-            }
         }
         out
     }

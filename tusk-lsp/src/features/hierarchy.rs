@@ -18,7 +18,7 @@ use mago_syntax::cst::{Expression, Node};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::references::search;
+use super::references::{FileMentions, search};
 use super::with_ctx;
 use crate::analysis::Parsed;
 use crate::index::Index;
@@ -74,7 +74,9 @@ fn locate(snap: &Snapshot, index: &Index, spans: Option<(Place, Place)>, fallbac
         let selection = lines.range(&text, name.start, name.end);
         return Where { uri: path_to_uri(path), range, selection };
     }
-    let uri = format!("tusk://builtin/{}", fallback.replace('\\', "/")).parse().expect("a valid URI");
+    // PHP allows names beyond ASCII, which a URI can't hold as they are.
+    let name = percent_encoding::utf8_percent_encode(&fallback.replace('\\', "/"), percent_encoding::NON_ALPHANUMERIC).to_string();
+    let uri = format!("tusk://builtin/{}", name.replace("%2F", "/")).parse().unwrap_or_else(|_| crate::text::path_to_uri(&snap.root));
     Where { uri, range: Range::default(), selection: Range::default() }
 }
 
@@ -289,7 +291,7 @@ fn constructed_by(codebase: &CodebaseMetadata, class: &str) -> Vec<String> {
 }
 
 /// Every call of a method or function in the project, without its declaration, by file.
-fn calls_of(snap: &Snapshot, index: &Index, target: &Target) -> Vec<(PathBuf, String, Vec<(u32, u32)>)> {
+fn calls_of(snap: &Snapshot, index: &Index, target: &Target) -> Vec<FileMentions> {
     let (symbols, constructor) = match target {
         Target::Function { fqn } => (vec![Symbol::Function(fqn.clone())], vec![]),
         Target::Method { class, name } if name.eq_ignore_ascii_case("__construct") => {

@@ -493,7 +493,7 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
         }
         classes.push((s, *origin != Origin::Project, d, kind));
     }
-    classes.sort_by(|a, b| (a.0, a.1, a.2.name.as_str_lossy().len()).cmp(&(b.0, b.1, b.2.name.as_str_lossy().len())));
+    classes.sort_by_key(|a| (a.0, a.1, a.2.name.as_str_lossy().len()));
     classes.dedup_by(|a, b| a.2.name == b.2.name);
     for (rank, (s, vendor, d, kind)) in classes.into_iter().take(NAME_LIMIT).enumerate() {
         let fqn = d.name.as_str_lossy().into_owned();

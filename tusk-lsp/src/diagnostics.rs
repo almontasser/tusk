@@ -109,7 +109,7 @@ fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::ph
 /// The problems in `doc`: Mago's for PHP, and the framework's for PHP and Blade.
 pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
     let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { vec![] };
-    let framework = crate::features::with_ctx(snap, &doc.uri, |ctx| crate::framework::diagnostics(ctx)).unwrap_or_default();
+    let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
     out.extend(framework);
     out
 }

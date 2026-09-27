@@ -112,8 +112,11 @@ fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadat
     out
 }
 
-/// Every mention of `symbols` in the project and open documents, as (path, text, spans).
-pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<(PathBuf, String, Vec<(u32, u32)>)> {
+/// A file's mentions of a symbol: its path, its text, and the mentions' spans.
+pub type FileMentions = (PathBuf, String, Vec<(u32, u32)>);
+
+/// Every mention of `symbols` in the project and open documents.
+pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMentions> {
     let codebase = &index.codebase;
     let targets: Vec<Symbol> = symbols.iter().map(|s| key(s, codebase)).collect();
     let Some(first) = symbols.first() else { return vec![] };

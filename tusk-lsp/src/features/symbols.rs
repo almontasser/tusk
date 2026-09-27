@@ -228,10 +228,10 @@ pub fn workspace_symbols(snap: &Snapshot, params: WorkspaceSymbolParams) -> Resu
     let mut out = vec![];
     for (_, _, _, name, container, kind, place) in hits {
         let Some(path) = index.path_of(place.file) else { continue };
-        if !files.contains_key(&place.file) {
+        if let std::collections::hash_map::Entry::Vacant(e) = files.entry(place.file) {
             let Some(text) = snap.read(path) else { continue };
             let lines = crate::text::LineIndex::new(&text);
-            files.insert(place.file, (text, lines));
+            e.insert((text, lines));
         }
         let (text, lines) = &files[&place.file];
         out.push(WorkspaceSymbol {
