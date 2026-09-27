@@ -320,6 +320,12 @@ impl State {
         self.cache.lock().retain(|_, c| !c.depends_on.iter().any(|d| d == "*" || rel.starts_with(d.as_str())));
     }
 
+    /// Stores a value as if a script had reported it, for tests.
+    #[cfg(test)]
+    pub fn seed(&self, key: &str, value: Value) {
+        self.cache.lock().insert(key.to_string(), Cached { value: Arc::new(value), depends_on: vec![], at: Instant::now() });
+    }
+
     /// Forgets everything, such as after a reindex.
     pub fn clear(&self) {
         self.cache.lock().clear();

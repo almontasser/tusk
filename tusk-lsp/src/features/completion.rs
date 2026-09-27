@@ -25,7 +25,9 @@ use crate::types::display;
 /// How many class, function, or constant names one response lists; typing more narrows it.
 const NAME_LIMIT: usize = 150;
 
-pub const TRIGGERS: &[&str] = &["$", ">", ":", "\\"];
+/// Quotes and `.` start the framework's completions in strings, such as Filament's field names. `(` isn't one:
+/// named arguments would pop up at every call.
+pub const TRIGGERS: &[&str] = &["$", ">", ":", "\\", "'", "\"", "."];
 
 /// What `completionItem/resolve` needs to find an item's documentation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +61,10 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     if in_comment(ctx, offset as u32) {
         return None;
     }
+    // Framework values outside strings, such as the enum in Filament's `->options(`.
+    if let Some(items) = crate::framework::completion(ctx, offset as u32) {
+        return Some((items, false));
+    }
     let word_start = before.len() - before.chars().rev().take_while(|c| is_name_char(*c)).map(char::len_utf8).sum::<usize>();
     let word = &before[word_start..];
     let range = Range { start: ctx.doc.position(word_start as u32), end: ctx.doc.position(offset as u32) };
@@ -74,8 +80,8 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     if lead.ends_with("::") {
         return Some((members(ctx, word_start as u32, word, range, true), false));
     }
-    // A lone `:` or `>` trigger outside `::` and `->` completes nothing.
-    if word.is_empty() && (lead.ends_with(':') || lead.ends_with('>')) {
+    // A lone `:`, `>`, or `.` trigger outside `::` and `->` completes nothing more.
+    if word.is_empty() && (lead.ends_with(':') || lead.ends_with('>') || lead.ends_with('.')) {
         return None;
     }
     if word.is_empty() && !lead.ends_with('\\') {
