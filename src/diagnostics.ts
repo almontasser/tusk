@@ -28,15 +28,14 @@ const messageOf = (d: Diagnostic) => (typeof d.message === "string" ? d.message 
 export const isLibrary = (path: string) => /\/(vendor|node_modules)\//.test(path);
 
 /**
- * Pest binds each test closure to the project's test case, so `$this->get()` works, but Phpactor and Mago
- * can't see that. In Pest files, drop their complaints about `$this` lines, and the hint to add a namespace.
+ * Pest binds each test closure to the project's test case, so `$this->get()` works, but Mago can't see that.
+ * In Pest files, drop its complaints about `$this` lines.
  */
 // ponytail: drops every such problem on a `$this` line; reading tests/Pest.php could type `$this` instead.
 const isPestFile = (path: string, text: string) => /\/tests\//.test(path) && /^\s*(it|test|describe|arch)\(/m.test(text);
 
 function pestFalsePositive(text: string, lines: string[], lineStarts: number[], d: Diagnostic): boolean {
   const message = messageOf(d);
-  if (message.startsWith("Namespace should probably be")) return true;
   // Pest's own classes answer through magic: `->not`, higher-order expectations (`->name->toBe()`), and hooks.
   if (/^mago/.test(d.source ?? "") && /`Pest\\/.test(message)) return true;
   // expect() returns an `Expectation<TValue|null>`, so Mago takes every call along its chain as one on null.
@@ -264,9 +263,9 @@ type MagoIssue = {
 /**
  * The files `mago lint` or `mago analyze --reporting-format json` reports on, relative to the project, each with a
  * function that converts its issues for the file's text. Mago counts UTF-8 bytes; the diagnostics count UTF-16
- * units, as the language server's do. The messages match Phpactor's Mago extension's, which the filters read, except
+ * units, as the language server's do. The messages match Tusk's server's, which the filters read, except
  * a parse error's: Mago's is always "Parse error encountered during parsing", so this takes the one on its location,
- * such as "Expected one of `Variable`, found `LeftBrace`". Levels map as Phpactor's do: note to Information and help to
+ * such as "Expected one of `Variable`, found `LeftBrace`". Levels map as the server's do: note to Information and help to
  * Hint. The Problems panel shows neither, so the scan asks Mago for warnings and errors only.
  */
 export function magoIssuesByFile(json: string, source: "mago" | "mago-lint"): Map<string, (text: string) => Diagnostic[]> {
@@ -365,7 +364,7 @@ export function magoConfigText(bundled: string, composerJson: string, includes: 
 }
 
 /**
- * A message line split into text and code: code in backticks, and quoted class names such as Phpactor's
+ * A message line split into text and code: code in backticks, and quoted class names such as
  * `"App\Models\Post"`.
  */
 export function messageParts(line: string): { text: string; code: boolean }[] {

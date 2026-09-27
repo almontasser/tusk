@@ -11,9 +11,9 @@
 //
 // `configs` is a comma-separated subset of: none, defs, full, nomodels, wide, types (default: none,
 // defs, full, types). `nomodels` is full context without the models' columns. `wide` is full context with twice the budget for definitions and similar code. `types` is
-// full context plus the classes of the names before `->` near the cursor, from Phpactor's command
-// line, as the editor gets them from Phpactor. For a project without vendor/, build Phpactor's index
-// first: php src-tauri/target/tools/phpactor/phpactor.phar index:build --working-dir=<project>
+// full context plus the classes of the names before `->` near the cursor, from Tusk's PHP server, as the
+// editor gets them (textDocument/typeDefinition). Build the server first:
+// cargo build --release --manifest-path tusk-lsp/Cargo.toml
 // CASES=columns keeps only cases that read a model's column after `->`, to measure the models' columns.
 // DEBUG=1 prints each case's expected text and the model's reply.
 // NO_TYPING=1 skips timing a request after typing, which takes two more requests per case.
@@ -21,6 +21,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { BUDGET, buildContext, chunk, leastLikely, typedNames, cleanSuggestion, type Extra, INDEXED, type Index, infillRequest, MAX_FILES, type ModelFacts, outlineFile, SKIPPED, similarCode } from "../src/aicontext.ts";
+import { parseTypeDeclaration } from "../src/phptypes.ts";
 import { psr4From } from "../src/psr4.ts";
 
 const [root, modelPath, count = "80", only = "none,defs,full,types", task = "line"] = process.argv.slice(2);
@@ -209,6 +210,7 @@ if (task === "block") {
     console.log(`| ${name} | ${pct(t.shown)} | ${(t.correct / picked.length).toFixed(2)} | ${(t.wrong / picked.length).toFixed(2)} | ${pct(t.unsafe)} | ${pct(t.whole)} |`);
   }
   server.kill();
+tusk?.child.kill();
   process.exit(0);
 }
 
@@ -226,19 +228,64 @@ function editSimilarity(a: string, b: string) {
   return 1 - d[b.length] / Math.max(a.length, b.length, 1);
 }
 
-/** Classes in the type Phpactor reports for the name at `offset` in a file on disk; the editor asks the language server instead. */
+// ---- Tusk's PHP server, for the `types` configuration ----
+
+/** A minimal LSP client over the server's standard input and output. */
+function startTusk() {
+  const binary = new URL("../tusk-lsp/target/release/tusk-lsp", import.meta.url).pathname;
+  if (!existsSync(binary)) throw new Error("Build Tusk's server first: cargo build --release --manifest-path tusk-lsp/Cargo.toml");
+  const child = spawn(binary, [], { stdio: ["pipe", "pipe", "ignore"] });
+  process.on("exit", () => child.kill());
+  const pending = new Map<number, (result: unknown) => void>();
+  let nextId = 0;
+  let indexed!: () => void;
+  const ready = new Promise<void>((resolve) => (indexed = resolve));
+  const send = (message: object) => {
+    const body = JSON.stringify({ jsonrpc: "2.0", ...message });
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+  };
+  let buffer = Buffer.alloc(0);
+  child.stdout.on("data", (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    for (;;) {
+      const header = buffer.indexOf("\r\n\r\n");
+      if (header < 0) return;
+      const length = Number(buffer.subarray(0, header).toString().match(/Content-Length: (\d+)/i)?.[1]);
+      if (buffer.length < header + 4 + length) return;
+      const message = JSON.parse(buffer.subarray(header + 4, header + 4 + length).toString());
+      buffer = buffer.subarray(header + 4 + length);
+      if (message.method === undefined) pending.get(message.id)?.(message.result ?? null), pending.delete(message.id);
+      else if (message.id !== undefined) send({ id: message.id, result: null });
+      else if (message.method === "$/progress" && message.params.token === "tusk/indexing" && message.params.value.kind === "end") indexed();
+    }
+  });
+  const request = <T>(method: string, params: object) =>
+    new Promise<T>((resolve) => (pending.set(++nextId, resolve as (r: unknown) => void), send({ id: nextId, method, params })));
+  return { child, ready, request, notify: (method: string, params: object) => send({ method, params }) };
+}
+
+let tusk: ReturnType<typeof startTusk> | undefined;
+if (only.split(",").includes("types")) {
+  tusk = startTusk();
+  await tusk.request("initialize", { processId: process.pid, rootUri: `file://${root}`, capabilities: { window: { workDoneProgress: true } } });
+  tusk.notify("initialized", {});
+  await Promise.race([tusk.ready, new Promise((r) => setTimeout(r, 120_000))]);
+}
+
+/** The class of the name at `offset` in a file on disk, as the editor finds it: its type definition's first declaration. */
 const typeCache = new Map<string, string[]>();
-function typeAt(file: string, offset: number) {
+async function typeAt(file: string, offset: number): Promise<string[]> {
   const key = `${file}:${offset}`;
   if (!typeCache.has(key)) {
-    const out = (() => {
-      try {
-        return execFileSync("php", [`${tools}phpactor/phpactor.phar`, "offset:info", `${root}/${file}`, String(offset + 1), `--working-dir=${root}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-      } catch {
-        return "";
-      }
-    })();
-    typeCache.set(key, out.match(/^type:(.*)$/m)?.[1].match(/[A-Z]\w*(?:\\\w+)+/g) ?? []);
+    const before = texts.get(file)!.slice(0, offset + 1).split("\n");
+    const position = { line: before.length - 1, character: before.at(-1)!.length };
+    type Target = { uri?: string; targetUri?: string };
+    const result = await tusk!.request<Target | Target[] | null>("textDocument/typeDefinition", { textDocument: { uri: `file://${root}/${file}` }, position });
+    const target = [result ?? []].flat()[0];
+    const path = decodeURIComponent((target?.targetUri ?? target?.uri ?? "").replace(/^file:\/\//, ""));
+    const text = path.startsWith(`${root}/`) ? texts.get(path.slice(root.length + 1)) : undefined;
+    const fqn = text && parseTypeDeclaration(text)?.fqn;
+    typeCache.set(key, fqn ? [fqn] : []);
   }
   return typeCache.get(key)!;
 }
@@ -264,7 +311,7 @@ for (const [n, c] of cases.entries()) {
   if (configs.includes("nomodels")) extra.nomodels = buildContext({ ...index, models: {} }, c.file, source, offset, [], like);
   if (configs.includes("types")) {
     // The names come before the cursor, so their offsets are the same in the file on disk.
-    const found = typedNames(source, offset).flatMap((n) => typeAt(c.file, n.offset));
+    const found = (await Promise.all(typedNames(source, offset).map((n) => typeAt(c.file, n.offset)))).flat();
     extra.types = buildContext(index, c.file, source, offset, [], like, [...new Set(found)]);
   }
   const budget = { ...BUDGET };
@@ -313,3 +360,4 @@ for (const [config, s] of Object.entries(scores)) {
 for (const [config, s] of Object.entries(scores)) console.log(`\n${config}: exact first line ${pct(s.exactShownAll)} when every suggestion is shown, ${pct(s.exact)} when unsure ones are hidden (${pct(s.empty)} empty).`);
 for (const [k, c] of Object.entries(changedIn)) console.log(`\n${k} differs from full in ${c.cases} cases. Exact first line there: ${c.full} with full, ${c.other} with ${k}.`);
 server.kill();
+tusk?.child.kill();

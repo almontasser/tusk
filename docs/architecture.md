@@ -528,8 +528,6 @@ before they become markers, for open files and the project's problems alike.
 It has no editor imports, so `src/diagnostics.test.ts` runs it in Node. Besides
 Laravel's magic (above), it drops:
 
-- Phpactor's checks (source `phpactor`), which Tusk's server doesn't make.
-  These filters are left from before the switch and match nothing now.
 - A factory's `Model|Collection<int, Model>` (see `factoryUnion`), and the
   issues that follow from a factory call's value.
 - A member used in a trait (the classes that use it have it), and a member of a
@@ -1646,12 +1644,11 @@ editor's warm-up on focus hides most of that. On Pinkary, hiding
 suggestions the model was unsure of lost one exact match in 60 PHP cases, and
 none in the Blade cases.
 
-The `types` configuration adds the classes Phpactor finds for the names before
-`->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
-the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
-The benchmark still uses Phpactor's command line, which the app no longer
-downloads, so get the `.phar` from Phpactor's releases to run it.
-Over 600 cases, the types changed the context in 71, and the exact first line
+The `types` configuration adds the classes of the names before `->`, found as
+the editor finds them: the benchmark runs Tusk's server (build it first with
+`cargo build --release --manifest-path tusk-lsp/Cargo.toml`) and asks
+`textDocument/typeDefinition` for each name. The results below came from
+Phpactor's command line (`offset:info`), before the switch. Over 600 cases, the types changed the context in 71, and the exact first line
 went from 43 to 44 of those (62.7% to 62.8% overall). koel imports nearly
 every class it uses, so the types rarely add a class the outlines lack, and
 without a database there are no model columns, where a variable's type
