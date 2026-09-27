@@ -4,6 +4,7 @@ use mago_codex::metadata::CodebaseMetadata;
 use mago_names::kind::NameKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+use mago_syntax::cst::TriviaKind;
 
 use crate::analysis::{Analysis, Parsed};
 use crate::scope::{resolve_class, resolve_function_or_constant, scope_at};
@@ -62,6 +63,9 @@ impl<'p, 'a> Resolver<'p, 'a> {
 
     /// The symbol at `offset`.
     pub fn at(&self, offset: u32) -> Option<Found> {
+        if let Some(found) = self.in_docblock(offset) {
+            return Some(found);
+        }
         let path = self.parsed.path_at(offset);
         // The innermost node that names something.
         let i = path.iter().rposition(|n| {
@@ -191,6 +195,22 @@ impl<'p, 'a> Resolver<'p, 'a> {
             }
             _ => self.name_or_variable(&path, name, offset, start, end),
         }
+    }
+
+    /// A class name in a docblock type, such as `User` in `@param list<User> $users`.
+    fn in_docblock(&self, offset: u32) -> Option<Found> {
+        let comment = self.parsed.program.trivia.iter().find(|t| {
+            t.kind == TriviaKind::DocBlockComment && t.span.start.offset <= offset && offset <= t.span.end.offset
+        })?;
+        let (start, end, name) = docblock_type_names(comment.value, comment.span.start.offset)
+            .into_iter()
+            .find(|(s, e, _)| *s <= offset && offset <= *e)?;
+        let fqn = resolve_class(&scope_at(self.parsed.program, start), &name);
+        let lower = fqn.to_ascii_lowercase();
+        if matches!(lower.as_str(), "self" | "static" | "parent" | "this") || !self.codebase.class_like_exists(fqn.as_bytes()) {
+            return None;
+        }
+        Some(Found { symbols: vec![Symbol::Class(display_class(&fqn, self.codebase))], start, end, declaration: false })
     }
 
     fn name_or_variable(&self, path: &[Node<'a, 'a>], name: Node<'a, 'a>, offset: u32, start: u32, end: u32) -> Option<Found> {
@@ -339,6 +359,37 @@ impl<'p, 'a> Resolver<'p, 'a> {
     }
 }
 
+/// The names in a docblock that could be types: words not starting a tag (`@param`) or a variable (`$x`),
+/// with their spans. `base` is the docblock's offset.
+pub fn docblock_type_names(docblock: &[u8], base: u32) -> Vec<(u32, u32, String)> {
+    let text = String::from_utf8_lossy(docblock);
+    let bytes = text.as_bytes();
+    let is_name = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80;
+    let mut out = vec![];
+    let mut i = 0;
+    while i < bytes.len() {
+        if !is_name(bytes[i]) || bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && is_name(bytes[i]) {
+            i += 1;
+        }
+        let before = if start > 0 { bytes[start - 1] } else { b' ' };
+        if matches!(before, b'$' | b'@' | b'-' | b'.' | b':') {
+            continue;
+        }
+        let word = &text[start..i];
+        // A description's words start lowercase more often than types do; types in PHP code are classes.
+        let first = word.trim_start_matches('\\').chars().next().unwrap_or('a');
+        if first.is_uppercase() || word.starts_with('\\') {
+            out.push((base + start as u32, base + i as u32, word.to_string()));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +472,15 @@ mod tests {
             symbols("<?php namespace A; class B { function f() { return self::X<|>Y; } const XY = 1; }"),
             vec![Symbol::ClassConstant { class: "A\\B".into(), name: "XY".into() }]
         );
+    }
+
+    #[test]
+    fn finds_classes_in_docblocks() {
+        assert_eq!(
+            with_classes("<?php use App\\User;\n/** @param list<Us<|>er> $users */\nfunction f($users) {}"),
+            vec![Symbol::Class("App\\User".into())]
+        );
+        assert!(with_classes("<?php\n/** Returns the Us<|>er. */\nfunction f() {}").is_empty());
     }
 
     #[test]

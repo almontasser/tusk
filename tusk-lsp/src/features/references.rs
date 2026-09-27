@@ -88,6 +88,18 @@ fn mentions(parsed: &Parsed<'_>, analysis: &Analysis, codebase: &CodebaseMetadat
             candidates.push(s);
         }
     });
+    // Class names in docblock types.
+    if let Some(Symbol::Class(target)) = targets.first() {
+        for t in parsed.program.trivia.iter().filter(|t| t.kind == mago_syntax::cst::TriviaKind::DocBlockComment) {
+            for (s, _, name) in crate::symbol::docblock_type_names(t.value, t.span.start.offset) {
+                let last = name.rsplit('\\').next().unwrap_or(&name);
+                if last.eq_ignore_ascii_case(short) {
+                    candidates.push(s);
+                }
+            }
+        }
+        let _ = target;
+    }
     let mut out = vec![];
     for offset in candidates {
         let Some(found) = resolver.at(offset) else { continue };
@@ -231,6 +243,13 @@ mod tests {
         ]);
         let found: Vec<_> = refs(&fx, false).into_iter().map(|(f, l, c)| format!("{f}:{l}:{c}")).collect();
         assert_eq!(found, vec!["use.php:1:4", "use.php:2:11", "use.php:2:23", "use.php:2:46", "use.php:3:16"]);
+
+        let fx = Fixture::new(&[
+            ("app/Models.php", MODELS),
+            ("app/doc.php", "<?php\nnamespace App;\n/** @return list<User>|null */\nfunction f() { return [new Us<|>er]; }\n"),
+        ]);
+        let found: Vec<_> = refs(&fx, false).into_iter().map(|(f, l, c)| format!("{f}:{l}:{c}")).collect();
+        assert_eq!(found, vec!["doc.php:2:17", "doc.php:3:27"]);
     }
 
     #[test]
