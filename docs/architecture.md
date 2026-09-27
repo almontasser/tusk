@@ -3611,6 +3611,34 @@ Signature help and inlay hints find the called function the same way
 (`signature::called`). On a 855-line controller, the whole file's hints take
 about 9 ms (`examples/inlay_bench.rs`).
 
+### Filament
+
+`framework/filament.rs` ports `filament-lsp/server.php`, with the same
+completion items, relationship definitions and diagnostics (source
+`filament`), and code lenses (`phpEditor.open`). Its features run only
+when `vendor/filament/filament` exists.
+
+- **Resources and files:** the index finds which resource a file belongs
+  to. That's its own class if the class is a resource, otherwise the first
+  `*Resource.php` in its folder or a parent folder under `app/`.
+- **Running app:** the model's columns, casts, and relationships, and the
+  resource's pages and relation managers, need the running app.
+  `introspect.php` is compiled into the server and still reports them. Its
+  results are cached until a file under `app/`, `config/`, or `database/`
+  changes, or `composer.lock` does.
+- **Enums:** enum cases and their values come from the index, so an enum
+  the index doesn't know offers nothing.
+- **Relationship calls:** a `relationship` or `::make` call counts when the
+  analyzer types its receiver as a Filament class, or can't type it at all.
+- **`$get` and `$set`:** these read field names from the whole text,
+  because the parse for completion ends at the cursor.
+- **Triggers:** `'`, `"`, and `.` trigger completion. `(` doesn't, because
+  named arguments would show at every call, so `->options(` completes when
+  you ask for it.
+- **Demo app test:** a test marked `#[ignore]` mirrors the old PHP tests on
+  the demo app. Build the app with `scripts/make-fixture.sh`, then run
+  `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
+
 ### Tests
 
 Run the tests with `cargo test` in `tusk-lsp/`.
