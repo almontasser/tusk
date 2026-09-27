@@ -43,11 +43,13 @@ pub struct IndexConfig {
     /// Extra files or folders scanned as library code, such as generated Facade alias stubs.
     pub stubs: Vec<PathBuf>,
     pub php_version: PHPVersion,
+    /// The project's Mago configuration, for the analyzer and linter.
+    pub mago: Arc<crate::mago_config::MagoConfig>,
 }
 
 impl IndexConfig {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into(), exclude: vec![], stubs: vec![], php_version: PHPVersion::PHP84 }
+        Self { root: root.into(), exclude: vec![], stubs: vec![], php_version: PHPVersion::PHP84, mago: Default::default() }
     }
 
     fn exclusions(&self) -> GlobSet {

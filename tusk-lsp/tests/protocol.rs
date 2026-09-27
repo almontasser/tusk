@@ -121,7 +121,8 @@ fn indexes_reports_progress_and_publishes_diagnostics_after_edits() {
         "contentChanges": [{ "range": { "start": { "line": 1, "character": 29 }, "end": { "line": 1, "character": 32 } }, "text": "string" }]
     }));
     let diags = c.diagnostics(&uri, 2);
-    assert!(diags.is_empty(), "{diags:?}");
+    // The linter's style advice, such as `declare(strict_types=1)`, stays.
+    assert!(diags.iter().all(|d| d.source.as_deref() == Some("mago-lint")), "{diags:?}");
 
     // A syntax error is reported too.
     c.notify(notification::DidChangeTextDocument::METHOD, json!({

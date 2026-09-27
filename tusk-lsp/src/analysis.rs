@@ -135,8 +135,12 @@ pub fn settings(version: PHPVersion) -> Settings {
 }
 
 pub fn analyze(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, version: PHPVersion) -> Analysis {
+    analyze_with(parsed, arena, codebase, settings(version))
+}
+
+pub fn analyze_with(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, settings: Settings) -> Analysis {
     let mut result = AnalysisResult::new(SymbolReferences::new());
-    let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, codebase, &PLUGINS, settings(version));
+    let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, codebase, &PLUGINS, settings);
     let artifacts = analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default();
     Analysis { artifacts, issues: result.issues }
 }

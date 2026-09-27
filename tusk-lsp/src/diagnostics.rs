@@ -15,7 +15,7 @@ use mago_allocator::LocalArena;
 use mago_reporting::{AnnotationKind, Issue, Level};
 use parking_lot::RwLock;
 
-use crate::analysis::{Parsed, analyze};
+use crate::analysis::{Parsed, analyze_with};
 use crate::documents::{Document, Documents};
 use crate::index::SharedIndex;
 use crate::server::{Client, Snapshot};
@@ -108,21 +108,50 @@ fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.
     let exact = Parsed::exact(&arena, &doc.path, &doc.text);
-    let mut issues: Vec<Issue> = exact.program.errors.iter().map(Issue::from).collect();
-    let parsed = if issues.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
+    let syntax: Vec<Issue> = exact.program.errors.iter().map(Issue::from).collect();
+    let parsed = if syntax.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
     let index = index.read();
-    let analysis = analyze(&parsed, &arena, &index.codebase, index.config.php_version);
-    issues.extend(analysis.issues);
-    let mut out: Vec<Diagnostic> = issues.iter().filter_map(|issue| to_diagnostic(doc, &parsed, issue)).collect();
+    let mago = index.config.mago.clone();
+    let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
+    let analysis = analyze_with(&parsed, &arena, &index.codebase, mago.analyzer_settings(index.config.php_version));
+    let mut out: Vec<Diagnostic> = syntax.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
+    out.extend(
+        analysis
+            .issues
+            .iter()
+            .filter(|i| mago.reports_analysis(&rel, i.code.as_deref()))
+            .filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")),
+    );
+    drop(index);
+    if mago.lints(&rel) {
+        out.extend(lint(doc, &rel, &mago));
+    }
     out.extend(crate::features::actions::organize::diagnostics(&parsed, doc));
     out
 }
 
-fn to_diagnostic(doc: &Document, parsed: &Parsed<'_>, issue: &Issue) -> Option<Diagnostic> {
+/// Mago's linter on the document. Its rules match excluded paths against the file's name, so the file is
+/// named by its path relative to the project, as Mago names it.
+fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> Vec<Diagnostic> {
+    let arena = LocalArena::new();
+    let name = rel.to_string_lossy().into_owned().into_bytes();
+    let file = mago_database::file::File::new(
+        std::borrow::Cow::Owned(name),
+        mago_database::file::FileType::Host,
+        Some(doc.path.clone()),
+        std::borrow::Cow::Owned(doc.text.clone().into_bytes()),
+    );
+    let program = mago_syntax::parser::parse_file(&arena, &file);
+    let names = mago_names::resolver::NameResolver::new(&arena).resolve(program);
+    let linter = mago_linter::Linter::from_registry(&arena, mago.rules.clone(), mago.linter.php_version);
+    linter.lint(&file, program, &names).iter().filter_map(|i| to_diagnostic(doc, file.id, i, "mago-lint")).collect()
+}
+
+fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
     let primary = issue
         .annotations
         .iter()
-        .filter(|a| a.span.file_id == parsed.file.id)
+        .filter(|a| a.span.file_id == file)
         .find(|a| a.kind == AnnotationKind::Primary)?;
     let severity = match issue.level {
         Level::Error => DiagnosticSeverity::ERROR,
@@ -144,8 +173,46 @@ fn to_diagnostic(doc: &Document, parsed: &Parsed<'_>, issue: &Issue) -> Option<D
         range: doc.range(primary.span.start.offset, primary.span.end.offset),
         severity: Some(severity),
         code: issue.code.clone().map(NumberOrString::String),
-        source: Some("mago".into()),
+        source: Some(source.into()),
         message,
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Fixture;
+
+    fn problems(text: &str, mago_toml: &str) -> Vec<(String, String)> {
+        let fx = Fixture::one(text);
+        {
+            let mut index = fx.snap.index.write();
+            index.config.mago = std::sync::Arc::new(crate::mago_config::MagoConfig::parse(mago_toml, std::path::Path::new(crate::testing::ROOT)).unwrap());
+        }
+        let doc = fx.doc("test.php");
+        let mut out: Vec<(String, String)> = php_problems(&fx.snap.index, &doc)
+            .into_iter()
+            .map(|d| (d.source.unwrap_or_default(), match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }))
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn reports_analysis_and_lint_problems_as_configured() {
+        let code = "<?php\n\nfunction f(): int { return 'x'; }\n";
+        let all = problems(code, "");
+        assert!(all.contains(&("mago".into(), "invalid-return-statement".into())), "{all:?}");
+        assert!(all.contains(&("mago-lint".into(), "strict-types".into())), "{all:?}");
+        let configured = problems(code, "[analyzer]\nignore = [\"invalid-return-statement\"]\n[linter.rules]\nstrict-types = { enabled = false }\n");
+        assert!(!configured.iter().any(|(_, c)| c == "invalid-return-statement" || c == "strict-types"), "{configured:?}");
+    }
+
+    #[test]
+    fn honors_expect_pragmas() {
+        let code = "<?php\n\ndeclare(strict_types=1);\n\nfunction f(): int {\n    // @mago-expect analysis:invalid-return-statement\n    return 'x';\n}\n";
+        let found = problems(code, "");
+        assert!(!found.iter().any(|(_, c)| c == "invalid-return-statement"), "{found:?}");
+    }
 }

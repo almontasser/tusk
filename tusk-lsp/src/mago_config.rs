@@ -62,6 +62,8 @@ struct Linter {
 
 /// The configuration, ready to use.
 pub struct MagoConfig {
+    /// The linter's rules, built once.
+    pub rules: std::sync::Arc<mago_linter::registry::RuleRegistry>,
     pub php_version: Option<PHPVersion>,
     /// Library code to index, relative to the root or absolute.
     pub includes: Vec<PathBuf>,
@@ -86,6 +88,12 @@ fn globs(patterns: &[String]) -> GlobSet {
         }
     }
     set.build().unwrap_or_else(|_| GlobSet::empty())
+}
+
+impl std::fmt::Debug for MagoConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MagoConfig").field("includes", &self.includes).field("excludes", &self.excludes).finish_non_exhaustive()
+    }
 }
 
 impl Default for MagoConfig {
@@ -132,7 +140,9 @@ impl MagoConfig {
             .filter(|i| *i != "vendor")
             .map(|i| if Path::new(i).is_absolute() { PathBuf::from(i) } else { root.join(i) })
             .collect();
+        let rules = std::sync::Arc::new(mago_linter::registry::RuleRegistry::build(&linter, None, false));
         Ok(Self {
+            rules,
             php_version,
             includes,
             excludes: file.source.excludes.clone(),

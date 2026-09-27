@@ -33,8 +33,34 @@ pub struct Options {
     pub exclude: Vec<String>,
     /// Extra PHP files or folders to index as library code.
     pub stubs: Vec<PathBuf>,
-    /// The PHP version to analyze for, such as `8.3`. By default, from `composer.json`.
+    /// The PHP version to analyze for, such as `8.3`. By default, from `mago.toml` or `composer.json`.
     pub php_version: Option<String>,
+    /// The Mago configuration to use. By default, the project's `mago.toml`.
+    pub mago_config: Option<PathBuf>,
+}
+
+/// The index's configuration from the options and the project's files.
+pub fn index_config(root: &Path, options: &Options) -> IndexConfig {
+    let mut config = IndexConfig::new(root);
+    let mago_path = options.mago_config.clone().unwrap_or_else(|| root.join("mago.toml"));
+    let mago = crate::mago_config::MagoConfig::load(&mago_path, root).unwrap_or_else(|e| {
+        eprintln!("tusk: {e}");
+        Default::default()
+    });
+    config.exclude = options.exclude.clone();
+    // Hidden folders are skipped anyway, and `vendor` is indexed as library code.
+    config.exclude.extend(mago.excludes.iter().filter(|e| !e.starts_with('.') && *e != "vendor").cloned());
+    config.stubs = options.stubs.clone();
+    config.stubs.extend(mago.includes.iter().cloned());
+    config.php_version = options
+        .php_version
+        .as_deref()
+        .and_then(parse_php_version)
+        .or(mago.php_version)
+        .or_else(|| composer_php_version(root))
+        .unwrap_or(config.php_version);
+    config.mago = Arc::new(mago);
+    config
 }
 
 /// What a request handler reads: the open documents as they were when it arrived, and the index.
@@ -64,8 +90,8 @@ impl Snapshot {
 }
 
 enum Job {
-    /// Discover and index the whole project, replacing the index.
-    Build,
+    /// Discover and index the whole project, replacing the index, with a new configuration if given.
+    Build(Option<IndexConfig>),
     /// A file's new text, or `None` if it's gone. Open documents give their text; closed ones are read from disk.
     Change(PathBuf, Option<Vec<u8>>),
 }
@@ -164,6 +190,7 @@ pub struct Server {
     framework: Arc<crate::framework::State>,
     pool: rayon::ThreadPool,
     root: PathBuf,
+    options: Options,
     shutting_down: bool,
 }
 
@@ -218,15 +245,7 @@ pub fn parse_php_version(spec: &str) -> Option<mago_php_version::PHPVersion> {
 impl Server {
     fn new(sender: Sender<Message>, root: PathBuf, options: Options) -> Self {
         let client = Client { sender, next_id: Arc::new(AtomicI32::new(1)), waiting: Default::default() };
-        let mut config = IndexConfig::new(&root);
-        config.exclude = options.exclude.clone();
-        config.stubs = options.stubs.clone();
-        config.php_version = options
-            .php_version
-            .as_deref()
-            .and_then(parse_php_version)
-            .or_else(|| composer_php_version(&root))
-            .unwrap_or(config.php_version);
+        let config = index_config(&root, &options);
         let index: SharedIndex = Arc::new(RwLock::new(Index::empty(config)));
         let docs = Arc::new(RwLock::new(Documents::default()));
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -235,14 +254,14 @@ impl Server {
         let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone(), framework.clone(), root.clone());
         spawn_indexer(rx, index.clone(), docs.clone(), applied.clone(), client.clone(), diagnostics.clone());
         let indexer = Indexer { tx, queued: AtomicU64::new(0), applied };
-        indexer.send(Job::Build);
+        indexer.send(Job::Build(None));
         let pool = rayon::ThreadPoolBuilder::new()
             .thread_name(|i| format!("tusk-request-{i}"))
             // Mago's analyzer recurses deeply on large files.
             .stack_size(64 << 20)
             .build()
             .expect("the request pool starts");
-        Self { client, docs, index, indexer, diagnostics, framework, pool, root, shutting_down: false }
+        Self { client, docs, index, indexer, diagnostics, framework, pool, root, options, shutting_down: false }
     }
 
     fn main_loop(&mut self, receiver: &Receiver<Message>) {
@@ -310,7 +329,8 @@ impl Server {
         match method.as_str() {
             "tusk/reindex" => {
                 self.framework.clear();
-                self.indexer.send(Job::Build);
+                // The configuration may have changed too, such as a regenerated mago.toml.
+                self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
                 self.client.respond(Response::new_ok(id, ()));
             }
             _ => self.client.respond(Response::new_err(id, ErrorCode::MethodNotFound as i32, format!("Unknown method {method}"))),
@@ -352,10 +372,14 @@ impl Server {
             }
             notification::DidChangeWatchedFiles::METHOD => {
                 let Some(p) = extract::<DidChangeWatchedFilesParams>(note) else { return };
-                let open = self.docs.read();
+                let mut reconfigure = false;
+                let open = self.docs.read().clone();
                 for change in p.changes {
                     let Some(path) = uri_to_path(&change.uri) else { continue };
                     self.framework.changed(&path);
+                    if path.file_name().is_some_and(|n| n == "mago.toml") || path.file_name().is_some_and(|n| n == "composer.lock") {
+                        reconfigure = true;
+                    }
                     if path.extension().is_none_or(|e| e != "php") {
                         continue;
                     }
@@ -366,6 +390,10 @@ impl Server {
                     let contents = if change.typ == FileChangeType::DELETED { None } else { std::fs::read(&path).ok() };
                     self.indexer.send(Job::Change(path, contents));
                 }
+                // A new mago.toml, or packages installed or removed, change what's indexed and how.
+                if reconfigure {
+                    self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
+                }
             }
             notification::Initialized::METHOD => {
                 // Ask for changes the editor sees on disk, such as a branch switch or a `composer update`.
@@ -374,7 +402,7 @@ impl Server {
                         id: "tusk-watch".into(),
                         method: notification::DidChangeWatchedFiles::METHOD.into(),
                         register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                            watchers: ["**/*.php", "**/.env", "lang/**/*.json", "public/**", "composer.lock"]
+                            watchers: ["**/*.php", "**/.env", "lang/**/*.json", "public/**", "composer.lock", "mago.toml"]
                                 .into_iter()
                                 .map(|g| FileSystemWatcher { glob_pattern: GlobPattern::String(g.into()), kind: None })
                                 .collect(),
@@ -416,12 +444,13 @@ fn spawn_indexer(
                 let mut jobs = vec![first];
                 jobs.extend(rx.try_iter());
                 let count = jobs.len() as u64;
-                let mut build = false;
+                let mut build: Option<Option<IndexConfig>> = None;
                 let mut changes: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
                 for job in jobs {
                     match job {
-                        Job::Build => {
-                            build = true;
+                        Job::Build(config) => {
+                            // A later build's configuration wins; one without keeps an earlier one's.
+                            build = Some(config.or(build.flatten()));
                             changes.clear();
                         }
                         Job::Change(path, contents) => {
@@ -430,8 +459,8 @@ fn spawn_indexer(
                     }
                 }
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    if build {
-                        rebuild(&index, &docs, &client);
+                    if let Some(config) = build.clone() {
+                        rebuild(&index, &docs, &client, config);
                     }
                     if !changes.is_empty() {
                         index.write().update_many(changes.into_iter().collect());
@@ -440,7 +469,7 @@ fn spawn_indexer(
                 if result.is_err() {
                     // Mago panicked on some file. A rebuild from scratch is the safe state to return to.
                     eprintln!("tusk: the index update failed; rebuilding");
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| rebuild(&index, &docs, &client)));
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| rebuild(&index, &docs, &client, None)));
                 }
                 *applied.0.lock() += count;
                 applied.1.notify_all();
@@ -450,7 +479,7 @@ fn spawn_indexer(
         .expect("the indexer thread starts");
 }
 
-fn rebuild(index: &SharedIndex, docs: &Arc<RwLock<Documents>>, client: &Client) {
+fn rebuild(index: &SharedIndex, docs: &Arc<RwLock<Documents>>, client: &Client, config: Option<IndexConfig>) {
     let token = "tusk/indexing";
     client.request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
         token: NumberOrString::String(token.into()),
@@ -462,7 +491,7 @@ fn rebuild(index: &SharedIndex, docs: &Arc<RwLock<Documents>>, client: &Client) 
         percentage: Some(0),
     }));
     let started = Instant::now();
-    let config = index.read().config.clone();
+    let config = config.unwrap_or_else(|| index.read().config.clone());
     let mut fresh = Index::empty(config);
     let paths = fresh.discover();
     let open = docs.read().clone();
