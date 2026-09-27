@@ -540,6 +540,11 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
             file.is_file().then_some((file, 1))
         }
         Kind::Route if arg.value.contains('*') => None,
+        // Only when one policy matches the call's model.
+        Kind::Auth => match matching_policies(arg, data).as_slice() {
+            [only] => Some((data.abs(str_of(&only["uri"])?), line_of(&only["line"]))),
+            _ => None,
+        },
         Kind::Translation => {
             // The locale argument's, if it's a plain string.
             let t = data.translations()?;
@@ -555,6 +560,28 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
         _ => {
             let entries = entries(kind, data)?;
             find(kind, &entries, &arg.value)?.target.clone()
+        }
+    }
+}
+
+/// The model an ability check is about: `None` when the call needs none (`Gate::has('x')`, or no second
+/// argument), else the class of its second argument, `Post::class` or a `$post` the analyzer types, if known.
+fn auth_model(arg: &StringArg) -> Option<Option<String>> {
+    let call = &arg.call;
+    let requires = matches!(call.kind, CallKind::Function | CallKind::Method | CallKind::Static) && call.name != "has" && call.arguments.len() > 1;
+    requires.then(|| call.argument_classes.get(1).and_then(|c| c.first().cloned()))
+}
+
+/// The policies that define `ability` for the call's model, as `{policy, uri, line, model}`.
+fn matching_policies(arg: &StringArg, data: &Data<'_>) -> Vec<Value> {
+    let Some(auth) = data.auth() else { return vec![] };
+    let all = auth["policies"][arg.value.as_str()].as_array().cloned().unwrap_or_default();
+    match auth_model(arg) {
+        None => all,
+        Some(None) => vec![],
+        Some(Some(class)) => {
+            let same = |m: &str| m.trim_start_matches('\\').eq_ignore_ascii_case(class.trim_start_matches('\\'));
+            all.into_iter().filter(|p| p["model"].as_str().is_some_and(same)).collect()
         }
     }
 }
@@ -593,6 +620,11 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Translation if !looks_like_translation_key(v) => return None,
         Kind::Translation => ("translation", format!("Translation [{v}] not found.")),
         Kind::Middleware => ("middleware", format!("Middleware [{v}] not found.")),
+        // A known ability that no policy for the call's model defines.
+        Kind::Auth if found => {
+            let model_known = matches!(auth_model(arg), Some(Some(_)));
+            return (model_known && matching_policies(arg, data).is_empty()).then(|| ("auth", format!("Policy/Model match [{v}] not found.")));
+        }
         Kind::Auth => ("auth", format!("Policy [{v}] not found.")),
         // A class name needs no binding: the container builds it.
         Kind::AppBinding if codebase.class_like_exists(v.trim_start_matches('\\').as_bytes()) => return None,
@@ -1099,7 +1131,19 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
         let kind = kind_of(arg, &ctx.index.codebase)?;
         let entries = entries(kind, &data)?;
-        let text = find(kind, &entries, &arg.value)?.hover.clone()?;
+        let found = find(kind, &entries, &arg.value)?;
+        let text = if kind == Kind::Auth {
+            let lines: Vec<String> = matching_policies(arg, &data)
+                .iter()
+                .filter_map(|p| {
+                    let uri = str_of(&p["uri"])?;
+                    Some(format!("`{}`\n\n{}", p["policy"].as_str().unwrap_or("Gate"), link(&data.abs(uri), Some(line_of(&p["line"])), uri)))
+                })
+                .collect();
+            (!lines.is_empty()).then(|| lines.join("\n\n"))?
+        } else {
+            found.hover.clone()?
+        };
         Some(markdown(text, ctx.doc.range(arg.start, arg.end)))
     })
 }

@@ -219,6 +219,22 @@ fn reports_unknown_names_and_skips_what_it_cant_check() {
 }
 
 #[test]
+fn matches_policies_to_the_calls_model() {
+    let text = "<?php\nuse Illuminate\\Support\\Facades\\Gate;\nfunction f(\\App\\Models\\Post $post, $thing) {\n    Gate::allows('update', $post);\n    Gate::allows('update', \\App\\Models\\User::class);\n    Gate::allows('update', $thing);\n    Gate::has('update');\n    Gate::allows('nope');\n}\n";
+    let fx = fixture("t.php", text);
+    fx.snap.framework.seed(
+        "laravel:auth",
+        json!({"policies": {"update": [{"policy": "App\\Policies\\PostPolicy", "uri": "app/Policies/PostPolicy.php", "line": 20, "model": "\\App\\Models\\Post"}]}}),
+    );
+    let (found, links) = with_ctx(&fx.snap, &uri("t.php"), |ctx| (diagnostics(ctx), document_links(ctx))).unwrap();
+    let found: Vec<(u32, String)> = found.into_iter().map(|d| (d.range.start.line, d.message)).collect();
+    assert_eq!(found, vec![(4, "Policy/Model match [update] not found.".into()), (7, "Policy [nope] not found.".into())]);
+    // A link needs exactly one matching policy: the typed `$post` and `has()` have it; an untyped model doesn't.
+    let lines: Vec<u32> = links.iter().map(|l| l.range.start.line).collect();
+    assert_eq!(lines, vec![3, 6]);
+}
+
+#[test]
 fn matches_controller_actions_by_their_short_name() {
     let found = problems(
         "t.php",
