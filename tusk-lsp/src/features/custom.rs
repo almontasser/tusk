@@ -51,6 +51,9 @@ pub fn project_problems(snap: &Snapshot, _params: Value) -> Result<Value, String
     let results: BTreeMap<String, Vec<Diagnostic>> = paths
         .into_par_iter()
         .filter_map(|path| {
+            if snap.is_cancelled() {
+                return None;
+            }
             let text = snap.read(&path)?;
             let doc = Document::new(path_to_uri(&path), path.clone(), "php".into(), 0, text);
             let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::diagnostics::php_problems(&snap.index, &doc))).ok()?;
@@ -58,6 +61,9 @@ pub fn project_problems(snap: &Snapshot, _params: Value) -> Result<Value, String
             (!problems.is_empty()).then_some((rel, problems))
         })
         .collect();
+    if snap.is_cancelled() {
+        return Err(crate::server::CANCELLED.into());
+    }
     serde_json::to_value(results).map_err(|e| e.to_string())
 }
 

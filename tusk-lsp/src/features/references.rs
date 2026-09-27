@@ -126,6 +126,9 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<(PathBu
     paths
         .into_par_iter()
         .filter_map(|path| {
+            if snap.is_cancelled() {
+                return None;
+            }
             let text = snap.read(&path)?;
             // Class names may also appear through an alias, which only the `use` line spells out.
             if !text.to_ascii_lowercase().contains(&short) {

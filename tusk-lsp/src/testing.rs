@@ -51,6 +51,7 @@ impl Fixture {
             root: PathBuf::from(ROOT),
             framework: Arc::new(crate::framework::State::new(PathBuf::from(ROOT))),
             client: None,
+            cancel: Default::default(),
         };
         Self { snap, cursor }
     }

@@ -158,6 +158,13 @@ pub fn file_id(path: &Path) -> FileId {
 
 /// A file's symbols, and with `uses`, the lowercase names its code mentions: classes, functions, and constants,
 /// including class names in docblocks.
+/// The threads that parse and scan files in parallel. Their stacks are as large as the server's other threads', since
+/// the parser recurses once per level of nesting; rayon's global pool has the default 2 MB.
+fn scan_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("tusk-scan-{i}")).stack_size(64 << 20).build().expect("the scan pool starts"))
+}
+
 fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>) {
     let (file, program) = crate::analysis::parse_balanced(arena, path, file_type, contents);
     let names = NameResolver::new(arena).resolve(program);
@@ -372,7 +379,7 @@ impl Index {
         // Library files: only what they declare. Each scan is dropped at once, so the build's memory stays near
         // what the index keeps, which is what the process keeps after it.
         for chunk in library.chunks(1024) {
-            let found: Vec<(PathBuf, FileType, Vec<Declared>)> = chunk
+            let found: Vec<(PathBuf, FileType, Vec<Declared>)> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
@@ -381,7 +388,7 @@ impl Index {
                     tick();
                     Some((path.clone(), file_type, declarations_of(&meta)))
                 })
-                .collect();
+                .collect());
             for (path, file_type, declared) in found {
                 self.add_library_file(path, file_type, declared);
             }
@@ -389,7 +396,7 @@ impl Index {
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
-            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>)> = chunk
+            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>)> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
@@ -397,7 +404,7 @@ impl Index {
                     tick();
                     Some((path.clone(), meta, used))
                 })
-                .collect();
+                .collect());
             for (path, meta, used) in scans {
                 wanted.extend(used);
                 wanted.extend(dependencies(&meta));
@@ -463,14 +470,14 @@ impl Index {
             let php_version = self.config.php_version;
             let jobs: Vec<(PathBuf, FileType)> =
                 wave.iter().filter_map(|id| self.library.get(id)).map(|f| (f.path.clone(), f.file_type)).collect();
-            let scans: Vec<(PathBuf, FileType, CodebaseMetadata)> = jobs
+            let scans: Vec<(PathBuf, FileType, CodebaseMetadata)> = scan_pool().install(|| jobs
                 .into_par_iter()
                 .filter_map(|(path, file_type)| {
                     let contents = read(&path)?;
                     let (meta, _) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
                     Some((path, file_type, meta))
                 })
-                .collect();
+                .collect());
             for (path, file_type, meta) in scans {
                 names.extend(dependencies(&meta));
                 loaded.extend(meta.class_likes.keys().copied());

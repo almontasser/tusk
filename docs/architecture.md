@@ -782,7 +782,9 @@ would clear another server's indexing progress.
   per version is shared by all servers (`textOf`).
 - Providers pass Monaco's cancellation token. When Monaco drops a request, such
   as a completion list after the next keystroke, the client sends
-  `$/cancelRequest` and resolves the request with `null`.
+  `$/cancelRequest` and resolves the request with `null`. Tusk's server skips a
+  cancelled request that hasn't started, and stops references and project
+  problems part way.
 - It answers server requests: `workspace/applyEdit`, `workspace/configuration`,
   and the progress and registration requests.
 - It shows `$/progress` and `window/showMessage` in the status bar.
@@ -1710,6 +1712,14 @@ watchdog (`WATCHDOG` in `lsp.rs`). The shell starts a loop that checks the
 app's process ID every 2 seconds, then replaces itself with the server through
 `exec`. The server keeps the shell's process ID, so stopping it normally still
 works, and the loop kills it within 2 seconds after the app dies.
+
+A server that exits on its own, such as from a crash, is restarted. Stopping or
+replacing a server removes it from `LspState` before killing it, so when a
+server's output ends while it's still listed, it exited by itself: `lsp_start`'s
+reader thread removes it and emits `lsp-exit` with its name. The client fails
+that server's pending requests and restarts the servers (`serverExited`),
+unless servers exited more than 3 times in 5 minutes, when the status bar asks
+you to reopen the project instead.
 
 ### Mago
 
@@ -3436,12 +3446,24 @@ Commands (`workspace/executeCommand`) apply their edits by sending
 - **Request pool:** each request runs on the pool once the index has every
   edit made before it (`Indexer::ticket`), so it sees its own file's latest
   symbols. A panic in a request answers with an error instead of stopping the
-  server.
+  server. `$/cancelRequest` sets the request's flag (`Snapshot::cancel`): a
+  request that hasn't started answers `RequestCancelled` at once, and
+  references and project problems check it between files.
 - **Diagnostics thread:** checks an edited document as soon as the index has
   its change, and the other open documents once edits pause for 600 ms,
   since they may depend on it.
-- **Stacks:** threads get 64 MB stacks, because Mago's analyzer recurses
-  deeply on large files.
+- **Stacks:** threads get 64 MB stacks, because Mago's parser and analyzer
+  recurse once per level of nesting. So do the threads that scan files for the
+  index (`scan_pool`); rayon's global pool has 2 MB.
+- **Pathological files:** a file whose syntax tree nests deeper than 1,000
+  levels, such as a generated expression of thousands of terms, or with more
+  than 1,000 branches in one `if`, `switch`, or `match`
+  (`analysis::too_complex`), gets only syntax errors: the analyzer, linter,
+  and requests skip it. Mago takes time quadratic in such a chain's length:
+  minutes at 10,000 terms, and 4 s per request on a `match` of 2,000 arms.
+  Real code stays under both limits: at most about 850 levels (a Symfony
+  bundle's configuration chain) and 800 branches (a `switch` in WordPress). A
+  file reports at most 100 syntax errors.
 
 ### Symbols
 
@@ -3652,7 +3674,20 @@ and a real Laravel app, which need PHP.
 - **Feature tests** build an in-memory project (`testing.rs`) with a `<|>`
   cursor marker and call handlers directly.
 - **Protocol tests** (`tests/protocol.rs`) run the real server over an
-  in-memory connection.
+  in-memory connection, including requests racing edits, a reindex, and file
+  events, and cancelled requests.
+- **Unfinished files:** a test in `handlers.rs` cuts a file at every point
+  and runs each request and every code action's resolve on it. An unfinished
+  file parses with its open brackets closed, so spans can run past the
+  document's end; slice the parsed text (`Parsed::text`), not the document's.
+- **Stress test:** `cargo run --release --example stress <root> [max files]
+  [seed]` runs the real server over a project: every request at random places
+  in each file, then with the file cut off at random points. It reports caught
+  panics, requests unanswered for 30 s, and each method's mean and slowest
+  time; a stack overflow ends it, after the file it was on. Run it on
+  projects unlike the ones the tests use, such as Symfony, WordPress, and
+  Magento. `examples/depth.rs` lists a folder's most deeply nested files (with
+  `BRANCHES=1`, those with the most branches in one statement).
 - **Benchmark:** `cargo run --release --example index_bench <root> [file]`
   times indexing a real project.
 

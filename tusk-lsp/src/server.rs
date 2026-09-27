@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -74,9 +74,18 @@ pub struct Snapshot {
     pub framework: Arc<crate::framework::State>,
     /// The editor, for requests such as applying an edit. `None` in tests.
     pub client: Option<Client>,
+    /// Set when the editor cancels the request. Long requests check it and return [`CANCELLED`].
+    pub cancel: Arc<AtomicBool>,
 }
 
+/// The error of a request the editor cancelled, answered with the protocol's cancellation code.
+pub const CANCELLED: &str = "Cancelled";
+
 impl Snapshot {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
     /// The open document at `uri`, or the file on disk as a document.
     pub fn doc(&self, uri: &Uri) -> Option<Arc<Document>> {
         let path = uri_to_path(uri)?;
@@ -193,6 +202,8 @@ pub struct Server {
     framework: Arc<crate::framework::State>,
     phpstan: Arc<crate::phpstan::PhpStan>,
     pool: rayon::ThreadPool,
+    /// Requests being answered, by ID, with their cancellation flags.
+    running: Arc<Mutex<HashMap<RequestId, Arc<AtomicBool>>>>,
     root: PathBuf,
     options: Options,
     shutting_down: bool,
@@ -270,7 +281,7 @@ impl Server {
             .stack_size(64 << 20)
             .build()
             .expect("the request pool starts");
-        Self { client, docs, index, indexer, diagnostics, framework, phpstan, pool, root, options, shutting_down: false }
+        Self { client, docs, index, indexer, diagnostics, framework, phpstan, pool, running: Default::default(), root, options, shutting_down: false }
     }
 
     fn main_loop(&mut self, receiver: &Receiver<Message>) {
@@ -301,7 +312,14 @@ impl Server {
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot { docs: self.docs.read().clone(), index: self.index.clone(), root: self.root.clone(), framework: self.framework.clone(), client: Some(self.client.clone()) }
+        Snapshot {
+            docs: self.docs.read().clone(),
+            index: self.index.clone(),
+            root: self.root.clone(),
+            framework: self.framework.clone(),
+            client: Some(self.client.clone()),
+            cancel: Default::default(),
+        }
     }
 
     /// Runs a request on the pool after the index catches up. A panic answers with an error instead of taking
@@ -311,9 +329,17 @@ impl Server {
         let ticket = self.indexer.ticket();
         let applied = self.indexer.applied.clone();
         let client = self.client.clone();
+        let running = self.running.clone();
+        running.lock().insert(id.clone(), snapshot.cancel.clone());
         self.pool.spawn(move || {
             wait(&applied, ticket);
-            let response = match std::panic::catch_unwind(AssertUnwindSafe(|| run(&snapshot))) {
+            let result = match snapshot.is_cancelled() {
+                true => Ok(Err(CANCELLED.to_string())),
+                false => std::panic::catch_unwind(AssertUnwindSafe(|| run(&snapshot))),
+            };
+            running.lock().remove(&id);
+            let response = match result {
+                Ok(Err(message)) if message == CANCELLED => Response::new_err(id, ErrorCode::RequestCanceled as i32, message),
                 Ok(Ok(value)) => Response::new_ok(id, value),
                 Ok(Err(message)) => Response::new_err(id, ErrorCode::RequestFailed as i32, message),
                 Err(panic) => {
@@ -348,6 +374,16 @@ impl Server {
 
     fn notification(&mut self, note: Notification) {
         match note.method.as_str() {
+            notification::Cancel::METHOD => {
+                let Some(p) = extract::<CancelParams>(note) else { return };
+                let id = match p.id {
+                    NumberOrString::Number(n) => RequestId::from(n),
+                    NumberOrString::String(s) => RequestId::from(s),
+                };
+                if let Some(cancel) = self.running.lock().get(&id) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
             notification::DidOpenTextDocument::METHOD => {
                 let Some(p) = extract::<DidOpenTextDocumentParams>(note) else { return };
                 let Some(path) = uri_to_path(&p.text_document.uri) else { return };

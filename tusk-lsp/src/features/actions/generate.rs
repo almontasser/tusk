@@ -61,7 +61,7 @@ pub fn class_at<'a>(ctx: &Ctx<'a>, offset: u32) -> Option<ClassAt<'a>> {
 
 /// An edit that adds `members` (each a block of lines, without trailing newlines) at the end of a class body.
 fn append_members(ctx: &Ctx<'_>, class: &ClassAt<'_>, members: &[String]) -> TextEdit {
-    let text = &ctx.doc.text;
+    let text = ctx.parsed.text();
     let close = class.close as usize;
     let line_start = text[..close].rfind('\n').map_or(0, |i| i + 1);
     let brace_alone = text[line_start..close].trim().is_empty();
@@ -409,7 +409,7 @@ pub fn resolve(ctx: &Ctx<'_>, action: &str, range: Range, arg: &Value) -> Option
             let ctor = constructor(&class)?;
             let MethodBody::Concrete(body) = &ctor.body else { return None };
             let declared = declared_properties(&class);
-            let text = &ctx.doc.text;
+            let text = ctx.parsed.text();
             let body_indent = format!("{}{}", line_indent(text, ctor.span().start.offset as usize), unit);
             let mut assignments = String::new();
             let mut properties = String::new();
@@ -444,7 +444,7 @@ pub fn resolve(ctx: &Ctx<'_>, action: &str, range: Range, arg: &Value) -> Option
             let ctor = constructor(&class)?;
             let MethodBody::Concrete(body) = &ctor.body else { return None };
             let declared = declared_properties(&class);
-            let text = &ctx.doc.text;
+            let text = ctx.parsed.text();
             for p in ctor.parameter_list.parameters.iter().filter(|p| p.modifiers.is_empty()) {
                 let name = param_name(p);
                 let Some(assignment) = assignment_of(body, &name) else { continue };
@@ -483,7 +483,7 @@ pub fn resolve(ctx: &Ctx<'_>, action: &str, range: Range, arg: &Value) -> Option
                 let ty = ty.filter(|t| t != "null" && t != "void" && t != "never");
                 declarations.push_str(&format!("{}private {}${name};\n", class.indent, ty.map(|t| format!("{t} ")).unwrap_or_default()));
             }
-            let text = &ctx.doc.text;
+            let text = ctx.parsed.text();
             let after_open = text[class.open as usize..].find('\n').map_or(class.open as usize, |i| class.open as usize + i + 1);
             let pos = ctx.doc.position(after_open as u32);
             let has_members = class.members.iter().next().is_some();
@@ -508,7 +508,7 @@ fn docblock_start(text: &str, line_start: usize) -> usize {
 
 /// An edit removing the lines from the one holding `start` through the one holding `end`.
 fn remove_lines(ctx: &Ctx<'_>, start: u32, end: u32) -> TextEdit {
-    let text = &ctx.doc.text;
+    let text = ctx.parsed.text();
     let from = text[..start as usize].rfind('\n').map_or(0, |i| i + 1);
     let to = text[end as usize..].find('\n').map_or(text.len(), |i| end as usize + i + 1);
     TextEdit { range: ctx.doc.range(from as u32, to as u32), new_text: String::new() }

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
 use lsp_types::*;
@@ -89,6 +89,35 @@ impl Client {
         }
     }
 
+    /// Sends a request without waiting for its answer.
+    fn send(&mut self, method: &str, params: Value) -> RequestId {
+        let id = RequestId::from(self.next);
+        self.next += 1;
+        self.conn.sender.send(Message::Request(Request::new(id.clone(), method.into(), params))).unwrap();
+        id
+    }
+
+    /// The answers to `ids`, in any order they arrive.
+    fn responses(&mut self, ids: &[RequestId]) -> Vec<Response> {
+        let mut out = vec![];
+        while out.len() < ids.len() {
+            if let Message::Response(r) = self.recv() {
+                if ids.contains(&r.id) {
+                    out.push(r);
+                }
+            }
+        }
+        out
+    }
+
+    fn open(&self, name: &str, text: &str) -> String {
+        let uri = self.uri(name);
+        self.notify(notification::DidOpenTextDocument::METHOD, json!({
+            "textDocument": { "uri": uri, "languageId": "php", "version": 1, "text": text }
+        }));
+        uri
+    }
+
     fn diagnostics(&mut self, uri: &str, version: i32) -> Vec<Diagnostic> {
         let n = self.wait_for(|n| {
             n.method == notification::PublishDiagnostics::METHOD
@@ -144,4 +173,106 @@ fn indexes_reports_progress_and_publishes_diagnostics_after_edits() {
     }
     let result = c.request_raw(request::Shutdown::METHOD, Value::Null);
     assert_eq!(result, Value::Null);
+}
+
+fn indexed(files: &[(&str, &str)]) -> Client {
+    let mut c = Client::start(files);
+    c.wait_for(|n| n.method == "$/progress" && n.params["value"]["kind"] == "end");
+    c
+}
+
+#[test]
+fn cancelled_requests_are_answered_as_cancelled() {
+    let files: Vec<(String, String)> =
+        (0..40).map(|i| (format!("src/C{i}.php"), format!("<?php\nclass C{i} {{ function m(): int {{ return 'x'; }} }}\n"))).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let mut c = indexed(&files);
+    // More than the pool runs at once, so most are still waiting when the cancellations arrive.
+    let ids: Vec<RequestId> = (0..64).map(|_| c.send("tusk/projectProblems", json!({}))).collect();
+    for id in &ids {
+        let id: i32 = id.to_string().parse().unwrap();
+        c.notify(notification::Cancel::METHOD, json!({ "id": id }));
+    }
+    let answers = c.responses(&ids);
+    let cancelled = answers.iter().filter(|r| r.response_result.as_ref().is_err_and(|e| e.code == ErrorCode::RequestCanceled as i32)).count();
+    assert!(cancelled > 0, "no request was cancelled");
+    // The rest finished normally.
+    assert!(answers.iter().all(|r| r.response_result.as_ref().is_ok_and(|v| v.is_object()) || r.response_result.is_err()));
+    // A request after them is answered in full.
+    let problems = c.request_raw("tusk/projectProblems", json!({}));
+    assert_eq!(problems.as_object().unwrap().len(), 40);
+}
+
+#[test]
+fn requests_racing_edits_answer_for_the_text_before_them() {
+    let mut c = indexed(&[("src/Box.php", "<?php\nclass Box { public function open(): void {} }\n")]);
+    let uri = c.open("src/use.php", "<?php\nfunction f(Box $b) {\n    $b->\n}\n");
+    let mut ids = vec![];
+    // Typing in the class file while completions are asked for in the other: each keystroke adds a method.
+    let box_uri = c.open("src/Box.php", "<?php\nclass Box { public function open(): void {} }\n");
+    for i in 0..30 {
+        c.notify(notification::DidChangeTextDocument::METHOD, json!({
+            "textDocument": { "uri": box_uri, "version": i + 2 },
+            "contentChanges": [{ "range": { "start": { "line": 1, "character": 12 }, "end": { "line": 1, "character": 12 } },
+                "text": format!("public function m{i}(): void {{}} ") }]
+        }));
+        ids.push(c.send(request::Completion::METHOD, json!({ "textDocument": { "uri": uri }, "position": { "line": 2, "character": 8 } })));
+        ids.push(c.send(request::HoverRequest::METHOD, json!({ "textDocument": { "uri": box_uri }, "position": { "line": 1, "character": 8 } })));
+    }
+    let answers = c.responses(&ids);
+    assert!(answers.iter().all(|r| r.response_result.is_ok()), "{answers:?}");
+    // The last completion, sent after every edit, sees every method.
+    let last = answers.iter().find(|r| r.id == ids[ids.len() - 2]).unwrap();
+    let labels = last.response_result.as_ref().unwrap().to_string();
+    assert!(labels.contains("m0") && labels.contains("m29") && labels.contains("open"), "{labels}");
+}
+
+#[test]
+fn a_reindex_during_requests_answers_them_all() {
+    let mut c = indexed(&[
+        ("src/Box.php", "<?php\nclass Box { public function open(): void {} }\n"),
+        ("src/use.php", "<?php\nfunction f(Box $b) { $b->open(); }\n"),
+    ]);
+    let uri = c.uri("src/use.php");
+    let at = json!({ "textDocument": { "uri": uri }, "position": { "line": 1, "character": 27 } });
+    let mut ids = vec![c.send(request::GotoDefinition::METHOD, at.clone())];
+    ids.push(c.send("tusk/reindex", json!({})));
+    for _ in 0..10 {
+        ids.push(c.send(request::References::METHOD, json!({ "textDocument": { "uri": uri }, "position": { "line": 1, "character": 27 }, "context": { "includeDeclaration": true } })));
+        ids.push(c.send(request::HoverRequest::METHOD, at.clone()));
+    }
+    let answers = c.responses(&ids);
+    assert!(answers.iter().all(|r| r.response_result.is_ok()), "{answers:?}");
+    // After the reindex, requests still find the method.
+    let found = c.request_raw(request::GotoDefinition::METHOD, at);
+    assert!(found.to_string().contains("Box.php"), "{found}");
+}
+
+#[test]
+fn files_created_while_indexing_are_indexed() {
+    let mut c = Client::start(&[("src/A.php", "<?php\nclass A {}\n")]);
+    // Created and reported before the first build is known to have finished.
+    let path = c.root.join("src/Late.php");
+    std::fs::write(&path, "<?php\nclass Late {}\n").unwrap();
+    c.notify(notification::DidChangeWatchedFiles::METHOD, json!({ "changes": [{ "uri": c.uri("src/Late.php"), "type": 1 }] }));
+    let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Late" }));
+    assert!(found.to_string().contains("Late.php"), "{found}");
+    // Deleted again, it's gone.
+    std::fs::remove_file(&path).unwrap();
+    c.notify(notification::DidChangeWatchedFiles::METHOD, json!({ "changes": [{ "uri": c.uri("src/Late.php"), "type": 3 }] }));
+    let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Late" }));
+    assert!(!found.to_string().contains("Late.php"), "{found}");
+}
+
+#[test]
+fn closing_a_file_goes_back_to_its_text_on_disk() {
+    let mut c = indexed(&[("src/Box.php", "<?php\nclass Box {}\n")]);
+    let uri = c.open("src/Box.php", "<?php\nclass Crate {}\n");
+    let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Crate" }));
+    assert!(found.to_string().contains("Box.php"), "{found}");
+    c.notify(notification::DidCloseTextDocument::METHOD, json!({ "textDocument": { "uri": uri } }));
+    let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Crate" }));
+    assert!(!found.to_string().contains("Box.php"), "{found}");
+    let found = c.request_raw(request::WorkspaceSymbolRequest::METHOD, json!({ "query": "Box" }));
+    assert!(found.to_string().contains("Box.php"), "{found}");
 }

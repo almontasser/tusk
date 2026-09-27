@@ -173,7 +173,8 @@ fn lines_of(text: &str, start: u32, end: u32) -> (u32, u32) {
 
 /// The edits that remove unused imports and sort the rest.
 fn organize(parsed: &Parsed<'_>, doc: &Document) -> Vec<TextEdit> {
-    let text = &doc.text;
+    // The parsed text: an unfinished file's is longer, with the brackets it leaves open closed.
+    let text = parsed.text();
     let unused: Vec<u32> = unused(parsed).iter().map(|i| i.start).collect();
     let mut edits = vec![];
     for group in imports(parsed.program) {
@@ -237,7 +238,7 @@ pub fn resolve(ctx: &Ctx<'_>, action: &str, _range: Range, arg: &Value) -> Optio
         "remove" => {
             let start = arg.as_u64()? as u32;
             let i = unused(&ctx.parsed).into_iter().find(|i| i.start == start)?;
-            let (s, e) = lines_of(&ctx.doc.text, i.start, i.end);
+            let (s, e) = lines_of(ctx.parsed.text(), i.start, i.end);
             file_edit(ctx, vec![TextEdit { range: ctx.doc.range(s, e), new_text: String::new() }])
         }
         _ => None,

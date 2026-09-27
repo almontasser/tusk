@@ -58,6 +58,9 @@ pub fn import_edit(doc: &Document, program: &Program<'_>, offset: u32, fqn: &str
     };
     let line = format!("{keyword} {fqn};\n");
     let text = &doc.text;
+    // Spans are in the parsed text, which for an unfinished file goes on past the document's end with the brackets it
+    // leaves open closed.
+    let clamp = |offset: u32| (offset as usize).min(text.len());
     // The statements of the namespace at `offset`, or of the file.
     let mut statements: Vec<&Statement<'_>> = program.statements.iter().collect();
     let mut namespace_end: Option<u32> = None;
@@ -83,7 +86,7 @@ pub fn import_edit(doc: &Document, program: &Program<'_>, offset: u32, fqn: &str
         .filter_map(|s| match s {
             Statement::Use(u) => {
                 let span = u.span();
-                let text = &text[span.start.offset as usize..span.end.offset as usize];
+                let text = &text[clamp(span.start.offset)..clamp(span.end.offset)];
                 Some((span.start.offset, span.end.offset, text.to_string()))
             }
             _ => None,
@@ -109,12 +112,12 @@ pub fn import_edit(doc: &Document, program: &Program<'_>, offset: u32, fqn: &str
             return insert(at(*start), line);
         }
         let last = same_kind.last().copied().unwrap_or_else(|| uses.last().unwrap());
-        let line_end = text[last.1 as usize..].find('\n').map_or(text.len(), |i| last.1 as usize + i + 1);
+        let line_end = text[clamp(last.1)..].find('\n').map_or(text.len(), |i| clamp(last.1) + i + 1);
         return insert(at(line_end as u32), line);
     }
     // After `namespace …;` or `<?php`, with a blank line between.
     let after = match namespace_end {
-        Some(end) => end as usize,
+        Some(end) => clamp(end),
         None => text.find("<?php").map_or(0, |i| i + "<?php".len()),
     };
     let line_end = text[after..].find('\n').map_or(text.len(), |i| after + i + 1);
