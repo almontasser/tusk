@@ -80,7 +80,8 @@ function deleteUnlisted() {
   }
 }
 
-if (!uploads.length && published.packages.length) {
+// Only when the list is the same too: a tool taken out of TOOLS uploads nothing but still needs a new tools.json.
+if (!uploads.length && JSON.stringify(packages) === JSON.stringify(published.packages)) {
   console.log("Every tool is already published.");
   deleteUnlisted();
   process.exit(0);
