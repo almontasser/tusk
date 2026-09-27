@@ -1135,18 +1135,27 @@ server answers.
 
 ### Generate
 
-`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Tusk's server writes what it
-can: getters and setters through its `generate_accessors` and
-`generate_mutators` commands, called with the property names directly, named
-`getTitle` and `setTitle` as PhpStorm names them, and Implement Methods
-(including a trait's abstract methods), Override Methods, and the constructor
-transformers through its code actions for the cursor, filtered by kind and run
-with `runTuskAction`, which resolves their edits. The server has no action
-that writes a constructor from properties or a `__toString()`, so those are
-snippets: `classProperties` in `src/refactorparse.ts` reads the class body's
-top-level declarations and promoted parameters, and the snippet goes after the
-last property or before the class's closing brace, indented with the file's
-indentation.
+`src/generate.ts` is PhpStorm's ⌘N menu for PHP. It lists the code actions
+Tusk's server offers for the class at the cursor, asking for
+`source.generate` and `quickfix`, and runs the chosen one with
+`runTuskAction`, which resolves its edit:
+
+- `source.generate.constructor`, `.getters`, `.setters`, `.accessors` (getters
+  and setters), and `.toString`, from `generate_candidates` in
+  `features/actions/generate.rs`. The server reads the class's properties from
+  the syntax tree: declared ones, and those promoted in its constructor.
+  Static properties are left out, readonly ones (or a readonly class's) get no
+  setter, and a method the class declares itself isn't offered again. The
+  constructor takes the properties without a default and goes after the last
+  property. Getters are named `getTitle` and setters `setTitle`, as PhpStorm
+  names them, typed as the property is. The light bulb doesn't list
+  `source` actions.
+- The quick fixes Implement Methods (including a trait's abstract methods),
+  Override Methods, Complete Constructor, Promote Constructor, and Add Missing
+  Properties.
+
+The menu shows them in that order, with the properties or the overridden
+method as each row's detail.
 
 ⌘N is also **New File…**. The shortcut handler now takes the first action for
 the keys that applies (an editor-only action needs the editor focused, and
@@ -3373,9 +3382,9 @@ the linter gets the file named by its path relative to the root. Mago's
 | `tusk/memberReferences` | `class`, `method` | Every call of the method in the project, through subclasses too, without its declarations |
 | `tusk/projectProblems` | none | Every project PHP file's problems, by path relative to the root |
 
-Commands (`workspace/executeCommand`) apply their edits by sending
-`workspace/applyEdit` and waiting for the editor's answer before they return:
-`generate_accessors`, `generate_mutators`, and `tusk.extractMethod`.
+The command (`workspace/executeCommand`) `tusk.extractMethod` applies its edit
+by sending `workspace/applyEdit` and waiting for the editor's answer before it
+returns.
 
 ### Index
 
@@ -4465,7 +4474,7 @@ Phpactor already writes getters, setters, implemented and overridden methods,
 and completes constructors, so Generate lists those actions instead of
 writing its own. It calls the accessor commands itself, since the code action
 needs a selection over the properties. Only the constructor from properties
-and `__toString()`, which Phpactor lacks, are written by the editor.
+and `__toString()`, which Phpactor lacked, were written by the editor until Tusk's server offered them.
 
 ### 2026-09-26: Rebasing merges uses git's own todo list
 

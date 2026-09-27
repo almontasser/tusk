@@ -1,5 +1,6 @@
 //! Actions that write members: implement abstract methods, override parent methods, complete or promote a
-//! constructor, declare properties assigned without a declaration, and the getter and setter commands.
+//! constructor, declare properties assigned without a declaration, and Generate's constructor, getters,
+//! setters, and `__toString()`.
 
 use lsp_types::{Range, TextEdit, WorkspaceEdit};
 use mago_allocator::LocalArena;
@@ -22,8 +23,6 @@ use crate::analysis::Parsed;
 use crate::features::Ctx;
 use crate::features::hover::signature;
 use crate::imports::{import_edits, reference};
-use crate::server::Snapshot;
-use crate::text::uri_to_path;
 use crate::types::display_class;
 
 /// The class-like the cursor is in, with what the actions need to edit it.
@@ -365,6 +364,7 @@ pub fn candidates(ctx: &Ctx<'_>, range: Range) -> Vec<Candidate> {
     if class.kind != SymbolKind::Interface && !missing_properties(ctx, &class).is_empty() {
         out.push(Candidate::new("Add missing properties", "quickfix.add_missing_properties", "generate.add_missing_properties", Value::Null));
     }
+    out.extend(generate_candidates(ctx, &class));
     out
 }
 
@@ -489,10 +489,37 @@ pub fn resolve(ctx: &Ctx<'_>, action: &str, range: Range, arg: &Value) -> Option
             let has_members = class.members.iter().next().is_some();
             edits.push(TextEdit { range: Range { start: pos, end: pos }, new_text: if has_members { format!("{declarations}\n") } else { declarations } });
         }
+        "constructor" => {
+            let (unset, _, _) = generatable(ctx, &class);
+            edits.push(constructor_edit(ctx, &class, &unset)?);
+        }
+        "to_string" => {
+            edits.push(append_members(ctx, &class, &[method_block(&class.indent, &unit, "public function __toString(): string", &["return '';".into()])]));
+        }
+        "getters" | "setters" => {
+            let names = strings(arg.get("names"));
+            return accessors_edit(ctx, offset, &names, action == "getters");
+        }
+        "accessors" => {
+            // Each getter, then each setter.
+            let getters = strings(arg.get("getters"));
+            let setters = strings(arg.get("setters"));
+            let mut members = vec![];
+            for (names, getter) in [(&getters, true), (&setters, false)] {
+                for name in names {
+                    members.push(accessor(ctx, &class, name, getter, offset, &mut imports));
+                }
+            }
+            edits.push(append_members(ctx, &class, &members));
+        }
         _ => return None,
     }
     edits.extend(import_edits(&ctx.doc, ctx.parsed.program, offset, &imports, NameKind::Default));
     file_edit(ctx, edits)
+}
+
+fn strings(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array).map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect()).unwrap_or_default()
 }
 
 /// Where the docblock above the line at `line_start` starts, or `line_start` if there's none.
@@ -514,43 +541,163 @@ fn remove_lines(ctx: &Ctx<'_>, start: u32, end: u32) -> TextEdit {
     TextEdit { range: ctx.doc.range(from as u32, to as u32), new_text: String::new() }
 }
 
-/// `generate_accessors` and `generate_mutators`: arguments are the document's URI, the class declaration's
-/// UTF-8 offset, and the property names.
-pub fn accessors_command(snap: &Snapshot, command: &str, args: &[Value]) -> Result<Option<WorkspaceEdit>, String> {
-    let uri: lsp_types::Uri = args.first().and_then(Value::as_str).and_then(|u| u.parse().ok()).ok_or("Missing document")?;
-    let at = args.get(1).and_then(Value::as_u64).ok_or("Missing class offset")? as u32;
-    let names: Vec<String> = args.get(2).and_then(Value::as_array).map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect()).unwrap_or_default();
-    uri_to_path(&uri).ok_or("Not a file")?;
-    let getters = command == "generate_accessors";
-    Ok(crate::features::with_ctx(snap, &uri, |ctx| {
-        let class = class_at(ctx, at + 1)?;
-        let unit = indent_unit(&ctx.doc.text);
-        let codebase = &ctx.index.codebase;
-        let mut imports = vec![];
-        let mut members = vec![];
-        for name in &names {
-            let prop = format!("${name}");
-            let p = codebase.get_declaring_property(class.fqn.as_bytes(), prop.as_bytes());
-            let ty = p
-                .and_then(|p| p.type_declaration_metadata.as_ref().or(p.type_metadata.as_ref()))
-                .and_then(|t| writable_type(&t.type_union, ctx, at, &mut imports));
-            let upper = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
-            if getters {
-                let ret = ty.as_ref().map(|t| format!(": {t}")).unwrap_or_default();
-                members.push(method_block(&class.indent, &unit, &format!("public function get{upper}(){ret}"), &[format!("return $this->{name};")]));
-            } else {
-                let param = ty.as_ref().map(|t| format!("{t} ")).unwrap_or_default();
-                members.push(method_block(&class.indent, &unit, &format!("public function set{upper}({param}${name}): void"), &[format!("$this->{name} = ${name};")]));
+/// Getters (`getTitle()`) or setters (`setTitle()`) for the named properties of the class at `offset`.
+fn accessors_edit(ctx: &Ctx<'_>, offset: u32, names: &[String], getters: bool) -> Option<WorkspaceEdit> {
+    let class = class_at(ctx, offset)?;
+    let mut imports = vec![];
+    let members: Vec<String> = names.iter().map(|n| accessor(ctx, &class, n, getters, offset, &mut imports)).collect();
+    if members.is_empty() {
+        return None;
+    }
+    let mut edits = vec![append_members(ctx, &class, &members)];
+    edits.extend(import_edits(&ctx.doc, ctx.parsed.program, offset, &imports, NameKind::Default));
+    file_edit(ctx, edits)
+}
+
+/// A property's getter or setter, typed as the property is.
+fn accessor(ctx: &Ctx<'_>, class: &ClassAt<'_>, name: &str, getter: bool, offset: u32, imports: &mut Vec<String>) -> String {
+    let unit = indent_unit(&ctx.doc.text);
+    let prop = format!("${name}");
+    let ty = ctx
+        .index
+        .codebase
+        .get_declaring_property(class.fqn.as_bytes(), prop.as_bytes())
+        .and_then(|p| p.type_declaration_metadata.as_ref().or(p.type_metadata.as_ref()))
+        .and_then(|t| writable_type(&t.type_union, ctx, offset, imports));
+    let upper = upper_first(name);
+    if getter {
+        let ret = ty.as_ref().map(|t| format!(": {t}")).unwrap_or_default();
+        method_block(&class.indent, &unit, &format!("public function get{upper}(){ret}"), &[format!("return $this->{name};")])
+    } else {
+        let param = ty.as_ref().map(|t| format!("{t} ")).unwrap_or_default();
+        method_block(&class.indent, &unit, &format!("public function set{upper}({param}${name}): void"), &[format!("$this->{name} = ${name};")])
+    }
+}
+
+fn upper_first(name: &str) -> String {
+    let mut chars = name.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// A property as Generate lists them: declared in the class body, or promoted in its constructor.
+struct Prop {
+    name: String,
+    /// The type as written.
+    hint: Option<String>,
+    is_static: bool,
+    readonly: bool,
+    has_default: bool,
+    promoted: bool,
+    /// Where its declaration ends.
+    end: u32,
+}
+
+fn properties(ctx: &Ctx<'_>, class: &ClassAt<'_>) -> Vec<Prop> {
+    let text = ctx.parsed.text();
+    let written = |span: mago_span::Span| text.get(span.start.offset as usize..span.end.offset as usize).map(str::to_string);
+    let readonly_class = ctx.index.codebase.get_class_like(class.fqn.as_bytes()).is_some_and(|c| c.flags.is_readonly());
+    let mut out = vec![];
+    for member in class.members.iter() {
+        match member {
+            ClassLikeMember::Property(p) => {
+                let modifiers = p.modifiers();
+                let is_static = modifiers.iter().any(|m| matches!(m, mago_syntax::cst::Modifier::Static(_)));
+                let readonly = readonly_class || modifiers.iter().any(|m| matches!(m, mago_syntax::cst::Modifier::Readonly(_)));
+                let (hint, items): (_, Vec<&mago_syntax::cst::PropertyItem<'_>>) = match p {
+                    Property::Plain(plain) => (plain.hint.as_ref().and_then(|h| written(h.span())), plain.items.iter().collect()),
+                    Property::Hooked(h) => (h.hint.as_ref().and_then(|h| written(h.span())), vec![&h.item]),
+                };
+                for item in items {
+                    out.push(Prop {
+                        name: String::from_utf8_lossy(&item.variable().name[1..]).into_owned(),
+                        hint: hint.clone(),
+                        is_static,
+                        readonly,
+                        has_default: matches!(item, mago_syntax::cst::PropertyItem::Concrete(_)),
+                        promoted: false,
+                        end: p.span().end.offset,
+                    });
+                }
             }
+            ClassLikeMember::Method(m) if m.name.value.eq_ignore_ascii_case(b"__construct") => {
+                for param in m.parameter_list.parameters.iter().filter(|p| !p.modifiers.is_empty()) {
+                    out.push(Prop {
+                        name: param_name(param),
+                        hint: param.hint.as_ref().and_then(|h| written(h.span())),
+                        is_static: false,
+                        readonly: readonly_class || param.modifiers.iter().any(|m| matches!(m, mago_syntax::cst::Modifier::Readonly(_))),
+                        has_default: false,
+                        promoted: true,
+                        end: param.span().end.offset,
+                    });
+                }
+            }
+            _ => {}
         }
-        if members.is_empty() {
-            return None;
-        }
-        let mut edits = vec![append_members(ctx, &class, &members)];
-        edits.extend(import_edits(&ctx.doc, ctx.parsed.program, at, &imports, NameKind::Default));
-        file_edit(ctx, edits)
-    })
-    .flatten())
+    }
+    out
+}
+
+/// Whether the class body declares the method itself.
+fn declares(class: &ClassAt<'_>, method: &str) -> bool {
+    class.members.iter().any(|m| matches!(m, ClassLikeMember::Method(m) if m.name.value.eq_ignore_ascii_case(method.as_bytes())))
+}
+
+/// The properties a constructor would take, getters and setters would be written for, in that order.
+fn generatable(ctx: &Ctx<'_>, class: &ClassAt<'_>) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let props: Vec<Prop> = properties(ctx, class).into_iter().filter(|p| !p.is_static).collect();
+    let unset = props.iter().filter(|p| !p.promoted && !p.has_default).map(|p| p.name.clone()).collect();
+    let getters = props.iter().filter(|p| !declares(class, &format!("get{}", upper_first(&p.name)))).map(|p| p.name.clone()).collect();
+    let setters = props.iter().filter(|p| !p.readonly && !declares(class, &format!("set{}", upper_first(&p.name)))).map(|p| p.name.clone()).collect();
+    (unset, getters, setters)
+}
+
+fn listed(names: &[String]) -> String {
+    names.iter().map(|n| format!("${n}")).collect::<Vec<_>>().join(", ")
+}
+
+/// Generate's actions (⌘N): a constructor for the properties without a value, `__toString()`, getters, and
+/// setters. They're `source.generate.*`, so the light bulb doesn't list them.
+fn generate_candidates(ctx: &Ctx<'_>, class: &ClassAt<'_>) -> Vec<Candidate> {
+    if !matches!(class.kind, SymbolKind::Class | SymbolKind::Trait) {
+        return vec![];
+    }
+    let (unset, getters, setters) = generatable(ctx, class);
+    let mut out = vec![];
+    if class.kind == SymbolKind::Class && !unset.is_empty() && !declares(class, "__construct") {
+        out.push(Candidate::new(format!("Constructor for {}", listed(&unset)), "source.generate.constructor", "generate.constructor", Value::Null));
+    }
+    if !getters.is_empty() {
+        out.push(Candidate::new(format!("Getters for {}", listed(&getters)), "source.generate.getters", "generate.getters", json!({ "names": getters })));
+    }
+    if !setters.is_empty() {
+        out.push(Candidate::new(format!("Setters for {}", listed(&setters)), "source.generate.setters", "generate.setters", json!({ "names": setters })));
+    }
+    if !getters.is_empty() && !setters.is_empty() {
+        out.push(Candidate::new("Getters and setters", "source.generate.accessors", "generate.accessors", json!({ "getters": getters, "setters": setters })));
+    }
+    if !declares(class, "__toString") {
+        out.push(Candidate::new("__toString()", "source.generate.toString", "generate.to_string", Value::Null));
+    }
+    out
+}
+
+/// A constructor that takes and assigns `names`, below the last property's declaration.
+fn constructor_edit(ctx: &Ctx<'_>, class: &ClassAt<'_>, names: &[String]) -> Option<TextEdit> {
+    let props = properties(ctx, class);
+    let unit = indent_unit(&ctx.doc.text);
+    let params: Vec<String> = names
+        .iter()
+        .filter_map(|n| props.iter().find(|p| p.name == *n))
+        .map(|p| format!("{}${}", p.hint.as_ref().map(|h| format!("{h} ")).unwrap_or_default(), p.name))
+        .collect();
+    let body: Vec<String> = names.iter().map(|n| format!("$this->{n} = ${n};")).collect();
+    let block = method_block(&class.indent, &unit, &format!("public function __construct({})", params.join(", ")), &body);
+    let text = ctx.parsed.text();
+    let last = props.iter().filter(|p| !p.promoted).map(|p| p.end).max()?;
+    let at = text[last as usize..].find('\n').map_or(text.len(), |i| last as usize + i + 1);
+    let pos = ctx.doc.position(at as u32);
+    Some(TextEdit { range: Range { start: pos, end: pos }, new_text: format!("\n{block}\n") })
 }
 
 #[cfg(test)]
@@ -655,16 +802,59 @@ mod tests {
     }
 
     #[test]
+    fn offers_generate_actions_for_what_the_class_lacks() {
+        let class = "<?php\nclass A\n{\n    private string $title;\n    private ?int $count = null;\n    private static int $made = 0;\n\n    public function __construct() {}\n}\n";
+        let fx = Fixture::one(&class.replace("class A\n{", "class A\n{<|>").replace("    public function __construct() {}\n", ""));
+        let titles = |fx: &Fixture| {
+            let at = fx.at();
+            code_actions(&fx.snap, CodeActionParams {
+                text_document: TextDocumentIdentifier { uri: at.text_document.uri.clone() },
+                range: Range { start: at.position, end: at.position },
+                context: CodeActionContext { only: Some(vec!["source.generate".to_string().into()]), ..Default::default() },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| match a { CodeActionOrCommand::CodeAction(a) => a.title, CodeActionOrCommand::Command(c) => c.title })
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(titles(&fx), vec!["Constructor for $title", "Getters for $title, $count", "Setters for $title, $count", "Getters and setters", "__toString()"]);
+        // With a constructor, readonly properties, and a getter and __toString() already there.
+        let fx = Fixture::one("<?php\nreadonly class B\n{<|>\n    public function __construct(public string $name) {}\n    public function getName(): string { return ''; }\n    public function __toString(): string { return ''; }\n}\n");
+        assert!(titles(&fx).is_empty(), "{:?}", titles(&fx));
+    }
+
+    #[test]
+    fn generates_a_constructor_and_to_string() {
+        let files = |text: &str| vec![("t.php", text.to_string())];
+        let code = "<?php\nclass A\n{<|>\n    private string $title;\n    private ?int $count;\n    private bool $done = false;\n\n    public function run(): void {}\n}\n";
+        let owned = files(code);
+        let refs: Vec<(&str, &str)> = owned.iter().map(|(a, b)| (*a, b.as_str())).collect();
+        let (_, out) = run(&refs, "Constructor for $title, $count");
+        assert_eq!(
+            out,
+            "<?php\nclass A\n{\n    private string $title;\n    private ?int $count;\n    private bool $done = false;\n\n    public function __construct(string $title, ?int $count)\n    {\n        $this->title = $title;\n        $this->count = $count;\n    }\n\n    public function run(): void {}\n}\n"
+        );
+        let (_, out) = run(&refs, "__toString()");
+        assert!(out.ends_with("    public function run(): void {}\n\n    public function __toString(): string\n    {\n        return '';\n    }\n}\n"), "{out}");
+        let (_, out) = run(&refs, "Getters and setters");
+        assert!(out.contains("public function getTitle(): string") && out.contains("public function setDone(bool $done): void"), "{out}");
+    }
+
+    #[test]
     fn generates_getters_and_setters() {
         let fx = Fixture::one("<?php\nclass A\n{\n    private ?string $title = null;\n    private bool $done = false;\n}\n");
         let uri = crate::testing::uri("test.php");
-        let edit = accessors_command(&fx.snap, "generate_accessors", &[json!(uri.as_str()), json!(6), json!(["title", "done"])]).unwrap().unwrap();
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let edit = crate::features::with_ctx(&fx.snap, &uri, |ctx| accessors_edit(ctx, 7, &names(&["title", "done"]), true)).flatten().unwrap();
         let out = apply(&fx.doc("test.php"), edit);
         assert_eq!(
             out,
             "<?php\nclass A\n{\n    private ?string $title = null;\n    private bool $done = false;\n\n    public function getTitle(): ?string\n    {\n        return $this->title;\n    }\n\n    public function getDone(): bool\n    {\n        return $this->done;\n    }\n}\n"
         );
-        let edit = accessors_command(&fx.snap, "generate_mutators", &[json!(uri.as_str()), json!(6), json!(["title"])]).unwrap().unwrap();
+        let edit = crate::features::with_ctx(&fx.snap, &uri, |ctx| accessors_edit(ctx, 7, &names(&["title"]), false)).flatten().unwrap();
         assert!(apply(&fx.doc("test.php"), edit).contains("    public function setTitle(?string $title): void\n    {\n        $this->title = $title;\n    }\n}"));
     }
 }

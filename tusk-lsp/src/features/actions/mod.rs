@@ -113,11 +113,10 @@ fn edit_for(ctx: &Ctx<'_>, id: &str, range: Range, arg: &Value) -> Option<Worksp
 }
 
 /// The commands the server runs, which apply their edits through the editor.
-pub const COMMANDS: &[&str] = &["generate_accessors", "generate_mutators", extract::COMMAND];
+pub const COMMANDS: &[&str] = &[extract::COMMAND];
 
 pub fn execute_command(snap: &Snapshot, params: ExecuteCommandParams) -> Result<Option<Value>, String> {
     let edit = match params.command.as_str() {
-        "generate_accessors" | "generate_mutators" => generate::accessors_command(snap, &params.command, &params.arguments)?,
         extract::COMMAND => Some(extract::command(snap, &params.arguments)?),
         other => return Err(format!("Unknown command {other}")),
     };

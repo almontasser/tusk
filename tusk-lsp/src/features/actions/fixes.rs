@@ -152,7 +152,8 @@ mod tests {
         code_actions(&fx.snap, CodeActionParams {
             text_document: TextDocumentIdentifier { uri: at.text_document.uri.clone() },
             range: Range { start: at.position, end: at.position },
-            context: CodeActionContext::default(),
+            // Quick fixes only: Organize Imports and Generate's actions are offered everywhere.
+            context: CodeActionContext { only: Some(vec![lsp_types::CodeActionKind::QUICKFIX]), ..Default::default() },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         })
@@ -163,8 +164,6 @@ mod tests {
             CodeActionOrCommand::CodeAction(a) => a.title,
             CodeActionOrCommand::Command(c) => c.title,
         })
-        // Organize Imports is offered everywhere.
-        .filter(|t| t != "Organize imports")
         .collect()
     }
 

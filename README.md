@@ -811,8 +811,8 @@ class, trait, or enum at the cursor. The list offers what the class lacks:
   and isn't static. It's offered when the class has no constructor.
 - **Getters**, **Setters**, and **Getters and Setters**: `getTitle()` and
   `setTitle()` for each property, including promoted ones, that doesn't have
-  one yet. Readonly properties get no setter. The PHP server writes them.
-- **`__toString()`**, with the cursor in its `return`.
+  one yet. Readonly properties get no setter.
+- **`__toString()`**, returning `''`.
 - **Implement Methods…** and **Override Methods…**, when the class has
   interface or abstract methods to write, including abstract methods of the
   traits it uses, or parent methods to override. Override asks which method.
