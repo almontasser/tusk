@@ -49,6 +49,12 @@ pub struct Call {
     pub classes: Vec<String>,
     /// Each argument's name if named, and its value if it's a plain string.
     pub arguments: Vec<(Option<String>, Option<String>)>,
+    /// The classes each argument names or holds: `Post::class` names `Post`, and `$post` holds its inferred
+    /// type. An array argument counts as its first element.
+    pub argument_classes: Vec<Vec<String>>,
+    /// The classes in the receiver type's type arguments, such as `User` for `Builder<User>` or `Post` for
+    /// `HasMany<Post, User>`, in order.
+    pub type_args: Vec<String>,
     /// The span of the whole call.
     pub span: (u32, u32),
 }
@@ -106,7 +112,7 @@ fn plain_string(ctx: &Ctx<'_>, expr: &Expression<'_>) -> Option<String> {
 }
 
 /// Describes the call node `node`, if it's one.
-fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<Call> {
+pub(crate) fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<Call> {
     let resolver = ctx.resolver();
     let span = (node.span().start.offset, node.span().end.offset);
     let args = |list: &mago_syntax::cst::ArgumentList<'_>| -> Vec<(Option<String>, Option<String>)> {
@@ -119,38 +125,49 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
             .collect()
     };
     let name_of = |selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>| text_of(ctx, (selector.span().start.offset, selector.span().end.offset));
+    let arg_classes = |list: &mago_syntax::cst::ArgumentList<'_>| -> Vec<Vec<String>> {
+        list.arguments
+            .iter()
+            .map(|a| match a {
+                Argument::Positional(p) => expression_classes(ctx, p.value, path),
+                Argument::Named(n) => expression_classes(ctx, n.value, path),
+            })
+            .collect()
+    };
+    let method = |object: &Expression<'_>, selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>, list: &mago_syntax::cst::ArgumentList<'_>| {
+        let (classes, type_args) = receiver(ctx, object, path);
+        Call { kind: CallKind::Method, name: name_of(selector), classes, arguments: args(list), argument_classes: arg_classes(list), type_args, span }
+    };
     Some(match node {
         Node::FunctionCall(c) => {
             if let Expression::Variable(v) = c.function {
                 let var = text_of(ctx, (v.span().start.offset, v.span().end.offset));
-                return Some(Call { kind: CallKind::Closure, name: var, classes: vec![], arguments: args(&c.argument_list), span });
+                return Some(Call {
+                    kind: CallKind::Closure,
+                    name: var,
+                    classes: vec![],
+                    arguments: args(&c.argument_list),
+                    argument_classes: arg_classes(&c.argument_list),
+                    type_args: vec![],
+                    span,
+                });
             }
             let at = c.function.span().end.offset.saturating_sub(1);
             let name = match resolver.at(at)?.symbols.into_iter().next()? {
                 Symbol::Function(f) => f,
                 _ => return None,
             };
-            Call { kind: CallKind::Function, name, classes: vec![], arguments: args(&c.argument_list), span }
+            Call { kind: CallKind::Function, name, classes: vec![], arguments: args(&c.argument_list), argument_classes: arg_classes(&c.argument_list), type_args: vec![], span }
         }
-        Node::MethodCall(c) => Call {
-            kind: CallKind::Method,
-            name: name_of(&c.method),
-            classes: resolver.classes_of(c.object),
-            arguments: args(&c.argument_list),
-            span,
-        },
-        Node::NullSafeMethodCall(c) => Call {
-            kind: CallKind::Method,
-            name: name_of(&c.method),
-            classes: resolver.classes_of(c.object),
-            arguments: args(&c.argument_list),
-            span,
-        },
+        Node::MethodCall(c) => method(c.object, &c.method, &c.argument_list),
+        Node::NullSafeMethodCall(c) => method(c.object, &c.method, &c.argument_list),
         Node::StaticMethodCall(c) => Call {
             kind: CallKind::Static,
             name: name_of(&c.method),
             classes: resolver.classes_of_class_expr(c.class, path),
             arguments: args(&c.argument_list),
+            argument_classes: arg_classes(&c.argument_list),
+            type_args: vec![],
             span,
         },
         Node::Instantiation(i) => Call {
@@ -158,6 +175,8 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
             name: String::new(),
             classes: resolver.classes_of_class_expr(i.class, path),
             arguments: i.argument_list.as_ref().map(args).unwrap_or_default(),
+            argument_classes: i.argument_list.as_ref().map(arg_classes).unwrap_or_default(),
+            type_args: vec![],
             span,
         },
         Node::Attribute(a) => {
@@ -176,10 +195,88 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
                         .collect()
                 })
                 .unwrap_or_default();
-            Call { kind: CallKind::Attribute, name: String::new(), classes: vec![fqn], arguments, span }
+            let argument_classes = a
+                .argument_list
+                .as_ref()
+                .map(|l| {
+                    l.arguments
+                        .iter()
+                        .map(|a| match a {
+                            PartialArgument::Positional(p) => expression_classes(ctx, p.value, path),
+                            PartialArgument::Named(n) => expression_classes(ctx, n.value, path),
+                            _ => vec![],
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Call { kind: CallKind::Attribute, name: String::new(), classes: vec![fqn], arguments, argument_classes, type_args: vec![], span }
         }
         _ => return None,
     })
+}
+
+/// The classes a method call's receiver can be, and the classes in its type's type arguments. A receiver the
+/// analyzer can't type, such as the result of a static call Laravel forwards through `__callStatic`
+/// (`User::where(...)->orderBy(...)`), counts as the class at the root of its chain, as Laravel LSP reads it.
+fn receiver(ctx: &Ctx<'_>, object: &Expression<'_>, path: &[Node<'_, '_>]) -> (Vec<String>, Vec<String>) {
+    let resolver = ctx.resolver();
+    let classes = resolver.classes_of(object);
+    if !classes.is_empty() {
+        return (classes, type_arguments(ctx, object));
+    }
+    let mut expr = object;
+    loop {
+        expr = match expr {
+            Expression::Call(mago_syntax::cst::Call::Method(c)) => c.object,
+            Expression::Call(mago_syntax::cst::Call::NullSafeMethod(c)) => c.object,
+            Expression::Call(mago_syntax::cst::Call::StaticMethod(c)) => return (resolver.classes_of_class_expr(c.class, path), vec![]),
+            Expression::Parenthesized(p) => p.expression,
+            _ => return (vec![], vec![]),
+        };
+        let classes = resolver.classes_of(expr);
+        if !classes.is_empty() {
+            return (classes, type_arguments(ctx, expr));
+        }
+    }
+}
+
+/// The classes in the type arguments of an expression's type, such as `User` in `Builder<User>`.
+fn type_arguments(ctx: &Ctx<'_>, expr: &Expression<'_>) -> Vec<String> {
+    use mago_codex::ttype::atomic::TAtomic;
+    use mago_codex::ttype::atomic::object::TObject;
+    let span = expr.span();
+    let Some(t) = ctx.analysis().type_of(span.start.offset, span.end.offset) else { return vec![] };
+    let codebase = &ctx.index.codebase;
+    let mut out: Vec<String> = vec![];
+    for atomic in t.types.iter() {
+        let TAtomic::Object(TObject::Named(named)) = atomic else { continue };
+        for param in named.type_parameters.iter().flatten() {
+            for class in crate::types::class_names(param, codebase) {
+                if !out.contains(&class) {
+                    out.push(class);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The classes an argument names (`Post::class`) or holds (`$post`), or its first element's for an array.
+fn expression_classes(ctx: &Ctx<'_>, expr: &Expression<'_>, path: &[Node<'_, '_>]) -> Vec<String> {
+    match expr {
+        Expression::Access(mago_syntax::cst::Access::ClassConstant(a))
+            if matches!(&a.constant, mago_syntax::cst::ClassLikeConstantSelector::Identifier(id) if id.value.eq_ignore_ascii_case(b"class")) =>
+        {
+            ctx.resolver().classes_of_class_expr(a.class, path)
+        }
+        Expression::Array(a) => match a.elements.iter().next() {
+            Some(mago_syntax::cst::ArrayElement::Value(v)) => expression_classes(ctx, v.value, path),
+            Some(mago_syntax::cst::ArrayElement::KeyValue(kv)) => expression_classes(ctx, kv.value, path),
+            _ => vec![],
+        },
+        Expression::Literal(_) => vec![],
+        other => ctx.resolver().classes_of(other),
+    }
 }
 
 /// The string argument a string literal at the end of `path` is, if any.

@@ -10,8 +10,38 @@ namespace Illuminate\Routing { class Redirector { public function route($name, $
 namespace Illuminate\Http { class Request { public function routeIs(...$patterns) {} public function validate(array $rules) {} } }
 namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} }
 namespace Illuminate\Foundation\Http { class FormRequest {} }
-namespace Illuminate\Database\Eloquent { class Model {} }
-namespace App\Models { class User extends \Illuminate\Database\Eloquent\Model {} }
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+    }
+    /** @template TModel of Model */
+    class Builder {
+        /** @return $this */
+        public function where($column, $operator = null, $value = null) {}
+        /** @return $this */
+        public function orderBy($column) {}
+        /** @return $this */
+        public function whereHas($relation, ?\Closure $callback = null) {}
+    }
+}
+namespace Illuminate\Database\Eloquent\Relations {
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     */
+    class HasMany {
+        /** @return $this */
+        public function where($column, $operator = null, $value = null) {}
+    }
+}
+namespace App\Models {
+    class User extends \Illuminate\Database\Eloquent\Model {
+        /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Post, $this> */
+        public function posts() {}
+    }
+    class Post extends \Illuminate\Database\Eloquent\Model {}
+}
 namespace {
     function route($name, $parameters = [], $absolute = true) {}
     function redirect($to = null): \Illuminate\Routing\Redirector {}
@@ -62,7 +92,13 @@ fn fixture(file: &str, text: &str) -> Fixture {
     state.seed("laravel:middleware", json!({"auth": {"class": "App\\Http\\Middleware\\Authenticate", "path": "app/Http/Middleware/Authenticate.php", "line": 9, "parameters": "guards...", "groups": []}}));
     state.seed("laravel:blade-components", json!({"components": {"alert": {"isVendor": false, "paths": ["resources/views/components/alert.blade.php"], "props": "@props(['type'])"}, "flux::button": {"isVendor": true, "paths": ["vendor/flux/button.blade.php"], "props": []}}, "prefixes": ["flux"]}));
     state.seed("laravel:blade-directives", json!([{"name": "money", "hasParams": true}]));
-    state.seed("laravel:models", json!({"models": {"App\\Models\\User": {"attributes": [{"name": "email", "fillable": true, "cast": null}, {"name": "full_name", "fillable": false, "cast": "accessor"}], "relations": [{"name": "posts"}]}}}));
+    state.seed(
+        "laravel:models",
+        json!({"models": {
+            "App\\Models\\User": {"attributes": [{"name": "email", "fillable": true, "cast": null}, {"name": "full_name", "fillable": false, "cast": "accessor"}], "relations": [{"name": "posts", "related": "App\\Models\\Post"}]},
+            "App\\Models\\Post": {"attributes": [{"name": "title", "fillable": true, "cast": null}], "relations": [{"name": "author", "related": "App\\Models\\User"}]},
+        }}),
+    );
     fx
 }
 
@@ -143,6 +179,21 @@ fn completes_validation_rules_and_eloquent_attributes() {
     assert!(labels(&form).contains(&"required".to_string()));
     assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::where('<|>');")), vec!["email"]);
     assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::with('<|>');")), vec!["posts"]);
+}
+
+#[test]
+fn completes_eloquent_attributes_through_builder_chains() {
+    let user = vec!["email".to_string()];
+    let post = vec!["title".to_string()];
+    // A builder's model comes from its type argument.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::query()->where('<|>');")), user);
+    // A chain the analyzer can't type counts as its root's class.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::where('email', 1)->orderBy('<|>');")), user);
+    // A relation's related model.
+    assert_eq!(labels(&complete("t.php", "<?php function f(\\App\\Models\\User $u) { $u->posts()->where('<|>'); }")), post);
+    // A closure passed to a relation method queries the relation's model.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\Post::whereHas('author', fn ($q) => $q->where('<|>'));")), user);
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::query()->whereHas('posts', function ($q) { $q->where('<|>'); });")), post);
 }
 
 #[test]
