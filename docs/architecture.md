@@ -3639,6 +3639,50 @@ when `vendor/filament/filament` exists.
   the demo app. Build the app with `scripts/make-fixture.sh`, then run
   `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
 
+### Extract Method
+
+The editor lists the action with `only: ["refactor.extract.method"]` and runs
+its command, `tusk.extractMethod`. The command sends the edit as
+`workspace/applyEdit` and waits for the editor to apply it before it answers,
+because `extract.ts` diffs the text for the new `function` next. Other clients
+can resolve the action's edit instead.
+
+- **Selection:** whole statements of one block, or exactly one expression.
+  Surrounding whitespace doesn't count.
+- **Parameters:** the variables the selection reads that the function mentions
+  before it, in order of first use.
+- **Return value:** the variables the selection sets that the function reads
+  after it. One comes back as itself, several as an array that the call
+  destructures.
+- **`return` statements:** a selection with one works only at the end of its
+  function, where the call is returned.
+- **Where it goes:** a method in a class is `private`, and `static` when its
+  function is, and follows that function. In a plain function it becomes a
+  function after it. It's named `newMethod`, or the next free
+  `newMethod2`…, for the editor to rename in place.
+- **Types:** come from the analyzer. Types PHP can't declare are narrowed:
+  `list<int>` to `array`, `int<0, max>` or a literal to `int`, and so on. Class
+  names are written for the file, with imports added. A type that includes
+  `mixed` is left out.
+
+### Organize imports and unused imports
+
+- **What counts as used:** names in code, attributes, and docblock types (with
+  `@method` and `@property` lines), outside `use` statements. Member names and
+  declarations don't count, even when an import has the same name.
+- **Matching:** a qualified name such as `Sub\Thing` uses its first part.
+  Class and function names match without regard to case, and constants with
+  it.
+- **What's removed:** only a `use` statement that imports one name.
+- **Sorting:** classes, then functions, then constants, without regard to
+  case. It only applies within a run of imports that has only whitespace
+  between them.
+- **Groups and lists:** a group (`use A\{B, C};`) or a list (`use A, B;`)
+  keeps its run in its written order, apart from removing unused imports.
+- **Diagnostics:** each unused import is reported with source `tusk`, code
+  `unused_import`, and the Unnecessary tag. The quickfix "Remove unused import"
+  deletes its line.
+
 ### Tests
 
 Run the tests with `cargo test` in `tusk-lsp/`.
