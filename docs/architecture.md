@@ -3744,19 +3744,24 @@ and a real Laravel app, which need PHP.
   Magento. `examples/depth.rs` lists a folder's most deeply nested files (with
   `BRANCHES=1`, those with the most branches in one statement).
 
-  Results on 2026-09-27, 400 sampled files per project, on an M-series Mac:
+  Results on 2026-09-27, 200 sampled files per project, on an M-series Mac,
+  with type and call hierarchy, formatting, Fix All, and workspace symbols
+  added to the requests:
 
-  | Project | Files indexed | Index | Mean hover | Slowest references |
-  |---|---|---|---|---|
-  | PHP-Parser | 341 | 0.0 s | 0.7 ms | 0.1 s |
-  | Laravel framework | 2,981 | 0.4 s | 1.8 ms | 0.3 s |
-  | Symfony | 11,919 | 0.6 s | 1.5 ms | 3.0 s |
-  | WordPress | 1,899 | 0.2 s | 2.6 ms | 2.4 s |
-  | Magento 2 | 25,580 | 2.4 s | 2.6 ms | 1.1 s |
+  | Project | Files indexed | Index | Mean hover | Slowest references | Slowest incoming calls |
+  |---|---|---|---|---|---|
+  | PHP-Parser | 341 | 0.0 s | 1.8 ms | 0.1 s | 2.7 s |
+  | Laravel framework | 2,981 | 0.4 s | 2.2 ms | 0.3 s | 0.7 s |
+  | Symfony | 11,919 | 0.6 s | 2.1 ms | 4.3 s | 4.2 s |
+  | WordPress | 1,899 | 0.2 s | 1.9 ms | 2.5 s | 4.6 s |
+  | Magento 2 | 25,580 | 2.2 s | 2.8 ms | 1.3 s | 2.0 s |
 
-  No request crashed or hung after the fixes the runs led to. References and
-  rename analyze every project file that mentions the name, so a common name
-  in a large project takes seconds; both can be cancelled.
+  No request crashed or hung after the fixes the runs led to: requests on
+  plain threads (see Threads), inheritance cycles cut before populating (see
+  Index), one search for a constructor's classes, and spans from the index
+  sliced with `str::get`. References, rename, and incoming calls analyze
+  every project file that mentions the name, so a common name in a large
+  project takes seconds; all three can be cancelled.
 - **Benchmark:** `cargo run --release --example index_bench <root> [file]`
   times indexing a real project.
 
