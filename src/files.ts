@@ -176,6 +176,8 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
     e.stopPropagation();
     rows.forEach((row, i) => row.classList.toggle("focused", i === index));
   };
+  // The pointer moves the keyboard's place too, so only one row is ever highlighted.
+  rows.forEach((row, i) => (row.onmouseenter = () => ((index = i), rows.forEach((r, j) => r.classList.toggle("focused", j === i)))));
   addEventListener("mousedown", outside, true);
   addEventListener("keydown", keys, true);
 }
