@@ -34,6 +34,7 @@ pub fn server() -> ServerCapabilities {
         inlay_hint_provider: Some(OneOf::Left(true)),
         code_lens_provider: Some(CodeLensOptions { resolve_provider: Some(false) }),
         document_link_provider: Some(DocumentLinkOptions { resolve_provider: Some(false), work_done_progress_options: Default::default() }),
+        rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
         ..Default::default()
     }
 }

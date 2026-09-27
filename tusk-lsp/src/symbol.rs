@@ -221,6 +221,16 @@ impl<'p, 'a> Resolver<'p, 'a> {
                 if written == "$this" {
                     return found(vec![Symbol::Class(self.enclosing_class(path)?)], false);
                 }
+                // A promoted constructor parameter (`private string $name`) declares a property.
+                let promoted = path.iter().any(|n| matches!(n, Node::FunctionLikeParameter(p) if p.variable.span == var.span && !p.modifiers.is_empty()));
+                if promoted && let Some(class) = self.enclosing_class(path) {
+                    return Some(Found {
+                        symbols: vec![Symbol::Property { class, name: written[1..].to_string() }],
+                        start: start + 1,
+                        end,
+                        declaration: true,
+                    });
+                }
                 let declaration = path.iter().any(|n| matches!(n, Node::FunctionLikeParameter(p) if p.variable.span == var.span));
                 found(vec![Symbol::Variable { name: written[1..].to_string(), scope: self.variable_scope(path) }], declaration)
             }
@@ -472,6 +482,13 @@ mod tests {
             symbols("<?php namespace A; class B { function f() { return self::X<|>Y; } const XY = 1; }"),
             vec![Symbol::ClassConstant { class: "A\\B".into(), name: "XY".into() }]
         );
+    }
+
+    #[test]
+    fn promoted_parameters_declare_properties() {
+        let found = symbol_at(&[("test.php", "<?php class K { function __construct(private int $a<|>ge) {} }")]).unwrap();
+        assert_eq!(found.symbols, vec![Symbol::Property { class: "K".into(), name: "age".into() }]);
+        assert!(found.declaration);
     }
 
     #[test]

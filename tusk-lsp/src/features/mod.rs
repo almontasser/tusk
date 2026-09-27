@@ -7,6 +7,7 @@ pub mod inlay;
 pub mod links;
 pub mod navigation;
 pub mod references;
+pub mod rename;
 pub mod signature;
 pub mod symbols;
 

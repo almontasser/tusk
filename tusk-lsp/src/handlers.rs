@@ -38,6 +38,8 @@ pub fn find(method: &str) -> Option<Handler> {
         InlayHintRequest::METHOD => typed!(InlayHintRequest, inlay::inlay_hints),
         CodeLensRequest::METHOD => typed!(CodeLensRequest, links::code_lenses),
         DocumentLinkRequest::METHOD => typed!(DocumentLinkRequest, links::document_links),
+        PrepareRenameRequest::METHOD => typed!(PrepareRenameRequest, rename::prepare),
+        Rename::METHOD => typed!(Rename, rename::rename),
         _ => return None,
     };
     Some(handler)
