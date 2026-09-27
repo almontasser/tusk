@@ -263,7 +263,14 @@ export async function routeRules(action: string): Promise<Record<string, string>
   const formRequest = formRequestParameter(source, target.method);
   const requestFile = formRequest && (await classFile(formRequest));
   const rules = requestFile ? validationRules(methodBody(await read(requestFile), "rules")) : {};
-  return Object.keys(rules).length ? rules : validationRules(methodBody(source, target.method));
+  if (Object.keys(rules).length) return rules;
+  const body = methodBody(source, target.method);
+  // Rules in the action, or in a helper it calls, such as `$this->validateRequest($request)`.
+  for (const code of [body, ...[...body.matchAll(/\$this->(\w+)\s*\(/g)].map((m) => methodBody(source, m[1]))]) {
+    const found = validationRules(code);
+    if (Object.keys(found).length) return found;
+  }
+  return {};
 }
 
 /** Opens the controller method a route action names. */

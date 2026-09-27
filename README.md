@@ -867,7 +867,8 @@ at the top.
   API routes, or every route. Each gets `{{host}}` for the app's address and a
   variable for each route parameter. A `POST`, `PUT`, or `PATCH` request's JSON
   body lists the fields its controller validates, read from the FormRequest it
-  takes or its `validate()` call, with a value of the right type for each. A web
+  takes, its `validate()` or `Validator::make()` call, or those calls in a
+  method of the controller it calls with `$this->`, with a value of the right type for each. A web
   route gets Laravel session auth, and an API route behind `auth:sanctum` a
   bearer token. When artisan fails, such as on an error while the app boots,
   the message says why.

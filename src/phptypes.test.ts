@@ -152,6 +152,10 @@ class PostController {
   assert.equal(formRequestParameter(controller, "store"), "App\\Http\\Requests\\StorePostRequest");
   assert.equal(formRequestParameter(controller, "update"), null);
   assert.deepEqual(validationRules(methodBody(controller, "update")), { title: "required" });
+  // Validator::make with its data as an array literal.
+  const made = "Validator::make(['lang' => $request->lang, 'code' => $request->code], ['lang' => 'required|in:ar,en', 'code' => ['required', new CodeRule()]])->validate();";
+  assert.deepEqual(validationRules(made), { lang: "required|in:ar,en", code: "required|['required', new CodeRule()]" });
+  assert.deepEqual(validationRules("Validator::make($request->all(), ['a' => 'int']);"), { a: "int" });
 });
 
 test("finds constructor calls of classes", () => {

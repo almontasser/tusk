@@ -1216,9 +1216,12 @@ files work in PhpStorm and VS Code's REST Client.
   `src/profiler.ts`) and opens the profile written after the send.
 - Requests from routes get a body from `validationRules` and
   `formRequestParameter` in `src/phptypes.ts`, which read the rules array of a
-  FormRequest's `rules()` or a controller's `validate()` with bracket matching
-  that skips strings and comments, and `bodyFromRules` in `src/httpfile.ts`,
-  which picks each field's example value from its rules. **Go to Controller**
+  FormRequest's `rules()` or a controller's `validate()` or
+  `Validator::make()` (its second argument, since the data before it is often
+  an array too) with bracket matching that skips strings and comments.
+  `routeRules` in `src/runner.ts` also tries each `$this->` method the action
+  calls, for rules in a helper such as `validateRequest()`. `bodyFromRules`
+  in `src/httpfile.ts` picks each field's example value from the rules. **Go to Controller**
   matches the request to a route with `matchRoute`.
 - Scripts run in `src/httpscript.worker.ts`, a worker with no access to Tauri's
   IPC, so a script in a cloned repository can't run commands. The worker is

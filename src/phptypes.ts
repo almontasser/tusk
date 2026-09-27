@@ -235,10 +235,20 @@ export function methodBody(source: string, method: string): string {
  * `validate([...])` and `Validator::make($data, [...])` in a controller. Rule objects read as their source text.
  */
 export function validationRules(code: string): Record<string, string> {
-  const m = /(?:return|validate\s*\(|Validator::make\s*\([^,]+,)\s*\[/.exec(code);
-  if (!m) return {};
+  let found: string | undefined;
+  for (const m of code.matchAll(/\breturn\s*\[|validate\s*\(\s*\[|Validator::make\s*\(/g)) {
+    const end = m.index + m[0].length - 1;
+    if (!m[0].startsWith("Validator")) found = bracketed(code, end);
+    else {
+      // The rules are the second argument; the data before them is often an array too.
+      const rules = topLevel(bracketed(code, end))[1];
+      if (rules?.startsWith("[")) found = rules.slice(1, rules.lastIndexOf("]"));
+    }
+    if (found !== undefined) break;
+  }
+  if (found === undefined) return {};
   const rules: Record<string, string> = {};
-  const array = bracketed(code, m.index + m[0].length - 1).replace(/(['"])(?:\\.|(?!\1).)*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (t) => (t.startsWith("/") ? "" : t));
+  const array = found.replace(/(['"])(?:\\.|(?!\1).)*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (t) => (t.startsWith("/") ? "" : t));
   for (const item of topLevel(array)) {
     const entry = item.match(/^(['"])(.+?)\1\s*=>\s*([\s\S]*)$/);
     if (!entry) continue;
