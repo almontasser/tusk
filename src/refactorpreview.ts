@@ -14,8 +14,11 @@ const panel = h("div", { class: "hierarchy refactor-preview" });
 
 const flat = (text: string) => text.replace(/\s*\n\s*/g, " ");
 
-/** Each changed line of a file, before and after, with edits that start on the same line applied together. */
-export function changedLines(text: string, edits: L.TextEdit[]): { line: number; before: string; after: string }[] {
+/**
+ * Each changed line of a file, before and after, with edits that start on the same line applied together. `delta`
+ * is how many lines the change adds (or, below zero, removes), for a change that spans several.
+ */
+export function changedLines(text: string, edits: L.TextEdit[]): { line: number; before: string; after: string; delta: number }[] {
   const lines = text.split("\n");
   const byLine = new Map<number, L.TextEdit[]>();
   for (const e of edits) byLine.set(e.range.start.line, [...(byLine.get(e.range.start.line) ?? []), e]);
@@ -29,7 +32,7 @@ export function changedLines(text: string, edits: L.TextEdit[]): { line: number;
       let after = segment;
       for (const e of [...group].sort((a, b) => offset(b.range.start) - offset(a.range.start)))
         after = after.slice(0, offset(e.range.start)) + e.newText + after.slice(offset(e.range.end));
-      return { line: line + 1, before: flat(segment).trim(), after: flat(after).trim() };
+      return { line: line + 1, before: flat(segment).trim(), after: flat(after).trim(), delta: after.split("\n").length - segment.split("\n").length };
     });
 }
 
@@ -54,13 +57,13 @@ function diffLine(before: string, after: string) {
 }
 
 /**
- * Shows what a refactoring would change: `changes` by file URI, with `texts` the current text of each file.
- * **Do Refactor** runs `apply`.
+ * Shows what a refactoring would change: `changes` by file URI, with `texts` the current text of each file, and
+ * `created` the files it would create, by URI, with their text. **Do Refactor** runs `apply`.
  */
-export function showRefactorPreview(title: string, changes: Record<string, L.TextEdit[]>, texts: Map<string, string>, skipped: Skipped[], apply: () => unknown) {
+export function showRefactorPreview(title: string, changes: Record<string, L.TextEdit[]>, texts: Map<string, string>, skipped: Skipped[], apply: () => unknown, created: Record<string, string> = {}) {
   const relative = (path: string) => (path.startsWith(host.root() + "/") ? path.slice(host.root().length + 1) : path);
-  const count = Object.values(changes).reduce((n, e) => n + e.length, 0);
-  const files = Object.keys(changes).length;
+  const count = Object.values(changes).reduce((n, e) => n + e.length, 0) + Object.keys(created).length;
+  const files = Object.keys(changes).length + Object.keys(created).length;
   const doRefactor = h("button", { class: "primary", textContent: "Do Refactor" });
   const cancel = h("button", { textContent: "Cancel", onclick: () => closeView(panel) });
   doRefactor.onclick = () => {
@@ -90,13 +93,36 @@ export function showRefactorPreview(title: string, changes: Record<string, L.Tex
       [icon("warning"), h("span", { class: "name" }, "Left unchanged"), h("span", { class: "namespace" }, String(skipped.length))],
       skipped.map((s) => row(1, [h("span", { class: "line-number" }, String(s.line)), h("span", { class: "name" }, relative(s.path)), h("span", { class: "reason" }, s.reason)], () => host.openAt(s.path, s.line))),
     );
+  const fileHeader = (path: string, iconName: string, count: number, label?: string) => {
+    const slash = relative(path).lastIndexOf("/");
+    return [
+      icon(iconName),
+      h("span", { class: "name" }, relative(path).slice(slash + 1)),
+      label ? h("span", { class: "badge new-file" }, label) : null,
+      h("span", { class: "namespace" }, slash > 0 ? relative(path).slice(0, slash) : ""),
+      h("span", { class: "count" }, String(count)),
+    ].filter((n): n is HTMLElement => !!n);
+  };
+  for (const [uri, text] of Object.entries(created)) {
+    const path = monaco.Uri.parse(uri).fsPath;
+    const lines = text.replace(/\n$/, "").split("\n");
+    group(
+      fileHeader(path, "new-file", lines.length, "new file"),
+      lines.map((l, i) => row(1, [h("span", { class: "line-number" }, String(i + 1)), h("span", { class: "preview-text" }, l.trim() ? h("ins", {}, l) : "")])),
+    );
+  }
   for (const [uri, edits] of Object.entries(changes)) {
     const path = monaco.Uri.parse(uri).fsPath;
     const lines = changedLines(texts.get(uri) ?? "", edits);
-    const slash = relative(path).lastIndexOf("/");
     group(
-      [icon("file-code"), h("span", { class: "name" }, relative(path).slice(slash + 1)), h("span", { class: "namespace" }, slash > 0 ? relative(path).slice(0, slash) : ""), h("span", { class: "count" }, String(lines.length))],
-      lines.map((l) => row(1, [h("span", { class: "line-number" }, String(l.line)), diffLine(l.before, l.after)], () => host.openAt(path, l.line))),
+      fileHeader(path, "file-code", lines.length),
+      lines.map((l) =>
+        row(1, [
+          h("span", { class: "line-number" }, String(l.line)),
+          diffLine(l.before, l.after),
+          l.delta ? h("span", { class: `line-delta ${l.delta > 0 ? "added" : "removed"}` }, `${l.delta > 0 ? "+" : "−"}${Math.abs(l.delta)} ${Math.abs(l.delta) === 1 ? "line" : "lines"}`) : null,
+        ].filter((n): n is HTMLElement => !!n), () => host.openAt(path, l.line)),
+      ),
     );
   }
   panel.replaceChildren(

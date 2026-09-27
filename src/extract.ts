@@ -324,7 +324,11 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   const onCall = !!word && /^\s*\(/.test(line.slice(word.endColumn - 1)) && !/(\$|\bnew\s+)$/.test(before);
   if (onVariable || onConstant || onCall) names.push("Inline…");
   if (found) names.push("Safe Delete…");
-  if (parseTypeDeclarations(text).length === 1) names.push("Move Class…");
+  const types = parseTypeDeclarations(text);
+  if (types.length === 1) names.push("Move Class…");
+  // Pull Members Up needs a parent or an interface; Extract Interface, a class or enum.
+  if (types.some((t) => t.kind === "class" && (t.extends.length || t.implements.length))) names.push("Pull Members Up…");
+  if (types.some((t) => t.kind === "class" || t.kind === "enum")) names.push("Extract Interface…");
   // Phpactor's own refactorings, other than the extractions above.
   const actions =
     (await phpactorRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {

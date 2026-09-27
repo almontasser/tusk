@@ -324,7 +324,7 @@ function offsetAt(text: string, p: L.Position): number {
   return offset + p.character;
 }
 
-const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? readText(path);
+export const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? readText(path);
 
 /**
  * Opens the Change Signature dialog for the method or function at the cursor, then rewrites its declaration, its
@@ -420,7 +420,7 @@ type Descendant = { path: string; text: string; type: TypeDeclaration; body: str
  * classes the index hasn't seen yet. The search looks for the short name alone, so an `extends` or `implements`
  * list broken over several lines is found, and the file's declarations decide.
  */
-async function descendantsOf(fqn: string): Promise<Descendant[]> {
+export async function descendantsOf(fqn: string): Promise<Descendant[]> {
   const queue = [fqn];
   const seen = new Set(queue);
   const found: Descendant[] = [];

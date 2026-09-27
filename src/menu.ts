@@ -20,7 +20,7 @@ const LAYOUT: [string, Entry[]][] = [
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "-",
     "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],
   ["Code", ["Generate…", "Show Context Actions", "Parameter Info", "Quick Documentation", "-", "Reformat Code", "Optimize Imports", "Fix All Safe Problems in File", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],
-  ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Move Class…", "Safe Delete…"]],
+  ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]],
   ["Run", ["Run Anything", "Rerun", "-", "Run Test at Cursor", "Debug Test at Cursor", "Run Test at Cursor with Coverage", "Run All Tests", "Run All Tests with Coverage", "-",
     "Start Listening for PHP Debug Connections", "Start Debug Server (php artisan serve with Xdebug)", "Stop Debugging", "Resume Program", "Step Over", "Step Into", "Step Out", "-",
     "Toggle Breakpoint", "Edit Breakpoint…", "Toggle Pause on Exceptions", "Pause on Exception Classes…", "Set Server Paths for Debugging…", "-",

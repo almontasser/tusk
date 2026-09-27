@@ -18,9 +18,9 @@ export const iconButton = (name: string, title: string, onclick: () => unknown) 
 
 /**
  * Shows a message in the corner. An error closes itself after 6 seconds; a hint with an action stays until
- * you act on it or close it.
+ * you act on it or close it, or for `timeout` ms, as for a notice of what just happened.
  */
-export function toast(text: string, { kind = "error", action }: { kind?: "error" | "info"; action?: { label: string; run(): unknown } } = {}) {
+export function toast(text: string, { kind = "error", action, timeout }: { kind?: "error" | "info"; action?: { label: string; run(): unknown }; timeout?: number } = {}) {
   if (kind === "error") console.warn(`[toast] ${text}`); // So an error can be traced after the toast closes.
   const close = () => el.remove();
   // Git's "hint:" lines repeat advice; the first lines carry the error.
@@ -34,5 +34,5 @@ export function toast(text: string, { kind = "error", action }: { kind?: "error"
     h("button", { class: "codicon codicon-close", ariaLabel: "Dismiss", onclick: close }),
   );
   document.getElementById("toasts")!.append(el);
-  if (!action) setTimeout(close, 6000);
+  if (!action || timeout) setTimeout(close, timeout ?? 6000);
 }

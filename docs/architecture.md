@@ -1169,6 +1169,49 @@ maps paths to class names through Composer's autoloader, loaded when it
 starts, so a project without `vendor/composer` gets no edits; the error it
 returns now reaches the status bar instead of being dropped.
 
+### Pull Members Up and Extract Interface
+
+`src/classparse.ts` holds the logic, free of editor imports so Node tests it.
+`classBody` walks a class body over comment-masked code: each member's kind,
+name, modifiers, a one-line signature, and offsets from its docblock or
+attributes to its end, then promoted constructor properties, which can't move
+on their own. `memberRefs` finds what code uses through `$this->`, `self::`,
+`static::`, and `parent::`, which gives `dependencies` (a member's uses of other
+members) and `needsProtected` (private members that move while staying members
+use them).
+
+Moved code has to mean the same in another file. `classNameRefs` finds class
+names by where they can appear: `new`, `::`, `instanceof`, `catch`, attributes,
+anonymous classes' `extends` and `implements`, the types in function and closure
+headers (with default values blanked, so `= [A, B]` isn't read as types) and
+properties, and docblock tags. `requalify` resolves each through the source
+file's imports, then writes it for the target: short when the target's imports
+or namespace give the same class, with a new import when the short name is
+free, and in full otherwise. `importEdits` inserts imports in order among the
+file's own. Unqualified function and constant names aren't re-resolved.
+
+`planPullUp` returns edits for both files. The source loses each moved member's
+lines with `deletionLines` (its docblock, attributes, and one blank line), and
+imports only that code used. The target gets constants and properties after its
+own, and methods at the end, re-indented to its members' indentation; a method
+made abstract, or pulled into an interface, becomes its declaration without
+attributes, with `abstract` before the visibility as PSR-12 has it. Making one
+abstract adds `abstract` to the parent class. `pullUpProblems` reports clashes
+with the target's members (errors), and uses of members left behind, `parent::`
+calls, a parent that becomes abstract, and siblings missing an abstract method
+(warnings). Siblings come from `descendantsOf` in `src/refactor.ts`.
+`planExtractInterface` builds the interface file from a skeleton, so `requalify`
+and `importEdits` work on it as on any file, and edits the class's `implements`.
+
+`src/classrefactor.ts` finds the targets (`locate` tries the PSR-4 path, then
+Phpactor's workspace symbols) and runs `memberDialog`, which both refactorings
+share: rows with badges and a per-row switch, a colorized preview of the new
+code, and problems with fixes, all recomputed on each change. The dialog is
+modal and both files' text is checked again before applying, so the edits never
+land on changed text. A new file goes through `applyWorkspaceEdit`'s `create`
+operation, which uses `create_file` and so never replaces an existing file, and
+`linkUndo` deletes a created file when an undo empties it.
+
 ### Refactoring popups
 
 The refactorings ask their questions in `pick` (`src/palette.ts`) with a
@@ -4265,4 +4308,14 @@ side free of per-command knowledge and puts the logic where Node tests it.
 Connections are pooled because a TLS handshake per click is visible on a
 remote server. Keys load in batches instead of all at once, since `SCAN` to
 the end on a production keyspace of millions takes minutes.
+
+### 2026-09-27: Pull Members Up and Extract Interface plan text edits
+
+Phpactor has no Pull Members Up, and its class generation doesn't move members
+or rewrite names. Both refactorings plan plain text edits over the source, as
+the other refactorings here do, so the Refactoring Preview, one-step undo, and
+saving work unchanged. The member dialog recomputes the whole plan on every
+change, rather than validating the choice at the end, because it is cheap (a few
+regex passes over two files) and lets the dialog show the exact code and
+problems as you choose, as PhpStorm's does.
 

@@ -23,6 +23,7 @@ import { runAllRequests } from "./httpload";
 import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
 import { changeSignature, initRefactor, inline, introduceParameter, moveClass } from "./refactor";
+import { extractInterface, initClassRefactor, pullMembersUp } from "./classrefactor";
 import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
@@ -624,7 +625,7 @@ function showModel(path: string) {
 /** Starts (or restarts) the language servers for the open folder. */
 function restartServers() {
   if (!root) return;
-  startLsp(root, { ensureModel, markSaved, renamed, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) =>
+  startLsp(root, { ensureModel, markSaved, renamed, forget, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }).catch((e) =>
     status(`Language server failed: ${e}`),
   );
 }
@@ -1332,6 +1333,8 @@ const actions: Action[] = [
   { label: "Introduce Parameter…", keys: "Alt+Meta+P", run: () => introduceParameter(editor), editorOnly: true },
   { label: "Refactor This…", keys: "Ctrl+T", run: () => refactorThis(), editorOnly: true },
   { label: "Move Class…", keys: "F6", run: () => moveClass(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
+  { label: "Pull Members Up…", run: () => pullMembersUp(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
+  { label: "Extract Interface…", run: () => extractInterface(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
   { label: "Type Hierarchy", keys: "Ctrl+H", run: () => showTypeHierarchy(editor), editorOnly: true },
   { label: "Call Hierarchy", keys: "Ctrl+Alt+H", run: () => showCallHierarchy(editor), editorOnly: true },
   editorAction("Rename", "Shift+F6", "editor.action.rename"),
@@ -1761,6 +1764,7 @@ initHttpClient({
 });
 initComposer({ root: () => root, status });
 initRefactor({ root: () => root, status, ensureModel });
+initClassRefactor({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initGenerate({ status });

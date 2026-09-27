@@ -60,7 +60,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. There's no Pull Members Up or Extract Interface. |
+| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up and Extract Interface don't change the class's callers or type hints, don't re-resolve unqualified function and constant names in moved code, and can't move a promoted constructor property. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -554,7 +554,8 @@ with their shortcuts, as PhpStorm's **Refactor This** does. The refactorings'
 choices open in a small popup below the caret: press a row's number (1 to 9)
 or ⏎ to choose, or type to filter. The popup highlights in the editor what each
 choice would change. The list: Rename, Change
-Signature, the three Extracts, Introduce Field and Parameter, Inline, Move Class, and Safe Delete, plus
+Signature, the three Extracts, Introduce Field and Parameter, Inline, Pull Members Up, Extract Interface,
+Move Class, and Safe Delete, plus
 Phpactor's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
@@ -672,6 +673,59 @@ self` and `new static` inside them, and `parent::__construct()` in subclasses;
 a subclass's own constructor keeps its parameters, and a promoted property is
 renamed with Rename instead. Arguments one per line stay one per line. Calls it
 can't rewrite safely, such as ones that spread `...$args`, are left unchanged.
+
+
+## Pull members up and extract interface
+
+Both start from the class at the caret: choose **Pull Members Up…** or
+**Extract Interface…** from ⌃T or the **Refactor** menu. A dialog lists the
+class's members with their signatures, colored as in the editor.
+
+- Check the members to move. Click a row, or use ↑ and ↓ and Space; ⌘A
+  selects every member shown, and the filter box narrows a long list. A member
+  that can't move says why instead of offering a checkbox.
+- Below the list, the dialog shows the code the members become, and
+  warns about anything that would break. Where there's a fix, such as a method
+  that uses a property you left behind, a button applies it.
+- Click **Refactor**, or press ⏎, to apply the change and save the files. Click
+  **Preview** to see every changed line first in the **Refactoring Preview**.
+  One ⌘Z undoes it in every file.
+
+**Pull Members Up** moves members to a parent class, or declares them in an
+interface the class implements. Choose the target under **To**: the class's
+parents, nearest first, and its interfaces. Classes in `vendor` are listed but
+can't be chosen.
+
+- Constants, properties, and methods move with their docblocks and attributes.
+  Methods go at the end of the parent, and constants and properties after the
+  parent's own.
+- Check **abstract** on a method to declare it abstract in the parent and keep
+  its code in the class. The parent becomes `abstract`, and the dialog warns
+  about sibling classes that don't declare the method.
+- Pulling a method into an interface adds its declaration there; the class
+  keeps its code. Interfaces take public methods and constants only.
+- A private member that the class still uses becomes `protected`, marked in
+  the row. The dialog warns when a member you move uses one that stays, or
+  calls `parent::`, whose meaning changes one level up.
+- Class names in the moved code are rewritten for the parent's file: they keep
+  their short names where its imports allow, get a new `use` import, or are
+  written in full when a short name would mean another class. Imports the
+  class no longer uses are removed.
+
+**Extract Interface** creates an interface from the class's public methods and
+constants, and makes the class implement it.
+
+- Type the interface's name and namespace; the namespace field suggests the
+  project's namespaces. The file goes where `composer.json`'s PSR-4 map puts
+  that namespace, shown under the fields, or beside the class when the project
+  has no map.
+- Methods become declarations, with their docblocks unless you clear **Copy
+  docblocks**, and constants move to the interface.
+- The interface gets the imports its signatures need, and `declare(strict_types=1)`
+  when the class's file has it. The class gets `implements`, and a `use` import
+  when the interface is in another namespace.
+- When it's done, a notice offers to open the new interface. ⌘Z removes the
+  file along with the change to the class.
 
 ## Move class
 
@@ -2140,6 +2194,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/hierarchy.ts` | The type hierarchy view |
 | `src/safedelete.ts` | Safe Delete |
 | `src/refactor.ts` | Inline Variable and Change Signature |
+| `src/classrefactor.ts` | Pull Members Up and Extract Interface: the member dialog, targets, and applying the edits |
+| `src/classparse.ts` | Class members, their dependencies, moving class names between files, and the edits both refactorings make |
 | `src/refactorparse.ts` | Argument, parameter, declaration, and assignment parsing for the refactorings |
 | `src/signaturedialog.ts` | The Change Signature dialog |
 | `src/refactorpreview.ts` | The Refactoring Preview panel |

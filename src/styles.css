@@ -1360,6 +1360,59 @@ button.link:hover { text-decoration: underline; }
 #signature .buttons { display: flex; justify-content: flex-end; gap: 8px; }
 #signature .buttons button { padding: 5px 16px; }
 #signature .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
+
+/* Pull Members Up and Extract Interface: members to choose, the code they become, and what they'd break. */
+.refactor-dialog { width: min(860px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
+.refactor-dialog::backdrop { background: #0007; }
+.refactor-dialog form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 18px; max-height: 88vh; }
+.refactor-dialog h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.refactor-dialog h2 .muted { font: 500 13px var(--mono); margin-left: 6px; color: var(--muted); }
+.refactor-dialog .dialog-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; }
+.refactor-dialog label.field { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--muted); min-width: 200px; }
+.refactor-dialog label.field.grow { flex: 1; }
+.refactor-dialog label.field input, .refactor-dialog label.field select { font: 12.5px var(--mono); }
+.refactor-dialog .dialog-path { flex-basis: 100%; font: 11.5px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.refactor-dialog .dialog-path:empty { display: none; }
+.members-toolbar { display: flex; align-items: center; gap: 8px; }
+.members-toolbar input { flex: 1; min-width: 0; }
+.members-toolbar button, .dialog-problems button { padding: 3px 10px; font-size: 12px; border: 1px solid var(--input-border); border-radius: var(--radius); white-space: nowrap; }
+.members-toolbar button:hover, .dialog-problems button:hover { background: var(--hover); }
+.members-count { margin-left: 4px; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.members-list { flex-shrink: 1; min-height: 96px; max-height: 36vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.members-list:empty::after { content: attr(data-empty); display: block; padding: 14px; color: var(--faint); font-size: 12px; }
+.member-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 10px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
+.member-row:last-child { border-bottom: 0; }
+.member-row:hover { background: var(--hover); }
+.member-row.checked { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.member-row:focus-within { box-shadow: inset 2px 0 var(--accent); }
+.member-row.disabled { cursor: default; }
+.member-row.disabled .member-signature, .member-row.disabled .member-icon { opacity: 0.5; }
+.member-row input[type="checkbox"] { flex-shrink: 0; margin: 0; }
+.member-icon { flex-shrink: 0; font-size: 14px; }
+.member-icon.codicon-symbol-method { color: var(--purple); }
+.member-icon.codicon-symbol-field { color: var(--blue); }
+.member-icon.codicon-symbol-constant { color: var(--yellow); }
+.member-signature { flex: 1; min-width: 0; font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-row .badge { margin-right: 0; flex-shrink: 0; }
+.member-row .badge.protect { color: var(--orange); }
+.member-toggle { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.member-reason { flex-shrink: 0; max-width: 45%; font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.refactor-dialog .dialog-options { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+.refactor-dialog .dialog-options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.code-preview { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.code-preview[hidden] { display: none; }
+.code-preview .code-title { padding: 6px 12px; font-size: 11.5px; color: var(--muted); background: var(--chrome); border-bottom: 1px solid var(--border-subtle); }
+.code-preview pre { margin: 0; padding: 10px 12px; max-height: 24vh; overflow: auto; font: 12px/1.55 var(--mono); white-space: pre; }
+.dialog-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.dialog-problems:empty { display: none; }
+.dialog-problems li { display: flex; align-items: center; gap: 6px; }
+.dialog-problems li.error { color: var(--red); }
+.dialog-problems li.warning .codicon { color: var(--yellow); }
+.dialog-problems li button { margin-left: 4px; color: var(--text); }
+.refactor-dialog .buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.refactor-dialog .buttons button { padding: 5px 16px; }
+.refactor-dialog .buttons button:not(.primary) { border: 1px solid var(--input-border); border-radius: var(--radius); }
+.refactor-dialog .dialog-hint { margin-right: auto; font-size: 11.5px; color: var(--faint); }
 #signature .buttons button:not(.primary):hover:not(:disabled) { background: var(--hover); }
 
 /* Index Exclusions: the folders the index skips, and the scan's suggestions. */
@@ -1396,6 +1449,10 @@ button.link:hover { text-decoration: underline; }
 .refactor-preview del { background: color-mix(in srgb, var(--red) 22%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 70%, transparent); color: var(--muted); border-radius: 3px; padding: 0 1px; margin-right: 3px; }
 .refactor-preview ins { background: color-mix(in srgb, var(--green) 24%, transparent); text-decoration: none; border-radius: 3px; padding: 0 1px; }
 .refactor-preview .codicon-warning { color: var(--yellow); }
+.refactor-preview .line-delta { flex-shrink: 0; margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--faint); }
+.refactor-preview .line-delta.added { color: var(--green); }
+.refactor-preview .line-delta.removed { color: var(--red); }
+.refactor-preview .badge.new-file { color: var(--green); margin-right: 0; }
 .hierarchy-toolbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .hierarchy-toolbar button.primary:hover { background: var(--accent-hover); }
 

@@ -27,6 +27,8 @@ export type Host = {
   markSaved(path: string): void;
   /** Moves an open tab after a file is renamed on disk. */
   renamed(from: string, to: string): void;
+  /** Closes a deleted file's tab and drops its model. */
+  forget(path: string): void;
   /** Opens a file at a 1-based line. */
   openAt(path: string, line: number): void;
   /** Shows a status message; each source has its own slot, and "" clears it. */
@@ -285,7 +287,11 @@ async function saveModel(model: monaco.editor.ITextModel) {
  * it in the others too, and saves them all. A file edited after the refactoring leaves the group, since its
  * next undo is no longer the refactoring's.
  */
-function linkUndo(models: monaco.editor.ITextModel[]) {
+/**
+ * Makes one ⌘Z undo a refactoring in every file it edited. A file the refactoring created, and the undo empties,
+ * is deleted, so undoing Extract Interface leaves no empty file behind.
+ */
+function linkUndo(models: monaco.editor.ITextModel[], created: Set<string> = new Set()) {
   const group = new Set(models);
   if (group.size < 2) return;
   const listeners = [...group].map((model) =>
@@ -295,7 +301,11 @@ function linkUndo(models: monaco.editor.ITextModel[]) {
       listeners.forEach((l) => l.dispose());
       const others = [...group].filter((m) => m !== model && !m.isDisposed());
       for (const m of others) m.undo();
-      for (const m of [model, ...others]) saveModel(m).catch(() => {});
+      for (const m of [model, ...others]) {
+        const path = m.uri.fsPath;
+        if (created.has(path) && !m.getValue()) invoke("remove_path", { path }).then(() => host.forget(path), () => {});
+        else saveModel(m).catch(() => {});
+      }
       host.status(`Undid the refactoring in ${others.length + 1} files.`);
     }),
   );
@@ -306,6 +316,7 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
   const ops: (L.TextDocumentEdit | L.CreateFile | L.RenameFile | L.DeleteFile)[] =
     edit.documentChanges ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri, version: null }, edits }));
   const edited: monaco.editor.ITextModel[] = [];
+  const created = new Set<string>();
   for (const op of ops) {
     if (!("kind" in op)) {
       const model = await host.ensureModel(pathOf(op.textDocument.uri));
@@ -316,7 +327,19 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       await saveModel(model);
       edited.push(model);
     } else if (op.kind === "create") {
-      await invoke("write_file", { path: pathOf(op.uri), contents: "" });
+      // A new file never replaces one that exists, unless the edit asks to.
+      const path = pathOf(op.uri);
+      if (op.options?.overwrite) await invoke("write_file", { path, contents: "" });
+      else {
+        const made = await invoke("create_file", { path, contents: "" }).then(
+          () => true,
+          (e) => {
+            if (op.options?.ignoreIfExists) return false;
+            throw e;
+          },
+        );
+        if (made) created.add(path);
+      }
     } else if (op.kind === "rename") {
       const [from, to] = [pathOf(op.oldUri), pathOf(op.newUri)];
       await invoke("rename_path", { from, to });
@@ -325,7 +348,7 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       await invoke("remove_path", { path: pathOf(op.uri) });
     }
   }
-  linkUndo(edited);
+  linkUndo(edited, created);
 }
 
 // Servers can link to a location with this command, for example in code lenses.
