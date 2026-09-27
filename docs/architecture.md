@@ -1125,29 +1125,12 @@ a later undo there doesn't reach back into the refactoring.
 
 ### Type hierarchy
 
-Tusk's server has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
-builds the tree from requests it does support.
-
-The starting type comes from the cursor. On a capitalized word, the view asks
-the server for its definition and reads the type declared at that line; the name
-must match the word, so a constant or method doesn't count. Otherwise it takes
-the type declared at or above the cursor line in the current file.
-
-- **Supertypes**: `parseTypeDeclarations` in `src/phptypes.ts` reads every
-  type a file declares and resolves the names after `extends` and `implements`,
-  and the traits in `use` lines inside its body, through the file's
-  `namespace` and `use` statements. Each parent's file comes from a
-  workspace symbol search, matched on name and namespace.
-- **Subtypes**: `textDocument/implementation` at the type's name. The server
-  answers from its index with every descendant, so the tree keeps the ones
-  whose own declaration names the type, and deeper ones appear when you expand
-  their parent. The file gets a model (without a tab) for the request. The
-  server doesn't list a trait's users, so for a trait
-  a text search finds `use` lines naming it, and the tree keeps the types
-  whose declaration really uses it.
-
-Children load when a row expands, so a large hierarchy, such as `Model`'s,
-costs nothing until you open it.
+`src/hierarchy.ts` shows the tree that Tusk's server gives:
+`textDocument/prepareTypeHierarchy` for the starting type, then
+`typeHierarchy/supertypes` or `typeHierarchy/subtypes` for each row as it
+expands, so a large hierarchy, such as `Model`'s, costs nothing until you open
+it. See "Type and call hierarchy" under "Tusk's language server" for how the
+server answers.
 
 ### Generate
 
@@ -1171,23 +1154,11 @@ everywhere else.
 
 ### Call hierarchy
 
-The server has no `textDocument/prepareCallHierarchy` either, so
-`src/callhierarchy.ts` builds the tree the same way, reusing the type
-hierarchy's styles.
-
-- **Callers**: `callsOf` from `src/refactor.ts` (`tusk/memberReferences` for
-  methods, `textDocument/references` for functions).
-  Each reference is placed in the innermost method, constructor, or function
-  around it, from `textDocument/documentSymbol` of its file.
-- **Callees**: `callSites` in `src/phptypes.ts` finds the names followed by `(`
-  in the body, leaving out language constructs, declarations, `new`, and
-  variable calls. Each one gets `textDocument/definition`, and the declaration
-  around the answer is the callee. Definitions without a file (PHP's own
-  functions) are dropped, since they can't be opened.
-
-As with types, the starting point is what Go to Definition finds under the
-cursor, when that's a function of the same name; otherwise it's the function
-around the cursor. Rows load their children when expanded.
+`src/callhierarchy.ts` shows the tree that Tusk's server gives:
+`textDocument/prepareCallHierarchy`, then `callHierarchy/incomingCalls` or
+`callHierarchy/outgoingCalls` as each row expands, reusing the type
+hierarchy's styles. A caller with several calls gets a row for each call, so
+each row opens its call.
 
 ### HTTP client
 
@@ -3546,6 +3517,35 @@ when `vendor/filament/filament` exists.
 - **Demo app test:** a test marked `#[ignore]` mirrors the old PHP tests on
   the demo app. Build the app with `scripts/make-fixture.sh`, then run
   `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
+
+### Type and call hierarchy
+
+`features/hierarchy.rs` answers the LSP's type and call hierarchy requests.
+`lsp-types` has no capability field for type hierarchy, so
+`capabilities::server_json` adds `typeHierarchyProvider`. Each item's `data`
+names what it stands for (a type, a function, or a method by its declaring
+class), so the follow-up requests answer from the index rather than from
+positions an edit may have moved.
+
+- **Starting point:** the type, method, or function named under the cursor
+  (`new Foo` counts as `Foo`'s constructor), else the one the cursor is in. A
+  closure counts as the function around it.
+- **Supertypes:** the parent class, then the interfaces, then the traits, from
+  the class's metadata. PHP's own types have no file, and get a
+  `tusk://builtin/` address the editor doesn't open.
+- **Subtypes:** the types that name it directly as parent or interface
+  (Mago's `direct_classlike_descendants`), or, for a trait, the classes that
+  use it and whose parent doesn't. Library classes the project doesn't reach
+  aren't loaded, so they aren't listed.
+- **Incoming calls:** the references search, without declarations, grouped by
+  the method or function around each call; code outside one is listed by its
+  file (kind `File`). A method is identified by its declaring class, so calls
+  through subclasses count. A constructor's calls also include `new` of its
+  class and of subclasses that don't declare their own, and `new self`,
+  `new static`, and `new parent` in the files declaring those classes.
+- **Outgoing calls:** every function call, method call, and `new` inside the
+  item's range, resolved as Go to Definition resolves them. Callees without a
+  file (PHP's own functions) are left out.
 
 ### Extract Method
 

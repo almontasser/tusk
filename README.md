@@ -40,8 +40,8 @@ file to change when you add it.
 | --- | --- |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
-| Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed. Callees are found with Go to Definition on each call, so calls on a value whose type the analyzer can't infer are missed. |
+| Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
+| Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
@@ -793,13 +793,13 @@ type's name, such as `Model` in `extends Model` or a trait in `use HasFactory;`,
 the tab shows that type. Otherwise, it shows the class, interface, trait, or
 enum that the cursor is in.
 
-- **Subtypes** lists the classes that extend it or implement it, including
-  classes in `vendor`. For a trait, it lists the types that use it, in project
-  files only. Expand one to see its own subtypes.
+- **Subtypes** lists the classes that extend it or implement it directly,
+  including classes in `vendor`. For a trait, it lists the types that use it.
+  Expand one to see its own subtypes.
 - **Supertypes** lists its parent class, its interfaces, and its traits.
   Expand one to go further up.
 
-Click a type to open it. Types that the PHP index doesn't know are listed
+Click a type to open it. PHP's own types, such as `Countable`, are listed
 without a file.
 
 ## Generate code
@@ -825,8 +825,9 @@ Press ⌃⌥H in a PHP file to open the **Call Hierarchy** tab for the method or
 function called under the cursor, or else the one the cursor is in.
 
 - **Callers** lists the methods and functions that call it, one row per call.
-  Code outside a function, such as a route file, is listed by its file. Expand
-  a caller to see its own callers.
+  For a constructor, that includes `new`, `new self`, `new static`, and
+  `parent::__construct()`. Code outside a function, such as a route file, is
+  listed by its file. Expand a caller to see its own callers.
 - **Callees** lists the project's and packages' methods and functions it calls.
   PHP's own functions aren't listed.
 

@@ -222,11 +222,11 @@ pub fn run(connection: Connection) {
     let root = root_of(&params).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let options: Options =
         params.initialization_options.clone().and_then(|o| serde_json::from_value(o).ok()).unwrap_or_default();
-    let result = InitializeResult {
-        capabilities: capabilities::server(),
-        server_info: Some(ServerInfo { name: "tusk".into(), version: Some(env!("CARGO_PKG_VERSION").into()) }),
-    };
-    if connection.initialize_finish(id, serde_json::to_value(result).unwrap()).is_err() {
+    let result = serde_json::json!({
+        "capabilities": capabilities::server_json(),
+        "serverInfo": ServerInfo { name: "tusk".into(), version: Some(env!("CARGO_PKG_VERSION").into()) },
+    });
+    if connection.initialize_finish(id, result).is_err() {
         return;
     }
     let mut server = Server::new(connection.sender.clone(), root, options);

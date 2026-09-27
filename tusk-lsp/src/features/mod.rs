@@ -4,6 +4,7 @@ pub mod actions;
 pub mod completion;
 pub mod custom;
 pub mod folding;
+pub mod hierarchy;
 pub mod hover;
 pub mod inlay;
 pub mod links;
