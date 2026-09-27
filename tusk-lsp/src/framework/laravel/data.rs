@@ -51,9 +51,11 @@ impl Data<'_> {
     }
 
     fn script(&self, key: &str, template: &str, depends_on: &[&str]) -> Option<Arc<Value>> {
-        // A project PHP can't boot fails here, and the failure is cached like any result.
-        let script = format!("{BOOT}{}\n{}", body(GLOBAL), body(template));
-        self.0.php(&format!("laravel:{key}"), &script, &[], depends_on)
+        // An app without `vendor/autoload.php` and `bootstrap/app.php` boots through `artisan tinker` instead,
+        // as Laravel LSP does. A project PHP can't boot fails here, and the failure is cached like any result.
+        let bootable = self.root().join("vendor/autoload.php").is_file() && self.root().join("bootstrap/app.php").is_file();
+        let script = format!("{}{}\n{}", if bootable { BOOT } else { "<?php\n" }, body(GLOBAL), body(template));
+        self.0.php_script(&format!("laravel:{key}"), &script, &[], depends_on, !bootable)
     }
 
     pub fn routes(&self) -> Option<Arc<Value>> {
@@ -125,6 +127,26 @@ impl Data<'_> {
                 .flatten()
                 .filter(|e| e.file_type().is_some_and(|t| t.is_file()) && e.path().extension().is_none_or(|x| x != "php"))
                 .filter_map(|e| e.path().strip_prefix(&public).ok().map(|p| p.to_string_lossy().into_owned()))
+                .collect();
+            out.sort();
+            json!(out)
+        })
+    }
+
+    /// Files under `resources/` other than views and translations, relative to the root: what `@vite()` and
+    /// `Vite::asset()` usually name.
+    pub fn vite_files(&self) -> Arc<Value> {
+        let root = self.root().to_path_buf();
+        self.0.remember("laravel:vite-files", &["resources/"], || {
+            let resources = root.join("resources");
+            let mut out: Vec<String> = ignore::WalkBuilder::new(&resources)
+                .standard_filters(false)
+                .max_depth(Some(10))
+                .filter_entry(|e| !(e.depth() == 1 && matches!(e.file_name().to_str(), Some("views" | "lang"))))
+                .build()
+                .flatten()
+                .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+                .filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into_owned()))
                 .collect();
             out.sort();
             json!(out)

@@ -49,6 +49,7 @@ file to change when you add it.
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. |
 | PHPStan | When the project has `vendor/bin/phpstan`, it checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
+| Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
@@ -93,7 +94,9 @@ yourself. The first launch downloads the tools for your Mac's chip (about
 checks for newer versions at launch and every six hours. Sail support needs
 Docker, which Sail itself needs. The PHP language server is the app's own
 binary, started with `lsp`, so there's nothing to download for it. It runs
-Laravel's and Filament's PHP scripts with the `php` on your `PATH`.
+Laravel's and Filament's PHP scripts with the project's PHP: Herd's or Valet's
+PHP for the site, Sail's, Lando's, or DDEV's container, else the `php` on your
+`PATH`.
 
 ## Run in development
 
@@ -1325,11 +1328,24 @@ arrive, before you type.
 
 ## Laravel features
 
-In Laravel projects (folders with an `artisan` file), the app also runs Laravel
-LSP. It adds completion, hover, go to definition, links, and diagnostics for
-config keys, routes, views, translations, environment variables, middleware,
-and container bindings, in PHP and Blade files. For example, ⌘-click on
-`view('welcome')` opens `resources/views/welcome.blade.php`.
+In Laravel projects (folders with an `artisan` file), the PHP server adds
+completion, hover, go to definition, links, and diagnostics for config keys,
+routes, views, translations, environment variables, middleware, gates and
+policies, container bindings, assets, Vite and Mix files, storage disks,
+Inertia pages, validation rules, and Eloquent attributes and relations, in PHP
+and Blade files. For example, ⌘-click on `view('welcome')` opens
+`resources/views/welcome.blade.php`.
+
+- **Eloquent** attributes complete through query chains, such as
+  `User::query()->where('`, `$user->posts()->where('`, and a closure passed
+  to `whereHas('author', …)`.
+- **Gates** match the model you pass: `Gate::allows('update', $post)` links to
+  the policy for `$post`'s class, and warns when no policy for it defines the
+  ability.
+- **Quick fixes** create a missing view (`resources/views/…blade.php`) or
+  Inertia page, add a missing variable to `.env` (or the value from
+  `.env.example`), and, in `.env` files, add a `VITE_` copy of the selected
+  variables. Each opens what it changed.
 
 Translation keys in `__()`, `trans()`, `trans_choice()`, `@lang()`, and
 `Lang::get()` complete from `lang/*/*.php`, `lang/*.json`, and packages'

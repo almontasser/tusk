@@ -3,10 +3,10 @@
 
 pub mod filament;
 pub mod laravel;
+pub mod php;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -49,6 +49,12 @@ pub struct Call {
     pub classes: Vec<String>,
     /// Each argument's name if named, and its value if it's a plain string.
     pub arguments: Vec<(Option<String>, Option<String>)>,
+    /// The classes each argument names or holds: `Post::class` names `Post`, and `$post` holds its inferred
+    /// type. An array argument counts as its first element.
+    pub argument_classes: Vec<Vec<String>>,
+    /// The classes in the receiver type's type arguments, such as `User` for `Builder<User>` or `Post` for
+    /// `HasMany<Post, User>`, in order.
+    pub type_args: Vec<String>,
     /// The span of the whole call.
     pub span: (u32, u32),
 }
@@ -106,7 +112,7 @@ fn plain_string(ctx: &Ctx<'_>, expr: &Expression<'_>) -> Option<String> {
 }
 
 /// Describes the call node `node`, if it's one.
-fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<Call> {
+pub(crate) fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<Call> {
     let resolver = ctx.resolver();
     let span = (node.span().start.offset, node.span().end.offset);
     let args = |list: &mago_syntax::cst::ArgumentList<'_>| -> Vec<(Option<String>, Option<String>)> {
@@ -119,38 +125,49 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
             .collect()
     };
     let name_of = |selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>| text_of(ctx, (selector.span().start.offset, selector.span().end.offset));
+    let arg_classes = |list: &mago_syntax::cst::ArgumentList<'_>| -> Vec<Vec<String>> {
+        list.arguments
+            .iter()
+            .map(|a| match a {
+                Argument::Positional(p) => expression_classes(ctx, p.value, path),
+                Argument::Named(n) => expression_classes(ctx, n.value, path),
+            })
+            .collect()
+    };
+    let method = |object: &Expression<'_>, selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>, list: &mago_syntax::cst::ArgumentList<'_>| {
+        let (classes, type_args) = receiver(ctx, object, path);
+        Call { kind: CallKind::Method, name: name_of(selector), classes, arguments: args(list), argument_classes: arg_classes(list), type_args, span }
+    };
     Some(match node {
         Node::FunctionCall(c) => {
             if let Expression::Variable(v) = c.function {
                 let var = text_of(ctx, (v.span().start.offset, v.span().end.offset));
-                return Some(Call { kind: CallKind::Closure, name: var, classes: vec![], arguments: args(&c.argument_list), span });
+                return Some(Call {
+                    kind: CallKind::Closure,
+                    name: var,
+                    classes: vec![],
+                    arguments: args(&c.argument_list),
+                    argument_classes: arg_classes(&c.argument_list),
+                    type_args: vec![],
+                    span,
+                });
             }
             let at = c.function.span().end.offset.saturating_sub(1);
             let name = match resolver.at(at)?.symbols.into_iter().next()? {
                 Symbol::Function(f) => f,
                 _ => return None,
             };
-            Call { kind: CallKind::Function, name, classes: vec![], arguments: args(&c.argument_list), span }
+            Call { kind: CallKind::Function, name, classes: vec![], arguments: args(&c.argument_list), argument_classes: arg_classes(&c.argument_list), type_args: vec![], span }
         }
-        Node::MethodCall(c) => Call {
-            kind: CallKind::Method,
-            name: name_of(&c.method),
-            classes: resolver.classes_of(c.object),
-            arguments: args(&c.argument_list),
-            span,
-        },
-        Node::NullSafeMethodCall(c) => Call {
-            kind: CallKind::Method,
-            name: name_of(&c.method),
-            classes: resolver.classes_of(c.object),
-            arguments: args(&c.argument_list),
-            span,
-        },
+        Node::MethodCall(c) => method(c.object, &c.method, &c.argument_list),
+        Node::NullSafeMethodCall(c) => method(c.object, &c.method, &c.argument_list),
         Node::StaticMethodCall(c) => Call {
             kind: CallKind::Static,
             name: name_of(&c.method),
             classes: resolver.classes_of_class_expr(c.class, path),
             arguments: args(&c.argument_list),
+            argument_classes: arg_classes(&c.argument_list),
+            type_args: vec![],
             span,
         },
         Node::Instantiation(i) => Call {
@@ -158,6 +175,8 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
             name: String::new(),
             classes: resolver.classes_of_class_expr(i.class, path),
             arguments: i.argument_list.as_ref().map(args).unwrap_or_default(),
+            argument_classes: i.argument_list.as_ref().map(arg_classes).unwrap_or_default(),
+            type_args: vec![],
             span,
         },
         Node::Attribute(a) => {
@@ -176,10 +195,88 @@ fn call_of(ctx: &Ctx<'_>, node: &Node<'_, '_>, path: &[Node<'_, '_>]) -> Option<
                         .collect()
                 })
                 .unwrap_or_default();
-            Call { kind: CallKind::Attribute, name: String::new(), classes: vec![fqn], arguments, span }
+            let argument_classes = a
+                .argument_list
+                .as_ref()
+                .map(|l| {
+                    l.arguments
+                        .iter()
+                        .map(|a| match a {
+                            PartialArgument::Positional(p) => expression_classes(ctx, p.value, path),
+                            PartialArgument::Named(n) => expression_classes(ctx, n.value, path),
+                            _ => vec![],
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Call { kind: CallKind::Attribute, name: String::new(), classes: vec![fqn], arguments, argument_classes, type_args: vec![], span }
         }
         _ => return None,
     })
+}
+
+/// The classes a method call's receiver can be, and the classes in its type's type arguments. A receiver the
+/// analyzer can't type, such as the result of a static call Laravel forwards through `__callStatic`
+/// (`User::where(...)->orderBy(...)`), counts as the class at the root of its chain, as Laravel LSP reads it.
+fn receiver(ctx: &Ctx<'_>, object: &Expression<'_>, path: &[Node<'_, '_>]) -> (Vec<String>, Vec<String>) {
+    let resolver = ctx.resolver();
+    let classes = resolver.classes_of(object);
+    if !classes.is_empty() {
+        return (classes, type_arguments(ctx, object));
+    }
+    let mut expr = object;
+    loop {
+        expr = match expr {
+            Expression::Call(mago_syntax::cst::Call::Method(c)) => c.object,
+            Expression::Call(mago_syntax::cst::Call::NullSafeMethod(c)) => c.object,
+            Expression::Call(mago_syntax::cst::Call::StaticMethod(c)) => return (resolver.classes_of_class_expr(c.class, path), vec![]),
+            Expression::Parenthesized(p) => p.expression,
+            _ => return (vec![], vec![]),
+        };
+        let classes = resolver.classes_of(expr);
+        if !classes.is_empty() {
+            return (classes, type_arguments(ctx, expr));
+        }
+    }
+}
+
+/// The classes in the type arguments of an expression's type, such as `User` in `Builder<User>`.
+fn type_arguments(ctx: &Ctx<'_>, expr: &Expression<'_>) -> Vec<String> {
+    use mago_codex::ttype::atomic::TAtomic;
+    use mago_codex::ttype::atomic::object::TObject;
+    let span = expr.span();
+    let Some(t) = ctx.analysis().type_of(span.start.offset, span.end.offset) else { return vec![] };
+    let codebase = &ctx.index.codebase;
+    let mut out: Vec<String> = vec![];
+    for atomic in t.types.iter() {
+        let TAtomic::Object(TObject::Named(named)) = atomic else { continue };
+        for param in named.type_parameters.iter().flatten() {
+            for class in crate::types::class_names(param, codebase) {
+                if !out.contains(&class) {
+                    out.push(class);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The classes an argument names (`Post::class`) or holds (`$post`), or its first element's for an array.
+fn expression_classes(ctx: &Ctx<'_>, expr: &Expression<'_>, path: &[Node<'_, '_>]) -> Vec<String> {
+    match expr {
+        Expression::Access(mago_syntax::cst::Access::ClassConstant(a))
+            if matches!(&a.constant, mago_syntax::cst::ClassLikeConstantSelector::Identifier(id) if id.value.eq_ignore_ascii_case(b"class")) =>
+        {
+            ctx.resolver().classes_of_class_expr(a.class, path)
+        }
+        Expression::Array(a) => match a.elements.iter().next() {
+            Some(mago_syntax::cst::ArrayElement::Value(v)) => expression_classes(ctx, v.value, path),
+            Some(mago_syntax::cst::ArrayElement::KeyValue(kv)) => expression_classes(ctx, kv.value, path),
+            _ => vec![],
+        },
+        Expression::Literal(_) => vec![],
+        other => ctx.resolver().classes_of(other),
+    }
 }
 
 /// The string argument a string literal at the end of `path` is, if any.
@@ -269,6 +366,8 @@ pub fn string_arg_at(ctx: &Ctx<'_>, offset: u32) -> Option<StringArg> {
 pub struct State {
     root: PathBuf,
     cache: Mutex<HashMap<String, Cached>>,
+    /// The project's PHP, found the first time a script runs.
+    php: std::sync::OnceLock<php::Php>,
 }
 
 struct Cached {
@@ -278,12 +377,9 @@ struct Cached {
     at: Instant,
 }
 
-/// How long one PHP script may run.
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
-
 impl State {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, cache: Mutex::new(HashMap::new()) }
+        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new() }
     }
 
     pub fn root(&self) -> &Path {
@@ -291,13 +387,20 @@ impl State {
     }
 
     /// The JSON a PHP script prints, run once and cached under `key` until a path in `depends_on` changes.
-    /// The script runs in the project's root with `php`, and its arguments follow it. `None` if PHP fails.
+    /// The script runs in the project's root with the project's PHP, and its arguments follow it. `None` if
+    /// PHP fails.
     pub fn php(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str]) -> Option<Arc<Value>> {
+        self.php_script(key, script, args, depends_on, false)
+    }
+
+    /// Like [`State::php`], optionally through `artisan tinker`, for an app that can't boot on its own.
+    pub fn php_script(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str], tinker: bool) -> Option<Arc<Value>> {
         if let Some(c) = self.cache.lock().get(key) {
             // A failed run is cached as null, so it isn't retried until a file it depends on changes.
             return (!c.value.is_null()).then(|| c.value.clone());
         }
-        let value = Arc::new(run_php(&self.root, script, args).unwrap_or(Value::Null));
+        let php = self.php.get_or_init(|| php::detect(&self.root));
+        let value = Arc::new(php::run(&self.root, php, script, args, tinker).unwrap_or(Value::Null));
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
         self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
         (!value.is_null()).then_some(value)
@@ -336,55 +439,6 @@ impl State {
     pub fn age(&self, key: &str) -> Option<Duration> {
         self.cache.lock().get(key).map(|c| c.at.elapsed())
     }
-}
-
-/// Writes `script` to a temporary file and runs it with PHP, returning the JSON it prints. The output may be
-/// preceded by noise such as deprecation notices, so parsing starts at the first `{` or `[`.
-fn run_php(root: &Path, script: &str, args: &[&str]) -> Option<Value> {
-    let dir = std::env::temp_dir().join("tusk-lsp");
-    std::fs::create_dir_all(&dir).ok()?;
-    // Named by content, so concurrent servers share it and a new build's script replaces the old.
-    let hash = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        script.hash(&mut h);
-        h.finish()
-    };
-    let file = dir.join(format!("script-{hash:016x}.php"));
-    if !file.exists() {
-        std::fs::write(&file, script).ok()?;
-    }
-    let mut child = Command::new("php")
-        .arg(&file)
-        .args(args)
-        .current_dir(root)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    // Read the output as it comes: a script that prints more than the pipe holds waits until it's read.
-    let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut out = vec![];
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
-        out
-    });
-    let started = Instant::now();
-    loop {
-        if child.try_wait().ok()?.is_some() {
-            break;
-        }
-        if started.elapsed() > SCRIPT_TIMEOUT {
-            let _ = child.kill();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let output = reader.join().ok()?;
-    let text = String::from_utf8_lossy(&output);
-    let start = text.find(['{', '['])?;
-    serde_json::from_str(&text[start..]).ok()
 }
 
 /// Completions inside a string argument.

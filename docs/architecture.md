@@ -3577,11 +3577,40 @@ an `artisan` file.
   `Illuminate\Routing\Redirector`. Facade calls are static calls on the
   facade, so each pattern lists the facade, its short alias, and the class
   behind it.
+- **Untyped chains:** a receiver the analyzer can't type, such as a call
+  Laravel forwards through `__callStatic` (`User::where(...)->orderBy(...)`),
+  counts as the class at the root of its chain, as Laravel LSP reads it. A call
+  also keeps its receiver type's type arguments (`User` in `Builder<User>`,
+  `Post` in `HasMany<Post, User>`) and each argument's classes (`Post::class`,
+  or a typed `$post`).
+- **Eloquent's model:** the receiver's class, else a model in its type
+  arguments, else, inside a closure passed to a relation method
+  (`whereHas('author', fn ($q) => …)`), the relation's related model from the
+  models script.
+- **Gates:** an ability check with a second argument (other than `has`)
+  matches policies by the model class of that argument; with a known class and
+  no policy for it, it's reported as `Policy/Model match [x] not found.`
 - **Facts about the app:** Laravel LSP's PHP scripts (`php/laravel/`,
   embedded in the binary) run after the app boots, with the project root as
   the working directory. `State` caches each result until a file it depends
   on changes. A script that fails caches a failure. Features built on it then
   report no problems, rather than flag every call as Laravel LSP did.
+- **Which PHP:** `framework/php.rs` detects it once per server, in Laravel
+  LSP's order: `herd which-php`, `valet which-php`, then Sail (`sail ps`),
+  Lando, and DDEV when the project has their files, then `php -r 'echo
+  PHP_BINARY;'`. A local PHP runs the script from the system's temporary
+  folder. A container sees only the project, so its script goes in
+  `storage/framework/lsp-<16 hex>.php` and is removed after the run, and the
+  container's paths in the output (from `getcwd()` inside it) are mapped back
+  to the project's. An app without `vendor/autoload.php` and
+  `bootstrap/app.php` runs the scripts through `artisan tinker --execute`.
+- **Quick fixes:** `laravel/actions.rs` offers Laravel LSP's fixes for the
+  problems at the cursor, which it finds itself rather than from the editor's
+  context: create a missing view or Inertia page, add a variable to `.env`
+  (after the variables sharing its prefix) or the value from `.env.example`,
+  and, in `.env` files, `VITE_` copies of the selected variables. They carry
+  their edit and the editor's `phpEditor.open` command, which the client runs
+  itself. `.env` files have a `dotenv` language so the server sees them.
 - **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
   pages, and controller actions (read from `app/Http/Controllers`).
 - **Blade:** a view becomes "virtual PHP" of the same length.
@@ -3602,13 +3631,17 @@ an `artisan` file.
   - A class name passed to `app()` isn't reported as a missing binding.
   - `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, and
     `@livewire` are recognized.
-- **Not ported:**
-  - Code actions: create a missing view or Inertia page, add a variable to
-    `.env`.
-  - Matching gate abilities by model class.
-  - Eloquent completion through a query builder chain, since the analyzer's
-    class list drops the builder's model type.
-  - The custom `laravel/data` request and the Pest helper file.
+  - `@vite(...)` and `Vite::asset()` complete files under `resources/`, link
+    to them, and report a file that doesn't exist (code `vite`).
+  - A gate's model can come from a typed variable, not only `X::class`.
+  - A link's `#L<line>` opens at the line: Monaco reads the fragment as a
+    selection without an end, which the editor opener turns into a position.
+- **Left out on purpose:**
+  - The Pest helper file: it would be written into the project, and the
+    functions it declares would duplicate Pest's own in the index. Pest's
+    `$this` problems are filtered in `diagnostics.ts` instead.
+  - The `laravel/data` request: VS Code's pickers use it, and Tusk's route
+    list needs `artisan route:list`'s fields.
 
 ### Tests
 

@@ -3,15 +3,46 @@ use serde_json::json;
 use super::*;
 use crate::features::{with_ctx, with_ctx_at};
 use crate::testing::{Fixture, uri};
+use lsp_types::{DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp};
 
 /// Enough of Laravel's classes and helpers for the analyzer to type the calls.
 const STUBS: &str = r#"<?php
 namespace Illuminate\Routing { class Redirector { public function route($name, $parameters = []) {} } class Router {} class UrlGenerator {} }
 namespace Illuminate\Http { class Request { public function routeIs(...$patterns) {} public function validate(array $rules) {} } }
-namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} }
+namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} class Vite {} }
 namespace Illuminate\Foundation\Http { class FormRequest {} }
-namespace Illuminate\Database\Eloquent { class Model {} }
-namespace App\Models { class User extends \Illuminate\Database\Eloquent\Model {} }
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+    }
+    /** @template TModel of Model */
+    class Builder {
+        /** @return $this */
+        public function where($column, $operator = null, $value = null) {}
+        /** @return $this */
+        public function orderBy($column) {}
+        /** @return $this */
+        public function whereHas($relation, ?\Closure $callback = null) {}
+    }
+}
+namespace Illuminate\Database\Eloquent\Relations {
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     */
+    class HasMany {
+        /** @return $this */
+        public function where($column, $operator = null, $value = null) {}
+    }
+}
+namespace App\Models {
+    class User extends \Illuminate\Database\Eloquent\Model {
+        /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Post, $this> */
+        public function posts() {}
+    }
+    class Post extends \Illuminate\Database\Eloquent\Model {}
+}
 namespace {
     function route($name, $parameters = [], $absolute = true) {}
     function redirect($to = null): \Illuminate\Routing\Redirector {}
@@ -22,6 +53,7 @@ namespace {
     function trans_choice($key, $number, array $replace = [], $locale = null) {}
     function asset($path) {}
     function storage_path($path = '') {}
+    function inertia($component = null, $props = []) {}
 }
 "#;
 
@@ -62,7 +94,13 @@ fn fixture(file: &str, text: &str) -> Fixture {
     state.seed("laravel:middleware", json!({"auth": {"class": "App\\Http\\Middleware\\Authenticate", "path": "app/Http/Middleware/Authenticate.php", "line": 9, "parameters": "guards...", "groups": []}}));
     state.seed("laravel:blade-components", json!({"components": {"alert": {"isVendor": false, "paths": ["resources/views/components/alert.blade.php"], "props": "@props(['type'])"}, "flux::button": {"isVendor": true, "paths": ["vendor/flux/button.blade.php"], "props": []}}, "prefixes": ["flux"]}));
     state.seed("laravel:blade-directives", json!([{"name": "money", "hasParams": true}]));
-    state.seed("laravel:models", json!({"models": {"App\\Models\\User": {"attributes": [{"name": "email", "fillable": true, "cast": null}, {"name": "full_name", "fillable": false, "cast": "accessor"}], "relations": [{"name": "posts"}]}}}));
+    state.seed(
+        "laravel:models",
+        json!({"models": {
+            "App\\Models\\User": {"attributes": [{"name": "email", "fillable": true, "cast": null}, {"name": "full_name", "fillable": false, "cast": "accessor"}], "relations": [{"name": "posts", "related": "App\\Models\\Post"}]},
+            "App\\Models\\Post": {"attributes": [{"name": "title", "fillable": true, "cast": null}], "relations": [{"name": "author", "related": "App\\Models\\User"}]},
+        }}),
+    );
     fx
 }
 
@@ -146,6 +184,21 @@ fn completes_validation_rules_and_eloquent_attributes() {
 }
 
 #[test]
+fn completes_eloquent_attributes_through_builder_chains() {
+    let user = vec!["email".to_string()];
+    let post = vec!["title".to_string()];
+    // A builder's model comes from its type argument.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::query()->where('<|>');")), user);
+    // A chain the analyzer can't type counts as its root's class.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::where('email', 1)->orderBy('<|>');")), user);
+    // A relation's related model.
+    assert_eq!(labels(&complete("t.php", "<?php function f(\\App\\Models\\User $u) { $u->posts()->where('<|>'); }")), post);
+    // A closure passed to a relation method queries the relation's model.
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\Post::whereHas('author', fn ($q) => $q->where('<|>'));")), user);
+    assert_eq!(labels(&complete("t.php", "<?php \\App\\Models\\User::query()->whereHas('posts', function ($q) { $q->where('<|>'); });")), post);
+}
+
+#[test]
 fn reports_unknown_names_and_skips_what_it_cant_check() {
     let found = problems(
         "t.php",
@@ -165,6 +218,86 @@ fn reports_unknown_names_and_skips_what_it_cant_check() {
     // Facts that failed to load report nothing: no assets were seeded, and asset() has no PHP behind it,
     // but auth has no data at all.
     assert!(problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Gate::allows('edit');").is_empty());
+}
+
+#[test]
+fn completes_and_checks_vite_assets() {
+    let fx = fixture("resources/views/app.blade.php", "<head>\n    @vite(['resources/css/app.css', '<|>'])\n</head>\n");
+    fx.snap.framework.seed("laravel:vite-files", json!(["resources/css/app.css", "resources/js/app.js"]));
+    let at = fx.at();
+    let items = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| crate::framework::completion(ctx, ctx.offset(at.position))).flatten().unwrap();
+    assert_eq!(labels(&items), vec!["resources/css/app.css", "resources/js/app.js"]);
+    // The fixture's files aren't on disk, so each named file is missing.
+    let found = problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Vite::asset('resources/images/logo.png');");
+    assert_eq!(found, vec![("vite".into(), "Vite asset [resources/images/logo.png] not found.".into())]);
+}
+
+#[test]
+fn offers_to_create_what_a_name_is_missing() {
+    let fx = fixture("t.php", "<?php\nview('admin.users.index');\nenv('NOPE');\ninertia('Users/Show');\n");
+    fx.snap.framework.seed("laravel:inertia", json!({"page_paths": ["resources/js/Pages"], "page_extensions": ["vue"]}));
+    fx.snap.framework.seed("laravel:inertia-pages", json!({"pages": {"Home": "resources/js/Pages/Home.tsx"}, "paths": ["resources/js/Pages"], "extensions": ["vue"]}));
+    let actions = with_ctx(&fx.snap, &uri("t.php"), |ctx| actions::code_actions(ctx, Range { start: Position::new(0, 0), end: Position::new(4, 0) })).unwrap();
+    let summary: Vec<(String, String, Vec<serde_json::Value>)> = actions
+        .iter()
+        .map(|a| {
+            let Some(DocumentChanges::Operations(ops)) = &a.edit.as_ref().unwrap().document_changes else { panic!() };
+            let created = ops.iter().find_map(|o| match o {
+                DocumentChangeOperation::Op(ResourceOp::Create(c)) => Some(c.uri.as_str().to_string()),
+                _ => None,
+            });
+            let command = a.command.as_ref().unwrap();
+            assert_eq!(command.command, "phpEditor.open");
+            (a.title.clone(), created.unwrap(), command.arguments.clone().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("Create missing view".into(), "file:///project/resources/views/admin/users/index.blade.php".into(), vec![json!("file:///project/resources/views/admin/users/index.blade.php"), json!(1)]),
+            ("Add variable to .env".into(), "file:///project/.env".into(), vec![json!("file:///project/.env"), json!(1)]),
+            // The extension the existing pages use.
+            ("Create resources/js/Pages/Users/Show.tsx".into(), "file:///project/resources/js/Pages/Users/Show.tsx".into(), vec![json!("file:///project/resources/js/Pages/Users/Show.tsx"), json!(1)]),
+        ]
+    );
+}
+
+#[test]
+fn places_new_env_variables_by_their_prefix() {
+    let env = "APP_NAME=Tusk\nAPP_ENV=local\n\nDB_HOST=127.0.0.1\n";
+    assert_eq!(actions::env_insertion(env, "APP_KEY="), (2, "APP_KEY=\n".into()));
+    assert_eq!(actions::env_insertion(env, "MAIL_HOST="), (4, "\nMAIL_HOST=\n".into()));
+    assert_eq!(actions::env_insertion("", "X="), (0, "X=\n".into()));
+}
+
+#[test]
+fn turns_env_variables_into_vite_ones() {
+    let fx = Fixture::new(&[(".env", "APP_NAME=Tusk\nPUSHER_KEY=abc\nVITE_APP_NAME=\"${APP_NAME}\"\n")]);
+    fx.snap.framework.seed("laravel:active", json!(true));
+    let actions = with_ctx(&fx.snap, &uri(".env"), |ctx| actions::code_actions(ctx, Range { start: Position::new(0, 0), end: Position::new(1, 5) })).unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].title, "Create Vite env variable from \"PUSHER_KEY\"");
+    let changes = &actions[0].edit.as_ref().unwrap();
+    let Some(DocumentChanges::Operations(ops)) = &changes.document_changes else { panic!() };
+    let DocumentChangeOperation::Edit(e) = &ops[0] else { panic!() };
+    let OneOf::Left(edit) = &e.edits[0] else { panic!() };
+    assert_eq!((edit.range.start.line, edit.new_text.as_str()), (3, "\nVITE_PUSHER_KEY=\"${PUSHER_KEY}\"\n"));
+}
+
+#[test]
+fn matches_policies_to_the_calls_model() {
+    let text = "<?php\nuse Illuminate\\Support\\Facades\\Gate;\nfunction f(\\App\\Models\\Post $post, $thing) {\n    Gate::allows('update', $post);\n    Gate::allows('update', \\App\\Models\\User::class);\n    Gate::allows('update', $thing);\n    Gate::has('update');\n    Gate::allows('nope');\n}\n";
+    let fx = fixture("t.php", text);
+    fx.snap.framework.seed(
+        "laravel:auth",
+        json!({"policies": {"update": [{"policy": "App\\Policies\\PostPolicy", "uri": "app/Policies/PostPolicy.php", "line": 20, "model": "\\App\\Models\\Post"}]}}),
+    );
+    let (found, links) = with_ctx(&fx.snap, &uri("t.php"), |ctx| (diagnostics(ctx), document_links(ctx))).unwrap();
+    let found: Vec<(u32, String)> = found.into_iter().map(|d| (d.range.start.line, d.message)).collect();
+    assert_eq!(found, vec![(4, "Policy/Model match [update] not found.".into()), (7, "Policy [nope] not found.".into())]);
+    // A link needs exactly one matching policy: the typed `$post` and `has()` have it; an untyped model doesn't.
+    let lines: Vec<u32> = links.iter().map(|l| l.range.start.line).collect();
+    assert_eq!(lines, vec![3, 6]);
 }
 
 #[test]

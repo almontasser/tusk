@@ -5,6 +5,7 @@
 //! a call on `Illuminate\Routing\Redirector`. Facade calls are static calls on the facade class, so patterns
 //! list the facade, its short alias, and the class behind it.
 
+pub mod actions;
 pub mod blade;
 mod data;
 mod tables;
@@ -47,6 +48,8 @@ enum Kind {
     Inertia,
     /// A file under a path helper's folder, such as `storage_path('logs/x.log')`.
     Path,
+    /// A file Vite builds or serves, relative to the root: `@vite('resources/js/app.js')`.
+    Vite,
 }
 
 fn facade(name: &str) -> [String; 2] {
@@ -204,6 +207,12 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
     }
     if s.function(PATH_HELPERS, &[0]) {
         return (!in_array).then_some(Kind::Path);
+    }
+    if s.function(&["@vite"], &[0]) {
+        return list_ok(Kind::Vite);
+    }
+    if s.facade(&["asset", "content"], "Vite", &["Illuminate\\Foundation\\Vite"], &[0]) {
+        return (!in_array).then_some(Kind::Vite);
     }
     None
 }
@@ -468,6 +477,17 @@ fn entries(kind: Kind, data: &Data<'_>) -> Option<Vec<Entry>> {
             .map(|a| Entry::new(a, CompletionItemKind::ENUM))
             .collect(),
         Kind::Path => vec![],
+        Kind::Vite => data
+            .vite_files()
+            .as_array()?
+            .iter()
+            .filter_map(|p| p.as_str())
+            .map(|p| {
+                let mut e = Entry::new(p, CompletionItemKind::FILE);
+                e.target = Some((data.abs(p), 1));
+                e
+            })
+            .collect(),
     })
 }
 
@@ -540,6 +560,15 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
             file.is_file().then_some((file, 1))
         }
         Kind::Route if arg.value.contains('*') => None,
+        Kind::Vite => {
+            let file = data.abs(&arg.value);
+            file.is_file().then_some((file, 1))
+        }
+        // Only when one policy matches the call's model.
+        Kind::Auth => match matching_policies(arg, data).as_slice() {
+            [only] => Some((data.abs(str_of(&only["uri"])?), line_of(&only["line"]))),
+            _ => None,
+        },
         Kind::Translation => {
             // The locale argument's, if it's a plain string.
             let t = data.translations()?;
@@ -555,6 +584,28 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
         _ => {
             let entries = entries(kind, data)?;
             find(kind, &entries, &arg.value)?.target.clone()
+        }
+    }
+}
+
+/// The model an ability check is about: `None` when the call needs none (`Gate::has('x')`, or no second
+/// argument), else the class of its second argument, `Post::class` or a `$post` the analyzer types, if known.
+fn auth_model(arg: &StringArg) -> Option<Option<String>> {
+    let call = &arg.call;
+    let requires = matches!(call.kind, CallKind::Function | CallKind::Method | CallKind::Static) && call.name != "has" && call.arguments.len() > 1;
+    requires.then(|| call.argument_classes.get(1).and_then(|c| c.first().cloned()))
+}
+
+/// The policies that define `ability` for the call's model, as `{policy, uri, line, model}`.
+fn matching_policies(arg: &StringArg, data: &Data<'_>) -> Vec<Value> {
+    let Some(auth) = data.auth() else { return vec![] };
+    let all = auth["policies"][arg.value.as_str()].as_array().cloned().unwrap_or_default();
+    match auth_model(arg) {
+        None => all,
+        Some(None) => vec![],
+        Some(Some(class)) => {
+            let same = |m: &str| m.trim_start_matches('\\').eq_ignore_ascii_case(class.trim_start_matches('\\'));
+            all.into_iter().filter(|p| p["model"].as_str().is_some_and(same)).collect()
         }
     }
 }
@@ -579,6 +630,8 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
     }
     let found = match kind {
         Kind::ControllerAction => action_route(v, data).is_some(),
+        // A Vite input may be anywhere in the project, not only in `resources/`.
+        Kind::Vite => data.abs(v).is_file(),
         _ => find(kind, entries, v).is_some(),
     };
     let (code, message) = match kind {
@@ -593,6 +646,11 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Translation if !looks_like_translation_key(v) => return None,
         Kind::Translation => ("translation", format!("Translation [{v}] not found.")),
         Kind::Middleware => ("middleware", format!("Middleware [{v}] not found.")),
+        // A known ability that no policy for the call's model defines.
+        Kind::Auth if found => {
+            let model_known = matches!(auth_model(arg), Some(Some(_)));
+            return (model_known && matching_policies(arg, data).is_empty()).then(|| ("auth", format!("Policy/Model match [{v}] not found.")));
+        }
         Kind::Auth => ("auth", format!("Policy [{v}] not found.")),
         // A class name needs no binding: the container builds it.
         Kind::AppBinding if codebase.class_like_exists(v.trim_start_matches('\\').as_bytes()) => return None,
@@ -602,6 +660,7 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Storage => ("storage_disk", format!("Storage Disk [{v}] not found.")),
         Kind::Inertia => ("inertia", format!("Inertia view [{v}] not found.")),
         Kind::Path => return None,
+        Kind::Vite => ("vite", format!("Vite asset [{v}] not found.")),
     };
     (!found).then_some((code, message))
 }
@@ -844,24 +903,60 @@ fn inertia_props(source: &str) -> Vec<String> {
     out
 }
 
+/// The methods whose first argument names a relation.
+const RELATION_METHODS: &[&str] = &[
+    "doesntHave", "doesntHaveMorph", "has", "hasMorph", "orDoesntHave", "orDoesntHaveMorph", "orHas", "orHasMorph", "orWhereDoesntHave",
+    "orWhereDoesntHaveMorph", "orWhereHas", "orWhereHasMorph", "whereDoesntHave", "whereDoesntHaveMorph", "whereHas", "whereHasMorph", "with",
+    "withAggregate", "withAvg", "withCount", "withMax", "withMin", "withSum", "load", "loadMissing",
+];
+
+fn model_named<'m>(models: &'m serde_json::Map<String, Value>, class: &str) -> Option<&'m Value> {
+    let class = class.trim_start_matches('\\');
+    models.iter().find(|(k, _)| k.trim_start_matches('\\').eq_ignore_ascii_case(class)).map(|(_, v)| v)
+}
+
+/// The model a query call works on: the receiver when it's a model, the model a `Builder<User>`,
+/// `HasMany<Post, User>`, or collection is of, or, inside a closure passed to a relation method such as
+/// `whereHas('author', fn ($q) => $q->where('…'))`, the relation's related model.
+fn model_of<'m>(ctx: &Ctx<'_>, models: &'m serde_json::Map<String, Value>, call: &crate::framework::Call, at: u32, depth: u8) -> Option<&'m Value> {
+    if let Some(m) = call.classes.iter().chain(&call.type_args).find_map(|c| model_named(models, c)) {
+        return Some(m);
+    }
+    if depth > 4 {
+        return None;
+    }
+    let path = ctx.parsed.path_at(at);
+    let closure = path.iter().rposition(|n| matches!(n, Node::Closure(_) | Node::ArrowFunction(_)))?;
+    let (i, outer_node) = path[..closure].iter().enumerate().rev().find(|(_, n)| {
+        matches!(n, Node::MethodCall(_) | Node::NullSafeMethodCall(_) | Node::StaticMethodCall(_))
+    })?;
+    let outer = crate::framework::call_of(ctx, outer_node, &path[..=i])?;
+    if !outer.is_method(RELATION_METHODS) {
+        return None;
+    }
+    let relation = outer.arguments.first()?.1.clone()?;
+    let mut model = model_of(ctx, models, &outer, outer.span.0, depth + 1)?;
+    // `author.posts` walks from relation to relation.
+    for name in relation.split('.') {
+        let related = model["relations"].as_array()?.iter().find(|r| r["name"].as_str() == Some(name))?["related"].as_str()?;
+        model = model_named(models, related)?;
+    }
+    Some(model)
+}
+
 /// Attribute and relation names for Eloquent calls such as `User::where('` or `->with('`.
 fn eloquent_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, range: Range) -> Option<Vec<CompletionItem>> {
-    const RELATION: &[&str] = &[
-        "doesntHave", "doesntHaveMorph", "has", "hasMorph", "orDoesntHave", "orDoesntHaveMorph", "orHas", "orHasMorph", "orWhereDoesntHave",
-        "orWhereDoesntHaveMorph", "orWhereHas", "orWhereHasMorph", "whereDoesntHave", "whereDoesntHaveMorph", "whereHas", "whereHasMorph", "with",
-        "withAggregate", "withAvg", "withCount", "withMax", "withMin", "withSum", "load", "loadMissing",
-    ];
+    const RELATION: &[&str] = RELATION_METHODS;
     const FIRST: &[&str] = &["create", "fill", "firstWhere", "make", "max", "orderBy", "orderByDesc", "orWhere", "select", "sum", "update", "where", "whereColumn", "whereIn", "whereNotIn", "whereNull", "whereNotNull", "pluck", "value", "latest", "oldest", "min", "avg", "increment", "decrement", "groupBy"];
     const ANY: &[&str] = &["createOrFirst", "firstOrNew", "firstOrCreate", "updateOrCreate"];
-    let codebase = &ctx.index.codebase;
     let method = arg.call.name.as_str();
     let relevant = matches!(arg.call.kind, CallKind::Method | CallKind::Static) && (RELATION.contains(&method) || FIRST.contains(&method) || ANY.contains(&method));
-    if !relevant || !arg.call.on(codebase, &["Illuminate\\Database\\Eloquent\\Model"]) {
+    if !relevant {
         return None;
     }
     let models = data.models()?;
     let models = models["models"].as_object()?;
-    let model = arg.call.classes.iter().find_map(|c| models.iter().find(|(k, _)| k.eq_ignore_ascii_case(c)).map(|(_, v)| v))?;
+    let model = model_of(ctx, models, &arg.call, arg.start, 0)?;
     let attrs = |fillable_only: bool| -> Vec<String> {
         model["attributes"]
             .as_array()
@@ -1063,7 +1158,19 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
         let kind = kind_of(arg, &ctx.index.codebase)?;
         let entries = entries(kind, &data)?;
-        let text = find(kind, &entries, &arg.value)?.hover.clone()?;
+        let found = find(kind, &entries, &arg.value)?;
+        let text = if kind == Kind::Auth {
+            let lines: Vec<String> = matching_policies(arg, &data)
+                .iter()
+                .filter_map(|p| {
+                    let uri = str_of(&p["uri"])?;
+                    Some(format!("`{}`\n\n{}", p["policy"].as_str().unwrap_or("Gate"), link(&data.abs(uri), Some(line_of(&p["line"])), uri)))
+                })
+                .collect();
+            (!lines.is_empty()).then(|| lines.join("\n\n"))?
+        } else {
+            found.hover.clone()?
+        };
         Some(markdown(text, ctx.doc.range(arg.start, arg.end)))
     })
 }
