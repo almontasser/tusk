@@ -514,7 +514,8 @@ async function startServer(
       if (name === "phpactor" && v.kind === "end" && token === fullIndexRun) (fullIndexRun = undefined), markIndexComplete(root);
       // Show progress only after it runs for a moment, so quick tasks such as resolving code
       // actions don't flash in the status bar.
-      const text = [progressTitles.get(token), v.message ?? (v.percentage != null && `${v.percentage}%`)].filter(Boolean).join(" ");
+      // The percentage when there is one: Phpactor's message ("3000/24340 (12.33%, 227/1,611 mb)") crowds the status bar.
+      const text = [progressTitles.get(token), v.percentage != null ? `${Math.round(v.percentage)}%` : v.message].filter(Boolean).join(" ");
       if (v.kind === "end") {
         clearTimeout(progressTimers.get(token));
         progressTimers.delete(token);
