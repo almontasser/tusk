@@ -76,3 +76,13 @@ pub fn with_ctx_at<R>(snap: &Snapshot, uri: &Uri, pos: Position, f: impl FnOnce(
     let ctx = Ctx { snap, doc: doc.clone(), arena: &arena, parsed, index, analysis: OnceCell::new() };
     Some(f(&ctx))
 }
+
+/// Runs `f` on `text` standing in for the document `doc`, such as the PHP a Blade view's echoes and
+/// directives hold, laid out at the same offsets. Positions still convert through `doc`.
+pub fn with_text<R>(snap: &Snapshot, doc: Arc<Document>, text: &str, f: impl FnOnce(&Ctx<'_>) -> R) -> R {
+    let arena = LocalArena::new();
+    let parsed = Parsed::new(&arena, &doc.path, text);
+    let index = snap.index.read();
+    let ctx = Ctx { snap, doc, arena: &arena, parsed, index, analysis: OnceCell::new() };
+    f(&ctx)
+}

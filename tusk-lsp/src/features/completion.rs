@@ -25,7 +25,9 @@ use crate::types::display;
 /// How many class, function, or constant names one response lists; typing more narrows it.
 const NAME_LIMIT: usize = 150;
 
-pub const TRIGGERS: &[&str] = &["$", ">", ":", "\\"];
+/// PHP's triggers, then Laravel's: a string's opening quote, a dotted key's `.`, a rule's `|`, and a Blade
+/// directive's `@`.
+pub const TRIGGERS: &[&str] = &["$", ">", ":", "\\", "'", "\"", ".", "|", "@"];
 
 /// What `completionItem/resolve` needs to find an item's documentation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,6 +55,10 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     let text = &ctx.doc.text;
     let offset = offset as usize;
     let before = &text[..offset];
+    // A Blade view isn't PHP; only the framework completes in it.
+    if ctx.doc.language == "blade" || ctx.doc.path.to_string_lossy().ends_with(".blade.php") {
+        return crate::framework::completion(ctx, offset as u32).map(|items| (items, false));
+    }
     if in_string(ctx, offset as u32) {
         return crate::framework::completion(ctx, offset as u32).map(|items| (items, false));
     }
