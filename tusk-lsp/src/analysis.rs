@@ -25,6 +25,21 @@ use mago_syntax::parser::parse_file;
 
 use crate::index::source_file;
 
+/// Parses a file. If brackets are left open at its end, as when a class is being written at the end of a file,
+/// they're closed first, so the parser keeps the unfinished declaration. The index and every request parse the
+/// same way, so spans agree.
+pub fn parse_balanced<'a>(arena: &'a LocalArena, path: &Path, file_type: FileType, contents: Vec<u8>) -> (File, &'a Program<'a>) {
+    let file = source_file(path, file_type, contents);
+    let program = parse_file(arena, &file);
+    if program.errors.is_empty() {
+        return (file, program);
+    }
+    let balanced = crate::repair::balance_end(&String::from_utf8_lossy(&file.contents));
+    let file = source_file(path, file_type, balanced.into_bytes());
+    let program = parse_file(arena, &file);
+    (file, program)
+}
+
 static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(PluginRegistry::with_library_providers);
 
 /// A parsed file with its names resolved.
@@ -35,7 +50,15 @@ pub struct Parsed<'a> {
 }
 
 impl<'a> Parsed<'a> {
+    /// Parses `text`, with brackets left open at its end closed the way the index closes them.
     pub fn new(arena: &'a LocalArena, path: &Path, text: &str) -> Self {
+        let (file, program) = parse_balanced(arena, path, FileType::Host, text.as_bytes().to_vec());
+        let names = NameResolver::new(arena).resolve(program);
+        Self { file, program, names }
+    }
+
+    /// Parses `text` as it is, for a repaired copy of a document.
+    pub fn exact(arena: &'a LocalArena, path: &Path, text: &str) -> Self {
         let file = source_file(path, FileType::Host, text.as_bytes().to_vec());
         let program = parse_file(arena, &file);
         let names = NameResolver::new(arena).resolve(program);

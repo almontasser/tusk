@@ -20,7 +20,6 @@ use mago_database::file::{File, FileId, FileType};
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
 use mago_prelude::Prelude;
-use mago_syntax::parser::parse_file;
 use mago_word::{Word, WordSet};
 use rayon::prelude::*;
 
@@ -100,10 +99,10 @@ pub fn file_id(path: &Path) -> FileId {
     FileId::new(path.to_string_lossy().as_bytes())
 }
 
-fn scan(file: &File, php_version: PHPVersion, arena: &LocalArena) -> CodebaseMetadata {
-    let program = parse_file(arena, file);
+fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena) -> CodebaseMetadata {
+    let (file, program) = crate::analysis::parse_balanced(arena, path, file_type, contents);
     let names = NameResolver::new(arena).resolve(program);
-    scan_program(arena, file, program, &names, php_version)
+    scan_program(arena, &file, program, &names, php_version)
 }
 
 impl Index {
@@ -182,8 +181,7 @@ impl Index {
             .filter_map(|path| {
                 let contents = read(&path)?;
                 let file_type = self.file_type(&path);
-                let file = source_file(&path, file_type, contents);
-                let meta = scan(&file, php_version, &LocalArena::new());
+                let meta = scan(&path, file_type, contents, php_version, &LocalArena::new());
                 let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 if n % 500 == 0 {
                     progress(n, total);
@@ -229,7 +227,7 @@ impl Index {
                 continue;
             }
             let file_type = self.file_type(&path);
-            let meta = scan(&source_file(&path, file_type, contents), self.config.php_version, &arena);
+            let meta = scan(&path, file_type, contents, self.config.php_version, &arena);
             dirty.extend(meta.class_likes.keys().copied());
             dirty.extend(meta.function_likes.keys().filter(|k| k.1.is_empty()).map(|k| k.0));
             dirty.extend(meta.constants.keys().copied());

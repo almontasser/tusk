@@ -1583,6 +1583,7 @@ dependencies = [
  "mago-reporting",
  "mago-span",
  "mago-syntax",
+ "mago-syntax-core",
  "mago-word",
  "mimalloc",
  "parking_lot",

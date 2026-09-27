@@ -64,6 +64,16 @@ pub fn declaration(symbol: &Symbol, codebase: &CodebaseMetadata) -> Option<Place
 }
 
 impl Snapshot {
+    /// The text of an indexed file, or of one of PHP's built-in stubs.
+    pub fn text_of(&self, index: &Index, file: FileId) -> Option<String> {
+        if let Some(path) = index.path_of(file) {
+            return self.read(path);
+        }
+        use mago_database::DatabaseReader;
+        let stub = crate::index::prelude().database.get_ref(&file).ok()?;
+        Some(String::from_utf8_lossy(&stub.contents).into_owned())
+    }
+
     /// The location of a span in an indexed file.
     pub fn location(&self, index: &Index, place: Place) -> Option<Location> {
         let path = index.path_of(place.file)?;

@@ -84,8 +84,11 @@ fn publish(client: &Client, index: &SharedIndex, doc: &Document) {
 /// The problems in `doc`.
 pub fn check(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
-    let parsed = Parsed::new(&arena, &doc.path, &doc.text);
-    let mut issues: Vec<Issue> = parsed.program.errors.iter().map(Issue::from).collect();
+    // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
+    // the end of the file, which would hide a missing `}`.
+    let exact = Parsed::exact(&arena, &doc.path, &doc.text);
+    let mut issues: Vec<Issue> = exact.program.errors.iter().map(Issue::from).collect();
+    let parsed = if issues.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
     let index = index.read();
     let analysis = analyze(&parsed, &arena, &index.codebase, index.config.php_version);
     issues.extend(analysis.issues);

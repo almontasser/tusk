@@ -1,7 +1,9 @@
 //! Request handlers, one module per feature.
 
+pub mod hover;
 pub mod navigation;
 pub mod references;
+pub mod signature;
 
 use std::cell::OnceCell;
 use std::sync::Arc;
@@ -49,6 +51,22 @@ pub fn with_ctx<R>(snap: &Snapshot, uri: &Uri, f: impl FnOnce(&Ctx<'_>) -> R) ->
     let doc = snap.doc(uri)?;
     let arena = LocalArena::new();
     let parsed = Parsed::new(&arena, &doc.path, &doc.text);
+    let index = snap.index.read();
+    let ctx = Ctx { snap, doc: doc.clone(), arena: &arena, parsed, index, analysis: OnceCell::new() };
+    Some(f(&ctx))
+}
+
+/// Like [`with_ctx`], but parses the text cut at `pos` with its open brackets closed, for features that work
+/// on the statement being typed. Offsets before `pos` are the same as in the document.
+pub fn with_ctx_at<R>(snap: &Snapshot, uri: &Uri, pos: Position, f: impl FnOnce(&Ctx<'_>) -> R) -> Option<R> {
+    let doc = snap.doc(uri)?;
+    let offset = doc.offset(pos);
+    let arena = LocalArena::new();
+    let original = Parsed::new(&arena, &doc.path, &doc.text);
+    let parsed = match crate::repair::at_cursor(&original, offset) {
+        Some(text) => Parsed::exact(&arena, &doc.path, &text),
+        None => original,
+    };
     let index = snap.index.read();
     let ctx = Ctx { snap, doc: doc.clone(), arena: &arena, parsed, index, analysis: OnceCell::new() };
     Some(f(&ctx))

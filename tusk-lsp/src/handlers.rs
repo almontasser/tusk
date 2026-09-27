@@ -27,6 +27,8 @@ pub fn find(method: &str) -> Option<Handler> {
         GotoImplementation::METHOD => typed!(GotoImplementation, navigation::implementation),
         References::METHOD => typed!(References, references::references),
         DocumentHighlightRequest::METHOD => typed!(DocumentHighlightRequest, references::highlight),
+        HoverRequest::METHOD => typed!(HoverRequest, hover::hover),
+        SignatureHelpRequest::METHOD => typed!(SignatureHelpRequest, signature::signature_help),
         _ => return None,
     };
     Some(handler)

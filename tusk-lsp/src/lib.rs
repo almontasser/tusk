@@ -8,6 +8,7 @@ pub mod features;
 pub mod handlers;
 pub mod index;
 pub mod locate;
+pub mod repair;
 pub mod scope;
 pub mod server;
 pub mod symbol;
