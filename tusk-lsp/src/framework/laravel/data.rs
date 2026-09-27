@@ -133,6 +133,26 @@ impl Data<'_> {
         })
     }
 
+    /// Files under `resources/` other than views and translations, relative to the root: what `@vite()` and
+    /// `Vite::asset()` usually name.
+    pub fn vite_files(&self) -> Arc<Value> {
+        let root = self.root().to_path_buf();
+        self.0.remember("laravel:vite-files", &["resources/"], || {
+            let resources = root.join("resources");
+            let mut out: Vec<String> = ignore::WalkBuilder::new(&resources)
+                .standard_filters(false)
+                .max_depth(Some(10))
+                .filter_entry(|e| !(e.depth() == 1 && matches!(e.file_name().to_str(), Some("views" | "lang"))))
+                .build()
+                .flatten()
+                .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+                .filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into_owned()))
+                .collect();
+            out.sort();
+            json!(out)
+        })
+    }
+
     /// The Mix manifest: `{"/js/app.js": "/js/app.js?id=…"}`.
     pub fn mix(&self) -> Option<Arc<Value>> {
         let path = self.root().join("public/mix-manifest.json");

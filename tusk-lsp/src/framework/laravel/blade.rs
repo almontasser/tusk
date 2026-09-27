@@ -6,7 +6,7 @@
 const CALL_DIRECTIVES: &[&str] = &[
     "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "extends", "each", "component", "can",
     "cannot", "canany", "lang", "livewire", "method", "error", "section", "yield", "push", "stack", "props", "env",
-    "json",
+    "json", "vite",
 ];
 
 /// A Blade view's PHP at the offsets it has in the view, so string positions in it are positions in the view.

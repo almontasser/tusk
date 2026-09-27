@@ -48,6 +48,8 @@ enum Kind {
     Inertia,
     /// A file under a path helper's folder, such as `storage_path('logs/x.log')`.
     Path,
+    /// A file Vite builds or serves, relative to the root: `@vite('resources/js/app.js')`.
+    Vite,
 }
 
 fn facade(name: &str) -> [String; 2] {
@@ -205,6 +207,12 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
     }
     if s.function(PATH_HELPERS, &[0]) {
         return (!in_array).then_some(Kind::Path);
+    }
+    if s.function(&["@vite"], &[0]) {
+        return list_ok(Kind::Vite);
+    }
+    if s.facade(&["asset", "content"], "Vite", &["Illuminate\\Foundation\\Vite"], &[0]) {
+        return (!in_array).then_some(Kind::Vite);
     }
     None
 }
@@ -469,6 +477,17 @@ fn entries(kind: Kind, data: &Data<'_>) -> Option<Vec<Entry>> {
             .map(|a| Entry::new(a, CompletionItemKind::ENUM))
             .collect(),
         Kind::Path => vec![],
+        Kind::Vite => data
+            .vite_files()
+            .as_array()?
+            .iter()
+            .filter_map(|p| p.as_str())
+            .map(|p| {
+                let mut e = Entry::new(p, CompletionItemKind::FILE);
+                e.target = Some((data.abs(p), 1));
+                e
+            })
+            .collect(),
     })
 }
 
@@ -541,6 +560,10 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
             file.is_file().then_some((file, 1))
         }
         Kind::Route if arg.value.contains('*') => None,
+        Kind::Vite => {
+            let file = data.abs(&arg.value);
+            file.is_file().then_some((file, 1))
+        }
         // Only when one policy matches the call's model.
         Kind::Auth => match matching_policies(arg, data).as_slice() {
             [only] => Some((data.abs(str_of(&only["uri"])?), line_of(&only["line"]))),
@@ -607,6 +630,8 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
     }
     let found = match kind {
         Kind::ControllerAction => action_route(v, data).is_some(),
+        // A Vite input may be anywhere in the project, not only in `resources/`.
+        Kind::Vite => data.abs(v).is_file(),
         _ => find(kind, entries, v).is_some(),
     };
     let (code, message) = match kind {
@@ -635,6 +660,7 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Storage => ("storage_disk", format!("Storage Disk [{v}] not found.")),
         Kind::Inertia => ("inertia", format!("Inertia view [{v}] not found.")),
         Kind::Path => return None,
+        Kind::Vite => ("vite", format!("Vite asset [{v}] not found.")),
     };
     (!found).then_some((code, message))
 }

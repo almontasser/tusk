@@ -9,7 +9,7 @@ use lsp_types::{DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp};
 const STUBS: &str = r#"<?php
 namespace Illuminate\Routing { class Redirector { public function route($name, $parameters = []) {} } class Router {} class UrlGenerator {} }
 namespace Illuminate\Http { class Request { public function routeIs(...$patterns) {} public function validate(array $rules) {} } }
-namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} }
+namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} class Vite {} }
 namespace Illuminate\Foundation\Http { class FormRequest {} }
 namespace Illuminate\Database\Eloquent {
     abstract class Model {
@@ -218,6 +218,18 @@ fn reports_unknown_names_and_skips_what_it_cant_check() {
     // Facts that failed to load report nothing: no assets were seeded, and asset() has no PHP behind it,
     // but auth has no data at all.
     assert!(problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Gate::allows('edit');").is_empty());
+}
+
+#[test]
+fn completes_and_checks_vite_assets() {
+    let fx = fixture("resources/views/app.blade.php", "<head>\n    @vite(['resources/css/app.css', '<|>'])\n</head>\n");
+    fx.snap.framework.seed("laravel:vite-files", json!(["resources/css/app.css", "resources/js/app.js"]));
+    let at = fx.at();
+    let items = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| crate::framework::completion(ctx, ctx.offset(at.position))).flatten().unwrap();
+    assert_eq!(labels(&items), vec!["resources/css/app.css", "resources/js/app.js"]);
+    // The fixture's files aren't on disk, so each named file is missing.
+    let found = problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Vite::asset('resources/images/logo.png');");
+    assert_eq!(found, vec![("vite".into(), "Vite asset [resources/images/logo.png] not found.".into())]);
 }
 
 #[test]
