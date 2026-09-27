@@ -680,25 +680,26 @@ wait covers that.
 
 ### Mago's fixes and suppressions
 
-Mago reports fixes for many lint rules, but Tusk's server publishes Mago's
-problems without them, so a second code action provider for `php` in `lsp.ts` gets them from
-Mago itself. On a request the user makes (`CodeActionTriggerType.Invoke`: ⌥⏎,
-the hover's Quick Fix link, or Fix All) with `mago-lint` markers in the range,
-it runs `mago lint --stdin-input <path> --reporting-format json` on the
-buffer, once per model version. `magoFixes` in `diagnostics.ts` reads each
-issue's `edits`: byte ranges and UTF-8 `new_text` bytes, and a `safety` of
-`safe`, `potentiallyunsafe`, or `unsafe`. Each fix whose range touches a marker
-with the same code becomes a `quickfix` action; only safe ones are preferred,
-and the others say so in their title. `safeEdits` collects the safe fixes for
-problems the file shows, leaving out fixes that overlap one before them, for
-**Fix All Safe Mago Problems in File**. A fix for a problem the filters drop,
-such as an unused import that a trait's `use` needs, isn't applied. The same action has the kind `source.fixAll.mago` when the
-request asks for `source.fixAll`, so Monaco's `editor.action.fixAll` applies
-it. The edits go through Monaco, so they're undoable and the file isn't saved.
-They carry the model version Mago ran on, so Monaco refuses them if the text
-changed while Mago ran.
-The analyzer's fixes aren't offered, since `mago analyze` on one buffer still
-reads the whole project.
+Tusk's server offers Mago's own fixes as code actions with their edits
+(`features/actions/mago.rs`). For each `mago-lint` or `mago` problem in the
+request's context, it runs the linter on the document again, in process (the
+analyzer too when an analysis problem is there), and each issue with edits
+whose code matches the problem and whose span touches it becomes a
+`quickfix`. Only safe fixes are preferred; the others say so in their title
+("may change behavior" or "unsafe"). The linter takes milliseconds, so the
+light bulb shows the fixes as the caret moves.
+
+`source.fixAll.mago` collects the safe fixes for the problems in the context,
+leaving out fixes that overlap one before them, as Mago leaves them for its
+next run; with no problems in the context, every safe fix. The editor sends
+only the problems its filters keep, so a fix for a problem the filters drop,
+such as an unused import that a trait's `use` needs, isn't applied. Monaco's
+`editor.action.fixAll` asks for `source.fixAll` and reaches the server
+through the generic provider. The provider for `php` in `lsp.ts` also offers
+it as the quick fix **Fix All Safe Mago Problems in File** on a request the
+user makes (⌥⏎ or the hover's Quick Fix link) with `mago-lint` markers,
+asking for `source.fixAll.mago` over the whole file with every problem the
+file shows. Edits carry the document's version, so a stale one is refused.
 
 Every `mago` and `mago-lint` marker also gets **Suppress *code* for this
 line**, which doesn't run Mago, so the light bulb shows it too. `magoExpect`

@@ -1688,6 +1688,7 @@ dependencies = [
  "mago-span",
  "mago-syntax",
  "mago-syntax-core",
+ "mago-text-edit",
  "mago-word",
  "mimalloc",
  "parking_lot",

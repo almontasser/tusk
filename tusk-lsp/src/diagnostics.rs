@@ -149,6 +149,12 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
 /// Mago's linter on the document. Its rules match excluded paths against the file's name, so the file is
 /// named by its path relative to the project, as Mago names it.
 fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> Vec<Diagnostic> {
+    let (file, issues) = lint_issues(doc, rel, mago);
+    issues.iter().filter_map(|i| to_diagnostic(doc, file, i, "mago-lint")).collect()
+}
+
+/// The linter's issues, with their fixes, and the ID of the file they're in.
+pub fn lint_issues(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> (mago_database::file::FileId, Vec<Issue>) {
     let arena = LocalArena::new();
     let name = rel.to_string_lossy().into_owned().into_bytes();
     let file = mago_database::file::File::new(
@@ -160,10 +166,10 @@ fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoCo
     let program = mago_syntax::parser::parse_file(&arena, &file);
     let names = mago_names::resolver::NameResolver::new(&arena).resolve(program);
     let linter = mago_linter::Linter::from_registry(&arena, mago.rules.clone(), mago.linter.php_version);
-    linter.lint(&file, program, &names).iter().filter_map(|i| to_diagnostic(doc, file.id, i, "mago-lint")).collect()
+    (file.id, linter.lint(&file, program, &names).into_iter().collect())
 }
 
-fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
+pub fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
     let primary = issue
         .annotations
         .iter()

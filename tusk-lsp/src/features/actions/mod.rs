@@ -4,6 +4,7 @@
 pub mod extract;
 pub mod fixes;
 pub mod generate;
+pub mod mago;
 pub mod organize;
 
 use lsp_types::{
@@ -55,14 +56,19 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
     let uri = params.text_document.uri.clone();
     let range = params.range;
     let only = params.context.only.clone();
+    let fix_all = only.is_some() && wanted(&only, &CodeActionKind::from(mago::FIX_ALL.to_string()));
     let (candidates, complete) = with_ctx(snap, &uri, |ctx| {
+        let mut complete = crate::framework::laravel::actions::code_actions(ctx, range);
+        if fix_all || wanted(&only, &CodeActionKind::QUICKFIX) {
+            complete.extend(mago::code_actions(ctx, &params, fix_all));
+        }
         let mut out = vec![];
         out.extend(fixes::candidates(ctx, range));
         out.extend(generate::candidates(ctx, range));
         out.extend(organize::candidates(ctx, range));
         out.extend(extract::candidates(ctx, range));
-        // Laravel's fixes come with their edits: they're only offered on a problem, so they're few.
-        (out, crate::framework::laravel::actions::code_actions(ctx, range))
+        // Laravel's and Mago's fixes come with their edits: they're only offered on a problem, so they're few.
+        (out, complete)
     })
     .unwrap_or_default();
     let complete = complete.into_iter().filter(|a| a.kind.as_ref().is_some_and(|k| wanted(&only, k))).map(CodeActionOrCommand::CodeAction);
