@@ -405,6 +405,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #recent-projects { align-self: stretch; list-style: none; margin: 0; padding: 0; text-align: left; }
 #recent-projects li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; }
 #recent-projects li:hover { background: var(--hover); }
+#recent-projects li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 #recent-projects .project-badge:empty { display: none; }
 .project-badge { width: 28px; height: 28px; font-size: 12px; border-radius: 6px; flex-shrink: 0; }
 #recent-projects .name { font-weight: 600; }

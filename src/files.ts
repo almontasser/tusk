@@ -45,7 +45,7 @@ function targetDir() {
   return isDir(base) ? base : parentOf(base);
 }
 
-function select(path: string) {
+export function select(path: string) {
   selected = path;
   document.querySelectorAll("#tree .row.selected").forEach((r) => r.classList.remove("selected"));
   rowOf(path)?.classList.add("selected");

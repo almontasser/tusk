@@ -188,7 +188,7 @@ DMG that everyone installs by hand.
   indexing, the cursor position,
   indentation, line endings, and the file's language.
 - **Welcome screen:** without an open folder, the window lists your recent
-  projects.
+  projects. Tab and Enter open one; right-click one to remove it from the list.
 
 Errors, such as a failed git command, also appear briefly in the lower-right
 corner.
@@ -269,6 +269,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
 | ⌘1 | Show the project tree |
+| ⌥F1 | Select the current file in the project tree (also the target button above the tree) |
 | ⌘\ | Split the editor to the right, or move to the next pane |
 | ⌘⇧\ | Split the editor down |
 | ⌘9 | Git log |

@@ -33,7 +33,7 @@ import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, 
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
-import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, showMenu } from "./files";
+import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
@@ -772,6 +772,12 @@ function rememberProject(dir: string) {
   } catch {}
 }
 
+function forgetProject(dir: string) {
+  try {
+    localStorage.setItem("recentProjects", JSON.stringify(recentProjects().filter((d) => d !== dir)));
+  } catch {}
+}
+
 function projectItem(dir: string): Item {
   return { label: nameOf(dir), detail: dir.replace(/^\/Users\/[^/]+/, "~"), icon: "codicon-folder icon-folder", run: () => openFolder(dir) };
 }
@@ -792,7 +798,19 @@ function showWelcome() {
       li.querySelector(".project-badge")!.textContent = initials(nameOf(dir));
       li.querySelector(".name")!.textContent = nameOf(dir);
       li.querySelector(".dir")!.textContent = dir.replace(/^\/Users\/[^/]+/, "~");
+      li.tabIndex = 0;
+      li.role = "button";
       li.onclick = () => openFolder(dir);
+      li.onkeydown = (e) => e.key === "Enter" && openFolder(dir);
+      li.oncontextmenu = (e) => {
+        e.preventDefault();
+        showMenu(e.clientX, e.clientY, [
+          { label: "Open", run: () => openFolder(dir) },
+          { label: "Reveal in Finder", run: () => revealInFinder(dir) },
+          "-",
+          { label: "Remove from Recent Projects", run: () => (forgetProject(dir), showWelcome()) },
+        ]);
+      };
       return li;
     }),
   );
@@ -858,6 +876,30 @@ function toggleDir(path: string, row: HTMLElement, children: HTMLUListElement) {
   }
   paintRow(row, nameOf(path), true);
   saveSoon();
+}
+
+/** Opens the folders above the current file in the project tree, and selects and scrolls to it. */
+async function selectOpenedFile() {
+  if (!activeFile() || !active.startsWith(`${root}/`)) return;
+  showView("project");
+  let dir = root;
+  for (const part of relative(active).split("/").slice(0, -1)) {
+    dir = `${dir}/${part}`;
+    const row = document.querySelector<HTMLElement>(`#tree .row[data-path="${CSS.escape(dir)}"]`);
+    if (!row) return;
+    const open = openDirs.has(dir);
+    openDirs.add(dir);
+    row.classList.add("open");
+    paintRow(row, part, true);
+    // Awaited even when open, since an open folder's listing may still be loading.
+    await renderDir(row.nextElementSibling as HTMLUListElement, dir, open);
+  }
+  saveSoon();
+  const row = document.querySelector<HTMLElement>(`#tree .row[data-path="${CSS.escape(active)}"]`);
+  if (!row) return;
+  selectInTree(active);
+  row.scrollIntoView({ block: "center" });
+  row.focus({ preventScroll: true });
 }
 
 function collapseAll() {
@@ -1324,6 +1366,7 @@ const actions: Action[] = [
   { label: "Move File to Trash", run: () => remove() },
   { label: "Copy Path", keys: "Meta+Shift+C", run: () => copyPath() },
   { label: "Reveal in Finder", run: () => revealInFinder() },
+  { label: "Select Opened File in Project", keys: "Alt+F1", run: selectOpenedFile },
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
@@ -1731,6 +1774,7 @@ $("welcome-open").onclick = () => openFolder();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
+$("tree-locate").onclick = selectOpenedFile;
 $("todo-refresh").onclick = () => loadTodos();
 
 // Drag the sidebar's right edge to resize it; the width is remembered.
