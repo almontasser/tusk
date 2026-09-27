@@ -34,7 +34,7 @@ pub fn parse_balanced<'a>(arena: &'a LocalArena, path: &Path, file_type: FileTyp
     if program.errors.is_empty() {
         return (file, program);
     }
-    let balanced = crate::repair::balance_end(&String::from_utf8_lossy(&file.contents));
+    let balanced = crate::repair::balance_end(&crate::text::decode(&file.contents));
     let file = source_file(path, file_type, balanced.into_bytes());
     let program = parse_file(arena, &file);
     (file, program)
@@ -134,12 +134,47 @@ pub fn settings(version: PHPVersion) -> Settings {
     }
 }
 
+/// Deeper syntax trees than any real code has, such as a generated expression of thousands of terms. Mago's analyzer
+/// and linter take time quadratic in such a chain's length and recurse once per level. Real code nests at most about
+/// 850 levels deep (a Symfony bundle's configuration chain).
+pub const MAX_DEPTH: usize = 1000;
+
+/// More branches in one `if`, `switch`, or `match` than real code has: Mago's analyzer takes 0.7 s on a `match` of
+/// 1,000 arms and minutes on 20,000 `elseif`s. Real code has at most about 800 (a `switch` in WordPress).
+pub const MAX_BRANCHES: usize = 1000;
+
+/// Whether `program` is beyond what the analyzer and requests handle in reasonable time: nested deeper than
+/// [`MAX_DEPTH`], or with more than [`MAX_BRANCHES`] branches in one statement. Walks with its own stack, so any depth
+/// is safe.
+pub fn too_complex(program: &Program<'_>) -> bool {
+    let mut stack = vec![(Node::Program(program), 0)];
+    while let Some((node, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            return true;
+        }
+        let mut branches = 0;
+        node.visit_children(|child| {
+            if matches!(child, Node::IfStatementBodyElseIfClause(_) | Node::IfColonDelimitedBodyElseIfClause(_) | Node::SwitchCase(_) | Node::MatchArm(_)) {
+                branches += 1;
+            }
+            stack.push((child, depth + 1));
+        });
+        if branches > MAX_BRANCHES {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn analyze(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, version: PHPVersion) -> Analysis {
     analyze_with(parsed, arena, codebase, settings(version))
 }
 
 pub fn analyze_with(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, settings: Settings) -> Analysis {
     let mut result = AnalysisResult::new(SymbolReferences::new());
+    if too_complex(parsed.program) {
+        return Analysis { artifacts: Default::default(), issues: result.issues };
+    }
     let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, codebase, &PLUGINS, settings);
     let artifacts = analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default();
     Analysis { artifacts, issues: result.issues }

@@ -586,6 +586,18 @@ async function startServer(
     setMarkers(model, owner, diagnostics.get(uri) ?? []);
   }
 
+  // The backend reports a server that exits on its own, such as from a crash. One that exits while starting fails its start instead.
+  let server: Server | undefined;
+  const unlistenExit = await listen<string>("lsp-exit", ({ payload }) => {
+    if (payload !== name) return;
+    failPending(`${name} stopped`);
+    if (server) serverExited(server);
+  });
+  const failPending = (reason: string) => {
+    for (const p of pending.values()) p.reject(reason);
+    pending.clear();
+  };
+
   const processId = await invoke<number>("lsp_start", { name, root });
   const init = call<L.InitializeResult>("initialize", {
     processId,
@@ -602,11 +614,13 @@ async function startServer(
   registerProviders(monaco.languages);
   registerProblemHover();
 
-  return {
+  server = {
     name,
     request,
     stop() {
       unlisten();
+      unlistenExit();
+      failPending(`${name} stopped`);
       disposables.forEach((d) => d.dispose());
       monaco.editor.getModels().forEach((m) => monaco.editor.setModelMarkers(m, owner, []));
       // So onModelsRead can't bring back the stopped server's markers.
@@ -629,6 +643,7 @@ async function startServer(
       return (await request<(L.SymbolInformation | L.WorkspaceSymbol)[] | null>("workspace/symbol", { query })) ?? [];
     },
   };
+  return server;
 
   function registerProviders(ml: M) {
     // The server's original item for each suggestion, sent back to resolve its details.
@@ -1048,6 +1063,22 @@ export function ensureTools() {
 export async function toolPath(name: string) {
   await ensureTools();
   return invoke<string>("tool_path", { name });
+}
+
+/** When servers exited on their own lately, so a server that crashes as it starts isn't restarted forever. */
+let exits: number[] = [];
+
+/** Restarts the servers when a running one exits on its own, up to 3 times in 5 minutes. */
+function serverExited(s: Server) {
+  if (!servers.includes(s)) return;
+  const now = Date.now();
+  exits = [...exits.filter((t) => now - t < 300_000), now];
+  if (exits.length > 3) return host.status(`The ${s.name} language server keeps stopping. Reopen the project to start it again.`);
+  host.status(`The ${s.name} language server stopped. Restarting it.`);
+  startLsp(projectRoot, host).then(
+    () => host.status(""),
+    (e) => host.status(`Language servers failed to restart: ${e}`),
+  );
 }
 
 /** Starts the language servers for a project, stopping those of the previous project. */

@@ -60,6 +60,10 @@ pub fn with_ctx<R>(snap: &Snapshot, uri: &Uri, f: impl FnOnce(&Ctx<'_>) -> R) ->
     let doc = snap.doc(uri)?;
     let arena = LocalArena::new();
     let parsed = Parsed::new(&arena, &doc.path, &doc.text);
+    // Beyond the analyzer, and walks that measure spans at every level, in reasonable time.
+    if crate::analysis::too_complex(parsed.program) {
+        return None;
+    }
     let index = snap.index.read();
     let ctx = Ctx { snap, doc: doc.clone(), arena: &arena, parsed, index, analysis: OnceCell::new() };
     Some(f(&ctx))
@@ -72,6 +76,9 @@ pub fn with_ctx_at<R>(snap: &Snapshot, uri: &Uri, pos: Position, f: impl FnOnce(
     let offset = doc.offset(pos);
     let arena = LocalArena::new();
     let original = Parsed::new(&arena, &doc.path, &doc.text);
+    if crate::analysis::too_complex(original.program) {
+        return None;
+    }
     let parsed = match crate::repair::at_cursor(&original, offset) {
         Some(text) => Parsed::exact(&arena, &doc.path, &text),
         None => original,

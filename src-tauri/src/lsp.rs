@@ -97,17 +97,29 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         .map_err(|e| format!("Could not start {name}. Is {runtime} installed? ({e})"))?;
     let stdin = writer(child.stdin.take().unwrap());
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    let event = format!("lsp:{name}");
-    std::thread::spawn(move || {
-        while let Ok(Some(msg)) = read_message(&mut stdout) {
-            let _ = app.emit(&event, msg);
-        }
-    });
-    let old = state.0.lock().unwrap().insert(name, (child, stdin));
+    let pid = child.id();
+    let old = state.0.lock().unwrap().insert(name.clone(), (child, stdin));
     if let Some((mut old, _)) = old {
         let _ = old.kill();
         let _ = old.wait();
     }
+    let event = format!("lsp:{name}");
+    let server = name.clone();
+    std::thread::spawn(move || {
+        while let Ok(Some(msg)) = read_message(&mut stdout) {
+            let _ = app.emit(&event, msg);
+        }
+        // Stopping or replacing a server takes it out of the list first, so one still listed has exited on its own,
+        // such as from a crash: the client is told, to start it again.
+        let state = app.state::<LspState>();
+        let mut servers = state.0.lock().unwrap();
+        if servers.get(&server).is_some_and(|(c, _)| c.id() == pid) {
+            let (mut child, _) = servers.remove(&server).unwrap();
+            drop(servers);
+            let _ = child.wait();
+            let _ = app.emit("lsp-exit", server);
+        }
+    });
     Ok(std::process::id())
 }
 

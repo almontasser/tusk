@@ -50,3 +50,41 @@ pub fn find(method: &str) -> Option<Handler> {
     };
     Some(handler)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use crate::testing::{Fixture, uri};
+
+    /// Every request, and every code action resolved, with the file cut off at each point typing passes through.
+    /// Unfinished files parse with their open brackets closed, so the tree's spans run past the document's end.
+    #[test]
+    fn no_request_panics_on_unfinished_files() {
+        let code = "<?php\nnamespace App;\n\nuse Foo\\Bar;\n\ninterface I { function f(int $a): string; }\n\nclass A extends B implements I {\n    public function __construct(int $x, private ?Bar $bar = null) {}\n    public function f(int $a): string { return $this->bar?->name($a, [1, 2]) . \"x{$a}\"; }\n}\n";
+        let doc = json!({ "uri": uri("test.php") });
+        for cut in (0..=code.len()).filter(|&i| code.is_char_boundary(i)) {
+            let text = &code[..cut];
+            let fx = Fixture::one(text);
+            let end = fx.doc("test.php").position(cut as u32);
+            let at = json!({ "textDocument": doc, "position": end });
+            let whole = json!({ "start": { "line": 0, "character": 0 }, "end": end });
+            let run = |method: &str, params: Value| {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::find(method).unwrap()(&fx.snap, params)));
+                result.unwrap_or_else(|_| panic!("{method} panicked with the file cut at {cut}: {text:?}")).ok()
+            };
+            for method in ["textDocument/hover", "textDocument/completion", "textDocument/signatureHelp", "textDocument/definition", "textDocument/documentHighlight"] {
+                run(method, at.clone());
+            }
+            run("textDocument/documentSymbol", json!({ "textDocument": doc }));
+            run("textDocument/foldingRange", json!({ "textDocument": doc }));
+            run("textDocument/inlayHint", json!({ "textDocument": doc, "range": whole }));
+            for range in [json!({ "start": end, "end": end }), whole] {
+                let actions = run("textDocument/codeAction", json!({ "textDocument": doc, "range": range, "context": { "diagnostics": [] } }));
+                for action in actions.and_then(|a| a.as_array().cloned()).unwrap_or_default() {
+                    run("codeAction/resolve", action);
+                }
+            }
+        }
+    }
+}

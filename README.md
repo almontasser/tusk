@@ -96,7 +96,8 @@ Docker, which Sail itself needs. The PHP language server is the app's own
 binary, started with `lsp`, so there's nothing to download for it. It runs
 Laravel's and Filament's PHP scripts with the project's PHP: Herd's or Valet's
 PHP for the site, Sail's, Lando's, or DDEV's container, else the `php` on your
-`PATH`.
+`PATH`. A language server that crashes restarts on its own; if it keeps
+crashing, the status bar asks you to reopen the project.
 
 ## Run in development
 
@@ -122,6 +123,7 @@ cargo test --manifest-path src-tauri/Cargo.toml   # Rust
 cargo test --manifest-path src-tauri/Cargo.toml db -- --ignored   # MySQL and PostgreSQL, needs the servers in src-tauri/src/db.rs
 cargo test --manifest-path tusk-lsp/Cargo.toml   # The PHP language server
 cargo test --manifest-path tusk-lsp/Cargo.toml -- --ignored   # Against Filament's demo app and a real Laravel app
+cargo run --manifest-path tusk-lsp/Cargo.toml --release --example stress <project>   # Every request on every file, whole and cut off
 node scripts/ai-bench.ts <project> <model.gguf>   # AI completion quality, see docs/architecture.md
 ```
 

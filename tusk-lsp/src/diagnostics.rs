@@ -51,6 +51,7 @@ pub fn spawn(
                 root: root.clone(),
                 framework: framework.clone(),
                 client: None,
+                cancel: Default::default(),
             };
             let mut edited: HashSet<PathBuf> = HashSet::new();
             let mut others_due = false;
@@ -118,11 +119,13 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.
     let exact = Parsed::exact(&arena, &doc.path, &doc.text);
-    let syntax: Vec<Issue> = exact.program.errors.iter().map(Issue::from).collect();
+    // After the first errors, the rest are mostly the parser losing its way, and each costs a position lookup.
+    let syntax: Vec<Issue> = exact.program.errors.iter().take(100).map(Issue::from).collect();
     let parsed = if syntax.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
     let index = index.read();
     let mago = index.config.mago.clone();
     let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
+    let complex = crate::analysis::too_complex(parsed.program);
     let analysis = analyze_with(&parsed, &arena, &index.codebase, mago.analyzer_settings(index.config.php_version));
     let mut out: Vec<Diagnostic> = syntax.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
     out.extend(
@@ -133,6 +136,9 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
             .filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")),
     );
     drop(index);
+    if complex {
+        return out;
+    }
     if mago.lints(&rel) {
         out.extend(lint(doc, &rel, &mago));
     }
@@ -224,5 +230,21 @@ mod tests {
         let code = "<?php\n\ndeclare(strict_types=1);\n\nfunction f(): int {\n    // @mago-expect analysis:invalid-return-statement\n    return 'x';\n}\n";
         let found = problems(code, "");
         assert!(!found.iter().any(|(_, c)| c == "invalid-return-statement"), "{found:?}");
+    }
+
+    #[test]
+    fn skips_analysis_of_pathological_files() {
+        // Mago's analyzer takes minutes on each and recurses once per term; the syntax check still runs.
+        let deep = vec!["1"; 20_000].join(" + ");
+        let branches: String = (0..5_000).map(|i| format!("{i} => {i}, ")).collect();
+        for body in [format!("$a = {deep};"), format!("$a = match ($b) {{ {branches} }};")] {
+            let code = format!("<?php\n\nfunction f(): int {{ return 'x'; }}\n{body}\n$b = (;\n");
+            let started = std::time::Instant::now();
+            // On a stack as large as the server's threads have.
+            let found = std::thread::Builder::new().stack_size(64 << 20).spawn(move || problems(&code, "")).unwrap().join().unwrap();
+            assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+            assert!(found.iter().all(|(s, _)| s == "mago") && !found.iter().any(|(_, c)| c == "invalid-return-statement"), "{found:?}");
+            assert!(!found.is_empty());
+        }
     }
 }

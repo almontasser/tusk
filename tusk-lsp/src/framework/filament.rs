@@ -652,7 +652,7 @@ mod tests {
         let open = |path: &Path, text: String| {
             let mut docs = Documents::default();
             docs.insert(Document::new(path_to_uri(path), path.to_path_buf(), "php".into(), 1, text));
-            Snapshot { docs, index: index.clone(), root: root.clone(), framework: framework.clone(), client: None }
+            Snapshot { docs, index: index.clone(), root: root.clone(), framework: framework.clone(), client: None, cancel: Default::default() }
         };
         let run = |path: &Path, text: String, needle: &str| -> Vec<CompletionItem> {
             let offset = (text.find(needle).expect(needle) + needle.len()) as u32;

@@ -12,7 +12,7 @@ fn main() {
     let mut idx = Index::empty(IndexConfig::new(&args[1]));
     let paths = idx.discover();
     idx.build(paths, |p| std::fs::read(p).ok(), |_, _| {});
-    let snap = Snapshot { docs: Documents::default(), index: Arc::new(parking_lot::RwLock::new(idx)), root: args[1].clone().into(), framework: Arc::new(tusk_lsp::framework::State::new(args[1].clone().into())), client: None };
+    let snap = Snapshot { docs: Documents::default(), index: Arc::new(parking_lot::RwLock::new(idx)), root: args[1].clone().into(), framework: Arc::new(tusk_lsp::framework::State::new(args[1].clone().into())), client: None, cancel: Default::default() };
     let index = snap.index.read();
     let symbol = Symbol::Method { class: args[2].clone(), name: args[3].clone() };
     let pool = rayon::ThreadPoolBuilder::new().stack_size(64 << 20).build().unwrap();
