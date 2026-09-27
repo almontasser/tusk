@@ -32,6 +32,7 @@ percent-encoding = "2"
 mago-syntax-core = "=1.50.0"
 mago-linter = { version = "=1.50.0", features = ["serde"] }
 toml = "0.9"
+libc = "0.2.189"
 
 [dev-dependencies]
 mago-allocator = "=1.50.0"

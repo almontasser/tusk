@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::hover::{docblock_before, docblock_markdown, signature};
 use super::{Ctx, with_ctx_at};
 use crate::imports::reference;
+use crate::index::{DeclKind, Declared, Origin};
 use crate::locate::{variable_scope, walk};
 use crate::server::Snapshot;
 use crate::types::display;
@@ -471,12 +472,15 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
         out.extend(named_arguments(ctx, word_start, word, range));
     }
 
-    let mut classes: Vec<(u8, bool, &ClassLikeMetadata)> = vec![];
-    for meta in codebase.class_likes.values() {
-        if meta.name.as_str_lossy().starts_with("class@anonymous") {
+    // Every name the project and its libraries declare, loaded or not, and PHP's built-ins.
+    let names = ctx.index.names();
+    let mut classes: Vec<(u8, bool, &Declared, SymbolKind)> = vec![];
+    for (d, origin) in &names {
+        let DeclKind::Class(kind) = d.kind else { continue };
+        let fqn = d.name.as_str_lossy();
+        if fqn.contains(['@', ':', '{', '/']) {
             continue;
         }
-        let fqn = meta.original_name.as_str_lossy();
         let s = if qualified {
             let typed = word.trim_start_matches('\\');
             fqn.to_ascii_lowercase().starts_with(&typed.to_ascii_lowercase()).then_some(1)
@@ -484,16 +488,16 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
             score(fqn.rsplit('\\').next().unwrap_or(&fqn), typed_short)
         };
         let Some(s) = s else { continue };
-        if place == Place::New && (meta.kind != SymbolKind::Class || meta.flags.is_abstract()) {
+        if place == Place::New && (kind != SymbolKind::Class || d.is_abstract) {
             continue;
         }
-        let project = meta.flags.is_user_defined();
-        classes.push((s, !project, meta));
+        classes.push((s, *origin != Origin::Project, d, kind));
     }
-    classes.sort_by(|a, b| (a.0, a.1, a.2.original_name.as_str_lossy().len()).cmp(&(b.0, b.1, b.2.original_name.as_str_lossy().len())));
-    for (rank, (s, vendor, meta)) in classes.into_iter().take(NAME_LIMIT).enumerate() {
-        let fqn = meta.original_name.as_str_lossy().into_owned();
-        let kind = match meta.kind {
+    classes.sort_by(|a, b| (a.0, a.1, a.2.name.as_str_lossy().len()).cmp(&(b.0, b.1, b.2.name.as_str_lossy().len())));
+    classes.dedup_by(|a, b| a.2.name == b.2.name);
+    for (rank, (s, vendor, d, kind)) in classes.into_iter().take(NAME_LIMIT).enumerate() {
+        let fqn = d.name.as_str_lossy().into_owned();
+        let kind = match kind {
             SymbolKind::Interface => CompletionItemKind::INTERFACE,
             SymbolKind::Enum => CompletionItemKind::ENUM,
             SymbolKind::Trait => CompletionItemKind::STRUCT,
@@ -524,26 +528,28 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
         return out;
     }
 
-    let mut functions: Vec<(u8, bool, &FunctionLikeMetadata)> = codebase
-        .function_likes
+    let mut functions: Vec<(u8, bool, &Declared)> = names
         .iter()
-        .filter(|((class, _), f)| class.is_empty() && f.kind.is_function())
-        .filter_map(|(_, f)| {
-            let name = f.original_name.as_str_lossy();
+        .filter(|(d, _)| d.kind == DeclKind::Function)
+        .filter_map(|(d, origin)| {
+            let name = d.name.as_str_lossy();
             let short = name.rsplit('\\').next().unwrap_or(&name);
-            score(short, typed_short).map(|s| (s, !f.flags.is_user_defined(), f))
+            score(short, typed_short).map(|s| (s, *origin != Origin::Project, d))
         })
         .collect();
-    functions.sort_by_key(|(s, vendor, f)| (*s, *vendor, f.original_name.as_str_lossy().len()));
-    for (rank, (s, vendor, f)) in functions.into_iter().take(NAME_LIMIT).enumerate() {
-        let fqn = f.original_name.as_str_lossy().into_owned();
+    functions.sort_by_key(|(s, vendor, d)| (*s, *vendor, d.name.as_str_lossy().len()));
+    functions.dedup_by(|a, b| a.2.name == b.2.name);
+    for (rank, (s, vendor, d)) in functions.into_iter().take(NAME_LIMIT).enumerate() {
+        let fqn = d.name.as_str_lossy().into_owned();
         let r = reference(&ctx.doc, ctx.parsed.program, word_start, &fqn, NameKind::Function);
-        let sig = method_signature(ctx, f);
-        let has_params = !f.parameters.is_empty();
+        // A library function the project doesn't use yet isn't loaded: its name is known, not its parameters.
+        let loaded = codebase.get_function(fqn.as_bytes());
+        let sig = loaded.map(|f| method_signature(ctx, f));
+        let has_params = loaded.is_none_or(|f| !f.parameters.is_empty());
         out.push(CompletionItem {
             label: fqn.rsplit('\\').next().unwrap_or(&fqn).to_string(),
             kind: Some(CompletionItemKind::FUNCTION),
-            label_details: Some(CompletionItemLabelDetails { detail: Some(sig.params), description: sig.returns.clone() }),
+            label_details: sig.map(|sig| CompletionItemLabelDetails { detail: Some(sig.params), description: sig.returns }),
             detail: Some(fqn.clone()),
             sort_text: Some(format!("{s}{}{rank:04}", u8::from(vendor))),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
@@ -556,16 +562,17 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
             ..Default::default()
         });
     }
-    let mut constants: Vec<(u8, String)> = codebase
-        .constants
-        .values()
-        .filter_map(|c| {
-            let name = c.name.as_str_lossy().into_owned();
+    let mut constants: Vec<(u8, String)> = names
+        .iter()
+        .filter(|(d, _)| d.kind == DeclKind::Constant)
+        .filter_map(|(d, _)| {
+            let name = d.name.as_str_lossy().into_owned();
             let short = name.rsplit('\\').next().unwrap_or(&name).to_string();
             score(&short, typed_short).map(|s| (s, name))
         })
         .collect();
     constants.sort();
+    constants.dedup();
     for (s, name) in constants.into_iter().take(NAME_LIMIT / 3) {
         let short = name.rsplit('\\').next().unwrap_or(&name).to_string();
         let mut it = item(&short, CompletionItemKind::CONSTANT, Some(name.clone()), range);
@@ -597,9 +604,20 @@ pub fn resolve(snap: &Snapshot, mut item: CompletionItem) -> Result<CompletionIt
             .map(|c| c.span)
             .or_else(|| codebase.get_class_constant(class.as_bytes(), name.as_bytes()).map(|c| c.span)),
     };
+    // A library symbol the project doesn't use yet isn't loaded; its declaration is still known, by its name.
+    let from_name = span.is_none();
+    let span = span.or_else(|| match &data {
+        Data::Class { name } | Data::Function { name } => index.find_declared(name).map(|d| d.span),
+        _ => None,
+    });
     let Some(span) = span else { return Ok(item) };
     let Some(text) = snap.text_of(&index, span.file_id) else { return Ok(item) };
-    let start = span.start.offset as usize;
+    let mut start = span.start.offset as usize;
+    if from_name {
+        // The declaration starts at the start of its name's line, after any docblock.
+        start = text[..start.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+        start += text[start..].len() - text[start..].trim_start().len();
+    }
     let mut value = String::new();
     if matches!(data, Data::Method { .. } | Data::Function { .. } | Data::Class { .. }) {
         let end = (span.end.offset as usize).min(text.len());

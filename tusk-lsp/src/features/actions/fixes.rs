@@ -15,18 +15,16 @@ use crate::symbol::Symbol;
 
 /// Classes named `short`, by their fully qualified names, project classes first.
 fn classes_named(ctx: &Ctx<'_>, short: &str) -> Vec<String> {
-    let mut found: Vec<(bool, String)> = ctx
+    let mut found: Vec<(crate::index::Origin, String)> = ctx
         .index
-        .codebase
-        .class_likes
-        .values()
-        .filter(|c| {
-            let name = c.original_name.as_str_lossy();
-            name.rsplit('\\').next().is_some_and(|s| s.eq_ignore_ascii_case(short))
-        })
-        .map(|c| (!c.flags.is_user_defined(), c.original_name.as_str_lossy().into_owned()))
+        .names()
+        .into_iter()
+        .filter(|(d, _)| matches!(d.kind, crate::index::DeclKind::Class(_)))
+        .map(|(d, origin)| (origin, d.name.as_str_lossy().into_owned()))
+        .filter(|(_, name)| name.rsplit('\\').next().is_some_and(|s| s.eq_ignore_ascii_case(short)))
         .collect();
     found.sort();
+    found.dedup_by(|a, b| a.1 == b.1);
     found.into_iter().map(|(_, n)| n).take(20).collect()
 }
 

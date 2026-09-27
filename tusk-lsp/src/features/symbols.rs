@@ -4,8 +4,6 @@ use lsp_types::{
     DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Location, OneOf, SymbolKind, WorkspaceSymbol,
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
-use mago_codex::metadata::function_like::FunctionLikeKind;
-use mago_database::file::FileType;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
@@ -164,37 +162,39 @@ pub fn workspace_symbols(snap: &Snapshot, params: WorkspaceSymbolParams) -> Resu
     let qualified = query.contains('\\');
     let query = query.trim_start_matches('\\').to_string();
     let index = snap.index.read();
-    let codebase = &index.codebase;
 
     // (rank, vendor, name, fqn, kind, place)
     let mut hits: Vec<(u8, bool, String, String, SymbolKind, Place)> = vec![];
     let mut consider = |fqn: String, kind: SymbolKind, span: Span| {
-        let Some(file) = index.files.get(&span.file_id) else { return };
+        if index.path_of(span.file_id).is_none() {
+            return;
+        }
+        let library = !index.is_project_file(span.file_id);
         let short = fqn.rsplit('\\').next().unwrap_or(&fqn).to_string();
         let target = if qualified { fqn.to_ascii_lowercase() } else { short.to_ascii_lowercase() };
         if let Some(r) = rank(&target, &query) {
-            hits.push((r, file.file_type != FileType::Host, short, fqn, kind, span.into()));
+            hits.push((r, library, short, fqn, kind, span.into()));
         }
     };
-    for class in codebase.class_likes.values() {
-        let fqn = class.original_name.as_str_lossy().into_owned();
+    // Every name the project and its libraries declare, loaded or not. PHP's built-ins have no file to go to.
+    for (d, origin) in index.names() {
+        if origin == crate::index::Origin::BuiltIn {
+            continue;
+        }
+        let fqn = d.name.as_str_lossy().into_owned();
         // Anonymous classes have generated names.
         if fqn.contains(['@', ':', '{', '/']) {
             continue;
         }
-        let kind = match class.kind {
-            mago_codex::symbol::SymbolKind::Interface => SymbolKind::INTERFACE,
-            mago_codex::symbol::SymbolKind::Trait => SymbolKind::STRUCT,
-            mago_codex::symbol::SymbolKind::Enum => SymbolKind::ENUM,
-            _ => SymbolKind::CLASS,
+        let kind = match d.kind {
+            crate::index::DeclKind::Class(mago_codex::symbol::SymbolKind::Interface) => SymbolKind::INTERFACE,
+            crate::index::DeclKind::Class(mago_codex::symbol::SymbolKind::Trait) => SymbolKind::STRUCT,
+            crate::index::DeclKind::Class(mago_codex::symbol::SymbolKind::Enum) => SymbolKind::ENUM,
+            crate::index::DeclKind::Class(_) => SymbolKind::CLASS,
+            crate::index::DeclKind::Function => SymbolKind::FUNCTION,
+            crate::index::DeclKind::Constant => SymbolKind::CONSTANT,
         };
-        consider(fqn, kind, class.name_span.unwrap_or(class.span));
-    }
-    for f in codebase.function_likes.values().filter(|f| f.get_kind() == FunctionLikeKind::Function) {
-        consider(f.original_name.as_str_lossy().into_owned(), SymbolKind::FUNCTION, f.name_span.unwrap_or(f.span));
-    }
-    for c in codebase.constants.values() {
-        consider(c.name.as_str_lossy().into_owned(), SymbolKind::CONSTANT, c.span);
+        consider(fqn, kind, d.span);
     }
     hits.sort_by(|a, b| (a.0, a.1, a.2.len(), &a.3).cmp(&(b.0, b.1, b.2.len(), &b.3)));
     hits.truncate(LIMIT);

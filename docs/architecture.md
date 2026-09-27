@@ -3352,6 +3352,10 @@ server's guards can turn a panic in a request into an error answer.
 | `stubs` | The folder with Laravel's alias stubs |
 | `magoConfig` | The editor's `mago.toml` for the project, when the project has none of its own |
 
+The server also accepts `phpVersion` (otherwise from `mago.toml` or
+`composer.json`) and `loadAllLibraries` (load every library file, not only
+what the project reaches; see Index below), which the editor doesn't send.
+
 The server needs no index on disk: it indexes the project each time it starts,
 with `$/progress` titled "Indexing". `tusk/reindex` indexes it again with its
 configuration read again, which the editor asks for when the alias stubs or its
@@ -3386,19 +3390,42 @@ Commands (`workspace/executeCommand`) apply their edits by sending
 
 ### Index
 
-`index.rs` scans every PHP file in the project and `vendor` in parallel into
-one `CodebaseMetadata`, then populates it (resolves inheritance and types).
+`index.rs` scans the project's PHP files in parallel into one
+`CodebaseMetadata`, with the library code they reach, then populates it
+(resolves inheritance and types).
+
+- **Library code, as far as the project reaches:** every library file
+  (`vendor` and stubs) is parsed once for the names it declares, which the
+  index keeps with their locations (`Declared`). Library files are loaded in
+  full only for the names the project's files use, in code or in docblocks,
+  and then for whatever loaded code depends on: parents, interfaces, traits,
+  mixins, and every class in a signature, property, constant, or template
+  (`dependencies`), until nothing new is reached (`ensure_loaded`). An edit
+  that starts using a name loads it the same way, and a library file open in
+  the editor is loaded in full. Completion, Import Class, and Go to Symbol list
+  names from `Index::names`, loaded or not.
+- **What it saves:** on a Laravel and Filament app with 23,000 files, the
+  project reaches 1,900 of `vendor`'s 16,000 classes; memory drops from
+  1.3 GB to 370 MB and indexing from 1.4 s to 0.8 s. The analyzer's problems
+  in all 425 project files are the same either way (`examples/lazy_check.rs`
+  compares them). `loadAllLibraries` in `initializationOptions` loads
+  everything, should a project need it.
+- **Building in chunks:** files are scanned 1,024 at a time, and each scan is
+  cloned into the index and dropped before the next chunk: the allocator keeps
+  what the process peaks at, and holding every scan until the end doubled the
+  peak. Clones are allocated at their size, so the index holds no spare
+  capacity from scanning.
 
 - **Excluded paths:** `vendor`'s tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
   hidden folders), plus the `exclude` globs in `initializationOptions`.
-- **Changes:** each file keeps the keys of the symbols it added. A change
-  removes those, scans the new text, and repopulates only the file's symbols
-  and the classes that inherit from them. Everything else is passed to the
-  populator as safe.
+- **Changes:** each file keeps the names it declared. A change removes the
+  ones the index still has from that file (two files can declare the same
+  class, and only one wins the merge), scans the new text, and repopulates
+  only the file's symbols and the classes that inherit from them. Everything
+  else is passed to the populator as safe.
 - **Measurements** on a Laravel and Filament project with 23,000 PHP files,
-  on an M-series Mac: discovery takes 0.26 s and indexing 1.0 s, and a
-  model's update takes 10 ms. Memory is 1.3 GB, nearly all of it symbol data
-  for `vendor` (147,000 functions and methods).
+  on an M-series Mac: indexing takes 0.8 s, a model's update 10 ms, and
+  memory 370 MB.
 
 ### Threads
 
@@ -4486,7 +4513,8 @@ published parser, codebase index, and analyzer make it a matter of features.
   work the way the editor needs, and fixes don't wait on upstream releases.
 - **No `.phar` downloads:** the server is the app's own binary.
 
-The costs: memory is about 1.3 GB on that large app, nearly all of it
-`vendor`'s symbols, since the whole index stays in memory; Mago's crates are
+The costs: memory was about 1.3 GB on that large app at first, nearly all of
+it `vendor`'s symbols (370 MB since the index loads only the library code the
+project reaches); Mago's crates are
 pinned to `=1.50.0`, because their API changes between minor versions, and
 upgrading them is deliberate work.

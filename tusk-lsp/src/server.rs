@@ -37,6 +37,8 @@ pub struct Options {
     pub php_version: Option<String>,
     /// The Mago configuration to use. By default, the project's `mago.toml`.
     pub mago_config: Option<PathBuf>,
+    /// Index every library file in full, not only what the project reaches. Uses several times the memory.
+    pub load_all_libraries: bool,
 }
 
 /// The index's configuration from the options and the project's files.
@@ -60,6 +62,7 @@ pub fn index_config(root: &Path, options: &Options) -> IndexConfig {
         .or_else(|| composer_php_version(root))
         .unwrap_or(config.php_version);
     config.mago = Arc::new(mago);
+    config.load_all = options.load_all_libraries;
     config
 }
 

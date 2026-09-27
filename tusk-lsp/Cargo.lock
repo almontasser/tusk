@@ -1673,6 +1673,7 @@ dependencies = [
  "foldhash",
  "globset",
  "ignore",
+ "libc",
  "lsp-server",
  "lsp-types",
  "mago-allocator",
