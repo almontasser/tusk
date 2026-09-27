@@ -5,6 +5,8 @@ import { recordBeforeDelete, showLocalHistory } from "./localhistory";
 import { excludeFolder, exclusionOf, updateReferences } from "./lsp";
 import { confirm, pick } from "./palette";
 import { newFileContent, psr4From } from "./psr4";
+import { findInFolder } from "./search";
+import { openTerminal } from "./terminal";
 
 type Host = {
   root(): string;
@@ -188,6 +190,9 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     items.push("-", { label: "Rename…", run: () => rename(path) }, { label: "Move to Trash", run: () => remove(path) });
   }
   items.push(
+    "-",
+    { label: "Find in Folder…", run: () => findInFolder(dir) },
+    { label: "Open in Terminal", run: () => openTerminal(dir, nameOf(dir)) },
     "-",
     { label: "Show History", run: () => showFileHistory(path) },
     ...(isDir(path) ? [] : [{ label: "Show Local History", run: () => showLocalHistory(path) }]),

@@ -226,6 +226,17 @@ export function openSearch(editor: monaco.editor.ICodeEditor, focusReplace = fal
   target.select();
 }
 
+/** Opens the Search view limited to the files in `dir`. */
+export function findInFolder(dir: string) {
+  host.showView("search");
+  const rel = dir.slice(host.root().length + 1);
+  $<HTMLInputElement>("find-include").value = rel ? `${rel}/**` : "";
+  const input = $<HTMLInputElement>("find-query");
+  input.focus();
+  input.select();
+  if (input.value) search();
+}
+
 export function initSearch(h: Host) {
   host = h;
   for (const [id, key] of [["opt-case", "caseSensitive"], ["opt-word", "wholeWord"], ["opt-regex", "regex"]] as const) {

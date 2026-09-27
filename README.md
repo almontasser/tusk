@@ -418,7 +418,8 @@ save every file they change.
 ## Files
 
 Right-click the project tree for **New File…**, **New Folder…**, **Rename…**,
-**Move to Trash**, **Copy Path**, **Copy Relative Path**, and **Reveal in
+**Move to Trash**, **Find in Folder…** (Find in Files limited to the folder),
+**Open in Terminal**, **Copy Path**, **Copy Relative Path**, and **Reveal in
 Finder**. In the tree, you can also press:
 
 - ↑ and ↓ to move between rows, and ⏎ to open a file or folder.
