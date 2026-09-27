@@ -26,6 +26,10 @@ import {
   parseSetCookie,
   prepare,
   requestForRoute,
+  routeSync,
+  syncBody,
+  syncEdits,
+  applyLineEdits,
   resolve,
   shellWords,
   substitute,
@@ -392,4 +396,81 @@ test("reads a GRPC request", async () => {
   assert.equal(r.method, "GRPC");
   const p = await prepare(r, lookupIn([{ grpc: "localhost:50051", token: "t", name: "Ada" }]), "/p", async () => "");
   assert.deepEqual([p.method, p.url, p.headers, p.body], ["GRPC", "localhost:50051/test.Echo/Say", [["x-token", "t"]], "{\"name\": \"Ada\"}"]);
+});
+
+test("syncBody adds and removes fields and keeps your values", () => {
+  const body = '{\n    "sender": "Lamah",\n    "phone": "0910000000"\n}';
+  const synced = syncBody(body, { sender: "required|string", receiver: "required", length: "integer" });
+  assert.deepEqual(synced?.added, ["receiver", "length"]);
+  assert.deepEqual(synced?.removed, ["phone"]);
+  // The body's own four-space indentation stays.
+  assert.equal(synced?.body, '{\n    "sender": "Lamah",\n    "receiver": "",\n    "length": 0\n}');
+  assert.equal(syncBody('{"a": 1}', { a: "integer" }), null);
+  // Unreadable rules, a body with a bare variable, and a list are left alone.
+  assert.equal(syncBody('{"a": 1}', {}), null);
+  assert.equal(syncBody('{"a": {{id}}}', { b: "string" }), null);
+  assert.equal(syncBody("[1]", { b: "string" }), null);
+  assert.equal(syncBody("", { b: "string" })?.body, '{\n  "b": ""\n}');
+});
+
+test("routeSync adds routes, updates bodies, and finds requests with no route", () => {
+  const text = [
+    "### Send OTP",
+    "POST {{host}}/api/otp/initiate",
+    "Content-Type: application/json",
+    "",
+    '{"lang": "ar", "old": 1}',
+    "",
+    "### Gone",
+    "GET {{host}}/api/old",
+    "",
+    "### Elsewhere",
+    "GET https://api.github.com/users",
+    "",
+  ].join("\n");
+  const routes = [
+    { method: "POST", uri: "api/otp/initiate", name: null, action: "OTP@send" },
+    { method: "POST", uri: "api/otp/verify", name: "otp.verify", action: "OTP@verify" },
+  ];
+  const rules = new Map<string, Record<string, string>>([["OTP@send", { lang: "required", receiver: "required" }], ["OTP@verify", { code: "required" }]]);
+  const changes = routeSync(text, routes, rules);
+  assert.deepEqual(
+    changes.map((c) => [c.kind, c.request.url]),
+    [
+      ["update", "{{host}}/api/otp/initiate"],
+      ["remove", "{{host}}/api/old"],
+      ["add", "{{host}}/api/otp/verify"],
+    ],
+  );
+  const after = applyLineEdits(text, syncEdits(text, changes));
+  assert.equal(
+    after,
+    [
+      "### Send OTP",
+      "POST {{host}}/api/otp/initiate",
+      "Content-Type: application/json",
+      "",
+      "{",
+      '  "lang": "ar",',
+      '  "receiver": ""',
+      "}",
+      "",
+      "### Elsewhere",
+      "GET https://api.github.com/users",
+      "",
+      "### otp.verify",
+      "POST {{host}}/api/otp/verify",
+      "Accept: application/json",
+      "Content-Type: application/json",
+      "",
+      "{",
+      '  "code": ""',
+      "}",
+      "",
+    ].join("\n"),
+  );
+  // Nothing to do once in step.
+  assert.deepEqual(routeSync(applyLineEdits(text, syncEdits(text, changes.filter((c) => c.kind !== "remove"))), routes, rules).filter((c) => c.kind !== "remove"), []);
+  // An empty file gets every route.
+  assert.equal(applyLineEdits("", syncEdits("", routeSync("", routes.slice(1), rules))), "### otp.verify\nPOST {{host}}/api/otp/verify\nAccept: application/json\nContent-Type: application/json\n\n{\n  \"code\": \"\"\n}\n");
 });

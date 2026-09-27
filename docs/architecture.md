@@ -1227,15 +1227,39 @@ files work in PhpStorm and VS Code's REST Client.
   IPC, so a script in a cloned repository can't run commands. The worker is
   stopped after 5 seconds. It gets copies of the globals and variables and
   returns the changed ones, with test results and logs.
-- `src/httpview.ts` is the tool window and the HTTP tab. The tab tracks its
-  request with a model decoration on the request's first line, which moves as
-  the file changes above it. Each form edit parses the model, changes the
-  request, formats it, and replaces only the lines between the unchanged ones
-  at the block's start and end, in one undoable edit. The parser keeps comments
-  among the headers and in the body with their positions, and a URL written
-  over several lines, so formatting puts them back. The file then saves, open
-  in a tab or not, so a reload can't lose a form edit. Edits in the editor
-  re-render the form unless focus is in it.
+- `src/httpview.ts` is the tool window and the HTTP tab. The tab has a
+  `RequestTab` per open request. Each tracks its request with a model
+  decoration on the request's first line, which moves as the file changes
+  above it, and keeps its own response (`exchange`), its send in progress
+  (`sending`, so a response lands in the tab that sent it), and a WebSocket
+  log (`live`). A preview tab (`preview`) is replaced by the next request
+  opened as a preview, and becomes a lasting tab when you edit or send it.
+  `requestsIn` caches each model's parse by version, since every tab label
+  parses its file. Each form edit parses the model, changes the request,
+  formats it, and replaces only the lines between the unchanged ones at the
+  block's start and end, in one undoable edit. The parser keeps comments among
+  the headers and in the body with their positions, and a URL written over
+  several lines, so formatting puts them back. Edits in the editor re-render
+  the form unless focus is in it.
+- Form edits leave the file unsaved. `main.ts` keeps `held`, the files request
+  tabs have, with the version last saved, beside the editor's `tabs`.
+  `fileDirty`, `saveFile`, Save All, the quit prompt, and the check before a
+  disk change reloads a model all cover held files. A held file's model isn't
+  disposed when its editor tab closes: `closeFile` moves the tab's saved
+  version to `held` instead of asking, and a new editor tab takes it back
+  (`addTab`). The HTTP tab reaches this through `host.hold`, `release` (which
+  reverts on **Don't Save**), `isDirty`, `hasTab`, and `save`. Closing a
+  file's last request tab asks, unless an editor tab has the file, since that
+  tab asks when it closes. Auto-save leaves held files alone: the window
+  losing focus saves editor tabs only, and quitting asks when a held file
+  without an editor tab has changes. Actions in the tool window, such as
+  deleting a request, save the file only when it had no unsaved changes
+  (`edited`). A moved file's tabs follow it (`requestFileMoved`), and a deleted
+  one's close with its model (`onWillDispose`).
+- The session keeps the request tabs (`HttpSession`) as file, line, and key:
+  `@name`, or else method and URL. Restoring finds the request with the same
+  key nearest its old line, since the file may have changed. Unsaved text isn't
+  kept, as with editor tabs, since closing asks about it.
 - A Laravel error response is read by `laravelException`: the JSON Laravel
   sends when asked for it, or file and line references in an HTML error page.
 - WebSockets use the webview's `WebSocket`: curl in macOS has no WebSocket
@@ -1276,6 +1300,21 @@ files work in PhpStorm and VS Code's REST Client.
 - **Less typing.** `httpfile.ts` holds the pure parts. `jsonPathAt(text, offset)` walks the JSON text and returns the path of the deepest value, key or container at the offset. `CHECKS` defines each check kind's code template. `writeChecks` writes checks between the `// checks:start` and `// checks:end` markers in the response handler. `readChecks` reads them back with patterns built from the same templates, and reports the block as not editable when its code doesn't match. `envTable` and `envFiles` turn the two environment files into a table model and back. A variable in the private file is private, and every environment stays in the shared file so the menus list it.
 - `httpchecks.ts` holds the Checks section of the Scripts tab and the response body's **Save as Variable…** action. The Checks section edits the handler's Monaco editor, so its changes go through the same `updateSoon` path as typing. `httpenv.ts` is the environment editor, shown with `showHttpPanel`. Both import from `httpview.ts`, which imports them back. That's safe because each only uses the other's exports inside functions.
 - `send` passes `response.time` (curl's `time_total` in ms) to the response handler script.
+- Sync with Routes is `src/httpsync.ts`, loaded with `import()` the first time
+  it's used. `routeSync` in `httpfile.ts` matches requests to `{{host}}` with
+  routes by `matchRoute`, and lists the changes: an `add` for each route no
+  request calls, an `update` when `syncBody` changes a JSON body (fields the
+  rules add, with `bodyFromRules`' example values, and fields no rule
+  validates removed, keeping the body's order, values, and indentation), and a
+  `remove` for each request no route answers. `syncBody` leaves a body alone
+  when there are no rules, since they may be unreadable, or when it isn't a
+  plain JSON object. `syncEdits` turns the ticked changes into line edits that
+  don't overlap, which `applyLineEdits` makes to text for **View Diff** and
+  `toMonaco` makes to the model in one undoable edit, so request tabs keep
+  their decorations. The view keeps the model's version: if the file changes
+  before you apply, it works the list out again instead of applying stale line
+  numbers. The scope is API routes unless the file calls a route outside
+  `api/`. A removed request's tabs close first (`dropTabsIn`).
 - `requestItems()` in `httpview.ts` lists every request as palette items. **Go to Request…** and Search Everywhere use it.
 - `src/graphqlschema.ts` has no editor imports, so Node tests it. `schemaFrom`
   reads an introspection result into a map of types, with fields, arguments,

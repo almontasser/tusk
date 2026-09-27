@@ -1086,6 +1086,106 @@ export function bodyFromRules(rules: Record<string, string>): Record<string, unk
   return body;
 }
 
+// ---- Sync with routes ----
+
+/** A change that brings a file's requests in line with the app's routes. */
+export type SyncChange =
+  | { kind: "add"; route: Route; request: HttpRequest }
+  | { kind: "update"; route: Route; request: HttpRequest; updated: HttpRequest; added: string[]; removed: string[] }
+  | { kind: "remove"; request: HttpRequest };
+
+/**
+ * A JSON body brought in line with validation rules: fields the rules add get an example value, fields no rule
+ * validates go, and the values you set stay, in their order. Null when nothing changes, when there are no rules (they
+ * may just be unreadable), or when the body isn't a plain JSON object, such as one with a {{variable}} outside quotes.
+ */
+export function syncBody(body: string, rules: Record<string, string>): { body: string; added: string[]; removed: string[] } | null {
+  if (!Object.keys(rules).length) return null;
+  const want = bodyFromRules(rules);
+  let have: Record<string, unknown> = {};
+  if (body.trim()) {
+    try {
+      have = JSON.parse(body);
+    } catch {
+      return null;
+    }
+    if (!have || typeof have !== "object" || Array.isArray(have)) return null;
+  }
+  const added = Object.keys(want).filter((k) => !(k in have));
+  const removed = Object.keys(have).filter((k) => !(k in want));
+  if (!added.length && !removed.length) return null;
+  const next: Record<string, unknown> = {};
+  for (const k of Object.keys(have)) if (k in want) next[k] = have[k];
+  for (const k of added) next[k] = want[k];
+  // The body's own indentation, two spaces if it has none.
+  const indent = body.match(/\n([ \t]+)"/)?.[1] ?? "  ";
+  return { body: JSON.stringify(next, null, indent), added, removed };
+}
+
+const hasBody = (method: string) => ["POST", "PUT", "PATCH"].includes(method);
+
+/**
+ * What syncing a file's requests with `routes` would change: a request for each route none calls, a body for each
+ * request whose route validates other fields, and each request to {{host}} that no route answers. Requests to other
+ * hosts are left alone. `rules` has each route's validation rules, by its action.
+ */
+export function routeSync(text: string, routes: Route[], rules: Map<string, Record<string, string>>): SyncChange[] {
+  const changes: SyncChange[] = [];
+  const called = new Set<Route>();
+  for (const request of parseHttp(text).requests) {
+    if (!/^\{\{\s*host\s*\}\}/.test(request.url)) continue;
+    const route = matchRoute(request.method, request.url, routes);
+    if (!route) {
+      changes.push({ kind: "remove", request });
+      continue;
+    }
+    called.add(route);
+    if (!hasBody(request.method)) continue;
+    const synced = syncBody(request.body, rules.get(route.action) ?? {});
+    if (!synced) continue;
+    const updated: HttpRequest = { ...request, headers: [...request.headers], body: synced.body };
+    if (!header(updated, "content-type")) updated.headers.push({ name: "Content-Type", value: "application/json", enabled: true });
+    changes.push({ kind: "update", route, request, updated, added: synced.added, removed: synced.removed });
+  }
+  for (const route of routes) if (!called.has(route)) changes.push({ kind: "add", route, request: requestForRoute(route, rules.get(route.action)) });
+  return changes;
+}
+
+/** Lines `start` to `end` (1-based, inclusive) replaced by `lines`; `end` one before `start` inserts before `start`. */
+export type LineEdit = { start: number; end: number; lines: string[] };
+
+/**
+ * The line edits that make `changes`, which don't overlap: each updated request's block rewritten (keeping the blank
+ * line after it), each removed one's taken out, and new ones added after the last line with a blank line before them.
+ */
+export function syncEdits(text: string, changes: SyncChange[]): LineEdit[] {
+  const lines = text.split("\n");
+  const edits: LineEdit[] = [];
+  for (const c of changes) {
+    if (c.kind === "remove") edits.push({ start: c.request.start, end: c.request.end, lines: [] });
+    else if (c.kind === "update") {
+      const { start, end } = c.request;
+      const blank = !lines[end - 1]?.trim() ? [""] : [];
+      edits.push({ start, end, lines: [...formatRequest(c.updated).replace(/\n$/, "").split("\n"), ...blank] });
+    }
+  }
+  const added = changes.flatMap((c) => (c.kind === "add" ? [formatRequest(c.request).replace(/\n$/, "")] : [])).join("\n\n").split("\n");
+  if (changes.some((c) => c.kind === "add")) {
+    if (!text.trim()) edits.push({ start: 1, end: lines.length, lines: [...added, ""] });
+    // Text that ends in a newline has an empty last "line", which becomes the blank line before them.
+    else edits.push({ start: lines.length + 1, end: lines.length, lines: [...(text.endsWith("\n") ? [] : [""]), ...added, ""] });
+  }
+  return edits;
+}
+
+/** The text with line edits made. */
+export function applyLineEdits(text: string, edits: LineEdit[]): string {
+  const lines = text.split("\n");
+  // From the bottom, so earlier lines keep their numbers.
+  for (const e of [...edits].sort((a, b) => b.start - a.start)) lines.splice(e.start - 1, e.end - e.start + 1, ...e.lines);
+  return lines.join("\n");
+}
+
 /** Values that `path` selects in JSON: $, .key, ['key'], [n], [-n], [*], .*, and ..key for any depth. */
 export function jsonQuery(value: unknown, path: string): unknown[] {
   const tokens = [...path.trim().replace(/^\$/, "").matchAll(/\.\.([\w$-]+|\*)|\.([\w$-]+|\*)|\[\s*(?:'([^']*)'|"([^"]*)"|(-?\d+)|(\*))\s*\]/g)];

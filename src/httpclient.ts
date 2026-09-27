@@ -31,8 +31,17 @@ export type Host = {
   status(text: string): void;
   openAt(path: string, line: number): Promise<unknown>;
   ensureModel(path: string): Promise<monaco.editor.ITextModel>;
-  /** Saves a model edited from the HTTP tab. */
-  persist(path: string): Promise<unknown>;
+  /** Keeps a file open for request tabs, so its unsaved edits outlive its editor tab. */
+  hold(path: string): Promise<monaco.editor.ITextModel>;
+  /** Lets go of a held file; `discard` first reverts unsaved edits when no editor tab has them. */
+  release(path: string, discard: boolean): Promise<void>;
+  isDirty(path: string): boolean;
+  hasTab(path: string): boolean;
+  /** Saves a file, whether or not a tab has it. True when it's saved. */
+  save(path: string): Promise<boolean>;
+  sessionChanged(): void;
+  /** Shows the HTTP tool window in the sidebar. */
+  showHttpTool(): void;
   profiler(): Promise<typeof import("./profiler")>;
   showDiff(path: string, original: string, modified: string, label: string): unknown;
 };

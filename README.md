@@ -845,10 +845,13 @@ The **HTTP Client** tool window lists every request in the project's `.http` and
 `.rest` files, grouped by file, with a filter box and the selected environment
 at the top.
 
-- Click a request to edit it in the **HTTP** tab. Double-click it to open its
-  file. Hover over it and click ▶ to send it.
-- Right-click a request to send, rename, duplicate, delete, or stress test it.
-  Right-click a file to add a request to it or run all of its requests.
+- Click a request to preview it in the **HTTP** tab. The next request you click
+  takes the preview's place, until you edit or send it. Double-click a request
+  to keep its tab open. Hover over it and click ▶ to send it.
+- A dot after a file means it has unsaved changes.
+- Right-click a request to send, open in the editor, rename, duplicate, delete,
+  or stress test it. Right-click a file to add a request to it, run all of its
+  requests, sync it with the Laravel routes, or save it.
 - **+** adds a request to a file you choose, or to a new file in `http/`.
 - The import icon imports a curl command, such as one from your browser's
   developer tools (**Copy as cURL**), a Postman collection (v2 or v2.1), an
@@ -872,6 +875,23 @@ at the top.
   route gets Laravel session auth, and an API route behind `auth:sanctum` a
   bearer token. When artisan fails, such as on an error while the app boots,
   the message says why.
+- **Sync with Laravel Routes** (right-click a file, the first row of the
+  method icon's list, or **HTTP Client: Sync with Laravel Routes…** in ⌘⇧A)
+  brings a file in line with the routes. It lists what would change, each with
+  a checkbox:
+  - **New routes** get a request each, with a body from their rules.
+  - **Changed bodies** get fields that the rules add, with an example value,
+    and lose fields that no rule validates. Values you typed stay.
+  - **No matching route** lists requests to `{{host}}` that no route answers.
+    These aren't ticked, so they're only deleted if you tick them.
+
+  Requests go with routes by method and path, so a route whose path changed
+  shows as one new and one missing. A file that calls only API routes syncs
+  with the API routes; switch to **All routes** at the top. **View Diff** shows
+  the file before and after, and **Apply** makes the ticked changes as one
+  undoable edit. The file saves unless it had unsaved changes, which then stay
+  unsaved with the sync. If the file changes before you apply, the list is
+  worked out again for you to check.
 - **History** lists the last 100 requests you sent in the project, with their
   responses, and a filter. Click one to see it again. Right-click one to send it
   again, pin it (pinned requests stay at the top and don't count toward the
@@ -886,6 +906,16 @@ at the top.
 
 ### The HTTP tab
 
+Each request you open gets a tab at the top of the **HTTP** tab, showing its
+method and title, and its file when two tabs have the same title. A preview
+tab's title is in italics. Drag tabs to reorder them. Middle-click or ⌘W (with
+the **HTTP** tab focused) closes one. Right-click a tab to close others, those
+to the right, the saved ones, or all of them, to keep a preview open, to save
+its file, or to show it in the editor or the tool window. ← and → move between
+focused tabs. Each tab keeps its own response, and a request goes on sending
+when you switch to another tab. The tabs, the one you had open, and whether
+the **HTTP** tab showed come back when you reopen the project.
+
 The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
 menu, and the environment. Under the URL, you see it with its variables
 replaced, and the names nothing defines. While a request runs, **Send** becomes
@@ -897,7 +927,12 @@ in the private environment file. **Send Anyway** sends `{{name}}` as written.
 
 The request's tabs edit its text in the `.http` file, and edits in the editor
 show in the tabs. Each change rewrites only the lines it touches, keeping
-comments and a URL split over several lines, and saves the file.
+comments and a URL split over several lines. The file stays unsaved, with a dot
+on its tabs, until you save it with ⌘S. Auto-save doesn't save it: closing its
+last tab asks whether to save, and so do quitting and opening another project.
+If the file also has an editor tab, that tab shows the changes too, and closing
+it keeps them in the request tabs. Adding, duplicating, deleting, or renaming a
+request from the tool window saves the file, unless it had unsaved changes.
 
 | Tab | What you set |
 | --- | --- |

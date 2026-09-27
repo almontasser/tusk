@@ -989,6 +989,42 @@ button.link:hover { text-decoration: underline; }
 /* The HTTP tab: a bar with the method, URL, and Send, then the request form beside the response. */
 .http-client { display: flex; flex-direction: column; height: 100%; font-size: 12px; padding-right: 10px; }
 .http-main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* Request tabs: the editor's tab look, a little smaller. A dot marks a file with unsaved changes; italics a preview. */
+.http-request-tabs { height: 32px; margin: 0 -10px 8px 0; background: transparent; }
+.http-request-tabs[hidden] { display: none; }
+.http-request-tabs .tab { gap: 6px; padding: 0 4px 0 10px; max-width: 260px; font-size: 12px; cursor: pointer; }
+.http-request-tabs .tab .name { overflow: hidden; text-overflow: ellipsis; }
+.http-request-tabs .tab .http-badge { width: auto; }
+.http-request-tabs .tab > .codicon { font-size: 12px !important; color: var(--muted); }
+.http-request-tabs .tab.preview .name { font-style: italic; }
+.http-request-tabs .tab.missing .name { color: var(--faint); text-decoration: line-through; }
+.http-request-tabs .tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.http-request-tabs .tab.drop-before { box-shadow: inset 2px 0 var(--accent); }
+.http-request-tabs .tab.drop-after { box-shadow: inset -2px 0 var(--accent); }
+.http-request-tabs .http-new-tab { align-self: center; flex-shrink: 0; margin: 0 6px; }
+.http-unsaved { width: 7px; height: 7px; border-radius: 50%; background: var(--text); flex-shrink: 0; }
+/* Sync with Routes: the changes by kind, each with a checkbox. */
+.http-sync-bar { align-items: center; }
+.http-sync-bar > button:not(.primary) { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--input-border); border-radius: var(--radius); padding: 0 10px; background: var(--panel); }
+.http-sync-bar > button:disabled { opacity: 0.5; cursor: default; }
+.http-sync-done { margin: 0 0 8px; padding: 6px 10px; border-radius: var(--radius); color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.http-sync-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px; }
+.http-sync-group ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.http-sync-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 0 4px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
+.http-sync-head input { align-self: center; }
+.http-sync-head .http-hint { margin-left: 8px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.http-sync-group.remove .http-sync-head strong { color: var(--orange); }
+.http-sync-row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+.http-sync-row:hover { background: var(--hover); }
+.http-sync-row.off { opacity: 0.55; }
+.http-sync-row .name { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.http-sync-row .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.http-sync-row .icon-button { margin-left: auto; visibility: hidden; }
+.http-sync-row:hover .icon-button { visibility: visible; }
+.http-sync-fields { display: flex; flex-wrap: wrap; gap: 4px; }
+.http-sync-fields ins, .http-sync-fields del { font: 11px var(--mono); text-decoration: none; padding: 0 6px; border-radius: 8px; }
+.http-sync-fields ins { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.http-sync-fields del { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
 .http-bar { display: flex; align-items: flex-start; gap: 6px; padding: 0 0 6px; flex-shrink: 0; }
 .http-bar > select, .http-bar > button, .http-bar > input { height: 28px; }
 .http-method { width: 118px; font: 600 12px var(--mono); }

@@ -47,8 +47,10 @@ export async function generateFeatureTest(x: Exchange | undefined) {
     let line: number;
     if (model) {
       const added = addTest(model.getValue(), test, pest);
+      const clean = !host.isDirty(path);
       model.pushEditOperations([], [{ range: model.getFullModelRange(), text: added.text }], () => null);
-      await host.persist(path);
+      // Saved, unless it had unsaved edits of yours.
+      if (clean) await host.save(path);
       line = added.line;
     } else {
       const text = featureTestFile(name, test, pest);

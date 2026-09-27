@@ -19,7 +19,7 @@ import { initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
 import { detectAppAddress } from "./httplaravel";
 import { editEnvironments } from "./httpenv";
-import { goToRequest, httpFilesChanged, initHttpClient, newRequestInteractive, refreshTree, requestItems, resetHttpClient, selectEnvironment, showGlobals } from "./httpview";
+import { closeAllRequests, closeFocusedRequest, goToRequest, httpFilesChanged, type HttpSession, initHttpClient, newRequestInteractive, refreshTree, requestFileMoved, requestFilesSaved, requestItems, resetHttpClient, restoreHttpSession, selectEnvironment, showGlobals, httpSession, syncRequestsWithRoutes } from "./httpview";
 import { runAllRequests } from "./httpload";
 import { exportOpenApi, importRequests } from "./httpteam";
 import { initSafeDelete, safeDelete } from "./safedelete";
@@ -506,6 +506,11 @@ function buildLayout(layout: Layout, into: HTMLElement, take: () => Pane) {
   layout.children.forEach((child) => buildLayout(child, group, take));
 }
 const tabs = new Map<string, Tab>();
+/**
+ * Files the HTTP client's request tabs keep open, with the version last saved. A file here keeps its model, unsaved
+ * edits included, when its editor tab closes; while it has an editor tab, the tab's `saved` is the one that counts.
+ */
+const held = new Map<string, number>();
 const renderedDirs = new Map<string, HTMLUListElement>();
 const openDirs = new Set<string>();
 let root = "";
@@ -519,11 +524,21 @@ const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
 const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(root.length + 1) : path);
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const isDirty = (t: Tab) => t.model.getAlternativeVersionId() !== t.saved;
+/** A file's model while a tab or the HTTP client has it open. */
+const openModel = (path: string) => tabs.get(path)?.model ?? (held.has(path) ? monaco.editor.getModel(monaco.Uri.file(path)) : null);
+/** Whether a file open in a tab or the HTTP client has unsaved changes. */
+function fileDirty(path: string) {
+  const model = openModel(path);
+  const saved = tabs.get(path)?.saved ?? held.get(path);
+  return !!model && !model.isDisposed() && saved !== undefined && model.getAlternativeVersionId() !== saved;
+}
+const openPaths = () => [...new Set([...tabs.keys(), ...held.keys()])];
 
 async function openFolder(dir: unknown = null) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
   saveSession();
+  if (!(await closeAllRequests())) return; // user kept unsaved changes
   for (const path of [...tabs.keys()]) await closeFile(path);
   if (tabs.size) return; // user kept unsaved changes
   // Terminals go back to the panel; editor-only views, such as a diff, belong to the old project.
@@ -565,7 +580,8 @@ async function openFolder(dir: unknown = null) {
   const terminals: Restore[] = session?.terminals ?? Array.from({ length: session?.shells ?? 0 }, () => ({ title: "Terminal", cwd: root }));
   const found = terminals.length ? await invoke<boolean[]>("paths_exist", { paths: terminals.map((t) => t.cwd) }) : [];
   for (const [i, t] of terminals.entries()) await openTerminal(found[i] ? t.cwd : root, t.title, t.command, undefined, undefined, !!t.command, t.scrollback);
-  if ((terminals.length || session?.debugging || session?.profiling) && !session?.panel) hidePanel();
+  const requests = await restoreHttpSession(session?.http);
+  if ((terminals.length || session?.debugging || session?.profiling || requests) && !session?.panel) hidePanel();
 }
 
 // ---- Session: open tabs, view states, expanded folders, and the sidebar view, per project ----
@@ -586,6 +602,8 @@ type Session = {
   /** Whether the debugger listened, and whether the profiling server ran. */
   debugging?: boolean;
   profiling?: boolean;
+  /** The HTTP client's request tabs. */
+  http?: HttpSession;
 };
 const sessionKey = () => `session:${root}`;
 
@@ -613,6 +631,7 @@ function saveSession() {
     panel: panelShown(),
     debugging: isListening(),
     profiling: !!profiler?.profilingServerRunning(),
+    http: httpSession(),
   };
   try {
     localStorage.setItem(sessionKey(), JSON.stringify(session));
@@ -692,13 +711,27 @@ async function ensureModel(path: string) {
 function markSaved(path: string) {
   const tab = tabs.get(path);
   if (tab) tab.saved = tab.model.getAlternativeVersionId();
+  const model = held.has(path) && monaco.editor.getModel(monaco.Uri.file(path));
+  if (model) held.set(path, model.getAlternativeVersionId());
   renderTabs();
+  requestFilesSaved();
 }
 
 /** Moves a file's tab after the file moved on disk, keeping its place and any unsaved edits. */
 async function renamed(from: string, to: string) {
   const old = monaco.editor.getModel(monaco.Uri.file(from));
   const tab = tabs.get(from);
+  if (!tab && held.has(from) && old) {
+    // Only request tabs have it: they follow it, unsaved edits and all.
+    const dirty = fileDirty(from);
+    const model = await ensureModel(to);
+    if (dirty) model.setValue(old.getValue());
+    held.set(to, dirty ? -1 : model.getAlternativeVersionId());
+    held.delete(from);
+    requestFileMoved(from, to);
+    old.dispose();
+    return forgetPath(from);
+  }
   if (!tab) {
     old?.dispose();
     return forgetPath(from);
@@ -717,6 +750,7 @@ async function renamed(from: string, to: string) {
   viewStates.delete(from);
   if (view) viewStates.set(to, view);
   retarget((p) => (p === from ? to : p));
+  if (held.has(from)) held.set(to, held.get(from)!), held.delete(from), requestFileMoved(from, to);
   old?.dispose();
   forgetPath(from);
   renderTabs();
@@ -731,6 +765,7 @@ function forget(path: string) {
     tabs.delete(p);
     tab.model.dispose();
   }
+  [...held.keys()].filter(inside).forEach((p) => held.delete(p));
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && inside(m.uri.fsPath)).forEach((m) => m.dispose());
   [...viewStates.keys()].filter(inside).forEach((p) => viewStates.delete(p));
   retarget((p) => (inside(p) ? null : p));
@@ -962,7 +997,7 @@ function collapseAll() {
 /** Registers an open file's model, without showing it. */
 function addTab(path: string, model: monaco.editor.ITextModel) {
   if (tabs.has(path)) return;
-  tabs.set(path, { model, saved: model.getAlternativeVersionId() });
+  tabs.set(path, { model, saved: held.get(path) ?? model.getAlternativeVersionId() });
   model.onDidChangeContent(() => showDirty(path));
 }
 
@@ -997,6 +1032,17 @@ async function closeTab(path: string, pane = currentPane()) {
 async function closeFile(path: string) {
   const tab = tabs.get(path);
   if (!tab) return;
+  if (held.has(path)) {
+    // Request tabs still have the file, so it stays open, unsaved edits and all, and they ask when they close.
+    held.set(path, tab.saved);
+    tabs.delete(path);
+    viewStates.delete(path);
+    retarget((p) => (p === path ? null : p));
+    saveSoon();
+    renderTabs();
+    markActiveInTree();
+    return;
+  }
   // With auto-save, closing saves, as in PhpStorm; otherwise it asks. If a save fails, the tab stays open.
   if (isDirty(tab)) {
     const choice = settings.autoSave
@@ -1139,38 +1185,40 @@ async function writeModel(path: string) {
 }
 
 async function saveFile(path: string) {
-  const tab = tabs.get(path);
-  if (!tab || !isDirty(tab)) return;
+  const model = openModel(path);
+  if (!model || !fileDirty(path)) return;
   if (settings.formatOnSave) {
     // The active editor formats through Monaco, which applies minimal edits and keeps the cursor in place.
-    if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
-    else await formatModel(tab.model);
+    if (path === active && tabs.has(path)) await editor.getAction("editor.action.formatDocument")?.run();
+    else await formatModel(model);
   }
-  await applySaveRules(tab.model);
-  const text = tab.model.getValue();
+  await applySaveRules(model);
+  const text = model.getValue();
   try {
     await writeText(path, text);
   } catch (e) {
     return status(`Couldn't save ${relative(path)}: ${e}`);
   }
   markSaved(path);
-  didSave(tab.model);
+  didSave(model);
   afterSave(path, text);
   recordVersion(path, text);
 }
 
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
-const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
+const saveAll = () => Promise.all(openPaths().map(saveFile));
 
 /**
  * Saves unsaved edits (with auto-save on) or asks about them, as closing a tab does, before the app restarts or quits,
  * and saves the session. False when you cancel, or a file couldn't be saved.
  */
 async function readyToLeave(verb: "restarting" | "quitting") {
-  if ([...tabs.values()].some(isDirty)) {
-    const choice = settings.autoSave ? "Save" : await choose(`Save your changes before ${verb}?`, ["Save", "Don't Save", "Cancel"]);
+  if (openPaths().some(fileDirty)) {
+    // Auto-save covers editor tabs; request tabs' edits are always asked about.
+    const requestsOnly = [...held.keys()].some((p) => !tabs.has(p) && fileDirty(p));
+    const choice = settings.autoSave && !requestsOnly ? "Save" : await choose(`Save your changes before ${verb}?`, ["Save", "Don't Save", "Cancel"]);
     if (choice === "Cancel" || choice === null) return false;
-    if (choice === "Save" && (await saveAll(), [...tabs.values()].some(isDirty))) return false;
+    if (choice === "Save" && (await saveAll(), openPaths().some(fileDirty))) return false;
   }
   saveSession();
   return true;
@@ -1189,7 +1237,8 @@ listen<string>("tools-failed", (e) => toast(e.payload));
 listen("update-restart", async () => (await readyToLeave("restarting")) && invoke("restart"));
 
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.
-window.addEventListener("blur", () => (saveSession(), settings.autoSave && saveAll()));
+// Files only the HTTP client's request tabs have stay unsaved until you save them or close their tabs.
+window.addEventListener("blur", () => (saveSession(), settings.autoSave && Promise.all([...tabs.keys()].map(saveFile))));
 
 /**
  * Updates a file's unsaved-changes dot after an edit. Only the dot can change, and only when the
@@ -1292,13 +1341,14 @@ listen<string[]>("fs-change", ({ payload }) => {
     for (const path of paths) {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
       const tab = tabs.get(path);
-      if (model && !(tab && isDirty(tab))) {
+      if (model && !fileDirty(path)) {
         const text = await readText(path).catch(() => null);
         if (text !== null && text !== model.getValue()) {
           // Another program changed it, such as a git checkout: keep what the editor had first.
           await recordVersion(path, model.getValue());
           model.setValue(text);
           if (tab) tab.saved = model.getAlternativeVersionId();
+          if (held.has(path)) held.set(path, model.getAlternativeVersionId());
         }
       }
     }
@@ -1472,7 +1522,7 @@ const actions: Action[] = [
   { label: "Color Theme…", keys: "Ctrl+Backquote", run: pickTheme },
   { label: "Import Color Theme…", run: importTheme },
   { label: "Remove Imported Color Theme…", run: removeTheme },
-  { label: "Close Tab", keys: "Meta+W", run: () => closeFocusedPanelTab() || closeTab(active) },
+  { label: "Close Tab", keys: "Meta+W", run: () => closeFocusedRequest() || closeFocusedPanelTab() || closeTab(active) },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },
   { label: "Go to File", keys: "Meta+Shift+O", run: goToFile },
@@ -1530,6 +1580,7 @@ const actions: Action[] = [
   editorAction("Execute Query", "", "phpEditor.runSql"),
   { label: "HTTP Client", run: () => showView("http") },
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
+  { label: "HTTP Client: Sync with Laravel Routes…", run: () => root && syncRequestsWithRoutes() },
   { label: "HTTP Client: Global Variables…", run: () => root && showGlobals() },
   { label: "HTTP Client: Clear Cookies", run: () => root && clearCookies() },
   { label: "HTTP Client: Detect App Address", run: () => root && detectAppAddress(active ?? "") },
@@ -1870,8 +1921,28 @@ initHttpClient({
   status,
   openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }),
   ensureModel,
-  // Edits from the HTTP tab save at once, even in a tab, so a reload or a closed tab doesn't lose them.
-  persist: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)),
+  async hold(path) {
+    const model = await ensureModel(path);
+    if (!held.has(path)) held.set(path, tabs.get(path)?.saved ?? model.getAlternativeVersionId());
+    return model;
+  },
+  async release(path, discard) {
+    const model = openModel(path);
+    if (discard && model && fileDirty(path) && !tabs.has(path)) {
+      const text = await readText(path).catch(() => null);
+      if (text !== null) model.setValue(text);
+    }
+    held.delete(path);
+  },
+  isDirty: fileDirty,
+  hasTab: (path) => tabs.has(path),
+  async save(path) {
+    if (tabs.has(path) || held.has(path)) await saveFile(path);
+    else await writeModel(path);
+    return !fileDirty(path);
+  },
+  sessionChanged: saveSoon,
+  showHttpTool: () => showView("http"),
   profiler: loadProfiler,
   showDiff: (path, original, modified, label) => showDiff(path, original, modified, label),
 });
