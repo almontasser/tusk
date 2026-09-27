@@ -22,6 +22,11 @@ pub fn server() -> ServerCapabilities {
             retrigger_characters: Some(vec![",".into()]),
             work_done_progress_options: Default::default(),
         }),
+        completion_provider: Some(CompletionOptions {
+            resolve_provider: Some(true),
+            trigger_characters: Some(crate::features::completion::TRIGGERS.iter().map(|s| s.to_string()).collect()),
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }

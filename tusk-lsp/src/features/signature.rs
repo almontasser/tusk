@@ -4,6 +4,7 @@ use lsp_types::{
     Documentation, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, SignatureHelp, SignatureHelpParams,
     SignatureInformation,
 };
+use mago_codex::metadata::CodebaseMetadata;
 use mago_codex::metadata::function_like::FunctionLikeMetadata;
 use mago_span::HasSpan;
 use mago_syntax::cst::{ArgumentList, Node};
@@ -45,16 +46,42 @@ fn call_at(ctx: &Ctx<'_>, offset: u32) -> Option<(u32, u32, bool)> {
     None
 }
 
-fn help(ctx: &Ctx<'_>, offset: u32) -> Option<SignatureHelp> {
+/// The function or method a call calls.
+pub enum Called {
+    Function(String),
+    Method { class: String, name: String },
+}
+
+impl Called {
+    pub fn get<'c>(&self, codebase: &'c CodebaseMetadata) -> Option<&'c FunctionLikeMetadata> {
+        match self {
+            Called::Function(name) => codebase.get_function(name.as_bytes()),
+            Called::Method { class, name } => codebase.get_declaring_method(class.as_bytes(), name.as_bytes()),
+        }
+    }
+}
+
+/// What the call whose parentheses hold `offset` calls, and where its arguments start.
+fn called_at(ctx: &Ctx<'_>, offset: u32) -> Option<(Called, u32)> {
     let (args_start, name_at, constructor) = call_at(ctx, offset)?;
     let found = ctx.resolver().at(name_at)?;
-    let codebase = &ctx.index.codebase;
-    let function: &FunctionLikeMetadata = match found.symbols.first()? {
-        Symbol::Function(name) => codebase.get_function(name.as_bytes())?,
-        Symbol::Method { class, name } => codebase.get_declaring_method(class.as_bytes(), name.as_bytes())?,
-        Symbol::Class(class) if constructor => codebase.get_declaring_method(class.as_bytes(), b"__construct")?,
+    let called = match found.symbols.into_iter().next()? {
+        Symbol::Function(name) => Called::Function(name),
+        Symbol::Method { class, name } => Called::Method { class, name },
+        Symbol::Class(class) if constructor => Called::Method { class, name: "__construct".into() },
         _ => return None,
     };
+    Some((called, args_start))
+}
+
+pub fn called_function(ctx: &Ctx<'_>, offset: u32) -> Option<Called> {
+    called_at(ctx, offset).map(|(c, _)| c)
+}
+
+fn help(ctx: &Ctx<'_>, offset: u32) -> Option<SignatureHelp> {
+    let (called, args_start) = called_at(ctx, offset)?;
+    let codebase = &ctx.index.codebase;
+    let function: &FunctionLikeMetadata = called.get(codebase)?;
     let src = source(ctx, function.span);
     let (label, ranges) = match &src {
         Some(s) => label_from_source(&s.signature)?,

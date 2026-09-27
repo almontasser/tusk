@@ -29,6 +29,8 @@ pub fn find(method: &str) -> Option<Handler> {
         DocumentHighlightRequest::METHOD => typed!(DocumentHighlightRequest, references::highlight),
         HoverRequest::METHOD => typed!(HoverRequest, hover::hover),
         SignatureHelpRequest::METHOD => typed!(SignatureHelpRequest, signature::signature_help),
+        Completion::METHOD => typed!(Completion, completion::completion),
+        ResolveCompletionItem::METHOD => typed!(ResolveCompletionItem, completion::resolve),
         _ => return None,
     };
     Some(handler)

@@ -293,7 +293,7 @@ impl<'p, 'a> Resolver<'p, 'a> {
     }
 
     /// The classes a `Class::` expression refers to.
-    fn classes_of_class_expr(&self, expr: &Expression<'_>, path: &[Node<'_, '_>]) -> Vec<String> {
+    pub fn classes_of_class_expr(&self, expr: &Expression<'_>, path: &[Node<'_, '_>]) -> Vec<String> {
         match expr {
             Expression::Self_(_) | Expression::Static(_) => self.enclosing_class(path).into_iter().collect(),
             Expression::Parent(_) => self.parent_class(path).into_iter().collect(),

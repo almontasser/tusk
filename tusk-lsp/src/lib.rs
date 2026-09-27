@@ -6,6 +6,7 @@ pub mod diagnostics;
 pub mod documents;
 pub mod features;
 pub mod handlers;
+pub mod imports;
 pub mod index;
 pub mod locate;
 pub mod repair;

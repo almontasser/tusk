@@ -217,7 +217,6 @@ impl Index {
             let id = file_id(&path);
             if let Some(old) = self.files.remove(&id) {
                 dirty.extend(old.keys.class_like_names.iter().copied());
-                dirty.extend(old.keys.function_like_keys.iter().filter(|k| k.1.is_empty()).map(|k| k.0));
                 dirty.extend(old.keys.constant_names.iter().copied());
                 self.codebase.remove_entries_by_keys(&old.keys);
                 self.by_path.remove(&path);
@@ -229,7 +228,6 @@ impl Index {
             let file_type = self.file_type(&path);
             let meta = scan(&path, file_type, contents, self.config.php_version, &arena);
             dirty.extend(meta.class_likes.keys().copied());
-            dirty.extend(meta.function_likes.keys().filter(|k| k.1.is_empty()).map(|k| k.0));
             dirty.extend(meta.constants.keys().copied());
             scans.push((path, file_type, meta));
         }
@@ -256,7 +254,9 @@ impl Index {
         dirty.extend(descendants);
         let mut safe = WordSet::default();
         safe.extend(self.codebase.class_likes.keys().filter(|k| !dirty.contains(*k)).copied());
-        safe.extend(self.codebase.function_likes.keys().filter(|k| k.1.is_empty() && !dirty.contains(&k.0)).map(|k| k.0));
+        // Functions are keyed `("", name)`, and the populator counts one as safe when the empty word is. A
+        // function the change scanned is unpopulated, so it's populated either way.
+        safe.insert(mago_word::empty_word());
         safe.extend(self.codebase.constants.keys().filter(|k| !dirty.contains(*k)).copied());
         // An empty safe set would repopulate everything, which is also correct.
         let mut refs = SymbolReferences::new();
@@ -331,6 +331,19 @@ mod tests {
         idx.update(Path::new("/p/app/Base.php"), None);
         assert!(!idx.codebase.class_like_exists(b"App\\Base"));
         assert!(!idx.codebase.method_exists(b"App\\User", b"extra"));
+    }
+
+    #[test]
+    fn updates_functions_and_keeps_others_populated() {
+        let mut idx = index(&[
+            ("app/a.php", "<?php namespace App; function a(): int { return 1; }"),
+            ("app/b.php", "<?php namespace App; function b(): \\App\\Thing { return new Thing; } class Thing {}"),
+        ]);
+        idx.update(Path::new("/p/app/a.php"), Some(b"<?php namespace App; function a(): string { return ''; }".to_vec()));
+        use mago_codex::ttype::TType;
+        let ret = |f: &str| idx.codebase.get_function(f.as_bytes()).unwrap().return_type_metadata.as_ref().unwrap().type_union.get_id().to_string();
+        assert_eq!(ret("App\\a"), "string");
+        assert_eq!(ret("App\\b"), "App\\Thing");
     }
 
     #[test]
