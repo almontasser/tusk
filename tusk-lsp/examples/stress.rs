@@ -216,6 +216,11 @@ fn whole_file(c: &mut Client, doc: &Value, text: &str) {
     c.request("textDocument/inlayHint", json!({ "textDocument": doc, "range": range }));
     c.request("textDocument/codeLens", json!({ "textDocument": doc }));
     c.request("textDocument/documentLink", json!({ "textDocument": doc }));
+    c.request("textDocument/formatting", json!({ "textDocument": doc, "options": { "tabSize": 4, "insertSpaces": true } }));
+    c.request("textDocument/codeAction", json!({ "textDocument": doc, "range": range, "context": { "diagnostics": [], "only": ["source.fixAll"] } }));
+    // A query from the file's first word, which matches many symbols.
+    let word: String = text.chars().skip_while(|c| !c.is_ascii_alphabetic()).skip(5).take_while(|c| c.is_ascii_alphanumeric()).take(3).collect();
+    c.request("workspace/symbol", json!({ "query": word }));
 }
 
 /// Every position request at `offset`; `full` adds the ones that search the project.
@@ -249,6 +254,17 @@ fn at(c: &mut Client, doc: &Value, text: &str, offset: usize, full: bool) {
         c.request("textDocument/references", json!({ "textDocument": doc, "position": p, "context": { "includeDeclaration": true } }));
         if c.request("textDocument/prepareRename", tp.clone()).is_some_and(|r| !r.is_null()) {
             c.request("textDocument/rename", json!({ "textDocument": doc, "position": p, "newName": "renamed" }));
+        }
+        for (prepare, follow) in [
+            ("textDocument/prepareTypeHierarchy", ["typeHierarchy/supertypes", "typeHierarchy/subtypes"]),
+            ("textDocument/prepareCallHierarchy", ["callHierarchy/incomingCalls", "callHierarchy/outgoingCalls"]),
+        ] {
+            let items = c.request(prepare, tp.clone()).and_then(|a| a.as_array().cloned()).unwrap_or_default();
+            for item in items {
+                for method in follow {
+                    c.request(method, json!({ "item": item }));
+                }
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ use lsp_types::{
 };
 use mago_allocator::LocalArena;
 use mago_codex::metadata::CodebaseMetadata;
+use mago_codex::metadata::class_like::ClassLikeMetadata;
 use mago_span::HasSpan;
 use mago_syntax::cst::{Expression, Node};
 use serde::{Deserialize, Serialize};
@@ -140,7 +141,7 @@ pub fn supertypes(snap: &Snapshot, params: TypeHierarchySupertypesParams) -> Res
         .iter()
         .map(|p| p.as_str_lossy().into_owned())
         .chain(sorted(&meta.direct_parent_interfaces))
-        .chain(sorted(&meta.used_traits));
+        .chain(direct_traits(&index.codebase, meta));
     Ok(Some(names.map(|n| type_item(snap, &index, &n)).collect()))
 }
 
@@ -153,22 +154,35 @@ pub fn subtypes(snap: &Snapshot, params: TypeHierarchySubtypesParams) -> Result<
     Ok(Some(names.iter().map(|n| type_item(snap, &index, n)).collect()))
 }
 
+/// The traits a class's own `use` lines name, sorted. Its metadata's traits also include those its parent uses
+/// and those its traits use.
+fn direct_traits(codebase: &CodebaseMetadata, meta: &ClassLikeMetadata) -> Vec<String> {
+    let lower = |w: &mago_word::Word| w.as_str_lossy().to_ascii_lowercase();
+    let mut inherited: Vec<String> = vec![];
+    let parent = meta.direct_parent_class.and_then(|p| codebase.get_class_like(p.as_bytes()));
+    for other in parent.into_iter().chain(meta.used_traits.iter().filter_map(|t| codebase.get_class_like(t.as_bytes()))) {
+        inherited.extend(other.used_traits.iter().map(lower));
+    }
+    let mut names: Vec<String> = meta
+        .used_traits
+        .iter()
+        .filter(|t| !inherited.contains(&lower(t)))
+        .map(|t| display_class(&t.as_str_lossy(), codebase))
+        .collect();
+    names.sort_by_key(|n| n.to_ascii_lowercase());
+    names
+}
+
 fn direct_subtypes(codebase: &CodebaseMetadata, fqn: &str) -> Vec<String> {
     let lower = fqn.to_ascii_lowercase();
     let mut names: Vec<String> = match codebase.get_class_like(fqn.as_bytes()) {
-        // Traits aren't parents, so their users are found by what each class uses. A class's traits include its
-        // parent's, which don't count as using it directly.
-        Some(meta) if meta.kind == mago_codex::symbol::SymbolKind::Trait => {
-            let uses = |c: &mago_codex::metadata::class_like::ClassLikeMetadata| {
-                c.used_traits.iter().any(|t| t.as_str_lossy().eq_ignore_ascii_case(&lower))
-            };
-            codebase
-                .class_likes
-                .values()
-                .filter(|c| uses(c) && !c.direct_parent_class.and_then(|p| codebase.get_class_like(p.as_bytes())).is_some_and(uses))
-                .map(|c| c.original_name.as_str_lossy().into_owned())
-                .collect()
-        }
+        // Traits aren't parents, so their users are found by what each class uses.
+        Some(meta) if meta.kind == mago_codex::symbol::SymbolKind::Trait => codebase
+            .class_likes
+            .values()
+            .filter(|c| direct_traits(codebase, c).iter().any(|t| t.eq_ignore_ascii_case(&lower)))
+            .map(|c| c.original_name.as_str_lossy().into_owned())
+            .collect(),
         _ => codebase
             .direct_classlike_descendants
             .iter()
@@ -501,7 +515,7 @@ mod tests {
         names(subtypes(&fx.snap, TypeHierarchySubtypesParams { item, work_done_progress_params: Default::default(), partial_result_params: PartialResultParams::default() }).unwrap().unwrap())
     }
 
-    const TYPES: &str = "<?php\nnamespace App;\ninterface Named {}\ninterface Titled extends Named {}\ntrait Greets {}\nabstract class Base implements Named {}\nclass User extends Base implements Titled, \\Countable { use Greets; public function count(): int { return 0; } }\nclass Admin extends User {}\nclass Guest { use Greets; }\n";
+    const TYPES: &str = "<?php\nnamespace App;\ninterface Named {}\ninterface Titled extends Named {}\ntrait Waves {}\ntrait Greets { use Waves; }\nabstract class Base implements Named {}\nclass User extends Base implements Titled, \\Countable { use Greets; public function count(): int { return 0; } }\nclass Admin extends User {}\nclass Guest { use Greets; }\n";
 
     #[test]
     fn lists_supertypes_and_direct_subtypes() {
@@ -509,9 +523,14 @@ mod tests {
         let user = prepare_type(&fx).unwrap();
         assert_eq!((user.name.as_str(), user.kind), ("User", SymbolKind::CLASS));
         assert!(user.uri.as_str().ends_with("types.php"));
-        assert_eq!(user.selection_range.start.line, 6);
+        assert_eq!(user.selection_range.start.line, 7);
         assert_eq!(up(&fx, user.clone()), vec!["App\\Base", "App\\Titled", "\\Countable", "App\\Greets"]);
         assert_eq!(down(&fx, user), vec!["App\\Admin"]);
+        // Traits the parent uses, or a trait uses, aren't the class's own.
+        let admin = type_item(&fx.snap, &fx.snap.index.read(), "App\\Admin");
+        assert_eq!(up(&fx, admin), vec!["App\\User"]);
+        let waves = type_item(&fx.snap, &fx.snap.index.read(), "App\\Waves");
+        assert_eq!(down(&fx, waves), vec!["App\\Greets"]);
 
         let named = type_item(&fx.snap, &fx.snap.index.read(), "App\\Named");
         assert_eq!(down(&fx, named), vec!["App\\Base", "App\\Titled"]);
