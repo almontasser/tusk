@@ -851,7 +851,7 @@ function showWelcome() {
       li.tabIndex = 0;
       li.role = "button";
       li.onclick = () => openFolder(dir);
-      li.onkeydown = (e) => e.key === "Enter" && openFolder(dir);
+      li.onkeydown = (e) => void (e.key === "Enter" && openFolder(dir));
       li.oncontextmenu = (e) => {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [

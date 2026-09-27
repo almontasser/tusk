@@ -827,7 +827,7 @@ async function askForValues(names: string[], mode: SendMode) {
     if (remember.checked && current) await saveToPrivateEnvironment(current.path, env, values);
     go(values);
   };
-  inputs.forEach((i) => (i.onkeydown = (e) => e.key === "Enter" && sendWithValues()));
+  inputs.forEach((i) => (i.onkeydown = (e) => void (e.key === "Enter" && sendWithValues())));
   resTabs.replaceChildren();
   resSummary.replaceChildren(h("span", { class: "http-missing" }, `Not defined${Object.keys(envs).length ? ` in ${env}` : ""}: ${names.join(", ")}`));
   resBody.replaceChildren(

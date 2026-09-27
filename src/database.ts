@@ -457,7 +457,7 @@ export function initDatabase(h: Host) {
   monaco.languages.registerCompletionItemProvider("sql", { triggerCharacters: ["."], provideCompletionItems });
   $("db-console").onclick = openConsole;
   $("db-filter").oninput = filterTables;
-  $("db-filter").onkeydown = (e) => e.key === "Escape" && (((e.target as HTMLInputElement).value = ""), filterTables());
+  $("db-filter").onkeydown = (e) => void (e.key === "Escape" && (((e.target as HTMLInputElement).value = ""), filterTables()));
   monaco.editor.addEditorAction({
     id: "phpEditor.runSql",
     label: "Execute Query",

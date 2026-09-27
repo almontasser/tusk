@@ -71,7 +71,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fou
     addInput.value = "";
     render();
   };
-  addInput.onkeydown = (e) => e.key === "Enter" && (e.preventDefault(), e.stopPropagation(), add());
+  addInput.onkeydown = (e) => void (e.key === "Enter" && (e.preventDefault(), e.stopPropagation(), add()));
   sharedBox.onchange = render;
 
   dialog.append(
