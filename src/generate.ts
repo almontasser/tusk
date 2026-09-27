@@ -1,6 +1,6 @@
 // Generate (⌘N in a PHP file), as in PhpStorm: a constructor, getters, setters, __toString(), and methods to
 // implement or override. Tusk's server offers them as code actions for the class at the cursor: `source.generate.*`
-// for the first four, and quick fixes for the rest.
+// for all but the fixes (Implement Methods and the constructor and property fixes), which are quick fixes.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { runTuskAction, tuskRequest } from "./lsp";
@@ -17,7 +17,7 @@ const LABELS: [RegExp, string][] = [
   [/^source\.generate\.accessors/, "Getters and Setters"],
   [/^source\.generate\.toString/, "__toString()"],
   [/^quickfix\.implement_contracts/, "Implement Methods…"],
-  [/^quickfix\.override_method/, "Override Methods…"],
+  [/^source\.generate\.override/, "Override Methods…"],
   [/^quickfix\.(complete_constructor|promote_constructor|add_missing_properties)/, ""],
 ];
 

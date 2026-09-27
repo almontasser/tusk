@@ -1143,7 +1143,8 @@ Tusk's server offers for the class at the cursor, asking for
 `runTuskAction`, which resolves its edit:
 
 - `source.generate.constructor`, `.getters`, `.setters`, `.accessors` (getters
-  and setters), and `.toString`, from `generate_candidates` in
+  and setters), `.toString`, and `.override` (Override Methods, one action per
+  method), from `generate_candidates` in
   `features/actions/generate.rs`. The server reads the class's properties from
   the syntax tree: declared ones, and those promoted in its constructor.
   Static properties are left out, readonly ones (or a readonly class's) get no
@@ -1152,8 +1153,10 @@ Tusk's server offers for the class at the cursor, asking for
   property. Getters are named `getTitle` and setters `setTitle`, as PhpStorm
   names them, typed as the property is. The light bulb doesn't list
   `source` actions.
+  Override Methods was a quick fix, so the light bulb listed every parent
+  method at any point in a class.
 - The quick fixes Implement Methods (including a trait's abstract methods),
-  Override Methods, Complete Constructor, Promote Constructor, and Add Missing
+  Complete Constructor, Promote Constructor, and Add Missing
   Properties.
 
 The menu shows them in that order, with the properties or the overridden

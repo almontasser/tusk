@@ -341,7 +341,7 @@ pub fn candidates(ctx: &Ctx<'_>, range: Range) -> Vec<Candidate> {
         for (m, owner) in overridable(codebase, &class.fqn) {
             let name = m.original_name.as_str_lossy().into_owned();
             let short = owner.rsplit('\\').next().unwrap_or(&owner).to_string();
-            out.push(Candidate::new(format!("Override {short}::{name}()"), "quickfix.override_method", "generate.override", json!({ "method": name })));
+            out.push(Candidate::new(format!("Override {short}::{name}()"), "source.generate.override", "generate.override", json!({ "method": name })));
         }
     }
     if let Some(ctor) = constructor(&class)
