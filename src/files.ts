@@ -20,7 +20,8 @@ type Host = {
   status(text: string): void;
 };
 
-export type MenuItem = { label: string; run(): unknown } | "-";
+/** A menu row, with its shortcut as symbols (such as ⌥⏎) in `keys`, or a separator. */
+export type MenuItem = { label: string; keys?: string; run(): unknown } | "-";
 
 const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
@@ -139,12 +140,15 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
   const menu = document.createElement("ul");
   menu.id = "menu";
   menu.role = "menu";
-  for (const item of items) {
+  // Groups can come out empty, so separators appear only between items.
+  const shown = items.filter((item, i) => item !== "-" || (i > 0 && items[i - 1] !== "-" && items.slice(i + 1).some((next) => next !== "-")));
+  for (const item of shown) {
     const li = document.createElement("li");
     if (item === "-") li.className = "separator";
     else {
       li.role = "menuitem";
-      li.textContent = item.label;
+      li.append(Object.assign(document.createElement("span"), { textContent: item.label }));
+      if (item.keys) li.append(Object.assign(document.createElement("kbd"), { textContent: item.keys }));
       li.onclick = () => (close(), item.run());
     }
     menu.append(li);
@@ -166,7 +170,7 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
     const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (e.key === "Escape") close();
     else if (step) index = (index + step + rows.length) % rows.length;
-    else if (e.key === "Enter" && rows[index]) rows[index].click();
+    else if (e.key === "Enter" && rows[index]) return (e.preventDefault(), e.stopPropagation(), rows[index].click());
     else return;
     e.preventDefault();
     e.stopPropagation();

@@ -39,7 +39,7 @@ import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
-import { attachTestRunner, initRunner, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
+import { attachTestRunner, initRunner, isTestFile, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
 import { hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
@@ -75,6 +75,8 @@ function addPane(): Pane {
   el.className = "pane";
   el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-editor"></div>`;
   const ed = createEditor(el.querySelector<HTMLElement>(".pane-editor")!);
+  // The code's context menu is the app's (codeMenu), with PhpStorm's actions and shortcuts rather than VS Code's.
+  ed.updateOptions({ contextmenu: false });
   const pane: Pane = { editor: ed, el, bar: el.querySelector("nav")!, paths: [], active: "" };
   panes.push(pane);
   addEditor(ed);
@@ -82,7 +84,7 @@ function addPane(): Pane {
   decorateConflicts(ed);
   attachDebugger(ed);
   attachTestRunner(ed);
-  ed.onContextMenu((e) => gutterMenu(ed, e));
+  ed.onContextMenu((e) => gutterMenu(ed, e) || codeMenu(ed, e));
   showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
   ed.onDidScrollChange(() => saveSoon());
@@ -95,12 +97,53 @@ function addPane(): Pane {
   return pane;
 }
 
-/** The context menu of the gutter left of the code: breakpoints, a bookmark, the line's change and tests, blame, and the line's reference and link. */
+/** The context menu of the code: the actions for the caret, as PhpStorm's editor menu has them. */
+function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
+  const model = ed.getModel();
+  if (!model || e.target.type === monaco.editor.MouseTargetType.SCROLLBAR) return;
+  e.event.preventDefault();
+  // As in Monaco's own menu, a click outside the selection moves the caret there, so actions apply to what was clicked.
+  const at = e.target.position;
+  if (at && !ed.getSelection()?.containsPosition(at)) ed.setPosition(at);
+  const action = (label: string) =>
+    actions.filter((a) => a.label === label && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+  const clipboard = (label: string, keys: string, id: string) => ({ label, keys, run: () => (ed.focus(), ed.trigger("contextmenu", id, null)) });
+  const php = model.getLanguageId() === "php";
+  const file = model.uri.scheme === "file";
+  showMenu(e.event.posx, e.event.posy, [
+    ...action("Show Context Actions"),
+    "-",
+    ...action("Go to Declaration"),
+    ...action("Go to Implementation"),
+    ...action("Find Usages"),
+    "-",
+    ...action("Refactor This…"),
+    ...action("Rename"),
+    ...(php ? action("Generate…") : []),
+    ...action("Reformat Code"),
+    ...(php ? action("Optimize Imports") : []),
+    "-",
+    ...(file && isTestFile(model.uri.fsPath) ? [...action("Run Test at Cursor"), ...action("Debug Test at Cursor")] : []),
+    "-",
+    clipboard("Cut", "⌘X", "editor.action.clipboardCutAction"),
+    clipboard("Copy", "⌘C", "editor.action.clipboardCopyAction"),
+    clipboard("Paste", "⌘V", "editor.action.clipboardPasteAction"),
+    "-",
+    ...(file ? [...action("Annotate with Git Blame"), ...action("Show File History"), ...action("Compare with Clipboard")] : []),
+    "-",
+    ...action("Find Action"),
+  ]);
+}
+
+/**
+ * The context menu of the gutter left of the code: breakpoints, a bookmark, the line's change and tests, blame, and
+ * the line's reference and link. False when the click wasn't in the gutter.
+ */
 function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
   const T = monaco.editor.MouseTargetType;
   const model = ed.getModel();
   const line = e.target.position?.lineNumber;
-  if (![T.GUTTER_GLYPH_MARGIN, T.GUTTER_LINE_NUMBERS, T.GUTTER_LINE_DECORATIONS].includes(e.target.type) || !line || model?.uri.scheme !== "file") return;
+  if (![T.GUTTER_GLYPH_MARGIN, T.GUTTER_LINE_NUMBERS, T.GUTTER_LINE_DECORATIONS].includes(e.target.type) || !line || model?.uri.scheme !== "file") return false;
   const path = model.uri.fsPath;
   const tests = testMenu(model, line);
   showMenu(e.event.posx, e.event.posy, [
@@ -116,6 +159,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
+  return true;
 }
 
 const firstPane = addPane();

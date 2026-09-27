@@ -25,7 +25,7 @@ type Mode = "run" | "debug" | "coverage" | "profile";
 let last: { title: string; command: string[]; tests: boolean; mode: Mode } | undefined;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
-const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
+export const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
 
 /**
  * Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. With

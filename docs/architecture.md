@@ -4362,3 +4362,14 @@ change, rather than validating the choice at the end, because it is cheap (a few
 regex passes over two files) and lets the dialog show the exact code and
 problems as you choose, as PhpStorm's does.
 
+
+### 2026-09-27: The editor's context menu is the app's
+
+Monaco's menu listed VS Code's commands with VS Code's shortcuts (⌘F12, ⇧F12,
+F1 for its command palette), which contradicted the PhpStorm keymap everywhere
+else. The main panes set `contextmenu: false`, and `codeMenu` in `src/main.ts`
+builds the menu from the Find Action list by label, so a shortcut changed in the
+keymap shows in the menu too. It moves the caret to a click outside the
+selection first, as Monaco's menu did. `showMenu` drops separators around empty
+groups, so callers can list groups without checking each one. Other editors
+(the query console, the HTTP response) keep Monaco's menu for their own items.

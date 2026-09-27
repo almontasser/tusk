@@ -415,6 +415,13 @@ project closes the terminals of the one before. If a project has a
 run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
 save every file they change.
 
+## Context menus
+
+Right-click the code for the actions at the caret, as in PhpStorm: context
+actions, navigation, refactoring, formatting, running the test (in test files),
+the clipboard, and git. Each shows its shortcut from your keymap. Right-click
+the gutter for breakpoints, bookmarks, the line's change, and blame.
+
 ## Files
 
 Right-click the project tree for **New File…**, **New Folder…**, **Rename…**,

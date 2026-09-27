@@ -455,7 +455,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 :root[data-theme="dark"] #palette li.selected .label b { color: #8fb7ff; }
 
 #menu { position: fixed; z-index: 200; list-style: none; margin: 0; padding: 4px; min-width: 200px; background: var(--panel); border-radius: 8px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
-#menu li { padding: 4px 10px; border-radius: 5px; }
+#menu li { display: flex; align-items: center; gap: 24px; padding: 4px 10px; border-radius: 5px; white-space: nowrap; }
+#menu li kbd { margin-left: auto; padding: 0; min-width: 0; background: none; font-size: 12px; color: var(--faint); }
+#menu li:hover kbd, #menu li.focused kbd { color: inherit; }
 #menu li[role="menuitem"]:hover, #menu li.focused { background: var(--accent); color: var(--on-accent); }
 #menu li.separator { height: 1px; padding: 0; margin: 4px 6px; background: var(--border); }
 
