@@ -1519,7 +1519,8 @@ including new files. Click a file to see its diff. Hover over a file for
 buttons to open, stage, unstage, or discard it. The message box sits at the
 bottom of the view, and stays in view while a long list of changes scrolls.
 Write a message and press ⌘⏎ or click **Commit**. **Commit and Push** also pushes, and sets the upstream
-branch on the first push.
+branch on the first push. With nothing staged, **Commit** offers to stage all
+the changes and commit them.
 
 To stage part of a file, open its diff from **Changes** and click **Stage
 Selected**:

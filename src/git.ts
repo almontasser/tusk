@@ -280,7 +280,12 @@ async function commit(push: boolean) {
   const amend = ($("amend") as HTMLInputElement).checked;
   if (!message && !amend) return host.status("Write a commit message first.");
   if (current?.files.some(isConflict)) return host.status("Resolve the merge conflicts first.");
-  if (!current?.files.some(staged) && !amend && operation?.kind !== "merge") return host.status("Stage the changes to commit first.");
+  if (!current?.files.some(staged) && !amend && operation?.kind !== "merge") {
+    const count = current?.files.length ?? 0;
+    if (!count) return host.status("There are no changes to commit.");
+    if (!(await confirm(`Nothing is staged. Stage all ${count} ${count === 1 ? "change" : "changes"} and commit them?`, "Stage All and Commit"))) return;
+    await change("add", "--all");
+  }
   const args = ["commit", ...(amend ? ["--amend"] : []), ...(message ? ["-m", message] : ["--no-edit"])];
   try {
     await git(...args);
