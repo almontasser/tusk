@@ -1928,6 +1928,7 @@ password), and `DB_HOST` and `DB_PORT` are then as the server sees them, such
 as `127.0.0.1:3306`. Leave the destination empty to connect directly again.
 Each connection keeps its own SSH destination.
 
+- Type in **Filter tables** to list only the tables whose names contain it.
 - Click a table to see its columns. A `?` after a type marks a nullable column.
 - Double-click a table to show its rows, 1,000 at a time. Click **Next** and
   **Previous** to page through a table or a query's results; the summary shows

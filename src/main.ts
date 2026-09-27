@@ -107,10 +107,14 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
   if (at && !ed.getSelection()?.containsPosition(at)) ed.setPosition(at);
   const action = (label: string) =>
     actions.filter((a) => a.label === label && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
-  const clipboard = (label: string, keys: string, id: string) => ({ label, keys, run: () => (ed.focus(), ed.trigger("contextmenu", id, null)) });
+  const monacoItem = (label: string, keys: string, id: string) => ({ label, keys, run: () => (ed.focus(), ed.trigger("contextmenu", id, null)) });
   const php = model.getLanguageId() === "php";
   const file = model.uri.scheme === "file";
+  // ⌘⏎ runs the file's language's own Monaco action: a query in the console, a request in an .http file.
+  const runHere = { sql: "Execute Query", redis: "Execute Query", http: "Send HTTP Request" }[model.getLanguageId()];
+  const runId = runHere === "Send HTTP Request" ? "phpEditor.sendHttpAtCursor" : "phpEditor.runSql";
   showMenu(e.event.posx, e.event.posy, [
+    ...(runHere ? [monacoItem(runHere, "⌘⏎", runId)] : []),
     ...action("Show Context Actions"),
     "-",
     ...action("Go to Declaration"),
@@ -125,9 +129,9 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
     "-",
     ...(file && isTestFile(model.uri.fsPath) ? [...action("Run Test at Cursor"), ...action("Debug Test at Cursor")] : []),
     "-",
-    clipboard("Cut", "⌘X", "editor.action.clipboardCutAction"),
-    clipboard("Copy", "⌘C", "editor.action.clipboardCopyAction"),
-    clipboard("Paste", "⌘V", "editor.action.clipboardPasteAction"),
+    monacoItem("Cut", "⌘X", "editor.action.clipboardCutAction"),
+    monacoItem("Copy", "⌘C", "editor.action.clipboardCopyAction"),
+    monacoItem("Paste", "⌘V", "editor.action.clipboardPasteAction"),
     "-",
     ...(file ? [...action("Annotate with Git Blame"), ...action("Show File History"), ...action("Compare with Clipboard")] : []),
     "-",

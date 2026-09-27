@@ -228,18 +228,29 @@ export async function loadTables() {
   if (list.dataset.root !== key) (list.dataset.root = key), list.replaceChildren(el("li", "muted", "Loading…"));
   try {
     await loadConnection();
+    // Each kind of connection has its own filter: Redis's scans the server, the tables' filters the list.
+    document.getElementById("redis-toolbar")?.toggleAttribute("hidden", !isRedis());
+    $("db-filter-bar").hidden = isRedis();
     if (isRedis()) return await loadKeys();
     const result = await query(tablesQuery(connection!.driver));
     const tables = result.rows.map((r) => r[0] ?? "");
     list.replaceChildren(...(tables.length ? tables.map(tableRow) : [el("li", "muted", "No tables. Run the migrations with php artisan migrate.")]));
+    filterTables();
     if (result.truncated) list.append(el("li", "muted", `The first ${PAGE.toLocaleString()} of ${result.total.toLocaleString()} tables.`));
   } catch (e) {
     list.replaceChildren(el("li", "muted", `Can't connect: ${friendlyError(String(e))}`));
   }
 }
 
+/** Shows only the tables whose names contain the filter's text. */
+function filterTables() {
+  const q = ($("db-filter") as HTMLInputElement).value.trim().toLowerCase();
+  for (const li of $("db-tables").querySelectorAll<HTMLElement>(":scope > li[data-table]")) li.hidden = !!q && !li.dataset.table!.toLowerCase().includes(q);
+}
+
 function tableRow(table: string) {
   const li = el("li");
+  li.dataset.table = table;
   const row = el("div", "row");
   const chevron = el("span", "chevron codicon codicon-chevron-right");
   row.append(chevron, icon("table"), el("span", "name", table));
@@ -445,6 +456,8 @@ export function initDatabase(h: Host) {
   $("db-connection").onclick = chooseConnection;
   monaco.languages.registerCompletionItemProvider("sql", { triggerCharacters: ["."], provideCompletionItems });
   $("db-console").onclick = openConsole;
+  $("db-filter").oninput = filterTables;
+  $("db-filter").onkeydown = (e) => e.key === "Escape" && (((e.target as HTMLInputElement).value = ""), filterTables());
   monaco.editor.addEditorAction({
     id: "phpEditor.runSql",
     label: "Execute Query",
