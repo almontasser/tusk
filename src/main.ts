@@ -1185,6 +1185,7 @@ getCurrentWindow().onCloseRequested(async (e) => {
 // Update download progress, and Restart Now after an update installs.
 listen<string>("update-progress", (e) => status(e.payload, "update:progress"));
 listen<string>("tools-progress", (e) => status(e.payload, "tools:progress"));
+listen<string>("tools-failed", (e) => toast(e.payload));
 listen("update-restart", async () => (await readyToLeave("restarting")) && invoke("restart"));
 
 // Auto-save, as in PhpStorm: when you switch tabs, and when the window loses focus.

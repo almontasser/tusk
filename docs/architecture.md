@@ -312,7 +312,13 @@ tools wait, with progress in the status bar. Otherwise it returns at once and
 checks in the background (`check_tools`, which release builds also run every
 six hours); updates stay staged and are swapped in at the next
 launch, before anything runs, so a running server never has its files
-replaced. Each installed folder records its package's ID in `.tusk-id`. The
+replaced. Each installed folder records its package's ID in `.tusk-id`. A
+package that fails, such as one the list names but the release lacks, doesn't
+stop the others: the rest install, a toast (`tools-failed`) names the failures,
+and the next launch tries again, since the folder is missing. It fails outright
+only when no tool is installed afterwards, as on a first launch offline.
+`publish-tools.ts` uploads a new list whenever the packages differ from the
+published one, so removing a tool also removes it from the list. The
 editor's `mago.toml` and `introspect.php` ship inside the app, since they're
 part of this repository. The PHP language server is the app's own binary, so
 it isn't a tool at all.

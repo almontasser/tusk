@@ -106,7 +106,17 @@ pub async fn tools_ensure(app: AppHandle) -> Result<(), String> {
     let cached = std::fs::read(dir.join("tools.json")).ok().and_then(|b| serde_json::from_slice::<Manifest>(&b).ok());
     if !cached.is_some_and(|m| m.here().all(|p| dir.join(&p.name).is_dir())) {
         let manifest = fetch_manifest(&app, &dir).await.map_err(|e| format!("Couldn't download the language tools: {e}"))?;
-        return install(&app, &dir, &manifest, false).await.map_err(|e| format!("Couldn't install the language tools: {e}"));
+        let failed = install(&app, &dir, &manifest, false).await.map_err(|e| format!("Couldn't install the language tools: {e}"))?;
+        if !failed.is_empty() {
+            // No tool at all, as on a first launch offline: the servers can't start. Otherwise those that need a missing
+            // tool fail on their own, and the next launch tries it again, since its folder is missing.
+            if !manifest.here().any(|p| dir.join(&p.name).is_dir()) {
+                return Err(format!("Couldn't install the language tools: {}", failed.join("; ")));
+            }
+            use tauri::Emitter;
+            let _ = app.emit("tools-failed", format!("Some language tools didn't install, and will be tried again at the next launch: {}", failed.join("; ")));
+        }
+        return Ok(());
     }
     drop(lock);
     tauri::async_runtime::spawn(check_tools(app));
@@ -151,8 +161,9 @@ async fn fetch_manifest(app: &AppHandle, dir: &std::path::Path) -> Result<Manife
 }
 
 /// Downloads and unpacks every package that isn't installed at its current ID. With `later`, each is left
-/// staged as `.next-<name>`, for the next launch; otherwise it replaces the live folder now.
-async fn install(app: &AppHandle, dir: &std::path::Path, manifest: &Manifest, later: bool) -> Result<(), String> {
+/// staged as `.next-<name>`, for the next launch; otherwise it replaces the live folder now. A package that fails,
+/// such as one missing from the release, doesn't stop the others. Returns each failure.
+async fn install(app: &AppHandle, dir: &std::path::Path, manifest: &Manifest, later: bool) -> Result<Vec<String>, String> {
     use sha2::Digest;
     use tauri::Emitter;
     let id = |folder: String| std::fs::read_to_string(dir.join(folder).join(".tusk-id")).unwrap_or_default();
@@ -163,8 +174,9 @@ async fn install(app: &AppHandle, dir: &std::path::Path, manifest: &Manifest, la
     let total = needed.iter().map(|p| p.size).sum::<u64>().max(1);
     let verb = if later { "Updating" } else { "Downloading" };
     let (client, mut done, mut shown) = (client()?, 0, u64::MAX);
-    let result = async {
-        for p in needed {
+    let mut failed = vec![];
+    for p in needed {
+        let result = async {
             let archive = dir.join(format!(".download-{}", p.name));
             let mut file = std::fs::File::create(&archive).map_err(|e| e.to_string())?;
             let mut hash = sha2::Sha256::new();
@@ -197,13 +209,16 @@ async fn install(app: &AppHandle, dir: &std::path::Path, manifest: &Manifest, la
                 std::fs::rename(&part, &next).map_err(|e| e.to_string())?;
                 if later { Ok(()) } else { swap_in(&dir, &name) }
             })
-            .await?;
+            .await
         }
-        Ok(())
+        .await;
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(dir.join(format!(".download-{}", p.name)));
+            failed.push(format!("{}: {e}", p.name));
+        }
     }
-    .await;
     let _ = app.emit("tools-progress", "");
-    result
+    Ok(failed)
 }
 
 /// Replaces a tool's live folder with its staged `.next-<name>` folder.
