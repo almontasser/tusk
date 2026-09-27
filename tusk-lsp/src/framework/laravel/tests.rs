@@ -3,6 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::features::{with_ctx, with_ctx_at};
 use crate::testing::{Fixture, uri};
+use lsp_types::{DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp};
 
 /// Enough of Laravel's classes and helpers for the analyzer to type the calls.
 const STUBS: &str = r#"<?php
@@ -52,6 +53,7 @@ namespace {
     function trans_choice($key, $number, array $replace = [], $locale = null) {}
     function asset($path) {}
     function storage_path($path = '') {}
+    function inertia($component = null, $props = []) {}
 }
 "#;
 
@@ -216,6 +218,58 @@ fn reports_unknown_names_and_skips_what_it_cant_check() {
     // Facts that failed to load report nothing: no assets were seeded, and asset() has no PHP behind it,
     // but auth has no data at all.
     assert!(problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Gate::allows('edit');").is_empty());
+}
+
+#[test]
+fn offers_to_create_what_a_name_is_missing() {
+    let fx = fixture("t.php", "<?php\nview('admin.users.index');\nenv('NOPE');\ninertia('Users/Show');\n");
+    fx.snap.framework.seed("laravel:inertia", json!({"page_paths": ["resources/js/Pages"], "page_extensions": ["vue"]}));
+    fx.snap.framework.seed("laravel:inertia-pages", json!({"pages": {"Home": "resources/js/Pages/Home.tsx"}, "paths": ["resources/js/Pages"], "extensions": ["vue"]}));
+    let actions = with_ctx(&fx.snap, &uri("t.php"), |ctx| actions::code_actions(ctx, Range { start: Position::new(0, 0), end: Position::new(4, 0) })).unwrap();
+    let summary: Vec<(String, String, Vec<serde_json::Value>)> = actions
+        .iter()
+        .map(|a| {
+            let Some(DocumentChanges::Operations(ops)) = &a.edit.as_ref().unwrap().document_changes else { panic!() };
+            let created = ops.iter().find_map(|o| match o {
+                DocumentChangeOperation::Op(ResourceOp::Create(c)) => Some(c.uri.as_str().to_string()),
+                _ => None,
+            });
+            let command = a.command.as_ref().unwrap();
+            assert_eq!(command.command, "phpEditor.open");
+            (a.title.clone(), created.unwrap(), command.arguments.clone().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("Create missing view".into(), "file:///project/resources/views/admin/users/index.blade.php".into(), vec![json!("file:///project/resources/views/admin/users/index.blade.php"), json!(1)]),
+            ("Add variable to .env".into(), "file:///project/.env".into(), vec![json!("file:///project/.env"), json!(1)]),
+            // The extension the existing pages use.
+            ("Create resources/js/Pages/Users/Show.tsx".into(), "file:///project/resources/js/Pages/Users/Show.tsx".into(), vec![json!("file:///project/resources/js/Pages/Users/Show.tsx"), json!(1)]),
+        ]
+    );
+}
+
+#[test]
+fn places_new_env_variables_by_their_prefix() {
+    let env = "APP_NAME=Tusk\nAPP_ENV=local\n\nDB_HOST=127.0.0.1\n";
+    assert_eq!(actions::env_insertion(env, "APP_KEY="), (2, "APP_KEY=\n".into()));
+    assert_eq!(actions::env_insertion(env, "MAIL_HOST="), (4, "\nMAIL_HOST=\n".into()));
+    assert_eq!(actions::env_insertion("", "X="), (0, "X=\n".into()));
+}
+
+#[test]
+fn turns_env_variables_into_vite_ones() {
+    let fx = Fixture::new(&[(".env", "APP_NAME=Tusk\nPUSHER_KEY=abc\nVITE_APP_NAME=\"${APP_NAME}\"\n")]);
+    fx.snap.framework.seed("laravel:active", json!(true));
+    let actions = with_ctx(&fx.snap, &uri(".env"), |ctx| actions::code_actions(ctx, Range { start: Position::new(0, 0), end: Position::new(1, 5) })).unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].title, "Create Vite env variable from \"PUSHER_KEY\"");
+    let changes = &actions[0].edit.as_ref().unwrap();
+    let Some(DocumentChanges::Operations(ops)) = &changes.document_changes else { panic!() };
+    let DocumentChangeOperation::Edit(e) = &ops[0] else { panic!() };
+    let OneOf::Left(edit) = &e.edits[0] else { panic!() };
+    assert_eq!((edit.range.start.line, edit.new_text.as_str()), (3, "\nVITE_PUSHER_KEY=\"${PUSHER_KEY}\"\n"));
 }
 
 #[test]

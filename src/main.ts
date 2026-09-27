@@ -1332,7 +1332,9 @@ async function openAt(path: string, target?: monaco.IRange | monaco.IPosition) {
 // Go to definition, references, and similar features open other files through this hook.
 monaco.editor.registerEditorOpener({
   openCodeEditor(_, resource, selection) {
-    openAt(resource.fsPath, selection);
+    // A link's `#L12` fragment gives a selection without an end, which is a position.
+    const s = selection as Partial<monaco.IRange> | undefined;
+    openAt(resource.fsPath, s?.startLineNumber !== undefined && s.endLineNumber === undefined ? { lineNumber: s.startLineNumber, column: s.startColumn ?? 1 } : selection);
     return true;
   },
 });

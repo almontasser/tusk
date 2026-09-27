@@ -5,6 +5,7 @@
 //! a call on `Illuminate\Routing\Redirector`. Facade calls are static calls on the facade class, so patterns
 //! list the facade, its short alias, and the class behind it.
 
+pub mod actions;
 pub mod blade;
 mod data;
 mod tables;

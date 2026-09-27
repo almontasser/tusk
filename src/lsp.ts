@@ -363,6 +363,9 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
 // Servers can link to a location with this command, for example in code lenses.
 monaco.editor.registerCommand("phpEditor.open", (_, uri: string, line: number) => host.openAt(pathOf(uri), line));
 
+// `.env` files get a language of their own, so Tusk's server can offer fixes in them.
+monaco.languages.register({ id: "dotenv", filenames: [".env"], filenamePatterns: [".env.*"], aliases: ["Environment"] });
+
 // Code actions carry the function that runs them, so each one goes back to the server that made it.
 monaco.editor.registerCommand("lsp.codeAction", (_, run: (a: L.CodeAction | L.Command) => Promise<void>, action) => run(action));
 
@@ -521,7 +524,9 @@ async function startServer(
     }
   }
 
-  const execute = (cmd: L.Command) => request("workspace/executeCommand", { command: cmd.command, arguments: cmd.arguments });
+  // `phpEditor.open` is the editor's own, such as a code action's "open the file it created".
+  const execute = (cmd: L.Command) =>
+    cmd.command === "phpEditor.open" ? host.openAt(pathOf(cmd.arguments![0]), cmd.arguments![1]) : request("workspace/executeCommand", { command: cmd.command, arguments: cmd.arguments });
 
   async function runCodeAction(item: L.CodeAction | L.Command) {
     if (typeof item.command === "string") return void (await execute(item as L.Command));
@@ -1075,7 +1080,8 @@ export async function startLsp(root: string, h: Host) {
   ]);
   // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, in about a
   // second, so nothing is kept between starts.
-  const tusk = startServer("tusk", root, ["php", "blade"], {
+  // `.env` files too, for the server's quick fix that turns their variables into Vite ones.
+  const tusk = startServer("tusk", root, ["php", "blade", "dotenv"], {
     // The project's folders to skip (indexexclude.ts), on top of the server's defaults.
     exclude: excluded.list,
     // Laravel's root aliases (`use DB;`).
