@@ -294,7 +294,8 @@ impl State {
     /// The script runs in the project's root with `php`, and its arguments follow it. `None` if PHP fails.
     pub fn php(&self, key: &str, script: &str, args: &[&str], depends_on: &[&str]) -> Option<Arc<Value>> {
         if let Some(c) = self.cache.lock().get(key) {
-            return Some(c.value.clone());
+            // A failed run is cached as null, so it isn't retried until a file it depends on changes.
+            return (!c.value.is_null()).then(|| c.value.clone());
         }
         let value = Arc::new(run_php(&self.root, script, args).unwrap_or(Value::Null));
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
@@ -362,6 +363,13 @@ fn run_php(root: &Path, script: &str, args: &[&str]) -> Option<Value> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
+    // Read the output as it comes: a script that prints more than the pipe holds waits until it's read.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = vec![];
+        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
+        out
+    });
     let started = Instant::now();
     loop {
         if child.try_wait().ok()?.is_some() {
@@ -373,8 +381,8 @@ fn run_php(root: &Path, script: &str, args: &[&str]) -> Option<Value> {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    let output = child.wait_with_output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    let output = reader.join().ok()?;
+    let text = String::from_utf8_lossy(&output);
     let start = text.find(['{', '['])?;
     serde_json::from_str(&text[start..]).ok()
 }

@@ -3682,6 +3682,53 @@ can resolve the action's edit instead.
 - **Diagnostics:** each unused import is reported with source `tusk`, code
   `unused_import`, and the Unnecessary tag. The quickfix "Remove unused import"
   deletes its line.
+### Laravel
+
+`framework/laravel/` ports Laravel LSP (laravel/lsp v0.0.32). It covers
+routes, controller actions, views, Blade components, Livewire, Blade
+directives, config, env, translations, middleware, auth, container bindings,
+assets, Mix, storage disks, Inertia, validation rules, Eloquent, and path
+helpers. Labels, kinds, messages, and codes match the original, and problems
+come from the source `Laravel Extension`. It runs only when the project has
+an `artisan` file.
+
+- **Matching calls:** a string's call is matched on the classes the analyzer
+  infers for its receiver, so `redirect()->route('home')` is a call on
+  `Illuminate\Routing\Redirector`. Facade calls are static calls on the
+  facade, so each pattern lists the facade, its short alias, and the class
+  behind it.
+- **Facts about the app:** Laravel LSP's PHP scripts (`php/laravel/`,
+  embedded in the binary) run after the app boots, with the project root as
+  the working directory. `State` caches each result until a file it depends
+  on changes. A script that fails caches a failure. Features built on it then
+  report no problems, rather than flag every call as Laravel LSP did.
+- **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
+  pages, and controller actions (read from `app/Http/Controllers`).
+- **Blade:** a view becomes "virtual PHP" of the same length.
+  - `{{ expr }}` keeps `expr` at its offsets, and `@include('x')` becomes
+    `_include('x')`, so string positions in the virtual text are positions in
+    the view.
+  - Everything else turns into spaces, keeping line breaks.
+  - A short open tag (`<? `) goes in the first line-break-free gap before any
+    echo or directive.
+  - Only directives that take names become calls. `@foreach ($a as $b)`
+    isn't a valid call.
+  - Component and Livewire tags are found on the line, and must follow `<`.
+- **Fixes over Laravel LSP:**
+  - Completion works in double-quoted and unfinished strings, including
+    unfinished directives.
+  - Positions are UTF-16.
+  - `HomeController@index` matches a route's full action name by its end.
+  - A class name passed to `app()` isn't reported as a missing binding.
+  - `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, and
+    `@livewire` are recognized.
+- **Not ported:**
+  - Code actions: create a missing view or Inertia page, add a variable to
+    `.env`.
+  - Matching gate abilities by model class.
+  - Eloquent completion through a query builder chain, since the analyzer's
+    class list drops the builder's model type.
+  - The custom `laravel/data` request and the Pest helper file.
 
 ### Tests
 
