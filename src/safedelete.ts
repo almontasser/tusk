@@ -1,10 +1,10 @@
 // Safe Delete (⌘⌦): deletes the class, method, or function under the cursor only after checking
-// that nothing uses it. Usages come from Phpactor; for classes, a text search also finds the full
+// that nothing uses it. Usages come from Tusk's server; for classes, a text search also finds the full
 // class name in strings, as Laravel's config files use them.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { phpactorRequest } from "./lsp";
+import { tuskRequest } from "./lsp";
 import { callsOf } from "./refactor";
 import { pick } from "./palette";
 import { deletionLines, laravelNames } from "./phptypes";
@@ -19,7 +19,7 @@ type Match = { path: string; line: number; column: number; end: number; text: st
 type Usage = { path: string; line: number; column: number; text: string };
 
 let host: Host;
-const CLASS_KINDS = [5, 10, 11, 23]; // class, enum, interface, struct (Phpactor's traits)
+const CLASS_KINDS = [5, 10, 11, 23]; // class, enum, interface, struct (traits)
 const KINDS: Record<number, string> = { 5: "class", 10: "enum", 11: "interface", 23: "trait", 6: "method", 12: "function" };
 
 const contains = (r: L.Range, line: number, character: number) =>
@@ -75,7 +75,7 @@ async function check(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();
   const position = editor.getPosition();
   if (!model || !position || model.getLanguageId() !== "php") return host.status("Safe Delete works on PHP classes, methods, and functions.");
-  const symbols = (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
+  const symbols = (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
   const found = symbolAt(symbols, position.lineNumber - 1, position.column - 1);
   if (!found) return host.status("Put the cursor in a class, method, or function to delete it.");
   const { symbol } = found;

@@ -29,8 +29,7 @@ let version = { model: null as monaco.editor.ITextModel | null, id: 0 };
 /**
  * Shows `rel` and the symbols at the editor's cursor in `el`. Clicking a symbol moves the cursor to
  * its name. Cursor moves are debounced, so holding an arrow key doesn't redraw on every line.
- * While you type, it waits longer: a new outline is a request to every language server, and it
- * sends Phpactor the whole file first.
+ * While you type, it waits longer: a new outline is a request to every language server.
  */
 export function showBreadcrumbs(el: HTMLElement, rel: string, editor: monaco.editor.ICodeEditor) {
   clearTimeout(timer);

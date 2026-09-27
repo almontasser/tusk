@@ -18,7 +18,7 @@ const stage = join(root, "src-tauri/target/tools-stage");
 const out = join(root, "src-tauri/target/tools-publish");
 /** Each tool's folder, and whether it's built per chip. */
 const TOOLS: [string, boolean][] = [
-  ["phpactor", false], ["laravel-lsp", false], ["composer", false], ["php-debug", false],
+  ["composer", false], ["php-debug", false],
   ["mago", true], ["typos-lsp", true], ["node", true], ["llama", true],
 ];
 const ARCHS = ["aarch64", "x86_64"];

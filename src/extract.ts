@@ -1,11 +1,11 @@
 // Extract Variable (⌥⌘V), Extract Constant (⌥⌘C), and Extract Method (⌥⌘M), as in PhpStorm: with nothing
 // selected, choose among the expressions around the caret; choose whether to replace every occurrence; then
-// type the new name in place, with every use following it. Phpactor writes the extracted method; the rest is
-// done here, since its Extract Expression names the variable $newVariable and has no Extract Constant.
+// type the new name in place, with every use following it. Tusk's server writes the extracted method; the rest
+// is done here.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { h } from "./dom";
-import { applyWorkspaceEdit, phpactorRequest } from "./lsp";
+import { runTuskAction, tuskRequest } from "./lsp";
 import { pick, type Item } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
@@ -125,7 +125,7 @@ function applyNamed(editor: Editor, edits: { start: number; end: number; text: s
 // ---- Shared ----
 
 const symbolsOf = async (model: monaco.editor.ITextModel) =>
-  (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
+  (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
 
 /** The selected expression, or one chosen among those around the caret. A status explains when there's none. */
 export async function chosenExpression(editor: Editor, what: string): Promise<Expr | null> {
@@ -274,21 +274,21 @@ export async function extractMethod(editor: Editor) {
   }
   const before = model.getValue();
   const actions =
-    (await phpactorRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
+    (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
       range: { start: { line: range.startLineNumber - 1, character: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, character: range.endColumn - 1 } },
       context: { diagnostics: [], only: ["refactor.extract.method"] },
     }).catch(() => null)) ?? [];
   const action = actions.find((a) => "kind" in a && a.kind === "refactor.extract.method") as L.CodeAction | undefined;
-  if (!action?.command) return host.status("Select whole statements or an expression to extract a method. Phpactor must be running.");
-  // Phpactor sends its edit back as workspace/applyEdit, which applyWorkspaceEdit applies before the command returns.
-  await phpactorRequest("workspace/executeCommand", { command: action.command.command, arguments: action.command.arguments });
+  if (!action?.command) return host.status("Select whole statements or an expression to extract a method. Tusk's PHP server must be running.");
+  // The server sends its edit back as workspace/applyEdit, and waits for the editor to apply it before the command returns.
+  await tuskRequest("workspace/executeCommand", { command: action.command.command, arguments: action.command.arguments });
   const after = model.getValue();
-  if (after === before) return host.status("Phpactor couldn't extract a method from this selection.");
+  if (after === before) return host.status("Couldn't extract a method from this selection.");
   const had = new Set([...before.matchAll(/\bfunction\s+&?(\w+)\s*\(/g)].map((m) => m[1]));
   const name = [...after.matchAll(/\bfunction\s+&?(\w+)\s*\(/g)].map((m) => m[1]).find((n) => !had.has(n));
   if (!name) return;
-  // The call and the declaration Phpactor wrote, renamed together.
+  // The call and the declaration the server wrote, renamed together.
   const places = [...after.matchAll(new RegExp(`(?:->|::|\\bfunction\\s+&?)(${name})\\s*\\(`, "dg"))].map((m) => ({ start: m.indices![1]![0], end: m.indices![1]![1], text: "\0" }));
   applyNamed(editor, places, name);
 }
@@ -296,7 +296,7 @@ export async function extractMethod(editor: Editor) {
 // ---- Refactor This ----
 
 /**
- * The refactorings that apply at the caret or selection, by action name, and Phpactor's other refactoring
+ * The refactorings that apply at the caret or selection, by action name, and the server's other refactoring
  * actions there, for Refactor This (⌃T).
  */
 export async function refactorings(editor: Editor): Promise<{ names: string[]; more: Item[] }> {
@@ -329,22 +329,16 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   // Pull Members Up needs a parent or an interface; Extract Interface, a class or enum.
   if (types.some((t) => t.kind === "class" && (t.extends.length || t.implements.length))) names.push("Pull Members Up…");
   if (types.some((t) => t.kind === "class" || t.kind === "enum")) names.push("Extract Interface…");
-  // Phpactor's own refactorings, other than the extractions above.
+  // The server's own refactorings, other than the extractions above.
   const actions =
-    (await phpactorRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
+    (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
       range: { start: { line: sel.startLineNumber - 1, character: sel.startColumn - 1 }, end: { line: sel.endLineNumber - 1, character: sel.endColumn - 1 } },
       context: { diagnostics: [] },
     }).catch(() => null)) ?? [];
   const more = actions
     .filter((a): a is L.CodeAction => "kind" in a && !!a.kind?.startsWith("refactor") && !/^refactor\.extract\.(method|expression|constant)/.test(a.kind))
-    .map((a) => ({
-      label: a.title,
-      run: async () => {
-        if (a.edit) await applyWorkspaceEdit(a.edit);
-        if (a.command) await phpactorRequest("workspace/executeCommand", { command: a.command.command, arguments: a.command.arguments });
-      },
-    }));
+    .map((a) => ({ label: a.title, run: () => runTuskAction(a) }));
   return { names, more };
 }
 

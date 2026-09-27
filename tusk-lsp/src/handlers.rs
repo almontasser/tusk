@@ -44,6 +44,8 @@ pub fn find(method: &str) -> Option<Handler> {
         CodeActionRequest::METHOD => typed!(CodeActionRequest, actions::code_actions),
         CodeActionResolveRequest::METHOD => typed!(CodeActionResolveRequest, actions::resolve),
         ExecuteCommand::METHOD => typed!(ExecuteCommand, actions::execute_command),
+        "tusk/memberReferences" => custom::member_references,
+        "tusk/projectProblems" => custom::project_problems,
         _ => return None,
     };
     Some(handler)

@@ -1,13 +1,13 @@
 // The Problems panel: errors and warnings across the whole project, as PhpStorm's project errors. Open files show
-// their language servers' live markers. The others come from a scan: Mago's analyzer and linter over the project,
-// and Phpactor's diagnostics command for each PHP file, through the same filters as open files (diagnostics.ts).
+// their language servers' live markers. The others come from a scan of every PHP file by Tusk's server, through the
+// same filters as open files (diagnostics.ts).
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
-import { facts, projectCache, readModels } from "./eloquent";
-import { formatType, inlineProblem, magoIssuesByFile, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
+import { facts, readModels } from "./eloquent";
+import { formatType, inlineProblem, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
-import { diagnosed, magoConfigPath, phpactorIndex, toolPath } from "./lsp";
+import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
 import { settings, onSettings } from "./settings";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
@@ -117,7 +117,7 @@ const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path)
 
 /**
  * Every file's problems: live markers for open files, and the scan for the rest. An open PHP file shows the scan
- * until Phpactor, which also runs Mago, has checked it. Phpactor doesn't read Blade views, so theirs are always live.
+ * until Tusk's server has checked it. Blade views aren't in the scan, so theirs are always live.
  */
 function allProblems(): Map<string, Problem[]> {
   const root = host.root();
@@ -327,102 +327,42 @@ export function forgetPath(path: string) {
   renderSoon();
 }
 
-const hash = (text: string) => {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
-  return h;
-};
-
 /**
- * Scans every PHP file: Mago first (seconds), then Phpactor, one process per file, several at a time (about 1.5
- * seconds each). Phpactor's results are kept in the app's cache by each file's text, but a file's results also
- * depend on the files it uses, so only the first scan after the project opens reads the cache (`useCache`).
+ * Scans every PHP file in the project with Tusk's server, which runs the same checks as for open files (Mago's
+ * analyzer and linter, and its own), all files at once in the server's process: about a second for a few hundred
+ * files. A file's results depend on the files it uses, so each scan checks every file again.
  */
-export async function scanProject(useCache = false) {
+export async function scanProject(_useCache = false) {
   const root = host.root();
   if (!root || scan.running) return;
   const run = ++scan.run;
   const current = () => run === scan.run;
-  scan = { root, run, running: true, progress: "Checking with Mago…" };
+  scan = { root, run, running: true, progress: "Checking the project…" };
   render();
   try {
     await readModels(root);
-    const files = (await invoke<string[]>("list_files", { root })).filter(
-      (f) => f.endsWith(".php") && !/(^|\/)(vendor|node_modules|storage|bootstrap\/cache|\.[^/]+)\//.test(f) && !f.startsWith("."),
-    );
+    const results = (await tuskRequest<Record<string, Diagnostic[]>>("tusk/projectProblems", {})) ?? {};
+    if (!current()) return;
     const texts = new Map<string, string>();
-    const text = async (rel: string) => texts.get(rel) ?? texts.set(rel, await invoke<string>("read_file", { path: `${root}/${rel}` }).catch(() => "")).get(rel)!;
-    const results = new Map<string, Diagnostic[]>();
-    const add = (rel: string, list: Diagnostic[]) => results.set(rel, [...(results.get(rel) ?? []), ...list]);
-
-    // Mago: the analyzer and the linter over the whole project, in one run each.
-    const mago = await toolPath("mago/mago");
-    const config = magoConfigPath ? ["--config", magoConfigPath] : [];
-    const runMago = (command: string, source: "mago" | "mago-lint") =>
-      invoke<string>("run_capture", { cwd: root, program: mago, args: [...config, command, "--reporting-format", "json", "--minimum-report-level", "warning"], input: null, anyStatus: true })
-        .then((json) => magoIssuesByFile(json, source))
-        .catch((e) => (host.status(`Mago ${command} failed: ${e}`), new Map<string, (text: string) => Diagnostic[]>()));
-    const [analyzed, linted] = await Promise.all([runMago("analyze", "mago"), runMago("lint", "mago-lint")]);
-    for (const reports of [analyzed, linted]) for (const [rel, convert] of reports) add(rel, convert(await text(rel)));
-    if (!current()) return;
-    const publish = (rels: Iterable<string>) => {
-      for (const rel of rels) {
-        const path = `${root}/${rel}`;
-        const kept = realProblems(path, texts.get(rel) ?? "", "php", results.get(rel) ?? [], facts);
-        scanned.set(
-          path,
-          kept.flatMap((d) => {
-            const severity = MARKER[severityOf(d)];
-            if (!severity) return [];
-            const message = typeof d.message === "string" ? d.message : d.message.value;
-            const { start, end } = d.range;
-            const range = { startLineNumber: start.line + 1, startColumn: start.character + 1, endLineNumber: end.line + 1, endColumn: end.character + 1 };
-            return [{ range, message, severity, source: d.source, code: d.code?.toString() }];
-          }),
-        );
-      }
-      renderSoon();
-    };
+    await Promise.all(Object.keys(results).map(async (rel) => texts.set(rel, await invoke<string>("read_file", { path: `${root}/${rel}` }).catch(() => ""))));
     scanned.clear();
-    publish(results.keys());
-
-    // Phpactor: its own checks, such as deprecated classes and unused imports, file by file.
-    const cachePath = `${await projectCache("problems", root)}/phpactor.json`;
-    const cache: Record<string, { hash: number; list: Diagnostic[] }> = useCache
-      ? await invoke<string>("read_file", { path: cachePath }).then(JSON.parse, () => ({}))
-      : {};
-    const phar = await toolPath("phpactor/phpactor.phar");
-    const extra = JSON.stringify({ ...phpactorIndex(), "language_server_mago.enabled": false, "language_server_phpstan.enabled": false });
-    let done = 0;
-    const next = [...files];
-    const worker = async () => {
-      for (let rel = next.shift(); rel && current(); rel = next.shift()) {
-        const source = await text(rel);
-        // A newer scan may have started while this one waited; its results must not mix with this one's.
-        if (!current()) return;
-        const key = hash(source);
-        if (cache[rel]?.hash !== key) {
-          const out = await invoke<string>("run_capture", {
-            cwd: root,
-            program: "php",
-            args: [phar, "language-server:diagnostics", `--uri=${monaco.Uri.file(`${root}/${rel}`).toString()}`, `--config-extra=${extra}`, "-n"],
-            input: source,
-          }).catch(() => "[]");
-          if (!current()) return;
-          cache[rel] = { hash: key, list: (() => { try { return JSON.parse(out) as Diagnostic[]; } catch { return []; } })() };
-        }
-        if (cache[rel].list.length) add(rel, cache[rel].list), publish([rel]);
-        scan.progress = `Checking with Phpactor: ${++done} of ${files.length} files`;
-        if (done % 20 === 0) renderSoon();
-      }
-    };
-    // Half the cores, so the editor stays responsive.
-    await Promise.all(Array.from({ length: Math.max(2, Math.floor(navigator.hardwareConcurrency / 2)) }, worker));
-    if (!current()) return;
+    for (const [rel, list] of Object.entries(results)) {
+      const path = `${root}/${rel}`;
+      const kept = realProblems(path, texts.get(rel) ?? "", "php", list, facts);
+      scanned.set(
+        path,
+        kept.flatMap((d) => {
+          const severity = MARKER[severityOf(d)];
+          if (!severity) return [];
+          const message = typeof d.message === "string" ? d.message : d.message.value;
+          const { start, end } = d.range;
+          const range = { startLineNumber: start.line + 1, startColumn: start.character + 1, endLineNumber: end.line + 1, endColumn: end.character + 1 };
+          return [{ range, message, severity, source: d.source, code: d.code?.toString() }];
+        }),
+      );
+    }
     scan.progress = "";
-    for (const rel of Object.keys(cache)) if (!texts.has(rel)) delete cache[rel];
-    await invoke("create_dir", { path: cachePath.slice(0, cachePath.lastIndexOf("/")) });
-    await invoke("write_file", { path: cachePath, contents: JSON.stringify(cache) });
+    renderSoon();
   } catch (e) {
     if (!current()) return;
     host.status(`Couldn't scan the project: ${e}`);

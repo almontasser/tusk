@@ -2,7 +2,6 @@
 // Mago's report of a whole project. Free of editor imports so Node can test it, and so the open files and the
 // project's problems go through the same filters.
 import { withoutMagic } from "./magic.ts";
-import { docblockHasParam, docblockHasReturn } from "./phptypes.ts";
 
 type Position = { line: number; character: number };
 export type Diagnostic = {
@@ -107,17 +106,9 @@ function withoutEloquentMagic<D extends Diagnostic>(text: string, list: D[], fac
 
 /**
  * Reports that are wrong on correct code, each for a reason the editor can check:
- * - Phpactor's checks that Mago's analyzer makes too, and gets right where Phpactor doesn't: members that don't
- *   exist (Phpactor misses facades, macros, typed class constants, and methods declared without `public`),
- *   undefined variables (`new readonly class`), unresolved names (trait `insteadof` rules), missing interface
- *   methods (it compares their names with case, and misses a trait's traits), and missing generic tags (it
- *   ignores template defaults, such as Filament's `@template TModel of Model = Model`).
- * - Phpactor's unused import that a docblock uses (`@use HasFactory<UserFactory>`), or that Mago reports too, and
- *   its deprecation that Mago reports on the same line.
+ * - The server's unused import that Mago's linter reports too (`no-redundant-use`), or that a docblock uses.
  * - An unused import that the code uses with other letter case (`use HasDescription, hasIcon;`): PHP's class
  *   names ignore case, and both checkers don't.
- * - Phpactor's "has not been defined" for a model's column set in the model.
- * - Phpactor's namespace hint in a file with no named class, such as tests/Pest.php.
  * - A member used in a trait: the classes that use the trait have it. PhpStorm doesn't check these either.
  * - A member of a Mockery mock, which answers any call.
  * - A view name given to a `view-string` property, such as a widget's `$view`, when the view exists: Mago doesn't
@@ -137,14 +128,11 @@ type FileFacts = {
   byReference: RegExp | null;
   /** The text of the file's docblocks. */
   docblocks: string;
-  /** The file's class, such as `App\Models\Post`, and whether it declares a named class, interface, trait, or enum. */
-  fileClass: string | undefined;
-  namedClass: boolean;
   /** `code line` of each diagnostic, and `source code line:character message`, to find two servers reporting the same thing. */
   sameLine: Set<string>;
 };
 
-function falsePositive({ path, lines, traits, byReference, docblocks, fileClass, namedClass, sameLine }: FileFacts, facts: Facts, d: Diagnostic): boolean {
+function falsePositive({ path, lines, traits, byReference, docblocks, sameLine }: FileFacts, facts: Facts, d: Diagnostic): boolean {
   const message = messageOf(d);
   // PHP's class names ignore case, so `use ..., hasIcon;` uses an imported `HasIcon`; both checkers compare with case.
   const usedWithOtherCase = (name: string) =>
@@ -153,28 +141,14 @@ function falsePositive({ path, lines, traits, byReference, docblocks, fileClass,
   const byReferenceCode = /null|no-value|impossible|redundant|reference-constraint-violation|mismatched-array-index|undefined-(int|string)-array-index/;
   if (byReference && (byReferenceCode.test(String(d.code)) || /`null`/.test(message)) && byReference.test(line)) return true;
   switch (d.code) {
-    case "worse.missing_member":
-    case "worse.undefined_variable":
-    case "worse.unresolved_name":
-    case "implement_contracts":
-    case "worse.docblock_missing_class_generic":
-      return true;
-    case "worse.unused_import": {
-      const name = message.match(/^Name "([^"]+)"/)?.[1]?.split("\\").pop();
+    case "unused_import": {
+      const name = message.match(/^Unused import: `([^`]+)`/)?.[1]?.split("\\").pop();
       return !!name && (new RegExp(`\\b${name}\\b`).test(docblocks) || usedWithOtherCase(name) || sameLine.has(`no-redundant-use ${d.range.start.line}`));
     }
     case "no-redundant-use": {
       const name = message.match(/^Unused import: `([^`]+)`/)?.[1]?.split("\\").pop();
       return !!name && usedWithOtherCase(name);
     }
-    case "worse.deprecated_usage":
-      return ["method", "class", "function", "constant", "property"].some((kind) => sameLine.has(`deprecated-${kind} ${d.range.start.line}`));
-    case "worse.assignment_to_missing_property": {
-      const property = message.match(/^Property "(\w+)"/)?.[1];
-      return !!property && !!fileClass && facts.isModelProperty(fileClass, property) === true;
-    }
-    case "fix_namespace_class_name":
-      return !namedClass;
     case "parse": {
       // `mago analyze` and `mago lint` both report each parse error.
       const { line, character } = d.range.start;
@@ -227,19 +201,6 @@ function ownDocblock(lines: string[], line: number): boolean {
   return i >= 0 && /\*\/\s*$/.test(lines[i]);
 }
 
-/**
- * Phpactor's "Method "send" is missing @param $body", or "is missing docblock return type", when the docblock has
- * the tag: Phpactor's docblock parser drops a tag whose type it can't read, such as a PHPStan array shape with
- * quoted keys (`array{'code': string}`) or an open one (`array{id: string, ...}`).
- */
-function documentedAfterAll(text: string, lineStarts: number[], d: Diagnostic): boolean {
-  const at = (lineStarts[d.range.start.line] ?? text.length) + d.range.start.character;
-  if (d.code === "worse.docblock_missing_return_type") return docblockHasReturn(text, at);
-  if (d.code !== "worse.docblock_missing_param") return false;
-  const name = messageOf(d).match(/@param \$(\w+)/)?.[1];
-  return !!name && docblockHasParam(text, at, name);
-}
-
 /** The diagnostics worth showing for a file: none in libraries, and none of the false ones above. */
 export function realProblems<D extends Diagnostic>(path: string, text: string, languageId: string, list: D[], facts: Facts): D[] {
   if (isLibrary(path)) return [];
@@ -251,21 +212,16 @@ export function realProblems<D extends Diagnostic>(path: string, text: string, l
   if (!list.length || languageId !== "php") return list;
   const traits = new Set([...text.matchAll(/^\s*trait\s+(\w+)/gm)].map((m) => m[1]));
   const captured = [...text.matchAll(/\buse\s*\(([^)]*)\)/g)].flatMap((m) => [...m[1].matchAll(/&\s*\$(\w+)/g)].map((v) => v[1]));
-  const declaration = (kinds: string) => text.match(new RegExp(`^\\s*(?:(?:abstract|final|readonly)\\s+)*(?:${kinds})\\s+(\\w+)`, "m"))?.[1];
-  const declared = declaration("class");
-  const namespace = text.match(/^\s*namespace\s+([\w\\]+)\s*;/m)?.[1];
   const file: FileFacts = {
     path,
     lines,
     traits,
     byReference: captured.length ? new RegExp(`\\$(${[...new Set(captured)].join("|")})\\b`) : null,
     docblocks: (text.match(/\/\*\*[\s\S]*?\*\//g) ?? []).join("\n"),
-    fileClass: declared && (namespace ? `${namespace}\\${declared}` : declared),
-    namedClass: !!declaration("class|interface|trait|enum"),
     sameLine: new Set(list.flatMap((d) => [`${d.code} ${d.range.start.line}`, `${d.source} ${d.code} ${d.range.start.line}:${d.range.start.character} ${messageOf(d)}`])),
   };
   return withoutEloquentMagic(text, list, facts)
-    .filter((d) => !documentedAfterAll(text, lineStarts, d) && !falsePositive(file, facts, d))
+    .filter((d) => !falsePositive(file, facts, d))
     .map((d) => (isDeprecation(d) ? onDeprecatedName(text, lineStarts, d) : isUnused(d) ? onUseStatement(lines, d) : d));
 }
 
@@ -508,7 +464,7 @@ export function formatType(type: string): string {
 }
 
 /** A report of a deprecated method, class, function, or constant, which the editor strikes through. */
-export const isDeprecation = (d: Diagnostic) => (/^mago/.test(d.source ?? "") && /^deprecated-/.test(String(d.code))) || d.code === "worse.deprecated_usage";
+export const isDeprecation = (d: Diagnostic) => (/^mago/.test(d.source ?? "") && /^deprecated-/.test(String(d.code))) ;
 
 /**
  * `d` narrowed to the deprecated name, as its strikethrough covers: Mago reports the whole call
@@ -529,7 +485,7 @@ function onDeprecatedName<D extends Diagnostic>(text: string, lineStarts: number
 }
 
 /** A report of an unused import, which the editor fades as a hint, as VS Code does. */
-export const isUnused = (d: Diagnostic) => d.code === "worse.unused_import" || d.code === "no-redundant-use";
+export const isUnused = (d: Diagnostic) => d.code === "unused_import" || d.code === "no-redundant-use";
 
 /** `d` widened to its whole `use …;` line, which the fade covers, when the import is on a line of its own. */
 function onUseStatement<D extends Diagnostic>(lines: string[], d: D): D {

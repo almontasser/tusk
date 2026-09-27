@@ -21,6 +21,8 @@ use crate::index::SharedIndex;
 use crate::server::{Client, Snapshot};
 
 pub enum Event {
+    /// Something other than an edit changed a document's problems, such as a PHPStan run ending.
+    Refresh(PathBuf),
     /// An open document changed. Its index update is queued.
     Edited(PathBuf),
     /// The indexer applied updates.
@@ -35,6 +37,7 @@ pub fn spawn(
     docs: Arc<RwLock<Documents>>,
     index: SharedIndex,
     framework: Arc<crate::framework::State>,
+    phpstan: Arc<crate::phpstan::PhpStan>,
     root: PathBuf,
 ) -> Sender<Event> {
     let (tx, rx) = crossbeam_channel::unbounded::<Event>();
@@ -58,11 +61,17 @@ pub fn spawn(
                         Ok(Event::Edited(path)) => {
                             edited.insert(path);
                         }
+                        Ok(Event::Refresh(path)) => {
+                            let snap = snapshot(&docs);
+                            if let Some(doc) = snap.docs.get(&path).cloned() {
+                                publish(&client, &snap, &doc, &phpstan);
+                            }
+                        }
                         Ok(Event::IndexChanged) => {
                             let snap = snapshot(&docs);
                             for path in edited.drain() {
                                 if let Some(doc) = snap.docs.get(&path).cloned() {
-                                    publish(&client, &snap, &doc);
+                                    publish(&client, &snap, &doc, &phpstan);
                                 }
                             }
                             others_due = true;
@@ -73,7 +82,7 @@ pub fn spawn(
                         others_due = false;
                         let snap = snapshot(&docs);
                         for doc in snap.docs.iter() {
-                            publish(&client, &snap, doc);
+                            publish(&client, &snap, doc, &phpstan);
                         }
                     }
                 }
@@ -83,11 +92,12 @@ pub fn spawn(
     tx
 }
 
-fn publish(client: &Client, snap: &Snapshot, doc: &Document) {
+fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::phpstan::PhpStan) {
     if !matches!(doc.language.as_str(), "php" | "blade") {
         return;
     }
-    let diagnostics = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(snap, doc))).unwrap_or_default();
+    let mut diagnostics = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(snap, doc))).unwrap_or_default();
+    diagnostics.extend(phpstan.problems(&doc.path));
     client.notify::<PublishDiagnostics>(PublishDiagnosticsParams {
         uri: doc.uri.clone(),
         diagnostics,
@@ -103,7 +113,7 @@ pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
     out
 }
 
-fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
+pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.

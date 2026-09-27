@@ -20,13 +20,12 @@ pushes events to the frontend with Tauri events (`emit`).
 
 | Component | Tool | Milestone |
 | --- | --- | --- |
-| PHP intelligence | Phpactor language server | 2 |
-| Laravel intelligence | Laravel LSP (`laravel/lsp`) | 3 |
-| Diagnostics and formatting | Mago and Larastan | 3 |
+| PHP intelligence | Tusk's own language server in Rust (`tusk-lsp/`); Phpactor until September 2026 | 2 |
+| Laravel intelligence | `tusk-lsp/`; Laravel LSP (`laravel/lsp`) until September 2026 | 3 |
+| Diagnostics and formatting | Mago, in `tusk-lsp/` and on the command line | 3 |
 | Terminal | `xterm.js` and `portable-pty` | 4 |
 | Git and pull requests | The `git` and `gh` command-line tools | 5 |
-| Filament intelligence | A custom language server written in PHP (`filament-lsp/`) | 6 |
-| PHP, Laravel, and Filament intelligence | Tusk's own language server in Rust (`tusk-lsp/`), replacing the three above | In progress |
+| Filament intelligence | `tusk-lsp/`; a server written in PHP (`filament-lsp/`) until September 2026 | 6 |
 
 The backend runs each language server as a child process. The frontend starts
 one client per server, and Monaco merges their results.
@@ -314,8 +313,9 @@ checks in the background (`check_tools`, which release builds also run every
 six hours); updates stay staged and are swapped in at the next
 launch, before anything runs, so a running server never has its files
 replaced. Each installed folder records its package's ID in `.tusk-id`. The
-editor's `mago.toml` and the Filament server still ship inside the app, since
-they're part of this repository.
+editor's `mago.toml` and `introspect.php` ship inside the app, since they're
+part of this repository. The PHP language server is the app's own binary, so
+it isn't a tool at all.
 
 Every tool gets new files, never files rewritten in place: macOS caches a
 binary's code signature per file, and a binary rewritten after it ran fails its
@@ -323,8 +323,6 @@ check and is killed partway through a large run.
 
 | Tool | Version | Form |
 | --- | --- | --- |
-| Phpactor | 2026.06.23.0 | PHP archive (`.phar`) |
-| Laravel LSP | 0.0.32 | PHP archive (`.phar`) |
 | Mago | 1.50.0 | Native binary for the build's target |
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
@@ -371,48 +369,33 @@ a program call `login_path()` first, which waits for that thread.
 
 ### Language server bridge
 
-`src-tauri/src/lsp.rs` starts `php tools/phpactor.phar language-server` in the
-project folder. A thread reads the server's `Content-Length` framed messages
+`src-tauri/src/lsp.rs` starts each language server in the project folder. For
+PHP, it starts the app's own binary with `lsp` (`std::env::current_exe()`), which
+`main.rs` hands to `tusk_lsp::run_stdio()` before Tauri starts. A thread reads the server's `Content-Length` framed messages
 from standard output and emits each one as an `lsp` event. The `lsp_send`
 command queues a message for a writer thread, one per server, which writes it to
 the server's standard input. A busy server stops reading, its pipe fills, and a
 write then blocks until it reads again; with the write on the main thread, that
-froze the whole window while Phpactor worked through a large file. Opening
+froze the whole window while a server worked through a large file. Opening
 another folder stops the old server.
 
 The bridge doesn't parse messages. All protocol logic lives in `src/lsp.ts`.
 
-### Phpactor's index
+### Index exclusions
 
-Phpactor's indexer ignores `.gitignore`. The client passes
-`indexer.exclude_patterns` that add hidden folders, `node_modules`, `storage`,
-and `bootstrap/cache` to Phpactor's defaults. On a project with three git
-worktrees under `.claude/`, this cut the index from 125,859 files to about
-26,700.
-
-Each project also has a list of vendor folders to skip, which
+Each project has a list of vendor folders to skip, which
 `src/indexexclude.ts` reads: `tusk.json`'s `indexExclude` when the project has
 one, otherwise the editor's own copy (localStorage `indexExclude:<root>`), and
 `DEFAULT_EXCLUDES` when neither exists. The defaults are folders that declare no
 classes, functions, or constants: AWS's API data, Carbon's and every package's
-translations, package Blade views, and `voku/portable-ascii`'s tables. Each
-folder goes to Phpactor as `/<folder>/**/*` and to Mago's `excludes`, where a
+translations, package Blade views, and `voku/portable-ascii`'s tables. The list
+goes to the PHP server as `exclude` in `initializationOptions`, on top of its
+own defaults (see "Tusk's language server"), and to Mago's `excludes`, where a
 folder glob needs `/**` because Mago matches globs against files, not folders.
-On a Laravel and Filament app,
-all 6,154 such files declared nothing, and skipping them took a full build
-from 26,781 files and 87 seconds to 18,614 files and 62 seconds. AWS's data is
-39 MB of that app's 110 MB of vendor PHP. Rector's bundled `vendor` stays,
-since its `vendor/rector` holds the rule sets `rector.php` uses. Introspection
-and the Filament server load classes through Composer's autoloader, not the
-index, so they're unaffected.
-
-Phpactor keeps index entries for files that later become excluded, which
-would list classes twice. So the index lives in a folder the editor owns,
-`phpactor-index/<project>` in the app's cache, and `setExclusions` stops
-Phpactor, deletes that folder, and starts the servers again, which asks for a
-full build. An index takes 300 to 550 MB on a large Laravel app, so a folder per
-list would pile up. When the fixed patterns in `PHPACTOR_EXCLUDES` change,
-delete the folders the same way.
+On a Laravel and Filament app, all 6,154 such files declared nothing. AWS's
+data is 39 MB of that app's 110 MB of vendor PHP. Rector's bundled `vendor`
+stays, since its `vendor/rector` holds the rule sets `rector.php` uses.
+Changing the list restarts the servers, which index again with it.
 
 `symbol_free_folders` in `search.rs` suggests more folders to skip. It reads
 every PHP file in `vendor` except tests and `vendor/composer`, checks each with a
@@ -462,26 +445,25 @@ facade's `mixed` return, shows as a hint (`magicNoise`) rather than a problem,
 as PhpStorm reports magic access only as a weak warning.
 
 Laravel's root aliases (`use DB;`, `Route`, `Cache`, and the rest in
-`config/app.php`) exist only at runtime, through `class_alias()`, so Phpactor
-reported `Class "DB" not found` and Mago that its methods don't exist.
+`config/app.php`) exist only at runtime, through `class_alias()`, so the
+index had no `DB` and Mago reported that its methods don't exist.
 `aliasStubs` in `eloquent.ts` writes a stub file per project in the app's cache
 folder (`alias-stubs/<project>/aliases.php`), one `class DB extends
 \Illuminate\Support\Facades\DB {}` per alias, from `introspect.php aliases`
-(Laravel's `AliasLoader`, so package aliases count too). Phpactor gets the
-folder in `indexer.stub_paths`, after PHP's own stubs, which the setting
-replaces; `worse_reflection.additive_stubs` doesn't resolve them. Phpactor
-indexes stub paths only in a full build, so new stubs are followed by a full
-reindex, and later starts check the aliases in the background and reindex only
-if they changed. For projects without their own `mago.toml`, the editor's Mago
+(Laravel's `AliasLoader`, so package aliases count too). Tusk's server gets the
+folder in `stubs` and indexes it as library code. Later starts check the
+aliases in the background and ask the server to reindex only if they changed. For projects without their own `mago.toml`, the editor's Mago
 settings for the project (see "Types Mago reads wrong") add the folder to
 `includes`, so Mago reads the facades' `@method` docs through the stubs. A facade call
 (`DB::transaction(…)`, by alias or by an import from a `Facades` namespace)
 also counts as magic for `withoutMagic`, since its documented return type is
 often `mixed`.
 
-In development, Tauri copies `filament-lsp/` into `target/debug/tools/` only
-when the Rust side rebuilds, so a change to `introspect.php` reaches the running
-app after the next Rust rebuild.
+`introspect.php` lives in `tusk-lsp/php/`. Tusk's server compiles it in with
+`include_str!`, and the app bundles a copy as `tools/introspect.php` for the
+editor's own calls. In development, Tauri copies it into `target/debug/tools/`
+only when the Rust side rebuilds, so a change reaches the running app after the
+next Rust rebuild.
 
 ### Types Mago reads wrong
 
@@ -530,10 +512,8 @@ at each start, and the last start's list (`replaced.json`) is used until then.
 ones, `vendor` (already an include), `node_modules`, and `storage`. Mago walks
 every file under a path before it applies `excludes`, so with `.` each check
 walked the worktrees in `.claude` and all of `node_modules`. A top-level folder
-made later is read after the next start. Phpactor, which runs Mago as you type,
-starts with `MAGO_THREADS` set to half the cores (`lsp_start`), so a check
-costs about half the CPU; the Problems panel's scan and Mago's fixes run Mago
-from the app, on every core.
+made later is read after the next start. Mago's fixes and Blade's checks run
+Mago's command line from the app, on every core.
 
 ### False problems the filters drop
 
@@ -542,18 +522,8 @@ before they become markers, for open files and the project's problems alike.
 It has no editor imports, so `src/diagnostics.test.ts` runs it in Node. Besides
 Laravel's magic (above), it drops:
 
-- Phpactor's checks that Mago's analyzer makes too and gets right where
-  Phpactor doesn't: members that don't exist (Phpactor misses facades, macros,
-  typed class constants such as `const string A`, and methods declared without
-  `public`, as Livewire's `Testable::set()`), undefined variables (`new
-  readonly class`), unresolved names (trait `insteadof` rules), missing
-  interface methods (it compares names with case, and misses a trait's
-  traits), and missing generic tags (it ignores defaults, such as Filament's
-  `@template TModel of Model = Model`).
-- Phpactor's unused import that a docblock uses (`@use
-  HasFactory<UserFactory>`), or that Mago reports on the same line; its "has
-  not been defined" for a model's column set in the model; and its namespace
-  hint in a file with no named class.
+- Phpactor's checks (source `phpactor`), which Tusk's server doesn't make.
+  These filters are left from before the switch and match nothing now.
 - A factory's `Model|Collection<int, Model>` (see `factoryUnion`), and the
   issues that follow from a factory call's value.
 - A member used in a trait (the classes that use it have it), and a member of a
@@ -580,36 +550,20 @@ like.
 
 ### The project's problems
 
-`src/problems.ts` scans the whole project for the Problems panel. Mago has no
-server mode, but one `mago analyze` and one `mago lint` over the project (with
-the editor's settings, `--reporting-format json --minimum-report-level
-warning`) take about 3 seconds and 1.6 GB on a 1,000-file project.
-`run_capture` takes `anyStatus` for them, since Mago exits with an error when it
-finds problems. `magoIssuesByFile` converts the report as Phpactor's Mago
-extension does, with Mago's UTF-8 byte offsets turned into UTF-16 positions.
-Mago's message for a parse error is always "Parse error encountered during
-parsing", so for code `parse` the scan takes the message on the error's
-location instead, such as "Expected one of `Variable`, found `LeftBrace`".
-Phpactor's extension keeps the generic message for open files. Both `mago
-analyze` and `mago lint` report each parse error, so `realProblems` drops the
-`mago` one when a `mago-lint` one has the same position and message. Both
-paths map Mago's levels the same way: note to Information and help to Hint.
-The panel shows neither, so the scan asks only for warnings and errors, and
-open files show notes and help in the editor only.
-Phpactor has no project-wide check, so its diagnostics command,
-`language-server:diagnostics`, runs once per file with the file on standard
-input and the editor's index path in `--config-extra`, half the cores at a time;
-at about 1.5 seconds a file, 1,000 files take 2 to 4 minutes. Its results are
-cached in the app's cache (`problems/<project>/phpactor.json`) by a hash of
-each file's text. A file's results also depend on the files it uses, so only
-the first scan after a project opens reads the cache; **Scan Project** runs
-Phpactor on every file. Both go through `realProblems` and `severityOf`, as open
-files do. Files open in the editor show their live markers instead, and a file
-that closes keeps its last markers as its scan result, unless you close it
-without saving its changes. Then it keeps its earlier scan result. Deleting or
-moving a file drops its problems (`forgetPath`). A scan that a newer one
-replaced (the project changed) checks its run number after each wait and stops
-without publishing; **Scan Project** does nothing while a scan runs. The panel's Errors and
+`src/problems.ts` scans the whole project for the Problems panel with one
+`tusk/projectProblems` request. The server checks every project PHP file in its
+own process, in parallel, with the same checks as open files (Mago's analyzer
+and linter, and its own), and returns the problems by path relative to the
+root. That takes a few seconds, where running Mago's command line over the
+project and Phpactor's diagnostics command per file took minutes, so there's
+no cache: a file's results depend on the files it uses, and every scan checks
+every file again. The results go through `realProblems` and `severityOf`, as
+open files do. Files open in the editor show their live markers instead, and a
+file that closes keeps its last markers as its scan result, unless you close
+it without saving its changes. Then it keeps its earlier scan result. Deleting
+or moving a file drops its problems (`forgetPath`). A scan that a newer one
+replaced (the project changed) checks its run number and stops without
+publishing; **Scan Project** does nothing while a scan runs. The panel's Errors and
 Warnings toggles filter the list, not the status bar counts, and are kept in
 `localStorage` (`problemsShown`). The **Current File** toggle (`problemsCurrentFile`)
 keeps the file in the editor, and the filter box keeps problems for which
@@ -635,14 +589,13 @@ at 99+, on the Problems button in the activity bar.
 
 ### Deprecations
 
-Neither Phpactor nor Mago tags its deprecation reports as deprecated, so
-`isDeprecation` in `diagnostics.ts` finds them by code (Mago's `deprecated-*`,
-Phpactor's `worse.deprecated_usage`), and `setMarkers` gives their markers
+Mago doesn't tag its deprecation reports as deprecated, so
+`isDeprecation` in `diagnostics.ts` finds them by code (`deprecated-*`), and `setMarkers` gives their markers
 Monaco's deprecated tag, which draws the code struck through. Mago reports the
 whole call (`$method->setAccessible(true)`), so `realProblems` narrows its range
 to the deprecated name from the message.
 
-Unused imports (Phpactor's `worse.unused_import`, Mago's `no-redundant-use`)
+Unused imports (Tusk's `unused_import`, Mago's `no-redundant-use`)
 show as VS Code shows them: hints over the whole `use …;` line with Monaco's
 unnecessary tag, which fades them without an underline, and not counted as
 problems (`isUnused`). An import the code uses with other letter case (`use
@@ -651,12 +604,12 @@ both checkers compare with it.
 
 ### Hovers
 
-Phpactor's hover shows a member's signature in a PHP code block, on one line
-however many parameters it has, with a `// @deprecated …` comment and a `⚠`
-before it. `formatHoverMarkdown` in `phptypes.ts` moves the deprecation to a
-**Deprecated** line above the block, puts `<?php` (which Monaco needs to
-highlight PHP) on a line of its own, and gives a signature longer than 80
-characters one parameter per line.
+Tusk's hover shows a declaration's signature as its source writes it, on one
+line, in a PHP code block that starts with `<?php` (which Monaco needs to
+highlight PHP), after a **Deprecated** line when its docblock has
+`@deprecated`, and followed by the docblock. `formatHoverMarkdown` in
+`phptypes.ts` gives a signature longer than 80 characters one parameter per
+line.
 
 ### Problem popups and the problem page
 
@@ -691,9 +644,6 @@ a command the kind `quickfix` when problems overlap the range. Each action carri
 diagnostics as markers: the server's own for a `CodeAction`, and the
 overlapping ones for a command.
 
-Phpactor's hover over a docblock returns its parser's node name, such as
-`ClassMembersNode`; the hover provider drops a hover that's only such a name.
-
 The link runs `problems.openPage`, which `showProblemPage` in `problems.ts`
 handles: a page in the editor area, like the diff view, with the message
 (`messageParts`; code longer than 60 characters goes in a block, laid out by
@@ -724,8 +674,8 @@ wait covers that.
 
 ### Mago's fixes and suppressions
 
-Mago reports fixes for many lint rules, but Phpactor's Mago extension drops
-them, so a second code action provider for `php` in `lsp.ts` gets them from
+Mago reports fixes for many lint rules, but Tusk's server publishes Mago's
+problems without them, so a second code action provider for `php` in `lsp.ts` gets them from
 Mago itself. On a request the user makes (`CodeActionTriggerType.Invoke`: ⌥⏎,
 the hover's Quick Fix link, or Fix All) with `mago-lint` markers in the range,
 it runs `mago lint --stdin-input <path> --reporting-format json` on the
@@ -765,148 +715,49 @@ while the debugger is idle. The built-in themes set `editorError.foreground`,
 `editorHint.foreground` to the interface's colors, and Monaco derives the
 widget's colors from them.
 
-### Checking open files one at a time
+### Open files' problems
 
-Phpactor's diagnostics engine (`DiagnosticsEngine` in its language server
-library) keeps one waiting document: each document opened, changed, or saved
-replaces the one before, and it drops a document's results once another is
-waiting. So when a session reopened several files, or indexing ended and the
-editor asked for every open file again, only the last one got checked, and the
-others showed no problems until you edited them. `checkOneByOne` in `lsp.ts`
-sends `didSave` for one file at a time, when the server starts and when its
-first indexing run ends. Later indexing runs follow a file created on disk,
-such as by `artisan make`, and a pass then took the check away from the file
-you were editing for up to a minute, so they don't start one. It moves to the next file half a second after a publish that has
-results from both `mago` and `mago-lint`, 5 seconds after the last publish
-(Mago takes about 2, and a checker that finds nothing publishes nothing), or
-after 30 seconds. Moving on sooner would make Phpactor drop Mago's results for
-the file. The client tracks the document Phpactor checks next
-(`lastEnqueued`), and a publish for it marks the file as checked
-(`diagnosed`). Until then, the Problems panel shows the scan's problems for an
-open PHP file: other servers, such as the spell checker, publish first.
-
-Before each check, `DiagnosticsEngine` publishes an empty list, then the list so
-far as each checker finishes. A checker with no results publishes nothing, so
-the empty list is the only way a file that became clean loses its problems.
-Applying it at once made every squiggle vanish after each pause in typing and
-come back in stages. The client holds an empty Phpactor publish for a file
-that has problems for 4 seconds, and any later publish for the file replaces
-it. A held publish doesn't mark the file as checked. Held markers keep their
-old ranges: Monaco moves the squiggles as you type, but not the marker ranges
-that the Problems panel reads.
-
-### Docblocks Phpactor can't read
-
-Phpactor's docblock parser drops a `@param` whose type it can't read, such as a
-PHPStan array shape with quoted keys (`array{'code': string}`; unquoted keys
-parse), and then reports `worse.docblock_missing_param` for a parameter the
-docblock does document. `documentedAfterAll` in `lsp.ts` finds the docblock of
-the function around the report (`docblockHasParam` in `phptypes.ts`: the
-`/** … */` right before `function`, with only modifiers and attributes between)
-and drops the report when it has `@param … $name`. The same goes for
-`worse.docblock_missing_return_type` and `@return`: Phpactor can't read an open
-array shape either (`array{id: string, ...}`), which Mago needs for
-`array<mixed>&array{…}`.
-
-### Unfinished first builds
-
-Phpactor finds classes through Composer's autoloader even without an index,
-but functions only through the index. A first build takes minutes, and its
-update pass on later starts indexes only files newer than the index's last
-update, which every file change moves forward. So a first build that stops
-partway, because the server restarted or another project opened, leaves the
-files it never reached out of the index for good, and a helper such as
-Laravel's `response()` shows "Function not found" in every file. (One project
-had a 133 MB index where a complete one is 537 MB.)
-
-The client therefore records, per project in `localStorage`
-(`phpactorIndexed:<root>`, set to the index path), that a full build finished.
-Until it has, `startLsp` stops Phpactor and deletes the index folder before
-starting it, and file changes don't trigger the update pass, which would only
-move the timestamp past the missing files. Phpactor indexes an empty folder in
-full as it starts, so its first `$/progress` run titled "Indexing…" is the full
-build, and that run's end marks the index complete. Nothing asks for a reindex
-during that run: a reindex cancels the running pass, and its end can pass for
-the full build's. In testing, a start that asked for one marked the index
-complete 40 seconds in, where a full build of that project takes 160. For the same reason, `reindex(false)` forgets the running pass's
-token, and `checkComposerLock` saves the lock's hash but doesn't reindex while
-a build runs. Before it saved the hash then, every new project was built twice:
-once at first open, and again at the next start, when the lock looked new. Indexes from earlier builds, under `~/.cache/phpactor/index`
-and named `-editor-1` to `-editor-3`, are no longer used and can be deleted.
-
-### Reindexing after Composer changes
-
-Composer extracts package files with the package's own modification times,
-which are older than Phpactor's index. Phpactor's update pass at startup
-compares times, so it skips a newly installed package, and its classes and
-functions show as not found. `checkComposerLock` keeps a hash of
-`composer.lock` per project in `localStorage`. When the hash differs, at
-startup (so installs made while the editor was closed count) or when the file
-watcher reports a change, `reindex()` sends Phpactor's
-`phpactor/indexer/reindex` request with `soft: false`, which resets the index
-and rebuilds it. The first time a project opens, there's no hash yet, so it
-reindexes once.
+The PHP server publishes each open file's problems whole, with the document's
+version, as soon as its index has the edit, and the other open files' once edits
+pause (see "Tusk's language server"). So a publish for a file marks it as
+checked (`diagnosed` in `lsp.ts`), and until then the Problems panel shows the
+scan's problems for an open PHP file. Phpactor needed three workarounds that
+are gone: asking for one file at a time (its diagnostics engine kept one
+waiting document), holding its empty publishes for 4 seconds (it published an
+empty list before each check), and rechecking open files after its first
+index. So are its index's workarounds: a recorded full build per project, a
+reindex after `composer.lock` changed, and a soft reindex after other programs
+changed files, since the server indexes from scratch at each start and follows
+`workspace/didChangeWatchedFiles`.
 
 ### Files changed by other programs
 
-Phpactor's index doesn't pick up PHP files that another program creates or
-changes, such as `php artisan make:model` or a `git checkout`. The editor sends
-`workspace/didChangeWatchedFiles` for them, and Phpactor registers for those
-events, but in testing the classes stayed out of the index until a reindex; the
-cause, somewhere in Phpactor's watcher, wasn't found. So `filesChanged` also
-asks for a soft reindex (`soft: true`), which indexes only files modified since
-the last pass, 2 seconds after the last such change. It skips files open in the
-editor, which Phpactor already gets through the editor, and files in the
-folders the index excludes (`vendor`, `node_modules`, `storage`,
-`bootstrap/cache`, and hidden folders), so Laravel's own writes to `storage`
-don't trigger it. A new class is in the index about 3 seconds after its file
-appears.
-
-### Diagnostics run in the server process
-
-By default, Phpactor runs its own diagnostics in a child process,
-`phpactor language-server:diagnostics`. That process reads only
-`.phpactor.json` and the global config, not the settings the editor sends
-with `initialize`, so it used Phpactor's default index path instead of the
-editor's. That index can be missing newer packages, and functions from them
-showed as not found even after a reindex. The editor sets
-`language_server.diagnostic_outsource` to `false`, so diagnostics run in the
-server process with the editor's settings.
+`filesChanged` in `lsp.ts` sends `workspace/didChangeWatchedFiles` for PHP
+files, `.env`, `composer.lock`, `mago.toml`, `lang/**/*.json`, and `public/`
+files that another program creates, changes, or deletes, such as `php artisan
+make:model` or a `git checkout`. The server indexes PHP files it doesn't have
+open, forgets cached Laravel and Filament facts that depend on the paths, and
+indexes the project again with its configuration read again when
+`composer.lock` or `mago.toml` changes.
 
 ### Pest in diagnostics
 
 Pest binds test closures to the test case that `tests/Pest.php` sets, so
 `$this->get()` works in a Pest test. Mago reads the type from the corrected
-copy of Pest's functions (see "Types Mago reads wrong"). Phpactor reports
-`$this` as undefined, so in files under `tests/` that call `it()`, `test()`,
-`describe()`, or `arch()`, the filters drop problems that mention `$this`,
-`TestCase`, or `mixed` on lines that use `$this`, and Phpactor's hint to add a
-namespace. They also drop Mago's issues about Pest's own classes, which answer
+copy of Pest's functions (see "Types Mago reads wrong"). In files under
+`tests/` that call `it()`, `test()`, `describe()`, or `arch()`, the filters
+drop problems that mention `$this`, `TestCase`, or `mixed` on lines that use
+`$this`. They also drop Mago's issues about Pest's own classes, which answer
 through magic (`->not`, higher-order expectations such as `->name->toBe()`),
 and calls on null along an `expect()` chain: `expect()` returns an
 `Expectation<TValue|null>`.
 
-### Rechecking after indexing
-
-Phpactor checks a file when you open it. During the first indexing, names
-defined in files that aren't indexed yet, such as Laravel's `config()` helper,
-can show as not found, and Phpactor doesn't recheck them when indexing ends.
-The client remembers the title of each `$/progress` token. When the progress
-titled "Indexing workspace" ends, it sends `didSave` for every open PHP file,
-which makes Phpactor check them again against the full index.
-
 ### Questions from servers
 
-A server can ask a question with `window/showMessageRequest`. Phpactor does
-this when a project has a `.phpactor.json`, because that file can run code:
-it asks whether to trust the file. The client shows the question as a native
-dialog with the server's options as buttons (up to three) and sends back the
-option you choose. Phpactor saves the answer in
-`~/.local/share/phpactor/trust.json`.
-
-After you trust the file, Phpactor asks for a restart to load it. The client
-restarts the language servers when a server's message asks for that. The
-**Restart Language Servers** action does the same by hand.
+A server can ask a question with `window/showMessageRequest`. The client
+shows the question as a native dialog with the server's options as buttons (up
+to three) and sends back the option you choose. The **Restart Language
+Servers** action restarts every server.
 
 ### Status bar
 
@@ -922,12 +773,12 @@ would clear another server's indexing progress.
   provider only for features the server reports.
 - It keeps the server in sync with every open PHP model through `didOpen`,
   `didChange`, `didSave`, and `didClose`. A server that takes changes
-  (sync kind 2, such as typos-lsp) gets each edit's ranges. A server that takes
-  only whole documents (Phpactor, Laravel LSP, Tailwind, the Filament server)
-  gets the full text once typing pauses for 150 ms, or before the next message
-  to it, whichever comes first, so every request is answered for the current
-  text. Sending the full text on every keystroke made Phpactor reparse a
-  4,800-line file for each one, and it fell minutes behind. One copy of the text
+  (sync kind 2, such as Tusk's server and typos-lsp) gets each edit's ranges.
+  A server that takes only whole documents (Tailwind) gets the full text once
+  typing pauses for 150 ms, or before the next message to it, whichever comes
+  first, so every request is answered for the current text. Sending the full
+  text on every keystroke made Phpactor reparse a 4,800-line file for each one,
+  and it fell minutes behind. One copy of the text
   per version is shared by all servers (`textOf`).
 - Providers pass Monaco's cancellation token. When Monaco drops a request, such
   as a completion list after the next keystroke, the client sends
@@ -953,7 +804,7 @@ would clear another server's indexing progress.
 | Diagnostics | `textDocument/publishDiagnostics` | Squiggles and markers |
 | Formatting | `textDocument/formatting` | **Format Document**, when the server supports it |
 
-Phpactor doesn't format code. Milestone 3 adds formatting through Mago.
+Tusk's server doesn't format code. Milestone 3 adds formatting through Mago.
 
 Monaco has no UI for type hierarchy or workspace-wide symbol search. Milestone 4
 adds workspace symbol search to search everywhere. Type hierarchy needs its own
@@ -979,7 +830,7 @@ tab moves to the new path.
 
 `src/safedelete.ts` finds the declaration with `textDocument/documentSymbol`
 and its usages with `textDocument/references`, leaving out references inside
-the declaration itself, such as recursive calls. Phpactor misses Laravel's
+the declaration itself, such as recursive calls. References miss Laravel's
 calls by name, so a whole-word, case-sensitive text search over `*.php` adds
 possible usages: a class's full name with single or double backslashes, or a
 method's names from `laravelNames` (its own, its scope name, and its accessor
@@ -1006,12 +857,10 @@ and `rewriteArgs` maps a call's arguments to a new parameter list by name.
 a signature change becomes a `WorkspaceEdit` for `applyWorkspaceEdit`, which
 edits and saves each file.
 
-Calls of a method come from Phpactor's command line, `phpactor references:member
-<class> <method> --format=json`, run with the editor's index path. The command
-scans the project's files (`--filesystem=git`), while the language server's
-`textDocument/references` relies on its index and missed calls in files it
-hadn't indexed. Safe Delete uses the same search for methods. Functions, which
-the command doesn't cover, still use the language server.
+Calls of a method come from Tusk's server, `tusk/memberReferences` with the
+class and method: every call in the project, through subclasses too, without
+the declarations. Safe Delete uses the same search for methods. Functions use
+`textDocument/references`.
 
 Change Signature also changes overrides. `descendantsOf` searches project
 files for the class's short name as a whole word, keeps the types whose parsed
@@ -1019,15 +868,14 @@ declaration really extends or implements it, and repeats for each one found,
 to reach grandchildren. Searching for the name alone, rather than for
 `extends … Name` on one line, finds headers split over several lines; the
 search is line by line, so a pattern can't span them. `overridesOf` then
-takes the method from each type's text. Phpactor's Go to Implementation would include `vendor`, but it
-answers from the index, which misses classes created since the last full
-index: in testing, file change events for new files didn't reach the index
-until a reindex. Each override's parameter list gets the new text, and calls
-through the override (`references:member` on its class) are rewritten too,
+takes the method from each type's text. Go to Implementation would include
+`vendor`, but the text search keeps Change Signature to files you can edit.
+Each override's parameter list gets the new text, and calls through the
+override (`tusk/memberReferences` on its class) are rewritten too,
 without duplicates. References that are declarations (`function name(`) are
 skipped, since they have their own edit.
 
-Constructors differ: Phpactor's `references:member` doesn't report `new`, and
+Constructors differ: a method search doesn't report `new`, and
 a subclass's constructor isn't an override, since it may take different
 parameters. So `callsOf` sends `__construct` to `constructorCallsOf`, which
 collects the class and each descendant that inherits the constructor (no
@@ -1078,9 +926,8 @@ since those need a look.
 
 ### Extract Variable, Extract Constant, and Extract Method
 
-Phpactor's Extract Expression names the variable `$newVariable` and wraps
-whatever the range covers, and it offers no Extract Constant, so both are
-written here. `src/extractparse.ts` tokenizes the file (comments masked, PHP
+Extract Variable and Extract Constant are written here, since they need the
+editor's in-place naming. `src/extractparse.ts` tokenizes the file (comments masked, PHP
 tags as `;`) and, for the token at the caret, walks out to the nearest
 boundary (`;`, `,`, `=>`, assignments, a ternary's `?` and `:`, braces, and
 keywords), splits that span into operands and binary operators, and lists the
@@ -1103,8 +950,9 @@ text from the first edit to the last with one snippet, the name a placeholder
 at every use, so typing renames them together and ⌘Z undoes the extraction in
 one step. A `tuskNaming` context key makes ⏎ and Escape end it, as PhpStorm's
 in-place rename does, rather than add a line at every copy. Extract Method runs
-Phpactor's `extract_method` and then does the same with the name Phpactor chose,
-found as the one new `function` in the file.
+the server's `tusk.extractMethod` command (see "Tusk's language server"), which
+applies its edit through the editor before it returns, and then does the same
+with the name the server chose, found as the one new `function` in the file.
 
 Introduce Field uses the same expression and occurrence search. It places the
 property after the last one `classProperties` finds, or where a constant would
@@ -1168,11 +1016,11 @@ class names in full for another file (`X::`, `new X`, `instanceof X`,
 `moveClass` in `src/refactor.ts` reuses the file tree's move (`move` in
 `src/files.ts`): it lists namespaces from the folders of the project's PHP
 files (`namespaceFor`), maps the chosen one to a path with `pathsFor`, and
-moves the file there. `updateReferences` then asks Phpactor
-(`workspace/willRenameFiles`) for the namespace and reference edits. Phpactor
-maps paths to class names through Composer's autoloader, loaded when it
-starts, so a project without `vendor/composer` gets no edits; the error it
-returns now reaches the status bar instead of being dropped.
+moves the file there. `updateReferences` then asks Tusk's server
+(`workspace/willRenameFiles`) for the namespace and reference edits. The server
+maps paths to namespaces through the PSR-4 map in `composer.json`, so no
+Composer autoloader is needed; when no mapped folder holds the new path, its
+error reaches the status bar.
 
 ### Pull Members Up and Extract Interface
 
@@ -1238,7 +1086,7 @@ calls, a parent that becomes abstract, and siblings missing an abstract method
 and `importEdits` work on it as on any file, and edits the class's `implements`.
 
 `src/classrefactor.ts` finds the targets (`locate` tries the PSR-4 path, then
-Phpactor's workspace symbols) and runs `memberDialog`, which both refactorings
+the workspace symbols) and runs `memberDialog`, which both refactorings
 share: rows with badges and a per-row switch, a colorized preview of the new
 code, and problems with fixes, all recomputed on each change. The dialog is
 modal and both files' text is checked again before applying, so the edits never
@@ -1269,11 +1117,11 @@ a later undo there doesn't reach back into the refactoring.
 
 ### Type hierarchy
 
-Phpactor has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
+Tusk's server has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
 builds the tree from requests it does support.
 
 The starting type comes from the cursor. On a capitalized word, the view asks
-Phpactor for its definition and reads the type declared at that line; the name
+the server for its definition and reads the type declared at that line; the name
 must match the word, so a constant or method doesn't count. Otherwise it takes
 the type declared at or above the cursor line in the current file.
 
@@ -1282,11 +1130,11 @@ the type declared at or above the cursor line in the current file.
   and the traits in `use` lines inside its body, through the file's
   `namespace` and `use` statements. Each parent's file comes from a
   workspace symbol search, matched on name and namespace.
-- **Subtypes**: `textDocument/implementation` at the type's name. Phpactor
+- **Subtypes**: `textDocument/implementation` at the type's name. The server
   answers from its index with every descendant, so the tree keeps the ones
   whose own declaration names the type, and deeper ones appear when you expand
-  their parent. The request needs the file open in Phpactor, so the file gets a
-  model (without a tab). Phpactor doesn't list a trait's users, so for a trait
+  their parent. The file gets a model (without a tab) for the request. The
+  server doesn't list a trait's users, so for a trait
   a text search finds `use` lines naming it, and the tree keeps the types
   whose declaration really uses it.
 
@@ -1295,30 +1143,18 @@ costs nothing until you open it.
 
 ### Generate
 
-`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Phpactor writes what it can:
-getters and setters through its `generate_accessors` and `generate_mutators`
-commands, called with the property names directly (its code action offers
-only the properties inside the selection), and Implement Methods, Override
-Methods, and the constructor transformers through its code actions for the
-cursor, filtered by kind. The editor sets Phpactor's accessor prefix to `get`,
-so getters match PhpStorm's names. Phpactor has no action that writes a
-constructor from properties or a `__toString()`, so those are snippets:
-`classProperties` in `src/refactorparse.ts` reads the class body's top-level
-declarations and promoted parameters, and the snippet goes after the last
-property or before the class's closing brace, indented with the file's
+`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Tusk's server writes what it
+can: getters and setters through its `generate_accessors` and
+`generate_mutators` commands, called with the property names directly, named
+`getTitle` and `setTitle` as PhpStorm names them, and Implement Methods
+(including a trait's abstract methods), Override Methods, and the constructor
+transformers through its code actions for the cursor, filtered by kind and run
+with `runTuskAction`, which resolves their edits. The server has no action
+that writes a constructor from properties or a `__toString()`, so those are
+snippets: `classProperties` in `src/refactorparse.ts` reads the class body's
+top-level declarations and promoted parameters, and the snippet goes after the
+last property or before the class's closing brace, indented with the file's
 indentation.
-
-Phpactor's Implement Methods covers interfaces and abstract parent classes,
-but not the abstract methods a trait declares. `traitAbstracts` follows the
-class's traits, and the traits they use, to their files through the workspace
-symbols (`typeSymbol` in `src/lsp.ts`, which Type Hierarchy also uses), and
-`abstractMethods` in `src/phptypes.ts` copies each declaration without
-`abstract`, with class names in its types written in full, since the trait's
-`use` statements don't apply in the class's file. `shortenNames` then writes
-a full name short where the class's file already imports it or shares its
-namespace. The stubs go before the class's closing brace, found again after
-Phpactor's own edit. When Phpactor has nothing to implement, **Implement
-Methods…** still shows for the trait methods alone.
 
 ⌘N is also **New File…**. The shortcut handler now takes the first action for
 the keys that applies (an editor-only action needs the editor focused, and
@@ -1327,19 +1163,19 @@ everywhere else.
 
 ### Call hierarchy
 
-Phpactor has no `textDocument/prepareCallHierarchy` either, so
+The server has no `textDocument/prepareCallHierarchy` either, so
 `src/callhierarchy.ts` builds the tree the same way, reusing the type
 hierarchy's styles.
 
-- **Callers**: `callsOf` from `src/refactor.ts` (Phpactor's
-  `references:member` for methods, `textDocument/references` for functions).
+- **Callers**: `callsOf` from `src/refactor.ts` (`tusk/memberReferences` for
+  methods, `textDocument/references` for functions).
   Each reference is placed in the innermost method, constructor, or function
   around it, from `textDocument/documentSymbol` of its file.
 - **Callees**: `callSites` in `src/phptypes.ts` finds the names followed by `(`
   in the body, leaving out language constructs, declarations, `new`, and
   variable calls. Each one gets `textDocument/definition`, and the declaration
-  around the answer is the callee. Definitions inside Phpactor's `.phar` (PHP's
-  own functions) are dropped, since they can't be opened.
+  around the answer is the callee. Definitions without a file (PHP's own
+  functions) are dropped, since they can't be opened.
 
 As with types, the starting point is what Go to Definition finds under the
 cursor, when that's a function of the same name; otherwise it's the function
@@ -1546,7 +1382,7 @@ PHPStan extensions, packages with a `bin`, and packages without a namespace
 are skipped, since code never names them. Packagist search goes through curl, like
 the HTTP client. Commands that change packages run in terminal tabs, and the
 tab's exit reloads the list. The `composer.lock` change they cause also
-reindexes Phpactor.
+makes Tusk's server index the project again.
 
 ### Spell checking
 
@@ -1653,13 +1489,13 @@ extra files, in this order:
    with each method body replaced by `{ … }`, cut at 2,500 characters. Open
    files are outlined from their unsaved text.
    The classes of the names before `->` near the cursor come first, from
-   Phpactor, so a variable's class is included even when the file never names
+   Tusk's server, so a variable's class is included even when the file never names
    it. `typedNames` lists the variables and properties before `->` in the 30
    lines before the cursor, nearest first, up to six, and the editor asks
-   Phpactor for each one's type definition (`textDocument/typeDefinition`),
-   whose file gives the class. A request never waits for Phpactor: it uses the
+   the server for each one's type definition (`textDocument/typeDefinition`),
+   whose file gives the class. A request never waits for the server: it uses the
    types found so far and starts lookups for the rest, and a type that arrives
-   readies the prompt again. A lookup often runs before Phpactor has the edit
+   readies the prompt again. A lookup often runs before the server has the edit
    that declared the variable, so a name with no type is asked again after a
    second. Found types are kept until the file changes on disk.
 
@@ -1824,12 +1660,14 @@ none in the Blade cases.
 The `types` configuration adds the classes Phpactor finds for the names before
 `->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
 the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
+The benchmark still uses Phpactor's command line, which the app no longer
+downloads, so get the `.phar` from Phpactor's releases to run it.
 Over 600 cases, the types changed the context in 71, and the exact first line
 went from 43 to 44 of those (62.7% to 62.8% overall). koel imports nearly
 every class it uses, so the types rarely add a class the outlines lack, and
 without a database there are no model columns, where a variable's type
 matters most (`$playlist->` after `$playlist = $this->service->create()`).
-The types stay: they cost about 50 tokens and a Phpactor request that doesn't
+The types stay: they cost about 50 tokens and a server request that doesn't
 delay suggestions, and they help code that gets its objects from other
 classes. Blade views aren't measured: the benchmark only hides code in PHP
 classes. Run the benchmark again after changing the context, the
@@ -1840,44 +1678,34 @@ request, or the model.
 ### Several language servers
 
 `lsp.rs` keeps running servers by name. `lsp_start` accepts only known names
-(`phpactor` and `laravel`), so the frontend can't start arbitrary commands.
-Each server's messages arrive as a separate event (`lsp:phpactor` and
-`lsp:laravel`).
+(`tusk`, `tailwind`, `typos`, and the frontend servers), so the frontend can't
+start arbitrary commands. Each server's messages arrive as a separate event,
+such as `lsp:tusk`.
 
 In `lsp.ts`, `startServer` creates one client per server with its own request
 IDs, diagnostics, and Monaco providers. It passes the server's language list to
-every provider registration:
+every provider registration. Tusk's server takes `php` and `blade` and always
+starts; it turns its Laravel features on when the folder has an `artisan` file,
+and its Filament features when it has `vendor/filament/filament`.
 
-| Server | Languages | Starts when |
-| --- | --- | --- |
-| Phpactor | `php` | Always |
-| Laravel LSP | `php`, `blade` | The folder has an `artisan` file |
-
-Laravel LSP covers translation keys on its own (`TranslationDocumentMapper` in
-the phar): completion, hover with each locale's value, definition through its
-links, and a warning for an unknown key that looks like `group.key`, for
-`__`, `trans`, `trans_choice`, `@lang`, `Lang::get`, and the translator's
-methods, reading `lang/*/*.php` and `lang/*.json` through a booted app. It
-lists values in completion only below 200 keys, and packages' keys count.
-
-Laravel LSP runs its PHP helpers from `storage/framework/lsp-<hash>.php` and
-deletes each when it finishes. A server stopped mid-run leaves its helper in
-the user's project, where it shows as an untracked file, so `lsp_start`
-removes helpers older than a minute before starting the server.
+Laravel LSP ran its PHP helpers from `storage/framework/lsp-<hash>.php`, and a
+server stopped mid-run left one in the user's project. `lsp_start` still
+removes helpers older than a minute when Tusk's server starts, for projects
+that used an earlier build.
 
 Monaco combines providers for the same language: it merges completion lists,
 definitions, references, hovers, code actions, and links. Each server writes
-its markers under its own owner (`lsp:phpactor` or `lsp:laravel`), so one
-server's diagnostics never replace another's. A code action carries the
-function that runs it, so it goes back to the server that created it.
+its markers under its own owner (such as `lsp:tusk`), so one server's
+diagnostics never replace another's. A code action carries the function that
+runs it, so it goes back to the server that created it.
 
 ### Server lifetime
 
 Opening another folder stops the old clients and servers. Quitting the app
 stops all servers through `LspState::stop_all`.
 
-If the app crashes or is force-quit, that code never runs. Phpactor ignores the
-LSP `processId` and keeps running, so each server starts through a small shell
+If the app crashes or is force-quit, that code never runs. Many servers ignore
+the LSP `processId` and keep running, so each server starts through a small shell
 watchdog (`WATCHDOG` in `lsp.rs`). The shell starts a loop that checks the
 app's process ID every 2 seconds, then replaces itself with the server through
 `exec`. The server keeps the shell's process ID, so stopping it normally still
@@ -1885,41 +1713,44 @@ works, and the loop kills it within 2 seconds after the app dies.
 
 ### Mago
 
-Phpactor has a built-in Mago integration. The client turns it on and points it
-at the bundled binary, so Mago's static analysis and lint results arrive as
-Phpactor diagnostics while you type.
+Tusk's server runs Mago's analyzer and linter in its own process on each edit
+(see "Tusk's language server"), so their problems arrive with sources `mago`
+and `mago-lint` while you type. Mago's command line still checks Blade views,
+lists the linter's rules for the Problems panel, and computes Mago's fixes.
 
 Formatting doesn't go through a language server; see the next section.
 
 ### Default Mago configuration
 
-Phpactor sends Mago one file at a time on standard input. Mago then uses the
-files in `paths` (the project's own code) and `includes` (library code) as
-context, and reports problems only in the file it received. The bundled
-`resources/mago.toml`, used when a project has no `mago.toml`, sets:
+The bundled `resources/mago.toml`, used when a project has no `mago.toml`,
+sets:
 
 - `paths = ["."]` and `includes = ["vendor"]`, so project classes and
-  framework classes such as facades resolve. Project folders must not go in
-  `includes`, because Mago never lints included files.
+  framework classes such as facades resolve on the command line. Project
+  folders must not go in `includes`, because Mago never lints included files.
 - `excludes` for hidden folders (`.*`), `node_modules`, `storage`, and
   `bootstrap/cache`. Hidden folders can hold whole copies of the project, such
   as git worktrees in `.claude/`. `projectMagoConfig` adds the project's
-  index exclusions. Skipping AWS's API data and Carbon's translations, arrays
-  that declare nothing, cut each check from 1.65 to 1.23 seconds of CPU on a
-  Laravel and Filament app.
+  index exclusions.
 - The Laravel lint integration, with `strict-types` and
   `literal-named-argument` turned off. On the test app, those two rules
   produced 154 warnings on standard Laravel code.
 
-Mago has no server mode, so each analysis parses the project again. It takes
-about 0.6 seconds on the test app and about 2 seconds on a project with 27,000
-PHP files. Lint takes milliseconds.
+`projectMagoConfig` writes the project's copy to the app's cache and passes
+its path to Tusk's server as `magoConfig`. The server reads its analyzer and
+linter options, and its `includes` and `excludes` for the index. The file is
+outside the project, so the client asks the server to reindex after it writes
+the file again with corrected vendor copies.
 
 ### PHPStan and Larastan
 
-If the project has `vendor/bin/phpstan`, the client turns on Phpactor's PHPStan
-integration. PHPStan reads the project's own configuration, so Larastan works
-when the project installs it.
+When the project has `vendor/bin/phpstan`, the server (`phpstan.rs`) runs
+`php vendor/bin/phpstan analyse --error-format=json` on a PHP file when it
+opens and each time it's saved, one run at a time on a thread of its own,
+with the project's own configuration. PHPStan reads files from disk, so its
+problems (source `phpstan`, severity Error, the identifier as the code) cover
+their line and keep it until the next run. A run that fails or passes its
+3-minute limit keeps the last results.
 
 ### Blade
 
@@ -1987,10 +1818,10 @@ statements (every echo is one), and Laravel magic and uses of `mixed` values
 (`magicNoise`), since the view's variables have no types. Mago has no server
 mode, so only open views are checked; the project scan reads Blade files as
 PHP with inline HTML, which has nothing to report. Blade views' markers count
-in the Problems panel as soon as the view is open, since no Phpactor check
+in the Problems panel as soon as the view is open, since no server check
 has to finish first.
 
-Laravel LSP answers definitions and completions for component tags with the
+Tusk's server answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
 class-based component, from `componentClassPath` in `src/phptypes.ts`.
 
@@ -2055,8 +1886,8 @@ files from their Monaco models, so unsaved text is included. It applies the
 result with `pushEditOperations`, which you can undo, and saves the file. Other
 files are read and rewritten on disk.
 
-Go to class hides symbols inside the bundled `phpactor.phar`, because Phpactor
-also indexes the PHP stubs it ships and those files can't be opened.
+Go to class hides symbols inside a `.phar`, whose files can't be opened. Tusk's
+server leaves PHP's own built-ins out of workspace symbols for the same reason.
 
 
 Results stop at 20,000 matches (`MAX_MATCHES` in `search.rs`). To keep the
@@ -2671,32 +2502,24 @@ The pull request for the current branch (`gh pr view` without a number) loads
 when the branch or project changes, through `branchListeners` in `git.ts`.
 It makes a network call, so it doesn't run on every refresh.
 
-## Filament language server (milestone 6)
+## Filament intelligence (milestone 6)
 
-Phpactor already completes Filament's fluent methods, such as
-`TextInput::make()->required()`, because they are ordinary typed PHP. The
-Filament server covers what no general PHP server knows: the strings Filament
-resolves against Eloquent models at run time.
-
-### Structure
-
-The server is plain PHP with no dependencies, in `filament-lsp/`. The app
-bundles the folder as `tools/filament-lsp/` and starts it with
-`php server.php` in the project folder when `vendor/filament/filament` exists.
-
-| File | Role |
-| --- | --- |
-| `server.php` | LSP over standard input and output: completion, definition, code lenses, and diagnostics |
-| `introspect.php` | Boots the project and prints JSON about a resource, its model, and its relationships |
-| `tests.php` | Tests against the test app |
+Tusk's server completes Filament's fluent methods, such as
+`TextInput::make()->required()`, because they are ordinary typed PHP. Its
+Filament features (`tusk-lsp/src/framework/filament.rs`, see "Filament" under
+"Tusk's language server") cover what no general PHP server knows: the strings
+Filament resolves against Eloquent models at run time. Until September 2026 a
+separate server written in PHP (`filament-lsp/server.php`) did this; the Rust
+port keeps its behavior.
 
 ### Why a subprocess
 
-PHP can't unload a class. If the server loaded the project's classes itself,
-edits to models and resources would never show up. So the server runs
+PHP can't unload a class, so reading the project's classes in one long-lived
+PHP process would never see edits to models and resources. The server runs
 `introspect.php` in a new process, which boots the app, reads the classes
-through reflection, and exits. The server caches each result until you save any
-file. A call takes about 0.3 seconds on the test app.
+through reflection, and exits. The server caches each result until a file it
+depends on changes (`app/`, `config/`, `database/`, or `composer.lock`). A
+call takes about 0.3 seconds on the test app.
 
 ### Finding the model for a file
 
@@ -2718,30 +2541,17 @@ schema builder when the app boots and connects. Otherwise they come from the
 model's key, `$fillable`, casts, and timestamps. Related models are described
 one level deep, which covers paths such as `author.name`.
 
-### Text patterns
+### Strings and options
 
-The server finds strings with line-based patterns: `::make('…')`,
-`->relationship('…')`, and `->relationship('…', '…')`. Diagnostics check only
-relationship names (from `->relationship()` and dotted `::make()` paths),
-because plain field names can be virtual attributes that aren't columns.
-
-### Options and state paths
-
-`valueCompletion` runs before the string completions. `fieldAt` finds the
-field a position belongs to: the last `X::make('name')` before it, whose chain
-runs to the next `::make(` or `;`. So an option set after the cursor, as in
-`->default('')->options(Status::class)`, still counts, and a `;` inside a
-closure in the chain ends it early. `fieldEnum` takes the enum from
-`->options(X::class)` or `->enum(X::class)`, resolving `X` through the file's
-`use` statements and namespace, or else from the model's cast of the field
-(`describeModel` reports `getCasts()`). `introspect.php enum <class>` lists
-the cases with `cases()`; a class that isn't an enum returns an error, which
-also filters casts such as `datetime`. Completions insert the enum's short
-name when the file imports it or shares its namespace, and the fully qualified
-name otherwise. `$get('…')` and `$set('…')` offer every `::make()` name in the
-file, from the text alone. `(` is a trigger character, so `->options(` opens
-the list without a keystroke; every other `(` in PHP gets an empty answer from
-a few regexes.
+The server finds the strings in `::make('…')`, `->relationship('…')`, and
+`->relationship('…', '…')` calls through the parsed code, and counts a call
+only when the analyzer types its receiver as a Filament class (or can't type
+it). Diagnostics check only relationship names (from `->relationship()` and
+dotted `::make()` paths), because plain field names can be virtual attributes
+that aren't columns. For `->options(`, `->enum(`, and `->default(`, the enum
+comes from `->options(X::class)` or `->enum(X::class)` before the cursor in
+the chain, or else from the model's cast of the field, and its cases from the
+index. `$get('…')` and `$set('…')` offer every `::make()` name in the file.
 
 ### Links
 
@@ -2762,24 +2572,17 @@ The Rust side protects your files:
 
 ### Moving PHP files
 
-Phpactor implements `workspace/willRenameFiles`: given the old and new paths,
-it returns edits for the class name, the namespace, and every reference. It
+Tusk's server implements `workspace/willRenameFiles`: given the old and new
+paths, it returns edits for the class name, the namespace, and every reference. It
 reads each file at its new path, so the editor moves the file on disk first,
 then asks for the edits and applies them (`updateReferences` in `lsp.ts`). For
 a folder, it sends one rename for each PHP file inside.
 
-Two protocol details keep Phpactor's index current, so a second move right
-after the first still finds every reference:
-
-- **`didSave` after refactoring edits.** Phpactor reindexes open files when
-  they're saved. `applyWorkspaceEdit` writes each edited file and then sends
-  `didSave`.
-- **File events.** The client declares support for
-  `workspace/didChangeWatchedFiles`. Phpactor then stops polling the disk (every
-  5 seconds) and relies on the editor, and Laravel LSP also registers for
-  events. The file watcher's changes to PHP files go to every registered
-  server: a file that exists is reported as changed, and a missing file as
-  deleted.
+The server's index follows the edits as they're applied to open models, and
+the file watcher's changes through `workspace/didChangeWatchedFiles`, which the
+server registers for: a file that exists is reported as changed, and a missing
+file as deleted. So a second move right after the first still finds every
+reference.
 
 ### New PHP files
 
@@ -3430,7 +3233,7 @@ the debugger.
 - **Routes** (`showRoutes` in `src/runner.ts`) parse `artisan route:list
   --json`. `routeTarget` in `src/phptypes.ts` reads the action; the class is
   found through composer.json's PSR-4 folders first (fast, and works before
-  indexing ends), then through Phpactor's workspace symbols for `vendor`
+  indexing ends), then through the workspace symbols for `vendor`
   classes.
 - **Tinker** is a terminal tab running `artisan tinker`, in Sail when it's up.
 - **Compare with Clipboard** reads the clipboard with `pbpaste` through
@@ -3490,9 +3293,8 @@ file's outline. The service caches one outline per model version and merges
 every server's document symbols, so breadcrumbs usually cost no request of
 their own. The bar redraws 100 ms after the cursor stops moving, or 600 ms
 after an edit: a new outline is a `textDocument/documentSymbol` request to
-every server, and Phpactor first gets the whole file (see
-[Full-document syncs](#performance)), so the longer wait keeps typing from
-triggering one on every pause.
+every server, so the longer wait keeps typing from triggering one on every
+pause.
 
 ### Status and errors
 
@@ -3505,7 +3307,7 @@ that report a failure (they contain words such as "failed", "error", or
 
 Diagnostics for files inside `vendor` and `node_modules` are dropped
 (`setMarkers` in `lsp.ts`). Those files open for go to definition and peeks, and
-Phpactor and Mago analyze library code as strictly as your own, which filled the
+Mago analyzes library code as strictly as your own, which filled the
 counts with problems you can't fix. The counts cover open tabs and update when
 markers or tabs change.
 
@@ -3516,11 +3318,12 @@ one block where it appears whole (its last occurrence, which is usually in the
 file name), or else the letters of a fuzzy match. The folder part of a path is
 dimmed.
 
-## Tusk's language server (in progress)
+## Tusk's language server
 
-`tusk-lsp/` is a PHP language server written in Rust. It will replace
-Phpactor, Laravel LSP, and the Filament server. Until it covers everything the
-editor uses them for, the editor doesn't start it.
+`tusk-lsp/` is the PHP language server the editor runs, written in Rust. It
+replaced Phpactor, Laravel LSP, and the Filament server in September 2026 (see
+the decision log). It serves PHP and Blade: navigation, completion, hovers,
+diagnostics, refactorings, and the Laravel and Filament features.
 
 It's built on Mago's crates, pinned to `=1.50.0` because their API changes
 between minor versions:
@@ -3530,14 +3333,63 @@ between minor versions:
 - `mago-codex` holds the codebase's classes, functions, and types.
 - `mago-analyzer` infers expression types and reports problems.
 - `mago-prelude` provides PHP's built-in functions and classes.
+- `mago-linter` runs the linter's rules.
+
+### Startup
+
+The server is the app itself: `src-tauri/Cargo.toml` depends on `tusk-lsp` by
+path, and `main.rs` calls `tusk_lsp::run_stdio()` when the first argument is
+`lsp`, before Tauri starts. `lsp_start` in `lsp.rs` runs `current_exe() lsp`
+through the watchdog as the server `tusk`, so there's no separate binary to
+bundle or download. Release builds unwind on panic, rather than abort, so the
+server's guards can turn a panic in a request into an error answer.
+
+`startLsp` in `lsp.ts` sends these `initializationOptions`:
+
+| Option | Value |
+| --- | --- |
+| `exclude` | The project's index exclusions (`indexexclude.ts`), relative to the root |
+| `stubs` | The folder with Laravel's alias stubs |
+| `magoConfig` | The editor's `mago.toml` for the project, when the project has none of its own |
+
+The server needs no index on disk: it indexes the project each time it starts,
+with `$/progress` titled "Indexing". `tusk/reindex` indexes it again with its
+configuration read again, which the editor asks for when the alias stubs or its
+`mago.toml` change. The server also does it by itself when `composer.lock` or
+the project's `mago.toml` changes.
+
+### Diagnostics
+
+For each open PHP document, the server publishes syntax errors from the text as
+written, Mago's analyzer (source `mago`) and linter (source `mago-lint`) in its
+own process, unused imports (source `tusk`), and, for PHP and Blade, the
+framework's problems (sources `Laravel Extension` and `filament`).
+`mago_config.rs` reads the `mago.toml` options it uses: `php-version`, the
+analyzer's switches, `excludes`, and `ignore` (codes, optionally by path), the
+linter's `integrations`, `rules`, and `excludes`, and the source's `includes`
+and `excludes`, which feed the index. The linter's rule registry is built once
+per configuration. Its rules match excluded paths against the file's name, so
+the linter gets the file named by its path relative to the root. Mago's
+`@mago-expect` and `@mago-ignore` comments work as on the command line.
+
+### Requests of its own
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `tusk/reindex` | none | Indexes the project again, with the configuration read again |
+| `tusk/memberReferences` | `class`, `method` | Every call of the method in the project, through subclasses too, without its declarations |
+| `tusk/projectProblems` | none | Every project PHP file's problems, by path relative to the root |
+
+Commands (`workspace/executeCommand`) apply their edits by sending
+`workspace/applyEdit` and waiting for the editor's answer before they return:
+`generate_accessors`, `generate_mutators`, and `tusk.extractMethod`.
 
 ### Index
 
 `index.rs` scans every PHP file in the project and `vendor` in parallel into
 one `CodebaseMetadata`, then populates it (resolves inheritance and types).
 
-- **Excluded paths:** the same defaults the editor gave Phpactor (`vendor`
-  tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
+- **Excluded paths:** `vendor`'s tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
   hidden folders), plus the `exclude` globs in `initializationOptions`.
 - **Changes:** each file keeps the keys of the symbols it added. A change
   removes those, scans the new text, and repopulates only the file's symbols
@@ -3613,7 +3465,8 @@ about 9 ms (`examples/inlay_bench.rs`).
 
 ### Filament
 
-`framework/filament.rs` ports `filament-lsp/server.php`, with the same
+`framework/filament.rs` ports the PHP Filament server, `filament-lsp/server.php`,
+now deleted, with the same
 completion items, relationship definitions and diagnostics (source
 `filament`), and code lenses (`phpEditor.open`). Its features run only
 when `vendor/filament/filament` exists.
@@ -3732,7 +3585,9 @@ an `artisan` file.
 
 ### Tests
 
-Run the tests with `cargo test` in `tusk-lsp/`.
+Run the tests with `cargo test` in `tusk-lsp/`. `cargo test -- --ignored`
+also runs the integration tests, against Filament's demo app (`fixtures/demo`)
+and a real Laravel app, which need PHP.
 
 - **Feature tests** build an in-memory project (`testing.rs`) with a `<|>`
   cursor marker and call handlers directly.
@@ -3770,19 +3625,15 @@ measurement.
 
 ### Measuring indexing
 
-Time Phpactor's command line against a project, with its cache and settings in
-a temporary folder so your real index stays:
+Time Tusk's server's index against a project, and one file's update:
 
 ```sh
-mkdir -p /tmp/idx/cfg/phpactor
-echo '{"indexer.exclude_patterns": [...]}' > /tmp/idx/cfg/phpactor/phpactor.json
-time XDG_CACHE_HOME=/tmp/idx/cache XDG_CONFIG_HOME=/tmp/idx/cfg \
-  php phpactor.phar index:build --working-dir="$PWD"
+cd tusk-lsp
+cargo run --release --example index_bench <project> [file]
 ```
 
-Copy the patterns from `phpactorIndexer` in `src/lsp.ts`. PHP's own settings
-don't matter: with Xdebug off, with `-n`, and with opcache and JIT, 2,000 files
-index in 8 to 9 seconds each way. The time follows the files parsed.
+`examples/refs_bench.rs` times a references search the same way, and
+`examples/inlay_bench.rs` a file's inlay hints.
 
 ### Measuring typing
 
@@ -3798,7 +3649,7 @@ and `requestAnimationFrame` measure App Nap instead of the editor.
 | Synchronous work, median (AI on) | 18 ms | 3 ms |
 | Synchronous work, 95th percentile (AI on) | 26 ms | 9 ms |
 | Longest event-loop stall | about 1 s, repeatedly | 28 ms |
-| Whole-file copies sent to Phpactor per 55 keystrokes | 55 | 9 |
+| Whole-file copies sent to Phpactor per 55 keystrokes (before the switch to Tusk's server, which gets edits) | 55 | 9 |
 
 A bare Monaco editor with the same file takes 2 to 7 ms per keystroke in
 development builds, so most of what's left is Monaco's own work.
@@ -4612,3 +4463,30 @@ and ⌘Q is the **Quit Tusk** action instead of the native item. Both run
 on, otherwise Save, Don't Save, or Cancel. The window is then destroyed, which
 ends the app through the normal exit, so language servers still stop. This
 needs the `core:window:allow-destroy` permission.
+
+### 2026-09-27: Tusk's own PHP language server replaces Phpactor, Laravel LSP, and the Filament server
+
+The editor now runs one PHP language server of its own, `tusk-lsp/`, written in
+Rust on Mago's crates, instead of Phpactor, Laravel LSP, and the PHP Filament
+server. The earlier choice to build on free servers ("Build on free language
+servers instead of writing one") assumed a server would take years; Mago's
+published parser, codebase index, and analyzer make it a matter of features.
+
+- **Speed:** Phpactor's first index of a Laravel and Filament app with 23,000
+  PHP files took about 90 seconds and then needed its own bookkeeping; the new
+  server indexes it in about a second at every start, with no index on disk.
+  Mago runs in the server's process on each edit, where Phpactor ran its
+  command line for every check, parsing the project again each time. The
+  Problems panel's scan takes seconds instead of minutes.
+- **One server instead of three PHP processes**, each with whole-file syncs,
+  and the workarounds they needed: checking open files one at a time, holding
+  empty publishes, tracking unfinished first builds, and soft reindexes after
+  other programs changed files.
+- **Control over behavior:** completion, code actions, rename, and Move Class
+  work the way the editor needs, and fixes don't wait on upstream releases.
+- **No `.phar` downloads:** the server is the app's own binary.
+
+The costs: memory is about 1.3 GB on that large app, nearly all of it
+`vendor`'s symbols, since the whole index stays in memory; Mago's crates are
+pinned to `=1.50.0`, because their API changes between minor versions, and
+upgrading them is deliberate work.

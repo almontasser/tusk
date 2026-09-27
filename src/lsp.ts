@@ -13,7 +13,7 @@ import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
 import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
-import { covers, exclusionsFor, magoExcludes, phpactorPatterns, saveExclusions } from "./indexexclude";
+import { covers, exclusionsFor, magoExcludes, saveExclusions } from "./indexexclude";
 import { editExclusions, type Folder } from "./indexexcludedialog";
 import { toast } from "./dom";
 
@@ -40,7 +40,6 @@ const servers: Server[] = [];
 
 /**
  * Shows a server's question in the picker and returns the chosen action, or null if dismissed.
- * Phpactor asks this way, for example whether to trust a project's .phpactor.json.
  */
 async function askUser(server: string, params: L.ShowMessageRequestParams): Promise<L.MessageActionItem | null> {
   const actions = params.actions ?? [];
@@ -88,7 +87,7 @@ const lastDiagnostics = new Map<string, { model: monaco.editor.ITextModel; owner
 onModelsRead(() => lastDiagnostics.forEach(({ model, owner, list }) => !model.isDisposed() && setMarkers(model, owner, list)));
 
 /**
- * Files Phpactor has checked since they opened, whose markers from it and Mago are current. The Problems panel
+ * Files Tusk's server has checked since they opened, whose markers from it are current. The Problems panel
  * (problems.ts) shows its scan for the others.
  */
 export const diagnosed = new Set<string>();
@@ -180,7 +179,7 @@ registerProblemHover();
 let bladeReady = false;
 
 /**
- * Checks the PHP in a Blade view with Mago's analyzer (see bladephp.ts), as Phpactor runs Mago for PHP files. Only
+ * Checks the PHP in a Blade view with Mago's analyzer (see bladephp.ts), as Tusk's server does for PHP files. Only
  * open views are checked, a second after typing stops, since Mago parses the project again for each file.
  */
 async function checkBlade(model: monaco.editor.ITextModel) {
@@ -204,7 +203,7 @@ monaco.editor.onDidCreateModel((model) => {
 
 // ---- Mago's fixes and suppressions ----
 
-/** Mago's lint of a model's text, run once per version. Phpactor's Mago extension drops the fixes Mago reports. */
+/** Mago's lint of a model's text, run once per version, for the fixes the server's published problems don't carry. */
 const magoLints = new WeakMap<monaco.editor.ITextModel, { version: number; fixes: Promise<MagoFix[]> }>();
 function magoFixesOf(model: monaco.editor.ITextModel): Promise<MagoFix[]> {
   const version = model.getVersionId();
@@ -410,6 +409,8 @@ type Server = {
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
   willRename(files: L.FileRename[]): Promise<L.WorkspaceEdit | null>;
   executeCommand(command: string, args: unknown[]): Promise<any>;
+  /** Runs a code action or command: its edit (resolved first if the server resolves them), then its command. */
+  codeAction(action: L.CodeAction | L.Command): Promise<void>;
   filesChanged(changes: L.FileEvent[]): void;
 };
 
@@ -438,15 +439,8 @@ async function startServer(
   // Anything else sent to the server first sends edits it hasn't seen, so it always answers for the current text.
   const notify = (method: string, params: any) => {
     if (method !== "textDocument/didChange") flush();
-    if (/^textDocument\/did(Open|Change|Save)$/.test(method)) lastEnqueued = params.textDocument.uri;
     return send({ method, params });
   };
-  /** The document Phpactor checks next: the one its diagnostics engine keeps waiting (see checkOneByOne). */
-  let lastEnqueued = "";
-  /** Whether an indexing run has ended since the server started (see the $/progress handler). */
-  let indexedOnce = false;
-  /** Phpactor's empty publishes waiting to apply, by document (see the publishDiagnostics handler). */
-  const heldClears = new Map<string, ReturnType<typeof setTimeout>>();
   const call = <T>(method: string, params: unknown, token?: monaco.CancellationToken) => {
     flush();
     const id = nextId++;
@@ -482,39 +476,21 @@ async function startServer(
       const { uri, diagnostics: list } = msg.params as L.PublishDiagnosticsParams;
       diagnostics.set(uri, list);
       const model = monaco.editor.getModel(monaco.Uri.parse(uri));
-      clearTimeout(heldClears.get(uri));
-      heldClears.delete(uri);
-      // Read now: a held publish applies after you may have moved on to another file.
-      const enqueued = name === "phpactor" && uri === lastEnqueued;
-      const apply = () => {
-        if (!model || model.isDisposed()) return;
-        if (enqueued) markDiagnosed(model);
+      if (model && !model.isDisposed()) {
+        // Tusk's server checks every open file and publishes each check whole.
+        if (name === "tusk") markDiagnosed(model);
         setMarkers(model, owner, list);
-      };
-      // Phpactor publishes an empty list before each check, then the list so far as each checker finishes, and
-      // nothing more for a checker that found nothing. Keeping the old markers until the check is likely done stops
-      // them from vanishing and coming back after each pause in typing.
-      // ponytail: held markers keep their old ranges (Monaco moves the squiggles, not the markers the Problems panel
-      // reads); read ranges from the decorations if that shows.
-      if (name === "phpactor" && !list.length && lastDiagnostics.get(`${owner} ${uri}`)?.shown.length) heldClears.set(uri, setTimeout(apply, 4000));
-      else apply();
-      published.get(uri)?.(list);
+      }
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
       host.status(`${name}: ${msg.params.message}`, name);
-      // Phpactor asks for a restart after you trust a project's .phpactor.json.
-      if (/restart the language server/i.test(msg.params.message)) setTimeout(() => startLsp(root, host), 500);
     } else if (onNotification && msg.method !== "$/progress") {
       onNotification(msg.method, msg.params, notify);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
       const token = msg.params.token;
       if (v.kind === "begin") progressTitles.set(token, v.title);
-      // The first indexing run after a full reindex request is the full build; its end means the index is complete.
-      if (name === "phpactor" && v.kind === "begin" && awaitingFullIndex && /^indexing/i.test(v.title ?? "")) (fullIndexRun = token), (awaitingFullIndex = false);
-      if (name === "phpactor" && v.kind === "end" && token === fullIndexRun) (fullIndexRun = undefined), markIndexComplete(root);
       // Show progress only after it runs for a moment, so quick tasks such as resolving code
-      // actions don't flash in the status bar.
-      // The percentage when there is one: Phpactor's message ("3000/24340 (12.33%, 227/1,611 mb)") crowds the status bar.
+      // actions don't flash in the status bar. The percentage, when there is one, is shorter than the message.
       const text = [progressTitles.get(token), v.percentage != null ? `${Math.round(v.percentage)}%` : v.message].filter(Boolean).join(" ");
       if (v.kind === "end") {
         clearTimeout(progressTimers.get(token));
@@ -524,9 +500,6 @@ async function startServer(
       else if (!progressTimers.has(token)) {
         progressTimers.set(token, setTimeout(() => (progressShown.add(token), host.status(text, `${name}:progress`)), 800));
       }
-      // Only the first indexing run: later ones follow a file created or changed on disk, and a pass over every open
-      // file would take Phpactor's one waiting check away from the file you're editing for a minute.
-      if (v.kind === "end" && !indexedOnce && /^indexing/i.test(progressTitles.get(token) ?? "")) (indexedOnce = true), recheckOpenFiles();
       if (v.kind === "end") (progressTitles.delete(token), progressShown.delete(token));
     }
   });
@@ -564,50 +537,13 @@ async function startServer(
   const progressTitles = new Map<string | number, string>();
   const progressTimers = new Map<string | number, ReturnType<typeof setTimeout>>();
   const progressShown = new Set<string | number>();
-  // Set when the server asks to hear about file changes. Phpactor then relies on the editor
-  // instead of polling the disk every few seconds, so its index follows moves and edits at once.
+  // Set when the server asks to hear about file changes, so its index follows moves and edits at once.
   let watchesFiles = false;
-
-  /**
-   * Files opened during indexing were checked against a partial index, so names defined in
-   * files not yet indexed (such as Laravel's config() helper) show as not found. Phpactor
-   * doesn't recheck them when indexing ends, so a save notification asks it to.
-   */
-  const recheckOpenFiles = () => checkOneByOne(monaco.editor.getModels().filter(serves));
-
-  /**
-   * Phpactor's diagnostics engine keeps one waiting document: each document opened, changed, or saved replaces
-   * the one before, and the engine drops a document's results once another is waiting. So when a session reopens
-   * several files, only the last got checked. This asks for one file at a time, each once the one before has
-   * published results from both Mago checkers (plus half a second), or has been quiet for 5 seconds since its last
-   * publish (Mago takes about 2, and a checker that finds nothing publishes nothing), or after 30 seconds. A newer
-   * pass stops an older one.
-   */
-  let checkRun = 0;
-  const published = new Map<string, (list: L.Diagnostic[]) => void>();
-  async function checkOneByOne(models: monaco.editor.ITextModel[]) {
-    const run = ++checkRun;
-    for (const model of models) {
-      if (run !== checkRun) return;
-      if (model.isDisposed()) continue;
-      const uri = model.uri.toString();
-      await new Promise<void>((resolve) => {
-        const done = () => (clearTimeout(timer), published.delete(uri), resolve());
-        let timer = setTimeout(done, 30000);
-        published.set(uri, (list) => {
-          clearTimeout(timer);
-          const sources = new Set(list.map((d) => d.source));
-          timer = setTimeout(done, sources.has("mago") && sources.has("mago-lint") ? 500 : 5000);
-        });
-        notify("textDocument/didSave", { textDocument: { uri } });
-      });
-    }
-  }
 
   const serves = (model: monaco.editor.ITextModel) => langs.includes(model.getLanguageId()) && model.uri.scheme === "file";
 
   /**
-   * Servers that take whole documents, such as Phpactor, would otherwise get the full text and
+   * Servers that take whole documents, such as the Tailwind server, would otherwise get the full text and
    * reparse it on every keystroke, falling further behind on large files. Their edits wait here
    * until typing pauses, or until the next message to the server, whichever comes first.
    */
@@ -658,8 +594,6 @@ async function startServer(
   await notify("initialized", {});
   monaco.editor.getModels().forEach(track);
   reg(monaco.editor.onDidCreateModel(track));
-  // A session's files open together, and Phpactor checks only the last of them (see checkOneByOne).
-  if (name === "phpactor") checkOneByOne(monaco.editor.getModels().filter(serves));
   registerProviders(monaco.languages);
   registerProblemHover();
 
@@ -668,7 +602,6 @@ async function startServer(
     request,
     stop() {
       unlisten();
-      heldClears.forEach(clearTimeout);
       disposables.forEach((d) => d.dispose());
       monaco.editor.getModels().forEach((m) => monaco.editor.setModelMarkers(m, owner, []));
       // So onModelsRead can't bring back the stopped server's markers.
@@ -681,6 +614,7 @@ async function startServer(
       if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
     },
     executeCommand: (command, args) => request("workspace/executeCommand", { command, arguments: args }),
+    codeAction: runCodeAction,
     async willRename(files) {
       if (!c.workspace?.fileOperations?.willRename) return null;
       return request<L.WorkspaceEdit | null>("workspace/willRenameFiles", { files });
@@ -760,8 +694,7 @@ async function startServer(
         async provideHover(model, pos, token) {
           const h = await request<L.Hover | null>("textDocument/hover", at(model, pos), token);
           if (!h) return null;
-          // Phpactor answers for a docblock with its parser's node name, such as `ClassMembersNode`.
-          const contents = (Array.isArray(h.contents) ? h.contents : [h.contents]).filter((c) => !/^\s*[A-Z]\w*Node\s*$/.test(typeof c === "string" ? c : c.value));
+          const contents = Array.isArray(h.contents) ? h.contents : [h.contents];
           if (!contents.length) return null;
           return { contents: contents.map(markdown).map((c) => ({ ...c, value: formatHoverMarkdown(c.value) })), range: h.range && toRange(h.range) };
         },
@@ -965,31 +898,6 @@ async function startServer(
   }
 }
 
-/**
- * Phpactor's indexer ignores .gitignore, so without these patterns it walks copies of the
- * project in hidden folders (such as git worktrees under .claude/ or .idea/), node_modules,
- * and compiled views, and lists every class several times. The project's own list of vendor
- * folders to skip (indexexclude.ts) is added to these.
- */
-const PHPACTOR_EXCLUDES = [
-  // Phpactor's defaults, which this list replaces.
-  "/vendor/**/Tests/**/*",
-  "/vendor/**/tests/**/*",
-  "/vendor/composer/**/*",
-  "/vendor/rector/rector/stubs-rector",
-  "/.*/**/*",
-  "/node_modules/**/*",
-  "/storage/**/*",
-  "/bootstrap/cache/**/*",
-];
-/**
- * The project's index, in the app's cache rather than Phpactor's, so the editor can delete it: Phpactor keeps
- * entries for files that later become excluded, so a changed exclusion list needs an index built from nothing.
- */
-let indexPath = "";
-/** The editor's index, for running Phpactor's command line against the same index as the server. */
-export const phpactorIndex = () => ({ "indexer.index_path": indexPath });
-
 const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
 /** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
@@ -1157,55 +1065,26 @@ export async function startLsp(root: string, h: Host) {
   const exists = (path: string) => invoke<boolean>("path_exists", { path: `${root}/${path}` });
   const tool = toolPath;
   // Every check at once, rather than one round trip after another before the first server starts.
-  const [magoBin, magoConfig, hasMagoToml, hasPhpstan, hasArtisan, hasFilament, packageJson, phar, aliasDir, index, excluded] = await Promise.all([
-    tool("mago/mago"),
+  const [magoConfig, hasMagoToml, packageJson, aliasDir, excluded] = await Promise.all([
     tool("mago.toml"),
     exists("mago.toml"),
-    exists("vendor/bin/phpstan"),
-    exists("artisan"),
-    exists("vendor/filament/filament"),
     invoke<string>("read_file", { path: `${root}/package.json` }).catch(() => ""),
-    tool("phpactor/phpactor.phar"),
-    // Phpactor indexes stub paths only once, so a changed alias list needs a full reindex.
+    // The index reads stubs as it builds, so a changed alias list needs a reindex.
     aliasStubs(root, () => reindex()).catch(() => null),
-    projectCache("phpactor-index", root),
     exclusionsFor(root),
   ]);
-  indexPath = index;
-  // An unfinished index is missing files that Phpactor's update pass never adds (see indexComplete), so it starts
-  // again from nothing. Phpactor indexes an empty folder in full as it starts, and that first run is the full
-  // build; asking for a reindex as well would cancel it, and its end would pass for the build's.
-  const fullBuild = !indexComplete(root);
-  fullIndexRun = undefined;
-  awaitingFullIndex = fullBuild;
-  if (fullBuild) {
-    await invoke("lsp_stop", { name: "phpactor" });
-    await invoke("remove_path", { path: indexPath }).catch(() => {});
-  }
-  const phpactor = startServer("phpactor", root, ["php"], {
-    "indexer.exclude_patterns": [...PHPACTOR_EXCLUDES, ...phpactorPatterns(excluded.list)],
-    "indexer.index_path": indexPath,
-    // PHP's own stubs, which this list replaces, and Laravel's root aliases (`use DB;`).
-    "indexer.stub_paths": [`phar://${phar}/vendor/jetbrains/phpstorm-stubs`, ...(aliasDir ? [aliasDir.dir] : [])],
-    // Phpactor otherwise runs diagnostics in a child process that reads only .phpactor.json, not these
-    // settings, so it would use the default index path and report functions from newer packages as not found.
-    "language_server.diagnostic_outsource": false,
-    // Getters named getTitle, as PhpStorm writes them; Phpactor's default is title.
-    "code_transform.refactor.generate_accessor.prefix": "get",
-    "code_transform.refactor.generate_accessor.upper_case_first": true,
-    "language_server_worse_reflection.inlay_hints.enable": true,
-    "language_server_worse_reflection.inlay_hints.types": true,
-    "language_server_worse_reflection.inlay_hints.params": true,
-    "language_server_mago.enabled": true,
-    "language_server_mago.bin": magoBin,
-    // Without a project mago.toml, use defaults tuned for Laravel (src-tauri/resources/mago.toml).
-    ...(!hasMagoToml && { "language_server_mago.config": (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir, magoExcludes(excluded.list))) }),
-    "language_server_phpstan.enabled": hasPhpstan,
+  // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, in about a
+  // second, so nothing is kept between starts.
+  const tusk = startServer("tusk", root, ["php", "blade"], {
+    // The project's folders to skip (indexexclude.ts), on top of the server's defaults.
+    exclude: excluded.list,
+    // Laravel's root aliases (`use DB;`).
+    stubs: aliasDir ? [aliasDir.dir] : [],
+    // Without a project mago.toml, defaults tuned for Laravel (src-tauri/resources/mago.toml).
+    ...(!hasMagoToml && { magoConfig: (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir, magoExcludes(excluded.list))) }),
   });
   bladeReady = true;
   monaco.editor.getModels().forEach(checkBlade);
-  const laravel = hasArtisan ? startServer("laravel", root, ["php", "blade"], {}) : null;
-  const filament = hasFilament ? startServer("filament", root, ["php"], {}) : null;
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue", "svelte", "astro"], {}, tailwindSettings)
     : null;
@@ -1214,13 +1093,11 @@ export async function startLsp(root: string, h: Host) {
     ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
     : null;
   startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
-  for (const s of await Promise.allSettled([phpactor, laravel, filament, tailwind, typos])) {
+  for (const s of await Promise.allSettled([tusk, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
   }
-  // New alias stubs get into the index only with a full build.
-  if (aliasDir?.fresh && !fullBuild) reindex();
-  else checkComposerLock(root, fullBuild);
+  checkComposerLock(root);
 }
 
 /**
@@ -1276,15 +1153,18 @@ async function projectMagoConfig(root: string, bundled: string, aliasDir: string
     await write(replaced);
     await invoke("write_file", { path: `${dir}/replaced.json`, contents: JSON.stringify(replaced) });
     monaco.editor.getModels().forEach(checkBlade);
+    // The server reads its includes and excludes from the file, which is outside the project it watches.
+    if (JSON.stringify(replaced) !== JSON.stringify(previous)) reindex();
   });
   return config;
 }
 
 /**
- * Reindexes when composer.lock differs from the last time the editor saw it, including installs made
- * while the editor was closed. A simple hash of the file is kept per project.
+ * Offers index exclusions when composer.lock differs from the last time the editor saw it, including installs
+ * made while the editor was closed. A simple hash of the file is kept per project. The server reindexes by itself
+ * when composer.lock changes.
  */
-export async function checkComposerLock(root: string, building = awaitingFullIndex || fullIndexRun !== undefined) {
+export async function checkComposerLock(root: string) {
   const lock = await invoke<string>("read_file", { path: `${root}/composer.lock` }).catch(() => null);
   let hash = 0;
   for (let i = 0; lock && i < lock.length; i++) hash = (Math.imul(31, hash) + lock.charCodeAt(i)) | 0;
@@ -1292,37 +1172,11 @@ export async function checkComposerLock(root: string, building = awaitingFullInd
   let changed = false;
   try {
     changed = lock !== null && localStorage.getItem(key) !== String(hash);
-    // Kept even while a full build runs, which covers the packages too; otherwise the next start would take
-    // the lock for new and build the whole index a second time.
     if (changed) localStorage.setItem(key, String(hash));
   } catch {}
-  if (changed && !building) reindex();
   // New packages may bring folders of data that the index can skip.
   if (changed) suggestExclusions(root);
 }
-
-/**
- * Whether Phpactor's index for a project was ever built to the end. Its first build takes minutes, and if the
- * server stops partway (a restart, or opening another project), later starts only index files changed since
- * the last update, which any change moves forward; the files the first build never reached stay missing, and
- * functions such as Laravel's response() show as not found. So until a full build ends, each start asks for one.
- */
-const indexedKey = (root: string) => `phpactorIndexed:${root}`;
-function indexComplete(root: string) {
-  try {
-    return localStorage.getItem(indexedKey(root)) === indexPath;
-  } catch {
-    return true; // Without storage, don't rebuild on every start.
-  }
-}
-function markIndexComplete(root: string) {
-  try {
-    localStorage.setItem(indexedKey(root), indexPath);
-  } catch {}
-}
-/** A full reindex was asked for and hasn't started; then the progress token of the run that is the full build. */
-let awaitingFullIndex = false;
-let fullIndexRun: unknown;
 
 export const didSave = (model: monaco.editor.ITextModel) => {
   servers.forEach((s) => s.didSave(model));
@@ -1355,48 +1209,40 @@ export async function typeSymbol(fqn: string): Promise<Symbol | undefined> {
 /**
  * Asks the servers what to change after files moved, such as a PHP class's namespace and
  * the references to it, and applies those edits. The LSP method is `workspace/willRenameFiles`,
- * but Phpactor reads each file at its new path, so call this after the move on disk.
+ * but Tusk's server reads each file at its new path, so call this after the move on disk.
  */
 export async function updateReferences(renames: { from: string; to: string }[]): Promise<string | null> {
   const files = renames.map((r) => ({ oldUri: monaco.Uri.file(r.from).toString(), newUri: monaco.Uri.file(r.to).toString() }));
   let failure: string | null = null;
   for (const server of servers) {
-    // A server that can't, such as Phpactor without Composer's autoloader to map files to classes, says why.
-    const edit = await server.willRename(files).catch((e: { message?: string }) => ((failure ??= `${server.name}: ${String(e?.message ?? e).replace(/^Exception \[[^\]]*\\(\w+)\] /, "").replace(/ at (phar:|\/).*$/s, "")}`), null));
+    // A server that can't, such as one for a project without a PSR-4 map in composer.json, says why.
+    const edit = await server.willRename(files).catch((e: { message?: string }) => ((failure ??= `${server.name}: ${String(e?.message ?? e)}`), null));
     if (edit) await applyWorkspaceEdit(edit);
   }
   return failure;
 }
 
-/** Sends a request to Phpactor, or returns null when it isn't running. */
-export async function phpactorRequest<T>(method: string, params: unknown): Promise<T | null> {
-  const phpactor = servers.find((s) => s.name === "phpactor");
-  return phpactor ? phpactor.request<T>(method, params) : null;
+/** Sends a request to Tusk's PHP server, or returns null when it isn't running. */
+export async function tuskRequest<T>(method: string, params: unknown): Promise<T | null> {
+  const tusk = servers.find((s) => s.name === "tusk");
+  return tusk ? tusk.request<T>(method, params) : null;
 }
 
-/**
- * Rebuilds Phpactor's index from scratch. Needed after Composer installs packages: their files keep the
- * package's old modification times, so Phpactor's update pass takes them for already indexed. A soft
- * reindex only indexes files modified since the last pass.
- */
-export function reindex(soft = false) {
-  const phpactor = servers.find((s) => s.name === "phpactor");
-  // A run this cancels ends too, and that end mustn't pass for the new build's.
-  if (!soft && phpactor) (awaitingFullIndex = true), (fullIndexRun = undefined);
-  phpactor?.request("phpactor/indexer/reindex", { soft }).catch((e) => host.status(`Can't reindex: ${e}`));
+/** Runs a code action from Tusk's server: resolves its edit if needed, applies it, then runs its command. */
+export async function runTuskAction(action: L.CodeAction | L.Command) {
+  const tusk = servers.find((s) => s.name === "tusk");
+  await tusk?.codeAction(action);
 }
 
-/**
- * Saves the project's list of folders to skip and builds the index again from nothing, since Phpactor keeps
- * entries for files that become excluded.
- */
+/** Builds the PHP index again, with the configuration read again, such as after mago.toml or the stubs change. */
+export function reindex() {
+  tuskRequest("tusk/reindex", {}).catch((e) => host.status(`Can't reindex: ${e}`));
+}
+
+/** Saves the project's list of folders to skip, and restarts the servers with it. */
 export async function setExclusions(list: string[], shared: boolean) {
   const root = projectRoot;
   await saveExclusions(root, list, shared);
-  // An index that isn't complete is deleted and built again as the servers start.
-  try {
-    localStorage.removeItem(indexedKey(root));
-  } catch {}
   await startLsp(root, host);
 }
 
@@ -1421,22 +1267,14 @@ export async function excludeFolder(root: string, rel: string, exclude: boolean)
   await setExclusions(exclude ? [...list, rel] : list.filter((p) => p !== rel), shared).catch((e) => host.status(`Can't save index exclusions: ${e}`));
 }
 
-let reindexTimer: ReturnType<typeof setTimeout> | undefined;
-
-/** Tells the servers which PHP files changed on disk. `exists` false means deleted. */
+/**
+ * Tells the servers which files changed on disk: PHP files for the index, and the others Tusk's server watches
+ * for Laravel's facts, such as `.env`, `composer.lock`, and `mago.toml`. `exists` false means deleted.
+ */
 export function filesChanged(files: { path: string; exists: boolean }[]) {
-  const php = files.filter((f) => f.path.endsWith(".php"));
-  const changes = php.map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
+  const watched = files.filter((f) => /\.php$|\/\.env$|\/composer\.lock$|\/mago\.toml$|\/lang\/.*\.json$|\/public\//.test(f.path));
+  // Created and changed look the same here; the server reads the file either way.
+  const changes = watched.map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
   if (changes.length) servers.forEach((s) => s.filesChanged(changes));
-  // Phpactor's index misses PHP files that another program creates or changes, such as make:model or a git
-  // checkout, even with the events above. Files open in the editor reach it through the editor, so only
-  // files without a model, outside the folders the index skips, need a (soft) reindex.
-  const external = php.some(
-    (f) => f.exists && !monaco.editor.getModel(monaco.Uri.file(f.path)) && !/\/(vendor|node_modules|storage|bootstrap\/cache|\.[^/]+)\//.test(f.path.slice(projectRoot.length)),
-  );
-  // Until a full build has finished, one is running or comes with the next start; an update pass would only
-  // move the index's timestamp past the files it's missing.
-  if (!external || !indexComplete(projectRoot)) return;
-  clearTimeout(reindexTimer);
-  reindexTimer = setTimeout(() => reindex(true), 2000);
 }
+

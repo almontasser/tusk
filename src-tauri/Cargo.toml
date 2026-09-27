@@ -18,6 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# The PHP language server. The app runs itself with `lsp` to start it (see main.rs).
+tusk-lsp = { path = "../tusk-lsp" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -65,7 +67,7 @@ tokio = { version = "1", features = ["macros", "sync"] }
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Unwinding lets the language server answer a request that panics with an error instead of exiting.
 strip = true
 
 [dev-dependencies]

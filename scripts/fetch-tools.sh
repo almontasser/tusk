@@ -11,7 +11,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="${TOOLS_DEST:-$root/src-tauri/target/tools}"
 cache="$root/src-tauri/target/tool-cache"
 mkdir -p "$dest" && dest="$(cd "$dest" && pwd)"
-mkdir -p "$dest/phpactor" "$dest/laravel-lsp" "$dest/composer" "$dest/mago" "$dest/typos-lsp" "$cache"
+mkdir -p "$dest/composer" "$dest/mago" "$dest/typos-lsp" "$cache"
 
 # fetch <cache file name> <url> <sha256>: downloads into the cache once, verified.
 fetch() {
@@ -23,16 +23,6 @@ fetch() {
   echo "$3  $cache/$1.tmp" | shasum -a 256 -c - >/dev/null || { echo "Checksum mismatch for $1" >&2; rm "$cache/$1.tmp"; exit 1; }
   mv "$cache/$1.tmp" "$cache/$1"
 }
-
-fetch phpactor-2026.06.23.0.phar \
-  https://github.com/phpactor/phpactor/releases/download/2026.06.23.0/phpactor.phar \
-  25645647d9aa2dc69536fb4f75c976e33ef1a7b5533534a8456736e5e6fd5079
-cp "$cache/phpactor-2026.06.23.0.phar" "$dest/phpactor/phpactor.phar"
-
-fetch laravel-lsp-0.0.32.phar \
-  https://github.com/laravel/lsp/releases/download/v0.0.32/laravel-lsp \
-  86d43f017b2247f1da428891a84a7db66d1f4443a0858301fe3a0d38482c5a51
-cp "$cache/laravel-lsp-0.0.32.phar" "$dest/laravel-lsp/laravel-lsp.phar"
 
 # Composer, for the Composer tool window. Checksum from getcomposer.org.
 fetch composer-2.10.2.phar \

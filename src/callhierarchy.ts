@@ -1,9 +1,8 @@
-// Call hierarchy (⌃⌥H): the methods and functions that call the one at the cursor, or that it calls. Phpactor has
-// no call hierarchy requests, so callers come from the same reference search as Change Signature, each placed in
+// Call hierarchy (⌃⌥H): the methods and functions that call the one at the cursor, or that it calls. Callers come from the same reference search as Change Signature, each placed in
 // the declaration around it, and callees from Go to Definition on each call in the body.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { phpactorRequest } from "./lsp";
+import { tuskRequest } from "./lsp";
 import { callSites } from "./phptypes";
 import { callsOf } from "./refactor";
 import { showPanelView } from "./terminal";
@@ -40,7 +39,7 @@ function functionAt(symbols: L.DocumentSymbol[], line: number, character: number
 /** The method or function declared around a 0-based position of a file, or null for code outside one. */
 async function fnAt(path: string, line: number, character: number): Promise<Fn | null> {
   const model = await host.ensureModel(path);
-  const symbols = (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
+  const symbols = (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
   const found = functionAt(symbols, line, character);
   if (!found) return null;
   const { symbol, container } = found;
@@ -67,12 +66,12 @@ async function callees(fn: Fn): Promise<Fn[]> {
   // ponytail: one definition request per call, in turn; a very long method takes a few seconds.
   for (const offset of callSites(body).slice(0, 200)) {
     const pos = model.getPositionAt(start + offset);
-    const def = await phpactorRequest<L.Location[] | L.Location | null>("textDocument/definition", {
+    const def = await tuskRequest<L.Location[] | L.Location | null>("textDocument/definition", {
       textDocument: { uri: model.uri.toString() },
       position: { line: pos.lineNumber - 1, character: pos.column - 1 },
     }).catch(() => null);
     const at = Array.isArray(def) ? def[0] : def;
-    // PHP's own functions resolve into the stubs inside Phpactor's .phar, which can't be opened.
+    // PHP's own functions have no file to open.
     if (!at || !at.uri.startsWith("file:") || at.uri.includes(".phar")) continue;
     const callee = await fnAt(pathOf(at.uri), at.range.start.line, at.range.start.character);
     if (callee && !found.has(`${callee.path}:${callee.line}`)) found.set(`${callee.path}:${callee.line}`, callee);
@@ -146,7 +145,7 @@ export async function showCallHierarchy(editor: monaco.editor.ICodeEditor) {
   let fn: Fn | null = null;
   const word = model.getWordAtPosition(pos)?.word;
   if (word) {
-    const def = await phpactorRequest<L.Location[] | L.Location | null>("textDocument/definition", {
+    const def = await tuskRequest<L.Location[] | L.Location | null>("textDocument/definition", {
       textDocument: { uri: model.uri.toString() },
       position: { line: pos.lineNumber - 1, character: pos.column - 1 },
     }).catch(() => null);

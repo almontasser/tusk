@@ -26,7 +26,7 @@ export function readModels(root: string) {
   const done = (async () => {
     facts.phpVersion = phpVersionOf(await invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => ""));
     if (!(await invoke<boolean>("path_exists", { path: `${root}/artisan` }))) return;
-    const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
+    const script = await invoke<string>("tool_path", { name: "introspect.php" });
     const introspect = (mode: string) => invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
     const [models, builder, views]: [Record<string, ModelFacts> | { error: string }, string[] | { error: string }, string[] | { error: string }] = await Promise.all([
       introspect("models"),
@@ -74,7 +74,7 @@ export function isModelMethod(className: string, method: string): boolean | unde
 }
 
 export const introspect = async (root: string, mode: string, ...args: string[]) => {
-  const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
+  const script = await invoke<string>("tool_path", { name: "introspect.php" });
   return invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode, ...args], input: null }).then((out) => JSON.parse(out || "{}"), () => ({}));
 };
 
@@ -86,9 +86,8 @@ let aliases: { root: string; names: Set<string> } | undefined;
 
 /**
  * Stubs for Laravel's root aliases, such as `class DB extends \Illuminate\Support\Facades\DB {}`: Laravel makes
- * them with class_alias() at runtime, so Phpactor otherwise reports `use DB;` as a class it can't find. Returns the
- * folder to give Phpactor as a stub path, and whether the stubs are new, which needs a full reindex: Phpactor
- * indexes stub paths only in a full build. The first time, it waits for the aliases; later, it returns the folder
+ * them with class_alias() at runtime, so the index otherwise has no `DB` for `use DB;`. Returns the folder to give
+ * Tusk's server as a stub path, and whether the stubs are new, which needs a reindex. The first time, it waits for the aliases; later, it returns the folder
  * at once and checks in the background, calling `changed` if they differ.
  */
 export async function aliasStubs(root: string, changed: () => void): Promise<{ dir: string; fresh: boolean } | null> {
@@ -102,7 +101,7 @@ export async function aliasStubs(root: string, changed: () => void): Promise<{ d
     // Root names only; a namespaced alias is rare and would need a namespace block of its own.
     const entries = Object.entries(map).filter(([alias, target]) => /^\w+$/.test(alias) && /^[\w\\]+$/.test(target));
     aliases = { root, names: new Set(entries.filter(([, target]) => /\\Facades\\/.test(target)).map(([alias]) => alias)) };
-    const text = `<?php\n\n// Laravel's root aliases, which it makes with class_alias() at runtime. Written by the editor for Phpactor.\n\n${entries.map(([alias, target]) => `class ${alias} extends \\${target} {}`).join("\n")}\n`;
+    const text = `<?php\n\n// Laravel's root aliases, which it makes with class_alias() at runtime. Written by the editor for its index.\n\n${entries.map(([alias, target]) => `class ${alias} extends \\${target} {}`).join("\n")}\n`;
     if (text === previous) return false;
     await invoke("create_dir", { path: dir });
     await invoke("write_file", { path: file, contents: text });

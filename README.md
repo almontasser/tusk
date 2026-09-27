@@ -14,11 +14,12 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | Milestone | State |
 | --- | --- |
 | 1. Editor shell: folders, file tree, tabs, save, highlighting, file watcher | Done |
-| 2. PHP intelligence through Phpactor | Done |
-| 3. Laravel LSP, Mago, and Larastan diagnostics | Done |
+| 2. PHP intelligence | Done |
+| 3. Laravel intelligence and Mago diagnostics | Done |
 | 4. Terminal, Artisan, test runner, search | Done |
 | 5. Git, blame, and pull requests | Done |
-| 6. Filament language server | Done |
+| 6. Filament intelligence | Done |
+| 7. Tusk's own PHP language server (`tusk-lsp/`), replacing Phpactor, Laravel LSP, and the Filament server | Done |
 
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
@@ -40,14 +41,15 @@ file to change when you add it.
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed. Callees are found with Go to Definition on each call, so calls on a value whose type Phpactor can't infer are missed. |
+| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed. Callees are found with Go to Definition on each call, so calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
-| First indexing | Phpactor indexes a new project once, which takes about a minute and a half for a Laravel and Filament app with 24,000 files to read. Progress shows in the status bar. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
-| Mago analysis | Mago has no server mode (its experimental `--watch` reads files on disk, not unsaved text), so it parses the project again for each check: about 0.9 seconds of wall time and 1.2 seconds of CPU on a Laravel and Filament app. Without a `mago.toml`, Mago also skips the project's index exclusions. It runs 1 second after you stop typing. |
-| Unsaved files | Phpactor, Laravel LSP, Tailwind, and the Filament server accept only whole-file syncs, so each gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). |
-| Filament | The Filament server knows field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
+| Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It keeps the whole index in memory: about 1.3 GB for that app, nearly all of it `vendor`'s symbols. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
+| Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. |
+| PHPStan | When the project has `vendor/bin/phpstan`, it checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. |
+| Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
+| Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
@@ -60,7 +62,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
+| Refactoring | Rename, Extract Method, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -83,14 +85,15 @@ To build the app, you also need:
 - Rust 1.97 or later
 - Node.js 24 or later, and pnpm
 
-The app manages its own tools (Phpactor, Laravel LSP, Mago, Composer, `typos-lsp`,
+The app manages its own tools (Mago, Composer, `typos-lsp`,
 the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, TypeScript, and Vue language
 servers), and compiles in the database drivers, so you don't install them
 yourself. The first launch downloads the tools for your Mac's chip (about
 90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
 checks for newer versions at launch and every six hours. Sail support needs
-Docker, which Sail itself needs. If your project has PHPStan or Larastan in
-`vendor/bin/phpstan`, the app runs it too.
+Docker, which Sail itself needs. The PHP language server is the app's own
+binary, started with `lsp`, so there's nothing to download for it. It runs
+Laravel's and Filament's PHP scripts with the `php` on your `PATH`.
 
 ## Run in development
 
@@ -114,7 +117,8 @@ Docker, which Sail itself needs. If your project has PHPStan or Larastan in
 pnpm test                          # Frontend logic, with Node's test runner
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust
 cargo test --manifest-path src-tauri/Cargo.toml db -- --ignored   # MySQL and PostgreSQL, needs the servers in src-tauri/src/db.rs
-php -d zend.assertions=1 filament-lsp/tests.php fixtures/demo   # Filament server, needs the test app
+cargo test --manifest-path tusk-lsp/Cargo.toml   # The PHP language server
+cargo test --manifest-path tusk-lsp/Cargo.toml -- --ignored   # Against Filament's demo app and a real Laravel app
 node scripts/ai-bench.ts <project> <model.gguf>   # AI completion quality, see docs/architecture.md
 ```
 
@@ -411,9 +415,7 @@ its earlier output first, as plain text without colors, up to its last 50,000
 characters. If the debugger was listening, it listens again, and the profiling
 server and **Start Debug Server**'s server start again if they were running.
 Other commands, tests, and git commands don't run again. Opening another
-project closes the terminals of the one before. If a project has a
-`.phpactor.json` file, Phpactor asks whether to trust it, because the file can
-run code. After you choose **Yes**, the language servers restart and load it. Refactorings such as rename
+project closes the terminals of the one before. Refactorings such as rename
 save every file they change.
 
 ## Context menus
@@ -546,7 +548,7 @@ The diff shows the editor's text, including unsaved changes.
 ## Safe delete
 
 Press ⌘⌦ in a class, interface, trait, enum, method, or function to delete it
-only if nothing uses it. The editor looks for usages with Phpactor, and also
+only if nothing uses it. The editor looks for usages with the PHP server, and also
 searches the project's PHP files for the names Laravel uses: a class's full
 name in strings (as in config files), and a method's name, its scope name
 (`scopePublished` as `published`), or its attribute name (`getFullNameAttribute`
@@ -567,7 +569,7 @@ or ⏎ to choose, or type to filter. The popup highlights in the editor what eac
 choice would change. The list: Rename, Change
 Signature, the three Extracts, Introduce Field and Parameter, Inline, Pull Members Up, Extract Interface,
 Move Class, and Safe Delete, plus
-Phpactor's other refactoring actions there. The **Refactor** menu has them all.
+the PHP server's other refactoring actions there. The **Refactor** menu has them all.
 
 ## Extract variable, constant, and method
 
@@ -609,7 +611,7 @@ default, and anything else the value passed in existing calls. The expression
 can't use the method's variables or `$this`, which don't exist at the calls.
 
 Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
-method. Phpactor writes the method with its parameters and return type; you
+method. The PHP server writes the method with its parameters and return type; you
 then type its name in place.
 
 ## Inline
@@ -768,9 +770,9 @@ Press F6 in a PHP file that declares one class, interface, trait, or enum to
 move it to another namespace. The picker lists the project's namespaces, each
 with the file it would become; type a new one, such as `App\Services\Billing`,
 to create its folder. The file goes where `composer.json`'s PSR-4 map puts that
-namespace, and Phpactor updates the class's namespace and every reference, as
-when you move the file in the tree. If Phpactor can't, for example because the
-project has no `vendor/composer` autoloader yet, the status bar says why.
+namespace, and the PHP server updates the class's namespace and every reference,
+as when you move the file in the tree. If it can't, for example because no PSR-4
+folder in `composer.json` holds the new path, the status bar says why.
 
 ## Undo across files
 
@@ -792,7 +794,7 @@ enum that the cursor is in.
 - **Supertypes** lists its parent class, its interfaces, and its traits.
   Expand one to go further up.
 
-Click a type to open it. Types that Phpactor's index doesn't know are listed
+Click a type to open it. Types that the PHP index doesn't know are listed
 without a file.
 
 ## Generate code
@@ -804,13 +806,13 @@ class, trait, or enum at the cursor. The list offers what the class lacks:
   and isn't static. It's offered when the class has no constructor.
 - **Getters**, **Setters**, and **Getters and Setters**: `getTitle()` and
   `setTitle()` for each property, including promoted ones, that doesn't have
-  one yet. Readonly properties get no setter. Phpactor writes them.
+  one yet. Readonly properties get no setter. The PHP server writes them.
 - **`__toString()`**, with the cursor in its `return`.
 - **Implement Methods…** and **Override Methods…**, when the class has
   interface or abstract methods to write, including abstract methods of the
   traits it uses, or parent methods to override. Override asks which method.
-- Phpactor's **Complete Constructor**, **Promote Constructor**, and **Add
-  missing properties**, when they apply.
+- **Complete Constructor**, **Promote Constructor**, and **Add missing
+  properties**, when they apply.
 
 ## Call hierarchy
 
@@ -1279,7 +1281,7 @@ guessing:
   with function bodies left out. For a Vue file, its `<script>`.
 - **Types of variables:** when the code near the cursor calls methods on a
   variable or property, such as `$publisher->` after
-  `$publisher = $this->factory->publisher();`, the editor asks Phpactor for its
+  `$publisher = $this->factory->publisher();`, the editor asks the PHP server for its
   type and adds that class, even when the file never names it.
 - **Where a Blade view gets its variables:** in `resources/views/posts/show.blade.php`,
   the code that renders `posts.show`, such as
@@ -1340,7 +1342,7 @@ project has more than 200 keys, completion lists the keys without their values.
 - **Routes**, from ⌘⇧A, lists the app's routes from `php artisan route:list`.
   Search by method, path, route name, or controller, and choose a route to
   open its controller method. Routes to classes in `vendor`, such as Filament
-  pages, open once Phpactor has indexed them. If `route:list` fails, it runs in
+  pages, open once the PHP server has indexed them. If `route:list` fails, it runs in
   a terminal tab so you can see the error.
 - **Laravel Tinker**, from ⌘⇧A, opens `php artisan tinker` in a terminal tab.
 
@@ -1354,7 +1356,7 @@ also inside tags and attribute values. Component tags such as
 `<x-card.header>` and bound attributes such as `:title="$post->title"` are
 recognized. Inside `<script>`, echoes, comments, `@json(…)` and other
 directives, and `@php` blocks highlight as Blade and PHP, with the JavaScript
-around them intact; inside `<style>`, echoes and comments do. Laravel LSP
+around them intact; inside `<style>`, echoes and comments do. The PHP server
 completes component names after `<x-`. ⌘B on a component tag opens its view,
 and for a class-based component also its class in `app/View/Components`.
 
@@ -1504,8 +1506,8 @@ the editor sets `XDEBUG_MODE=coverage` for Xdebug. Only the folders in
 `phpunit.xml`'s `<source>` are measured. In Sail, the container's PHP must have
 one of them, as Sail's images do when `SAIL_XDEBUG_MODE` includes `coverage`.
 
-In Pest files, `$this` in a test is the project's test case, which Phpactor and
-Mago can't see, so the editor hides their problems about `$this` on those
+In Pest files, `$this` in a test is the project's test case, which Mago
+can't see, so the editor hides its problems about `$this` on those
 lines.
 
 Press ⌃⌃ and type an Artisan command with its arguments, such as
@@ -2050,20 +2052,18 @@ line** in Settings, or run **Toggle Inline Problems** from ⌘⇧A. Long message
 are cut short, and `+2` counts the line's other problems. The message hides
 while you type and comes back when you pause.
 
-The first time you open the Problems panel, it scans the project:
-Mago checks every file in a few seconds, and then Phpactor's own checks, such
-as deprecated classes and unused imports, run file by file in the background
-(a few minutes for about 1,000 files, using half the cores). Phpactor's results
-are cached by each file's contents for the first scan after the project opens.
-**Scan Project** rechecks every file, since a change in one file can change
-another's problems. Open files show their live problems as you type; after a fix, a
-problem can stay for up to 4 seconds while the checks run again. Mago's notes
-and help show in the editor only, not in the panel. The status bar counts cover
-the project once it has been scanned. Laravel LSP's and Tailwind's problems
-show for open files only.
+The first time you open the Problems panel, it scans the project: the PHP
+server runs the checks it runs for open files (Mago's analyzer and linter, and
+its own, such as unused imports) over every project PHP file at once, in a few
+seconds. **Scan Project** rechecks every file, since a change in one file can
+change another's problems. Open files show their live problems as you type.
+Mago's notes and help show in the editor only, not in the panel. The status bar
+counts cover the project once it has been scanned. Laravel's, Filament's, and
+Tailwind's problems show for open files only.
 
-When `composer.lock` changes, for example after `composer require`, the editor
-rebuilds Phpactor's index, so new packages' classes and functions are found.
+When `composer.lock` or `mago.toml` changes, for example after `composer
+require`, the PHP server indexes the project again, so new packages' classes
+and functions are found.
 This also happens when you open a project whose `composer.lock` changed while
 the editor was closed. To do it yourself, run **Reindex Project** from ⌘⇧A.
 PHP files that other programs create or change, such as `php artisan make:model`
@@ -2125,7 +2125,7 @@ editor reads your models' columns, relationships, accessors, and scopes, and
 hides those reports, and the ones they cause further on, when Laravel really
 has the member; anything left shows as a hint (dots you can hover), not as a
 problem. Laravel's root aliases, such as `use DB;`, resolve too: the editor
-writes stubs for them that Phpactor and Mago read. It also gives Mago corrected
+writes stubs for them that the PHP server and Mago read. It also gives Mago corrected
 copies of the Laravel and Pest files whose types are wider than what your code
 gets back, as Larastan does: `__()` returns a string, `auth()->user()` your
 user model, a test's `$this` your test case, and `shouldReceive()` takes
@@ -2256,9 +2256,9 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src-tauri/src/grpc.rs` | gRPC calls for the HTTP client, with schemas from server reflection or the project's `.proto` files |
 | `src-tauri/src/profile.rs` | Reads Xdebug's Cachegrind profiles |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
-| `filament-lsp/server.php` | Filament language server |
-| `filament-lsp/introspect.php` | Reads resources and models from the project |
-| `filament-lsp/tests.php` | Filament server tests |
+| `tusk-lsp/` | The PHP language server, which the app runs as `tusk lsp`: indexing, navigation, completion, diagnostics, refactorings, and Laravel and Filament features |
+| `tusk-lsp/php/introspect.php` | Reads resources and models from the project, for the server and the editor |
+| `tusk-lsp/php/laravel/` | The PHP scripts that report Laravel's routes, views, config, and other facts |
 | `node-tools/` | The pinned Node language servers (`package.json` and lockfile) |
 | `scripts/fetch-tools.sh` | Downloads the pinned language tools, one folder per tool |
 | `scripts/fetch-schemas.ts` | Downloads the JSON schemas in `src/schemas` |

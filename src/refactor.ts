@@ -1,9 +1,9 @@
-// Inline Variable and Change Signature, two refactorings Phpactor doesn't provide. Both refuse, with a
+// Inline Variable and Change Signature, refactorings written here rather than in the language server. Both refuse, with a
 // reason, when the code does something they can't rewrite safely.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, phpactorIndex, phpactorRequest, toolPath, typeSymbol } from "./lsp";
+import { applyWorkspaceEdit, tuskRequest, typeSymbol } from "./lsp";
 import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
@@ -20,7 +20,7 @@ type Host = { root(): string; status(text: string): void; ensureModel(path: stri
 let host: Host;
 
 const symbolsOf = async (model: monaco.editor.ITextModel) =>
-  (await phpactorRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
+  (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
 
 // ---- Inline variable ----
 
@@ -78,9 +78,9 @@ async function inlineMethod(editor: monaco.editor.ICodeEditor): Promise<boolean>
   const onDeclaration = /\bfunction\s+&?$/.test(text.slice(0, wordStart));
   if (!onDeclaration) {
     if (/\bnew\s+$/.test(text.slice(0, wordStart))) return false;
-    const found = await phpactorRequest<L.Location[] | L.Location | null>("textDocument/definition", { textDocument: { uri: model.uri.toString() }, position: at }).catch(() => null);
+    const found = await tuskRequest<L.Location[] | L.Location | null>("textDocument/definition", { textDocument: { uri: model.uri.toString() }, position: at }).catch(() => null);
     const loc = Array.isArray(found) ? found[0] : found;
-    if (!loc) return host.status(`Can't find the declaration of ${word.word}. Phpactor must be running.`), true;
+    if (!loc) return host.status(`Can't find the declaration of ${word.word}. Tusk's PHP server must be running.`), true;
     if (!loc.uri.startsWith("file:") || loc.uri.includes(".phar") || loc.uri.includes("/vendor/")) return host.status(`${word.word} is declared in a library, which can't be inlined.`), true;
     def = await host.ensureModel(monaco.Uri.parse(loc.uri).fsPath);
     at = loc.range.start;
@@ -328,7 +328,7 @@ export const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.
 
 /**
  * Opens the Change Signature dialog for the method or function at the cursor, then rewrites its declaration, its
- * overrides in classes that extend or implement its class, and every call Phpactor finds.
+ * overrides in classes that extend or implement its class, and every call Tusk's server finds.
  */
 export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: { expr: Expr; uses: Expr[] }) {
   const model = editor.getModel();
@@ -366,47 +366,23 @@ export async function changeSignature(editor: monaco.editor.ICodeEditor, introdu
   await plan(model, symbol, container, title, chosen.signature, chosen.preview, added ? introduce!.uses.map((u) => ({ ...u, text: `$${added.name}` })) : []);
 }
 
-type Member = { references: { line_no: number; col_no: number }[]; file: string };
-
 /**
- * Calls of a method, from Phpactor's command line: it scans the project's files, where the language
- * server's reference search relies on its index and can miss files it hasn't indexed yet. Functions
- * aren't covered by the command, so they use the language server. Constructors, called through `new`,
- * come from a text search.
+ * Calls of a method or function, from Tusk's server, without the declaration. Methods are found through
+ * subclasses too (`tusk/memberReferences`). Constructors, called through `new`, come from a text search.
  */
 export async function callsOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container?: L.DocumentSymbol): Promise<L.Location[]> {
   if (isConstructor(symbol) && container) return constructorCallsOf(model, container);
   if (symbol.kind === 6 && container) {
-    const calls = await memberCalls(fqnOf(model, container), symbol.name, { path: model.uri.fsPath, line: symbol.selectionRange.start.line });
+    const calls = await tuskRequest<L.Location[]>("tusk/memberReferences", { class: fqnOf(model, container), method: symbol.name }).catch(() => null);
     if (calls) return calls;
   }
   return (
-    (await phpactorRequest<L.Location[] | null>("textDocument/references", {
+    (await tuskRequest<L.Location[] | null>("textDocument/references", {
       textDocument: { uri: model.uri.toString() },
       position: symbol.selectionRange.start,
       context: { includeDeclaration: false },
     })) ?? []
   );
-}
-
-/** References to a class's method from Phpactor's command line, without the declaration (0-based line), or null if it fails. */
-async function memberCalls(fqn: string, method: string, declaration: { path: string; line: number }): Promise<L.Location[] | null> {
-  const phar = await toolPath("phpactor/phpactor.phar");
-  const args = [phar, "references:member", fqn, method, "--format=json", `--config-extra=${JSON.stringify(phpactorIndex())}`];
-  const out = await invoke<string>("run_capture", { cwd: host.root(), program: "php", args, input: null }).catch(() => "");
-  try {
-    const files: Member[] = JSON.parse(out.slice(out.indexOf("{"))).references;
-    return files.flatMap((f) =>
-      f.references
-        .filter((r) => !(f.file === declaration.path && r.line_no - 1 === declaration.line))
-        .map((r) => ({
-          uri: monaco.Uri.file(f.file).toString(),
-          range: { start: { line: r.line_no - 1, character: r.col_no }, end: { line: r.line_no - 1, character: r.col_no + method.length } },
-        })),
-    );
-  } catch {
-    return null;
-  }
 }
 
 type Override = { path: string; fqn: string; line: number; nameEnd: number; text: string };
@@ -416,7 +392,7 @@ type Descendant = { path: string; text: string; type: TypeDeclaration; body: str
 
 /**
  * Every project type that extends or implements `fqn`, directly or further down, parents before their children.
- * A text search finds them rather than Phpactor's Go to Implementation, which answers from its index and misses
+ * A text search finds them rather than Go to Implementation, which answers from the index and can miss
  * classes the index hasn't seen yet. The search looks for the short name alone, so an `extends` or `implements`
  * list broken over several lines is found, and the file's declarations decide.
  */
@@ -567,7 +543,8 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
     const own = declarationParts(o.text, o.nameEnd)?.params ?? [];
     const after = forOverride(base.params, s.params, own);
     declare(monaco.Uri.file(o.path).toString(), o.text, o.nameEnd, after, { returnTypeWas: base.returnType });
-    groups.push({ refs: (await memberCalls(o.fqn, symbol.name, { path: o.path, line: o.line })) ?? [], before: own, after, owner: { fqn: o.fqn, text: o.text } });
+    const refs = (await tuskRequest<L.Location[]>("tusk/memberReferences", { class: o.fqn, method: symbol.name }).catch(() => null)) ?? [];
+    groups.push({ refs, before: own, after, owner: { fqn: o.fqn, text: o.text } });
   }
   const skipped: Skipped[] = [];
   const sites = new Map<string, Site[]>();
@@ -675,7 +652,7 @@ export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
 
 /**
  * Moves the class in the current file to another namespace (F6, as in PhpStorm): into the folder composer.json's
- * PSR-4 map gives that namespace. The file move then has Phpactor update the namespace and every reference.
+ * PSR-4 map gives that namespace. The file move then has Tusk's server update the namespace and every reference.
  */
 export async function moveClass(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();

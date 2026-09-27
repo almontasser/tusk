@@ -1,10 +1,9 @@
 // Type hierarchy (⌃H): a type's parents, interfaces, and traits, or the types that extend, implement, or use it.
-// Phpactor has no type hierarchy requests, so supertypes come from reading declarations and finding
-// each parent with a workspace symbol search, subtypes from Phpactor's Go to Implementation, and a
-// trait's users from a text search.
+// Supertypes come from reading declarations and finding each parent with a workspace symbol search,
+// subtypes from Go to Implementation, and a trait's users from a text search.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
-import { phpactorRequest, typeSymbol } from "./lsp";
+import { tuskRequest, typeSymbol } from "./lsp";
 import { parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { showPanelView } from "./terminal";
 import { readText } from "./projectfiles";
@@ -34,7 +33,7 @@ async function typeAt(path: string, line = 1): Promise<Type | null> {
   return found ? { fqn: found.decl.fqn, kind: found.decl.kind, path, decl: found.decl, line: found.line } : null;
 }
 
-/** Finds a type's file through Phpactor's workspace symbols. */
+/** Finds a type's file through the workspace symbols. */
 async function locate(fqn: string): Promise<Type> {
   const match = await typeSymbol(fqn);
   if (!match) return { fqn, kind: "unknown", line: 1 };
@@ -60,14 +59,14 @@ async function subtypes(t: Type): Promise<Type[]> {
   const model = await host.ensureModel(t.path);
   const position = model.getPositionAt(t.decl.offset);
   const locations =
-    (await phpactorRequest<Location[] | Location | null>("textDocument/implementation", {
+    (await tuskRequest<Location[] | Location | null>("textDocument/implementation", {
       textDocument: { uri: model.uri.toString() },
       position: { line: position.lineNumber - 1, character: position.column - 1 },
     }).catch(() => null)) ?? [];
   return direct(t, await Promise.all((Array.isArray(locations) ? locations : [locations]).map((l) => typeAt(pathOf(l.uri), l.range.start.line + 1))));
 }
 
-/** The types that name `t` as a parent, interface, or trait. Phpactor returns every descendant; deeper ones appear under their parents. */
+/** The types that name `t` as a parent, interface, or trait. Go to Implementation returns every descendant; deeper ones appear under their parents. */
 function direct(t: Type, found: (Type | null)[]): Type[] {
   const types = new Map<string, Type>();
   for (const s of found) if (s?.decl && [...s.decl.extends, ...s.decl.implements, ...s.decl.uses].includes(t.fqn)) types.set(s.fqn, s);
@@ -143,7 +142,7 @@ export async function showTypeHierarchy(editor: monaco.editor.ICodeEditor) {
   let t: Type | null = null;
   const word = model.getWordAtPosition(pos)?.word;
   if (word && /^[A-Z]/.test(word)) {
-    const found = await phpactorRequest<Location[] | Location | null>("textDocument/definition", {
+    const found = await tuskRequest<Location[] | Location | null>("textDocument/definition", {
       textDocument: { uri: model.uri.toString() },
       position: { line: pos.lineNumber - 1, character: pos.column - 1 },
     }).catch(() => null);

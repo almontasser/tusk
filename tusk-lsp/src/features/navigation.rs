@@ -227,6 +227,15 @@ mod tests {
     }
 
     #[test]
+    fn goes_to_the_method_behind_a_relation_property() {
+        let files = [
+            ("app/Post.php", "<?php\nnamespace App;\nclass Post {\n    public function author(): Author { return new Author; }\n}\nclass Author {}\n"),
+            ("t.php", "<?php\nfunction f(\\App\\Post $p) { return $p->aut<|>hor; }\n"),
+        ];
+        assert_eq!(goto(&files), vec![("Post.php".into(), range(3, 20, 3, 26))]);
+    }
+
+    #[test]
     fn goes_to_a_variables_first_mention() {
         assert_eq!(
             goto(&[("test.php", "<?php\nfunction f(int $count) {\n    return $cou<|>nt + 1;\n}")]),

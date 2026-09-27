@@ -6,7 +6,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { confirm } from "./palette";
 import { buildContext, chunk, leastLikely, INDEXED, MAX_FILES, SKIPPED, type Chunk, cleanSuggestion, type Extra, type Index, infillRequest, type ModelFacts, outlineFile, replacedAfter, similarCode, typedNames } from "./aicontext";
-import { ensureTools, phpactorRequest } from "./lsp";
+import { ensureTools, tuskRequest } from "./lsp";
 import { parseTypeDeclaration } from "./phptypes";
 import { type Psr4, psr4From } from "./psr4";
 import { onSettings, settings, updateSetting } from "./settings";
@@ -176,7 +176,7 @@ async function indexProject(root: string) {
 /** Every model's columns, casts, and relationships, from the booted Laravel app. */
 async function loadModels(p: Project) {
   if (!(await invoke<boolean>("path_exists", { path: `${p.root}/vendor/autoload.php` }))) return;
-  const script = await invoke<string>("tool_path", { name: "filament-lsp/introspect.php" });
+  const script = await invoke<string>("tool_path", { name: "introspect.php" });
   const out = await invoke<string>("run_capture", { cwd: p.root, program: "php", args: [script, p.root, "models"] }).catch(() => "{}");
   const models = JSON.parse(out);
   if (!models.error) p.models = models;
@@ -245,7 +245,7 @@ let similarFor = { key: "", chunks: [] as Chunk[] };
 /** Similar code is searched again when the cursor moves 10 lines or more, so typing doesn't change the prompt. */
 const similarKey = (p: Project, model: monaco.editor.ITextModel, line: number) => `${relative(p, model.uri.path)}:${Math.floor(line / 10)}`;
 
-/** Types Phpactor found for names before `->`, by file path, then name: a class, or null and when it was asked. */
+/** Types the PHP server found for names before `->`, by file path, then name: a class, or null and when it was asked. */
 const types = new Map<string, Map<string, { fqn: string | null; at: number }>>();
 const typesIn = (path: string) => types.get(path) ?? types.set(path, new Map()).get(path)!;
 const asking = new Set<string>();
@@ -253,10 +253,10 @@ const asking = new Set<string>();
 let rewarm = () => {};
 
 /**
- * The classes of the names before `->` near the cursor that Phpactor has found so far. Names it hasn't
- * been asked about yet are looked up in the background, so a request never waits for Phpactor; the
+ * The classes of the names before `->` near the cursor that the PHP server has found so far. Names it hasn't
+ * been asked about yet are looked up in the background, so a request never waits for the server; the
  * next one has them. A name with no type is asked again after a second: the lookup often runs before
- * Phpactor has the edit that declared the name, or the code around it is half typed. Types are kept
+ * the server has the edit that declared the name, or the code around it is half typed. Types are kept
  * until the file changes on disk.
  */
 function typesNear(p: Project, model: monaco.editor.ITextModel, offset: number): string[] {
@@ -269,7 +269,7 @@ function typesNear(p: Project, model: monaco.editor.ITextModel, offset: number):
     if ((known && (known.fqn || Date.now() - known.at < 1000)) || asking.has(key)) continue;
     asking.add(key);
     const pos = model.getPositionAt(at + 1);
-    phpactorRequest<{ uri?: string; targetUri?: string } | { uri?: string; targetUri?: string }[]>("textDocument/typeDefinition", {
+    tuskRequest<{ uri?: string; targetUri?: string } | { uri?: string; targetUri?: string }[]>("textDocument/typeDefinition", {
       textDocument: { uri: model.uri.toString() },
       position: { line: pos.lineNumber - 1, character: pos.column - 1 },
     })
