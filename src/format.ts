@@ -1,9 +1,11 @@
-// Formatting with the project's own tools: Prettier, then Laravel Pint for PHP, then the bundled Mago. Projects
+// Formatting with the project's own tools: Prettier, then Laravel Pint for PHP, then Mago's formatter in Tusk's
+// PHP server. Projects
 // without Prettier get the bundled one, with the Svelte and Astro plugins, for everything but PHP and Blade.
 // Blade that the project's Prettier can't format goes to the bundled blade-formatter.
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
-import { toolPath } from "./lsp";
+import type * as L from "vscode-languageserver-protocol";
+import { toolPath, tuskRequest } from "./lsp";
 
 type Host = { root(): string; status(text: string): void };
 /** `plugins` are passed to Prettier with `--plugin`: the bundled Prettier's, which the project doesn't configure. */
@@ -47,7 +49,8 @@ export async function detectFormatters() {
 /**
  * Formats a file's text. Prettier handles every file its configuration can parse, which
  * includes PHP when the project uses @prettier/plugin-php. PHP files Prettier can't parse go
- * to Pint when the project has it, and to Mago otherwise.
+ * to Pint when the project has it, and to Tusk's server otherwise, which formats its copy of the
+ * open file, the same text.
  */
 async function format(path: string, text: string, language: string): Promise<string | null> {
   const rel = path.slice(host.root().length + 1);
@@ -64,8 +67,12 @@ async function format(path: string, text: string, language: string): Promise<str
   if (language === "blade" && tools.blade) return run("node", [tools.blade, "--stdin"], text);
   if (language !== "php") return null;
   if (tools.pint) return run("php", ["vendor/bin/pint", "-", `--stdin-filename=${rel}`], text);
-  const mago = await toolPath("mago/mago");
-  return run(mago, ["format", "--stdin-input", "--stdin-filepath", rel], text);
+  const edits = await tuskRequest<L.TextEdit[] | null>("textDocument/formatting", {
+    textDocument: { uri: monaco.Uri.file(path).toString() },
+    options: { tabSize: 4, insertSpaces: true },
+  });
+  // One edit of the whole file, none when it's already formatted, and null when mago.toml excludes it.
+  return edits?.[0]?.newText ?? text;
 }
 
 export function initFormatting(h: Host) {

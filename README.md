@@ -2122,10 +2122,13 @@ file's `excludes` instead.
    the project, the project's Prettier formats PHP and Blade files too.
 2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
    `vendor/bin/pint`.
-3. **Mago**, the bundled fallback for PHP.
+3. **Mago's formatter**, the fallback for PHP, built into the PHP server.
 
 Prettier, including the bundled one, and Pint read the project's own
-configuration files, and Prettier follows `.editorconfig`.
+configuration files, and Prettier follows `.editorconfig`. Mago reads the
+`[formatter]` section of `mago.toml`: a `preset` (`default`, `psr-12`, `pint`,
+`tempest`, `hack`, or `drupal`), options over it, and `excludes`. A file with
+a syntax error isn't formatted; the status bar names the line.
 
 Mago checks PHP files as you type (static analysis and lint).
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
@@ -2216,7 +2219,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |
 | `src/bookmarks.ts` | Bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
-| `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
+| `src/format.ts` | Formatting with the project's Prettier or Pint, or Tusk's server (Mago's formatter) |
 | `src/markdownpreview.ts` | The Markdown preview tab |
 | `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
 | `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |

@@ -17,6 +17,7 @@ struct File {
     source: Source,
     analyzer: Analyzer,
     linter: Linter,
+    formatter: toml::Table,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -75,6 +76,9 @@ pub struct MagoConfig {
     linter_excludes: GlobSet,
     /// Ignored problem codes, each with the paths it applies to (all when empty).
     ignored: Vec<(String, GlobSet)>,
+    /// The formatter's settings, or why `[formatter]` can't be read.
+    pub format: Result<mago_formatter::settings::FormatSettings, String>,
+    format_excludes: GlobSet,
 }
 
 fn globs(patterns: &[String]) -> GlobSet {
@@ -141,6 +145,7 @@ impl MagoConfig {
             .map(|i| if Path::new(i).is_absolute() { PathBuf::from(i) } else { root.join(i) })
             .collect();
         let rules = std::sync::Arc::new(mago_linter::registry::RuleRegistry::build(&linter, None, false));
+        let (format, format_excludes) = formatter(file.formatter);
         Ok(Self {
             rules,
             php_version,
@@ -151,6 +156,8 @@ impl MagoConfig {
             linter,
             analyzer: file.analyzer,
             ignored,
+            format,
+            format_excludes,
         })
     }
 
@@ -183,10 +190,38 @@ impl MagoConfig {
         !self.ignored.iter().any(|(c, paths)| c == code && (paths.is_empty() || paths.is_match(rel)))
     }
 
+    /// Whether the formatter formats the file at `rel`.
+    pub fn formats(&self, rel: &Path) -> bool {
+        !self.format_excludes.is_match(rel)
+    }
+
     /// Whether the linter checks the file at `rel`.
     pub fn lints(&self, rel: &Path) -> bool {
         !self.linter_excludes.is_match(rel)
     }
+}
+
+/// `[formatter]`: a `preset` (Mago's default when missing) with the other options over it, and `excludes`. An
+/// option the formatter doesn't know makes the settings an error, as Mago's command line refuses them.
+fn formatter(mut table: toml::Table) -> (Result<mago_formatter::settings::FormatSettings, String>, GlobSet) {
+    let excludes: Vec<String> = table
+        .remove("excludes")
+        .and_then(|v| v.try_into().ok())
+        .unwrap_or_default();
+    let settings = (|| {
+        let preset = match table.remove("preset") {
+            Some(toml::Value::String(name)) => name.parse::<mago_formatter::presets::FormatterPreset>().map_err(|_| format!("unknown preset `{name}`"))?,
+            Some(_) => return Err("`preset` must be a string".to_string()),
+            None => Default::default(),
+        };
+        let toml::Value::Table(mut merged) = toml::Value::try_from(preset.settings()).map_err(|e| e.to_string())? else {
+            return Err("the preset isn't a table".into());
+        };
+        merged.extend(table);
+        toml::Value::Table(merged).try_into::<mago_formatter::settings::FormatSettings>().map_err(|e| e.to_string())
+    })()
+    .map_err(|e| format!("mago.toml's [formatter]: {e}"));
+    (settings, globs(&excludes))
 }
 
 #[cfg(test)]
@@ -216,5 +251,18 @@ mod tests {
         assert!(config.reports_analysis(Path::new("app/a.php"), Some("possibly-null-argument")));
         assert!(!config.analyzer_settings(PHPVersion::PHP84).find_unused_expressions);
         assert!(MagoConfig::parse("[linter\n", Path::new("/p")).is_err());
+    }
+
+    #[test]
+    fn reads_the_formatters_preset_and_options() {
+        let config = MagoConfig::parse("[formatter]\npreset = \"psr-12\"\nprint-width = 100\nexcludes = [\"legacy\"]\n", Path::new("/p")).unwrap();
+        let settings = config.format.as_ref().unwrap();
+        assert_eq!(settings.print_width, 100);
+        assert!(!config.formats(Path::new("legacy/a.php")));
+        assert!(config.formats(Path::new("app/a.php")));
+        assert_eq!(MagoConfig::default().format.unwrap().print_width, mago_formatter::settings::FormatSettings::default().print_width);
+        // A bad option spoils the formatter only.
+        let config = MagoConfig::parse("[formatter]\nno-such-option = 1\n", Path::new("/p")).unwrap();
+        assert!(config.format.unwrap_err().contains("no-such-option"));
     }
 }

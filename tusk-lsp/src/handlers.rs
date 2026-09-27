@@ -50,6 +50,7 @@ pub fn find(method: &str) -> Option<Handler> {
         TypeHierarchyPrepare::METHOD => typed!(TypeHierarchyPrepare, hierarchy::prepare_type_hierarchy),
         TypeHierarchySupertypes::METHOD => typed!(TypeHierarchySupertypes, hierarchy::supertypes),
         TypeHierarchySubtypes::METHOD => typed!(TypeHierarchySubtypes, hierarchy::subtypes),
+        Formatting::METHOD => typed!(Formatting, format::formatting),
         "tusk/memberReferences" => custom::member_references,
         "tusk/projectProblems" => custom::project_problems,
         _ => return None,

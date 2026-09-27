@@ -813,7 +813,7 @@ would clear another server's indexing progress.
 | Diagnostics | `textDocument/publishDiagnostics` | Squiggles and markers |
 | Formatting | `textDocument/formatting` | **Format Document**, when the server supports it |
 
-Tusk's server doesn't format code. Milestone 3 adds formatting through Mago.
+Tusk's server formats PHP with Mago's formatter (see "Formatting" under "Tusk's language server"). The editor asks for it only when Prettier and Pint don't apply (see "Formatting").
 
 Monaco has no UI for type hierarchy or workspace-wide symbol search. Milestone 4
 adds workspace symbol search to search everywhere. Type hierarchy needs its own
@@ -2710,7 +2710,8 @@ each formatter finds the project's configuration:
    step runs.
 2. For PHP, Laravel Pint (`vendor/bin/pint - --stdin-filename`), when the
    project has it.
-3. For PHP, the bundled Mago (`mago format --stdin-input`).
+3. For PHP, Tusk's server (`textDocument/formatting`), which formats its copy
+   of the open file with Mago's formatter.
 
 `detectFormatters` looks for Prettier and Pint when a folder opens. Monaco's
 own formatters for CSS, HTML, JSON, and TypeScript are always off
@@ -3518,6 +3519,18 @@ when `vendor/filament/filament` exists.
 - **Demo app test:** a test marked `#[ignore]` mirrors the old PHP tests on
   the demo app. Build the app with `scripts/make-fixture.sh`, then run
   `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
+
+### Formatting
+
+`features/format.rs` answers `textDocument/formatting` for PHP with
+`mago-formatter`, as `mago format` would: one edit of the whole document, none
+when it's already formatted, and `null` for a file `[formatter]`'s `excludes`
+lists. `mago_config.rs` reads `[formatter]` as Mago does: the `preset`'s
+settings (Mago's default without one), with the section's other options over
+them. An option the formatter doesn't know makes only the formatter an error,
+which each request reports, as the command line refuses the file; the
+analyzer and linter keep their settings. A file with a syntax error isn't
+formatted, and the error names its line.
 
 ### Type and call hierarchy
 
