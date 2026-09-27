@@ -60,7 +60,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up and Extract Interface don't change the class's callers or type hints, don't re-resolve unqualified function and constant names in moved code, and can't move a promoted constructor property. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. |
+| Refactoring | Rename and Extract Method come from Phpactor, and Move Class relies on Phpactor finding classes through `vendor/composer`. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -705,12 +705,26 @@ can't be chosen.
 - Pulling a method into an interface adds its declaration there; the class
   keeps its code. Interfaces take public methods and constants only.
 - A private member that the class still uses becomes `protected`, marked in
-  the row. The dialog warns when a member you move uses one that stays, or
-  calls `parent::`, whose meaning changes one level up.
+  the row. When a member you move uses one that stays, the dialog stops you if
+  that one is private, which the parent can't reach, and warns otherwise,
+  since the parent's other subclasses won't have it. It also warns about calls
+  to `parent::`, whose meaning changes one level up.
 - Class names in the moved code are rewritten for the parent's file: they keep
   their short names where its imports allow, get a new `use` import, or are
   written in full when a short name would mean another class. Imports the
   class no longer uses are removed.
+- Functions and constants keep meaning the same ones: a helper declared in the
+  class's namespace, or imported with `use function` or `use const`, is written
+  in full when the parent is in another namespace, such as
+  `\App\Services\format_amount()`. PHP's own, such as `strlen()`, stay as
+  they are.
+- A property promoted in the constructor, such as
+  `private Client $client`, becomes a property of the parent; the constructor
+  keeps the parameter and assigns it after any `parent::__construct()`. It
+  becomes `protected`, since the constructor sets it. A `readonly` one needs
+  PHP 8.4, which lets a subclass set it: the dialog blocks it when
+  `composer.json` allows an older PHP. Pulling up the constructor itself takes
+  its promoted properties with it.
 
 **Extract Interface** creates an interface from the class's public methods and
 constants, and makes the class implement it.
@@ -724,8 +738,18 @@ constants, and makes the class implement it.
 - The interface gets the imports its signatures need, and `declare(strict_types=1)`
   when the class's file has it. The class gets `implements`, and a `use` import
   when the interface is in another namespace.
+- Check **Use it in type hints where possible** to type the interface instead
+  of the class across the project, as PhpStorm does: a parameter used only to
+  call the interface's methods and read its constants, and a private property,
+  declared or promoted, used only that way. The option shows how many it
+  changes; the **Refactoring Preview** lists the rest and why each stays, such
+  as a parameter passed on to other code, or a method the interface doesn't
+  declare. Docblock `@param` and `@var` types follow.
+- In a Laravel app, **Bind it in AppServiceProvider** adds
+  `$this->app->bind(Interface::class, Class::class)` to `register()`, so the
+  container can still build what those type hints ask for.
 - When it's done, a notice offers to open the new interface. ⌘Z removes the
-  file along with the change to the class.
+  file, and the folder it made, along with every other change.
 
 ## Move class
 

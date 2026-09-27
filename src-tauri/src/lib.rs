@@ -215,6 +215,7 @@ pub fn run() {
             fs::remove_path,
             fs::create_file,
             fs::create_dir,
+            fs::remove_empty_dir,
             fs::trash_path,
             fs::watch,
             lsp::lsp_start,

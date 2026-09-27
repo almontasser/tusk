@@ -206,6 +206,12 @@ pub async fn remove_path(path: String) -> Result<(), String> {
     .await
 }
 
+/// Removes a folder only when it's empty, as after undoing a refactoring that created a file in a new folder.
+#[tauri::command]
+pub fn remove_empty_dir(path: String) -> Result<(), String> {
+    std::fs::remove_dir(path).map_err(|e| e.to_string())
+}
+
 /// Watches `path` recursively and emits `fs-change` with the changed paths.
 /// Replaces any previous watcher, so only one project is watched at a time.
 /// Events are gathered for 50 ms and sent once without duplicates: `composer install` or a

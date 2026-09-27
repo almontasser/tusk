@@ -1399,6 +1399,10 @@ button.link:hover { text-decoration: underline; }
 .member-reason { flex-shrink: 0; max-width: 45%; font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .refactor-dialog .dialog-options { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
 .refactor-dialog .dialog-options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.refactor-dialog .dialog-options { flex-wrap: wrap; }
+.refactor-dialog .dialog-options label[hidden] { display: none; }
+.refactor-dialog .dialog-options label:has(input:disabled) { opacity: 0.55; cursor: default; }
+.refactor-dialog .option-note { color: var(--faint); }
 .code-preview { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg); overflow: hidden; }
 .code-preview[hidden] { display: none; }
 .code-preview .code-title { padding: 6px 12px; font-size: 11.5px; color: var(--muted); background: var(--chrome); border-bottom: 1px solid var(--border-subtle); }

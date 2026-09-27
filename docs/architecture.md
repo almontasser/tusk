@@ -1188,7 +1188,36 @@ properties, and docblock tags. `requalify` resolves each through the source
 file's imports, then writes it for the target: short when the target's imports
 or namespace give the same class, with a new import when the short name is
 free, and in full otherwise. `importEdits` inserts imports in order among the
-file's own. Unqualified function and constant names aren't re-resolved.
+file's own.
+
+Functions and constants resolve differently: an unqualified name means the one
+the file imports with `use function` or `use const`, or else its namespace's
+when one is declared there, or else the global one. `functionConstRefs` finds
+calls and upper-case constant names outside member and class positions, and
+`requalify` compares what each means in the source (`globalMeaning`) with what
+it would mean in the target, writing it in full when they differ. The
+project's namespaced functions and constants (`declaredGlobals`) come from one
+text search for top-level `function` and `const` lines, which excludes
+methods and class constants, since those are indented.
+
+A promoted constructor property moves as a declaration built from its
+parameter's modifiers and type (`Member.param` holds their offsets). `demote`
+removes the modifiers from the parameter and adds `$this->name = $name;` to the
+constructor, after a leading `parent::__construct()`. `pullUpProblems` reads
+the lowest PHP version from `composer.json` (`phpMinimum`) to decide whether a
+readonly one may be set from the subclass, which PHP allows from 8.4.
+
+Extract Interface's type hints come from `typeHintsFor`, run on each file
+that names the class. It finds the class in parameter types of functions,
+methods, and closures, and in declared property types, and replaces one only
+when its uses allow: every `$param` in the function body calls an interface
+method, reads an interface constant, or is tested with `instanceof`, and every
+`$this->property` in the class is such a call or an assignment. Private
+properties only, since subclasses and other code may use more of a protected
+or public one. A parameter of a method without a body stays, since changing it
+would change what implementations must accept. `bindingEdits` adds the
+container binding to `register()`, replacing Laravel's stock `//`
+placeholder.
 
 `planPullUp` returns edits for both files. The source loses each moved member's
 lines with `deletionLines` (its docblock, attributes, and one blank line), and
@@ -1210,7 +1239,9 @@ code, and problems with fixes, all recomputed on each change. The dialog is
 modal and both files' text is checked again before applying, so the edits never
 land on changed text. A new file goes through `applyWorkspaceEdit`'s `create`
 operation, which uses `create_file` and so never replaces an existing file, and
-`linkUndo` deletes a created file when an undo empties it.
+`linkUndo` deletes a created file when an undo empties it, and then
+the folders created for it, with `remove_empty_dir`, which fails rather than
+delete a folder that has anything in it.
 
 ### Refactoring popups
 

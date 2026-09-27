@@ -4,18 +4,23 @@ import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import {
   applyEdits,
+  bindingEdits,
   cantPull,
   classBody,
   type ClassBody,
+  declaredGlobals,
+  type Globals,
   type Edit,
   interfaceCandidates,
   type Member,
   memberLabel,
   needsProtected,
   planExtractInterface,
+  phpMinimum,
   planPullUp,
   type Problem,
   pullUpProblems,
+  typeHintsFor,
   typeNameProblem,
 } from "./classparse";
 import { h, icon, toast } from "./dom";
@@ -25,7 +30,7 @@ import { parseTypeDeclarations, type TypeDeclaration } from "./phptypes";
 import { readText } from "./projectfiles";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
 import { descendantsOf, textOf } from "./refactor";
-import { showRefactorPreview } from "./refactorpreview";
+import { showRefactorPreview, type Skipped } from "./refactorpreview";
 
 type Host = { root(): string; status(text: string): void; openAt(path: string, line: number): Promise<unknown> };
 let host: Host;
@@ -60,6 +65,23 @@ async function locate(fqn: string): Promise<string | null> {
   const psr4 = psr4From((await readText(`${host.root()}/composer.json`).catch(() => "")) || "{}");
   for (const rel of pathsFor(fqn, psr4)) if (await invoke<boolean>("path_exists", { path: `${host.root()}/${rel}` }).catch(() => false)) return `${host.root()}/${rel}`;
   return (await typeSymbol(fqn).catch(() => undefined))?.path ?? null;
+}
+
+/**
+ * The functions and constants the project declares outside classes, with their namespaces, so moved code keeps
+ * calling the same ones. One text search finds the files that declare any.
+ */
+async function projectGlobals(): Promise<Globals> {
+  // Top-level declarations start their line; methods and class constants are indented.
+  const query = { text: "^(function\\s+&?\\s*\\w+\\s*\\(|const\\s+\\w+\\s*=)", regex: true, caseSensitive: true, wholeWord: false };
+  const matches = await invoke<{ path: string }[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
+  const globals: Globals = { functions: new Set(), constants: new Set() };
+  for (const path of new Set(matches.map((m) => m.path))) {
+    const found = declaredGlobals((await textOf(path).catch(() => "")) ?? "");
+    found.functions.forEach((f) => globals.functions.add(f));
+    found.constants.forEach((c) => globals.constants.add(c));
+  }
+  return globals;
 }
 
 // ---- The members dialog ----
@@ -375,8 +397,12 @@ export async function pullMembersUp(editor: monaco.editor.ICodeEditor) {
   const showWhere = () => (where.textContent = `${target.fqn} · ${relative(target.path!)}`);
   showWhere();
 
+  const globals = projectGlobals();
+  let known: Globals | undefined;
+  globals.then((g) => (known = g));
+  const php = readText(`${host.root()}/composer.json`).then(phpMinimum, () => null);
   const plan = (moving: Member[]) =>
-    planPullUp({ source: text, body, moving, abstract: new Set([...abstract].filter((m) => moving.includes(m))), target: { source: target.text!, fqn: target.fqn, kind: target.kind, offset: target.type!.offset }, targetBody: target.body! });
+    planPullUp({ source: text, body, moving, abstract: new Set([...abstract].filter((m) => moving.includes(m))), target: { source: target.text!, fqn: target.fqn, kind: target.kind, offset: target.type!.offset }, targetBody: target.body!, globals: known });
 
   const dialog = memberDialog({
     heading: "Pull Members Up",
@@ -388,6 +414,8 @@ export async function pullMembersUp(editor: monaco.editor.ICodeEditor) {
     row: (m) => {
       const why = cantPull(m, target.kind);
       if (why) return { disabled: why };
+      // A promoted property is part of the constructor's code, so it goes where the constructor goes.
+      if (m.promoted && [...selected].some((s) => s.kind === "method" && /^__construct$/i.test(s.name))) return { disabled: "Moves with __construct(), which declares it." };
       const moving = members.filter((x) => selected.has(x));
       const badges: Row["badges"] = [];
       if (target.kind === "class" && selected.has(m) && needsProtected(text, moving, body.members).includes(m))
@@ -402,6 +430,7 @@ export async function pullMembersUp(editor: monaco.editor.ICodeEditor) {
     evaluate: async () => {
       const moving = members.filter((m) => selected.has(m));
       if (!moving.length) return { title: "", code: "", problems: [{ level: "error", text: `Choose the members to pull up to ${target.name}.` }] };
+      await globals;
       const edits = plan(moving).target.sort((a, b) => a.start - b.start);
       const imports = edits.filter((e) => /^\s*use\s/.test(e.text)).map((e) => e.text.trim());
       const becomesAbstract = edits.find((e) => /^abstract /.test(e.text));
@@ -416,6 +445,7 @@ export async function pullMembersUp(editor: monaco.editor.ICodeEditor) {
         abstract,
         target: { name: target.name, kind: target.kind, members: target.body!.members, isAbstract: !!target.isAbstract },
         siblings: needsSiblings ? await siblingsOf(target) : [],
+        php: await php,
       });
       return { title: `Adds to ${target.name}`, code, problems };
     },
@@ -432,6 +462,7 @@ export async function pullMembersUp(editor: monaco.editor.ICodeEditor) {
   if (model.getValue() !== text || (await textOf(target.path!).catch(() => null)) !== target.text) return host.status("A file changed while the dialog was open. Run Pull Members Up again.");
 
   const moving = members.filter((m) => selected.has(m));
+  await globals;
   const { source: sourceEdits, target: targetEdits } = plan(moving);
   const sourceUri = model.uri.toString();
   const targetUri = monaco.Uri.file(target.path!).toString();
@@ -484,6 +515,40 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
   const where = h("span", { class: "dialog-path" });
   const docs = h("input", { type: "checkbox", checked: true });
   const docsLabel = h("label", { class: "option" }, docs, "Copy docblocks");
+  const hints = h("input", { type: "checkbox" });
+  const hintsSummary = h("span", { class: "option-note" });
+  const hintsLabel = h("label", { class: "option", title: `Type parameters and private properties as the interface where they only use what it declares` }, hints, "Use it in type hints where possible", hintsSummary);
+  // Laravel resolves type hints through its container, which needs to know which class builds the interface.
+  const providerPath = `${host.root()}/app/Providers/AppServiceProvider.php`;
+  const provider = await readText(providerPath).catch(() => null);
+  const bind = h("input", { type: "checkbox", checked: true, disabled: true });
+  const bindLabel = h("label", { class: "option", title: `Adds $this->app->bind(Interface::class, ${name}::class) to register()` }, bind, "Bind it in AppServiceProvider");
+  bindLabel.hidden = provider === null;
+
+  /** Files that name the class, read once, for type hints. */
+  let files: Promise<Map<string, string>> | null = null;
+  const filesNaming = () =>
+    (files ??= invoke<{ path: string }[]>("search_text", { root: host.root(), query: { text: name, regex: false, caseSensitive: true, wholeWord: true }, include: "*.php" })
+      .catch(() => [])
+      .then(async (matches) => {
+        const texts = new Map<string, string>();
+        for (const path of new Set(matches.map((m) => m.path)))
+          if (path !== model.uri.fsPath) {
+            const t = await textOf(path).catch(() => null);
+            if (t !== null) texts.set(path, t);
+          }
+        return texts;
+      }));
+  /** The type hints to change in each file, and those left as they are, for the chosen members. */
+  const hintPlans = async (fqn: string, members: Member[]) => {
+    const use = { fqn, classFqn: type.fqn, methods: new Set(members.filter((m) => m.kind === "method").map((m) => m.name.toLowerCase())), constants: new Set(members.filter((m) => m.kind === "constant").map((m) => m.name)) };
+    const plans = new Map<string, ReturnType<typeof typeHintsFor>>();
+    for (const [path, t] of await filesNaming()) {
+      const plan = typeHintsFor(t, use);
+      if (plan.used.length || plan.skipped.length) plans.set(path, plan);
+    }
+    return plans;
+  };
 
   /** The interface's full name and file, or why there's no file for it. */
   const destination = () => {
@@ -503,16 +568,19 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
 
   const selected = new Set(candidates.filter((m) => m.kind === "method"));
   if (found.member && candidates.includes(found.member)) selected.add(found.member);
+  const globals = projectGlobals();
+  let known: Globals | undefined;
+  globals.then((g) => (known = g));
   const plan = (members: Member[]) => {
     const d = destination();
-    return planExtractInterface({ source: text, body, offset: type.offset, fqn: type.fqn, members, name: d.iface, namespace: d.ns, docs: docs.checked });
+    return planExtractInterface({ source: text, body, offset: type.offset, fqn: type.fqn, members, name: d.iface, namespace: d.ns, docs: docs.checked, globals: known });
   };
 
   const dialog = memberDialog({
     heading: "Extract Interface",
     subject: name,
     fields: [field("Interface name", nameInput), field("Namespace", namespaceInput, true), namespaces, where],
-    options: [docsLabel],
+    options: [docsLabel, hintsLabel, bindLabel],
     members: candidates,
     selected,
     empty: `${name} has no public methods or constants.`,
@@ -536,12 +604,25 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
         if (m.kind === "method" && /\(\s*[^)]*\bself\s+[&.]*\$/.test(m.signature))
           problems.push({ level: "warning", text: `${memberLabel(m)} takes self, which in the interface means the interface, so ${name}'s own method must accept any ${d.iface}.` });
       if (bad || !moving.length) return { title: "", code: "", problems };
+      await globals;
+      if (hints.checked) {
+        hintsSummary.textContent = " · looking…";
+        const plans = await hintPlans(d.fqn, moving);
+        const used = [...plans.values()].reduce((n, p) => n + p.used.length, 0);
+        const left = [...plans.values()].reduce((n, p) => n + p.skipped.length, 0);
+        const inFiles = [...plans.values()].filter((p) => p.used.length).length;
+        hintsSummary.textContent = used || left ? ` · ${used} in ${inFiles} ${inFiles === 1 ? "file" : "files"}${left ? `, ${left} left as they are (Preview lists why)` : ""}` : " · no type hints name it";
+        if (used && provider !== null && !bind.checked)
+          problems.push({ level: "warning", text: `Laravel's container can't build ${d.iface} for a type hint until it's bound to ${name}.` });
+      } else hintsSummary.textContent = "";
       return { title: d.path ? `New file ${relative(d.path)}` : "New interface", code: plan(moving).file, wholeFile: true, problems };
     },
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   for (const input of [nameInput, namespaceInput]) input.oninput = () => (clearTimeout(timer), (timer = setTimeout(dialog.refresh, 150)));
   docs.onchange = dialog.refresh;
+  hints.onchange = () => ((bind.disabled = !hints.checked), dialog.refresh());
+  bind.onchange = dialog.refresh;
   nameInput.select();
   nameInput.focus();
   const chosen = await dialog.done;
@@ -551,23 +632,47 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
 
   const d = destination();
   const moving = candidates.filter((m) => selected.has(m));
+  await globals;
   const { file, source } = plan(moving);
   const uri = monaco.Uri.file(d.path!).toString();
   const sourceUri = model.uri.toString();
-  const changes = { [sourceUri]: textEdits(text, source) };
+  const changes: Record<string, L.TextEdit[]> = { [sourceUri]: textEdits(text, source) };
+  const texts = new Map([[sourceUri, text]]);
+  const skipped: Skipped[] = [];
+  if (hints.checked) {
+    for (const [path, plan] of await hintPlans(d.fqn, moving)) {
+      const t = (await filesNaming()).get(path)!;
+      const lineOf = (offset: number) => t.slice(0, offset).split("\n").length;
+      skipped.push(...plan.skipped.map((s) => ({ path, line: lineOf(s.offset), reason: s.reason })));
+      if (!plan.edits.length) continue;
+      const u = monaco.Uri.file(path).toString();
+      changes[u] = textEdits(t, plan.edits);
+      texts.set(u, t);
+    }
+    if (provider !== null && bind.checked && Object.keys(changes).length > 1) {
+      const edits = bindingEdits(provider, d.fqn, type.fqn);
+      if (edits.length) {
+        const u = monaco.Uri.file(providerPath).toString();
+        changes[u] = textEdits(provider, edits);
+        texts.set(u, provider);
+      }
+    }
+  }
   const apply = async () => {
     if (await invoke<boolean>("path_exists", { path: d.path! })) return host.status(`${relative(d.path!)} already exists.`);
     await applyWorkspaceEdit({
       documentChanges: [
         { kind: "create", uri },
         { textDocument: { uri, version: null }, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: file }] },
-        { textDocument: { uri: sourceUri, version: null }, edits: changes[sourceUri] },
+        ...Object.entries(changes).map(([u, edits]) => ({ textDocument: { uri: u, version: null }, edits })),
       ],
     });
-    host.status(`Extracted ${d.iface} from ${name}. ⌘Z undoes it and removes the file.`);
+    const typed = Object.keys(changes).length - 1;
+    host.status(`Extracted ${d.iface} from ${name}${typed ? `, and used it in ${typed} ${typed === 1 ? "file" : "files"}` : ""}. ⌘Z undoes it and removes the file.`);
     toast(`Extracted ${d.iface} from ${name}.`, { kind: "info", timeout: 10000, action: { label: `Open ${d.iface}`, run: () => host.openAt(d.path!, file.split("\n").findIndex((l) => l.startsWith("interface ")) + 1) } });
   };
-  if (chosen.preview) showRefactorPreview(`Extract Interface ${d.iface}`, changes, new Map([[sourceUri, text]]), [], apply, { [uri]: file });
+  // Type hints left as they were are worth a look, as for Change Signature's calls.
+  if (chosen.preview || skipped.length) showRefactorPreview(`Extract Interface ${d.iface}`, changes, texts, skipped, apply, { [uri]: file });
   else await apply();
 }
 

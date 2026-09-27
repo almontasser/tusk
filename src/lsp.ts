@@ -291,7 +291,7 @@ async function saveModel(model: monaco.editor.ITextModel) {
  * Makes one ⌘Z undo a refactoring in every file it edited. A file the refactoring created, and the undo empties,
  * is deleted, so undoing Extract Interface leaves no empty file behind.
  */
-function linkUndo(models: monaco.editor.ITextModel[], created: Set<string> = new Set()) {
+function linkUndo(models: monaco.editor.ITextModel[], created: Map<string, string[]> = new Map()) {
   const group = new Set(models);
   if (group.size < 2) return;
   const listeners = [...group].map((model) =>
@@ -303,7 +303,14 @@ function linkUndo(models: monaco.editor.ITextModel[], created: Set<string> = new
       for (const m of others) m.undo();
       for (const m of [model, ...others]) {
         const path = m.uri.fsPath;
-        if (created.has(path) && !m.getValue()) invoke("remove_path", { path }).then(() => host.forget(path), () => {});
+        // The folders the file's creation made go too, deepest first, when nothing else is in them.
+        if (created.has(path) && !m.getValue())
+          invoke("remove_path", { path })
+            .then(async () => {
+              host.forget(path);
+              for (const dir of created.get(path)!) await invoke("remove_empty_dir", { path: dir });
+            })
+            .catch(() => {});
         else saveModel(m).catch(() => {});
       }
       host.status(`Undid the refactoring in ${others.length + 1} files.`);
@@ -316,7 +323,8 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
   const ops: (L.TextDocumentEdit | L.CreateFile | L.RenameFile | L.DeleteFile)[] =
     edit.documentChanges ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri, version: null }, edits }));
   const edited: monaco.editor.ITextModel[] = [];
-  const created = new Set<string>();
+  /** Files the edit creates, with the folders it creates for them, deepest first. */
+  const created = new Map<string, string[]>();
   for (const op of ops) {
     if (!("kind" in op)) {
       const model = await host.ensureModel(pathOf(op.textDocument.uri));
@@ -331,6 +339,8 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
       const path = pathOf(op.uri);
       if (op.options?.overwrite) await invoke("write_file", { path, contents: "" });
       else {
+        const folders: string[] = [];
+        for (let dir = path.slice(0, path.lastIndexOf("/")); dir && !(await invoke<boolean>("path_exists", { path: dir })); dir = dir.slice(0, dir.lastIndexOf("/"))) folders.push(dir);
         const made = await invoke("create_file", { path, contents: "" }).then(
           () => true,
           (e) => {
@@ -338,7 +348,7 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
             throw e;
           },
         );
-        if (made) created.add(path);
+        if (made) created.set(path, folders);
       }
     } else if (op.kind === "rename") {
       const [from, to] = [pathOf(op.oldUri), pathOf(op.newUri)];

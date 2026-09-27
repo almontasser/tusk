@@ -2,7 +2,7 @@
 // Node can test it. ponytail: a scanner over comment-masked code, not a PHP parser; `public $a, $b;` and
 // `const A = 1, B = 2;` read as their first name, and unqualified function and constant names aren't re-resolved.
 import { commentMask } from "./comments.ts";
-import { deletionLines, nameResolver } from "./phptypes.ts";
+import { deletionLines, nameResolver, parseTypeDeclarations } from "./phptypes.ts";
 import { matchBracket, splitTopLevel } from "./refactorparse.ts";
 
 export type Edit = { start: number; end: number; text: string };
@@ -25,8 +25,10 @@ export type Member = {
   signature: string;
   /** Offset of a method's body `{`, or -1. */
   bodyStart: number;
-  /** A property declared in the constructor's parameters, which can't move on its own. */
+  /** A property declared in the constructor's parameters. */
   promoted: boolean;
+  /** A promoted property's parameter: its offsets, its modifiers, and its type. */
+  param?: { start: number; end: number; modifiers: string; type: string; readonly: boolean };
 };
 
 export type ClassBody = { open: number; close: number; members: Member[]; indent: string };
@@ -122,13 +124,21 @@ export function classBody(source: string, typeOffset: number): ClassBody | null 
   // Promoted constructor properties.
   const ctor = members.find((m) => m.kind === "method" && m.name.toLowerCase() === "__construct");
   if (ctor) {
-    const paren = source.indexOf("(", ctor.declStart + ctor.signature.indexOf("__construct"));
-    const list = source.slice(paren + 1, matchBracket(source, paren));
-    for (const param of splitTopLevel(commentMask(`<?php ${list}`).slice(6))) {
-      const m = param.match(/^(?:#\[[^\]]*\]\s*)*((?:(?:public|protected|private|readonly)(?:\(set\))?\s+)+)(?:[?\w\\|&()]+\s+)?&?\$(\w+)/);
+    const paren = code.indexOf("(", code.indexOf("__construct", ctor.declStart));
+    const closeParen = matchBracket(source, paren);
+    for (let from = paren + 1; from < closeParen; ) {
+      const comma = topLevel(source, code, from, ",", closeParen);
+      const to = comma < 0 ? closeParen : comma;
+      const raw = code.slice(from, to);
+      const start = from + raw.match(/^\s*/)![0].length;
+      const end = from + raw.trimEnd().length;
+      from = to + 1;
+      const text = code.slice(start, end);
+      const m = text.match(/^((?:#\[[\s\S]*?\]\s*)*)((?:(?:public|protected|private|readonly)(?:\(set\))?\s+)+)([?\w\\|&()]+\s+)?&?\$(\w+)/);
       if (!m) continue;
-      const visibility = (m[1].match(/public|protected|private/)?.[0] as Visibility | undefined) ?? "public";
-      members.push({ kind: "property", name: m[2], start: -1, declStart: -1, end: -1, visibility, isStatic: false, isAbstract: false, signature: oneLine(param), bodyStart: -1, promoted: true });
+      const visibility = (m[2].match(/public|protected|private/)?.[0] as Visibility | undefined) ?? "public";
+      const param = { start: start + m[1].length, end, modifiers: m[2].trim(), type: (m[3] ?? "").trim(), readonly: /\breadonly\b/.test(m[2]) };
+      members.push({ kind: "property", name: m[4], start: -1, declStart: -1, end: -1, visibility, isStatic: false, isAbstract: false, signature: oneLine(source.slice(start, end)), bodyStart: -1, promoted: true, param });
     }
   }
   const firstLine = source.slice(open + 1, close).match(/\n([ \t]+)\S/);
@@ -166,10 +176,13 @@ export function dependencies(source: string, member: Member, all: Member[]): Mem
   return all.filter((m) => m !== member && refersTo(refs, m));
 }
 
-/** Private members that move while members that stay use them: in the parent class they must be protected. */
+/**
+ * Private members that move while members that stay use them: in the parent class they must be protected. A promoted
+ * property always is, since the constructor that stays sets it.
+ */
 export function needsProtected(source: string, moving: Member[], all: Member[]): Member[] {
   const staying = all.filter((m) => !moving.includes(m));
-  return moving.filter((m) => m.visibility === "private" && staying.some((s) => dependencies(source, s, all).includes(m)));
+  return moving.filter((m) => m.visibility === "private" && (m.promoted || staying.some((s) => dependencies(source, s, all).includes(m))));
 }
 
 // ---- Class names ----
@@ -260,18 +273,95 @@ function namesTaken(code: string): Map<string, string> {
   return taken;
 }
 
+/** Namespaced functions and constants the project declares, by full name; functions lowercased, as PHP matches them. */
+export type Globals = { functions: Set<string>; constants: Set<string> };
+const NO_GLOBALS: Globals = { functions: new Set(), constants: new Set() };
+
+/** The full names of the functions and constants a file declares outside any class. */
+export function declaredGlobals(source: string): Globals {
+  const code = commentMask(source);
+  const { namespace } = nameResolver(code);
+  const full = (name: string) => (namespace ? `${namespace}\\${name}` : name);
+  const functions = new Set([...code.matchAll(/^function\s+&?\s*(\w+)\s*\(/gm)].map((m) => full(m[1]).toLowerCase()));
+  const constants = new Set([...code.matchAll(/^const\s+([^;]+);/gm)].flatMap((m) => splitTopLevel(m[1]).map((c) => full(c.split("=")[0].trim()))));
+  return { functions, constants };
+}
+
+const NOT_FUNCTIONS = new Set(
+  "if elseif else while for foreach switch match array list isset empty unset eval exit die return echo print include include_once require require_once catch declare fn function static self parent use new clone yield and or xor not print".split(" "),
+);
+
 /**
- * Rewrites the class names in `code`, which `fromCode` resolves, so they mean the same classes in `toCode`: a name
- * that resolves the same there stays short, a class the target can import is imported, and a name that would clash
- * is written in full. Returns the code and the imports it needs; `imports` holds names already chosen for other code
- * going into the same file.
+ * Functions a member's code calls, and constants it reads, by name: `helper(`, `Sub\helper(`, `\strlen(`, and
+ * upper-case names such as `LIMIT` or `\PHP_EOL`. Not methods, class constants, or class names.
  */
-export function requalify(code: string, fromCode: string, toCode: string, imports: Map<string, string> = new Map()): { code: string; imports: Map<string, string> } {
-  const from = nameResolver(commentMask(fromCode)).resolve;
-  const to = nameResolver(commentMask(toCode));
-  const taken = namesTaken(commentMask(toCode));
-  let out = code;
-  for (const ref of classNameRefs(code).reverse()) {
+export function functionConstRefs(code: string): { start: number; end: number; name: string; kind: "function" | "constant" }[] {
+  const plain = codeOnly(code);
+  const classes = new Set(classNameRefs(code).map((r) => r.start));
+  // Attributes name classes, whose arguments look like calls.
+  const attributes: [number, number][] = [...plain.matchAll(/#\[/g)].map((m) => [m.index!, matchBracket(plain, m.index! + 1)]);
+  const inAttribute = (at: number) => attributes.some(([a, b]) => at > a && at < b);
+  const refs: { start: number; end: number; name: string; kind: "function" | "constant" }[] = [];
+  for (const m of plain.matchAll(/(?<![\w\\$]|->|::)\\?[A-Za-z_][\w\\]*(?=\s*\()/g)) {
+    const name = m[0];
+    if (classes.has(m.index!) || inAttribute(m.index!) || NOT_FUNCTIONS.has(name.toLowerCase())) continue;
+    if (/\b(?:new|function|fn|instanceof)\s+&?\s*$/.test(plain.slice(Math.max(0, m.index! - 20), m.index!))) continue;
+    refs.push({ start: m.index!, end: m.index! + name.length, name, kind: "function" });
+  }
+  for (const m of plain.matchAll(/(?<![\w\\$]|->|::)\\?[A-Z][A-Z0-9_]*[A-Z0-9](?![\w\\]|\s*(?:\(|::))/g)) {
+    const name = m[0];
+    const before = plain.slice(Math.max(0, m.index! - 30), m.index!);
+    if (classes.has(m.index!) || inAttribute(m.index!) || /^\\?(TRUE|FALSE|NULL)$/i.test(name)) continue;
+    // A declaration's own name, and a named argument (`f(LIMIT: 1)`).
+    if (/\b(?:const|case|function|class|interface|trait|enum|goto)\s+(?:\w+\s+)?$/.test(before)) continue;
+    if (/[(,]\s*$/.test(before) && /^\s*:(?!:)/.test(plain.slice(m.index! + name.length))) continue;
+    refs.push({ start: m.index!, end: m.index! + name.length, name, kind: "constant" });
+  }
+  return refs.sort((a, b) => a.start - b.start);
+}
+
+/** A file's `use function` and `use const` imports, by the name they give. */
+function functionImports(code: string) {
+  const imports = { function: new Map<string, string>(), constant: new Map<string, string>() };
+  for (const [, kind, name, alias] of code.matchAll(/^use\s+(function|const)\s+([\w\\]+)(?:\s+as\s+(\w+))?\s*;/gm)) {
+    const short = alias ?? name.split("\\").pop()!;
+    if (kind === "function") imports.function.set(short.toLowerCase(), name);
+    else imports.constant.set(short, name);
+  }
+  return imports;
+}
+
+/**
+ * What a function or constant name means in a file, as PHP resolves it: fully qualified as written, qualified through
+ * the file's imports or namespace, or unqualified through `use function` and `use const`, then the file's namespace
+ * when the project declares it there, and otherwise the global one.
+ */
+function globalMeaning(name: string, kind: "function" | "constant", code: string, globals: Globals): string {
+  if (name.startsWith("\\")) return name.slice(1);
+  const { namespace, resolve } = nameResolver(code);
+  if (name.includes("\\")) return resolve(name);
+  const imported = kind === "function" ? functionImports(code).function.get(name.toLowerCase()) : functionImports(code).constant.get(name);
+  if (imported) return imported;
+  const local = namespace ? `${namespace}\\${name}` : name;
+  const known = kind === "function" ? globals.functions.has(local.toLowerCase()) : globals.constants.has(local);
+  return namespace && known ? local : name;
+}
+
+/**
+ * Rewrites the names in `code`, which `fromCode` resolves, so they mean the same in `toCode`. A class name that
+ * resolves the same there stays short, a class the target can import is imported, and a name that would clash is
+ * written in full. A function or constant whose name would mean another one there, such as a helper in the source's
+ * namespace, is written in full. Returns the code and the class imports it needs; `imports` holds names already
+ * chosen for other code going into the same file.
+ */
+export function requalify(code: string, fromCode: string, toCode: string, imports: Map<string, string> = new Map(), globals: Globals = NO_GLOBALS): { code: string; imports: Map<string, string> } {
+  const fromMasked = commentMask(fromCode);
+  const toMasked = commentMask(toCode);
+  const from = nameResolver(fromMasked).resolve;
+  const to = nameResolver(toMasked);
+  const taken = namesTaken(toMasked);
+  const edits: Edit[] = [];
+  for (const ref of classNameRefs(code)) {
     const fqn = from(ref.name);
     const short = fqn.split("\\").pop()!;
     const key = short.toLowerCase();
@@ -283,9 +373,15 @@ export function requalify(code: string, fromCode: string, toCode: string, import
       written = short;
     } else if (!fqn.includes("\\") && !to.namespace) written = short;
     else written = `\\${fqn}`;
-    out = out.slice(0, ref.start) + written + out.slice(ref.end);
+    edits.push({ start: ref.start, end: ref.end, text: written });
   }
-  return { code: out, imports };
+  for (const ref of functionConstRefs(code)) {
+    const meant = globalMeaning(ref.name, ref.kind, fromMasked, globals);
+    const there = globalMeaning(ref.name, ref.kind, toMasked, globals);
+    const same = ref.kind === "function" ? meant.toLowerCase() === there.toLowerCase() : meant === there;
+    if (!same) edits.push({ start: ref.start, end: ref.end, text: `\\${meant}` });
+  }
+  return { code: applyEdits(code, edits), imports };
 }
 
 /**
@@ -326,8 +422,9 @@ function unusedImports(source: string, edits: Edit[], candidates: Set<string>): 
     const short = m[2] ?? m[1].split("\\").pop()!;
     if (candidates.has(m[1]) && !new RegExp(`(?<![\\w$\\\\])${short}\\b`).test(rest)) out.push({ start: m.index!, end: m.index! + m[0].length, text: "" });
   }
-  // With the whole block gone, one of the blank lines around it goes too.
-  return mergeRemovals(out).map((e) => (source.slice(e.start - 2, e.start) === "\n\n" && source[e.end] === "\n" ? { ...e, end: e.end + 1 } : e));
+  // With the whole block gone, and no new import taking its place, one of the blank lines around it goes too.
+  const replaced = (e: Edit) => edits.some((x) => x.start >= e.start && x.start <= e.end && /^\s*use\s/.test(x.text));
+  return mergeRemovals(out).map((e) => (source.slice(e.start - 2, e.start) === "\n\n" && source[e.end] === "\n" && !replaced(e) ? { ...e, end: e.end + 1 } : e));
 }
 
 /** Applies edits that don't overlap, from the last back. */
@@ -440,6 +537,34 @@ function insertionPoints(source: string, body: ClassBody) {
   };
 }
 
+/**
+ * Edits that turn promoted constructor properties into plain parameters the constructor assigns, as they're pulled up:
+ * `private readonly Client $client` becomes `Client $client` and `$this->client = $client;`, after a leading
+ * `parent::__construct(…)`.
+ */
+function demote(source: string, body: ClassBody, promoted: Member[]): Edit[] {
+  const ctor = body.members.find((m) => m.kind === "method" && m.name.toLowerCase() === "__construct");
+  if (!promoted.length || !ctor || ctor.bodyStart < 0) return [];
+  const edits: Edit[] = promoted.map((m) => {
+    const modifiers = source.slice(m.param!.start).match(/^(?:(?:public|protected|private|readonly)(?:\(set\))?\s+)+/)![0];
+    return { start: m.param!.start, end: m.param!.start + modifiers.length, text: "" };
+  });
+  const close = ctor.end - 1;
+  const inner = source.slice(ctor.bodyStart + 1, close);
+  const ctorIndent = lineIndent(source, ctor.declStart);
+  const statementIndent = inner.match(/\n([ \t]+)\S/)?.[1] ?? ctorIndent + (ctorIndent.includes("\t") ? "\t" : "    ");
+  const statements = promoted.map((m) => `${statementIndent}$this->${m.name} = $${m.name};`).join("\n");
+  // After the parent's constructor, which may set up what the parent needs first.
+  const parentCall = commentMask(`<?php ${inner}`).slice(6).match(/^\s*parent\s*::\s*__construct\s*\(/);
+  if (parentCall) {
+    const callEnd = matchBracket(source, ctor.bodyStart + 1 + parentCall[0].length - 1);
+    const semi = source.indexOf(";", callEnd);
+    if (callEnd > 0 && semi > 0) return [...edits, { start: semi + 1, end: semi + 1, text: `\n${statements}` }];
+  }
+  const text = inner.includes("\n") ? `\n${statements}` : `\n${statements}\n${ctorIndent}`;
+  return [...edits, { start: ctor.bodyStart + 1, end: inner.includes("\n") ? ctor.bodyStart + 1 : close, text }];
+}
+
 export type PullUp = {
   source: string;
   body: ClassBody;
@@ -448,6 +573,8 @@ export type PullUp = {
   abstract: Set<Member>;
   target: Target;
   targetBody: ClassBody;
+  /** The project's namespaced functions and constants, so moved calls keep meaning the same ones. */
+  globals?: Globals;
 };
 
 /** The edits to the source class's file and the target's, for Pull Members Up. */
@@ -456,8 +583,9 @@ export function planPullUp(p: PullUp): { source: Edit[]; target: Edit[] } {
   // Members whose declaration the target gets while the source keeps them: methods made abstract, and methods an
   // interface declares.
   const stays = (m: Member) => m.kind === "method" && (p.target.kind === "interface" || p.abstract.has(m));
-  const removed = p.moving.filter((m) => !stays(m));
+  const removed = p.moving.filter((m) => !stays(m) && !m.promoted);
   const sourceEdits = mergeRemovals(removed.map((m) => removal(p.source, m)));
+  sourceEdits.push(...demote(p.source, p.body, p.moving.filter((m) => m.promoted)));
   // Imports the removed code used, which the source may no longer need.
   const { resolve } = nameResolver(commentMask(p.source));
   const used = new Set(removed.flatMap((m) => classNameRefs(memberText(p.source, m)).map((r) => resolve(r.name))));
@@ -466,8 +594,21 @@ export function planPullUp(p: PullUp): { source: Edit[]; target: Edit[] } {
   const imports = new Map<string, string>();
   const indent = p.targetBody.indent;
   const code = (m: Member) => {
-    const text = pulledCode(p.source, m, p.target, p.abstract.has(m), protect.has(m));
-    const moved = requalify(text, p.source, p.target.source, imports).code;
+    if (m.param) {
+      const mods = protect.has(m) ? m.param.modifiers.replace(/\bprivate\b(?!\()/, "protected") : m.param.modifiers;
+      return indent + requalify(`${mods} ${m.param.type ? `${m.param.type} ` : ""}$${m.name};`, p.source, p.target.source, imports, p.globals).code;
+    }
+    let text = pulledCode(p.source, m, p.target, p.abstract.has(m), protect.has(m));
+    // A moving constructor takes its promoted properties along; a private one the class still uses becomes protected.
+    if (m.kind === "method" && /^__construct$/i.test(m.name) && text === memberText(p.source, m)) {
+      const staying = p.body.members.filter((x) => !p.moving.includes(x) && !x.promoted);
+      const shared = p.body.members.filter((x) => x.param && x.visibility === "private" && staying.some((s) => dependencies(p.source, s, p.body.members).includes(x)));
+      for (const x of [...shared].reverse()) {
+        const at = x.param!.start - m.start;
+        text = text.slice(0, at) + text.slice(at).replace(/^((?:readonly\s+)?)private\b(?!\()/, "$1protected");
+      }
+    }
+    const moved = requalify(text, p.source, p.target.source, imports, p.globals).code;
     return indent + reindent(moved, lineIndent(p.source, m.start), indent).trimStart();
   };
   const at = insertionPoints(p.target.source, p.targetBody);
@@ -509,6 +650,7 @@ export type ExtractInterface = {
   name: string;
   namespace: string;
   docs: boolean;
+  globals?: Globals;
 };
 
 /** The new interface file, and the class's edits: `implements` the interface, and its constants moved out. */
@@ -521,7 +663,7 @@ export function planExtractInterface(p: ExtractInterface): { file: string; sourc
   const stub = (m: Member) => {
     let text = withoutAttributes(pulledCode(p.source, m, target, false, false));
     if (!p.docs) text = text.replace(/^\s*\/\*\*[\s\S]*?\*\/\s*/, "");
-    return "    " + reindent(requalify(text, p.source, skeleton, imports).code, lineIndent(p.source, m.start), "    ").trimStart();
+    return "    " + reindent(requalify(text, p.source, skeleton, imports, p.globals).code, lineIndent(p.source, m.start), "    ").trimStart();
   };
   const constants = p.members.filter((m) => m.kind === "constant").map(stub);
   const methods = p.members.filter((m) => m.kind === "method").map(stub);
@@ -557,12 +699,22 @@ export function typeNameProblem(name: string): string | null {
 
 // ---- Checks ----
 
+/** The lowest PHP version a composer.json `require.php` constraint allows, such as [8, 2] for `^8.2|^9.0`. */
+export function phpMinimum(composerJson: string): [number, number] | null {
+  try {
+    const constraint: string = JSON.parse(composerJson).require?.php ?? "";
+    const versions = [...constraint.matchAll(/(\d+)\.(\d+)/g)].map((m) => [Number(m[1]), Number(m[2])] as [number, number]);
+    return versions.length ? versions.sort((a, b) => a[0] - b[0] || a[1] - b[1])[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 /** How the dialogs name a member: `charge()`, `$retries`, or `CURRENCY`. */
 export const memberLabel = (m: Member) => (m.kind === "method" ? `${m.name}()` : m.kind === "property" ? `$${m.name}` : m.name);
 
 /** Why a member can't move to a target of this kind, or null. */
 export function cantPull(m: Member, kind: "class" | "interface"): string | null {
-  if (m.promoted) return "Declared in the constructor. Declare it as a property first to move it.";
   if (kind === "class") return null;
   if (m.kind === "property") return "Interfaces can't declare properties.";
   if (m.visibility !== "public") return "Interfaces declare only public members.";
@@ -585,6 +737,8 @@ export type PullUpCheck = {
   target: { name: string; kind: "class" | "interface"; members: Member[]; isAbstract: boolean };
   /** The target's other direct subclasses and the methods each declares, once known. */
   siblings?: { name: string; methods: Set<string> }[];
+  /** The lowest PHP version composer.json allows, as [major, minor], or null when it doesn't say. */
+  php?: [number, number] | null;
 };
 
 /** What would break, or change meaning, if the members moved: errors block the refactoring, warnings don't. */
@@ -602,10 +756,14 @@ export function pullUpProblems(c: PullUpCheck): Problem[] {
     for (const d of dependencies(c.source, m, c.members))
       if (!c.moving.includes(d) && !c.target.members.some((t) => same(t, d))) left.set(d, [...(left.get(d) ?? []), m]);
   }
+  // A private member left behind is out of the parent's reach, which fails every time; another only exists in this
+  // subclass, which fails for the parent's others.
   for (const [d, users] of left)
     problems.push({
-      level: "warning",
-      text: `${users.map(memberLabel).join(", ")} ${users.length === 1 ? "uses" : "use"} ${memberLabel(d)}, which stays in ${c.sourceName}.`,
+      level: d.visibility === "private" ? "error" : "warning",
+      text: `${users.map(memberLabel).join(", ")} ${users.length === 1 ? "uses" : "use"} ${memberLabel(d)}, which stays in ${c.sourceName}${
+        d.visibility === "private" ? ` as private, where ${c.target.name} can't reach it` : `, so ${c.target.name}'s other subclasses won't have it`
+      }.`,
       fix: cantPull(d, c.target.kind) ? undefined : { label: `Pull ${memberLabel(d)} up too`, members: [d] },
     });
   if (c.target.kind === "class") {
@@ -614,6 +772,14 @@ export function pullUpProblems(c: PullUpCheck): Problem[] {
       const calls = [...memberRefs(memberText(c.source, m)).parentCalls];
       if (calls.length) problems.push({ level: "warning", text: `${memberLabel(m)} calls parent::${calls[0]}(), which in ${c.target.name} means its own parent's.` });
     }
+    // Before PHP 8.4, only the class that declares a readonly property may set it.
+    const readonly = c.moving.filter((m) => m.param?.readonly);
+    const old = !c.php || c.php[0] < 8 || (c.php[0] === 8 && c.php[1] < 4);
+    if (readonly.length && old)
+      problems.push({
+        level: c.php ? "error" : "warning",
+        text: `${readonly.map(memberLabel).join(", ")} ${readonly.length === 1 ? "is" : "are"} readonly, and before PHP 8.4 only ${c.target.name} could set ${readonly.length === 1 ? "it" : "them"}, not ${c.sourceName}'s constructor.${c.php ? ` composer.json allows PHP ${c.php.join(".")}.` : ""}`,
+      });
     const abstracts = c.moving.filter((m) => m.kind === "method" && (c.abstract.has(m) || m.isAbstract));
     if (abstracts.length && !c.target.isAbstract) problems.push({ level: "warning", text: `${c.target.name} becomes abstract, so new ${c.target.name}() stops working.` });
     for (const s of c.siblings ?? []) {
@@ -622,4 +788,190 @@ export function pullUpProblems(c: PullUpCheck): Problem[] {
     }
   }
   return problems;
+}
+
+// ---- Using an extracted interface ----
+
+/** A whole file with comments and strings blanked, keeping offsets. */
+function fileCode(source: string): string {
+  return commentMask(source).replace(/'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"/g, (s) => s.replace(/[^\n]/g, " "));
+}
+
+/** How a file writes a class: by short name when it resolves there, with a new import when the name is free, or in full. */
+function writtenName(masked: string, fqn: string): { name: string; imports: string[] } {
+  const { resolve } = nameResolver(masked);
+  const taken = namesTaken(masked);
+  const short = fqn.split("\\").pop()!;
+  if (resolve(short) === fqn && (taken.get(short.toLowerCase()) ?? fqn) === fqn) return { name: short, imports: [] };
+  if (!taken.has(short.toLowerCase())) return { name: short, imports: [fqn] };
+  return { name: `\\${fqn}`, imports: [] };
+}
+
+/** The top-level parts of a parameter list between `open` and `close`, with their offsets. */
+function paramParts(plain: string, open: number, close: number): { start: number; text: string }[] {
+  const parts: { start: number; text: string }[] = [];
+  let depth = 0;
+  let from = open + 1;
+  for (let i = open + 1; i <= close; i++) {
+    const c = plain[i];
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c) && i < close) depth--;
+    if ((c === "," && depth === 0) || i === close) {
+      if (plain.slice(from, i).trim()) parts.push({ start: from, text: plain.slice(from, i) });
+      from = i + 1;
+    }
+  }
+  return parts;
+}
+
+export type InterfaceUse = { fqn: string; classFqn: string; methods: Set<string>; constants: Set<string> };
+export type HintPlan = { edits: Edit[]; used: number[]; skipped: { offset: number; reason: string }[] };
+
+/**
+ * Where a file can type the interface instead of the class, as PhpStorm's "use interface where possible" does: a
+ * parameter used only to call the interface's methods and read its constants, and a private property (declared or
+ * promoted) used only that way and assigned. Anything else stays, with the reason: passing the value on, a method the
+ * interface lacks, a property others can see, or an abstract declaration, whose implementations would all have to
+ * change. Return types stay, since callers may use more of the class. Docblock `@param` and `@var` types follow.
+ */
+export function typeHintsFor(source: string, use: InterfaceUse): HintPlan {
+  const plain = fileCode(source);
+  const { resolve } = nameResolver(plain);
+  const ifaceShort = use.fqn.split("\\").pop()!;
+  const plan: HintPlan = { edits: [], used: [], skipped: [] };
+  const names = writtenName(plain, use.fqn);
+  const typeRefs = (text: string, at: number) =>
+    [...text.matchAll(/\\?[A-Za-z_][\w\\]*/g)].filter((n) => resolve(n[0]) === use.classFqn).map((n) => ({ start: at + n.index!, end: at + n.index! + n[0].length }));
+
+  /** Why a variable's uses in a body need more than the interface, or null. */
+  const varProblem = (from: number, to: number, variable: string): string | null => {
+    for (const m of plain.slice(from, to).matchAll(new RegExp(`\\$${variable}\\b`, "g"))) {
+      const after = plain.slice(from + m.index! + m[0].length);
+      const call = after.match(/^\s*\??->\s*(\w+)(\s*\()?/);
+      if (call?.[2] && use.methods.has(call[1].toLowerCase())) continue;
+      if (call?.[2]) return `calls $${variable}->${call[1]}(), which ${ifaceShort} doesn't declare`;
+      if (call) return `reads $${variable}->${call[1]}`;
+      const constant = after.match(/^\s*::\s*(\w+)/);
+      if (constant && (constant[1] === "class" || use.constants.has(constant[1]))) continue;
+      if (/^\s*instanceof\b/.test(after)) continue;
+      // A promoted parameter's value going into its own property, which is checked on its own.
+      if (new RegExp(`\\$this\\s*->\\s*${variable}\\s*=\\s*$`).test(plain.slice(from, from + m.index!)) && /^\s*;/.test(after)) continue;
+      return `passes $${variable} on, or uses it in a way the interface may not allow`;
+    }
+    return null;
+  };
+  /** Why a property's uses in its class need more than the interface, or null. */
+  const propertyProblem = (from: number, to: number, property: string): string | null => {
+    for (const m of plain.slice(from, to).matchAll(new RegExp(`\\$this\\s*\\??->\\s*${property}\\b(?!\\s*\\()`, "g"))) {
+      const after = plain.slice(from + m.index! + m[0].length);
+      const call = after.match(/^\s*\??->\s*(\w+)(\s*\()?/);
+      if (call?.[2] && use.methods.has(call[1].toLowerCase())) continue;
+      if (/^\s*=(?![=>])/.test(after)) continue;
+      if (call?.[2]) return `calls $this->${property}->${call[1]}(), which ${ifaceShort} doesn't declare`;
+      return `uses $this->${property} in a way the interface may not allow`;
+    }
+    return null;
+  };
+  const replace = (refs: { start: number; end: number }[], docFrom: number, docTag: RegExp) => {
+    for (const r of refs) plan.edits.push({ start: r.start, end: r.end, text: names.name });
+    plan.used.push(refs[0].start);
+    // The same type in the docblock tag for it.
+    const doc = docStart(source, docFrom);
+    if (doc === docFrom) return;
+    for (const tag of source.slice(doc, docFrom).matchAll(docTag)) {
+      const at = doc + tag.index! + tag[0].indexOf(tag[1]);
+      for (const r of typeRefs(tag[1], at)) plan.edits.push({ start: r.start, end: r.end, text: names.name });
+    }
+  };
+
+  const types = parseTypeDeclarations(source).map((t) => ({ t, body: classBody(source, t.offset) }));
+  const classOf = (offset: number) => types.find(({ body }) => body && offset > body.open && offset < body.close);
+
+  // Parameters of functions, methods, and closures, and promoted properties.
+  for (const m of plain.matchAll(/\b(function|fn)\b\s*&?\s*(\w*)\s*\(/g)) {
+    const open = m.index! + m[0].length - 1;
+    const close = matchBracket(plain, open);
+    if (close < 0) continue;
+    const brace = m[1] === "function" ? topLevel(source, plain, close + 1, "{;") : -1;
+    const bodyEnd = brace >= 0 && plain[brace] === "{" ? matchBracket(source, brace) : -1;
+    let keyword = m.index!;
+    const mods = plain.slice(0, keyword).match(/(?:(?:public|protected|private|static|abstract|final)\s+)*$/)!;
+    keyword -= mods[0].length;
+    for (const part of paramParts(plain, open, close)) {
+      const p = part.text.match(/^(\s*(?:#\[[\s\S]*?\]\s*)*)((?:(?:public|protected|private|readonly)(?:\(set\))?\s+)*)([?\w\\|&()\s]*?)\s*&?\s*(?:\.\.\.)?\s*\$(\w+)/);
+      if (!p || !p[3].trim()) continue;
+      const refs = typeRefs(p[3], part.start + p[1].length + p[2].length);
+      if (!refs.length) continue;
+      const at = refs[0].start;
+      const skip = (reason: string) => plan.skipped.push({ offset: at, reason });
+      if (m[1] === "fn") {
+        skip("a parameter of an arrow function");
+        continue;
+      }
+      if (bodyEnd < 0) {
+        skip("an abstract or interface method, whose implementations would have to change too");
+        continue;
+      }
+      const promoted = p[2].trim();
+      let why = varProblem(brace, bodyEnd, p[4]);
+      if (promoted) {
+        const owner = classOf(m.index!);
+        if (!/\bprivate\b/.test(promoted)) why ??= `$${p[4]} is ${promoted.match(/public|protected/)?.[0] ?? "public"}, so code outside the class may use more of it`;
+        else if (owner?.body) why ??= propertyProblem(owner.body.open, owner.body.close, p[4]);
+      }
+      if (why) skip(why);
+      else replace(refs, keyword, new RegExp(`@param\\s+((?:[^\\s$<]|<[^>]*>)+)\\s+\\$${p[4]}\\b`, "g"));
+    }
+  }
+  // Declared properties.
+  for (const { body } of types) {
+    for (const member of body?.members ?? []) {
+      if (member.kind !== "property" || member.promoted) continue;
+      const decl = plain.slice(member.declStart, member.end).match(/^((?:(?:public|protected|private|static|readonly|var)(?:\(set\))?\s+)+)([?\w\\|&()]+)\s+&?\$(\w+)/);
+      if (!decl) continue;
+      const refs = typeRefs(decl[2], member.declStart + decl[1].length);
+      if (!refs.length) continue;
+      const why = /\bstatic\b/.test(decl[1])
+        ? "a static property"
+        : member.visibility !== "private"
+          ? `$${member.name} is ${member.visibility}, so code outside the class may use more of it`
+          : propertyProblem(body!.open, body!.close, member.name);
+      if (why) plan.skipped.push({ offset: refs[0].start, reason: why });
+      else replace(refs, member.declStart, /@var\s+((?:[^\s$<]|<[^>]*>)+)/g);
+    }
+  }
+  if (!plan.used.length) return { ...plan, edits: [] };
+  plan.edits.push(...importEdits(source, names.imports));
+  plan.edits.push(...unusedImports(source, plan.edits, new Set([use.classFqn])));
+  return plan;
+}
+
+/**
+ * Edits that bind the interface to the class in a Laravel service provider's `register()`, so the container can
+ * resolve type hints that now name the interface. Empty when the provider already names the interface.
+ */
+export function bindingEdits(provider: string, ifaceFqn: string, classFqn: string): Edit[] {
+  const masked = commentMask(provider);
+  const iface = writtenName(masked, ifaceFqn);
+  const cls = writtenName(masked, classFqn);
+  if (new RegExp(`\\b${iface.name.replace(/\\/g, "\\\\")}::class\\b`).test(masked)) return [];
+  const line = `$this->app->bind(${iface.name}::class, ${cls.name}::class);`;
+  const imports = importEdits(provider, [...iface.imports, ...cls.imports]);
+  const register = masked.match(/\bfunction\s+register\s*\([^)]*\)[^{;]*\{/);
+  if (register) {
+    const open = register.index! + register[0].length - 1;
+    const close = matchBracket(provider, open);
+    const methodIndent = lineIndent(provider, register.index!);
+    const indent = `${methodIndent}${methodIndent.includes("\t") ? "\t" : "    "}`;
+    const inner = provider.slice(open + 1, close);
+    // Laravel's stock register() holds only a `//` placeholder, which the binding replaces.
+    if (/^\s*(\/\/[^\n]*)?\s*$/.test(inner)) return [...imports, { start: open + 1, end: close, text: `\n${indent}${line}\n${methodIndent}` }];
+    return [...imports, { start: open + 1, end: open + 1, text: `\n${indent}${line}` }];
+  }
+  const type = parseTypeDeclarations(provider)[0];
+  const body = type && classBody(provider, type.offset);
+  if (!body) return [];
+  const indent = body.indent;
+  const method = `\n${indent}public function register(): void\n${indent}{\n${indent}    ${line}\n${indent}}\n`;
+  return [...imports, { start: body.open + 1, end: body.open + 1, text: body.members.length ? method : method.trimEnd() }];
 }
