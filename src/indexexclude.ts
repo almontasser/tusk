@@ -1,4 +1,4 @@
-// Folders Phpactor's index and Mago skip, per project: vendor data that declares no symbols, such as AWS's API
+// Folders the PHP index and Mago skip, per project: vendor data that declares no symbols, such as AWS's API
 // arrays and packages' translations. The list is the project's `tusk.json` `indexExclude` when it has one,
 // so a team can share it; otherwise it's kept in the editor, and a project that never set it gets the defaults.
 import { invoke } from "@tauri-apps/api/core";
@@ -12,8 +12,6 @@ export const DEFAULT_EXCLUDES = [
   "vendor/**/resources/views",
 ];
 
-/** Phpactor's `indexer.exclude_patterns` for the list: each folder's files. */
-export const phpactorPatterns = (list: string[]) => list.map((p) => `/${p}/**/*`);
 
 /** Mago's `excludes` for the list. Mago matches a glob against file paths, so a folder glob needs `/**`. */
 export const magoExcludes = (list: string[]) => list.map((p) => (p.includes("*") ? `${p}/**` : p));

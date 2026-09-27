@@ -1,29 +1,21 @@
 // Generate (⌘N in a PHP file), as in PhpStorm: a constructor, getters, setters, __toString(), and methods to
-// implement or override. Phpactor writes getters, setters, and methods through its commands and code actions;
-// the constructor from properties and __toString() are written here, since Phpactor has no such action.
+// implement or override. Tusk's server writes getters, setters, and methods through its commands and code actions;
+// the constructor from properties and __toString() are written here as snippets.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, phpactorRequest, typeSymbol } from "./lsp";
+import { runTuskAction, tuskRequest } from "./lsp";
 import { pick, type Item } from "./palette";
-import { abstractMethods, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
-import { readText } from "./projectfiles";
+import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
 import { classProperties, matchBracket, type Property } from "./refactorparse";
 
 type Host = { status(text: string): void };
 let host: Host;
 
-// Phpactor's code actions that generate code, by kind.
-const PHPACTOR_KINDS = /^quickfix\.(complete_constructor|promote_constructor|implement_contracts|override_method|add_missing_properties)/;
+// The server's code actions that generate code, by kind.
+const GENERATE_KINDS = /^quickfix\.(complete_constructor|promote_constructor|implement_contracts|override_method|add_missing_properties)/;
 
 const upperFirst = (s: string) => s[0].toUpperCase() + s.slice(1);
-
-/** Runs a Phpactor code action or command: its edit, then its command, whose edits come back as `workspace/applyEdit`. */
-async function runAction(a: L.CodeAction | L.Command) {
-  const command = typeof a.command === "string" ? (a as L.Command) : a.command;
-  if ("edit" in a && a.edit) await applyWorkspaceEdit(a.edit);
-  if (command) await phpactorRequest("workspace/executeCommand", { command: command.command, arguments: command.arguments });
-}
 
 /** Inserts a snippet at the start of a 1-based line. */
 function insertAt(editor: monaco.editor.ICodeEditor, line: number, snippet: string) {
@@ -51,25 +43,18 @@ export async function generate(editor: monaco.editor.ICodeEditor) {
   const unit = insertSpaces ? " ".repeat(indentSize) : "\t";
   const closeLine = model.getPositionAt(close).lineNumber;
   const indent = model.getLineContent(closeLine).match(/^\s*/)![0] + unit;
-  // A new method goes last, after a blank line unless the line before the brace is blank already. The brace is
-  // found again, since Phpactor's Implement Methods may have added lines first.
-  const atEnd = (code: string) => {
-    const now = model.getValue();
-    const decl = parseTypeDeclarations(now).find((t) => t.fqn === type.fqn);
-    const brace = decl ? matchBracket(now, now.indexOf("{", decl.offset)) : -1;
-    const line = brace >= 0 ? model.getPositionAt(brace).lineNumber : closeLine;
-    insertAt(editor, line, (model.getLineContent(line - 1).trim() ? "\n" : "") + code);
-  };
+  // A new method goes last, after a blank line unless the line before the brace is blank already.
+  const atEnd = (code: string) => insertAt(editor, closeLine, (model.getLineContent(closeLine - 1).trim() ? "\n" : "") + code);
   const method = (signature: string, lines: string[]) => [`${indent}${signature}`, `${indent}{`, ...lines.map((l) => `${indent}${unit}${l}`), `${indent}}`, ""].join("\n");
 
   const items: Item[] = [];
   const unset = props.filter((p) => !p.promoted && !p.hasDefault);
   if (unset.length && !has("__construct"))
     items.push({ label: "Constructor", detail: unset.map((p) => `$${p.name}`).join(", "), run: () => constructor(editor, model, open + 1 + Math.max(...all.map((p) => p.end)), unset, method) });
-  // Getters and setters from Phpactor, named getTitle and setTitle as in PhpStorm (see the settings in src/lsp.ts).
-  // The class's offset in UTF-8 bytes tells Phpactor which class of the file is meant.
+  // Getters and setters from the server, named getTitle and setTitle as in PhpStorm.
+  // The class's offset in UTF-8 bytes tells the server which class of the file is meant.
   const at = new TextEncoder().encode(text.slice(0, type.offset)).length;
-  const run = (command: string, names: string[]) => phpactorRequest("workspace/executeCommand", { command, arguments: [model.uri.toString(), at, names] });
+  const run = (command: string, names: string[]) => tuskRequest("workspace/executeCommand", { command, arguments: [model.uri.toString(), at, names] });
   const getters = props.filter((p) => !has(`get${upperFirst(p.name)}`)).map((p) => p.name);
   const setters = props.filter((p) => !p.readonly && !has(`set${upperFirst(p.name)}`)).map((p) => p.name);
   if (getters.length) items.push({ label: "Getters", detail: getters.map((n) => `$${n}`).join(", "), run: () => run("generate_accessors", getters) });
@@ -79,47 +64,19 @@ export async function generate(editor: monaco.editor.ICodeEditor) {
   if (!has("__toString")) items.push({ label: "__toString()", run: () => atEnd(method("public function __toString(): string", ["return ${1:''};$0"])) });
 
   const actions =
-    (await phpactorRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
+    (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
       range: { start: { line: pos.lineNumber - 1, character: pos.column - 1 }, end: { line: pos.lineNumber - 1, character: pos.column - 1 } },
       context: { diagnostics: [] },
     }).catch(() => null)) ?? [];
-  // Phpactor implements interfaces and abstract parents, but skips the abstract methods of the class's traits.
-  const stubs = (await traitAbstracts(type)).filter((m) => !has(m.name));
-  const writeStubs = () => atEnd(snippetText(stubs.map((m) => method(shortenNames(m.signature, text), [])).join("\n")));
-  let implemented = false;
   for (const a of actions) {
     const kind = "kind" in a ? a.kind : undefined;
-    if (!kind || !PHPACTOR_KINDS.test(kind)) continue;
-    const implement = kind.includes("implement_contracts");
-    implemented ||= implement;
-    const label = implement ? "Implement Methods…" : kind.includes("override_method") ? "Override Methods…" : a.title;
-    items.push({ label, detail: kind.includes("override") ? a.title : undefined, run: () => (implement && stubs.length ? runAction(a).then(writeStubs) : runAction(a)) });
+    if (!kind || !GENERATE_KINDS.test(kind)) continue;
+    const label = kind.includes("implement_contracts") ? "Implement Methods…" : kind.includes("override_method") ? "Override Methods…" : a.title;
+    items.push({ label, detail: kind.includes("override") ? a.title : undefined, run: () => runTuskAction(a) });
   }
-  if (!implemented && stubs.length) items.push({ label: "Implement Methods…", detail: stubs.map((m) => `${m.name}()`).join(", "), run: writeStubs });
   if (!items.length) return host.status("Nothing to generate here.");
   pick("Generate", () => items);
-}
-
-/**
- * The abstract methods of the traits a type uses, and of the traits those use, each read from its file.
- * ponytail: a trait that Phpactor's index doesn't know yet, such as one created since the last index, is skipped.
- */
-async function traitAbstracts(type: TypeDeclaration): Promise<{ name: string; signature: string }[]> {
-  const queue = [...type.uses];
-  const seen = new Set(queue);
-  const methods: { name: string; signature: string }[] = [];
-  for (let fqn = queue.shift(); fqn; fqn = queue.shift()) {
-    const path = (await typeSymbol(fqn))?.path;
-    if (!path) continue;
-    const source = monaco.editor.getModel(monaco.Uri.file(path))?.getValue() ?? (await readText(path).catch(() => ""));
-    const types = parseTypeDeclarations(source);
-    const i = types.findIndex((t) => t.fqn === fqn);
-    if (i < 0) continue;
-    for (const m of abstractMethods(source, types[i].offset, types[i + 1]?.offset)) if (!methods.some((x) => x.name === m.name)) methods.push(m);
-    for (const u of types[i].uses) if (!seen.has(u)) (seen.add(u), queue.push(u));
-  }
-  return methods;
 }
 
 /** Inserts a constructor that takes and assigns the properties, below the line of `after`: the last property's `;`. */

@@ -44,16 +44,16 @@ pub fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("tools"))
 }
 
-/// The path of a tool's file, such as `mago/mago`. The editor's mago.toml and the Filament server are
+/// The path of a tool's file, such as `mago/mago`. The editor's mago.toml and introspect.php are
 /// small files from this repository, so they ship inside the app instead.
 pub fn tool(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
-    if path == "mago.toml" || path.starts_with("filament-lsp/") {
+    if path == "mago.toml" || path == "introspect.php" {
         return Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools").join(path));
     }
     Ok(tools_dir(app)?.join(path))
 }
 
-/// Starts the bundled language server `name` (`phpactor`, `laravel`, `filament`, `tailwind`, `typescript`, `vue`, `svelte`, `astro`, or `angular`) for `root`, replacing a running one with the
+/// Starts the bundled language server `name` (`tusk`, `tailwind`, `typescript`, `vue`, `svelte`, `astro`, or `angular`) for `root`, replacing a running one with the
 /// same name. Each message from the server is emitted as a `lsp:<name>` event (raw JSON).
 /// Returns this app's process ID, which the client sends as `processId` so that servers
 /// exit if the app dies without stopping them.
@@ -65,9 +65,8 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
     let ts_probe = format!("{root},{ng_dir}");
     // (runtime, script inside the tools folder, arguments)
     let (runtime, script, args): (&str, &str, &[&str]) = match name.as_str() {
-        "phpactor" => ("php", "phpactor/phpactor.phar", &["language-server"]),
-        "laravel" => ("php", "laravel-lsp/laravel-lsp.phar", &[]),
-        "filament" => ("php", "filament-lsp/server.php", &[]),
+        // PHP, Laravel, and Filament: this app's own binary in its language server mode.
+        "tusk" => ("", "", &["lsp"]),
         "tailwind" => ("node", "node/node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server", &["--stdio"]),
         "typescript" => ("node", "node/node_modules/@vtsls/language-server/bin/vtsls.js", &["--stdio"]),
         "vue" => ("node", "node/node_modules/@vue/language-server/bin/vue-language-server.js", &["--stdio"]),
@@ -80,18 +79,17 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         "xdebug" => ("node", "php-debug/out/phpDebug.js", &[]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
-    if name == "laravel" {
+    // Laravel LSP ran its PHP helpers from the project, and a stopped one could leave them behind.
+    if name == "tusk" {
         clean_laravel_helpers(Path::new(&root));
     }
+    let program = if name == "tusk" { std::env::current_exe().map_err(|e| e.to_string())? } else { tool(&app, script)? };
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
         .args((!runtime.is_empty()).then_some(runtime))
-        .arg(tool(&app, script)?)
+        .arg(program)
         .args(args)
         .current_dir(&root)
-        // Phpactor runs Mago after each pause in typing; half the cores costs about half the CPU for
-        // much the same time. The Problems panel's scan runs Mago itself, on every core.
-        .env("MAGO_THREADS", std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(2)).to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

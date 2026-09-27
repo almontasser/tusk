@@ -262,7 +262,11 @@ fn describe(ctx: &Ctx<'_>, symbol: &Symbol, start: u32, end: u32) -> Option<Stri
                 .map_or(class.clone(), |w| crate::types::display_class(&w.as_str_lossy(), codebase));
             let (p, magic) = match codebase.get_declaring_property(class.as_bytes(), prop.as_bytes()) {
                 Some(p) => (p, false),
-                None => (codebase.get_declaring_magic_property(class.as_bytes(), prop.as_bytes())?, true),
+                None => match codebase.get_declaring_magic_property(class.as_bytes(), prop.as_bytes()) {
+                    Some(p) => (p, true),
+                    // Eloquent reads a relation method as a property: `$post->author` for `author()`.
+                    None => return describe(ctx, &Symbol::Method { class: class.clone(), name: name.clone() }, start, end),
+                },
             };
             let ty = p.type_metadata.as_ref().map(|t| display(&t.type_union)).unwrap_or_else(|| "mixed".into());
             let fallback = format!("{ty} {prop}");

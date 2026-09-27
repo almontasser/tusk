@@ -1366,7 +1366,7 @@ const kindIcons: Record<number, string> = {
 async function symbolItems(query: string, typesOnly: boolean): Promise<Item[]> {
   if (!query.trim()) return [];
   const symbols = (await workspaceSymbols(query)).filter(
-    // Phpactor also indexes the PHP stubs inside its own .phar, which can't be opened.
+    // Symbols in a PHP archive's stubs can't be opened.
     (s) => (!typesOnly || typeKinds.includes(s.kind)) && !s.path.includes(".phar/"),
   );
   const items = symbols.map((s) => ({

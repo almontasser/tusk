@@ -43,7 +43,7 @@
     ],
     "resources": {
       "resources/mago.toml": "tools/mago.toml",
-      "../filament-lsp/": "tools/filament-lsp/"
+      "../tusk-lsp/php/introspect.php": "tools/introspect.php"
     },
     "createUpdaterArtifacts": true,
     "macOS": {

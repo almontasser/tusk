@@ -34,7 +34,7 @@ use crate::scope::{resolve_class, scope_at};
 use crate::text::path_to_uri;
 
 /// The script that describes resources and models, run in its own PHP process so edited classes load fresh.
-const INTROSPECT: &str = include_str!("../../../filament-lsp/introspect.php");
+const INTROSPECT: &str = include_str!("../../php/introspect.php");
 
 /// Folders whose changes can change what introspection reports.
 const DEPENDS_ON: &[&str] = &["app/", "config/", "database/", "composer.lock"];

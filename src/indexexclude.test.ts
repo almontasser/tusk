@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { covers, DEFAULT_EXCLUDES, magoExcludes, phpactorPatterns, sharedList, withSharedList } from "./indexexclude.ts";
+import { covers, DEFAULT_EXCLUDES, magoExcludes, sharedList, withSharedList } from "./indexexclude.ts";
 
-test("turns folders into Phpactor and Mago patterns", () => {
-  assert.deepEqual(phpactorPatterns(["vendor/aws/aws-sdk-php/src/data", "vendor/**/resources/lang"]), ["/vendor/aws/aws-sdk-php/src/data/**/*", "/vendor/**/resources/lang/**/*"]);
+test("turns folders into Mago patterns", () => {
   // Mago matches globs against files: a plain folder works as is, a glob needs /**.
   assert.deepEqual(magoExcludes(["vendor/aws/aws-sdk-php/src/data", "vendor/**/resources/lang"]), ["vendor/aws/aws-sdk-php/src/data", "vendor/**/resources/lang/**"]);
 });

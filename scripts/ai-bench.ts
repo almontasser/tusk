@@ -35,7 +35,7 @@ const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclud
 const texts = new Map(files.map((f) => [f, readFileSync(`${root}/${f}`, "utf8")] as const));
 let models: Record<string, ModelFacts> = {};
 if (existsSync(`${root}/vendor/autoload.php`)) {
-  const out = JSON.parse(execFileSync("php", [new URL("../filament-lsp/introspect.php", import.meta.url).pathname, root, "models"], { encoding: "utf8" }));
+  const out = JSON.parse(execFileSync("php", [new URL("../tusk-lsp/php/introspect.php", import.meta.url).pathname, root, "models"], { encoding: "utf8" }));
   if (!out.error) models = out;
 }
 const index: Index = {

@@ -60,7 +60,7 @@ function classAtCaret(editor: monaco.editor.ICodeEditor, kinds: TypeDeclaration[
   return { model, text, type, body: body!, member };
 }
 
-/** Where a class is declared: its PSR-4 path when that file exists, or else what Phpactor's index says. */
+/** Where a class is declared: its PSR-4 path when that file exists, or else what the PHP index says. */
 async function locate(fqn: string): Promise<string | null> {
   const psr4 = psr4From((await readText(`${host.root()}/composer.json`).catch(() => "")) || "{}");
   for (const rel of pathsFor(fqn, psr4)) if (await invoke<boolean>("path_exists", { path: `${host.root()}/${rel}` }).catch(() => false)) return `${host.root()}/${rel}`;

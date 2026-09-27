@@ -1,4 +1,4 @@
-// The Index Exclusions dialog: the vendor folders Phpactor's index and Mago skip, with a scan that suggests
+// The Index Exclusions dialog: the vendor folders the PHP index and Mago skip, with a scan that suggests
 // more (folders whose PHP files declare nothing), and where the list is kept. See indexexclude.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { h, icon, iconButton } from "./dom";
@@ -82,7 +82,7 @@ export function editExclusions({ root, list: initial, shared: initialShared, fou
       h(
         "p",
         { class: "muted" },
-        "Phpactor's index and Mago skip these folders. Skip folders whose PHP files declare no classes or functions, such as data and translations: indexing gets faster, and nothing goes missing.",
+        "The PHP index and Mago skip these folders. Skip folders whose PHP files declare no classes or functions, such as data and translations: indexing gets faster, and nothing goes missing.",
       ),
       h("div", { class: "exclusions-table" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Skipped folders"), h("th"))), excludedRows)),
       h("div", { class: "exclusions-tools" }, addInput, h("button", { type: "button", onclick: add }, icon("add"), "Add"), h("button", { type: "button", onclick: () => ((list = [...DEFAULT_EXCLUDES]), render()) }, "Restore Defaults")),

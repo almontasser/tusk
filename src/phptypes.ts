@@ -146,7 +146,7 @@ function docblockAt(source: string, at: number): string {
 }
 
 /**
- * Phpactor's hover Markdown, easier to read: in each PHP code block, a `// @deprecated …` comment becomes a line
+ * A hover's Markdown, easier to read: in each PHP code block, a `// @deprecated …` comment becomes a line
  * above the block, and a function signature longer than 80 characters gets one parameter per line.
  */
 export function formatHoverMarkdown(markdown: string): string {

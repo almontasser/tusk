@@ -47,8 +47,12 @@ pub fn declaration(symbol: &Symbol, codebase: &CodebaseMetadata) -> Option<Place
             let p = codebase
                 .get_declaring_property(class.as_bytes(), prop.as_bytes())
                 .or_else(|| codebase.get_property(class.as_bytes(), prop.as_bytes()))
-                .or_else(|| codebase.get_declaring_magic_property(class.as_bytes(), prop.as_bytes()))?;
-            p.name_span.or(p.span).map(Into::into)
+                .or_else(|| codebase.get_declaring_magic_property(class.as_bytes(), prop.as_bytes()));
+            match p {
+                Some(p) => p.name_span.or(p.span).map(Into::into),
+                // Eloquent reads a relation method as a property: `$post->author` for `author()`.
+                None => declaration(&Symbol::Method { class: class.clone(), name: name.clone() }, codebase),
+            }
         }
         Symbol::ClassConstant { class, name } => {
             if let Some(case) = codebase.get_enum_case(class.as_bytes(), name.as_bytes()) {

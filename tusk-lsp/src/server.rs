@@ -188,6 +188,7 @@ pub struct Server {
     indexer: Indexer,
     diagnostics: Sender<diagnostics::Event>,
     framework: Arc<crate::framework::State>,
+    phpstan: Arc<crate::phpstan::PhpStan>,
     pool: rayon::ThreadPool,
     root: PathBuf,
     options: Options,
@@ -251,7 +252,12 @@ impl Server {
         let (tx, rx) = crossbeam_channel::unbounded();
         let applied = Arc::new((Mutex::new(0), Condvar::new()));
         let framework = Arc::new(crate::framework::State::new(root.clone()));
-        let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone(), framework.clone(), root.clone());
+        let phpstan = Arc::new(crate::phpstan::PhpStan::default());
+        let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone(), framework.clone(), phpstan.clone(), root.clone());
+        let refresh = diagnostics.clone();
+        phpstan.start(&root, move |path| {
+            let _ = refresh.send(diagnostics::Event::Refresh(path));
+        });
         spawn_indexer(rx, index.clone(), docs.clone(), applied.clone(), client.clone(), diagnostics.clone());
         let indexer = Indexer { tx, queued: AtomicU64::new(0), applied };
         indexer.send(Job::Build(None));
@@ -261,7 +267,7 @@ impl Server {
             .stack_size(64 << 20)
             .build()
             .expect("the request pool starts");
-        Self { client, docs, index, indexer, diagnostics, framework, pool, root, options, shutting_down: false }
+        Self { client, docs, index, indexer, diagnostics, framework, phpstan, pool, root, options, shutting_down: false }
     }
 
     fn main_loop(&mut self, receiver: &Receiver<Message>) {
@@ -343,6 +349,7 @@ impl Server {
                 let Some(p) = extract::<DidOpenTextDocumentParams>(note) else { return };
                 let Some(path) = uri_to_path(&p.text_document.uri) else { return };
                 let doc = Document::new(p.text_document.uri, path.clone(), p.text_document.language_id, p.text_document.version, p.text_document.text);
+                self.phpstan.check(&path);
                 self.changed(path, doc);
             }
             notification::DidChangeTextDocument::METHOD => {
@@ -368,6 +375,7 @@ impl Server {
                 let Some(p) = extract::<DidSaveTextDocumentParams>(note) else { return };
                 if let Some(path) = uri_to_path(&p.text_document.uri) {
                     self.framework.changed(&path);
+                    self.phpstan.check(&path);
                 }
             }
             notification::DidChangeWatchedFiles::METHOD => {
