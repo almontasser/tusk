@@ -575,7 +575,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -2870,6 +2870,24 @@ dependencies = [
  "mago-span",
  "mago-syntax",
  "memchr",
+]
+
+[[package]]
+name = "mago-formatter"
+version = "1.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b69c7d02c0e44e918a65ffb93d7bb57ba40e806b24e1d249e4de513f6dcbd153"
+dependencies = [
+ "foldhash",
+ "mago-allocator",
+ "mago-database",
+ "mago-php-version",
+ "mago-span",
+ "mago-syntax",
+ "memchr",
+ "schemars 1.2.2",
+ "serde",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -6641,6 +6659,7 @@ dependencies = [
  "mago-analyzer",
  "mago-codex",
  "mago-database",
+ "mago-formatter",
  "mago-linter",
  "mago-names",
  "mago-php-version",
@@ -6649,6 +6668,7 @@ dependencies = [
  "mago-span",
  "mago-syntax",
  "mago-syntax-core",
+ "mago-text-edit",
  "mago-word",
  "parking_lot",
  "percent-encoding",

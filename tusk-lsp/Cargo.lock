@@ -718,6 +718,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mago-formatter"
+version = "1.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b69c7d02c0e44e918a65ffb93d7bb57ba40e806b24e1d249e4de513f6dcbd153"
+dependencies = [
+ "foldhash",
+ "mago-allocator",
+ "mago-database",
+ "mago-php-version",
+ "mago-span",
+ "mago-syntax",
+ "memchr",
+ "schemars",
+ "serde",
+ "unicode-width",
+]
+
+[[package]]
 name = "mago-linter"
 version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1680,6 +1698,7 @@ dependencies = [
  "mago-analyzer",
  "mago-codex",
  "mago-database",
+ "mago-formatter",
  "mago-linter",
  "mago-names",
  "mago-php-version",
@@ -1688,6 +1707,7 @@ dependencies = [
  "mago-span",
  "mago-syntax",
  "mago-syntax-core",
+ "mago-text-edit",
  "mago-word",
  "mimalloc",
  "parking_lot",

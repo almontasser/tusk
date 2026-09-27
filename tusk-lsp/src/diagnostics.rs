@@ -109,12 +109,17 @@ fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::ph
 /// The problems in `doc`: Mago's for PHP, and the framework's for PHP and Blade.
 pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
     let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { vec![] };
-    let framework = crate::features::with_ctx(snap, &doc.uri, |ctx| crate::framework::diagnostics(ctx)).unwrap_or_default();
+    let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
     out.extend(framework);
     out
 }
 
 pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
+    php_problems_in(&index.read(), doc)
+}
+
+/// [`php_problems`] with the index already locked, for work that runs in parallel and mustn't take the lock.
+pub fn php_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
     // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
     // the end of the file, which would hide a missing `}`.
@@ -122,7 +127,6 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
     // After the first errors, the rest are mostly the parser losing its way, and each costs a position lookup.
     let syntax: Vec<Issue> = exact.program.errors.iter().take(100).map(Issue::from).collect();
     let parsed = if syntax.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
-    let index = index.read();
     let mago = index.config.mago.clone();
     let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
     let complex = crate::analysis::too_complex(parsed.program);
@@ -135,7 +139,6 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
             .filter(|i| mago.reports_analysis(&rel, i.code.as_deref()))
             .filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")),
     );
-    drop(index);
     if complex {
         return out;
     }
@@ -149,6 +152,12 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
 /// Mago's linter on the document. Its rules match excluded paths against the file's name, so the file is
 /// named by its path relative to the project, as Mago names it.
 fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> Vec<Diagnostic> {
+    let (file, issues) = lint_issues(doc, rel, mago);
+    issues.iter().filter_map(|i| to_diagnostic(doc, file, i, "mago-lint")).collect()
+}
+
+/// The linter's issues, with their fixes, and the ID of the file they're in.
+pub fn lint_issues(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> (mago_database::file::FileId, Vec<Issue>) {
     let arena = LocalArena::new();
     let name = rel.to_string_lossy().into_owned().into_bytes();
     let file = mago_database::file::File::new(
@@ -160,10 +169,10 @@ fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoCo
     let program = mago_syntax::parser::parse_file(&arena, &file);
     let names = mago_names::resolver::NameResolver::new(&arena).resolve(program);
     let linter = mago_linter::Linter::from_registry(&arena, mago.rules.clone(), mago.linter.php_version);
-    linter.lint(&file, program, &names).iter().filter_map(|i| to_diagnostic(doc, file.id, i, "mago-lint")).collect()
+    (file.id, linter.lint(&file, program, &names).into_iter().collect())
 }
 
-fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
+pub fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
     let primary = issue
         .annotations
         .iter()

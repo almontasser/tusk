@@ -9,7 +9,7 @@ import { filterFor, type TestResult } from "./junit";
 import { type Container, runningContainer } from "./sail";
 import { openTerminal } from "./terminal";
 import { initTestResults, showLive, showResults } from "./testresults";
-import { workspaceSymbols } from "./lsp";
+import { TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
 import { formRequestParameter, methodBody, methodLine, routeTarget, validationRules } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
@@ -249,7 +249,7 @@ export async function classFile(fqn: string): Promise<string | undefined> {
   for (const rel of pathsFor(fqn, psr4)) if (await exists(rel)) return `${root}/${rel}`;
   const short = fqn.split("\\").pop()!;
   const namespace = fqn.slice(0, -short.length - 1);
-  const symbols = (await workspaceSymbols(short)).filter((s) => s.name === short && !s.path.includes(".phar/"));
+  const symbols = (await workspaceSymbols(short)).filter((s) => s.name === short && TYPE_KINDS.includes(s.kind) && !s.path.includes(".phar/"));
   return (symbols.find((s) => s.container === namespace) ?? symbols[0])?.path;
 }
 

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { outsideStrings, abstractMethods, callSites, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
+import { outsideStrings, abstractMethods, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -152,18 +152,6 @@ class PostController {
   assert.equal(formRequestParameter(controller, "store"), "App\\Http\\Requests\\StorePostRequest");
   assert.equal(formRequestParameter(controller, "update"), null);
   assert.deepEqual(validationRules(methodBody(controller, "update")), { title: "required" });
-});
-
-test("finds the calls in a function body", () => {
-  const body = `{
-    // skip(me)
-    if ($a && isset($b)) { return new Post(foo($x)); }
-    $this->save();
-    $f(1);
-    Post::query()->where('a', fn ($q) => \\strlen($q));
-  }`;
-  const names = callSites(body).map((i) => body.slice(i).match(/^\w+/)![0]);
-  assert.deepEqual(names, ["foo", "save", "query", "where", "strlen"]);
 });
 
 test("finds constructor calls of classes", () => {

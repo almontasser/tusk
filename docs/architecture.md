@@ -528,8 +528,6 @@ before they become markers, for open files and the project's problems alike.
 It has no editor imports, so `src/diagnostics.test.ts` runs it in Node. Besides
 Laravel's magic (above), it drops:
 
-- Phpactor's checks (source `phpactor`), which Tusk's server doesn't make.
-  These filters are left from before the switch and match nothing now.
 - A factory's `Model|Collection<int, Model>` (see `factoryUnion`), and the
   issues that follow from a factory call's value.
 - A member used in a trait (the classes that use it have it), and a member of a
@@ -680,25 +678,26 @@ wait covers that.
 
 ### Mago's fixes and suppressions
 
-Mago reports fixes for many lint rules, but Tusk's server publishes Mago's
-problems without them, so a second code action provider for `php` in `lsp.ts` gets them from
-Mago itself. On a request the user makes (`CodeActionTriggerType.Invoke`: ⌥⏎,
-the hover's Quick Fix link, or Fix All) with `mago-lint` markers in the range,
-it runs `mago lint --stdin-input <path> --reporting-format json` on the
-buffer, once per model version. `magoFixes` in `diagnostics.ts` reads each
-issue's `edits`: byte ranges and UTF-8 `new_text` bytes, and a `safety` of
-`safe`, `potentiallyunsafe`, or `unsafe`. Each fix whose range touches a marker
-with the same code becomes a `quickfix` action; only safe ones are preferred,
-and the others say so in their title. `safeEdits` collects the safe fixes for
-problems the file shows, leaving out fixes that overlap one before them, for
-**Fix All Safe Mago Problems in File**. A fix for a problem the filters drop,
-such as an unused import that a trait's `use` needs, isn't applied. The same action has the kind `source.fixAll.mago` when the
-request asks for `source.fixAll`, so Monaco's `editor.action.fixAll` applies
-it. The edits go through Monaco, so they're undoable and the file isn't saved.
-They carry the model version Mago ran on, so Monaco refuses them if the text
-changed while Mago ran.
-The analyzer's fixes aren't offered, since `mago analyze` on one buffer still
-reads the whole project.
+Tusk's server offers Mago's own fixes as code actions with their edits
+(`features/actions/mago.rs`). For each `mago-lint` or `mago` problem in the
+request's context, it runs the linter on the document again, in process (the
+analyzer too when an analysis problem is there), and each issue with edits
+whose code matches the problem and whose span touches it becomes a
+`quickfix`. Only safe fixes are preferred; the others say so in their title
+("may change behavior" or "unsafe"). The linter takes milliseconds, so the
+light bulb shows the fixes as the caret moves.
+
+`source.fixAll.mago` collects the safe fixes for the problems in the context,
+leaving out fixes that overlap one before them, as Mago leaves them for its
+next run; with no problems in the context, every safe fix. The editor sends
+only the problems its filters keep, so a fix for a problem the filters drop,
+such as an unused import that a trait's `use` needs, isn't applied. Monaco's
+`editor.action.fixAll` asks for `source.fixAll` and reaches the server
+through the generic provider. The provider for `php` in `lsp.ts` also offers
+it as the quick fix **Fix All Safe Mago Problems in File** on a request the
+user makes (⌥⏎ or the hover's Quick Fix link) with `mago-lint` markers,
+asking for `source.fixAll.mago` over the whole file with every problem the
+file shows. Edits carry the document's version, so a stale one is refused.
 
 Every `mago` and `mago-lint` marker also gets **Suppress *code* for this
 line**, which doesn't run Mago, so the light bulb shows it too. `magoExpect`
@@ -812,7 +811,7 @@ would clear another server's indexing progress.
 | Diagnostics | `textDocument/publishDiagnostics` | Squiggles and markers |
 | Formatting | `textDocument/formatting` | **Format Document**, when the server supports it |
 
-Tusk's server doesn't format code. Milestone 3 adds formatting through Mago.
+Tusk's server formats PHP with Mago's formatter (see "Formatting" under "Tusk's language server"). The editor asks for it only when Prettier and Pint don't apply (see "Formatting").
 
 Monaco has no UI for type hierarchy or workspace-wide symbol search. Milestone 4
 adds workspace symbol search to search everywhere. Type hierarchy needs its own
@@ -1125,44 +1124,36 @@ a later undo there doesn't reach back into the refactoring.
 
 ### Type hierarchy
 
-Tusk's server has no `textDocument/prepareTypeHierarchy`, so `src/hierarchy.ts`
-builds the tree from requests it does support.
-
-The starting type comes from the cursor. On a capitalized word, the view asks
-the server for its definition and reads the type declared at that line; the name
-must match the word, so a constant or method doesn't count. Otherwise it takes
-the type declared at or above the cursor line in the current file.
-
-- **Supertypes**: `parseTypeDeclarations` in `src/phptypes.ts` reads every
-  type a file declares and resolves the names after `extends` and `implements`,
-  and the traits in `use` lines inside its body, through the file's
-  `namespace` and `use` statements. Each parent's file comes from a
-  workspace symbol search, matched on name and namespace.
-- **Subtypes**: `textDocument/implementation` at the type's name. The server
-  answers from its index with every descendant, so the tree keeps the ones
-  whose own declaration names the type, and deeper ones appear when you expand
-  their parent. The file gets a model (without a tab) for the request. The
-  server doesn't list a trait's users, so for a trait
-  a text search finds `use` lines naming it, and the tree keeps the types
-  whose declaration really uses it.
-
-Children load when a row expands, so a large hierarchy, such as `Model`'s,
-costs nothing until you open it.
+`src/hierarchy.ts` shows the tree that Tusk's server gives:
+`textDocument/prepareTypeHierarchy` for the starting type, then
+`typeHierarchy/supertypes` or `typeHierarchy/subtypes` for each row as it
+expands, so a large hierarchy, such as `Model`'s, costs nothing until you open
+it. See "Type and call hierarchy" under "Tusk's language server" for how the
+server answers.
 
 ### Generate
 
-`src/generate.ts` is PhpStorm's ⌘N menu for PHP. Tusk's server writes what it
-can: getters and setters through its `generate_accessors` and
-`generate_mutators` commands, called with the property names directly, named
-`getTitle` and `setTitle` as PhpStorm names them, and Implement Methods
-(including a trait's abstract methods), Override Methods, and the constructor
-transformers through its code actions for the cursor, filtered by kind and run
-with `runTuskAction`, which resolves their edits. The server has no action
-that writes a constructor from properties or a `__toString()`, so those are
-snippets: `classProperties` in `src/refactorparse.ts` reads the class body's
-top-level declarations and promoted parameters, and the snippet goes after the
-last property or before the class's closing brace, indented with the file's
-indentation.
+`src/generate.ts` is PhpStorm's ⌘N menu for PHP. It lists the code actions
+Tusk's server offers for the class at the cursor, asking for
+`source.generate` and `quickfix`, and runs the chosen one with
+`runTuskAction`, which resolves its edit:
+
+- `source.generate.constructor`, `.getters`, `.setters`, `.accessors` (getters
+  and setters), and `.toString`, from `generate_candidates` in
+  `features/actions/generate.rs`. The server reads the class's properties from
+  the syntax tree: declared ones, and those promoted in its constructor.
+  Static properties are left out, readonly ones (or a readonly class's) get no
+  setter, and a method the class declares itself isn't offered again. The
+  constructor takes the properties without a default and goes after the last
+  property. Getters are named `getTitle` and setters `setTitle`, as PhpStorm
+  names them, typed as the property is. The light bulb doesn't list
+  `source` actions.
+- The quick fixes Implement Methods (including a trait's abstract methods),
+  Override Methods, Complete Constructor, Promote Constructor, and Add Missing
+  Properties.
+
+The menu shows them in that order, with the properties or the overridden
+method as each row's detail.
 
 ⌘N is also **New File…**. The shortcut handler now takes the first action for
 the keys that applies (an editor-only action needs the editor focused, and
@@ -1171,23 +1162,11 @@ everywhere else.
 
 ### Call hierarchy
 
-The server has no `textDocument/prepareCallHierarchy` either, so
-`src/callhierarchy.ts` builds the tree the same way, reusing the type
-hierarchy's styles.
-
-- **Callers**: `callsOf` from `src/refactor.ts` (`tusk/memberReferences` for
-  methods, `textDocument/references` for functions).
-  Each reference is placed in the innermost method, constructor, or function
-  around it, from `textDocument/documentSymbol` of its file.
-- **Callees**: `callSites` in `src/phptypes.ts` finds the names followed by `(`
-  in the body, leaving out language constructs, declarations, `new`, and
-  variable calls. Each one gets `textDocument/definition`, and the declaration
-  around the answer is the callee. Definitions without a file (PHP's own
-  functions) are dropped, since they can't be opened.
-
-As with types, the starting point is what Go to Definition finds under the
-cursor, when that's a function of the same name; otherwise it's the function
-around the cursor. Rows load their children when expanded.
+`src/callhierarchy.ts` shows the tree that Tusk's server gives:
+`textDocument/prepareCallHierarchy`, then `callHierarchy/incomingCalls` or
+`callHierarchy/outgoingCalls` as each row expands, reusing the type
+hierarchy's styles. A caller with several calls gets a row for each call, so
+each row opens its call.
 
 ### HTTP client
 
@@ -1665,12 +1644,11 @@ editor's warm-up on focus hides most of that. On Pinkary, hiding
 suggestions the model was unsure of lost one exact match in 60 PHP cases, and
 none in the Blade cases.
 
-The `types` configuration adds the classes Phpactor finds for the names before
-`->`, using Phpactor's command line (`offset:info`). koel has no `vendor/`, so
-the benchmark needs Phpactor's own index first (`phpactor.phar index:build`).
-The benchmark still uses Phpactor's command line, which the app no longer
-downloads, so get the `.phar` from Phpactor's releases to run it.
-Over 600 cases, the types changed the context in 71, and the exact first line
+The `types` configuration adds the classes of the names before `->`, found as
+the editor finds them: the benchmark runs Tusk's server (build it first with
+`cargo build --release --manifest-path tusk-lsp/Cargo.toml`) and asks
+`textDocument/typeDefinition` for each name. The results below came from
+Phpactor's command line (`offset:info`), before the switch. Over 600 cases, the types changed the context in 71, and the exact first line
 went from 43 to 44 of those (62.7% to 62.8% overall). koel imports nearly
 every class it uses, so the types rarely add a class the outlines lack, and
 without a database there are no model columns, where a variable's type
@@ -2738,7 +2716,8 @@ each formatter finds the project's configuration:
    step runs.
 2. For PHP, Laravel Pint (`vendor/bin/pint - --stdin-filename`), when the
    project has it.
-3. For PHP, the bundled Mago (`mago format --stdin-input`).
+3. For PHP, Tusk's server (`textDocument/formatting`), which formats its copy
+   of the open file with Mago's formatter.
 
 `detectFormatters` looks for Prettier and Pint when a folder opens. Monaco's
 own formatters for CSS, HTML, JSON, and TypeScript are always off
@@ -3400,9 +3379,9 @@ the linter gets the file named by its path relative to the root. Mago's
 | `tusk/memberReferences` | `class`, `method` | Every call of the method in the project, through subclasses too, without its declarations |
 | `tusk/projectProblems` | none | Every project PHP file's problems, by path relative to the root |
 
-Commands (`workspace/executeCommand`) apply their edits by sending
-`workspace/applyEdit` and waiting for the editor's answer before they return:
-`generate_accessors`, `generate_mutators`, and `tusk.extractMethod`.
+The command (`workspace/executeCommand`) `tusk.extractMethod` applies its edit
+by sending `workspace/applyEdit` and waiting for the editor's answer before it
+returns.
 
 ### Index
 
@@ -3434,6 +3413,13 @@ Commands (`workspace/executeCommand`) apply their edits by sending
 
 - **Excluded paths:** `vendor`'s tests, `vendor/composer`, `node_modules`, `storage`, `bootstrap/cache`, and
   hidden folders), plus the `exclude` globs in `initializationOptions`.
+- **Inheritance cycles:** a class that extends itself, or classes (or
+  interfaces) that extend each other, are cut at the link that closes the
+  cycle before Mago populates (`break_inheritance_cycles`). PHP refuses such
+  code, but typing leaves it for a moment: `<?php$x->` swallows a file's
+  `namespace`, so Symfony's `UnexpectedValueException` extended PHP's own, and
+  Mago's populator, which follows parent chains without a limit, never
+  finished. After a change, only the changed classes' chains are walked.
 - **Changes:** each file keeps the names it declared. A change removes the
   ones the index still has from that file (two files can declare the same
   class, and only one wins the merge), scans the new text, and repopulates
@@ -3455,6 +3441,16 @@ Commands (`workspace/executeCommand`) apply their edits by sending
   server. `$/cancelRequest` sets the request's flag (`Snapshot::cancel`): a
   request that hasn't started answers `RequestCancelled` at once, and
   references and project problems check it between files.
+  The pool is plain threads (`RequestPool`), not a rayon pool: a rayon thread
+  waiting on its own parallel work runs other queued jobs meanwhile, and a
+  search holding the index's read lock once picked up a request waiting for
+  the index to catch up with an edit, which the lock blocked. The server
+  stopped answering (`searches_racing_edits_and_other_requests_all_finish` in
+  `tests/protocol.rs` reproduces it).
+- **Parallel work in requests:** references, call hierarchy, rename's file
+  moves, and project problems read files in parallel on the scan pool. That
+  work never takes the index's lock: the request takes it once and passes the
+  index down (`php_problems_in`).
 - **Diagnostics thread:** checks an edited document as soon as the index has
   its change, and the other open documents once edits pause for 600 ms,
   since they may depend on it.
@@ -3481,13 +3477,18 @@ Commands (`workspace/executeCommand`) apply their edits by sending
     (`safedelete.ts`) looks for that kind.
   - Promoted constructor parameters are listed as properties.
 - **Workspace symbols:** these cover classes, interfaces, traits, enums,
-  functions, and constants, but not methods.
-  - `name` is the short name, and `containerName` the namespace, which is what
-    `typeSymbol` in `lsp.ts` matches.
+  functions, and constants, and the methods of the classes the index has
+  loaded (the project's, and the library classes it reaches).
+  - `name` is the short name, and `containerName` the namespace, or a
+    method's class. `typeSymbol` in `lsp.ts` matches name and namespace among
+    the type kinds (`TYPE_KINDS`), and Go to Symbol labels a method
+    `Class::method`.
   - A query matches the short name, or the fully qualified name when the query
-    has a `\`.
+    has a `\`. A query with `::` matches methods as `Class::method`, by the
+    class's short name.
   - Results rank exact matches first, then prefixes, substrings, and
-    subsequences. Within each rank, project files come before `vendor`.
+    subsequences. Within each rank, types come before methods, and project
+    files before `vendor`.
   - Results are capped at 200. PHP's built-ins have no file, so they're left
     out.
 
@@ -3546,6 +3547,48 @@ when `vendor/filament/filament` exists.
 - **Demo app test:** a test marked `#[ignore]` mirrors the old PHP tests on
   the demo app. Build the app with `scripts/make-fixture.sh`, then run
   `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
+
+### Formatting
+
+`features/format.rs` answers `textDocument/formatting` for PHP with
+`mago-formatter`, as `mago format` would: one edit of the whole document, none
+when it's already formatted, and `null` for a file `[formatter]`'s `excludes`
+lists. `mago_config.rs` reads `[formatter]` as Mago does: the `preset`'s
+settings (Mago's default without one), with the section's other options over
+them. An option the formatter doesn't know makes only the formatter an error,
+which each request reports, as the command line refuses the file; the
+analyzer and linter keep their settings. A file with a syntax error isn't
+formatted, and the error names its line.
+
+### Type and call hierarchy
+
+`features/hierarchy.rs` answers the LSP's type and call hierarchy requests.
+`lsp-types` has no capability field for type hierarchy, so
+`capabilities::server_json` adds `typeHierarchyProvider`. Each item's `data`
+names what it stands for (a type, a function, or a method by its declaring
+class), so the follow-up requests answer from the index rather than from
+positions an edit may have moved.
+
+- **Starting point:** the type, method, or function named under the cursor
+  (`new Foo` counts as `Foo`'s constructor), else the one the cursor is in. A
+  closure counts as the function around it.
+- **Supertypes:** the parent class, then the interfaces, then the traits, from
+  the class's metadata. PHP's own types have no file, and get a
+  `tusk://builtin/` address the editor doesn't open.
+- **Subtypes:** the types that name it directly as parent or interface
+  (Mago's `direct_classlike_descendants`), or, for a trait, the classes that
+  use it and whose parent doesn't. Library classes the project doesn't reach
+  aren't loaded, so they aren't listed.
+- **Incoming calls:** the references search, without declarations, grouped by
+  the method or function around each call; code outside one is listed by its
+  file (kind `File`). A method is identified by its declaring class, so calls
+  through subclasses count. A constructor's calls also include `new` of its
+  class and of subclasses that don't declare their own (one search for all of
+  them, since `Model` has hundreds), and `new self`, `new static`, and
+  `new parent` in the files declaring those classes.
+- **Outgoing calls:** every function call, method call, and `new` inside the
+  item's range, resolved as Go to Definition resolves them. Callees without a
+  file (PHP's own functions) are left out.
 
 ### Extract Method
 
@@ -3701,19 +3744,24 @@ and a real Laravel app, which need PHP.
   Magento. `examples/depth.rs` lists a folder's most deeply nested files (with
   `BRANCHES=1`, those with the most branches in one statement).
 
-  Results on 2026-09-27, 400 sampled files per project, on an M-series Mac:
+  Results on 2026-09-27, 200 sampled files per project, on an M-series Mac,
+  with type and call hierarchy, formatting, Fix All, and workspace symbols
+  added to the requests:
 
-  | Project | Files indexed | Index | Mean hover | Slowest references |
-  |---|---|---|---|---|
-  | PHP-Parser | 341 | 0.0 s | 0.7 ms | 0.1 s |
-  | Laravel framework | 2,981 | 0.4 s | 1.8 ms | 0.3 s |
-  | Symfony | 11,919 | 0.6 s | 1.5 ms | 3.0 s |
-  | WordPress | 1,899 | 0.2 s | 2.6 ms | 2.4 s |
-  | Magento 2 | 25,580 | 2.4 s | 2.6 ms | 1.1 s |
+  | Project | Files indexed | Index | Mean hover | Slowest references | Slowest incoming calls |
+  |---|---|---|---|---|---|
+  | PHP-Parser | 341 | 0.0 s | 1.8 ms | 0.1 s | 2.7 s |
+  | Laravel framework | 2,981 | 0.4 s | 2.2 ms | 0.3 s | 0.7 s |
+  | Symfony | 11,919 | 0.6 s | 2.1 ms | 4.3 s | 4.2 s |
+  | WordPress | 1,899 | 0.2 s | 1.9 ms | 2.5 s | 4.6 s |
+  | Magento 2 | 25,580 | 2.2 s | 2.8 ms | 1.3 s | 2.0 s |
 
-  No request crashed or hung after the fixes the runs led to. References and
-  rename analyze every project file that mentions the name, so a common name
-  in a large project takes seconds; both can be cancelled.
+  No request crashed or hung after the fixes the runs led to: requests on
+  plain threads (see Threads), inheritance cycles cut before populating (see
+  Index), one search for a constructor's classes, and spans from the index
+  sliced with `str::get`. References, rename, and incoming calls analyze
+  every project file that mentions the name, so a common name in a large
+  project takes seconds; all three can be cancelled.
 - **Benchmark:** `cargo run --release --example index_bench <root> [file]`
   times indexing a real project.
 
@@ -4451,7 +4499,7 @@ Phpactor already writes getters, setters, implemented and overridden methods,
 and completes constructors, so Generate lists those actions instead of
 writing its own. It calls the accessor commands itself, since the code action
 needs a selection over the properties. Only the constructor from properties
-and `__toString()`, which Phpactor lacks, are written by the editor.
+and `__toString()`, which Phpactor lacked, were written by the editor until Tusk's server offered them.
 
 ### 2026-09-26: Rebasing merges uses git's own todo list
 

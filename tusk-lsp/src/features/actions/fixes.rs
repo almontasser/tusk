@@ -39,8 +39,11 @@ fn unresolved_class(ctx: &Ctx<'_>, offset: u32) -> Option<String> {
     (!written.contains('\\')).then(|| written.to_string())
 }
 
-/// The file's namespace statement's name span and text, and its single class-like's name span and text.
-fn declarations(ctx: &Ctx<'_>) -> (Option<(u32, u32, String)>, Vec<(u32, u32, String)>) {
+/// A name's span and text.
+type Named = (u32, u32, String);
+
+/// The file's namespace statement's name, and its class-likes' names.
+fn declarations(ctx: &Ctx<'_>) -> (Option<Named>, Vec<Named>) {
     let text = ctx.parsed.text();
     let mut namespace = None;
     let mut classes = vec![];
@@ -152,7 +155,8 @@ mod tests {
         code_actions(&fx.snap, CodeActionParams {
             text_document: TextDocumentIdentifier { uri: at.text_document.uri.clone() },
             range: Range { start: at.position, end: at.position },
-            context: CodeActionContext::default(),
+            // Quick fixes only: Organize Imports and Generate's actions are offered everywhere.
+            context: CodeActionContext { only: Some(vec![lsp_types::CodeActionKind::QUICKFIX]), ..Default::default() },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         })
@@ -163,8 +167,6 @@ mod tests {
             CodeActionOrCommand::CodeAction(a) => a.title,
             CodeActionOrCommand::Command(c) => c.title,
         })
-        // Organize Imports is offered everywhere.
-        .filter(|t| t != "Organize imports")
         .collect()
     }
 

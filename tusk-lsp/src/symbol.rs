@@ -92,7 +92,7 @@ impl<'p, 'a> Resolver<'p, 'a> {
             )
         })?;
         let found = |symbols: Vec<Symbol>, declaration| {
-            (!symbols.is_empty()).then(|| Found { symbols, start, end, declaration })
+            (!symbols.is_empty()).then_some(Found { symbols, start, end, declaration })
         };
         let enclosing = || self.enclosing_class(&path);
 

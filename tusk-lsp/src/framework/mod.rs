@@ -488,7 +488,7 @@ mod tests {
             ("lib.php", LIB),
             ("t.php", "<?php\nfunction route(string $name, array $p = []) {}\nfunction f(\\Illuminate\\Http\\Request $r) {\n    route('home', ['id' => 'x']);\n    $r->routeIs('admin.*');\n    new \\Foo(view: 'mail');\n    $get('email');\n}\n"),
         ]);
-        let args = with_ctx(&fx.snap, &crate::testing::uri("t.php"), |ctx| string_args(ctx)).unwrap();
+        let args = with_ctx(&fx.snap, &crate::testing::uri("t.php"), string_args).unwrap();
         let summary: Vec<String> = args
             .iter()
             .map(|a| format!("{:?} {} {:?} #{} {:?} {:?} = {}", a.call.kind, a.call.name, a.call.classes, a.index, a.name, a.in_array, a.value))

@@ -120,7 +120,7 @@ fn labels(items: &[CompletionItem]) -> Vec<String> {
 
 fn problems(file: &str, text: &str) -> Vec<(String, String)> {
     let fx = fixture(file, text);
-    with_ctx(&fx.snap, &uri(file), |ctx| diagnostics(ctx))
+    with_ctx(&fx.snap, &uri(file), diagnostics)
         .unwrap()
         .into_iter()
         .map(|d| {

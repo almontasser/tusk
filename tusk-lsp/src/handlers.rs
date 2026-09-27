@@ -44,6 +44,13 @@ pub fn find(method: &str) -> Option<Handler> {
         CodeActionRequest::METHOD => typed!(CodeActionRequest, actions::code_actions),
         CodeActionResolveRequest::METHOD => typed!(CodeActionResolveRequest, actions::resolve),
         ExecuteCommand::METHOD => typed!(ExecuteCommand, actions::execute_command),
+        CallHierarchyPrepare::METHOD => typed!(CallHierarchyPrepare, hierarchy::prepare_call_hierarchy),
+        CallHierarchyIncomingCalls::METHOD => typed!(CallHierarchyIncomingCalls, hierarchy::incoming_calls),
+        CallHierarchyOutgoingCalls::METHOD => typed!(CallHierarchyOutgoingCalls, hierarchy::outgoing_calls),
+        TypeHierarchyPrepare::METHOD => typed!(TypeHierarchyPrepare, hierarchy::prepare_type_hierarchy),
+        TypeHierarchySupertypes::METHOD => typed!(TypeHierarchySupertypes, hierarchy::supertypes),
+        TypeHierarchySubtypes::METHOD => typed!(TypeHierarchySubtypes, hierarchy::subtypes),
+        Formatting::METHOD => typed!(Formatting, format::formatting),
         "tusk/memberReferences" => custom::member_references,
         "tusk/projectProblems" => custom::project_problems,
         _ => return None,
@@ -75,6 +82,16 @@ mod tests {
             };
             for method in ["textDocument/hover", "textDocument/completion", "textDocument/signatureHelp", "textDocument/definition", "textDocument/documentHighlight"] {
                 run(method, at.clone());
+            }
+            for (prepare, follow) in [
+                ("textDocument/prepareTypeHierarchy", ["typeHierarchy/supertypes", "typeHierarchy/subtypes"]),
+                ("textDocument/prepareCallHierarchy", ["callHierarchy/incomingCalls", "callHierarchy/outgoingCalls"]),
+            ] {
+                for item in run(prepare, at.clone()).and_then(|a| a.as_array().cloned()).unwrap_or_default() {
+                    for method in follow {
+                        run(method, json!({ "item": item }));
+                    }
+                }
             }
             run("textDocument/documentSymbol", json!({ "textDocument": doc }));
             run("textDocument/foldingRange", json!({ "textDocument": doc }));

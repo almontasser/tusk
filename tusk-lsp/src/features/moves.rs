@@ -233,7 +233,7 @@ pub fn will_rename(snap: &Snapshot, params: RenameFilesParams) -> Result<Option<
     paths.sort();
     paths.dedup();
     let shorts: Vec<String> = renamed.keys().map(|k| short(k).to_ascii_lowercase()).collect();
-    let per_file: Vec<(PathBuf, Vec<TextEdit>, Vec<String>)> = paths
+    let per_file: Vec<(PathBuf, Vec<TextEdit>, Vec<String>)> = crate::index::scan_pool().install(|| paths
         .into_par_iter()
         .filter_map(|path| {
             let text = snap.read(&path)?;
@@ -244,7 +244,7 @@ pub fn will_rename(snap: &Snapshot, params: RenameFilesParams) -> Result<Option<
             let (edits, imports) = file_edits(&path, &text, &renamed_lower, &moved_files);
             (!edits.is_empty() || !imports.is_empty()).then_some((path, edits, imports))
         })
-        .collect();
+        .collect());
     for (path, file_edits, needed) in per_file {
         for e in file_edits {
             edits.add(&path, e);

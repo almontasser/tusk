@@ -201,12 +201,44 @@ pub struct Server {
     diagnostics: Sender<diagnostics::Event>,
     framework: Arc<crate::framework::State>,
     phpstan: Arc<crate::phpstan::PhpStan>,
-    pool: rayon::ThreadPool,
+    pool: RequestPool,
     /// Requests being answered, by ID, with their cancellation flags.
     running: Arc<Mutex<HashMap<RequestId, Arc<AtomicBool>>>>,
     root: PathBuf,
     options: Options,
     shutting_down: bool,
+}
+
+/// The threads that answer requests, one request each at a time. They're plain threads rather than a rayon
+/// pool: a rayon thread waiting on its own parallel work runs other queued jobs meanwhile, and a request that
+/// holds the index's lock while another waits for the index to catch up with edits would never finish.
+struct RequestPool {
+    tx: crossbeam_channel::Sender<Box<dyn FnOnce() + Send>>,
+}
+
+impl RequestPool {
+    fn new() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded::<Box<dyn FnOnce() + Send>>();
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        for i in 0..threads {
+            let rx = rx.clone();
+            std::thread::Builder::new()
+                .name(format!("tusk-request-{i}"))
+                // Mago's analyzer recurses deeply on large files.
+                .stack_size(64 << 20)
+                .spawn(move || {
+                    for task in rx {
+                        task();
+                    }
+                })
+                .expect("the request pool starts");
+        }
+        Self { tx }
+    }
+
+    fn spawn(&self, task: impl FnOnce() + Send + 'static) {
+        let _ = self.tx.send(Box::new(task));
+    }
 }
 
 /// Runs a language server on stdin and stdout until the client disconnects.
@@ -222,11 +254,11 @@ pub fn run(connection: Connection) {
     let root = root_of(&params).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let options: Options =
         params.initialization_options.clone().and_then(|o| serde_json::from_value(o).ok()).unwrap_or_default();
-    let result = InitializeResult {
-        capabilities: capabilities::server(),
-        server_info: Some(ServerInfo { name: "tusk".into(), version: Some(env!("CARGO_PKG_VERSION").into()) }),
-    };
-    if connection.initialize_finish(id, serde_json::to_value(result).unwrap()).is_err() {
+    let result = serde_json::json!({
+        "capabilities": capabilities::server_json(),
+        "serverInfo": ServerInfo { name: "tusk".into(), version: Some(env!("CARGO_PKG_VERSION").into()) },
+    });
+    if connection.initialize_finish(id, result).is_err() {
         return;
     }
     let mut server = Server::new(connection.sender.clone(), root, options);
@@ -275,12 +307,7 @@ impl Server {
         spawn_indexer(rx, index.clone(), docs.clone(), applied.clone(), client.clone(), diagnostics.clone());
         let indexer = Indexer { tx, queued: AtomicU64::new(0), applied };
         indexer.send(Job::Build(None));
-        let pool = rayon::ThreadPoolBuilder::new()
-            .thread_name(|i| format!("tusk-request-{i}"))
-            // Mago's analyzer recurses deeply on large files.
-            .stack_size(64 << 20)
-            .build()
-            .expect("the request pool starts");
+        let pool = RequestPool::new();
         Self { client, docs, index, indexer, diagnostics, framework, phpstan, pool, running: Default::default(), root, options, shutting_down: false }
     }
 

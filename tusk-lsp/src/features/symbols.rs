@@ -156,24 +156,28 @@ fn rank(name: &str, query: &str) -> Option<u8> {
 const LIMIT: usize = 200;
 
 /// Classes, interfaces, traits, enums, functions, and constants whose short name matches the query, or whose
-/// qualified name does when the query has a `\`. The namespace goes in `containerName`, as Phpactor gives it.
+/// qualified name does when the query has a `\`, and methods whose name matches, or `Class::method` when the query
+/// has `::`. The namespace goes in `containerName`, as Phpactor gives it, and a method's class. Types come
+/// before methods that match as well.
 pub fn workspace_symbols(snap: &Snapshot, params: WorkspaceSymbolParams) -> Result<Option<WorkspaceSymbolResponse>, String> {
     let query = params.query.to_ascii_lowercase();
-    let qualified = query.contains('\\');
+    let member = query.contains("::");
+    let qualified = query.contains('\\') && !member;
     let query = query.trim_start_matches('\\').to_string();
     let index = snap.index.read();
 
-    // (rank, vendor, name, fqn, kind, place)
-    let mut hits: Vec<(u8, bool, String, String, SymbolKind, Place)> = vec![];
+    // (rank, is a method, vendor, name, container, kind, place)
+    let mut hits: Vec<(u8, bool, bool, String, String, SymbolKind, Place)> = vec![];
     let mut consider = |fqn: String, kind: SymbolKind, span: Span| {
-        if index.path_of(span.file_id).is_none() {
+        if member || index.path_of(span.file_id).is_none() {
             return;
         }
         let library = !index.is_project_file(span.file_id);
         let short = fqn.rsplit('\\').next().unwrap_or(&fqn).to_string();
         let target = if qualified { fqn.to_ascii_lowercase() } else { short.to_ascii_lowercase() };
         if let Some(r) = rank(&target, &query) {
-            hits.push((r, library, short, fqn, kind, span.into()));
+            let container = fqn.rsplit_once('\\').map(|(ns, _)| ns.to_string()).unwrap_or_default();
+            hits.push((r, false, library, short, container, kind, span.into()));
         }
     };
     // Every name the project and its libraries declare, loaded or not. PHP's built-ins have no file to go to.
@@ -196,26 +200,45 @@ pub fn workspace_symbols(snap: &Snapshot, params: WorkspaceSymbolParams) -> Resu
         };
         consider(fqn, kind, d.span);
     }
-    hits.sort_by(|a, b| (a.0, a.1, a.2.len(), &a.3).cmp(&(b.0, b.1, b.2.len(), &b.3)));
+    // Methods of the classes the index has loaded: the project's, and the library classes it reaches.
+    if !qualified && !query.is_empty() {
+        let codebase = &index.codebase;
+        for ((class, _), m) in codebase.function_likes.iter() {
+            let Some(span) = m.name_span else { continue };
+            if class.is_empty() || index.path_of(span.file_id).is_none() || class.as_str_lossy().contains(['@', '{']) {
+                continue;
+            }
+            let fqn = crate::types::display_class(&class.as_str_lossy(), codebase);
+            let name = m.original_name.as_str_lossy().into_owned();
+            let target = if member {
+                format!("{}::{name}", fqn.rsplit('\\').next().unwrap_or(&fqn)).to_ascii_lowercase()
+            } else {
+                name.to_ascii_lowercase()
+            };
+            if let Some(r) = rank(&target, &query) {
+                hits.push((r, true, !index.is_project_file(span.file_id), name, fqn, SymbolKind::METHOD, span.into()));
+            }
+        }
+    }
+    hits.sort_by(|a, b| (a.0, a.1, a.2, a.3.len(), &a.4, &a.3).cmp(&(b.0, b.1, b.2, b.3.len(), &b.4, &b.3)));
     hits.truncate(LIMIT);
 
     // Each file is read once for its line breaks.
     let mut files: std::collections::HashMap<mago_database::file::FileId, (String, crate::text::LineIndex)> = Default::default();
     let mut out = vec![];
-    for (_, _, short, fqn, kind, place) in hits {
+    for (_, _, _, name, container, kind, place) in hits {
         let Some(path) = index.path_of(place.file) else { continue };
-        if !files.contains_key(&place.file) {
+        if let std::collections::hash_map::Entry::Vacant(e) = files.entry(place.file) {
             let Some(text) = snap.read(path) else { continue };
             let lines = crate::text::LineIndex::new(&text);
-            files.insert(place.file, (text, lines));
+            e.insert((text, lines));
         }
         let (text, lines) = &files[&place.file];
-        let container = fqn.rsplit_once('\\').map(|(ns, _)| ns.to_string());
         out.push(WorkspaceSymbol {
-            name: short,
+            name,
             kind,
             tags: None,
-            container_name: container,
+            container_name: (!container.is_empty()).then_some(container),
             location: OneOf::Left(Location { uri: crate::text::path_to_uri(path), range: lines.range(text, place.start, place.end) }),
             data: None,
         });
@@ -296,5 +319,23 @@ mod tests {
         assert_eq!(search(&fx, "lib\\user"), vec![("User".into(), Some("Lib".into()))]);
         // PHP's built-ins have no file.
         assert!(search(&fx, "ArrayObject").is_empty());
+    }
+
+    #[test]
+    fn finds_methods_after_types() {
+        let fx = Fixture::new(&[(
+            "app/a.php",
+            "<?php namespace App; class Save {} class Repo { public function save(): void {} public function saveAll(): void {} } class Other { function save() {} }",
+        )]);
+        assert_eq!(
+            search(&fx, "save"),
+            vec![
+                ("Save".into(), Some("App".into())),
+                ("save".into(), Some("App\\Other".into())),
+                ("save".into(), Some("App\\Repo".into())),
+                ("saveAll".into(), Some("App\\Repo".into())),
+            ]
+        );
+        assert_eq!(search(&fx, "repo::sa"), vec![("save".into(), Some("App\\Repo".into())), ("saveAll".into(), Some("App\\Repo".into()))]);
     }
 }

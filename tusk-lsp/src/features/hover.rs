@@ -41,14 +41,15 @@ pub fn source(ctx: &Ctx<'_>, span: Span) -> Option<Source> {
     let text = ctx.snap.text_of(&ctx.index, span.file_id)?;
     let start = span.start.offset as usize;
     let end = (span.end.offset as usize).min(text.len());
-    Some(Source { signature: signature(&text[start..end]), docblock: docblock_before(&text, start) })
+    // The index can be ahead of or behind this text, so its span may not fit.
+    Some(Source { signature: signature(text.get(start..end)?), docblock: docblock_before(&text, start) })
 }
 
 /// The declaration statement around a name, such as a property's modifiers, type, and default value.
 fn statement_around(ctx: &Ctx<'_>, name: Span) -> Option<Source> {
     let text = ctx.snap.text_of(&ctx.index, name.file_id)?;
     let at = name.start.offset as usize;
-    let start = text[..at].rfind([';', '{', '}', '(', ',', ']']).map_or(0, |i| i + 1);
+    let start = text.get(..at)?.rfind([';', '{', '}', '(', ',', ']']).map_or(0, |i| i + 1);
     let start = match text[start..at].find("*/") {
         Some(i) => start + i + 2,
         None => start,
@@ -136,7 +137,7 @@ pub fn signature(decl: &str) -> String {
 
 /// The docblock (`/** … */`) that ends just before `offset`, apart from whitespace and attributes.
 pub fn docblock_before(text: &str, offset: usize) -> Option<String> {
-    let before = text[..offset.min(text.len())].trim_end();
+    let before = text.get(..offset.min(text.len()))?.trim_end();
     let before = strip_trailing_attributes(before);
     let end = before.strip_suffix("*/")?;
     let start = end.rfind("/**")?;

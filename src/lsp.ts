@@ -11,7 +11,7 @@ import { formatHoverMarkdown } from "./phptypes";
 import { settings } from "./settings";
 import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
-import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoFixes, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, safeEdits, severityOf, type MagoFix } from "./diagnostics";
+import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, severityOf } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
 import { covers, exclusionsFor, magoExcludes, saveExclusions } from "./indexexclude";
 import { editExclusions, type Folder } from "./indexexcludedialog";
@@ -201,67 +201,44 @@ monaco.editor.onDidCreateModel((model) => {
   checkBlade(model);
 });
 
-// ---- Mago's fixes and suppressions ----
-
-/** Mago's lint of a model's text, run once per version, for the fixes the server's published problems don't carry. */
-const magoLints = new WeakMap<monaco.editor.ITextModel, { version: number; fixes: Promise<MagoFix[]> }>();
-function magoFixesOf(model: monaco.editor.ITextModel): Promise<MagoFix[]> {
-  const version = model.getVersionId();
-  let lint = magoLints.get(model);
-  if (lint?.version !== version) {
-    const text = textOf(model);
-    const args = [...(magoConfigPath ? ["--config", magoConfigPath] : []), "lint", "--stdin-input", model.uri.fsPath.slice(projectRoot.length + 1), "--reporting-format", "json"];
-    const fixes = toolPath("mago/mago")
-      .then((mago) => invoke<string>("run_capture", { cwd: projectRoot, program: mago, args, input: text, anyStatus: true }))
-      .then((json) => magoFixes(json, text))
-      .catch((e) => (host.status(`Mago lint failed: ${e}`), []));
-    magoLints.set(model, (lint = { version, fixes }));
-  }
-  return lint.fixes;
-}
+// ---- Mago's suppressions and Fix All ----
 
 const magoCategory: Record<string, "lint" | "analysis"> = { "mago-lint": "lint", mago: "analysis" };
 
 /**
- * Quick fixes for Mago's problems: its own fix (labelled when it may change behavior), all its safe fixes in the
- * file (also Monaco's Fix All), and a `// @mago-expect` comment that suppresses the problem on its line.
+ * A `// @mago-expect` comment that suppresses a Mago problem on its line, and **Fix All Safe Mago Problems in File**
+ * as a quick fix. Each problem's own fix comes from Tusk's server with its other code actions. Fix All asks the
+ * server for `source.fixAll.mago` with the problems the editor shows, so a problem the filters drop, such as an
+ * unused import that a trait's `use` needs, isn't fixed. Monaco's own Fix All reaches the server directly.
  */
 monaco.languages.registerCodeActionProvider("php", {
-  async provideCodeActions(model, range, context) {
-    const fixAll = context.only?.startsWith("source.fixAll") ?? false;
-    const markers = (fixAll ? monaco.editor.getModelMarkers({ resource: model.uri }) : context.markers).filter((m) => magoCategory[m.source ?? ""] && typeof m.code === "string");
+  async provideCodeActions(model, _range, context) {
+    if (context.only?.startsWith("source")) return { actions: [], dispose() {} };
+    const markers = context.markers.filter((m) => magoCategory[m.source ?? ""] && typeof m.code === "string");
     const actions: monaco.languages.CodeAction[] = [];
-    // The version the edits are for, taken before Mago runs, so Monaco refuses them if the text changes meanwhile.
-    const versionId = model.getVersionId();
-    const edit = (edits: { range: L.Range; text: string }[]) => ({ edits: edits.map((e) => ({ resource: model.uri, textEdit: { range: toRange(e.range), text: e.text }, versionId })) });
-    if (!fixAll) {
-      const lines = model.getLinesContent();
-      for (const m of markers) {
-        const code = m.code as string;
-        const title = `Suppress ${code} for this line`;
-        const expect = !/^(parse|unfulfilled-expect)$/.test(code) && magoExpect(lines, m.startLineNumber - 1, magoCategory[m.source!], code);
-        if (expect && !actions.some((a) => a.title === title)) actions.push({ title, kind: "quickfix", diagnostics: [m], edit: edit([expect]) });
+    const lines = model.getLinesContent();
+    for (const m of markers) {
+      const code = m.code as string;
+      const title = `Suppress ${code} for this line`;
+      const expect = !/^(parse|unfulfilled-expect)$/.test(code) && magoExpect(lines, m.startLineNumber - 1, magoCategory[m.source!], code);
+      if (expect && !actions.some((a) => a.title === title)) {
+        actions.push({ title, kind: "quickfix", diagnostics: [m], edit: { edits: [{ resource: model.uri, textEdit: { range: toRange(expect.range), text: expect.text }, versionId: model.getVersionId() }] } });
       }
     }
-    // Mago runs only when asked (⌥⏎, the problem popup, Fix All), not for the light bulb's requests as the caret moves.
-    const lint = markers.filter((m) => m.source === "mago-lint");
-    if (context.trigger !== monaco.languages.CodeActionTriggerType.Invoke || !lint.length || !projectRoot || !model.uri.fsPath.startsWith(`${projectRoot}/`)) return { actions, dispose() {} };
-    const fixes = await magoFixesOf(model);
-    if (!fixAll) {
-      for (const f of fixes.filter((f) => monaco.Range.areIntersectingOrTouching(toRange(f.range), range))) {
-        const diagnostics = lint.filter((m) => m.code === f.code && monaco.Range.areIntersectingOrTouching(m, toRange(f.range)));
-        if (!diagnostics.length) continue;
-        const risk = f.safety === "unsafe" ? " (unsafe)" : f.safety === "potentiallyunsafe" ? " (may change behavior)" : "";
-        actions.unshift({ title: `${f.title}${risk}`, kind: "quickfix", isPreferred: !risk, diagnostics, edit: edit(f.edits) });
-      }
-    }
-    // Only fixes for problems the editor shows: the filters drop some of Mago's, such as an import a trait uses.
-    const shown = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => m.source === "mago-lint");
-    const safe = safeEdits(fixes.filter((f) => shown.some((m) => m.code === f.code && monaco.Range.areIntersectingOrTouching(m, toRange(f.range)))));
-    if (safe.length) actions.push({ title: "Fix All Safe Mago Problems in File", kind: fixAll ? "source.fixAll.mago" : "quickfix", edit: edit(safe) });
+    // Only when asked (⌥⏎, the problem popup), not for the light bulb's requests as the caret moves.
+    if (context.trigger !== monaco.languages.CodeActionTriggerType.Invoke || !markers.some((m) => m.source === "mago-lint")) return { actions, dispose() {} };
+    const shown = (lastDiagnostics.get(`lsp:tusk ${model.uri}`)?.shown ?? []).filter((d) => magoCategory[d.source ?? ""]);
+    const found = await tuskRequest<L.CodeAction[]>("textDocument/codeAction", {
+      textDocument: { uri: model.uri.toString() },
+      range: fromRange(model.getFullModelRange()),
+      context: { diagnostics: shown, only: ["source.fixAll.mago"] },
+    }).catch(() => null);
+    const fixAll = found?.find((a) => a.kind === "source.fixAll.mago" && a.edit);
+    if (fixAll) actions.push({ title: fixAll.title, kind: "quickfix", command: { id: "tusk.runAction", title: fixAll.title, arguments: [fixAll] } });
     return { actions, dispose() {} };
   },
-}, { providedCodeActionKinds: ["quickfix", "source.fixAll.mago"] });
+}, { providedCodeActionKinds: ["quickfix"] });
+monaco.editor.registerCommand("tusk.runAction", (_, action: L.CodeAction) => runTuskAction(action));
 
 /** Converts locations and loads their files, because Monaco can only show locations in existing models. */
 async function locations(result: L.Location | L.Location[] | L.LocationLink[] | null): Promise<monaco.languages.Location[]> {
@@ -1223,6 +1200,9 @@ export const didSave = (model: monaco.editor.ITextModel) => {
 
 export type Symbol = { name: string; kind: L.SymbolKind; container?: string; path: string; range?: monaco.IRange };
 
+/** LSP symbol kinds that name types: Class, Enum, Interface, Struct (Tusk's traits). */
+export const TYPE_KINDS: number[] = [5, 10, 11, 23];
+
 /** Searches symbols across the project in every server that supports it. */
 export async function workspaceSymbols(query: string): Promise<Symbol[]> {
   const results = await Promise.all(servers.map((s) => s.symbols(query).catch(() => [])));
@@ -1239,7 +1219,7 @@ export async function workspaceSymbols(query: string): Promise<Symbol[]> {
 export async function typeSymbol(fqn: string): Promise<Symbol | undefined> {
   const short = fqn.split("\\").pop()!;
   const namespace = fqn.slice(0, -short.length - 1);
-  const symbols = await workspaceSymbols(short);
+  const symbols = (await workspaceSymbols(short)).filter((s) => TYPE_KINDS.includes(s.kind));
   return symbols.find((s) => s.name === short && (s.container ?? "") === namespace) ?? symbols.find((s) => s.name === fqn);
 }
 

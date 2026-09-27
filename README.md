@@ -40,8 +40,8 @@ file to change when you add it.
 | --- | --- |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
-| Type hierarchy | A trait's users are found in project files, not in `vendor`. |
-| Call hierarchy | Callers come from the same search as Change Signature, so calls through dynamic names such as `$this->$method()` are missed. Callees are found with Go to Definition on each call, so calls on a value whose type the analyzer can't infer are missed. |
+| Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
+| Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
@@ -226,7 +226,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧A | Find action |
 | ⌘O | Go to class |
 | ⌘⇧O | Go to file (press again to include ignored files, such as `vendor`) |
-| ⌥⌘O | Go to symbol in the project |
+| ⌥⌘O | Go to symbol in the project: classes, functions, constants, and methods (`User::save` narrows to a class's) |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
 | ⌘⇧R | Replace in files |
@@ -793,13 +793,13 @@ type's name, such as `Model` in `extends Model` or a trait in `use HasFactory;`,
 the tab shows that type. Otherwise, it shows the class, interface, trait, or
 enum that the cursor is in.
 
-- **Subtypes** lists the classes that extend it or implement it, including
-  classes in `vendor`. For a trait, it lists the types that use it, in project
-  files only. Expand one to see its own subtypes.
+- **Subtypes** lists the classes that extend it or implement it directly,
+  including classes in `vendor`. For a trait, it lists the types that use it.
+  Expand one to see its own subtypes.
 - **Supertypes** lists its parent class, its interfaces, and its traits.
   Expand one to go further up.
 
-Click a type to open it. Types that the PHP index doesn't know are listed
+Click a type to open it. PHP's own types, such as `Countable`, are listed
 without a file.
 
 ## Generate code
@@ -811,8 +811,8 @@ class, trait, or enum at the cursor. The list offers what the class lacks:
   and isn't static. It's offered when the class has no constructor.
 - **Getters**, **Setters**, and **Getters and Setters**: `getTitle()` and
   `setTitle()` for each property, including promoted ones, that doesn't have
-  one yet. Readonly properties get no setter. The PHP server writes them.
-- **`__toString()`**, with the cursor in its `return`.
+  one yet. Readonly properties get no setter.
+- **`__toString()`**, returning `''`.
 - **Implement Methods…** and **Override Methods…**, when the class has
   interface or abstract methods to write, including abstract methods of the
   traits it uses, or parent methods to override. Override asks which method.
@@ -825,8 +825,9 @@ Press ⌃⌥H in a PHP file to open the **Call Hierarchy** tab for the method or
 function called under the cursor, or else the one the cursor is in.
 
 - **Callers** lists the methods and functions that call it, one row per call.
-  Code outside a function, such as a route file, is listed by its file. Expand
-  a caller to see its own callers.
+  For a constructor, that includes `new`, `new self`, `new static`, and
+  `parent::__construct()`. Code outside a function, such as a route file, is
+  listed by its file. Expand a caller to see its own callers.
 - **Callees** lists the project's and packages' methods and functions it calls.
   PHP's own functions aren't listed.
 
@@ -2121,10 +2122,13 @@ file's `excludes` instead.
    the project, the project's Prettier formats PHP and Blade files too.
 2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
    `vendor/bin/pint`.
-3. **Mago**, the bundled fallback for PHP.
+3. **Mago's formatter**, the fallback for PHP, built into the PHP server.
 
 Prettier, including the bundled one, and Pint read the project's own
-configuration files, and Prettier follows `.editorconfig`.
+configuration files, and Prettier follows `.editorconfig`. Mago reads the
+`[formatter]` section of `mago.toml`: a `preset` (`default`, `psr-12`, `pint`,
+`tempest`, `hack`, or `drupal`), options over it, and `excludes`. A file with
+a syntax error isn't formatted; the status bar names the line.
 
 Mago checks PHP files as you type (static analysis and lint).
 If your project has a `mago.toml` file, Mago uses it. Otherwise the app uses
@@ -2215,7 +2219,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |
 | `src/bookmarks.ts` | Bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
-| `src/format.ts` | Formatting with the project's Prettier or Pint, or Mago |
+| `src/format.ts` | Formatting with the project's Prettier or Pint, or Tusk's server (Mago's formatter) |
 | `src/markdownpreview.ts` | The Markdown preview tab |
 | `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
 | `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |
