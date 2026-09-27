@@ -85,6 +85,11 @@ export const luminance = (c: string) => {
   const [r, g, b] = rgb(c).map((x) => ((x /= 255) <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
+/** WCAG contrast ratio, from 1 (same) to 21 (black on white). */
+export const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
 
 // ---- Reading themes ----
 
@@ -292,6 +297,10 @@ export function convert(theme: ColorTheme): Converted {
   const accent =
     [...["button.background", "focusBorder", "textLink.foreground"].map((k) => over(first(c, k), bg)), (roles.keyword as Style | undefined)?.foreground]
       .find((color) => color && Math.abs(luminance(color) - luminance(bg)) > 0.05) ?? "#3574f0";
+  // A theme's color is kept only when it stands out from what it sits on; many themes draw inputs without a
+  // border, or set buttons' text for a button color other than the accent picked above.
+  const legible = (color: string | undefined, on: string, ratio: number) => (color && contrast(color, on) >= ratio ? color : undefined);
+  const inputBg = over(first(c, "input.background"), panel) ?? bg;
   const ui: Record<string, string> = {
     bg,
     panel,
@@ -299,16 +308,16 @@ export function convert(theme: ColorTheme): Converted {
     border,
     "border-subtle": mix(border, panel, 0.4),
     text,
-    muted: over(first(c, "descriptionForeground"), panel) ?? mix(text, panel, 0.4),
+    muted: legible(over(first(c, "descriptionForeground"), panel), text, 1.2) ?? mix(text, panel, 0.4),
     faint: mix(text, panel, 0.55),
     accent,
     "accent-hover": over(first(c, "button.hoverBackground"), bg) ?? mix(accent, text, 0.15),
-    "on-accent": over(first(c, "button.foreground"), accent) ?? (luminance(accent) > 0.45 ? "#000000" : "#ffffff"),
+    "on-accent": legible(over(first(c, "button.foreground"), accent), accent, 3) ?? (contrast(accent, "#000000") > contrast(accent, "#ffffff") ? "#000000" : "#ffffff"),
     hover: first(c, "list.hoverBackground") ?? mix(panel, text, 0.08),
     selected: first(c, "list.activeSelectionBackground", "editor.selectionBackground") ?? mix(panel, accent, 0.35),
     "selected-inactive": first(c, "list.inactiveSelectionBackground") ?? mix(panel, text, 0.12),
-    "input-bg": over(first(c, "input.background"), panel) ?? bg,
-    "input-border": over(first(c, "input.border", "dropdown.border"), panel) ?? mix(panel, text, 0.22),
+    "input-bg": inputBg,
+    "input-border": legible(over(first(c, "input.border", "dropdown.border"), panel), panel, 1.3) ?? mix(panel, text, 0.22),
   };
   const status: Record<string, string[]> = {
     red: ["terminal.ansiRed", "editorError.foreground", "errorForeground"],

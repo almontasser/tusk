@@ -182,7 +182,11 @@ wins over one still loading, so previewing in the picker stays quick.
   `list.activeSelectionBackground` for `--selected`), or is mixed from the
   editor's background and text when the theme doesn't set them, as TextMate
   themes never do. They're set on the root element's style, and `data-theme`
-  follows the theme's type, for the light-only rules.
+  follows the theme's type, for the light-only rules. A theme's input border,
+  button text, and description color are kept only when they contrast with
+  what they sit on (`contrast`, the WCAG ratio); otherwise they're mixed as for
+  TextMate themes. One Dark, for example, draws inputs with its sidebar's
+  color, which hid every secondary button's outline.
 - **Terminal colors** from `terminal.*`, for xterm.js. The terminal listens
   with `onTheme`.
 
@@ -1854,6 +1858,11 @@ links, and a warning for an unknown key that looks like `group.key`, for
 `__`, `trans`, `trans_choice`, `@lang`, `Lang::get`, and the translator's
 methods, reading `lang/*/*.php` and `lang/*.json` through a booted app. It
 lists values in completion only below 200 keys, and packages' keys count.
+
+Laravel LSP runs its PHP helpers from `storage/framework/lsp-<hash>.php` and
+deletes each when it finishes. A server stopped mid-run leaves its helper in
+the user's project, where it shows as an untracked file, so `lsp_start`
+removes helpers older than a minute before starting the server.
 
 Monaco combines providers for the same language: it merges completion lists,
 definitions, references, hovers, code actions, and links. Each server writes

@@ -1102,6 +1102,9 @@ function showDirty(path: string) {
 function renderTabs() {
   for (const pane of panes) {
     const shown = pane === currentPane() ? active : pane.active;
+    // Two files with one name get their folder beside it, so the tabs tell them apart.
+    const names = new Map<string, number>();
+    for (const p of pane.paths) if (!views.has(p)) names.set(nameOf(p), (names.get(nameOf(p)) ?? 0) + 1);
     pane.bar.replaceChildren(
       ...pane.paths.map((path) => {
         const tab = tabs.get(path);
@@ -1114,6 +1117,7 @@ function renderTabs() {
         const icon = view ? { codicon: tabIcon(view), color: "" } : fileIcon(nameOf(path));
         el.innerHTML = `<span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
         el.querySelector(".name")!.textContent = view ? view.title : nameOf(path);
+        if (!view && names.get(nameOf(path))! > 1) el.querySelector(".name")!.after(Object.assign(document.createElement("span"), { className: "tab-dir", textContent: nameOf(relative(path).replace(/\/[^/]*$/, "") || ".") }));
         el.onclick = () => (focusPane(pane), openFile(path));
         el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
         el.oncontextmenu = (e) => {
@@ -1125,6 +1129,7 @@ function renderTabs() {
             { label: "Close", run: () => closeTab(path, pane) },
             { label: "Close Others", run: () => closeAll(path) },
             { label: "Close All", run: () => closeAll() },
+            { label: "Close Tabs to the Right", run: async () => { for (const p of pane.paths.slice(pane.paths.indexOf(path) + 1)) await closeTab(p, pane); } },
             ...(view?.editorOnly
               ? []
               : view

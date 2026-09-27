@@ -326,6 +326,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .tabs .tab.dirty .close::before { content: "\ea71"; font-size: 10px; color: var(--text); }
 .tabs .tab.dirty:hover .close::before { content: "\ea76"; font-size: 14px; color: inherit; }
 #terminal-tabs .tab.exited { font-style: italic; }
+.tabs .tab .tab-dir { color: var(--faint); font-size: 12px; margin-left: -2px; }
 #terminal-tabs .new-terminal { align-self: center; flex-shrink: 0; margin: 0 6px; }
 #terminal-tabs .tab > .codicon { font-size: 14px !important; color: var(--faint); }
 #terminal-tabs .tab.active > .codicon { color: var(--muted); }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
@@ -80,6 +80,9 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         "xdebug" => ("node", "php-debug/out/phpDebug.js", &[]),
         _ => return Err(format!("Unknown language server: {name}")),
     };
+    if name == "laravel" {
+        clean_laravel_helpers(Path::new(&root));
+    }
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
         .args((!runtime.is_empty()).then_some(runtime))
@@ -108,6 +111,21 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         let _ = old.wait();
     }
     Ok(std::process::id())
+}
+
+/// Laravel's language server runs its PHP helpers from `storage/framework/lsp-<hash>.php` and deletes each when it
+/// finishes, so a server stopped mid-run (on reload, project switch, or quit) leaves them in the user's project.
+/// Removes those older than a minute; a newer one may belong to another window's server.
+fn clean_laravel_helpers(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root.join("storage/framework")) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let helper = name.strip_prefix("lsp-").and_then(|n| n.strip_suffix(".php")).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        let stale = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 60);
+        if helper && stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Starts the bundled llama-server with the GGUF file `model` on a free local port, for
@@ -231,13 +249,32 @@ fn read_message(r: &mut impl BufRead) -> std::io::Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_response, read_message};
+    use super::{clean_laravel_helpers, parse_response, read_message};
 
     #[test]
     fn reads_http_responses() {
         assert_eq!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap(), "{}");
         assert!(parse_response(b"HTTP/1.1 401 Unauthorized\r\n\r\nno").unwrap_err().contains("401"));
         assert!(parse_response(b"HTTP/1.1 200 OK").is_err());
+    }
+
+    #[test]
+    fn removes_stale_laravel_helpers_only() {
+        let root = std::env::temp_dir().join(format!("tusk-helpers-{}", std::process::id()));
+        let dir = root.join("storage/framework");
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        for name in ["lsp-0123456789abcdef.php", "lsp-fedcba9876543210.php", "lsp-notahash.php", "routes.php"] {
+            std::fs::write(dir.join(name), "<?php").unwrap();
+        }
+        for name in ["lsp-0123456789abcdef.php", "lsp-notahash.php", "routes.php"] {
+            std::fs::File::options().write(true).open(dir.join(name)).unwrap().set_modified(old).unwrap();
+        }
+        clean_laravel_helpers(&root);
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(left, ["lsp-fedcba9876543210.php", "lsp-notahash.php", "routes.php"]);
     }
 
     #[test]

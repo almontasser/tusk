@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
-import { convert, hex, parseJsonc, parsePlist, readTheme, styleOf } from "./colortheme.ts";
+import { contrast, convert, hex, parseJsonc, parsePlist, readTheme, styleOf } from "./colortheme.ts";
 
 test("parseJsonc strips comments and trailing commas but not URLs in strings", () => {
   assert.deepEqual(parseJsonc('{ // note\n "a": "http://x/*y*/", /* c */ "b": [1, 2,], }'), { a: "http://x/*y*/", b: [1, 2] });
@@ -47,4 +47,11 @@ test("every bundled theme converts with opaque interface colors", () => {
       assert.ok(out.monaco.rules.length > 20, file);
     }
   }
+});
+
+test("a theme's borderless inputs and mismatched button text fall back to legible colors", () => {
+  const ui = convert(readTheme({ type: "dark", colors: { "editor.background": "#282c34", "editor.foreground": "#abb2bf", "sideBar.background": "#21252b", "input.border": "#21252b", "focusBorder": "#61afef", "button.foreground": "#ffffff", "descriptionForeground": "#abb2bf" }, tokenColors: [] })).ui;
+  assert.ok(contrast(ui["input-border"], ui.panel) >= 1.3);
+  assert.ok(contrast(ui["on-accent"], ui.accent) >= 3);
+  assert.notEqual(ui.muted, ui.text);
 });
