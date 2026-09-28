@@ -1304,6 +1304,32 @@ function entryAccess(string $class, string $root): array
     return $out;
 }
 
+/**
+ * The app's importers and exporters with their models, and what imports and exports need: Filament's tables, the
+ * job batches and notifications tables, and a queue (anything but `sync` needs a worker).
+ */
+function porters(string $root): array
+{
+    $out = ['importers' => [], 'exporters' => [], 'tables' => [], 'queue' => config('queue.default')];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            $kind = is_subclass_of($class, 'Filament\\Actions\\Imports\\Importer') ? 'importers' : (is_subclass_of($class, 'Filament\\Actions\\Exports\\Exporter') ? 'exporters' : null);
+            if ($kind && !(new ReflectionClass($class))->isAbstract()) {
+                $out[$kind][] = ['class' => $class, 'file' => relativeFile($class, $root), 'model' => $class::getModel()];
+            }
+        } catch (Throwable) {
+        }
+    }
+    foreach (['imports', 'exports', 'failed_import_rows', 'job_batches', 'notifications'] as $table) {
+        try {
+            $out['tables'][$table] = Illuminate\Support\Facades\Schema::hasTable($table);
+        } catch (Throwable) {
+            $out['tables'][$table] = null;
+        }
+    }
+    return $out;
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1329,6 +1355,7 @@ try {
         'model' => modelDetails($argv[3], $root),
         'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
         'entry-access' => entryAccess($argv[3], $root),
+        'porters' => porters($root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

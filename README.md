@@ -961,6 +961,26 @@ the panel follows it.
 Settings written as code the designer doesn't write, such as a logo from a
 closure, show as code and open it.
 
+### Import and export
+
+Add an **ImportAction**, **ExportAction**, or **ExportBulkAction** from the
+palette, and its **Importer** or **Exporter** setting picks one of the model's,
+or makes a new one from the model's columns with Filament's generator. Click
+it, or **Open in Import Designer** above an importer's class, to design it:
+
+- **Columns:** each CSV column's heading; for imports, whether the file must
+  have it, how its value is read (text, a number, yes or no, or a list), its
+  validation rules, and an example value; for exports, whether it starts
+  checked. Add the model's other columns, reorder, and remove.
+- **Records:** whether each imported row makes a new record, updates the one
+  with the same value in a column (such as `sku`) or makes it, or only
+  updates.
+- **What it needs:** the tables imports and exports use, with a button that
+  creates them, and whether a queue worker must run.
+
+The preview shows the CSV: the example people download before importing, or
+the columns an export writes.
+
 ### Custom pages
 
 Pages that aren't a resource's are listed under **Pages** in each panel in the

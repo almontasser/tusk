@@ -1,0 +1,1835 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Imports\\Shop",
+  "uses": [
+    {
+      "alias": "ProductCategory",
+      "name": "App\\Models\\Shop\\ProductCategory",
+      "kind": "class",
+      "span": [
+        45,
+        81
+      ]
+    },
+    {
+      "alias": "ImportColumn",
+      "name": "Filament\\Actions\\Imports\\ImportColumn",
+      "kind": "class",
+      "span": [
+        82,
+        124
+      ]
+    },
+    {
+      "alias": "Importer",
+      "name": "Filament\\Actions\\Imports\\Importer",
+      "kind": "class",
+      "span": [
+        125,
+        163
+      ]
+    },
+    {
+      "alias": "Import",
+      "name": "Filament\\Actions\\Imports\\Models\\Import",
+      "kind": "class",
+      "span": [
+        164,
+        207
+      ]
+    }
+  ],
+  "useInsert": 208,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "CategoryImporter",
+      "fqn": "App\\Filament\\Imports\\Shop\\CategoryImporter",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Actions\\Imports\\Importer",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        209,
+        2425
+      ],
+      "bodyStart": 250,
+      "bodyEnd": 2424,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "model",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Models\\Shop\\ProductCategory",
+            "classSpan": [
+              289,
+              304
+            ],
+            "name": "class",
+            "span": [
+              289,
+              311
+            ]
+          },
+          "span": [
+            255,
+            312
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "getColumns",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            318,
+            1763
+          ],
+          "docStart": null,
+          "body": [
+            366,
+            1762
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        396,
+                        408
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 414,
+                        "close": 421,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "name",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                415,
+                                421
+                              ]
+                            },
+                            "span": [
+                              415,
+                              421
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        396,
+                        422
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "requiredMapping",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 456,
+                          "close": 457,
+                          "items": []
+                        },
+                        "span": [
+                          439,
+                          458
+                        ],
+                        "nameSpan": [
+                          441,
+                          456
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 482,
+                          "close": 506,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "required",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        484,
+                                        494
+                                      ]
+                                    },
+                                    "span": [
+                                      484,
+                                      494
+                                    ],
+                                    "spread": false
+                                  },
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "max:255",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        496,
+                                        505
+                                      ]
+                                    },
+                                    "span": [
+                                      496,
+                                      505
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 483,
+                                "close": 505,
+                                "legacy": false,
+                                "span": [
+                                  483,
+                                  506
+                                ]
+                              },
+                              "span": [
+                                483,
+                                506
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          475,
+                          507
+                        ],
+                        "nameSpan": [
+                          477,
+                          482
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 533,
+                          "close": 546,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Category A",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  534,
+                                  546
+                                ]
+                              },
+                              "span": [
+                                534,
+                                546
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          524,
+                          547
+                        ],
+                        "nameSpan": [
+                          526,
+                          533
+                        ]
+                      }
+                    ],
+                    "span": [
+                      396,
+                      547
+                    ]
+                  },
+                  "span": [
+                    396,
+                    547
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        561,
+                        573
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 579,
+                        "close": 586,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "slug",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                580,
+                                586
+                              ]
+                            },
+                            "span": [
+                              580,
+                              586
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        561,
+                        587
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "requiredMapping",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 621,
+                          "close": 622,
+                          "items": []
+                        },
+                        "span": [
+                          604,
+                          623
+                        ],
+                        "nameSpan": [
+                          606,
+                          621
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 647,
+                          "close": 671,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "required",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        649,
+                                        659
+                                      ]
+                                    },
+                                    "span": [
+                                      649,
+                                      659
+                                    ],
+                                    "spread": false
+                                  },
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "max:255",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        661,
+                                        670
+                                      ]
+                                    },
+                                    "span": [
+                                      661,
+                                      670
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 648,
+                                "close": 670,
+                                "legacy": false,
+                                "span": [
+                                  648,
+                                  671
+                                ]
+                              },
+                              "span": [
+                                648,
+                                671
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          640,
+                          672
+                        ],
+                        "nameSpan": [
+                          642,
+                          647
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 698,
+                          "close": 711,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "category-a",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  699,
+                                  711
+                                ]
+                              },
+                              "span": [
+                                699,
+                                711
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          689,
+                          712
+                        ],
+                        "nameSpan": [
+                          691,
+                          698
+                        ]
+                      }
+                    ],
+                    "span": [
+                      561,
+                      712
+                    ]
+                  },
+                  "span": [
+                    561,
+                    712
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        726,
+                        738
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 744,
+                        "close": 753,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "parent",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                745,
+                                753
+                              ]
+                            },
+                            "span": [
+                              745,
+                              753
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        726,
+                        754
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "relationship",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 785,
+                          "close": 816,
+                          "items": [
+                            {
+                              "name": "resolveUsing",
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "name",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        801,
+                                        807
+                                      ]
+                                    },
+                                    "span": [
+                                      801,
+                                      807
+                                    ],
+                                    "spread": false
+                                  },
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "slug",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        809,
+                                        815
+                                      ]
+                                    },
+                                    "span": [
+                                      809,
+                                      815
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 800,
+                                "close": 815,
+                                "legacy": false,
+                                "span": [
+                                  800,
+                                  816
+                                ]
+                              },
+                              "span": [
+                                786,
+                                816
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          771,
+                          817
+                        ],
+                        "nameSpan": [
+                          773,
+                          785
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 843,
+                          "close": 856,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Category B",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  844,
+                                  856
+                                ]
+                              },
+                              "span": [
+                                844,
+                                856
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          834,
+                          857
+                        ],
+                        "nameSpan": [
+                          836,
+                          843
+                        ]
+                      }
+                    ],
+                    "span": [
+                      726,
+                      857
+                    ]
+                  },
+                  "span": [
+                    726,
+                    857
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        871,
+                        883
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 889,
+                        "close": 903,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "description",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                890,
+                                903
+                              ]
+                            },
+                            "span": [
+                              890,
+                              903
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        871,
+                        904
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 930,
+                          "close": 972,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "This is the description for Category A.",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  931,
+                                  972
+                                ]
+                              },
+                              "span": [
+                                931,
+                                972
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          921,
+                          973
+                        ],
+                        "nameSpan": [
+                          923,
+                          930
+                        ]
+                      }
+                    ],
+                    "span": [
+                      871,
+                      973
+                    ]
+                  },
+                  "span": [
+                    871,
+                    973
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        987,
+                        999
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 1005,
+                        "close": 1016,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "position",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                1006,
+                                1016
+                              ]
+                            },
+                            "span": [
+                              1006,
+                              1016
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        987,
+                        1017
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "requiredMapping",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1051,
+                          "close": 1052,
+                          "items": []
+                        },
+                        "span": [
+                          1034,
+                          1053
+                        ],
+                        "nameSpan": [
+                          1036,
+                          1051
+                        ]
+                      },
+                      {
+                        "name": "numeric",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1079,
+                          "close": 1080,
+                          "items": []
+                        },
+                        "span": [
+                          1070,
+                          1081
+                        ],
+                        "nameSpan": [
+                          1072,
+                          1079
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1105,
+                          "close": 1129,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "required",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1107,
+                                        1117
+                                      ]
+                                    },
+                                    "span": [
+                                      1107,
+                                      1117
+                                    ],
+                                    "spread": false
+                                  },
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "integer",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1119,
+                                        1128
+                                      ]
+                                    },
+                                    "span": [
+                                      1119,
+                                      1128
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 1106,
+                                "close": 1128,
+                                "legacy": false,
+                                "span": [
+                                  1106,
+                                  1129
+                                ]
+                              },
+                              "span": [
+                                1106,
+                                1129
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1098,
+                          1130
+                        ],
+                        "nameSpan": [
+                          1100,
+                          1105
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1156,
+                          "close": 1160,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "1",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1157,
+                                  1160
+                                ]
+                              },
+                              "span": [
+                                1157,
+                                1160
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1147,
+                          1161
+                        ],
+                        "nameSpan": [
+                          1149,
+                          1156
+                        ]
+                      }
+                    ],
+                    "span": [
+                      987,
+                      1161
+                    ]
+                  },
+                  "span": [
+                    987,
+                    1161
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        1175,
+                        1187
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 1193,
+                        "close": 1206,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "is_visible",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                1194,
+                                1206
+                              ]
+                            },
+                            "span": [
+                              1194,
+                              1206
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        1175,
+                        1207
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "label",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1231,
+                          "close": 1244,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Visibility",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1232,
+                                  1244
+                                ]
+                              },
+                              "span": [
+                                1232,
+                                1244
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1224,
+                          1245
+                        ],
+                        "nameSpan": [
+                          1226,
+                          1231
+                        ]
+                      },
+                      {
+                        "name": "requiredMapping",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1279,
+                          "close": 1280,
+                          "items": []
+                        },
+                        "span": [
+                          1262,
+                          1281
+                        ],
+                        "nameSpan": [
+                          1264,
+                          1279
+                        ]
+                      },
+                      {
+                        "name": "boolean",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1307,
+                          "close": 1308,
+                          "items": []
+                        },
+                        "span": [
+                          1298,
+                          1309
+                        ],
+                        "nameSpan": [
+                          1300,
+                          1307
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1333,
+                          "close": 1357,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "required",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1335,
+                                        1345
+                                      ]
+                                    },
+                                    "span": [
+                                      1335,
+                                      1345
+                                    ],
+                                    "spread": false
+                                  },
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "boolean",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1347,
+                                        1356
+                                      ]
+                                    },
+                                    "span": [
+                                      1347,
+                                      1356
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 1334,
+                                "close": 1356,
+                                "legacy": false,
+                                "span": [
+                                  1334,
+                                  1357
+                                ]
+                              },
+                              "span": [
+                                1334,
+                                1357
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1326,
+                          1358
+                        ],
+                        "nameSpan": [
+                          1328,
+                          1333
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1384,
+                          "close": 1390,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "yes",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1385,
+                                  1390
+                                ]
+                              },
+                              "span": [
+                                1385,
+                                1390
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1375,
+                          1391
+                        ],
+                        "nameSpan": [
+                          1377,
+                          1384
+                        ]
+                      }
+                    ],
+                    "span": [
+                      1175,
+                      1391
+                    ]
+                  },
+                  "span": [
+                    1175,
+                    1391
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        1405,
+                        1417
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 1423,
+                        "close": 1435,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "seo_title",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                1424,
+                                1435
+                              ]
+                            },
+                            "span": [
+                              1424,
+                              1435
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        1405,
+                        1436
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "label",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1460,
+                          "close": 1472,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "SEO title",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1461,
+                                  1472
+                                ]
+                              },
+                              "span": [
+                                1461,
+                                1472
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1453,
+                          1473
+                        ],
+                        "nameSpan": [
+                          1455,
+                          1460
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1497,
+                          "close": 1508,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "max:60",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1499,
+                                        1507
+                                      ]
+                                    },
+                                    "span": [
+                                      1499,
+                                      1507
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 1498,
+                                "close": 1507,
+                                "legacy": false,
+                                "span": [
+                                  1498,
+                                  1508
+                                ]
+                              },
+                              "span": [
+                                1498,
+                                1508
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1490,
+                          1509
+                        ],
+                        "nameSpan": [
+                          1492,
+                          1497
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1535,
+                          "close": 1556,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Awesome Category A",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1536,
+                                  1556
+                                ]
+                              },
+                              "span": [
+                                1536,
+                                1556
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1526,
+                          1557
+                        ],
+                        "nameSpan": [
+                          1528,
+                          1535
+                        ]
+                      }
+                    ],
+                    "span": [
+                      1405,
+                      1557
+                    ]
+                  },
+                  "span": [
+                    1405,
+                    1557
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Imports\\ImportColumn",
+                      "classSpan": [
+                        1571,
+                        1583
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 1589,
+                        "close": 1607,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "seo_description",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                1590,
+                                1607
+                              ]
+                            },
+                            "span": [
+                              1590,
+                              1607
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        1571,
+                        1608
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "label",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1632,
+                          "close": 1650,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "SEO description",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1633,
+                                  1650
+                                ]
+                              },
+                              "span": [
+                                1633,
+                                1650
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1625,
+                          1651
+                        ],
+                        "nameSpan": [
+                          1627,
+                          1632
+                        ]
+                      },
+                      {
+                        "name": "rules",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1675,
+                          "close": 1687,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "array",
+                                "items": [
+                                  {
+                                    "key": null,
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "max:160",
+                                      "quote": "single",
+                                      "interpolated": false,
+                                      "span": [
+                                        1677,
+                                        1686
+                                      ]
+                                    },
+                                    "span": [
+                                      1677,
+                                      1686
+                                    ],
+                                    "spread": false
+                                  }
+                                ],
+                                "open": 1676,
+                                "close": 1686,
+                                "legacy": false,
+                                "span": [
+                                  1676,
+                                  1687
+                                ]
+                              },
+                              "span": [
+                                1676,
+                                1687
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1668,
+                          1688
+                        ],
+                        "nameSpan": [
+                          1670,
+                          1675
+                        ]
+                      },
+                      {
+                        "name": "example",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 1714,
+                          "close": 1744,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Wow! It's just so amazing.",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  1715,
+                                  1744
+                                ]
+                              },
+                              "span": [
+                                1715,
+                                1744
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          1705,
+                          1745
+                        ],
+                        "nameSpan": [
+                          1707,
+                          1714
+                        ]
+                      }
+                    ],
+                    "span": [
+                      1571,
+                      1745
+                    ]
+                  },
+                  "span": [
+                    1571,
+                    1745
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 382,
+              "close": 1755,
+              "legacy": false,
+              "span": [
+                382,
+                1756
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "resolveRecord",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "?ProductCategory",
+          "attributes": [],
+          "span": [
+            1769,
+            1930
+          ],
+          "docStart": null,
+          "body": [
+            1824,
+            1929
+          ],
+          "returns": [
+            {
+              "kind": "static",
+              "class": "App\\Models\\Shop\\ProductCategory",
+              "classSpan": [
+                1840,
+                1855
+              ],
+              "method": "firstOrNew",
+              "args": {
+                "open": 1867,
+                "close": 1922,
+                "items": [
+                  {
+                    "name": null,
+                    "value": {
+                      "kind": "array",
+                      "items": [
+                        {
+                          "key": {
+                            "kind": "string",
+                            "value": "slug",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1882,
+                              1888
+                            ]
+                          },
+                          "value": {
+                            "kind": "other",
+                            "span": [
+                              1892,
+                              1911
+                            ]
+                          },
+                          "span": [
+                            1882,
+                            1911
+                          ],
+                          "spread": false
+                        }
+                      ],
+                      "open": 1868,
+                      "close": 1921,
+                      "legacy": false,
+                      "span": [
+                        1868,
+                        1922
+                      ]
+                    },
+                    "span": [
+                      1868,
+                      1922
+                    ],
+                    "spread": false
+                  }
+                ]
+              },
+              "span": [
+                1840,
+                1923
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "getCompletedNotificationBody",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "import",
+              "type": "Import",
+              "default": null,
+              "span": [
+                1988,
+                2002
+              ]
+            }
+          ],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            1936,
+            2423
+          ],
+          "docStart": null,
+          "body": [
+            2017,
+            2422
+          ],
+          "returns": [
+            {
+              "kind": "var",
+              "name": "body",
+              "span": [
+                2411,
+                2416
+              ]
+            }
+          ],
+          "statements": [
+            {
+              "assigns": "body",
+              "value": {
+                "kind": "concat",
+                "parts": [
+                  {
+                    "kind": "string",
+                    "value": "Your shop category import has completed and ",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      2034,
+                      2080
+                    ]
+                  },
+                  {
+                    "kind": "func",
+                    "name": "number_format",
+                    "nameSpan": [
+                      2083,
+                      2096
+                    ],
+                    "args": {
+                      "open": 2096,
+                      "close": 2121,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "prop",
+                            "object": {
+                              "kind": "var",
+                              "name": "import",
+                              "span": [
+                                2097,
+                                2104
+                              ]
+                            },
+                            "name": "successful_rows",
+                            "nullsafe": false,
+                            "span": [
+                              2097,
+                              2121
+                            ]
+                          },
+                          "span": [
+                            2097,
+                            2121
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      2083,
+                      2122
+                    ]
+                  },
+                  {
+                    "kind": "string",
+                    "value": " ",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      2125,
+                      2128
+                    ]
+                  },
+                  {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "func",
+                      "name": "str",
+                      "nameSpan": [
+                        2131,
+                        2134
+                      ],
+                      "args": {
+                        "open": 2134,
+                        "close": 2140,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "row",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                2135,
+                                2140
+                              ]
+                            },
+                            "span": [
+                              2135,
+                              2140
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        2131,
+                        2141
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "plural",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 2149,
+                          "close": 2174,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "prop",
+                                "object": {
+                                  "kind": "var",
+                                  "name": "import",
+                                  "span": [
+                                    2150,
+                                    2157
+                                  ]
+                                },
+                                "name": "successful_rows",
+                                "nullsafe": false,
+                                "span": [
+                                  2150,
+                                  2174
+                                ]
+                              },
+                              "span": [
+                                2150,
+                                2174
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          2141,
+                          2175
+                        ],
+                        "nameSpan": [
+                          2143,
+                          2149
+                        ]
+                      }
+                    ],
+                    "span": [
+                      2131,
+                      2175
+                    ]
+                  },
+                  {
+                    "kind": "string",
+                    "value": " imported.",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      2178,
+                      2190
+                    ]
+                  }
+                ],
+                "span": [
+                  2034,
+                  2190
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

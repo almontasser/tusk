@@ -4402,6 +4402,24 @@ has, as `methodsOf` reports them.
   implements its Plugin contract), the app's name, and the user model with the
   contracts tenancy needs. `src/panelsettings.ts` draws the view.
 
+### Import and export
+
+- **Reading:** `introspect.php porters` lists the app's importers and
+  exporters with their models, whether the `imports`, `exports`,
+  `failed_import_rows`, `job_batches`, and `notifications` tables exist, and
+  the queue connection.
+- **Actions:** `essentials()` gives ImportAction, ExportAction, and
+  ExportBulkAction an Importer or Exporter row in place of "What it does",
+  and the designer shows no modal lane for them, since Filament draws theirs.
+  New importers and exporters come from `make:filament-importer --generate`,
+  whose `[Class]` in the output names the new class.
+- **Designing:** `src/portergen.ts` reads `getColumns()` as a list of
+  `ImportColumn` or `ExportColumn` chains and changes one call at a time, so
+  calls it doesn't write, such as a relationship's `resolveUsing`, stay.
+  `resolveRecord()` is one of three forms: `new Model()`, `firstOrNew()` by a
+  column, or `query()->where()->first()`. `src/porterdesigner.ts` draws the
+  view.
+
 ### Custom pages
 
 - **Reading:** `introspect.php filament-app` lists each panel's pages that

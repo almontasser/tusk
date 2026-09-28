@@ -31,6 +31,8 @@ export type DesignerHost = {
   openAt(path: string, line: number, column?: number): void;
   status(text: string): void;
   openUrl(url: string): void;
+  /** Runs a command in a terminal tab, calling `done` when it ends. */
+  openTerminal(title: string, command: string[], done?: () => void): void;
 };
 
 export let host: DesignerHost;
@@ -936,6 +938,50 @@ export class Designer {
   }
 
   /** Adds `getHeaderActions()` to the page the Page actions tab shows, with the actions that page usually has. */
+  /**
+   * Picks an importer or exporter for an import or export action: the model's first, then the app's others, or a new
+   * one Filament generates from the model's columns, which then opens in its designer.
+   */
+  private async pickPorter(kind: "importer" | "exporter", anchor: HTMLElement, set: (fqn: string) => void) {
+    const all = await fapp.porters(this.root).catch(() => null);
+    const list = (kind === "importer" ? all?.importers : all?.exporters) ?? [];
+    const model = this.facts?.class ?? null;
+    const mine = list.filter((p) => p.model === model);
+    const others = list.filter((p) => p.model !== model);
+    const choose = (fqn: string) => (p.close(), set(fqn));
+    const create = async () => {
+      if (!model) return;
+      p.close();
+      // Filament's generator takes the model under App\Models, with folders, or its namespace apart.
+      const rel = model.startsWith("App\\Models\\") ? model.slice(11).replace(/\\/g, "/") : shortClass(model);
+      const args = [`make:filament-${kind}`, rel, "--generate", ...(model.startsWith("App\\Models\\") ? [] : [`--model-namespace=${model.slice(0, model.lastIndexOf("\\"))}`])];
+      try {
+        host.status(`Making the ${kind}…`);
+        const out = await fapp.artisan(this.root, args);
+        const fqn = /\[([\w\\]+(?:Importer|Exporter))\]/.exec(out.replace(/\x1b\[[\d;]*m/g, ""))?.[1];
+        fapp.forget(["app:porters"]);
+        if (!fqn) return host.status(`Made the ${kind}, but couldn't tell its class: ${out.trim().slice(0, 120)}`);
+        set(fqn);
+        const file = await fapp.fileOfClass(this.root, fqn);
+        if (file) void import("./porterdesigner").then((m) => m.openPorter(file));
+      } catch (e) {
+        showError(`Can't make the ${kind}`, e);
+      }
+    };
+    const row = (x: fapp.PorterInfo) => h("button", { type: "button", class: "fd-menu-item", onclick: () => choose(x.class) }, icon("table"), h("span", {}, shortClass(x.class)), h("span", { class: "fd-note" }, x.model ? shortClass(x.model) : ""));
+    const p = popover(
+      anchor,
+      h(
+        "div",
+        { class: "fd-menu fd-porter-menu" },
+        ...mine.map(row),
+        model ? h("button", { type: "button", class: "fd-menu-item", onclick: () => void create() }, icon("add"), h("span", {}, `New ${kind} for ${shortClass(model)}`), h("span", { class: "fd-note" }, "from its columns")) : null,
+        others.length ? h("div", { class: "fd-menu-sep" }, "Other models") : null,
+        ...others.map(row),
+      ),
+    );
+  }
+
   /** A page's or widget's Access tab. */
   private entryAccess() {
     const doc = this.docs.get(this.file);
@@ -1033,7 +1079,8 @@ export class Designer {
       const path = this.selection!.slice(0, i);
       const comp = resolve(root, path)?.entry.comp;
       const kind = comp && this.cat && classInfo(this.cat, comp.cls)?.kind;
-      if (comp && (kind === "action" || kind === "bulkAction")) return { path, comp };
+      // Import and export actions draw their own modal, from the importer or exporter.
+      if (comp && (kind === "action" || kind === "bulkAction")) return /(Import|Export|ExportBulk)Action$/.test(comp.cls) ? null : { path, comp };
     }
     return null;
   }
@@ -1311,6 +1358,8 @@ export class Designer {
             },
           }),
         ),
+      porter: (kind, anchor, set) => void this.pickPorter(kind, anchor, set),
+      openPorter: (fqn) => void fapp.fileOfClass(this.root, fqn).then((f) => { if (f) void import("./porterdesigner").then((m) => m.openPorter(f)); }),
       action: (() => {
         const kind = classInfo(this.cat!, found.entry.comp!.cls)?.kind ?? "";
         const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;

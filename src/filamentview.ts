@@ -67,6 +67,12 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(page.index + page[0].length - page[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPageDesigner", title: "Open in Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      // An importer or exporter: its own designer.
+      const porter = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+(Importer|Exporter)\b/m.exec(text);
+      if (porter && /Filament\\Actions\\(Imports|Exports)\\/.test(text)) {
+        const line = model.getPositionAt(porter.index + porter[0].length - porter[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPorter", title: `Open in ${porter[1] === "Importer" ? "Import" : "Export"} Designer`, arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -81,6 +87,7 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
   monaco.editor.registerCommand("tusk.openPanelSettings", (_, path: string, id: string) => void import("./panelsettings").then((m) => m.openPanelSettings(path, id)));
   monaco.editor.registerCommand("tusk.openPageDesigner", (_, path: string) => void openDesigner(path));
+  monaco.editor.registerCommand("tusk.openPorter", (_, path: string) => void import("./porterdesigner").then((m) => m.openPorter(path)));
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
