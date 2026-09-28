@@ -74,6 +74,8 @@ export function paramEditor(cat: Pick<Catalog, "enums">, method: string, p: CPar
   const enumType = types.find((t) => cat.enums[t]);
   if (enumType && types.every((t) => t === enumType || t === "string" || t === "BackedEnum" || t === "UnitEnum")) return { kind: "enum", enum: enumType };
   if (types.length && types.every((t) => t === "bool")) return { kind: "switch" };
+  // Grid columns take a number, or an array of them by breakpoint, which code can hold.
+  if (/^(columns|columnSpan|rows|maxItems|minItems|limit)$/.test(method) && has("int")) return { kind: "number", integer: true };
   if ((has("int") || has("float")) && !has("string") && !has("array")) return { kind: "number", integer: !has("float") };
   // Options take an array, or an enum's class name as a string.
   if ((has("array") || has("Arrayable")) && /options|descriptions|labels/i.test(method)) return { kind: "map" };
@@ -89,7 +91,7 @@ export function methodEditor(cat: Pick<Catalog, "enums">, name: string, m: CMeth
   const params = m.params;
   if (!params.length) return { kind: "presence" };
   const [first, ...rest] = params;
-  const flag = first.types.includes("bool") && (first.default === "true" || first.optional) && !first.types.some((t) => /^(string|int|float|array)$/.test(t));
+  const flag = first.types.includes("bool") && (first.default === "true" || first.optional) && (first.name === "condition" || !first.types.some((t) => /^(string|int|float|array)$/.test(t)));
   if (flag && rest.every((r) => r.optional)) return { kind: "switch" };
   return paramEditor(cat, name, first);
 }

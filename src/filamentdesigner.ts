@@ -687,7 +687,10 @@ export class Designer {
   private footer() {
     const ref = this.currentRoot();
     const where = ref && "doc" in ref ? ref.doc.path.slice(this.root.length + 1) : this.file.slice(this.root.length + 1);
-    return h("footer", { class: "fd-footer" }, h("span", { class: "fd-footer-file", title: "The file this tab edits" }, icon("file-code"), where), h("span", { class: "fd-spacer" }), this.message ? h("span", { class: "fd-footer-message" }, icon("check"), this.message, " · saved") : null);
+    // A class outside the resource's folder can be shared, such as one table for two panels' resources.
+    const folder = this.file.slice(0, this.file.lastIndexOf("/"));
+    const shared = ref && "doc" in ref && !ref.doc.path.startsWith(`${folder}/`);
+    return h("footer", { class: "fd-footer" }, h("span", { class: "fd-footer-file", title: "The file this tab edits" }, icon("file-code"), where), shared ? h("span", { class: "fd-chip-warn", title: "This class is outside the resource's folder, so other resources may use it too. Changes here change them as well." }, icon("warning"), "Possibly shared") : null, h("span", { class: "fd-spacer" }), this.message ? h("span", { class: "fd-footer-message" }, icon("check"), this.message, " · saved") : null);
   }
 
   private renderTab(): HTMLElement {

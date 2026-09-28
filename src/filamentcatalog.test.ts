@@ -63,3 +63,12 @@ test("names and icons", () => {
   assert.equal(heroiconCase("s-user"), "User");
   assert.equal(heroiconCase("o-arrow-up-on-square-2"), "OutlinedArrowUpOnSquare2");
 });
+
+test("columns get a number, and a condition that also takes a string gets a switch", () => {
+  assert.deepEqual(paramEditorOf("columns", [{ name: "columns", types: ["array", "int", "string", "Closure", "null"], optional: true }]), { kind: "number", integer: true });
+  assert.equal(methodEditor(cat, "persistTabInQueryString", { params: [{ name: "condition", types: ["bool", "string", "Closure"], default: "true", optional: true }] }).kind, "switch");
+});
+
+function paramEditorOf(name: string, params: { name: string; types: string[]; optional?: boolean }[]) {
+  return methodEditor(cat, name, { params });
+}
