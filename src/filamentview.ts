@@ -153,7 +153,33 @@ export async function loadFilament() {
     }
     if (!panel.resources.length) rows.push(h("li", { class: "fv-none muted" }, "No resources yet"));
   }
-  if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, app.booted ? "No panels. Filament needs a panel provider." : "The app couldn't boot, so its panels aren't known."));
+  if (!app.booted) {
+    // The app can't start, often because of a mistake in a file Filament loads. Say where, and still list the
+    // resource files so they can be opened and fixed.
+    const e = app.bootError;
+    rows.push(
+      h(
+        "li",
+        { class: "fv-boot-error", title: e ? `${e.message}\n${e.file}:${e.line}` : "" },
+        icon("error"),
+        h(
+          "div",
+          {},
+          h("strong", {}, "The app can't start"),
+          h("span", {}, e?.message ?? "It failed while booting."),
+          e?.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(`${root}/${e.file}`, e.line) }, `${e.file}:${e.line}`) : null,
+        ),
+      ),
+    );
+    if (app.files?.length) rows.push(h("li", { class: "fv-group" }, "Resource files"));
+    for (const f of app.files ?? []) {
+      const path = `${root}/${f.file}`;
+      const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: f.file }, icon("symbol-structure"), h("span", { class: "fv-name" }, shortClass(f.class)), h("span", { class: "fv-detail" }, f.file.replace(/^app\/Filament\//, "").split("/")[0].replace(/^Resources$/, "")));
+      row.onclick = () => void openDesigner(path);
+      row.onkeydown = (ev) => ev.key === "Enter" && void openDesigner(path);
+      rows.push(row);
+    }
+  } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));
   const tree = h("ul", { class: "fv-tree", role: "tree" }, ...rows);
   list.replaceChildren(tree);
   applyFilter();

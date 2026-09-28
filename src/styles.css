@@ -2513,3 +2513,12 @@ button.link:hover { text-decoration: underline; }
 .fd-row-note { padding: 0 4px 4px; }
 .fd-stack-editor { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; min-width: 0; }
 .fd-stack-editor > select { width: 100%; padding: 3px 7px; font-size: 12px; }
+.fv-tree li.fv-boot-error { height: auto; align-items: flex-start; gap: 8px; margin: 4px 8px 8px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--red) 10%, transparent); white-space: normal; cursor: default; }
+.fv-boot-error > .codicon { color: var(--red); margin-top: 2px; }
+.fv-boot-error > div { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; font-size: 12px; }
+.fv-boot-error span { color: var(--muted); overflow-wrap: anywhere; }
+.fv-boot-error .fd-chip-link { font: 11px var(--mono); white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.fv-none { white-space: normal !important; height: auto !important; padding-top: 4px !important; padding-bottom: 4px !important; }
+.fd-error-note { background: color-mix(in srgb, var(--yellow) 12%, transparent); }
+.fd-error-note > .codicon { color: var(--yellow); }
+.fv-name { flex-shrink: 0; max-width: 72%; }

@@ -17,6 +17,7 @@ import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root
 import { applyWorkspaceEdit, saveModel } from "./lsp";
 import { classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
+import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
 
 export type DesignerHost = {
@@ -50,7 +51,11 @@ export async function openDesigner(file: string, tab?: Tab) {
 
 /** Tells open designers that the app's code changed on disk, so what introspect.php read may be stale. */
 export function projectChanged() {
-  for (const d of open.values()) d.stale = true;
+  for (const d of open.values()) {
+    d.stale = true;
+    // A designer opened while the app couldn't be read catches up as soon as it can, without a loading screen.
+    if (d.el.isConnected && ((!d.info && !d.manager) || !d.facts)) void d.load(true);
+  }
 }
 
 const TAB_ICONS: Record<Tab, string> = { form: "note", table: "table", infolist: "list-flat", relations: "references", pages: "files", settings: "settings-gear" };
@@ -116,9 +121,9 @@ export class Designer {
 
   // ---- Loading ----
 
-  async load() {
+  async load(quiet = false) {
     this.stale = false;
-    this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the resource and Filament's components…"));
+    if (!quiet) this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the resource and Filament's components…"));
     try {
       const root = this.root;
       // The models are needed for relationships' titles later; reading them now overlaps the waits.
@@ -251,6 +256,12 @@ export class Designer {
       return;
     }
     const fresh = doc;
+    // Code with syntax errors can be read wrong, and an edit from a wrong reading lands in the wrong place.
+    if (fresh.outline.errors) {
+      this.message = "Fix the syntax errors in the code first.";
+      this.render();
+      return;
+    }
     const imports = new Imports(fresh.text, fresh.outline);
     const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
     let edits: Edit[] | null;
@@ -469,6 +480,8 @@ export class Designer {
     if (!live || !comp || !this.cat) return;
     const next = classInfo(this.cat, cls);
     const methods = next ? methodsOf(this.cat, next) : null;
+    const dropped = methods ? [...new Set(comp.calls.filter((c) => !methods.has(c.name)).map((c) => `${c.name}()`))] : [];
+    if (dropped.length && !(await confirm(`${shortClass(cls)} doesn't have ${dropped.join(", ")}. Change the type and remove ${dropped.length === 1 ? "it" : "them"}?`, "Change and remove"))) return this.render();
     await this.apply(live.doc, (imports) => [
       { start: comp.make.classSpan[0], end: comp.make.classSpan[1], text: imports.name(cls) },
       // Settings the new type doesn't have would fail at runtime.
@@ -778,6 +791,16 @@ export class Designer {
     canvas.onclick = () => this.select(null);
     canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
+    if (ref.doc.outline.errors)
+      canvas.prepend(
+        h(
+          "div",
+          { class: "fd-helper-note fd-error-note" },
+          icon("warning"),
+          h("span", {}, "This file has syntax errors, so the designer may read it wrong. It won't change the file until the errors are fixed."),
+          h("button", { type: "button", class: "fd-chip-link", onclick: (e: MouseEvent) => (e.stopPropagation(), host.openAt(ref.doc.path, 1)) }, "Open the code"),
+        ),
+      );
     const helper = ref.root.helper;
     if (helper) {
       const where = helper.class === "self" || helper.class === "static" ? "" : `${shortClass(helper.class)}::`;

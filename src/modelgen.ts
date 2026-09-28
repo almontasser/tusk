@@ -285,7 +285,7 @@ ${indent(lines, "            ")}
 }
 
 /** A migration for a many-to-many relationship's pivot table. */
-export function pivotMigration(table: string, a: { table: string; key: string }, b: { table: string; key: string }): string {
+export function pivotMigration(table: string, a: { table: string; key: string; type?: string }, b: { table: string; key: string; type?: string }): string {
   return `<?php
 
 use Illuminate\\Database\\Migrations\\Migration;
@@ -300,8 +300,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create(${phpString(table)}, function (Blueprint $table) {
-            $table->foreignId(${phpString(a.key)})->constrained(${phpString(a.table)})->cascadeOnDelete();
-            $table->foreignId(${phpString(b.key)})->constrained(${phpString(b.table)})->cascadeOnDelete();
+            $table->${a.type ?? "foreignId"}(${phpString(a.key)})->constrained(${phpString(a.table)})->cascadeOnDelete();
+            $table->${b.type ?? "foreignId"}(${phpString(b.key)})->constrained(${phpString(b.table)})->cascadeOnDelete();
             $table->primary([${phpString(a.key)}, ${phpString(b.key)}]);
         });
     }

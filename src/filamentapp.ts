@@ -44,9 +44,17 @@ export type PanelInfo = {
   resources: ResourceInfo[];
   clusters: { class: string; file: string | null; label: string | null }[];
 };
-export type AppInfo = { version: string | null; booted: boolean; panels: PanelInfo[] };
+export type AppInfo = {
+  version: string | null;
+  booted: boolean;
+  /** Why the app couldn't boot, such as a syntax error in a resource Filament discovers. */
+  bootError?: { message: string; file: string; line: number } | null;
+  panels: PanelInfo[];
+  /** The resource files, read from the source, when the app couldn't boot. */
+  files?: { class: string; file: string }[];
+};
 export type EnumInfo = { class: string; file: string | null; backed: boolean; cases: { name: string; value: string | number | null }[]; contracts: string[] };
-export type ModelSummary = { class: string; table: string; columns: Record<string, { type: string; nullable: boolean } | null>; casts: Record<string, string>; relations: Relation[] };
+export type ModelSummary = { class: string; table: string; keyType?: string; ulid?: boolean; columns: Record<string, { type: string; nullable: boolean } | null>; casts: Record<string, string>; relations: Relation[] };
 export type ModelDetails = {
   class: string;
   file: string | null;

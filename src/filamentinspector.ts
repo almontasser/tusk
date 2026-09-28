@@ -9,6 +9,7 @@ import { type Condition, conditionClosure, getUtility, needsValue, type Operator
 import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
 import { type Comp, type Path, shortClass, walk } from "./filamentschema";
+import { confirm } from "./palette";
 import { mapCode, mapValue, nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
 
 /** A call to set: its arguments as code (`{{Fqn}}` names a class), "" for none, or null to remove it. */
@@ -283,14 +284,16 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   const source: "list" | "enum" | "relationship" | "code" = rel ? "relationship" : options?.kind === "classConst" ? "enum" : !options || list ? "list" : "code";
   const wrap = h("div", { class: "fd-options" });
   const clearOthers = (keep: string) => [...(keep !== "options" && options ? [{ name: "options", args: null }] : []), ...(keep !== "relationship" && rel ? [{ name: "relationship", args: null }] : [])];
-  const tabs = segmented<"list" | "enum" | "relationship">(
+  const tabs = segmented<"list" | "enum" | "relationship" | "code">(
     [
       ["list", "List"],
       ["enum", "Enum"],
       ["relationship", "Relationship"],
     ],
-    source === "code" ? "list" : source,
-    (v) => {
+    source,
+    async (v) => {
+      // Options written as code are replaced only when you say so.
+      if (source === "code" && !(await confirm("Replace the options written in code?", "Replace"))) return;
       if (v === "list") ctx.set([...clearOthers("options"), { name: "options", args: phpValue({ option: "Option" }) }]);
       if (v === "enum" && ctx.enums[0]) ctx.set([...clearOthers("options"), { name: "options", args: `{{${ctx.enums[0].class}}}::class` }]);
       if (v === "enum" && !ctx.enums[0]) wrap.append(h("p", { class: "fd-note" }, "The app has no enums under app/. Create one, then pick it here.") as HTMLElement);

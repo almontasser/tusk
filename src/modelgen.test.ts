@@ -143,3 +143,10 @@ test("mergeList keeps the model's order, renames in place, and appends new attri
   const designed = [{ ...col("headline", "string"), original: before[0] }, { ...col("slug", "string", { fillable: false }), original: before[1] }, col("summary", "text")];
   assert.deepEqual(mergeList(["provider_id", "title", "slug", "old"], before, designed, (c) => c.fillable), ["provider_id", "headline", "summary"]);
 });
+
+test("pivotMigration uses each side's key type", async () => {
+  const { pivotMigration } = await import("./modelgen.ts");
+  const code = pivotMigration("post_tag", { table: "posts", key: "post_id", type: "foreignUuid" }, { table: "tags", key: "tag_id" });
+  assert.match(code, /\$table->foreignUuid\('post_id'\)->constrained\('posts'\)/);
+  assert.match(code, /\$table->foreignId\('tag_id'\)->constrained\('tags'\)/);
+});
