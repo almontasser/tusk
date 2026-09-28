@@ -181,7 +181,7 @@ function editorFor(ctx: InspectorCtx, editor: Editor, name: string, value: PNode
       const t = textValue(value);
       return commitInput(t?.text ?? "", async (s) => {
         // A translated text's translations follow it to its new key.
-        if (t?.translated && s && ctx.i18n) await ctx.i18n.rename(t.text, s);
+        if (t && (t.translated || (name === "label" && flag(ctx.comp, "translateLabel"))) && s && ctx.i18n) await ctx.i18n.rename(t.text, s);
         set(s === "" ? null : stringCode(s, value));
       }, { multiline: editor.multiline, placeholder: "" });
     }

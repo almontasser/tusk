@@ -861,6 +861,10 @@ Filament hides what someone can't do. An ability the policy doesn't have is
 allowed. A rule written as other code, such as a call to a helper, shows as
 code, which you can open or replace.
 
+The same view opens for any model, with or without a resource: click
+**Access** in the model designer, **Open in Access** above a policy's class, or
+run **Laravel: Model Access…**.
+
 A model without a policy gets one with **Create a policy**, which runs
 `make:policy` and starts with everything allowed, so no one is locked out.
 New permissions are named as Filament Shield names them, such as `update_post`.
@@ -881,8 +885,8 @@ When text is written with `__()`, the designer helps translate it:
 - **Translate:** a label, heading, placeholder, or other text shows its
   translation in each of the app's languages below it, to edit in place. A
   missing one shows the text people see instead. Plain text has a
-  **Translate** button that writes it with `__()`. Changing a translated text
-  renames its key in the JSON files too.
+  **Translate** button that writes it with `__()`. Changing a translated text,
+  or a label with `translateLabel()`, renames its key in the JSON files too.
 - **Make translatable:** with nothing selected, the inspector counts the texts
   written as plain strings, and one click writes them all with `__()`.
 
@@ -963,7 +967,10 @@ designer, or use the Enum options of a select in the Filament designer, where
   them.
 - **Filament shows:** turns `HasLabel`, `HasColor`, `HasIcon`, and
   `HasDescription` on or off, which adds or removes the method.
-- **Translated:** labels and descriptions go through `__()`.
+- **Translated:** labels and descriptions go through `__()`. A
+  **Translations** card then shows each one in each of the app's languages, to
+  fill in. Translations are written with the enum when you apply, and a
+  renamed label takes its translations along.
 
 Changes are staged until you click **Create enum** or **Apply changes**, with
 the code previewed. A method the designer can't read, such as an icon that

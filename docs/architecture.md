@@ -4351,7 +4351,9 @@ has, as `methodsOf` reports them.
   `$user->id === $record->column`. The parameter names are the method's own.
   Anything else, including statements before the return, is custom. A rule is
   written back over the return's expression, or as a new method typed like the
-  others. `src/filamentaccess.ts` draws the tab.
+  others. `src/filamentaccess.ts` draws the tab against `AccessHost`, which
+  the resource designer implements, and so does `src/accessview.ts`, the
+  model's own Access view, with the designer's way of applying edits.
 - **New policies:** `make:policy <Model>Policy --model=…` puts it in
   `App\Policies`, where Laravel's discovery finds it for nested models too.
   Laravel's stub returns `false` everywhere, which would hide the resource
@@ -4369,8 +4371,10 @@ has, as `methodsOf` reports them.
 - **Writing:** `src/translations.ts` edits the files as text. A key goes to the
   locale's JSON file, keeping its order, indentation, and `json_encode` escapes;
   a key a PHP file already has is changed there when the file has exactly one
-  entry for it. The designer writes through the editor's models, so open files
-  and local history stay in step.
+  entry for it. `src/translationfiles.ts` writes through the editor's models,
+  so open files and local history stay in step; the resource and enum
+  designers both use it. The enum designer stages translations and writes
+  them on Apply, after renaming the keys of labels that changed.
 
 ## Model designer
 

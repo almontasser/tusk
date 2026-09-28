@@ -14,6 +14,8 @@ import { applyWorkspaceEdit } from "./lsp";
 import { applyEdits, type Edit, mergeEdits, type Outline } from "./phpcode";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView } from "./terminal";
+import { renameTranslation, writeTranslation } from "./translationfiles";
+import { isRtl, ownTranslation, type Translations } from "./translations";
 
 const open = new Map<string, EnumDesigner>();
 
@@ -43,6 +45,9 @@ class EnumDesigner {
   iconsDir: string | null = null;
   error = "";
   busy = "";
+  /** The app's translations, and the ones typed here, written on Apply: by locale, then key. */
+  translations: Translations | null = null;
+  pending = new Map<string, Map<string, string>>();
   preview: monaco.editor.IStandaloneCodeEditor | null = null;
   previewHost = h("div", { class: "md-preview-editor" });
   private o: { name?: string; options?: [value: string, label: string][]; then?: (cls: string) => void };
@@ -72,6 +77,8 @@ class EnumDesigner {
       const cat = (await fapp.hasFilament(this.root)) ? await fapp.catalog(this.root).catch(() => null) : null;
       this.heroicons = cat?.heroicons ?? [];
       this.iconsDir = cat?.heroiconsDir ?? null;
+      this.translations = await fapp.translations(this.root).catch(() => null);
+      this.pending.clear();
       if (this.file) {
         this.text = await invoke<string>("read_file", { path: this.file });
         this.outline = await fapp.outlineOf(this.text, this.file);
@@ -116,10 +123,61 @@ class EnumDesigner {
           h("div", { class: "fd-header-chips" }, h("span", { class: "fd-chip-static" }, s.backing ? `${s.backing}-backed` : "Pure enum"), this.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => designerHost.openAt(this.file!, 1) }, icon("go-to-file"), "Open the code") : null),
         ),
       ),
-      h("div", { class: "md-body" }, h("div", { class: "md-main" }, this.settingsCard(), this.casesCard()), h("aside", { class: "md-preview" }, h("nav", { class: "fd-tabs-nav md-preview-tabs" }, h("button", { type: "button", class: "active" }, "Code")), this.previewHost)),
+      h("div", { class: "md-body" }, h("div", { class: "md-main" }, this.settingsCard(), this.casesCard(), this.translationsCard()), h("aside", { class: "md-preview" }, h("nav", { class: "fd-tabs-nav md-preview-tabs" }, h("button", { type: "button", class: "active" }, "Code")), this.previewHost)),
       this.footer(),
     );
     requestAnimationFrame(() => this.mountPreview());
+  }
+
+  /** For translated labels and descriptions: each case's text in each of the app's languages. */
+  private translationsCard(): HTMLElement | null {
+    const s = this.spec!;
+    const t = this.translations;
+    const attrs = (["label", "description"] as Attr[]).filter((a) => s.contracts.includes(a));
+    if (!s.translated || !t || !attrs.length || !this.cases.length) return null;
+    const locales = t.locales;
+    const table = h("div", { class: "ed-cases", style: `--grid:minmax(120px, 1fr) ${locales.map(() => "minmax(120px, 1fr)").join(" ")}` });
+    table.append(h("div", { class: "ed-row ed-head" }, h("span", {}, "Text"), ...locales.map((l) => h("span", {}, l))));
+    for (const c of this.cases)
+      for (const a of attrs) {
+        const key = a === "label" ? (c.label || caseLabel(c.name)) : c.description;
+        if (!key) continue;
+        table.append(
+          h(
+            "div",
+            { class: "ed-row" },
+            h("span", { class: "ed-tr-key", title: `${c.name}'s ${a}` }, key),
+            ...locales.map((l) => {
+              const own = ownTranslation(t, l, key);
+              const input = commitInput(this.pending.get(l)?.get(key) ?? own ?? "", (v) => {
+                if (!this.pending.has(l)) this.pending.set(l, new Map());
+                this.pending.get(l)!.set(key, v);
+                this.updatePreview();
+              }, { placeholder: "Not translated" }) as HTMLInputElement;
+              if (isRtl(l)) input.dir = "rtl";
+              return input;
+            }),
+          ),
+        );
+      }
+    return h("section", { class: "fd-settings-section" }, h("h3", {}, icon("globe"), "Translations"), table, h("p", { class: "fd-note ed-note" }, "Written to the app's lang files when you apply, with the enum."));
+  }
+
+  /** Writes the translations: renamed texts take theirs along, then the ones typed here. */
+  private async writeTranslations() {
+    const t = this.translations;
+    if (!t) return;
+    const before = this.read?.spec;
+    if (before?.translated && this.spec!.translated)
+      for (const c of this.cases) {
+        const old = before.cases.find((k) => k.name === c.original);
+        if (!old) continue;
+        if (old.label && c.label && old.label !== c.label) await renameTranslation(t, old.label, c.label);
+        if (old.description && c.description && old.description !== c.description) await renameTranslation(t, old.description, c.description);
+      }
+    for (const [locale, values] of this.pending)
+      for (const [key, value] of values) if (value !== (ownTranslation(t, locale, key) ?? "")) await writeTranslation(t, locale, key, value);
+    this.pending.clear();
   }
 
   private row(label: string, editor: HTMLElement, help?: string) {
@@ -146,7 +204,7 @@ class EnumDesigner {
       }),
     );
     rows.push(this.row("Filament shows", features, "Selects, badges, and filters show the labels, colors, and icons of an enum's cases."));
-    if (s.contracts.includes("label") || s.contracts.includes("description")) rows.push(this.row("Translated", toggleSwitch(s.translated, (on) => ((s.translated = on), this.updatePreview())), "Labels and descriptions go through __(), so lang files can translate them."));
+    if (s.contracts.includes("label") || s.contracts.includes("description")) rows.push(this.row("Translated", toggleSwitch(s.translated, (on) => ((s.translated = on), this.render())), "Labels and descriptions go through __(), so lang files can translate them."));
     return h("section", { class: "fd-settings-section" }, h("h3", {}, icon("symbol-enum"), "Enum"), h("div", { class: "fd-rows md-rows" }, ...rows));
   }
 
@@ -228,7 +286,7 @@ class EnumDesigner {
           this.render();
         };
         cells.push(btn);
-      } else cells.push(commitInput(c[a] ?? "", (v) => ((c[a] = v || undefined), this.updatePreview()), { placeholder: a === "label" ? caseLabel(c.name) : "" }));
+      } else cells.push(commitInput(c[a] ?? "", (v) => ((c[a] = v || undefined), this.render()), { placeholder: a === "label" ? caseLabel(c.name) : "" }));
     }
     const row = h(
       "div",
@@ -328,6 +386,7 @@ class EnumDesigner {
         const path = `${this.root}/${s.namespace.replace(/^App\\?/, "app/").replace(/\\/g, "/").replace(/\/$/, "")}/${s.name}.php`.replace("//", "/");
         if (await invoke<boolean>("path_exists", { path })) throw new Error(`${path.slice(this.root.length + 1)} already exists.`);
         await invoke("create_file", { path, contents: code });
+        await this.writeTranslations();
         fapp.forget(["enums"]);
         designerHost.status(`Created ${s.name}.`);
         closeView(this.el);
@@ -342,6 +401,7 @@ class EnumDesigner {
         return { line: p.lineNumber - 1, character: p.column - 1 };
       };
       await applyWorkspaceEdit({ changes: { [model.uri.toString()]: (edits ?? []).map((e): L.TextEdit => ({ range: { start: pos(e.start), end: pos(e.end) }, newText: e.text })) } });
+      await this.writeTranslations();
       fapp.forget(["enums"]);
       designerHost.status(`Applied the changes to ${s.name}.`);
       await this.load();
