@@ -12,6 +12,7 @@ import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
 import { type CallChange, renderCodeInspector, renderInspector } from "./filamentinspector";
+import { renderAccessTab } from "./filamentaccess";
 import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsTab } from "./filamentpages";
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
@@ -36,7 +37,7 @@ export const initDesigner = (h_: DesignerHost) => (host = h_);
 export type Doc = { path: string; model: monaco.editor.ITextModel; text: string; outline: Outline };
 /** A form, table, or infolist, in the file that builds it: the resource's, or the class it hands the work to. */
 type RootRef = { kind: RootKind; doc: Doc; root: Root } | { kind: RootKind; missing: true } | { kind: RootKind; doc: Doc; error: string; root?: Root };
-export type Tab = "form" | "table" | "infolist" | "actions" | "relations" | "pages" | "settings";
+export type Tab = "form" | "table" | "infolist" | "actions" | "relations" | "pages" | "access" | "settings";
 
 const open = new Map<string, Designer>();
 
@@ -59,7 +60,7 @@ export function projectChanged() {
   }
 }
 
-const TAB_ICONS: Record<Tab, string> = { form: "note", table: "table", infolist: "list-flat", actions: "play", relations: "references", pages: "files", settings: "settings-gear" };
+const TAB_ICONS: Record<Tab, string> = { form: "note", table: "table", infolist: "list-flat", actions: "play", access: "shield", relations: "references", pages: "files", settings: "settings-gear" };
 
 export class Designer {
   file: string;
@@ -78,6 +79,10 @@ export class Designer {
   paletteQuery = "";
   message = "";
   stale = false;
+  /** The model's policy and its file, for the Access tab, read when the tab first shows. */
+  access: { info: fapp.PolicyInfo; doc: Doc | null } | null = null;
+  accessError = "";
+  private accessLoading: Promise<void> | null = null;
   /** The page whose header actions the Page actions tab shows, by its file. */
   actionsPage: string | null = null;
   /** Whether it's a relation manager, which has a form and table like a resource but no pages or settings. */
@@ -167,7 +172,7 @@ export class Designer {
     return null;
   }
 
-  private async doc(path: string): Promise<Doc> {
+  async doc(path: string): Promise<Doc> {
     const known = this.docs.get(path);
     if (known && known.model.getValue() === known.text) return known;
     const model = known?.model ?? (await host.ensureModel(path));
@@ -218,6 +223,25 @@ export class Designer {
       else this.roots.set(kind, { kind, doc: main, root });
     }
     await this.readPageActions();
+    if (this.access?.doc) this.access.doc = await this.doc(this.access.doc.path);
+  }
+
+  /** Reads the model's policy for the Access tab, and redraws. */
+  loadAccess(): Promise<void> {
+    this.accessLoading ??= (async () => {
+      const model = this.facts?.class ?? this.info?.model;
+      try {
+        if (!model) throw new Error("The resource's model isn't known.");
+        const info = await fapp.policy(this.root, model);
+        this.access = { info, doc: info.file ? await this.doc(info.file.startsWith("/") ? info.file : `${this.root}/${info.file}`) : null };
+        this.accessError = "";
+      } catch (e) {
+        this.accessError = e instanceof Error ? e.message : String(e);
+      }
+      this.accessLoading = null;
+      if (this.tab === "access") this.render();
+    })();
+    return this.accessLoading;
   }
 
   /** The resource's pages that have files, for the Page actions tab. */
@@ -722,7 +746,7 @@ export class Designer {
   }
 
   private tabs() {
-    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "settings"];
+    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "access", "settings"];
     const count = (t: Tab) => {
       if (t === "relations") return this.info?.relations.length;
       if (t === "pages") return this.info?.pages.length;
@@ -760,7 +784,7 @@ export class Designer {
 
   private footer() {
     const ref = this.currentRoot();
-    const where = (ref && "doc" in ref ? ref.doc.path : this.tab === "actions" && this.actionsPage ? this.actionsPage : this.file).slice(this.root.length + 1);
+    const where = (ref && "doc" in ref ? ref.doc.path : this.tab === "actions" && this.actionsPage ? this.actionsPage : this.tab === "access" && this.access?.doc ? this.access.doc.path : this.file).slice(this.root.length + 1);
     // A class outside the resource's folder can be shared, such as one table for two panels' resources.
     const folder = this.file.slice(0, this.file.lastIndexOf("/"));
     const shared = ref && "doc" in ref && !ref.doc.path.startsWith(`${folder}/`);
@@ -771,6 +795,7 @@ export class Designer {
     if (this.tab === "relations") return renderRelationsTab(this);
     if (this.tab === "pages") return renderPagesTab(this);
     if (this.tab === "settings") return renderSettingsTab(this);
+    if (this.tab === "access") return renderAccessTab(this);
     const ref = this.roots.get(this.tab as RootKind);
     if (!ref || "missing" in ref) return this.missingRoot(this.tab as RootKind);
     if ("error" in ref) return h("div", { class: "fd-error" }, icon("code"), h("div", {}, h("strong", {}, `The ${this.tab} is built by code the designer doesn't read`), h("p", {}, ref.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => this.reveal(ref.root?.node ?? { span: [0, 0] }, ref.doc) }, icon("go-to-file"), "Open the code"))));

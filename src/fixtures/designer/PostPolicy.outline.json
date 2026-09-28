@@ -1,0 +1,233 @@
+{
+  "errors": false,
+  "namespace": "App\\Policies",
+  "uses": [
+    {
+      "alias": "Post",
+      "name": "App\\Models\\Post",
+      "kind": "class",
+      "span": [
+        32,
+        52
+      ]
+    },
+    {
+      "alias": "User",
+      "name": "App\\Models\\User",
+      "kind": "class",
+      "span": [
+        53,
+        73
+      ]
+    }
+  ],
+  "useInsert": 74,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "PostPolicy",
+      "fqn": "App\\Policies\\PostPolicy",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        75,
+        568
+      ],
+      "bodyStart": 93,
+      "bodyEnd": 567,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "viewAny",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "user",
+              "type": "User",
+              "default": null,
+              "span": [
+                193,
+                203
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            169,
+            244
+          ],
+          "docStart": 98,
+          "body": [
+            216,
+            243
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": false,
+              "span": [
+                232,
+                237
+              ]
+            }
+          ]
+        },
+        {
+          "name": "view",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "user",
+              "type": "User",
+              "default": null,
+              "span": [
+                271,
+                281
+              ]
+            },
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                283,
+                293
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            250,
+            387
+          ],
+          "docStart": 98,
+          "body": [
+            306,
+            386
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                322,
+                380
+              ]
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "user",
+              "type": "User",
+              "default": null,
+              "span": [
+                416,
+                426
+              ]
+            },
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                428,
+                438
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            393,
+            566
+          ],
+          "docStart": 98,
+          "body": [
+            451,
+            565
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": true,
+              "span": [
+                503,
+                507
+              ]
+            },
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "user",
+                "span": [
+                  535,
+                  540
+                ]
+              },
+              "calls": [
+                {
+                  "name": "hasRole",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 549,
+                    "close": 558,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "editor",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            550,
+                            558
+                          ]
+                        },
+                        "span": [
+                          550,
+                          558
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    540,
+                    559
+                  ],
+                  "nameSpan": [
+                    542,
+                    549
+                  ]
+                }
+              ],
+              "span": [
+                535,
+                559
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

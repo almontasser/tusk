@@ -4338,6 +4338,25 @@ has, as `methodsOf` reports them.
   none), and reads it back with `readBehavior`. Anything else is custom and
   shows as code. The record parameter is typed as the resource's model.
 
+### Access
+
+- **Reading:** `introspect.php policy <model>` asks the Gate for the model's
+  policy and its file, and, with spatie/laravel-permission, lists the roles
+  with their permissions, whether the user model has `HasRoles`, and whether
+  Filament Shield is installed. `introspect.php permission` creates a role or
+  permission, or grants or revokes one, through Spatie's models.
+- **Rules:** `src/policygen.ts` reads each ability method whose body is one
+  `return`: `true`, `false`, or conditions joined by `||` or `&&`, each
+  `$user->can(…)` (or `hasPermissionTo`), `$user->hasRole(…)`, or
+  `$user->id === $record->column`. The parameter names are the method's own.
+  Anything else, including statements before the return, is custom. A rule is
+  written back over the return's expression, or as a new method typed like the
+  others. `src/filamentaccess.ts` draws the tab.
+- **New policies:** `make:policy <Model>Policy --model=…` puts it in
+  `App\Policies`, where Laravel's discovery finds it for nested models too.
+  Laravel's stub returns `false` everywhere, which would hide the resource
+  from everyone, so the designer opens those rules.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,
@@ -6072,6 +6091,16 @@ does. The designer could rewrite such a method from its table, but that would
 lose the helper. So a method that isn't a plain `match` stays as it is, its
 column shows as code, and a new case that such a method would throw for is
 called out, with the method opened after Apply.
+
+### 2026-09-28: Policy rules are the code, not a permission table
+
+Tools like Shield generate a permission per ability and check it in every
+policy method. The Access tab could store rules elsewhere and generate the
+policy, but a policy is code people edit, often with a helper that narrows
+access, as in "a permission, and a member of the project". So the designer
+reads and writes the methods themselves, understands the common shapes, and
+keeps anything else as code. Permissions stay in Spatie's tables, which the
+tab changes through Spatie's own models.
 
 ### 2026-09-28: New projects use Laravel's installer, kept in Tusk's tools
 

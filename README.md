@@ -850,6 +850,26 @@ Filament version or a plugin needs no update to Tusk.
   it with the record's values when it opens. The designer writes these as the
   action's code; an action written otherwise shows as code.
 
+### Access
+
+The **Access** tab decides who can do what with the resource's records, from
+the model's policy. Each ability (see the list, view, create, edit, delete, and
+under **More abilities** the bulk and soft-delete ones) is **Everyone**,
+**Nobody**, or **Only users who…** have a permission, have a role, or own the
+record, by a column such as `user_id`. Join conditions with **or** or **and**.
+Filament hides what someone can't do. An ability the policy doesn't have is
+allowed. A rule written as other code, such as a call to a helper, shows as
+code, which you can open or replace.
+
+A model without a policy gets one with **Create a policy**, which runs
+`make:policy` and starts with everything allowed, so no one is locked out.
+New permissions are named as Filament Shield names them, such as `update_post`.
+
+With spatie/laravel-permission, **Roles and permissions** shows which roles
+have the permissions the rules name. Check a box to grant one, creating the
+permission when it's missing, and **New role** adds a role. These change the
+app's database.
+
 ### New resources
 
 **Filament: New Resource…**, the **+** in the Filament tool window, or

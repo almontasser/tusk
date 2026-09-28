@@ -2566,3 +2566,36 @@ button.link:hover { text-decoration: underline; }
 .fd-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .fd-page-head { flex-wrap: wrap; }
 .fd-page-head h2 { white-space: nowrap; }
+
+/* The Access tab (src/filamentaccess.ts) */
+.fd-access { display: flex; flex-direction: column; border-radius: 12px; background: var(--fi-card); box-shadow: 0 0 0 1px var(--fi-ring); }
+.fd-access-row { display: grid; grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.4fr); gap: 16px; align-items: start; padding: 12px 16px; }
+.fd-access-row + .fd-access-row { border-top: 1px solid var(--fi-ring); }
+.fd-access-row.missing .fd-access-label strong { color: var(--muted); }
+.fd-access-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fd-access-label strong { font-weight: 600; }
+.fd-access-rule { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fd-access-rule > select, .fd-access-rule > .fd-code-chip { align-self: flex-start; min-width: 200px; }
+.fd-access-conds { display: flex; flex-direction: column; gap: 6px; }
+.fd-access-cond { display: grid; grid-template-columns: 34px auto minmax(120px, 1fr) 22px; gap: 6px; align-items: center; }
+.fd-access-cond input, .fd-access-cond select { min-width: 0; width: 100%; }
+.fd-access-value { display: flex; min-width: 0; }
+.fd-access-join { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; background: none; border: 0; padding: 2px 0; text-align: center; }
+button.fd-access-join { cursor: pointer; border-radius: 4px; }
+button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.fd-access-add { align-self: flex-start; margin-left: 40px; }
+.fd-access-more { margin-top: 12px; }
+.fd-access-more > summary { cursor: pointer; padding: 6px 2px; color: var(--muted); font-size: 12px; }
+.fd-access-more > .fd-access { margin-top: 6px; }
+.fd-access-empty { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border-radius: 12px; background: var(--fi-card); box-shadow: 0 0 0 1px var(--fi-ring); }
+.fd-access-empty > .codicon { font-size: 20px; color: var(--muted); }
+.fd-access-empty p { margin: 4px 0 0; }
+.fd-access-perms { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+.fd-access-perms h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+.fd-access-perms-head { display: flex; align-items: center; }
+.fd-access-perms .fd-note { display: flex; align-items: center; gap: 4px; margin: 0; }
+.fd-access-matrix { display: grid; grid-template-columns: minmax(200px, 1fr) repeat(var(--roles), minmax(70px, auto)); gap: 0; border-radius: 12px; background: var(--fi-card); box-shadow: 0 0 0 1px var(--fi-ring); overflow: hidden; }
+.fd-access-matrix > * { padding: 8px 12px; border-top: 1px solid var(--fi-ring); display: flex; align-items: center; gap: 8px; }
+.fd-access-matrix > .fd-access-matrix-head { border-top: 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+.fd-access-matrix > .center { justify-content: center; }
+.fd-access-perm code { font-size: 12px; }
