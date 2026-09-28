@@ -849,6 +849,43 @@ A search that a destructive action depends on, such as Safe Delete's usages or
 Inline Constant's uses, fails rather than falling back to "none found", so the
 action stops instead of working on incomplete results.
 
+### Lists and trees
+
+`src/listnav.ts` gives a list or tree PhpStorm's keyboard: ↑↓, Home and End,
+Page Up and Page Down, Enter, → and ← for tree nodes, and type-ahead. Use it for
+every new list rather than writing another keydown handler.
+
+```ts
+const nav = listNav(container, {
+  rows?: string,                                // default "[data-key]"
+  open?(row, e),                                // Enter; default row.click()
+  toggle?(row, expand),                         // → ← on a row with aria-expanded; default row.click()
+  onSelect?(row),                               // the selection moved
+  label?(row),                                  // type-ahead text; default data-label or text
+});
+nav.select(key, { scroll? }); nav.selected(); nav.selectedRow(); nav.refresh();
+```
+
+- Give each row a `data-key` that names it across redraws. The helper keeps
+  the selection by key and reapplies it after the list renders again (a
+  `MutationObserver`), so callers just replace their rows.
+- The container keeps the focus and points at the row with
+  `aria-activedescendant`, so the rows need no tabindex. Set the container's
+  role (`listbox`, `tree`) and the rows' (`option`, `treeitem`).
+- A tree is `aria-expanded` on rows that open and `aria-level` on every row;
+  ← goes to the nearest row above with a lower level, so the rows can be a flat
+  list, as in the Profiler's table.
+- The helper sets `selected`, `aria-selected`, and the `list-nav` class, whose
+  CSS in `styles.css` draws the selection with theme variables
+  (`--selected`, `--accent`), so it shows in every theme. Keys with ⌘, ⌃, or ⌥
+  pass through for the caller's own handler, such as ⌘C in Problems.
+
+It replaced the Problems panel's handler and the Profiler table's. `fileGroup`
+in `src/search.ts` marks its file and item rows as a tree, so Search, TODO,
+and Coverage's file list use it too. The Redis key tree still has its own
+handler: `src/redis.ts` belongs to the database work in progress, and moving it
+is a small follow-up.
+
 ### Language server client
 
 `src/lsp.ts` is a small client written for this editor:
@@ -4809,3 +4846,13 @@ once. Values of the wrong type and unknown keys are kept for the same reason.
 Other modules register their own settings groups (`registerSettings`), so the
 features added next (tools, formatters, the terminal, the debugger) don't all
 edit one list in `settings.ts`.
+
+### 2026-09-28: One keyboard helper for lists, driven by the DOM
+
+The Problems panel, the Redis tree, and the Profiler each had their own arrow
+key handler, and most lists had none. `listNav` reads the rows from the DOM by
+`data-key`, `aria-expanded`, and `aria-level` instead of taking a data model,
+so a list that renders with `replaceChildren` needs only those attributes, and
+the same code serves flat lists, nested trees, and a table whose tree is a flat
+run of rows. It uses `aria-activedescendant` rather than a roving tabindex, so
+a redraw doesn't move the focus.

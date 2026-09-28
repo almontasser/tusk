@@ -4,6 +4,7 @@ import type { monaco } from "./editor";
 import { diffCursor, git, showDiff } from "./git";
 import { age, type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
+import { listNav } from "./listnav";
 import { errorText, showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
 
@@ -98,18 +99,33 @@ function markdown(text: string, repo: string): HTMLElement {
 
 // ---- List ----
 
+/** How many pull requests the list asks for; Load More asks for 50 more. */
+let limit = 50;
+
 export async function loadPullRequests() {
   if (!host.root()) return;
   const filter = ($("pr-filter") as HTMLSelectElement).value;
-  const args = { open: [], mine: ["--author", "@me"], review: ["--search", "review-requested:@me"] }[filter] ?? [];
+  const text = ($("pr-search") as HTMLInputElement).value.trim();
+  // GitHub's search syntax, such as "label:bug" or "author:someone", works in the search box too.
+  const search = [filter === "review" ? "review-requested:@me" : "", text].filter(Boolean).join(" ");
+  const args = [...(filter === "mine" ? ["--author", "@me"] : []), ...(search ? ["--search", search] : [])];
   $("pr-detail").hidden = true;
   $("pr-list-view").hidden = false;
-  // Switching back to the view keeps the last list while it refreshes; a new project or filter starts over.
-  const key = `${host.root()}\0${filter}`;
-  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
+  // Switching back to the view keeps the last list while it refreshes; a new project, filter, or search starts over.
+  const key = `${host.root()}\0${filter}\0${text}`;
+  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
-    const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", "50", "--json", FIELDS, ...args));
-    $("pr-list").replaceChildren(...(prs.length ? prs.map(prRow) : [el("li", "muted", "No pull requests.")]));
+    const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", FIELDS, ...args));
+    if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
+    const more = el("li", "pr-more");
+    const button = el("button", "", "Load More");
+    button.onclick = () => ((limit += 50), (button.disabled = true), (button.textContent = "Loading…"), loadPullRequests());
+    more.append(button);
+    $("pr-list").replaceChildren(
+      ...(prs.length ? prs.map(prRow) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
+      // gh has no offset, so Load More asks for a longer list; a full page means there may be more.
+      ...(prs.length === limit ? [more] : []),
+    );
   } catch (e) {
     $("pr-list").replaceChildren(problemItem("Can't list pull requests", e));
   }
@@ -143,6 +159,9 @@ function problemItem(what: string, e: unknown, retry: () => unknown = loadPullRe
 
 function prRow(pr: PullRequest) {
   const li = el("li", "pr");
+  li.role = "option";
+  li.dataset.key = String(pr.number);
+  li.dataset.label = pr.title;
   const title = el("div", "pr-title", `#${pr.number} ${pr.title}`);
   if (pr.isDraft) title.prepend(el("span", "badge", "Draft"));
   const checks = checksSummary(pr.statusCheckRollup);
@@ -201,9 +220,14 @@ export async function showPullRequest(number: number) {
   if (pr.state === "OPEN") action("Merge…", () => merge(pr));
 
   const checks = el("ul", "pr-checks");
+  checks.role = "listbox";
+  checks.ariaLabel = "Checks";
+  listNav(checks);
   for (const c of pr.statusCheckRollup ?? []) {
     const state = checkState(c);
     const li = el("li");
+    li.role = "option";
+    li.dataset.key = c.name ?? c.context ?? "";
     li.append(el("span", `checks-${state}`, icons[state]), ` ${c.name ?? c.context}`);
     const url = c.detailsUrl ?? c.targetUrl;
     if (url) li.onclick = () => openUrl(url);
@@ -211,8 +235,14 @@ export async function showPullRequest(number: number) {
   }
 
   const files = el("ul", "pr-files");
+  files.role = "listbox";
+  files.ariaLabel = "Files";
+  listNav(files);
   for (const f of pr.files) {
     const li = el("li");
+    li.role = "option";
+    li.dataset.key = f.path;
+    li.dataset.label = f.path.split("/").pop()!;
     li.append(el("span", "name", ltr(f.path)), el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`));
     const count = threads.filter((t) => t.path === f.path).length;
     if (count) li.append(el("span", "codicon codicon-comment", ` ${count}`));
@@ -785,6 +815,13 @@ export const createPullRequest = () => openTerminal(host.root(), "gh pr create",
 export function initPullRequests(h: Host) {
   host = h;
   $("pr-filter").onchange = loadPullRequests;
+  let typing: ReturnType<typeof setTimeout> | undefined;
+  $("pr-search").oninput = () => (clearTimeout(typing), (typing = setTimeout(loadPullRequests, 400)));
+  $("pr-search").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") e.preventDefault(), $("pr-list").focus();
+  });
+  // Enter or a click opens a pull request.
+  listNav($("pr-list"));
   $("pr-refresh").onclick = loadPullRequests;
   $("pr-create").onclick = createPullRequest;
 }

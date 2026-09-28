@@ -9,6 +9,7 @@ import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
 import { settings, onSettings } from "./settings";
+import { listNav } from "./listnav";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
@@ -104,10 +105,10 @@ panel.append(toolbar, list);
 const collapsed = new Set<string>();
 /** The file in the editor and its cursor, which the Current File toggle and the selection follow. */
 let caret: { path: string; position: monaco.IPosition | null } = { path: "", position: null };
-/** The selected row's key: a file's path, or a problem's path, position, and message. */
-let selected = "";
-/** The rows on screen, in order, for the arrow keys. */
+/** The rows on screen, by key: a file's path, or a problem's path, position, and message. */
 let rows: { key: string; path: string; problem?: Problem; row: HTMLElement }[] = [];
+// Enter opens a problem or folds a file, → and ← fold files and go from a problem to its file.
+const nav = listNav(list);
 const keyOf = (path: string, p: Problem) => `${path}:${p.range.startLineNumber}:${p.range.startColumn}:${p.message}`;
 
 const MARKER = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warning } as Record<number, monaco.MarkerSeverity>;
@@ -148,34 +149,19 @@ export function problemCounts() {
   };
 }
 
-/** Marks a row as selected, and scrolls to it unless the panel is only redrawing. */
-function select(key: string, scroll = true) {
-  selected = key;
-  for (const r of rows) {
-    r.row.classList.toggle("selected", r.key === key);
-    r.row.ariaSelected = String(r.key === key);
-    if (r.key === key && scroll) r.row.scrollIntoView({ block: "nearest" });
-  }
-}
+/** Selects a row, and scrolls to it unless the panel is only redrawing. */
+const select = (key: string, scroll = true) => nav.select(key, { scroll });
 
 /** A problem as one line of text: `path:line:column severity rule message`. */
 const problemText = (path: string, p: Problem) =>
   [`${path.slice(host.root().length + 1)}:${p.range.startLineNumber}:${p.range.startColumn}`, level(p.severity), ruleLabel(p.source, p.code), p.message].filter(Boolean).join(" ");
 const copy = (text: string) => navigator.clipboard.writeText(text).then(() => host.status("Copied the problem"));
 
+// ⌘C copies the selected problem.
 list.addEventListener("keydown", (e) => {
-  const i = rows.findIndex((r) => r.key === selected);
-  const r = rows[i];
-  const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
-  if (step) rows.length && select(rows[Math.min(rows.length - 1, Math.max(0, i + step))].key);
-  else if (!r) return;
-  else if (e.key === "Enter") r.row.click();
-  // Left collapses a file, or goes from a problem to its file; Right expands a file.
-  else if (e.key === "ArrowLeft" && r.problem) select(r.path);
-  else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-    if (collapsed.has(r.path) !== (e.key === "ArrowLeft")) r.row.click();
-  } else if (e.key === "c" && e.metaKey && r.problem) copy(problemText(r.path, r.problem));
-  else return;
+  const r = rows.find((r) => r.key === nav.selected());
+  if (!(e.key === "c" && e.metaKey && r?.problem)) return;
+  copy(problemText(r.path, r.problem));
   e.preventDefault();
   e.stopPropagation();
 });
@@ -191,7 +177,7 @@ export function followEditor(path: string, position: monaco.IPosition | null) {
   if (!list.isConnected) return;
   const at = (r: (typeof rows)[number]) => !!position && r.path === path && !!r.problem && monaco.Range.containsPosition(r.problem.range, position);
   // Keep the selected problem when the cursor is in it too, such as after opening the second of two overlapping ones.
-  if (rows.some((r) => r.key === selected && at(r))) return;
+  if (rows.some((r) => r.key === nav.selected() && at(r))) return;
   const here = rows.find(at);
   if (here) select(here.key);
 }
@@ -229,6 +215,8 @@ function render() {
       row.role = "treeitem";
       const open = !collapsed.has(path);
       row.ariaExpanded = String(open);
+      row.ariaLevel = "1";
+      row.dataset.key = path;
       rows.push({ key: path, path, row });
       const name = path.slice(root.length + 1);
       const icon = fileIcon(name.split("/").pop()!);
@@ -257,6 +245,8 @@ function render() {
             li.className = "problems-row problems-item";
             li.role = "treeitem";
             const key = keyOf(path, p);
+            li.ariaLevel = "2";
+            li.dataset.key = key;
             rows.push({ key, path, problem: p, row: li });
             li.innerHTML = `<span class="codicon codicon-${level(p.severity)} icon-${level(p.severity)}"></span>`;
             const message = document.createElement("span");
@@ -291,7 +281,6 @@ function render() {
       return item;
     }),
   );
-  select(selected, false);
 }
 
 let pending: ReturnType<typeof setTimeout> | undefined;

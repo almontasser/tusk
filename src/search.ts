@@ -6,6 +6,7 @@ import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
 import { commentMask, inComment } from "./comments";
 import { readText, writeText } from "./projectfiles";
+import { listNav } from "./listnav";
 import { errorText, showError } from "./status";
 
 type Host = {
@@ -117,11 +118,22 @@ export function fileGroup<T>(path: string, list: T[], row: (item: T) => HTMLElem
   if (action) header.append(action);
   const rows = document.createElement("ul");
   const chevron = header.querySelector(".chevron")!;
+  // A tree for listNav: the file, then its items a level below.
+  Object.assign(header, { role: "treeitem", ariaLevel: "1" });
+  Object.assign(header.dataset, { key: path, label: name });
+  rows.role = "group";
+  const item = (it: T, i: number) => {
+    const li = row(it);
+    Object.assign(li, { role: "treeitem", ariaLevel: "2" });
+    li.dataset.key = `${path}\n${i}`;
+    return li;
+  };
   const setOpen = (open: boolean) => {
     rows.hidden = !open;
+    header.ariaExpanded = String(open);
     chevron.classList.toggle("codicon-chevron-down", open);
     chevron.classList.toggle("codicon-chevron-right", !open);
-    if (open && !rows.childElementCount) rows.append(...list.map(row));
+    if (open && !rows.childElementCount) rows.append(...list.map(item));
   };
   setOpen(open);
   header.onclick = () => setOpen(!!rows.hidden);
@@ -245,6 +257,16 @@ export function findInFolder(dir: string) {
 
 export function initSearch(h: Host) {
   host = h;
+  for (const id of ["find-results", "todo-results"]) {
+    $(id).role = "tree";
+    listNav($(id));
+  }
+  // ↓ in the search box moves to the results.
+  $("find-query").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" || !$("find-results").childElementCount) return;
+    e.preventDefault();
+    $("find-results").focus();
+  });
   for (const [id, key] of [["opt-case", "caseSensitive"], ["opt-word", "wholeWord"], ["opt-regex", "regex"]] as const) {
     const button = $(id);
     button.onclick = () => {

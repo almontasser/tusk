@@ -439,6 +439,23 @@ Other commands, tests, and git commands don't run again. Opening another
 project closes the terminals of the one before. Refactorings such as rename
 save every file they change.
 
+## Lists and trees
+
+Tool window lists and trees work from the keyboard: the Problems, Search,
+TODO, Coverage, Composer, and Pull Requests lists, and the Profiler's table.
+Click a list or press Tab to focus it, then:
+
+| Key | Action |
+| --- | --- |
+| ↑ ↓ | Previous or next row |
+| Home, End | First or last row |
+| Page Up, Page Down | A page up or down |
+| Enter | Open the row, or expand or collapse a folder |
+| → ← | Expand or collapse a tree node; ← on a child goes to its parent |
+| Letters | Jump to the next row that starts with what you type |
+
+In a search box above a list, ↓ moves to the list.
+
 ## Context menus
 
 Right-click the code for the actions at the caret, as in PhpStorm: context
@@ -1280,14 +1297,16 @@ An update shows in green when it fits the version constraint in
   constraints. Choose one of them to see why that one is installed, up to
   `composer.json`.
 - `composer audit` checks installed packages for security advisories. A package
-  with one is marked **advisory**; click it to open the advisory.
+  with one is marked **advisory**, and the advisory's title, CVE, and severity
+  show under its name; click it to open the advisory.
+- Type in the filter to narrow the list by name or description.
 - A direct dependency is marked **unused?** when no PHP file in the project
   names its namespace. It may still be used through Laravel's package
   discovery, a helper function, or configuration, so check before you remove
   it. Plugins and command-line tools, such as Pint, aren't checked.
 - Click **+** to search Packagist and require a package, as a dependency or a
   dev dependency.
-- Click the arrow to run `composer update` for everything.
+- Click the arrow to run `composer update` for everything, after you confirm.
 
 Commands run in terminal tabs with the Composer that ships with the editor, and
 the list reloads when they finish.
@@ -1573,8 +1592,10 @@ code; undo the change and its mark comes back. ⌃R reruns with coverage too.
 
 The **Coverage** tab in the bottom panel starts with each folder's coverage,
 nested, such as `app/Models 45% · 9/20`. Click a folder to list only its
-files, and click it again to list them all. Below, it lists every file with
-uncovered lines, least covered first, with each file's percentage. Under each file, a row shows
+files, and click it again to list them all; click its chevron, or press → and
+←, to expand and collapse it. Below, it lists every file with
+uncovered lines, least covered first, with each file's percentage. The menu in
+the toolbar sorts folders and files by name instead. Under each file, a row shows
 a run of uncovered lines, such as `15–17`, and the code on its first line.
 Click a row to open it there. The tab follows your edits: its line numbers and
 code are the lines as they are now, and lines you changed count as neither
@@ -1729,8 +1750,11 @@ again reuses its tab once the last run has finished.
 
 The **Pull Requests** tab lists the repository's pull requests through the
 GitHub CLI. Filter by open pull requests, ones you created, or ones waiting for
-your review. Each row shows check status (✓ passed, ✗ failed, ● running) and
-the review decision.
+your review, and type in the search box to search them with GitHub's search
+syntax, such as `fix label:bug`. Each row shows check status (✓ passed, ✗
+failed, ● running) and the review decision. The list shows 50 at a time;
+**Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
+you aren't logged in, the tab says so and offers to fix it.
 
 Click a pull request to see its checks, changed files, description, reviews,
 and comments. Descriptions and comments render as GitHub Markdown, and their
@@ -1906,7 +1930,8 @@ memory freed before a call returns doesn't count.
 
 Click **Call tree** to see each function under the function that called it,
 with its calls and time on that path. The tree opens along the busiest path,
-and → and ← open and close a node.
+and → and ← open and close a node. Click a column heading to order each node's
+callees by time, calls, or name.
 
 Click **Flame graph** to see the same tree as bars: each function's bar sits
 under its caller's and is as wide as its time there, busiest first. Blue bars
@@ -1920,7 +1945,10 @@ own time inside the zoomed bar: where that part of the run is slow.
 In a Laravel app, profiled runs also record the database queries. Click
 **Queries**, or the **Database** total, to list them: queries with the same SQL
 are grouped, slowest first, and a group opens to each run with its bindings
-and time. Two flags point at common problems:
+and time. Click a column heading to sort by SQL, runs, or time. The side pane
+lists a query's first 200 runs, and a function's 100 slowest callers and
+callees, and says when there are more. While another profile loads, the open
+one dims. Two flags point at common problems:
 
 - **Duplicate**: the same SQL with the same bindings ran more than once, so
   its result could be reused.

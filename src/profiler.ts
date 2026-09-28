@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
+import { listNav } from "./listnav";
 import { showError, withProgress } from "./status";
 import { openTerminal, showPanelView } from "./terminal";
 
@@ -260,7 +261,9 @@ export async function chooseProfile(title = "Open an Xdebug profile", chosen: (p
  * what was profiled, such as a request; without it, the tab shows the script Xdebug recorded.
  */
 export async function openProfile(path: string, label?: string) {
-  const parsed = await load(path);
+  // The old profile dims while the new one loads, so it isn't mistaken for the new one.
+  panel.classList.add("loading");
+  const parsed = await load(path).finally(() => panel.classList.remove("loading"));
   if (!parsed) return;
   if (label) saveLabel(path, label);
   profile = parsed;
@@ -411,6 +414,9 @@ const MAX_ROWS = 500;
 let profile: Profile = { command: "", functions: [], total: 0, sites: new Map(), tree: [] };
 let view: "functions" | "tree" | "flame" | "queries" = "functions";
 let sort: "name" | "calls" | "self" | "inclusive" | "memory" | "dself" | "dinclusive" = "self";
+/** The call tree's order among siblings, and the Queries view's order. */
+let treeSort: "name" | "calls" | "inclusive" = "inclusive";
+let querySort: "sql" | "runs" | "time" = "time";
 let selected: ProfiledFunction | undefined;
 /** The rows the table shows, in order, so the arrow keys can move through them. */
 let shown: Row[] = [];
@@ -534,22 +540,30 @@ panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
     }),
 );
 
-// ↑ and ↓ move the selection, ⏎ opens the selected function, and in the call tree, → and ← open and close a node.
-tableEl.onkeydown = (e) => {
-  const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 15, PageUp: -15 };
-  const at = shown.findIndex((r) => r.key === selectedKey);
-  const row = shown[at];
-  if (e.key in moves && shown.length) selectRow(shown[Math.max(0, Math.min(shown.length - 1, at + moves[e.key]))]);
-  else if (e.key === "Enter" && selected) openSource(selected);
-  else if (view === "tree" && row && e.key === "ArrowRight" && hasChildren(row)) {
-    if (expanded.has(row.key)) selectRow(shown[at + 1]);
-    else (expanded.add(row.key), render());
-  } else if (view === "tree" && row && e.key === "ArrowLeft") {
-    if (expanded.delete(row.key)) render();
-    else selectRow(shown.slice(0, at).reverse().find((r) => r.depth < row.depth) ?? row);
-  } else return;
-  e.preventDefault();
-};
+// The table's keyboard: ↑ and ↓ move the selection, ⏎ opens the selected function (or a query's runs), and in the
+// call tree and Queries view, → and ← open and close a row. Type a name to jump to it.
+const queryByKey = new Map<string, QueryGroup>();
+const toggleRow = (key: string, open: boolean) => (open ? expanded.add(key) : expanded.delete(key), render());
+const nav = listNav(tableEl, {
+  rows: "tbody tr[data-key]",
+  open: (row) => {
+    const key = row.dataset.key!;
+    if (view === "queries") return queryByKey.has(key) && toggleRow(key, !expanded.has(key));
+    const r = shown.find((r) => r.key === key);
+    if (r) openSource(r.fn);
+  },
+  toggle: (row, open) => toggleRow(row.dataset.key!, open),
+  onSelect: (row) => {
+    const key = row.dataset.key!;
+    if (view === "queries") {
+      const g = queryByKey.get(key) ?? queryByKey.get(key.split("\n")[0]);
+      if (g && g !== selectedQuery) (selectedQuery = g), showQueryDetail();
+      return;
+    }
+    const r = shown.find((r) => r.key === key);
+    if (r && key !== selectedKey) selectRow(r);
+  },
+});
 
 function cell(text: string, className = "") {
   const td = document.createElement("td");
@@ -601,8 +615,9 @@ function render() {
     const label = backTrace && key === "name" ? "Called by" : name;
     const th = Object.assign(document.createElement("th"), { textContent: label, title: tip, className: key === "name" ? "" : "num" });
     th.dataset.sort = key;
-    if (view === "functions") th.onclick = () => ((sort = key), render());
-    th.classList.toggle("sorted", view === "functions" && key === sort);
+    const sortable = view === "functions" || (view === "tree" && !backTrace);
+    if (sortable) th.onclick = () => (view === "functions" ? (sort = key) : (treeSort = key as typeof treeSort), render());
+    th.classList.toggle("sorted", view === "functions" ? key === sort : sortable && key === treeSort);
     return th;
   });
   const tr = document.createElement("tr");
@@ -640,7 +655,8 @@ function render() {
 function functionRow(r: Row) {
   const f = r.fn;
   const tr = document.createElement("tr");
-  tr.classList.toggle("selected", r.key === selectedKey);
+  tr.dataset.key = r.key;
+  tr.dataset.label = displayName(f).split(/\\|->|::/).pop()!;
   const name = cell(displayName(f), "name");
   name.title = `${f.name}\n${where(f)}`;
   name.append(Object.assign(document.createElement("span"), { className: "where", textContent: where(f) }));
@@ -651,7 +667,6 @@ function functionRow(r: Row) {
   tr.append(...(baseline ? [deltaCell(delta(f, "self")), deltaCell(delta(f, "inclusive"))] : [cell(bytes(f.memory), "num")]));
   tr.onclick = () => (selectRow(r), tableEl.focus());
   tr.ondblclick = () => openSource(f);
-  rowOf.set(r.key, tr);
   return tr;
 }
 
@@ -674,7 +689,7 @@ function treeRows(): Row[] {
     rows.push(row);
     if (row.recursive || !expanded.has(row.key)) return;
     if (!up) {
-      for (const n of [...row.node!.children].sort((a, b) => b.time - a.time)) walk(nodeRow(n, row.key, row.depth + 1), path);
+      for (const n of sortNodes(row.node!.children)) walk(nodeRow(n, row.key, row.depth + 1), path);
       return;
     }
     const next = new Set(path).add(row.fn);
@@ -682,9 +697,13 @@ function treeRows(): Row[] {
       walk({ fn: c.fn, key: `${row.key}\n${c.fn.name}`, depth: row.depth + 1, calls: c.calls, time: c.time, recursive: next.has(c.fn) }, next);
   };
   if (up) for (const f of treeRoots()) walk({ fn: f, key: `↑${f.name}`, depth: 0, calls: f.calls, time: f.inclusive, match: true }, new Set());
-  else for (const n of [...profile.tree].sort((a, b) => b.time - a.time)) walk(nodeRow(n, "", 0), new Set());
+  else for (const n of sortNodes(profile.tree)) walk(nodeRow(n, "", 0), new Set());
   return rows;
 }
+
+/** Siblings in the call tree's order: by time (the default), calls, or name. */
+const sortNodes = (nodes: CallNode[]) =>
+  [...nodes].sort((a, b) => (treeSort === "name" ? a.fn.name.localeCompare(b.fn.name) : treeSort === "calls" ? b.calls - a.calls : b.time - a.time));
 
 const nodeRow = (n: CallNode, parentKey: string, depth: number): Row => ({
   fn: n.fn,
@@ -739,11 +758,14 @@ function hotPath() {
 
 function treeRow(r: Row) {
   const tr = document.createElement("tr");
-  tr.classList.toggle("selected", r.key === selectedKey);
+  tr.dataset.key = r.key;
+  tr.dataset.label = displayName(r.fn).split(/\\|->|::/).pop()!;
+  tr.ariaLevel = String(r.depth + 1);
   tr.classList.toggle("match", !!r.match);
   const name = cell("", "name");
   name.style.paddingLeft = `${6 + r.depth * 14}px`;
   const canOpen = hasChildren(r);
+  if (canOpen) tr.ariaExpanded = String(expanded.has(r.key));
   const chevron = Object.assign(document.createElement("span"), {
     className: `chevron codicon ${canOpen ? (expanded.has(r.key) ? "codicon-chevron-down" : "codicon-chevron-right") : ""}`,
   });
@@ -763,7 +785,6 @@ function treeRow(r: Row) {
   tr.append(name, cell(String(r.calls), "num"), time);
   tr.onclick = () => (selectRow(r), tableEl.focus());
   tr.ondblclick = () => openSource(r.fn);
-  rowOf.set(r.key, tr);
   return tr;
 }
 
@@ -846,22 +867,30 @@ let selectedQuery: QueryGroup | undefined;
 function renderQueries() {
   filter.placeholder = "Filter queries";
   const words = filterWords();
-  const groups = queryGroups.filter((g) => words.every((w) => g.sql.toLowerCase().includes(w)));
+  const groups = queryGroups
+    .filter((g) => words.every((w) => g.sql.toLowerCase().includes(w)))
+    .sort((a, b) => (querySort === "sql" ? a.sql.localeCompare(b.sql) : querySort === "runs" ? b.runs.length - a.runs.length : b.time - a.time));
   const head = document.createElement("tr");
-  for (const [label, tip, num] of [
-    ["Query", "Queries with the same SQL, slowest first. Open one to see each time it ran.", false],
-    ["Runs", "How many times it ran", true],
-    ["Time", "Time in the database, all runs together", true],
-  ] as const)
-    head.append(Object.assign(document.createElement("th"), { textContent: label, title: tip, className: num ? "num" : "" }));
+  for (const [key, label, tip, num] of [
+    ["sql", "Query", "Queries with the same SQL. Open one to see each time it ran.", false],
+    ["runs", "Runs", "How many times it ran", true],
+    ["time", "Time", "Time in the database, all runs together", true],
+  ] as const) {
+    const th = Object.assign(document.createElement("th"), { textContent: label, title: tip, className: `${num ? "num" : ""}${key === querySort ? " sorted" : ""}` });
+    th.onclick = () => ((querySort = key), render());
+    head.append(th);
+  }
   q("thead").replaceChildren(head);
   panel.classList.add("tree-view");
   const rows: HTMLElement[] = [];
+  queryByKey.clear();
   for (const g of groups) {
     const key = `q:${g.sql}`;
     const open = expanded.has(key);
     const tr = document.createElement("tr");
-    tr.classList.toggle("selected", g === selectedQuery);
+    Object.assign(tr, { ariaLevel: "1", ariaExpanded: String(open) });
+    Object.assign(tr.dataset, { key, label: g.sql });
+    queryByKey.set(key, g);
     const name = cell("", "name sql");
     const chevron = Object.assign(document.createElement("span"), { className: `chevron codicon codicon-chevron-${open ? "down" : "right"}` });
     chevron.onclick = (e) => (e.stopPropagation(), expanded.delete(key) || expanded.add(key), render());
@@ -875,8 +904,10 @@ function renderQueries() {
     tr.onclick = () => selectQuery(g);
     rows.push(tr);
     if (!open) continue;
-    for (const run of g.runs) {
+    for (const [i, run] of g.runs.entries()) {
       const sub = document.createElement("tr");
+      sub.ariaLevel = "2";
+      sub.dataset.key = `${key}\n${i}`;
       const bindings = cell(run.bindings.length ? run.bindings.join(", ") : "No bindings", "name bindings");
       bindings.style.paddingLeft = "34px";
       bindings.title = withBindings(run);
@@ -896,7 +927,7 @@ function renderQueries() {
 
 function selectQuery(g: QueryGroup) {
   selectedQuery = g;
-  render();
+  nav.select(`q:${g.sql}`);
   showQueryDetail();
 }
 
@@ -947,30 +978,28 @@ function showQueryDetail() {
     table.append(tr);
   }
   runs.append(table);
+  if (g.runs.length > 200) runs.append(Object.assign(document.createElement("p"), { className: "muted", textContent: `Showing the first 200 of ${g.runs.length} runs. Open the query's row in the table to see them all.` }));
   detail.replaceChildren(heading, runs);
 }
 
 // ---- Selection and the side pane ----
 
 let selectedKey = "";
-const rowOf = new Map<string, HTMLTableRowElement>();
 
 /** Selects a row: highlights it and lists its function's callers and callees beside the table. */
 function selectRow(r: Row) {
-  rowOf.get(selectedKey)?.classList.remove("selected");
   selectedKey = r.key;
   selected = r.fn;
-  const row = rowOf.get(r.key);
-  if (row?.isConnected) row.classList.add("selected"), row.scrollIntoView({ block: "nearest" });
+  nav.select(r.key);
   showDetail();
 }
 
 /** Selects a function from the side pane: its row in the function table, when the table shows it. */
 function select(f: ProfiledFunction) {
   if (view === "functions") return selectRow(shown.find((r) => r.fn === f) ?? { fn: f, key: f.name, depth: 0, calls: f.calls, time: f.inclusive });
-  rowOf.get(selectedKey)?.classList.remove("selected");
   selected = f;
   selectedKey = "";
+  nav.select("");
   showDetail();
 }
 /** The side pane: the selected function, what called it, and what it called, each by time. */
@@ -1047,6 +1076,7 @@ function calls(label: string, list: Call[]) {
     table.append(tr);
   }
   section.append(table);
+  if (list.length > 100) section.append(Object.assign(document.createElement("p"), { className: "muted", textContent: `Showing the 100 slowest of ${list.length}.` }));
   return section;
 }
 
