@@ -83,6 +83,9 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
     if name == "tusk" {
         clean_laravel_helpers(Path::new(&root));
     }
+    if !runtime.is_empty() {
+        crate::toolpaths::check(&[runtime.to_string()])?;
+    }
     let program = if name == "tusk" { std::env::current_exe().map_err(|e| e.to_string())? } else { tool(&app, script)? };
     let mut child = Command::new("/bin/sh")
         .args(["-c", WATCHDOG, "sh"])
@@ -90,6 +93,7 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         .arg(program)
         .args(args)
         .current_dir(&root)
+        .env("PATH", crate::toolpaths::path_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

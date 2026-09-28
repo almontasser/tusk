@@ -163,6 +163,8 @@ export const SHAREABLE: { label: string; keys: string[]; detail: string }[] = [
   { label: "Pause on exceptions", keys: ["debugExceptions"], detail: "Whether to pause, the classes, and paths to skip" },
   { label: "Breakpoints", keys: ["breakpoints"], detail: "Line breakpoints and their options" },
   { label: "Docker service for commands", keys: ["dockerService"], detail: "Where tests, Artisan, and Tinker run" },
+  { label: "PHP interpreter", keys: ["phpInterpreter"], detail: "The PHP this project runs instead of the one in Settings > Tools" },
+  { label: "Formatters", keys: ["formatters"], detail: "The formatter and format on save for each language" },
   { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: "Names, URLs, SSH tunnels, and read-only choices; passwords stay in the Keychain" },
 ];
 

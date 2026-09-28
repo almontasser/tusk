@@ -114,6 +114,25 @@
         "additionalProperties": false
       }
     },
+    "formatters": {
+      "type": "object",
+      "description": "The formatter and format on save for each language group: php, blade, js (JavaScript, TypeScript, and Vue), css, json, markdown, and yaml.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "use": { "enum": ["auto", "pint", "php-cs-fixer", "mago", "prettier", "blade-formatter", "builtin", "none"], "description": "The formatter: auto, a specific one, builtin (Monaco's own), or none." },
+          "onSave": { "type": "boolean", "description": "Whether saving formats the file. Without it, the Format files when saving setting decides." }
+        },
+        "additionalProperties": false
+      },
+      "propertyNames": { "enum": ["php", "blade", "js", "css", "json", "markdown", "yaml"] },
+      "examples": [{ "php": { "use": "pint", "onSave": true }, "js": { "use": "prettier" } }]
+    },
+    "phpInterpreter": {
+      "type": "string",
+      "description": "The PHP program this project uses instead of the one in Settings > Tools, such as /opt/homebrew/opt/php@8.3/bin/php.",
+      "examples": ["/opt/homebrew/opt/php@8.3/bin/php"]
+    },
     "databaseSsh": {
       "type": "object",
       "description": "The SSH tunnel each database connection goes through, by connection name. The empty name is .env's connection.",

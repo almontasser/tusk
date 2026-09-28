@@ -8,6 +8,7 @@ import { commentMask, inComment } from "./comments";
 import { readText, writeText } from "./projectfiles";
 import { listNav } from "./listnav";
 import { errorText, showError } from "./status";
+import { limits } from "./limits";
 
 type Host = {
   root(): string;
@@ -19,7 +20,6 @@ type Host = {
 type Match = { path: string; line: number; column: number; end: number; text: string };
 type Query = { text: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
 
-const MAX_MATCHES = 20_000;
 /** Files start expanded until this many rows are shown; the rest render their matches when expanded. */
 const EXPANDED_ROWS = 2000;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -42,7 +42,7 @@ async function search() {
   // A search over a large project can take a while; say so, but don't flash it for quick ones.
   const slow = setTimeout(() => current === generation && ($("find-summary").textContent = "Searching…"), 300);
   try {
-    const found = await invoke<Match[]>("search_text", { root: host.root(), query: q, include: include() });
+    const found = await invoke<Match[]>("search_text", { root: host.root(), query: q, include: include(), limit: limits.searchMatches });
     if (current !== generation) return; // A newer search already started.
     matches = found;
     render("");
@@ -82,7 +82,7 @@ function render(error: string) {
   $("find-summary").textContent =
     error ||
     (matches.length
-      ? `${matches.length}${matches.length >= MAX_MATCHES ? "+" : ""} ${matches.length === 1 ? "match" : "matches"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
+      ? `${matches.length}${matches.length >= limits.searchMatches ? "+" : ""} ${matches.length === 1 ? "match" : "matches"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
       : query().text
         ? "No matches"
         : "");
@@ -200,7 +200,7 @@ async function replaceIn(paths: string[]) {
   const q = query();
   if (!q.text || !paths.length) return;
   const listed = matches.filter((m) => paths.includes(m.path)).length;
-  const count = matches.length >= MAX_MATCHES && paths.length > 1 ? "all" : String(listed);
+  const count = matches.length >= limits.searchMatches && paths.length > 1 ? "all" : String(listed);
   const where = paths.length === 1 ? paths[0].slice(host.root().length + 1) : `${paths.length} files`;
   if (!(await confirm(`Replace ${count} matches in ${where} with "${replacement()}"?`, "Replace All"))) return;
   let replaced = 0;
@@ -308,7 +308,7 @@ export async function loadTodos() {
   const current = ++todoGeneration;
   let matches: Match[];
   try {
-    matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" });
+    matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "", limit: limits.searchMatches });
   } catch (e) {
     if (current !== todoGeneration) return;
     $("todo-summary").textContent = `Can't list TODO comments: ${errorText(e)}`;
@@ -335,7 +335,7 @@ export async function loadTodos() {
   const groups = new Map<string, Match[]>();
   for (const m of found) (groups.get(m.path) ?? groups.set(m.path, []).get(m.path)!).push(m);
   $("todo-summary").textContent = found.length
-    ? `${found.length}${matches.length >= MAX_MATCHES ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
+    ? `${found.length}${matches.length >= limits.searchMatches ? "+" : ""} ${found.length === 1 ? "item" : "items"} in ${groups.size} ${groups.size === 1 ? "file" : "files"}`
     : "No TODO, FIXME, or XXX comments in project files.";
   let shown = 0;
   $("todo-results").replaceChildren(

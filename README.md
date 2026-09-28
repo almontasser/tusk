@@ -39,12 +39,12 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Git | Push, update, and fetch can't answer a password or passphrase prompt; when one is needed, the message offers to run the command in a terminal tab (`src/sync.ts`). The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
-| Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
+| Find in files | Results stop at 20,000 matches, which **Settings > Limits** changes (Replace All still changes every matching file). Refactorings that search the project, such as Safe Delete, stop at 20,000 matches whatever the setting. |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
 | Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
 | Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
-| TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
+| TODO comments | The search stops at the Find in Files limit (20,000 matches by default), counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
@@ -55,12 +55,14 @@ file to change when you add it.
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
+| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project (**Settings > Limits**), without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
 | Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
-| Terminal | A file reference that wraps onto the next line isn't a link. |
+| Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
+| Formatters | The built-in formatter formats on save only in the active tab; a file saved in another tab, such as with Save All, isn't formatted. |
+| Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -81,8 +83,9 @@ file to change when you add it.
 To use the app, you need:
 
 - macOS
-- PHP 8.1 or later on your `PATH`. The app finds PHP through your login shell,
-  so installs from Homebrew and Laravel Herd work.
+- PHP 8.1 or later. The app finds PHP through your login shell's `PATH`, so
+  installs from Homebrew and Laravel Herd work, or you set its path in
+  **Settings > Tools**.
 - Git, and optionally the GitHub CLI (`gh`) for pull requests.
 - Node.js, for Tailwind CSS, JavaScript, TypeScript, and Vue support. Laravel
   projects that use Vite already need it.
@@ -97,12 +100,13 @@ the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, Type
 servers), and compiles in the database drivers, so you don't install them
 yourself. The first launch downloads the tools for your Mac's chip (about
 90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
-checks for newer versions at launch and every six hours. Sail support needs
+checks for newer versions at launch and every six hours, unless you turn off
+**Check for app and tool updates automatically** in **Settings > Tools**. Sail support needs
 Docker, which Sail itself needs. The PHP language server is the app's own
 binary, started with `lsp`, so there's nothing to download for it. It runs
 Laravel's and Filament's PHP scripts with the project's PHP: Herd's or Valet's
-PHP for the site, Sail's, Lando's, or DDEV's container, else the `php` on your
-`PATH`. A language server that crashes restarts on its own; if it keeps
+PHP for the site, Sail's, Lando's, or DDEV's container, else the PHP from
+**Settings > Tools**. A language server that crashes restarts on its own; if it keeps
 crashing, the status bar asks you to reopen the project.
 
 ## Run in development
@@ -349,7 +353,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, Terminal, Debugger, and Git. A setting that depends on another, such as the AI model,
+AI, Spelling, Terminal, Debugger, Git, Tools, Project Tree, Limits, and Local History. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -381,6 +385,14 @@ shows only when it applies. Changes apply immediately and are saved in
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
+| Terminal shell and its arguments | Your login shell (`$SHELL`), `-l` |
+| Tools: paths of PHP, Composer, Node.js, Git, the GitHub CLI, and Docker | Empty: found on your `PATH`; Composer is the bundled `composer.phar` |
+| Tools: check for app and tool updates automatically | On |
+| Project tree: show hidden files and folders | Off |
+| Limits: recent projects to remember | 12 |
+| Limits: most matches for Find in Files and TODO | 20,000 |
+| Limits: HTTP requests to keep in the history, and the largest response to show | 100, 5 MB |
+| Local history: days and versions to keep, and the largest file | 14 days, 100 versions, 1,000 KB |
 | Debugger: Xdebug port | 9003 |
 | Debugger: items to load per array or object, and the longest string to load | 128, 2048 bytes |
 | Debugger: pause at the first line of each script | Off |
@@ -389,6 +401,34 @@ shows only when it applies. Changes apply immediately and are saved in
 | Git: how Update Project brings in commits (merge, rebase, or git's `pull.rebase`) | Merge |
 | Git: group changed files by folder in the Commit view | Off |
 | Database: rows per page, connection timeout, query timeout, and Redis command timeout | 1,000 rows, 10 s, none, 60 s |
+
+### Tools
+
+**Settings > Tools** sets the programs Tusk runs: PHP, Composer, Node.js, Git,
+the GitHub CLI (`gh`), and Docker. Leave a path empty to use the one on your
+login shell's `PATH`.
+
+- Each path has **Browse…** and **Test**. Under it, Tusk shows what it finds,
+  such as "Detected: /opt/homebrew/bin/php (PHP 8.4.2)", or the version of
+  the path you set, or why it can't run.
+- The PHP box offers the interpreters on this Mac: Homebrew's versions, Herd,
+  Herd Lite, MAMP, `/usr/bin/php`, and the shims and installs of asdf, phpenv,
+  and mise.
+- A change applies to the next command you run, without a restart. The
+  language servers started with the old PHP or Node.js, so Tusk offers to
+  restart them.
+- When a tool is missing, Tusk says so, such as "PHP wasn't found. Install it,
+  or set its path in Settings > Tools.", with **Open Settings**.
+- **Check for app and tool updates automatically** checks at launch and every
+  six hours. Turn it off on an offline or locked-down Mac; **Tusk > Check for
+  Updates…** still checks for both.
+
+A project can use another PHP: **Tools > Choose PHP Interpreter…** lists the
+interpreters on this Mac, a file you choose, and the default from Settings. The
+choice is a project setting, which you can share in `tusk.json`.
+
+**Settings > Terminal** sets the shell for new terminal tabs and its arguments
+(`-l` by default, for a login shell).
 
 ### Vim emulation
 
@@ -518,7 +558,7 @@ save every file they change.
 Tusk keeps some settings per project: breakpoints, watches, and how the
 debugger pauses on exceptions; the server paths for debugging; the Docker
 service that runs commands; saved database connections and their SSH tunnels;
-the index exclusions; run configurations; the last URL you profiled; and the stress test form. Each
+the index exclusions; run configurations; the PHP interpreter; the formatters; the hidden and excluded files; the last URL you profiled; and the stress test form. Each
 one lives in one of two places:
 
 - **On this Mac**, in a file per project in
@@ -575,6 +615,9 @@ An example:
 | `databaseSsh` | The SSH tunnel for each connection, by name; the empty name is `.env`'s connection. A destination such as `forge@203.0.113.5`, or `{ "destination": …, "identityFile": "~/.ssh/staging" }` with a key file. |
 | `databaseReadOnly` | The names of connections that refuse changes; the empty name is `.env`'s connection. |
 | `runConfigurations` | Shared run configurations: each a `name`, a `type` (`test`, `artisan`, `php`, `composer`, `npm`, `shell`, or `server`), and that type's fields. Configurations you don't share stay on this Mac. |
+| `formatters` | The formatter (`use`) and format on save (`onSave`) for each language group: `php`, `blade`, `js`, `css`, `json`, `markdown`, and `yaml`. |
+| `treeHidden`, `treeExcluded` | Patterns the project tree hides, or shows dimmed. A name matches at any depth; a path matches from the project's folder. |
+| `phpInterpreter` | The PHP program this project uses instead of the one in **Settings > Tools**, such as `/opt/homebrew/opt/php@8.3/bin/php`. |
 
 The selected database connection, `.env`'s override, the query history, the
 last profiled URL, the stress test form, and your own, temporary, and selected
@@ -624,6 +667,25 @@ Finder**. In the tree, you can also press:
 - ⌘⌫ or Delete to move to the Trash.
 
 Drag a file or folder onto a folder to move it there.
+
+### Hidden and excluded files
+
+Each project has two lists of patterns, which **Tools > Hidden Files and
+Folders…** edits, one pattern per line:
+
+- **Hidden** entries don't show in the tree: `.idea`, `.phpunit.cache`, and
+  `.phpunit.result.cache` by default. Right-click a file or folder and choose
+  **Hide in Project Tree** to add it.
+- **Excluded** entries show dimmed, as PhpStorm marks excluded folders:
+  `vendor`, `node_modules`, `storage`, `.claude`, `dist`, and `build` by
+  default.
+
+A name, such as `node_modules` or `*.log`, matches at any depth; a path, such as
+`public/build`, matches from the project's folder. Local history skips both
+lists. The lists are project settings, which you can share in `tusk.json`. The
+eye button in the tree's header, **View > Show Hidden Files**, or **Show hidden
+files and folders** in Settings shows hidden entries, dimmed. The tree never
+shows `.git` or `.DS_Store`.
 
 - **New PHP files** get a class skeleton with the namespace from your
   `composer.json` PSR-4 mappings. A name ending in `Interface`, `Trait`, or
@@ -1943,7 +2005,7 @@ folder from the tree. To see a file's versions, run **Show Local History** from
 the file as it is now, and click **Restore This Version** to put it back. The
 current text is kept as a version first, so a restore can be undone the same
 way. Versions older than 14 days are deleted, and each file keeps at most 100.
-Files over 1 MB aren't kept.
+Files over 1,000 KB aren't kept. **Settings > Local History** changes all three.
 
 To get back a deleted file, run **Local History: Deleted Files…** from ⌘⇧A,
 choose the file, then a version, and click **Restore This Version**. Its folder
@@ -2652,6 +2714,22 @@ file's `excludes` instead.
 2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
    `vendor/bin/pint`.
 3. **Mago's formatter**, the fallback for PHP, built into the PHP server.
+
+That order is **Auto**. To choose a formatter per language, run **Code >
+Formatters…**. For PHP, Blade, JavaScript, TypeScript, and Vue, CSS, JSON,
+Markdown, and YAML, choose Auto, a specific formatter (Laravel Pint, PHP CS
+Fixer, Mago, Prettier, blade-formatter, or Monaco's built-in one, where they
+apply), or **None**. Each language also has an **On save** choice that turns
+format on save on or off for it; **Default** follows **Format files when
+saving**. The choices are a project setting, which you can share in
+`tusk.json`, since teams standardize their formatters.
+
+- After formatting, the status bar names the formatter that ran, such as
+  "Formatted with Laravel Pint".
+- When the chosen formatter isn't installed, Tusk says how to install it, such
+  as `composer require laravel/pint --dev`, with a **Formatters…** button.
+- PHP CS Fixer formats a copy of the file in the temporary folder with the
+  project's configuration, since it doesn't read standard input.
 
 Prettier, including the bundled one, and Pint read the project's own
 configuration files, and Prettier follows `.editorconfig`. Mago reads the

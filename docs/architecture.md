@@ -420,10 +420,52 @@ and run `npm install --package-lock-only` in that folder.
 
 Apps opened from Finder get a minimal `PATH`. At startup, `lib.rs` runs your
 login shell (`$SHELL -ilc`) once and adopts its `PATH`, so every tool the app
-starts later (`php`, and in later milestones `git` and `gh`) resolves the same
-way as in your terminal. It runs on a thread, because a shell with plugins can
-take a second or more, and the window shouldn't wait for it. Commands that start
-a program call `login_path()` first, which waits for that thread.
+starts later (`php`, `git`, `gh`) resolves the same way as in your terminal. It
+runs on a thread, because a shell with plugins can take a second or more, and
+the window shouldn't wait for it. Commands that start a program call
+`login_path()` first, which waits for that thread.
+
+### Tool paths
+
+**Settings > Tools** (`src/toolpaths.ts`) sets the paths of PHP, Composer,
+Node.js, Git, `gh`, and Docker, and a project can set its own PHP
+(`phpInterpreter`, shareable in `tusk.json`). Call sites don't read these
+settings: they keep running `php` or `git` by name, and the backend resolves
+the name.
+
+- `toolpaths.rs` keeps a folder of shims (`bin/` in the app's local data
+  folder). For each tool with a path, `tools_configure` writes a two-line
+  script named after the tool that `exec`s the path, and removes the scripts of
+  tools without one. The folder is emptied at launch.
+- `path_env()` is the shims' folder followed by the login `PATH`. `run_capture`,
+  `pty_spawn`, and `lsp_start` start every program with it, so a set path
+  reaches commands, terminal tabs, `/usr/bin/env php …`, the language servers,
+  and what they start in turn, such as the PHP server's own `php`. A shim is a
+  script rather than a symlink so that version managers that read the name they
+  were run as, such as mise, see their own path.
+- `check(command)` runs before a program starts. It finds the tool, looking
+  past `/usr/bin/env VAR=value`, and fails when a set path isn't an executable
+  file or, without one, when the tool isn't on `PATH`. The error names the fix
+  ("PHP wasn't found at /x. Set its path in Settings > Tools."), and the
+  `tool-missing` event carries it to a toast with **Open Settings**, so callers
+  that stay quiet on failure, such as the model introspection, still tell you.
+- The frontend sends the paths with `configureTools` after each settings
+  change, when a project opens (before its servers start), and when `tusk.json`
+  changes the project's PHP. A change of PHP or Node.js offers to restart the
+  language servers.
+- Composer runs as `composer` when you set its path, and as `php` with the
+  bundled `composer.phar` otherwise (`composerCommand`).
+- The terminal's shell and arguments come with the same call; `pty_spawn` runs
+  them when it gets no command.
+- Settings' `path` field type (`src/settings.ts`) draws the text box with
+  **Browse…**, **Test**, a note from the field's `describe`, and a datalist of
+  `suggest`ed values. `describe` runs `--version` on the set path, or says what
+  `tool_which` finds on the login `PATH` ("Detected: …").
+- `FIND_INTERPRETERS` (`src/toolpathsdata.ts`, with tests) is a shell loop over
+  the usual PHP locations; `parseInterpreters` keeps each real binary once.
+- `auto_checks` reads `checkForUpdates` from `settings.json` in Rust, so the
+  six-hour update and tool checks and the launch tool check honor it before the
+  frontend has loaded. **Check for Updates…** also checks the tools.
 
 ### Language server bridge
 
@@ -2563,7 +2605,8 @@ For files that aren't open, the editor has no copy of the text before the
 change, so `recordExternalChanges` keeps the text after it: the next change
 then finds its earlier text in the history. The watcher batch in `main.ts`
 passes it every changed path without a Monaco model. It skips folders in
-`EXCLUDED_FOLDERS` (such as `vendor`, `node_modules`, and `.git`), `.env`
+the project tree's hidden and excluded patterns (`skippedPath` in
+`src/treehidden.ts`, such as `vendor` and `node_modules`), `.env`
 files, and anything `git check-ignore --stdin` names, in one call per batch.
 `run_capture` fails on any non-zero exit: an empty error is exit status 1 (none
 ignored), and "not a git repository" means there's nothing to ignore, but any
@@ -3156,10 +3199,27 @@ each formatter finds the project's configuration:
 3. For PHP, Tusk's server (`textDocument/formatting`), which formats its copy
    of the open file with Mago's formatter.
 
-`detectFormatters` looks for Prettier and Pint when a folder opens. Monaco's
-own formatters for CSS, HTML, JSON, and TypeScript are always off
-(`setModeConfiguration`), since a Prettier is always there and they would
-otherwise compete for those languages.
+That order is **Auto**. The project's `formatters` value (the Formatters
+dialog, `src/formattersdialog.ts`) picks a formatter per language group, and
+format on save per group; `src/formatdata.ts` (with tests) holds the groups and
+the lookups, `formatterFor` and `formatsOnSave`.
+
+- A specific formatter runs alone: no fallback, and a missing one (Pint or PHP
+  CS Fixer without `vendor/bin`, Prettier for PHP without the project's own)
+  throws `Missing`, which shows with how to install it and a **Formatters…**
+  button. Other failures go to the status bar, as before.
+- PHP CS Fixer formats a copy in the temporary folder
+  (`php-cs-fixer fix --using-cache=no <copy>`), run from the project so it
+  reads the project's config; with an explicit path, its Finder doesn't apply.
+- The provider is registered again when the choices change, for every language
+  except those set to Built-in. Monaco's own formatters for CSS, HTML, JSON,
+  and TypeScript (`setModeConfiguration`) are on only for those, or for Auto
+  while Node.js is missing, so the two never compete.
+- After formatting, `status("Formatted with …", "format")` names the formatter.
+- `saveFile` asks `formatOnSave(language)` instead of reading the setting.
+
+`detectFormatters` looks for Prettier, Pint, and PHP CS Fixer when a folder
+opens.
 
 `node-tools/package.json` pins Prettier and the two plugins directly, rather
 than relying on the copies the Svelte and Astro servers pull in. The Astro
@@ -3862,8 +3922,30 @@ Icons come from Monaco's icon font (codicons), which the page already loads, so
 there's no icon dependency. Monaco's `.codicon[class*='codicon-']` rule sets
 the icon size with high specificity, so the stylesheet uses `!important` where
 it changes a size. `src/icons.ts` maps file and folder names to a codicon and a
-color class; `src/icons.test.ts` covers it. Folders such as `vendor`,
-`node_modules`, and `storage` are dimmed, as PhpStorm marks excluded folders.
+color class; `src/icons.test.ts` covers it. Excluded entries are dimmed, as
+PhpStorm marks excluded folders.
+
+### Hidden and excluded files
+
+The project values `treeHidden` and `treeExcluded` (`src/treehidden.ts`, with
+defaults and the matcher in `src/treefilter.ts`, tested) decide how the tree
+shows each entry: `treeState(rel)` returns `omit`, `hidden` (when **Show hidden
+files and folders** is on), `excluded`, or nothing, and `renderDir` filters and
+classes the rows with it. A pattern without `/` matches a name at any depth; one
+with `/` goes through `covers` from `indexexclude.ts`, relative to the project.
+`folderIcon` takes the excluded flag from the row instead of a fixed set. A
+change to either list or the setting redraws the tree from the root, which
+keeps open folders open. The fixed `EXCLUDED_FOLDERS` in `icons.ts` remains
+only as `folderIcon`'s default.
+
+### Limits
+
+`src/limits.ts` registers the **Limits** and **Local History** settings groups,
+and each module reads them when it needs the value: recent projects
+(`rememberProject`), Find in Files and TODO (`search_text` takes a `limit`;
+other callers keep the backend's 20,000), the HTTP history's size and the
+largest response body shown, and local history's `toPrune` arguments and file
+size cap.
 
 ### Breadcrumbs
 
@@ -5455,3 +5537,37 @@ Connections are edited in a dialog, as in PhpStorm's Data Sources, instead of a
 URL typed into the palette, because TLS, SSH keys, and read-only mode don't fit
 in a URL a team shares. The URL stays as a field kept in step with the form,
 since that's how Laravel's `DB_URL` and hosting providers give connections.
+
+### 2026-09-28: Tool paths through shims on PATH, not at each call site
+
+Settings > Tools could have replaced each `"php"` in the frontend with a lookup,
+but PHP also runs from places the frontend doesn't see: `/usr/bin/env php` in
+terminal commands, Sail's scripts, and the PHP server's own helpers. A folder of
+shim scripts first on every child's `PATH` covers all of them with no call-site
+changes, applies to the next program without a restart, and keeps merges with
+the modules that run tools trivial. The backend checks the tool before it
+starts a program, so a missing one fails with an error that names the setting,
+not a raw spawn error. The tools manifest's URL stays fixed: packages are
+signed with the updater's key, so a mirror would need Tusk's key anyway.
+
+### 2026-09-28: Formatters per language in project state
+
+A team's formatter is part of the project, as its `lint-staged` and CI show, so
+the choice per language lives in `formatters`, shareable in `tusk.json`, not in
+personal settings. Auto keeps the old order, so a project that sets nothing
+formats as before. Format on save stays a personal setting, with a per-language
+override in the same value rather than a second setting, so one dialog shows
+both. Built-in unregisters Tusk's provider for the language instead of
+returning nothing from it, because Monaco uses one provider when several apply.
+
+### 2026-09-28: Which hardcoded limits became settings
+
+The recent projects cap, the Find in Files limit, local history's retention,
+the HTTP history's size and largest shown body, and the tree's hidden and
+excluded folders became settings; the tree's lists are project state, since a
+team's generated folders are part of the project. The Git log's page of 300
+stayed: the log already loads the next page on demand, so the size only tunes
+how often it asks. AI completion's internal limits stayed, since they're tuned
+against the model's context. The tools manifest URL stayed, since a mirror
+would need a list signed with Tusk's key.
+

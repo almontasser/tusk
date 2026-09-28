@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { type Advisory, advisories, dependents, namespaceChecks, packages, type Package, requiredBy } from "./composerdata";
 import { toolPath } from "./lsp";
+import { composerCommand } from "./toolpaths";
 import { confirm, pick } from "./palette";
 import { listNav } from "./listnav";
 import { errorText, showError } from "./status";
@@ -23,12 +24,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
   return e;
 }
 
-const capture = (...args: string[]) => invoke<string>("run_capture", { cwd: host.root(), program: "php", args: [composer, ...args, "--no-interaction"], input: null });
+/** Runs Composer and returns its output: the program from Settings > Tools, or the bundled composer.phar. */
+const composerRun = (args: string[], anyStatus = false) => {
+  const [program, ...first] = composerCommand(composer);
+  return invoke<string>("run_capture", { cwd: host.root(), program, args: [...first, ...args, "--no-interaction"], input: null, anyStatus });
+};
+const capture = (...args: string[]) => composerRun(args);
 
 /** Runs a Composer command in a terminal tab, then reloads the list. */
 async function run(title: string, args: string[]) {
   composer ||= await toolPath("composer/composer.phar");
-  openTerminal(host.root(), title, ["php", composer, ...args], () => loadPackages());
+  openTerminal(host.root(), title, [...composerCommand(composer), ...args], () => loadPackages());
 }
 
 /** Each load's number, so a slow load that a newer one replaced doesn't draw over it. */
@@ -61,7 +67,7 @@ export async function loadPackages() {
   const [outdated, audit, unused] = await Promise.all([
     capture("outdated", ...scope, "--format=json").catch(() => null),
     // Audit exits with an error status when it finds advisories.
-    invoke<string>("run_capture", { cwd: host.root(), program: "php", args: [composer, "audit", "--format=json", "--abandoned=ignore", "--no-interaction"], input: null, anyStatus: true }).catch(() => null),
+    composerRun(["audit", "--format=json", "--abandoned=ignore"], true).catch(() => null),
     lock ? unreferenced(lock, json) : new Set<string>(),
   ]);
   if (load !== loads) return;

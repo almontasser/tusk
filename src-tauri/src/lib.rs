@@ -6,6 +6,7 @@ mod profile;
 mod pty;
 mod search;
 mod tools;
+mod toolpaths;
 mod ws;
 
 use std::sync::LazyLock;
@@ -146,6 +147,7 @@ async fn update_check(app: tauri::AppHandle, manual: bool) {
 
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(tools::check_tools(app.clone()));
     update_check(app, true).await;
 }
 
@@ -175,6 +177,7 @@ pub fn run() {
                 .build(),
         )
         .setup(|_app| {
+            toolpaths::init(_app.handle());
             #[cfg(target_os = "macos")]
             if let Some(window) = _app.get_webview_window("main") {
                 window.with_webview(|w| hide_write_with_siri(w.inner()))?;
@@ -183,10 +186,15 @@ pub fn run() {
             {
                 let app = _app.handle().clone();
                 // Tools are also checked at launch, by `tools_ensure` once the tools are known to be installed.
+                // Settings > Tools can turn the checks off, for offline or locked-down Macs; Check for Updates still works.
                 std::thread::spawn(move || loop {
-                    tauri::async_runtime::block_on(update_check(app.clone(), false));
+                    if toolpaths::auto_checks(&app) {
+                        tauri::async_runtime::block_on(update_check(app.clone(), false));
+                    }
                     std::thread::sleep(std::time::Duration::from_secs(6 * 60 * 60));
-                    tauri::async_runtime::block_on(tools::check_tools(app.clone()));
+                    if toolpaths::auto_checks(&app) {
+                        tauri::async_runtime::block_on(tools::check_tools(app.clone()));
+                    }
                 });
             }
             Ok(())
@@ -230,6 +238,8 @@ pub fn run() {
             tools::path_exists,
             tools::paths_exist,
             tools::run_capture,
+            toolpaths::tools_configure,
+            toolpaths::tool_which,
             search::list_files,
             search::search_text,
             search::files_matching,

@@ -19,7 +19,7 @@ pub struct PtyState(Mutex<HashMap<u32, Session>>);
 
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
-/// Starts `command` (or a login shell) in a pseudo-terminal. Output arrives as
+/// Starts `command` (or the shell from Settings > Terminal) in a pseudo-terminal. Output arrives as
 /// `pty:<id>` events, and `pty-exit:<id>` fires when the process ends. With a `channel`, the
 /// events are `pty:<channel>` and `pty-exit:<channel>` instead, so the caller can listen before
 /// the process starts and miss nothing from a command that finishes at once.
@@ -33,23 +33,15 @@ pub fn pty_spawn(
     cols: u16,
     channel: Option<String>,
 ) -> Result<u32, String> {
-    crate::login_path();
+    let command = command.filter(|c| !c.is_empty()).unwrap_or_else(crate::toolpaths::shell);
+    crate::toolpaths::check(&command)?;
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
-    let mut cmd = match command.as_deref() {
-        Some([program, args @ ..]) => {
-            let mut c = CommandBuilder::new(program);
-            c.args(args);
-            c
-        }
-        _ => {
-            let mut c = CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
-            c.arg("-l");
-            c
-        }
-    };
+    let mut cmd = CommandBuilder::new(&command[0]);
+    cmd.args(&command[1..]);
     cmd.cwd(cwd);
+    cmd.env("PATH", crate::toolpaths::path_env());
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;

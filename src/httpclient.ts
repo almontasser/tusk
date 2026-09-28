@@ -25,6 +25,7 @@ import type { Query } from "./cachegrind";
 import type { Output, Test } from "./httpscript.worker";
 import ScriptWorker from "./httpscript.worker?worker";
 import { pick } from "./palette";
+import { limits } from "./limits";
 
 export type Host = {
   root(): string;
@@ -572,7 +573,6 @@ export async function jarCookies(env = "default") {
 
 // ---- History ----
 
-const HISTORY_SIZE = 100;
 let historyCache: Exchange[] | null = null;
 let historyRoot = "";
 
@@ -589,7 +589,7 @@ async function remember(exchange: Exchange) {
   const all = [exchange, ...(await history())];
   // Pinned exchanges don't count toward the limit.
   let unpinned = 0;
-  const keep = all.filter((x) => x.pinned || ++unpinned <= HISTORY_SIZE);
+  const keep = all.filter((x) => x.pinned || ++unpinned <= limits.httpHistory);
   await saveHistory(keep);
   for (const old of all.filter((x) => !keep.includes(x))) await invoke("remove_path", { path: old.bodyPath }).catch(() => {});
 }
