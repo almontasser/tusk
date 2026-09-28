@@ -6,7 +6,7 @@
 //   errorText(error)               An error's readable text, from an Error, a Tauri command's string, or anything.
 //   withProgress(label, task, o?)  Runs `task` with a spinner and `label` in the status bar, and shows a failure
 //                                  as an error. With `cancellable`, the status bar shows a Cancel button, which
-//                                  aborts the AbortSignal the task gets. Resolves to the task's result, or
+//                                  aborts the AbortSignal the task gets, and progress(label) updates the label. Resolves to the task's result, or
 //                                  undefined when it failed or was canceled.
 //   installErrorHandlers()         Shows unhandled promise rejections and errors as toasts, once per message.
 import { toast } from "./dom.ts";
@@ -77,11 +77,12 @@ let tasks = 0;
  * Runs a task with a spinner and `label`, such as "Merging #12…", in the status bar. A failure shows as an error,
  * starting with `error` (by default "<label> failed"). With `cancellable`, the status bar shows a Cancel button that
  * aborts the task's signal; the task stops when it sees `signal.aborted`, or passes the signal on, such as to fetch.
- * Resolves to the task's result, or undefined when it failed or was canceled.
+ * Resolves to the task's result, or undefined when it failed or was canceled. The task can call `progress` with a
+ * new label, such as "Deleted 500 of 2,000 keys…", which keeps the spinner and Cancel.
  */
 export async function withProgress<T>(
   label: string,
-  task: (signal: AbortSignal) => Promise<T>,
+  task: (signal: AbortSignal, progress: (label: string) => void) => Promise<T>,
   options: { cancellable?: boolean; error?: string } = {},
 ): Promise<T | undefined> {
   const source = `task${++tasks}:progress`;
@@ -89,7 +90,7 @@ export async function withProgress<T>(
   if (options.cancellable) cancels.set(source, controller);
   status(label, source);
   try {
-    return await task(controller.signal);
+    return await task(controller.signal, (text) => status(text, source));
   } catch (e) {
     if (controller.signal.aborted) status(`Canceled: ${label.replace(/…$/, "")}`, "app", "info");
     else showError(options.error ?? `${label.replace(/…$/, "")} failed`, e);

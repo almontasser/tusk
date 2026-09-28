@@ -16,6 +16,48 @@ pub struct Connection {
     /// A PEM file of the certificate authority to trust: MYSQL_ATTR_SSL_CA, or DB_SSLROOTCERT for PostgreSQL.
     #[serde(default)]
     ssl_ca: String,
+    /// Refuses changes: SQLite opens the file read-only, and MySQL and PostgreSQL start a read-only session.
+    #[serde(default)]
+    read_only: bool,
+    /// Rows per page, from the Database settings; 0 for every row, as for an export.
+    #[serde(default = "default_page_size")]
+    page_size: usize,
+    /// Seconds to wait for the server to accept the connection.
+    #[serde(default = "default_connect_timeout")]
+    connect_timeout: u64,
+    /// Seconds a Redis command may take before its connection gives up; 0 for no limit. SQL queries are
+    /// canceled by the frontend instead, with db_cancel, which leaves the connection usable.
+    #[serde(default = "default_read_timeout")]
+    read_timeout: u64,
+}
+
+const fn default_page_size() -> usize {
+    1000
+}
+const fn default_connect_timeout() -> u64 {
+    10
+}
+const fn default_read_timeout() -> u64 {
+    60
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Connection {
+            driver: String::new(),
+            host: String::new(),
+            port: 0,
+            database: String::new(),
+            username: String::new(),
+            password: String::new(),
+            ssl_mode: String::new(),
+            ssl_ca: String::new(),
+            read_only: false,
+            page_size: default_page_size(),
+            connect_timeout: default_connect_timeout(),
+            read_timeout: default_read_timeout(),
+        }
+    }
 }
 
 #[derive(Serialize, Default)]
@@ -26,50 +68,140 @@ pub struct QueryResult {
     truncated: bool,
     /// Every row the statement returned, including those skipped and those past the page.
     total: u64,
+    /// Columns holding binary values, which come back as `\x` and hex, as PostgreSQL shows bytea. The grid
+    /// keeps them read-only, since writing that text back would store text.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    binary: Vec<usize>,
     /// Rows to skip before the page starts.
     #[serde(skip)]
     skip: u64,
+    /// Rows per page (the connection's `page_size`); 0 for every row. `database.ts` asks for the next page with an offset.
+    #[serde(skip)]
+    limit: usize,
 }
 
-/// Rows per page. `database.ts` asks for the next page with an offset.
-const MAX_ROWS: usize = 1000;
-
 impl QueryResult {
+    fn new(c: &Connection, skip: u64) -> Self {
+        QueryResult { skip, limit: c.page_size, ..Default::default() }
+    }
+
     fn push(&mut self, row: Vec<Option<String>>) {
         self.total += 1;
         if self.total <= self.skip {
             return;
         }
-        if self.rows.len() < MAX_ROWS {
+        if self.limit == 0 || self.rows.len() < self.limit {
             self.rows.push(row);
         } else {
             self.truncated = true;
         }
     }
+
+    /// A binary value as text: `\x` and its hex, or its size when it's over 64 KB.
+    fn bytes(&mut self, column: usize, bytes: &[u8]) -> String {
+        if !self.binary.contains(&column) {
+            self.binary.push(column);
+        }
+        if bytes.len() > 64 * 1024 {
+            return format!("<binary, {} bytes>", bytes.len());
+        }
+        let mut text = String::with_capacity(2 + bytes.len() * 2);
+        text.push_str("\\x");
+        for b in bytes {
+            text.push_str(&format!("{b:02x}"));
+        }
+        text
+    }
 }
 
-/// Runs one statement and returns a page of its rows, from `offset`, or the number of rows it changed.
+/// How to stop a running query: SQLite's interrupt, MySQL's `KILL QUERY` from a second connection, or
+/// PostgreSQL's cancel request. None while the query is still connecting.
+enum Cancel {
+    Sqlite(rusqlite::InterruptHandle),
+    Mysql(Connection, u32),
+    Pgsql(Connection, postgres::CancelToken),
+}
+
+/// Running queries by the id the frontend gives them, so db_cancel can stop one.
+static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Option<Cancel>>>> = std::sync::LazyLock::new(Default::default);
+
+/// Registers a running query's cancel, once it has connected. Fails when it was canceled while connecting.
+fn running(id: &Option<String>, cancel: impl FnOnce() -> Cancel) -> Result<(), String> {
+    let Some(id) = id else { return Ok(()) };
+    match RUNNING.lock().unwrap().get_mut(id) {
+        Some(slot) => Ok(*slot = Some(cancel())),
+        None => Err(CANCELED.into()),
+    }
+}
+
+const CANCELED: &str = "Canceled.";
+
+/// Stops a running query: SQLite interrupts it, MySQL and MariaDB run `KILL QUERY` on a second connection,
+/// and PostgreSQL sends a cancel request, as `pg_cancel_backend` does. A query still connecting stops once it
+/// connects. Returns whether the query was running.
+#[tauri::command]
+pub async fn db_cancel(id: String) -> Result<bool, String> {
+    let Some(cancel) = RUNNING.lock().unwrap().remove(&id) else { return Ok(false) };
+    tauri::async_runtime::spawn_blocking(move || match cancel {
+        None => Ok(true),
+        Some(Cancel::Sqlite(handle)) => {
+            handle.interrupt();
+            Ok(true)
+        }
+        Some(Cancel::Mysql(c, thread)) => {
+            use mysql::prelude::Queryable;
+            let mut conn = open_mysql(&Connection { read_only: false, ..c })?;
+            conn.query_drop(format!("KILL QUERY {thread}")).map_err(mysql_error)?;
+            Ok(true)
+        }
+        Some(Cancel::Pgsql(c, token)) => {
+            let mode = if c.ssl_mode.is_empty() { "prefer" } else { c.ssl_mode.as_str() };
+            token.cancel_query(postgres_native_tls::MakeTlsConnector::new(tls_connector(&c, mode)?)).map_err(pgsql_error)?;
+            Ok(true)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs one statement and returns a page of its rows, from `offset`, or the number of rows it changed. With an
+/// `id`, db_cancel can stop it.
 // ponytail: connects for every query, and each page runs the statement again and reads every row, which the
 // drivers do anyway (MySQL drains the rest, PostgreSQL's simple query buffers it); a server-side cursor on a
 // kept connection if that gets slow on remote hosts.
 #[tauri::command]
-pub async fn db_query(connection: Connection, sql: String, offset: Option<u64>) -> Result<QueryResult, String> {
+pub async fn db_query(connection: Connection, sql: String, offset: Option<u64>, id: Option<String>) -> Result<QueryResult, String> {
     let skip = offset.unwrap_or(0);
-    tauri::async_runtime::spawn_blocking(move || match connection.driver.as_str() {
-        "sqlite" => sqlite(&connection, &sql, skip),
-        "mysql" | "mariadb" => mysql(&connection, &sql, skip),
-        "pgsql" => pgsql(&connection, &sql, skip),
-        "redis" => redis(&connection, &sql, skip),
-        other => Err(format!("The {other} driver isn't supported.")),
+    if let Some(id) = &id {
+        RUNNING.lock().unwrap().insert(id.clone(), None);
+    }
+    let result = tauri::async_runtime::spawn_blocking({
+        let id = id.clone();
+        move || match connection.driver.as_str() {
+            "sqlite" => sqlite(&connection, &sql, skip, &id),
+            "mysql" | "mariadb" => mysql(&connection, &sql, skip, &id),
+            "pgsql" => pgsql(&connection, &sql, skip, &id),
+            "redis" => redis(&connection, &sql, skip),
+            other => Err(format!("The {other} driver isn't supported.")),
+        }
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    // Gone from RUNNING means db_cancel took it: the driver's error is the cancel's, and MySQL's SLEEP, which
+    // returns early rather than failing, isn't a result either.
+    if id.is_some_and(|id| RUNNING.lock().unwrap().remove(&id).is_none()) {
+        return Err(CANCELED.into());
+    }
+    result
 }
 
 /// Runs statements in one transaction, and returns how many rows each changed. If one fails, none apply. With
 /// `one_row_each`, as for edits in the results grid, a statement that changes no row or several fails too.
 #[tauri::command]
 pub async fn db_batch(connection: Connection, statements: Vec<String>, one_row_each: Option<bool>) -> Result<Vec<u64>, String> {
+    if connection.read_only {
+        return Err("Nothing was saved: the connection is read-only.".into());
+    }
     let check = move |affected: Vec<u64>| match affected.iter().position(|&n| n != 1) {
         Some(i) if one_row_each == Some(true) => Err(format!("Nothing was saved: change {} of {} matched {} rows instead of one.", i + 1, affected.len(), affected[i])),
         _ => Ok(affected),
@@ -110,7 +242,12 @@ pub async fn db_batch(connection: Connection, statements: Vec<String>, one_row_e
 }
 
 fn open_sqlite(c: &Connection) -> Result<rusqlite::Connection, String> {
-    rusqlite::Connection::open_with_flags(&c.database, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).map_err(|e| e.to_string())
+    use rusqlite::OpenFlags;
+    let mode = if c.read_only { OpenFlags::SQLITE_OPEN_READ_ONLY } else { OpenFlags::SQLITE_OPEN_READ_WRITE };
+    let db = rusqlite::Connection::open_with_flags(&c.database, mode).map_err(|e| e.to_string())?;
+    // Wait for another process's write, such as the app's, instead of failing with "database is locked".
+    db.busy_timeout(std::time::Duration::from_secs(c.connect_timeout.max(1))).map_err(|e| e.to_string())?;
+    Ok(db)
 }
 
 fn mysql_error(e: mysql::Error) -> String {
@@ -131,7 +268,11 @@ fn open_mysql(c: &Connection) -> Result<mysql::Conn, String> {
         .tcp_port(c.port)
         .db_name(Some(&c.database))
         .user(Some(&c.username))
-        .pass(Some(&c.password));
+        .pass(Some(&c.password))
+        .tcp_connect_timeout(Some(std::time::Duration::from_secs(c.connect_timeout.max(1))));
+    if c.read_only {
+        opts = opts.init(vec!["SET SESSION TRANSACTION READ ONLY"]);
+    }
     let mode = c.ssl_mode.as_str();
     if !c.ssl_ca.is_empty() || matches!(mode, "require" | "verify-ca" | "verify-full") {
         let mut ssl = mysql::SslOpts::default();
@@ -146,7 +287,9 @@ fn open_mysql(c: &Connection) -> Result<mysql::Conn, String> {
 }
 
 fn pgsql_error(e: postgres::Error) -> String {
-    e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string())
+    // The driver's own message is terse, such as "error connecting to server"; its source says why.
+    let detail = || std::error::Error::source(&e).map_or_else(|| e.to_string(), |source| format!("{e}: {source}"));
+    e.as_db_error().map_or_else(detail, |d| d.message().to_string())
 }
 
 /// Connects to PostgreSQL with libpq's sslmode, which Laravel defaults to `prefer`: try TLS, and fall back
@@ -156,19 +299,23 @@ fn open_pgsql(c: &Connection) -> Result<postgres::Client, String> {
     use postgres::config::SslMode;
     let mode = if c.ssl_mode.is_empty() { "prefer" } else { c.ssl_mode.as_str() };
     let connector = postgres_native_tls::MakeTlsConnector::new(tls_connector(c, mode)?);
-    postgres::Config::new()
+    let mut config = postgres::Config::new();
+    config
         .host(&c.host)
         .port(c.port)
         .dbname(&c.database)
         .user(&c.username)
         .password(&c.password)
+        .connect_timeout(std::time::Duration::from_secs(c.connect_timeout.max(1)))
         .ssl_mode(match mode {
             "disable" => SslMode::Disable,
             "prefer" | "allow" => SslMode::Prefer,
             _ => SslMode::Require,
-        })
-        .connect(connector)
-        .map_err(pgsql_error)
+        });
+    if c.read_only {
+        config.options("-c default_transaction_read_only=on");
+    }
+    config.connect(connector).map_err(pgsql_error)
 }
 
 /// A TLS connector for libpq's sslmode: `allow`, `prefer`, and `require` accept any certificate, `verify-ca` checks
@@ -187,12 +334,14 @@ fn tls_connector(c: &Connection, mode: &str) -> Result<native_tls::TlsConnector,
     tls.build().map_err(|e| e.to_string())
 }
 
-fn sqlite(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
+fn sqlite(c: &Connection, sql: &str, skip: u64, id: &Option<String>) -> Result<QueryResult, String> {
     use rusqlite::types::ValueRef;
     let err = |e: rusqlite::Error| e.to_string();
     let db = open_sqlite(c)?;
+    running(id, || Cancel::Sqlite(db.get_interrupt_handle()))?;
     let mut stmt = db.prepare(sql).map_err(err)?;
-    let mut result = QueryResult { columns: stmt.column_names().iter().map(|s| s.to_string()).collect(), skip, ..Default::default() };
+    let mut result = QueryResult::new(c, skip);
+    result.columns = stmt.column_names().iter().map(|s| s.to_string()).collect();
     if result.columns.is_empty() {
         result.affected = stmt.execute([]).map_err(err)? as u64;
         return Ok(result);
@@ -206,7 +355,7 @@ fn sqlite(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
                 Ok(ValueRef::Integer(n)) => Some(n.to_string()),
                 Ok(ValueRef::Real(n)) => Some(n.to_string()),
                 Ok(ValueRef::Text(t)) => Some(String::from_utf8_lossy(t).into()),
-                Ok(ValueRef::Blob(b)) => Some(format!("<{} bytes>", b.len())),
+                Ok(ValueRef::Blob(b)) => Some(result.bytes(i, b)),
             })
             .collect();
         result.push(cells);
@@ -214,22 +363,25 @@ fn sqlite(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     Ok(result)
 }
 
-fn mysql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
+fn mysql(c: &Connection, sql: &str, skip: u64, id: &Option<String>) -> Result<QueryResult, String> {
     use mysql::prelude::Queryable;
     let err = mysql_error;
     let mut conn = open_mysql(c)?;
+    running(id, || Cancel::Mysql(c.clone(), conn.connection_id()))?;
     // The text protocol returns every value as bytes, so each cell reads as a string.
     let mut rows = conn.query_iter(sql).map_err(err)?;
-    let mut result = QueryResult { affected: rows.affected_rows(), skip, ..Default::default() };
+    let mut result = QueryResult::new(c, skip);
+    result.affected = rows.affected_rows();
     result.columns = rows.columns().as_ref().iter().map(|c| c.name_str().into_owned()).collect();
     for row in rows.by_ref() {
         let cells = row
             .map_err(err)?
             .unwrap()
             .into_iter()
-            .map(|v| match v {
+            .enumerate()
+            .map(|(i, v)| match v {
                 mysql::Value::NULL => None,
-                mysql::Value::Bytes(b) => Some(String::from_utf8_lossy(&b).into()),
+                mysql::Value::Bytes(b) => Some(String::from_utf8(b).unwrap_or_else(|e| result.bytes(i, e.as_bytes()))),
                 other => Some(other.as_sql(true)),
             })
             .collect();
@@ -238,12 +390,13 @@ fn mysql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
     Ok(result)
 }
 
-fn pgsql(c: &Connection, sql: &str, skip: u64) -> Result<QueryResult, String> {
+fn pgsql(c: &Connection, sql: &str, skip: u64, id: &Option<String>) -> Result<QueryResult, String> {
     use postgres::SimpleQueryMessage;
     let err = pgsql_error;
     let mut client = open_pgsql(c)?;
+    running(id, || Cancel::Pgsql(c.clone(), client.cancel_token()))?;
     // The simple query protocol returns every value as text.
-    let mut result = QueryResult { skip, ..Default::default() };
+    let mut result = QueryResult::new(c, skip);
     for message in client.simple_query(sql).map_err(err)? {
         match message {
             SimpleQueryMessage::RowDescription(columns) => result.columns = columns.iter().map(|c| c.name().into()).collect(),
@@ -280,11 +433,12 @@ impl Redis {
         let mut last = None;
         let tcp = addresses
             .iter()
-            .find_map(|a| std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(10)).map_err(|e| last = Some(e)).ok())
+            .find_map(|a| std::net::TcpStream::connect_timeout(a, std::time::Duration::from_secs(c.connect_timeout.max(1))).map_err(|e| last = Some(e)).ok())
             .ok_or_else(|| unreachable(&last.map_or("no address".into(), |e| e.to_string())))?;
-        // A blocking command, such as BLPOP, can't hold the query forever.
-        let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
-        let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(30)));
+        // A blocking command, such as BLPOP, can't hold the query forever, unless the setting is 0.
+        let timeout = (c.read_timeout > 0).then(|| std::time::Duration::from_secs(c.read_timeout));
+        let _ = tcp.set_read_timeout(timeout);
+        let _ = tcp.set_write_timeout(timeout);
         let _ = tcp.set_nodelay(true);
         let stream: Box<dyn Stream> = match c.ssl_mode.as_str() {
             "" | "disable" => Box::new(tcp),
@@ -363,7 +517,7 @@ const REDIS_IDLE: usize = 4;
 /// Runs `f` on a pooled connection, or a new one. A pooled connection the server has since closed, such as
 /// after its idle timeout or the Mac's sleep, fails with an I/O error, and `f` runs again on a new one.
 fn with_redis<T>(c: &Connection, mut f: impl FnMut(&mut Redis) -> std::io::Result<T>) -> Result<T, String> {
-    let key = format!("{}|{}|{}|{}|{}|{}|{}", c.host, c.port, c.username, c.password, c.database, c.ssl_mode, c.ssl_ca);
+    let key = format!("{}|{}|{}|{}|{}|{}|{}|{}", c.host, c.port, c.username, c.password, c.database, c.ssl_mode, c.ssl_ca, c.read_timeout);
     let pooled = REDIS_POOL.lock().unwrap().get_mut(&key).and_then(Vec::pop);
     let give_back = |redis: Redis| {
         let mut pool = REDIS_POOL.lock().unwrap();
@@ -480,7 +634,7 @@ fn split_command(line: &str) -> Result<Vec<String>, String> {
 fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String> {
     let args = split_command(command)?;
     let Some(name) = args.first().map(|a| a.to_uppercase()) else { return Err("Type a command.".into()) };
-    let mut result = QueryResult { skip, columns: vec!["value".into()], ..Default::default() };
+    let mut result = QueryResult { columns: vec!["value".into()], ..QueryResult::new(c, skip) };
     if name == "SCAN" {
         let mut keys = Vec::new();
         with_redis(c, |db| {
@@ -570,9 +724,10 @@ pub struct Tunnels(std::sync::Mutex<std::collections::HashMap<String, (std::proc
 /// as `forge@203.0.113.5`, a host alias, or `ssh://user@host:2222`. A password prompt can't be answered here,
 /// so it needs key or agent authentication. A running tunnel is reused, and every tunnel ends with the app.
 #[tauri::command(async)]
-pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: String, port: u16) -> Result<u16, String> {
+pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: String, port: u16, identity: Option<String>) -> Result<u16, String> {
     use std::process::{Command, Stdio};
-    let key = format!("{destination}|{host}|{port}");
+    let identity = identity.filter(|i| !i.is_empty());
+    let key = format!("{destination}|{host}|{port}|{}", identity.as_deref().unwrap_or(""));
     let mut tunnels = state.0.lock().unwrap();
     if let Some((child, local)) = tunnels.get_mut(&key) {
         if matches!(child.try_wait(), Ok(None)) {
@@ -584,6 +739,8 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
     let mut child = Command::new("/bin/sh")
         // ServerAlive ends a tunnel whose connection died, such as after sleep, so the next query opens a new one.
         .args(["-c", crate::lsp::WATCHDOG, "sh", "ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
+        // A key file is the only key ssh offers, as with `ssh -i`; without one, the agent and ~/.ssh/config choose.
+        .args(identity.iter().flat_map(|i| ["-i", i.as_str(), "-o", "IdentitiesOnly=yes"]))
         .arg("-L")
         .arg(format!("127.0.0.1:{local}:{host}:{port}"))
         .arg(&destination)
@@ -623,25 +780,63 @@ mod tests {
         let path = std::env::temp_dir().join("php-editor-db-test.sqlite");
         let _ = std::fs::remove_file(&path);
         rusqlite::Connection::open(&path).unwrap();
-        let c = Connection { driver: "sqlite".into(), host: String::new(), port: 0, database: path.to_string_lossy().into(), username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() };
-        sqlite(&c, "CREATE TABLE t (id INTEGER, name TEXT)", 0).unwrap();
-        assert_eq!(sqlite(&c, "INSERT INTO t VALUES (1, 'a'), (2, NULL)", 0).unwrap().affected, 2);
-        let r = sqlite(&c, "SELECT * FROM t", 0).unwrap();
+        let c = Connection { driver: "sqlite".into(), host: String::new(), port: 0, database: path.to_string_lossy().into(), username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() };
+        sqlite(&c, "CREATE TABLE t (id INTEGER, name TEXT)", 0, &None).unwrap();
+        assert_eq!(sqlite(&c, "INSERT INTO t VALUES (1, 'a'), (2, NULL)", 0, &None).unwrap().affected, 2);
+        let r = sqlite(&c, "SELECT * FROM t", 0, &None).unwrap();
         assert_eq!(r.columns, ["id", "name"]);
         assert_eq!(r.rows, [vec![Some("1".into()), Some("a".into())], vec![Some("2".into()), None]]);
         // A page from an offset still counts every row.
-        let page = sqlite(&c, "SELECT id FROM t ORDER BY id", 1).unwrap();
+        let page = sqlite(&c, "SELECT id FROM t ORDER BY id", 1, &None).unwrap();
         assert_eq!((page.rows, page.total, page.truncated), (vec![vec![Some("2".into())]], 2, false));
 
         // A batch applies all its statements, or none when one fails.
-        let batch = |statements: &[&str]| tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, statements.iter().map(|s| s.to_string()).collect(), None));
+        let batch = |statements: &[&str]| tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() }, statements.iter().map(|s| s.to_string()).collect(), None));
         assert_eq!(batch(&["UPDATE t SET name = 'b' WHERE id = 1", "DELETE FROM t WHERE id = 2"]).unwrap(), [1, 1]);
         assert!(batch(&["INSERT INTO t VALUES (3, 'c')", "INSERT INTO missing VALUES (1)"]).is_err());
-        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0).unwrap().rows, [vec![Some("1".into())]]);
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0, &None).unwrap().rows, [vec![Some("1".into())]]);
         // A grid edit that matches no row undoes the others.
-        let exact = tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new() }, vec!["DELETE FROM t WHERE id = 1".into(), "DELETE FROM t WHERE id = 99".into()], Some(true)));
+        let exact = tauri::async_runtime::block_on(db_batch(Connection { database: c.database.clone(), driver: "sqlite".into(), host: String::new(), port: 0, username: String::new(), password: String::new(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() }, vec!["DELETE FROM t WHERE id = 1".into(), "DELETE FROM t WHERE id = 99".into()], Some(true)));
         assert!(exact.unwrap_err().contains("change 2 of 2"));
-        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0).unwrap().rows, [vec![Some("1".into())]]);
+        assert_eq!(sqlite(&c, "SELECT count(*) FROM t", 0, &None).unwrap().rows, [vec![Some("1".into())]]);
+    }
+
+    #[test]
+    fn sqlite_limits_cancel_and_read_only() {
+        let path = std::env::temp_dir().join("php-editor-db-cancel.sqlite");
+        let _ = std::fs::remove_file(&path);
+        rusqlite::Connection::open(&path).unwrap();
+        let c = Connection { driver: "sqlite".into(), database: path.to_string_lossy().into(), page_size: 2, ..Default::default() };
+        sqlite(&c, "CREATE TABLE t (id INTEGER, data BLOB)", 0, &None).unwrap();
+        sqlite(&c, "INSERT INTO t VALUES (1, x'00ff'), (2, NULL), (3, NULL)", 0, &None).unwrap();
+        // The page size comes from the connection, 0 for every row, and a blob reads as hex in a binary column.
+        let r = sqlite(&c, "SELECT * FROM t ORDER BY id", 0, &None).unwrap();
+        assert_eq!((r.rows.len(), r.truncated, r.total, r.binary.as_slice()), (2, true, 3, [1].as_slice()));
+        assert_eq!(r.rows[0][1].as_deref(), Some("\\x00ff"));
+        assert_eq!(sqlite(&Connection { page_size: 0, ..c.clone() }, "SELECT * FROM t", 0, &None).unwrap().rows.len(), 3);
+
+        // Read-only refuses a write, in a query and in a batch.
+        let read_only = Connection { read_only: true, ..c.clone() };
+        assert!(sqlite(&read_only, "DELETE FROM t", 0, &None).err().unwrap().contains("readonly"));
+        assert!(tauri::async_runtime::block_on(db_batch(read_only, vec!["DELETE FROM t".into()], None)).is_err());
+
+        // A query that would run for minutes stops when it's canceled, with db_cancel's own error.
+        let slow = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+        let id = "test-cancel".to_string();
+        let started = std::time::Instant::now();
+        let query = std::thread::spawn({
+            let (c, id) = (c.clone(), id.clone());
+            move || tauri::async_runtime::block_on(db_query(c, slow.into(), None, Some(id)))
+        });
+        while !matches!(RUNNING.lock().unwrap().get(&id), Some(Some(_))) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(tauri::async_runtime::block_on(db_cancel(id.clone())).unwrap());
+        assert_eq!(query.join().unwrap().err().as_deref(), Some(CANCELED));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // Canceling a query that has finished does nothing.
+        assert!(!tauri::async_runtime::block_on(db_cancel(id)).unwrap());
     }
 
     /// Against throwaway servers: `docker run -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=laravel -p 33066:3306 mysql:8`
@@ -650,8 +845,8 @@ mod tests {
     #[ignore]
     fn queries_servers() {
         for (driver, port, user) in [("mysql", 33066, "root"), ("pgsql", 54329, "postgres")] {
-            let c = Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
-            let run = |sql: &str| if driver == "mysql" { mysql(&c, sql, 0) } else { pgsql(&c, sql, 0) }.unwrap();
+            let c = Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() };
+            let run = |sql: &str| if driver == "mysql" { mysql(&c, sql, 0, &None) } else { pgsql(&c, sql, 0, &None) }.unwrap();
             run("DROP TABLE IF EXISTS t");
             run("CREATE TABLE t (id INTEGER, name TEXT, at TIMESTAMP NULL)");
             assert_eq!(run("INSERT INTO t VALUES (1, 'a', '2026-01-02 03:04:05'), (2, NULL, NULL)").affected, 2, "{driver}");
@@ -660,15 +855,47 @@ mod tests {
             assert_eq!(r.rows, [vec![Some("1".into()), Some("a".into()), Some("2026-01-02 03:04:05".into())], vec![Some("2".into()), None, None]], "{driver}");
 
             let batch = |c: Connection, statements: &[&str]| tauri::async_runtime::block_on(db_batch(c, statements.iter().map(|s| s.to_string()).collect(), None));
-            let again = || Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
+            let again = || Connection { driver: driver.into(), host: "127.0.0.1".into(), port, database: "laravel".into(), username: user.into(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() };
             assert_eq!(batch(again(), &["UPDATE t SET name = 'b' WHERE id = 1", "DELETE FROM t WHERE id = 2"]).unwrap(), [1, 1], "{driver}");
             assert!(batch(again(), &["DELETE FROM t", "INSERT INTO missing VALUES (1)"]).is_err(), "{driver}");
             assert_eq!(run("SELECT count(*) FROM t").rows, [vec![Some("1".into())]], "{driver}");
         }
         // MySQL 8 serves TLS with a certificate it made itself, which `require` accepts and `verify-full` refuses.
-        let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new() }, "SHOW STATUS LIKE 'Ssl_cipher'", 0);
+        let tls = |mode: &str| mysql(&Connection { driver: "mysql".into(), host: "127.0.0.1".into(), port: 33066, database: "laravel".into(), username: "root".into(), password: "secret".into(), ssl_mode: mode.into(), ssl_ca: String::new(), ..Default::default() }, "SHOW STATUS LIKE 'Ssl_cipher'", 0, &None);
         assert_ne!(tls("require").unwrap().rows[0][1], Some(String::new()));
         assert!(tls("verify-full").is_err());
+    }
+
+    /// Against the throwaway servers above, or others given as `TUSK_PGSQL=host:port:user:password` and
+    /// `TUSK_MYSQL=…`. It changes nothing: it sleeps, and tries a write that read-only refuses.
+    #[test]
+    #[ignore]
+    fn cancels_servers() {
+        for (driver, variable, fallback, database, sleep) in [
+            ("pgsql", "TUSK_PGSQL", "127.0.0.1:54329:postgres:secret", "postgres", "SELECT pg_sleep(30)"),
+            ("mysql", "TUSK_MYSQL", "127.0.0.1:33066:root:secret", "laravel", "SELECT SLEEP(30)"),
+        ] {
+            let spec = std::env::var(variable).unwrap_or(fallback.into());
+            let [host, port, user, password] = spec.splitn(4, ':').collect::<Vec<_>>()[..] else { panic!("{variable} is host:port:user:password") };
+            let c = Connection { driver: driver.into(), host: host.into(), port: port.parse().unwrap(), database: database.into(), username: user.into(), password: password.into(), ..Default::default() };
+            let read_only = Connection { read_only: true, ..c.clone() };
+            let write = "CREATE TABLE tusk_read_only_test (id int)";
+            let refused = if driver == "mysql" { mysql(&read_only, write, 0, &None) } else { pgsql(&read_only, write, 0, &None) };
+            assert!(refused.err().unwrap().to_lowercase().contains("read"), "{driver}");
+            let id = format!("test-cancel-{driver}");
+            let started = std::time::Instant::now();
+            let query = std::thread::spawn({
+                let (c, id) = (c.clone(), id.clone());
+                move || tauri::async_runtime::block_on(db_query(c, sleep.into(), None, Some(id)))
+            });
+            while !matches!(RUNNING.lock().unwrap().get(&id), Some(Some(_))) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(tauri::async_runtime::block_on(db_cancel(id)).unwrap(), "{driver}");
+            assert_eq!(query.join().unwrap().err().as_deref(), Some(CANCELED), "{driver}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(5), "{driver}");
+        }
     }
 
     #[test]
@@ -683,7 +910,7 @@ mod tests {
     #[test]
     #[ignore]
     fn queries_redis() {
-        let c = Connection { driver: "redis".into(), host: "127.0.0.1".into(), port: 63799, database: "2".into(), username: String::new(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new() };
+        let c = Connection { driver: "redis".into(), host: "127.0.0.1".into(), port: 63799, database: "2".into(), username: String::new(), password: "secret".into(), ssl_mode: String::new(), ssl_ca: String::new(), ..Default::default() };
         let run = |command: &str| redis(&c, command, 0).unwrap();
         run("FLUSHDB");
         assert_eq!(run(r#"SET "a key" "one two""#).rows, [vec![Some("OK".into())]]);

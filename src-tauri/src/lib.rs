@@ -201,6 +201,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::db_query,
             db::db_batch,
+            db::db_cancel,
             db::redis_call,
             db::db_tunnel,
             db::db_password,

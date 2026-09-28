@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connectionFromConfig, connectionFromEnv, connectionFromUrl, connectionUrl, deleteStatement, insertStatement, literal, parseEnv, quoteIdentifier, redisFromEnv, repeatsEnv, statementAt, updateStatement } from "./dbconfig.ts";
+import { destinationOf, parseDestination, connectionFromConfig, connectionFromEnv, connectionFromUrl, connectionUrl, deleteStatement, insertStatement, insertTemplate, literal, parseEnv, quoteIdentifier, readsOnly, redisFromEnv, repeatsEnv, selectTemplate, splitStatements, statementAt, updateStatement, versionText } from "./dbconfig.ts";
 
 test("parses .env values", () => {
   const env = parseEnv(`# comment\nDB_CONNECTION=mysql\nDB_PASSWORD="se#cret"\nDB_HOST=db # the host\n# DB_PORT=1\nexport DB_USERNAME='sail'\n`);
@@ -37,9 +37,42 @@ test("finds the statement under the caret", () => {
   assert.equal(statementAt("select 1;\n-- note\n", 18), "select 1");
 });
 
+test("splits a script into statements outside strings, comments, and dollar quotes", () => {
+  const texts = (sql: string, driver = "") => splitStatements(sql, driver).map((s) => s.text);
+  assert.deepEqual(texts("select ';' ; select \"a;b\"; -- c;\n/* d; */ select 3;;"), ["select ';'", 'select "a;b"', "-- c;\n/* d; */ select 3"]);
+  assert.deepEqual(texts("create function f() returns int as $$ select 1; $$ language sql; select 2"), ["create function f() returns int as $$ select 1; $$ language sql", "select 2"]);
+  assert.deepEqual(texts("select $tag$ a; $tag$; select 'it''s;'"), ["select $tag$ a; $tag$", "select 'it''s;'"]);
+  // MySQL takes a backslash before a quote; PostgreSQL's standard strings don't.
+  assert.deepEqual(texts("select 'a\\'; b'; select 2", "mysql"), ["select 'a\\'; b'", "select 2"]);
+  assert.deepEqual(texts("select 'C:\\'; select 2", "pgsql"), ["select 'C:\\'", "select 2"]);
+  assert.deepEqual(texts("  -- only a comment\n ; "), []);
+  const [a, b] = splitStatements("select 1;\n  select 2");
+  assert.deepEqual([a.start, a.end, b.start, b.end], [0, 8, 12, 20]);
+  assert.equal(statementAt("select ';'; select 2", 3), "select ';'");
+});
+
+test("tells statements that only read", () => {
+  for (const sql of ["SELECT 1", "  select * from t", "(select 1) union (select 2)", "with a as (select 1) select * from a", "show tables", "EXPLAIN select 1", "pragma table_info(t)", "-- note\nselect 1"]) assert.ok(readsOnly(sql), sql);
+  for (const sql of ["update t set a = 1", "delete from t", "with a as (select 1) delete from t", "pragma foreign_keys = on", "drop table t", "set x = 1", "insert into t values (1)"]) assert.ok(!readsOnly(sql), sql);
+});
+
+test("reads the server's version", () => {
+  assert.equal(versionText("mysql", "MySQL 8.4.0"), "MySQL 8.4.0");
+  assert.equal(versionText("redis", "# Server\r\nredis_version:7.2.4\r\nredis_mode:standalone"), "Redis 7.2.4");
+});
+
+test("generates SELECT and INSERT for a table", () => {
+  assert.equal(selectTemplate("mysql", "users", ["id", "name"]), "SELECT `id`, `name`\nFROM `users`");
+  assert.equal(insertTemplate("pgsql", "users", ["id", "name"]), 'INSERT INTO "users" ("id", "name")\nVALUES (?, ?)');
+});
+
 test("quotes identifiers per driver", () => {
   assert.equal(quoteIdentifier("mysql", "a`b"), "`a``b`");
   assert.equal(quoteIdentifier("sqlite", 'a"b'), '"a""b"');
+});
+
+test("writes raw SQL values, such as DEFAULT, as they are", () => {
+  assert.equal(updateStatement("pgsql", "t", { a: { sql: "DEFAULT" }, b: null }, { id: "1" }), `UPDATE "t" SET "a" = DEFAULT, "b" = NULL WHERE "id" = '1'`);
 });
 
 test("builds cell updates", () => {
@@ -107,4 +140,13 @@ test("reads config/database.php's connections", () => {
   assert.equal(stock({ driver: "pgsql", host: "127.0.0.1", port: "5432", database: "laravel", username: "root" }), true);
   assert.equal(stock({ driver: "sqlite", database: "/app/database/database.sqlite" }), true);
   assert.equal(stock({ driver: "mysql", host: "replica", port: "3306", database: "laravel", username: "root" }), false);
+});
+
+test("reads and writes SSH destinations", () => {
+  assert.deepEqual(parseDestination("ssh://forge@203.0.113.5:2222"), { user: "forge", host: "203.0.113.5", port: "2222" });
+  assert.deepEqual(parseDestination("deploy@example.com"), { user: "deploy", host: "example.com", port: "" });
+  assert.deepEqual(parseDestination("staging"), { user: "", host: "staging", port: "" });
+  assert.equal(destinationOf("forge", "203.0.113.5", "22"), "forge@203.0.113.5");
+  assert.equal(destinationOf("forge", "203.0.113.5", "2222"), "ssh://forge@203.0.113.5:2222");
+  assert.equal(destinationOf("", "", "22"), "");
 });

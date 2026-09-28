@@ -78,7 +78,7 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; backg
 /* Like a native app, the interface's text can't be selected (WebKit reads only the prefixed property). Text you'd
    copy can: fields, comments and messages, test failures, database cells, and hovers. The editor and the terminal
    handle their own selection. */
-input, textarea, select, [contenteditable], .tests-detail, .db-grid td, .monaco-hover { -webkit-user-select: text; user-select: text; }
+input, textarea, select, [contenteditable], .tests-detail, .db-error, .monaco-hover { -webkit-user-select: text; user-select: text; }
 /* In WebKit, Monaco makes the whole editor selectable, so a right-click on the gutter would select the line numbers. */
 .monaco-editor .margin { -webkit-user-select: none; user-select: none; }
 [hidden] { display: none !important; }
@@ -800,6 +800,8 @@ button.link:hover { text-decoration: underline; }
 #db-connection .codicon { flex-shrink: 0; font-size: 14px; }
 #db-connection:hover { color: var(--text); }
 #db-tables, #db-tables ul { list-style: none; margin: 0; padding: 0; }
+/* The tree scrolls on its own, below the connection and search, so paging keys move by what shows. */
+#db-tables { flex: 1 1 0; min-height: 0; overflow: auto; }
 #db-tables > li.muted { padding: 4px 12px; }
 #db-tables .row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 8px 0 4px; white-space: nowrap; }
 #db-tables .row:hover { background: var(--hover); }
@@ -811,35 +813,110 @@ button.link:hover { text-decoration: underline; }
 #db-tables .type { color: var(--muted); font-size: 12px; margin-left: auto; padding-left: 8px; }
 
 .db-results { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
-.db-summary { padding: 2px 10px 6px; flex-shrink: 0; }
+.db-summary { padding: 2px 10px 6px; flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; white-space: pre; }
+.db-summary > .codicon-loading { margin-right: 4px; }
 .db-error { color: var(--red); white-space: pre-wrap; font-family: var(--mono); }
-.db-grid { flex: 1; min-height: 0; overflow: auto; }
-.db-grid table { border-collapse: collapse; font-family: var(--mono); }
-.db-grid th, .db-grid td { padding: 3px 10px; border: 1px solid var(--border-subtle); text-align: left; white-space: nowrap; max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
-.db-grid th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
-.db-grid td.index { color: var(--faint); text-align: right; }
-.db-grid td.null { color: var(--faint); font-style: italic; }
-.db-grid tr:hover td { background: var(--hover); }
-.db-grid td.editing { padding: 0; }
-.db-grid td.index { cursor: pointer; }
-.db-grid tr.selected td, .db-grid tr.selected:hover td { background: var(--selected); }
-.db-grid tr.new-row td.index { color: var(--accent); }
-/* Pending changes, until Submit: edited cells, added rows, and rows to delete. */
-.db-grid td.changed { background: color-mix(in srgb, var(--yellow) 18%, transparent); }
-.db-grid tr.added td { background: color-mix(in srgb, var(--green) 14%, transparent); }
-.db-grid tr.deleted td { background: color-mix(in srgb, var(--red) 14%, transparent); text-decoration: line-through; opacity: 0.7; }
+.db-error-block { display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.db-error-actions { display: flex; gap: 6px; }
+.db-error-actions .db-action { margin-left: 0; }
 .db-action:disabled { opacity: 0.5; }
 .db-action { margin-left: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; font-size: 12px; }
 .db-action .codicon { font-size: 13px; }
-.db-grid td.editing input { width: 100%; min-width: 120px; padding: 2px 9px; border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 0 0 1px var(--accent); }
 .db-label { color: var(--text); font-family: var(--mono); max-width: 50%; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .db-summary .db-error { margin-left: 8px; }
-.db-grid td.db-error { color: var(--red); }
+/* Statements run together, a tab each. */
+.db-result-tabs { display: flex; gap: 2px; padding: 0 10px 6px; flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
+.db-result-tab { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: var(--radius); font: 11.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.db-result-tab:hover { background: var(--hover); }
+.db-result-tab.active { background: var(--selected); color: var(--text); }
+.db-tab-state.codicon-check { color: var(--green); }
+.db-tab-state.codicon-error { color: var(--red); }
+.db-result-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.db-filter { display: flex; gap: 8px; padding: 0 10px 6px; flex-shrink: 0; }
+.db-filter label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; font: 600 11px var(--mono); color: var(--muted); }
+.db-filter input { flex: 1; min-width: 0; font: 12px var(--mono); padding: 2px 6px; }
+/* The grid: rows drawn as they scroll into view, a sticky header and row numbers, and a value viewer beside it. */
+.db-grid-wrap { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border-subtle); }
+.db-grid { flex: 1; min-width: 0; overflow: auto; font-family: var(--mono); outline: none; -webkit-user-select: none; user-select: none; }
+.db-row { display: grid; grid-template-columns: var(--cols); width: max-content; min-width: 100%; height: 22px; }
+.db-row > div { padding: 0 8px; line-height: 21px; border-right: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bg); }
+.db-head { position: sticky; top: 0; z-index: 2; }
+.db-head > div { background: var(--panel); font-weight: 600; }
+.db-th { position: relative; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.db-th:hover { color: var(--accent); }
+.db-col-name { overflow: hidden; text-overflow: ellipsis; }
+.db-sort { font-size: 12px; flex-shrink: 0; }
+.db-col-resize { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
+.db-col-resize:hover { background: var(--accent); opacity: 0.5; }
+.db-body { position: relative; }
+.db-body .db-row { position: absolute; left: 0; }
+.db-index { position: sticky; left: 0; z-index: 1; text-align: right; color: var(--faint); cursor: pointer; background: var(--panel) !important; }
+.db-head .db-index { z-index: 3; }
+.db-body .db-row:hover > div:not(.sel):not(.db-index) { background: var(--hover); }
+.db-row > .null, .db-row > .placeholder { color: var(--faint); font-style: italic; }
+.db-row > .raw { color: var(--purple); font-style: italic; }
+.db-row > .sel, .db-row > .db-index.sel { background: color-mix(in srgb, var(--accent) 18%, var(--bg)); }
+.db-row > .db-index.sel { color: var(--text); }
+.db-row > .active { box-shadow: inset 0 0 0 1px var(--border); }
+.db-grid:focus .db-row > .active { box-shadow: inset 0 0 0 2px var(--accent); }
+.db-row > .editing { padding: 0; }
+.db-cell-input { width: 100%; height: 100%; padding: 0 7px; border: 0; border-radius: 0; font: inherit; box-shadow: inset 0 0 0 2px var(--accent); }
+.db-empty { padding: 6px 12px; }
+/* Pending changes, until Submit: edited cells, added rows, and rows to delete. */
+.db-row > .changed { background: color-mix(in srgb, var(--yellow) 22%, var(--bg)); }
+.db-row.added > div:not(.db-index) { background: color-mix(in srgb, var(--green) 16%, var(--bg)); }
+.db-row.added > .db-index { color: var(--green); }
+.db-row.deleted > div:not(.db-index) { background: color-mix(in srgb, var(--red) 14%, var(--bg)); text-decoration: line-through; color: var(--muted); }
+.db-viewer { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.db-viewer-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--border-subtle); }
+.db-viewer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11.5px var(--mono); }
+.db-viewer-head select { font-size: 11.5px; padding: 1px 4px; }
+.db-viewer-text { flex: 1; min-height: 0; resize: none; border: 0; border-radius: 0; padding: 8px 10px; font: 12px/1.5 var(--mono); background: var(--bg); white-space: pre-wrap; }
+.db-viewer-text[readonly] { color: var(--muted); }
+.db-viewer-note { padding: 4px 10px; font-size: 11px; border-top: 1px solid var(--border-subtle); }
+
+/* The tables tree: loading and error rows, search matches, indexes, and foreign keys. */
+#db-tables .db-note { padding: 4px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+#db-tables .match { color: var(--accent); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+#db-tables .match:empty { display: none; }
+#db-tables .codicon-key { color: var(--yellow); }
+#db-tables .codicon-references, #db-tables .codicon-list-tree { color: var(--muted); }
+/* Data Sources: the connections on the left, the selected one's settings on the right. */
+#data-sources { width: min(900px, calc(100vw - 32px)); }
+.ds-body { display: flex; gap: 16px; min-height: 0; flex: 1; }
+.ds-side { display: flex; flex-direction: column; width: 210px; flex-shrink: 0; }
+.ds-list { list-style: none; margin: 0; padding: 4px 0; flex: 1; min-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px 8px 0 0; background: var(--bg); }
+.ds-list li { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; cursor: pointer; font-size: 12.5px; }
+.ds-list li:hover { background: var(--hover); }
+.ds-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-origin { font-size: 11px; color: var(--faint); }
+.ds-dirty { color: var(--accent); font-weight: 700; }
+.ds-list-actions { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; }
+.ds-form { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; overflow: auto; max-height: 64vh; padding-right: 4px; }
+.ds-form label.field { min-width: 0; }
+.ds-row { display: flex; gap: 10px; }
+.ds-row > * { flex: 1; min-width: 0; }
+.ds-row > label.field:nth-child(2):has(input[inputmode="numeric"]) { flex: 0 0 90px; }
+.field-with-button { display: flex; align-items: flex-end; gap: 6px; }
+.field-with-button > label.field { flex: 1; }
+.ds-browse { padding: 4px 10px; font-size: 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+.ds-note { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 8px; background: var(--chrome); }
+.ds-note button, .ds-test-row button { padding: 3px 10px; font-size: 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+.ds-ssh { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.ds-ssh legend { font-size: 12px; padding: 0 4px; }
+.ds-ssh legend label, .ds-check, .ds-share { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.ds-share { color: var(--muted); }
+.ds-test-row { display: flex; align-items: center; gap: 10px; }
+.ds-test-row button { display: inline-flex; align-items: center; gap: 5px; }
+.ds-test { font-size: 12px; min-width: 0; }
+.ds-test.ok { color: var(--green); }
+.ds-test.failed { color: var(--red); white-space: pre-wrap; }
+.ds-problem { font-size: 12px; color: var(--red); }
+.ds-problem:empty { display: none; }
+#data-sources input[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--red); }
 
 /* Redis: the key tree, and a key's header and value in the panel. */
 #db-tables:focus { outline: none; }
-#db-tables.redis-keys:focus .row.selected { box-shadow: inset 0 0 0 1px var(--accent); }
-#db-tables .row.selected, #db-tables .row.selected:hover { background: var(--selected); }
 #db-tables .redis-folder .codicon-folder, #db-tables .redis-folder .codicon-folder-opened { color: var(--muted); }
 #db-tables .redis-note { padding: 6px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 #db-tables .redis-note .db-action { margin-left: 0; }

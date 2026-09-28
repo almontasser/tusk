@@ -150,13 +150,14 @@
           <header class="view-header">
             <span>Database</span>
             <div class="view-actions">
+              <button class="icon-button" id="db-data-sources" title="Data Sources…"><span class="codicon codicon-settings-gear"></span></button>
               <button class="icon-button" id="db-console" title="Query Console"><span class="codicon codicon-terminal"></span></button>
               <button class="icon-button" id="db-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
             </div>
           </header>
           <p id="db-connection" class="db-connection muted" title="Click to switch connections"><span id="db-connection-name"></span><span class="codicon codicon-chevron-down"></span></p>
           <div class="pr-toolbar" id="db-filter-bar" hidden>
-            <input id="db-filter" placeholder="Filter tables" aria-label="Filter tables" spellcheck="false" />
+            <input id="db-filter" placeholder="Search tables and columns" aria-label="Search tables and columns" spellcheck="false" />
           </div>
           <ul id="db-tables"></ul>
         </section>

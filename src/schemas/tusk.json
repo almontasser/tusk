@@ -78,8 +78,26 @@
     },
     "databaseSsh": {
       "type": "object",
-      "description": "The SSH destination each database connection goes through, by connection name. The empty name is .env's connection.",
-      "additionalProperties": { "type": "string" }
+      "description": "The SSH tunnel each database connection goes through, by connection name. The empty name is .env's connection.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "description": "An SSH destination, such as forge@203.0.113.5, ssh://user@host:2222, or a host from ~/.ssh/config." },
+          {
+            "type": "object",
+            "properties": {
+              "destination": { "type": "string", "description": "An SSH destination, such as forge@203.0.113.5." },
+              "identityFile": { "type": "string", "description": "The private key to use, such as ~/.ssh/staging. Without it, ssh uses your agent and ~/.ssh/config." }
+            },
+            "required": ["destination"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "databaseReadOnly": {
+      "type": "array",
+      "description": "Database connections that refuse changes, by connection name. The empty name is .env's connection.",
+      "items": { "type": "string" }
     }
   }
 }

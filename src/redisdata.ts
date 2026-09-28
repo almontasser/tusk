@@ -217,7 +217,7 @@ const SCORE = /^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$|^[+-]?inf$/i;
  * page's first row, for a list. Throws for input Redis would refuse, such as a score that isn't a number.
  * A list element is deleted by setting it to a unique marker and removing the marker, as Redis has no delete by index.
  */
-export function editCommands(type: string, key: string, values: Cell[][], changes: Changes, first = 0, marker = `__tusk_deleted_${Date.now()}__`): string[][] {
+export function editCommands(type: string, key: string, values: Cell[][], changes: Changes<Cell>, first = 0, marker = `__tusk_deleted_${Date.now()}__`): string[][] {
   const out: string[][] = [];
   const s = (v: Cell | undefined) => v ?? "";
   const value = (r: number, c: number) => (changes.edits.get(r)?.has(c) ? changes.edits.get(r)!.get(c)! : values[r][c]);

@@ -835,7 +835,7 @@ instead of writing to the status bar or `toast()` directly:
 status(text, source = "app", kind?: "error" | "info")
 showError(message, error?, action?: { label, run })
 errorText(error): string
-withProgress<T>(label, task: (signal: AbortSignal) => Promise<T>, { cancellable?, error? }): Promise<T | undefined>
+withProgress<T>(label, task: (signal: AbortSignal, progress: (label) => void) => Promise<T>, { cancellable?, error? }): Promise<T | undefined>
 installErrorHandlers()
 ```
 
@@ -851,7 +851,8 @@ installErrorHandlers()
 - `withProgress` runs a task under a spinner and reports its failure with
   `showError`. With `cancellable: true`, the status bar shows **Cancel**, which
   aborts the signal the task gets; the task checks `signal.throwIfAborted()`
-  between steps or passes the signal on. A canceled task shows "Canceled", not
+  between steps or passes the signal on, and calls `progress` with a new
+  label, such as "Deleted 500 of 2,000 keys…", to show how far it got. A canceled task shows "Canceled", not
   an error. It resolves to `undefined` when the task failed or was canceled, so
   callers that need to stop check for that. Tauri commands can't be aborted,
   so a task that waits on a slow command stops at its next step.
@@ -899,9 +900,9 @@ nav.select(key, { scroll? }); nav.selected(); nav.selectedRow(); nav.refresh();
 
 It replaced the Problems panel's handler and the Profiler table's. `fileGroup`
 in `src/search.ts` marks its file and item rows as a tree, so Search, TODO,
-and Coverage's file list use it too. The Redis key tree still has its own
-handler: `src/redis.ts` belongs to the database work in progress, and moving it
-is a small follow-up.
+and Coverage's file list use it too, and so do the Database tool's tree, whose
+tables, Redis folders, and keys are treeitems in one `listNav`, and the Data
+Sources list.
 
 ### Language server client
 
@@ -2847,7 +2848,8 @@ Who uses which key:
 | `indexExclude` | `lsp.ts` (`exclusionsFor`, `saveExclusions`); a change on disk restarts the servers | Local; the dialog's checkbox shares it |
 | `breakpoints`, `debugWatches`, `debugExceptions`, `debugPathMappings` | `debug.ts`; breakpoints are saved with paths relative to the project | Local |
 | `dockerService` | `sail.ts`, through `setServiceChoice` from `main.ts`, so `sail.ts` loads in tests without the app's modules | Local |
-| `databaseConnections`, `databaseSsh`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; the selection never shares |
+| `databaseConnections`, `databaseSsh`, `databaseReadOnly`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; Data Sources' checkbox shares the first three; the selection never shares |
+| `databaseEnvOverride`, `databaseHistory` | `database.ts`: a URL that replaces `.env`'s connection on this Mac, and the last 100 statements run | Local only |
 | `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
 
 ## Sessions
@@ -3301,14 +3303,15 @@ profile parses in about 100 ms.
 
 `src-tauri/src/db.rs` has `db_query`, which runs one statement and returns
 column names, rows, and the number of changed rows, `db_batch`, which runs
-statements in one transaction, and `db_tunnel`, for SSH. Every value comes
+statements in one transaction, `db_cancel`, which stops a running query, and
+`db_tunnel`, for SSH. Every value comes
 back as text or null, which is all the grid needs, so no driver's type mapping
 leaks into the frontend:
 
 | Driver | Crate | How values become text |
 | --- | --- | --- |
-| SQLite | `rusqlite` with its bundled SQLite | Each `ValueRef` is formatted. Blobs show their size. |
-| MySQL, MariaDB | `mysql`, with `native-tls` | The text protocol (`query_iter`) returns every value as bytes. |
+| SQLite | `rusqlite` with its bundled SQLite | Each `ValueRef` is formatted. Blobs come back as `\x` and hex, as PostgreSQL shows `bytea`. |
+| MySQL, MariaDB | `mysql`, with `native-tls` | The text protocol (`query_iter`) returns every value as bytes; bytes that aren't UTF-8 come back as `\x` and hex. |
 | PostgreSQL | `postgres`, with `postgres-native-tls` | The simple query protocol returns every value as text. |
 | Redis | None: a RESP2 client in `db.rs`, with `native-tls` for `rediss://` | Bulk strings are read as UTF-8 text, and integers are formatted. |
 
@@ -3325,7 +3328,8 @@ TLS on with a CA file (`MYSQL_ATTR_SSL_CA`, the only TLS setting in Laravel's
 MySQL config) or with `DB_SSLMODE` set to `require` or stricter.
 
 `db_tunnel` runs the system's `ssh -N -L 127.0.0.1:<free port>:<host>:<port>
-<destination>` under the same watchdog as the language servers, so it ends with
+<destination>`, with `-i <key> -o IdentitiesOnly=yes` when the connection has
+a key file, under the same watchdog as the language servers, so it ends with
 the app, and waits up to 15 seconds for the local port to accept connections.
 `BatchMode=yes` makes a password prompt fail at once instead of hanging,
 `ExitOnForwardFailure=yes` makes a failed forward end ssh, whose error message
@@ -3333,14 +3337,14 @@ is returned, and `ServerAliveInterval` ends a tunnel whose connection died,
 such as after the Mac sleeps, so the next query opens a new one. Once the
 tunnel works, a thread keeps reading ssh's error output, which would otherwise
 fill its pipe and stop ssh. Tunnels are kept per destination and address, and reused while
-ssh runs. `database.ts` keeps the destination per project and connection in
-`localStorage` (`db:ssh:<root>` for `.env`'s, `db:ssh:<root>#<name>` for
-another) and connects to the tunnel's port instead of the connection's.
+ssh runs. `database.ts` keeps the tunnel per project and connection in
+`databaseSsh` (a destination, or one with an `identityFile`) and connects to
+the tunnel's port instead of the connection's.
 
 Besides `.env`'s connection, `database.ts` offers saved ones and
 `config/database.php`'s. Saved connections are a JSON list of names and URLs in
-`localStorage` (`db:connections:<root>`), with the selected name in
-`db:connection:<root>`. Passwords aren't in the URL: `db_password` and
+`databaseConnections`, with the selected name in `databaseConnection`.
+Passwords aren't in the URL: `db_password` and
 `db_set_password` in `db.rs` keep them in the login Keychain as generic
 passwords (service `Tusk database`, account `<root>#<name>`), through the
 `security-framework` crate that `native-tls` already builds. `connectionFromUrl`
@@ -3354,10 +3358,51 @@ which is what Laravel's stock `mysql`, `mariadb`, and `pgsql` entries are.
 Their passwords come from the booted config each time and are never stored.
 A selected connection that no longer exists falls back to `.env`'s.
 
+`src/datasources.ts` is the Data Sources dialog. It edits copies of the
+connections (drafts) and returns only what changed, which `applySources` in
+`database.ts` writes: URLs to `databaseConnections`, passwords to the
+Keychain, and tunnels and read-only choices to their keys. A rename moves the
+password, tunnel, and read-only choice to the new name, and the selection
+follows it. The URL field and the form are two views of one `Connection`:
+typing in a field rewrites the URL with `connectionUrl`, and a pasted URL fills
+the fields with `connectionFromUrl`. Passwords are read from the Keychain only
+when a connection needs one, such as for Test Connection, so opening the
+switcher or the dialog asks the Keychain nothing. `.env`'s connection is
+read-only in the form; **Override on This Mac** stores a URL in
+`databaseEnvOverride` (password in the Keychain under the empty name), and
+`envConnection` uses it instead of `.env`'s values. Test Connection opens the
+tunnel and runs `versionQuery`.
+
 Each query opens a new connection and runs on a blocking thread, so a slow
-server doesn't stall the app. Results come in pages of 1,000 rows. A table's
-page is `LIMIT 1001 OFFSET n` in its SQL (the extra row tells whether there's a
-next page), and its count is a `COUNT(*)` that fills in after the rows show.
+server doesn't stall the app. The connection the frontend sends carries the
+Database settings (`page_size`, `connect_timeout`, `read_timeout`) and
+`read_only`, so no command needs more arguments. Results come in pages of
+`page_size` rows (1,000 by default; 0 for every row, which Export uses). A
+binary value comes back as `\x` and hex, up to 64 KB, and its column is listed
+in `binary`, which the grid keeps read-only, since writing the text back would
+store text. A table's page is `LIMIT page+1 OFFSET n` in its SQL (the extra row
+tells whether there's a next page), and its count is a `COUNT(*)` with the same
+`WHERE` that fills in after the rows show.
+
+Read-only is enforced by the database, not only the frontend: SQLite opens
+the file with `SQLITE_OPEN_READ_ONLY`, MySQL runs `SET SESSION TRANSACTION READ
+ONLY` as it connects, PostgreSQL starts with
+`default_transaction_read_only=on`, and `db_batch` refuses. `readsOnly` in
+`dbconfig.ts` refuses a statement that isn't a `SELECT`, `WITH`, `SHOW`,
+`EXPLAIN`, or reading `PRAGMA` before it's sent, for a clearer message.
+
+`db_query` takes an `id`. It registers the query in `RUNNING` before it
+connects, and once connected stores how to stop it: SQLite's
+`InterruptHandle`, MySQL's connection ID, or PostgreSQL's `CancelToken`.
+`db_cancel(id)` takes the entry and interrupts SQLite, runs `KILL QUERY <id>`
+on a second MySQL connection, or sends PostgreSQL's cancel request (what
+`pg_cancel_backend` does). A query still connecting finds its entry gone and
+stops once it connects. `db_query` returns "Canceled." whenever its entry was
+taken, since MySQL's `SLEEP` returns early rather than failing. The query
+timeout setting is the frontend calling `db_cancel` on a timer, which leaves the
+connection usable where a socket read timeout would break it mid-result.
+Redis keeps its socket read timeout (`read_timeout`, the Redis command timeout
+setting) and has no cancel.
 For any other statement, `db_query` takes an `offset`, skips that many rows,
 and returns `total`, every row the statement returned: MySQL's driver drains
 the rest of a result anyway, and PostgreSQL's simple query protocol buffers it,
@@ -3401,7 +3446,16 @@ Two commands reach Redis:
 the first. A newer scan, such as after a filter change, bumps a generation
 number, and an older one drops its results. `keyTree` and `visibleRows` in
 `src/redisdata.ts` build the folder tree, which renders as a flat list with
-indentation, so the arrow keys move through it in order.
+indentation, so the arrow keys move through it in order. Rows are treeitems with
+`data-key` (`k:` and a key, or `f:` and a folder), `aria-level`, and
+`aria-expanded`, so the Database tool's `listNav` gives the tree its keys; only
+⌘⌫ has a handler of its own. A key whose name isn't UTF-8 comes back as bytes,
+can't be sent back in a command, and is counted in `scan.skipped`, which the
+tree's footer shows. Deleting a folder counts its keys with `SCAN`, asks, then
+sends `UNLINK`s in batches of 5,000 keys under `withProgress`, updating its
+label after each and checking the signal between them, so Cancel keeps what's
+deleted and forgets only those keys. `friendlyError` explains a `MOVED` reply:
+the server is a Cluster node and the key lives on the node the reply names.
 
 A key shows in the panel with `TYPE`, `PTTL`, and `MEMORY USAGE` in one call,
 then its value. A string or RedisJSON document opens in Monaco, and ⌘S saves
@@ -3436,13 +3490,35 @@ free of editor imports, so Node tests it.
 The query console is `console.sql` in the app's data folder, in a folder named
 after the project path, so it never shows up in the project's git status. It
 opens as a normal tab, so saving and session restore work unchanged. **Execute
-Query** is a Monaco action bound to ⌘⏎ when the editor's language is SQL.
+Query** is a Monaco action bound to ⌘⏎ when the editor's language is SQL, and
+**Execute All Statements** runs the file. `splitStatements` in `dbconfig.ts`
+splits a script at semicolons outside strings, quoted names, comments, and
+dollar quotes, with MySQL's backslash escapes; `statementAt` picks the one
+around the caret. `execute` runs statements one after another, each in its own
+tab, and stops at the first that fails or is canceled. `runQuery` shows a
+spinner with the elapsed time and **Cancel**, and records each statement in
+`databaseHistory` (the last 100, newest first), which **Query History** lists.
 SQL completion loads every table's columns in one query (`schemaQuery`) and
 keeps them until the connection reloads or a statement returns no rows, which
 may have changed the schema. An alias is found with a pattern (`posts p`,
 `posts as p`) anywhere in the file.
 
-Grid edits are pending until **Submit**, as in PhpStorm. `makeEditable` keeps
+`src/dbgrid.ts` is the grid. `dataGrid` takes the columns and rows and returns
+an element; it draws only the rows in view, plus 30 above and below, as
+absolutely positioned CSS grid rows of 22 pixels, so a page of 100,000 rows
+scrolls as fast as one of 100. Column widths are in `ch` from the values'
+lengths, since the font is monospaced, until you drag one to pixels. The grid
+keeps its own selection, a rectangle from an anchor to the active cell, with
+`aria-activedescendant` on the focused scroller. Sorting calls `onSort` for a
+table, which runs it again with `ORDER BY`, and otherwise sorts the rows in the
+grid (`sortOrder` in `dbgriddata.ts`: NULL first, numbers by value, text
+naturally). `formatRows` writes CSV, TSV, JSON, SQL `INSERT`, and Markdown for
+copying and export. The value viewer is a textarea beside the grid, behind a
+`splitter`; it shows JSON indented and binary values as `hexDump`.
+`confirmDiscard` asks before anything replaces a grid with pending changes:
+running a query, opening a table or a key, sorting, filtering, or paging.
+
+Grid edits are pending until **Submit**, as in PhpStorm. The grid keeps
 new values by row and column, rows to delete, and rows to add, and
 `statements()` turns them into SQL: one `DELETE` per deleted row first, so a
 row edited to take a deleted row's key doesn't collide with it, then one
@@ -3455,7 +3531,9 @@ changing a key column still finds the row, and a row's edits share one
 `UPDATE` for the same reason. Submit sends them to `db_batch` with
 `one_row_each`: a statement that changes no row or several rolls the whole
 batch back. Afterwards the grid's query runs again to show the result; Revert
-runs it again without submitting.
+drops them in the grid. **Set Default** writes `DEFAULT`; SQLite's `UPDATE` has
+no `DEFAULT`, so for SQLite the grid writes the column's default expression
+from `pragma_table_info`.
 `statementAt` finds the statement around the caret by splitting on semicolons,
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.
@@ -5058,3 +5136,25 @@ output are found with one regex over each line rather than per-tool parsers,
 since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
 `path(line)`, and a reference becomes a link only when the file exists, which
 keeps false matches, such as version numbers, from turning into links.
+
+### 2026-09-28: Queries cancel in the database, and the grid draws what shows
+
+Closing the results used to leave a query running on the server. Cancel now
+stops it where it runs: SQLite's interrupt, MySQL's `KILL QUERY` from a second
+connection, and PostgreSQL's cancel request, each registered by the query as
+it connects. The query timeout is the same cancel on a timer, rather than a
+socket timeout, because a timed-out socket leaves the server running the query
+and the connection unusable. The drivers still open a connection per query;
+keeping one would allow cancel without a second connection, but it would also
+need transaction state per console, which the editor doesn't have.
+
+The grid was a `<table>` of every row, with editing patched onto its cells.
+It's now one component that owns its rows, selection, and edits and draws only
+the rows in view, since a `<table>` of 10,000 rows took seconds to lay out and
+row heights had to be fixed for virtual scrolling anyway. Rows are CSS grid
+rows sharing one `grid-template-columns`, so resizing a column is one variable.
+
+Connections are edited in a dialog, as in PhpStorm's Data Sources, instead of a
+URL typed into the palette, because TLS, SSH keys, and read-only mode don't fit
+in a URL a team shares. The URL stays as a field kept in step with the form,
+since that's how Laravel's `DB_URL` and hosting providers give connections.
