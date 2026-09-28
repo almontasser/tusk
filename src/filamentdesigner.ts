@@ -644,6 +644,8 @@ export class Designer {
     this.el.replaceChildren(this.header(), this.tabs(), main, this.footer());
     const canvas = this.el.querySelector<HTMLElement>(".fd-canvas");
     if (canvas) canvas.scrollTop = this.scroll.get(this.tab) ?? 0;
+    // The selection stays in view as the keys move it.
+    this.el.querySelector(".fd-item.selected, .fd-th.selected, .fd-chip-item.selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   private errorView(message: string) {

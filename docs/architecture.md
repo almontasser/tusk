@@ -4214,6 +4214,39 @@ reads the editor's unsaved text, and the request needs no index.
 Anything else in a slot, such as a variable or a spread, is a code entry the
 designer shows, moves, and deletes, but never rewrites.
 
+### Keeping the code safe
+
+The designer never writes back less than the code held:
+
+- **Readable values only:** an editor edits a value only when it can read all of
+  it. `mapValue` in `src/phpcode.ts` reads options with plain or translated
+  (`__()`) labels, and other editors check the node's kind (`readable` in
+  `src/filamentinspector.ts`). Anything else shows as a code chip that opens
+  the code. A relationship's query closure, extra arguments, and root settings
+  written as code are kept the same way.
+- **Overridden settings:** a resource setting that a method decides, such as
+  `$navigationLabel` under `getNavigationLabel()`, shows as code, since a
+  property there would be ignored. So does a `getNavigationBadge()` the
+  designer didn't write.
+- **Asking first:** switching options written as code to a list, enum, or
+  relationship, and changing a component's type when the new type lacks some of
+  its settings, ask before replacing them.
+- **One change at a time:** each change waits for the previous one
+  (`settled`), and `applyNow` drops an edit whose text changed since it was
+  computed, such as by typing in the code editor. Edits computed from old
+  text would otherwise land in the wrong place.
+- **Syntax errors:** a file that doesn't parse can be read wrong, so the
+  designer shows it with a warning and doesn't change it until the errors are
+  fixed.
+- **Imports:** `droppedImports` removes, in the same edit, the imports a change
+  leaves unused, such as `RichEditor` after changing its field to a textarea.
+  Imports that were unused before stay.
+
+When the app can't boot, often because of a mistake in a file Filament loads,
+`introspect.php filament-app` reports the exception's message, file, and line,
+and lists the resource files it finds by reading the source. The tool window
+shows the error with a link to the line, and the files can still be opened.
+
 ### The project's components
 
 `introspect.php filament-catalog` reflects every concrete class with a static

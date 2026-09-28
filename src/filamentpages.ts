@@ -273,6 +273,22 @@ async function addPage(d: Designer, type: "view" | "create" | "edit" | "custom",
 
 type Setting = { name: string; label: string; help?: string; kind: "text" | "number" | "icon" | "switch" | "group" | "column" | "cluster"; placeholder?: string };
 
+/** The methods that override a setting's property; when the class has one, the property does nothing. */
+const GETTERS: Record<string, string[]> = {
+  navigationLabel: ["getNavigationLabel"],
+  navigationIcon: ["getNavigationIcon"],
+  activeNavigationIcon: ["getActiveNavigationIcon"],
+  navigationGroup: ["getNavigationGroup"],
+  navigationSort: ["getNavigationSort"],
+  navigationParentItem: ["getNavigationParentItem"],
+  shouldRegisterNavigation: ["shouldRegisterNavigation"],
+  modelLabel: ["getModelLabel", "getLabel"],
+  pluralModelLabel: ["getPluralModelLabel", "getPluralLabel"],
+  recordTitleAttribute: ["getRecordTitleAttribute"],
+  slug: ["getSlug"],
+  cluster: ["getCluster"],
+};
+
 const NAVIGATION: Setting[] = [
   { name: "navigationLabel", label: "Label", kind: "text" },
   { name: "navigationIcon", label: "Icon", kind: "icon" },
@@ -326,6 +342,15 @@ export function renderSettingsTab(d: Designer): HTMLElement {
     navigationGroup: info?.navigationGroup,
   };
   const row = (s: Setting) => {
+    const getter = (GETTERS[s.name] ?? []).map((g) => methodNamed(cls, g)).find(Boolean);
+    if (getter)
+      return h(
+        "div",
+        { class: "fd-row set", title: `${getter.name}() decides this, so a property would be ignored.` },
+        h("span", { class: "fd-row-label" }, s.label),
+        h("div", { class: "fd-row-editor" }, h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(getter, doc) }, icon("code"), h("span", {}, `Set in ${getter.name}()`))),
+        h("span", { class: "fd-row-spacer" }),
+      );
     const node = current(s.name);
     const set = !!propertyNamed(cls, s.name);
     const reset = () => void setProp(s.name, null, `Reset ${s.label.toLowerCase()}`);
@@ -384,7 +409,11 @@ export function renderSettingsTab(d: Designer): HTMLElement {
 
   // A count badge on the navigation item, and the attributes global search looks in.
   const badge = methodNamed(cls, "getNavigationBadge");
-  const badgeRow = h(
+  // Only the badge the designer writes can be switched off here; one of your own is code.
+  const ownBadge = !!badge && !/^\(string\)\s*static::getModel\(\)::count\(\)$/.test(badge.returns[0] ? doc.text.slice(badge.returns[0].span[0], badge.returns[0].span[1]).trim() : "");
+  const badgeRow = ownBadge
+    ? h("div", { class: "fd-row set" }, h("span", { class: "fd-row-label" }, "Badge"), h("div", { class: "fd-row-editor" }, h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(badge!, doc) }, icon("code"), h("span", {}, "Set in getNavigationBadge()"))), h("span", { class: "fd-row-spacer" }))
+    : h(
     "div",
     { class: `fd-row${badge ? " set" : ""}` },
     h("span", { class: "fd-row-label" }, "Record count badge"),
