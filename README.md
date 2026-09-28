@@ -20,6 +20,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | 5. Git, blame, and pull requests | Done |
 | 6. Filament intelligence | Done |
 | 7. Tusk's own PHP language server (`tusk-lsp/`), replacing Phpactor, Laravel LSP, and the Filament server | Done |
+| 8. Visual designers: Filament resources, models, and new projects | Done |
 
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
@@ -48,6 +49,9 @@ file to change when you add it.
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
+| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. |
+| Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
+| New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
@@ -767,6 +771,144 @@ comments of the project's files, grouped by file; the words in strings and
 names don't count. Click one to open it. The list updates when
 files change, and the refresh button reloads it. Files that `.gitignore`
 excludes, such as `vendor`, aren't searched.
+
+## Filament designer
+
+The designer builds a Filament resource without writing code: its form, table,
+infolist, relation managers, pages, and settings. It works with Filament 4 and
+later. To open it, do one of the following:
+
+- Open the **Filament** tool window and click a resource. It lists each panel's
+  resources by navigation group.
+- Click **Open in Designer** above a resource's or relation manager's class, or
+  above a Filament 4 schema class such as `PostForm`.
+- Run **Filament: Open Resource in Designer…** from the palette.
+
+The designer edits the resource's code, and the code is all it keeps. Each
+change is a small edit that's saved at once, with local history, and comments,
+closures, and code it doesn't read stay as written. Code it can't show as a
+component shows as a **Code** block, which you can still move or delete.
+Changes you make in the code editor show in the designer as you type.
+
+### Forms, tables, and infolists
+
+The canvas draws the form, table, or infolist as Filament does: sections,
+grids with column spans, tabs, wizards, repeaters, and every field type.
+
+- **Add a component:** drag it from the palette on the left, or click it to add
+  it after the selected component. Fields, columns, and filters ask for a name,
+  and suggest the model's columns that aren't used yet.
+- **Add a model column:** drag it from the model's column list to get the
+  component that suits it, already set up. For example, a foreign key becomes a
+  searchable relationship select, and a boolean becomes a toggle.
+  **Add N** adds every column that's missing.
+- **Change a component:** select it and use the inspector on the right. The
+  settings people change most come first, then every other setting the class
+  has, grouped and searchable. Options come from a list, an enum, or a
+  relationship. **Visible when**, **Required when**, and **Disabled when** build
+  conditions on other fields, and mark those fields `live()`.
+- **Rearrange:** drag components, or use <kbd>⌥↑</kbd> and <kbd>⌥↓</kbd>.
+  Right-click a component to duplicate it, wrap it in a section or grid, or show
+  it in the code.
+- **Tables:** columns sit in the table's header, and filters, row actions, bulk
+  actions, and header actions sit in lanes below it. With nothing selected, the
+  inspector shows the table's own settings, such as the default sort.
+
+| Key | Action |
+| --- | --- |
+| <kbd>⌫</kbd> | Delete the selected component |
+| <kbd>⌘D</kbd> | Duplicate it |
+| <kbd>⌥↑</kbd> / <kbd>⌥↓</kbd> | Move it up or down |
+| Arrow keys | Select the previous, next, parent, or first child component |
+| <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> | Undo or redo the designer's last change |
+| <kbd>Esc</kbd> | Select the parent |
+
+The palette lists the components the project has: Filament's, plugins', and the
+project's own. Each setting's editor comes from its parameter types, so a new
+Filament version or a plugin needs no update to Tusk.
+
+### New resources
+
+**Filament: New Resource…**, the **+** in the Filament tool window, or
+**Filament resource** in the model designer opens a wizard:
+
+1. **Model:** pick one of the app's models, or design a new one.
+2. **Placement:** the panel, cluster, navigation group, icon, record names,
+   title attribute, and pages: separate pages or one page with modals, and a
+   View page.
+3. **Form:** which columns become fields, the field for each, and whether
+   they're required or full width. Tusk proposes them from each column's type,
+   cast, and name, so a foreign key is a relationship select.
+4. **Table:** the columns and whether each is searchable, sortable, or can be
+   hidden, the filters, the row and bulk actions, and the default sort.
+5. **Review:** a summary and the form's and table's code.
+
+Filament's generator (`make:filament-resource`) makes the files, so they follow
+the project's Filament version and published stubs. The wizard then fills in
+the form, table, infolist, and settings, and opens the designer.
+
+### Relation managers, pages, and settings
+
+- **Relations:** lists the resource's relation managers. **Add relation
+  manager** creates one for a relationship of the model, with attach or
+  associate actions, and registers it. Click one to design its form and table.
+- **Pages:** lists the resource's pages and their addresses, and adds View,
+  Create, Edit, or custom pages.
+- **Settings:** sets the navigation label, icon, group, and order, the record's
+  names and title attribute, the URL, a record count badge, and the attributes
+  global search looks in.
+
+## Model designer
+
+The model designer creates an Eloquent model or changes one and its table. To
+open it, click **Open in Model Designer** above a model's class, run
+**Laravel: New Model…** or **Laravel: Open Model in Designer…**, or click the
+model's name in the Filament designer.
+
+- **Columns:** each column's name, type, length or precision, whether it can be
+  null, default, index, whether it's fillable, and its cast, which is chosen
+  from the type unless you pick an enum. A foreign key names its table and what
+  happens when the other row is deleted. **Quick add** adds common columns, such
+  as a slug or a price. Drag rows to reorder them.
+- **Relationships:** belongs-to, has-one, has-many, many-to-many, and morph
+  relationships. A belongs-to relationship adds its foreign key column, and a
+  many-to-many relationship adds its pivot table. You can add the other side of
+  the relationship to the related model too.
+- **Preview:** the right side shows the migration, the model, and the factory as
+  they'll be written.
+
+Changes are staged until you click **Create model** or **Apply changes**. A new
+model gets its class, a migration, and optionally a factory that fakes each
+column, a seeder, a policy, and a Filament resource. For an existing model,
+Tusk writes a migration with only the changes, such as
+`add_description_to_posts_table`, with a `down()` that reverses them. It edits
+the model's fillable attributes, casts, soft deletes, and relationships in
+place, and keeps everything else. Dropping a column asks first. **Run the
+migration** runs `php artisan migrate` afterwards, in Sail when it's up.
+
+## New Laravel projects and elements
+
+**New Laravel Project…** on the welcome screen or in the palette creates a
+project with Laravel's own installer. Tusk keeps a copy of `laravel/installer`
+in its tools folder and installs it with its bundled Composer the first time,
+so nothing is installed globally. The dialog chooses:
+
+- The folder and name.
+- The starter kit: none, Livewire, React, Vue, Svelte, or a community kit by its
+  package name, with Laravel's authentication, WorkOS, or none, and teams.
+- The database, the test framework (Pest or PHPUnit), the front-end package
+  manager, a Git repository, and Laravel Boost.
+- An admin panel: Filament with its first panel and, on SQLite, a first user.
+
+It runs in a terminal tab, where you can follow it, and the project opens when
+it succeeds.
+
+**Laravel: New Element…** lists every `make:` command the project's Artisan
+has, Laravel's and packages' alike, such as Filament's, Livewire's, or an MCP
+server's. Choosing one opens a form built from the command's own arguments and
+options, with the command line it will run, and opens the files it makes. The
+model and resource generators open the model designer and the resource wizard
+instead; their plain forms are listed too.
 
 ## Bookmarks
 

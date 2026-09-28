@@ -4178,6 +4178,154 @@ one block where it appears whole (its last occurrence, which is usually in the
 file name), or else the letters of a fuzzy match. The folder part of a path is
 dimmed.
 
+## Filament designer
+
+The designer (`src/filamentdesigner.ts`) edits a resource through its code.
+There's no model of the resource besides the code: each change is a set of
+edits to the files, applied with `applyWorkspaceEdit` (saved, with local
+history), after which the designer reads the files again and redraws.
+
+### Reading code
+
+`tusk/phpOutline` in Tusk's server (`tusk-lsp/src/features/outline.rs`) parses a
+file's text with Mago and returns its classes: properties, constants, methods,
+and each method's `return` expressions as trees of nodes. Nodes are static calls,
+chains of calls, arrays, literals, class constants, closures, and the like, with
+names resolved to fully qualified classes and ranges in UTF-16 offsets, as
+JavaScript counts them. It takes the text rather than a file, so the designer
+reads the editor's unsaved text, and the request needs no index.
+
+- `src/phpcode.ts` holds the outline's types and the edits: insert, remove,
+  move, and replace array items; set and remove calls in a chain; set static
+  properties; add and remove members; and `Imports`, which names a class the way
+  the file can (its alias, a name under an imported namespace, or the short name
+  with a new `use` line sorted into the others). Edits follow the file's layout:
+  a chain written one call per line gets its new call on a line of its own, an
+  array keeps its trailing comma or lack of one, and indentation comes from the
+  lines around the edit.
+- `src/filamentschema.ts` reads a form, table, or infolist method: a chain of
+  calls on the method's parameter, or a call that hands the work to another
+  class, as Filament 4 writes `PostForm::configure($schema)`, which the designer
+  follows to that class's file. A component is a `Class::make()` call with its
+  chain; array arguments that hold components are its slots. A path of slot names
+  and indexes names each component, so the selection survives reading the code
+  again.
+
+Anything else in a slot, such as a variable or a spread, is a code entry the
+designer shows, moves, and deletes, but never rewrites.
+
+### The project's components
+
+`introspect.php filament-catalog` reflects every concrete class with a static
+`make()` in Filament's packages, in packages that require Filament (plugins),
+and under `app/Filament`, and sorts them by the Filament class they extend:
+fields, layout components, entries, columns, filters, actions, bulk actions, and
+action groups. For each class, it lists the public methods that return `static`,
+grouped by the class or trait that declares them, which the file and line
+ranges tell apart, since reflection reports a trait's methods as the using
+class's. It also lists the enums those methods take, with their cases, the
+static properties of `Resource`, and Heroicon's cases. On a Filament 4 app it
+takes about 0.7 seconds and lists about 150 classes and 1,350 methods.
+
+`src/filamentcatalog.ts` resolves a class's methods in PHP's order and picks
+each one's editor from its parameters: a switch for `bool $condition = true`, a
+number, text, a list of an enum's cases, an icon, a color, a list, a map, or
+code for closures. What it adds by hand is taste: palette groups and icons, the
+settings each kind of component shows first, and methods to hide.
+
+`introspect.php filament-app` lists the panels with their resources (model,
+labels, navigation, pages, relation managers) from the booted app, and
+`model <class>` describes a model's table, columns, indexes, foreign keys, and
+declarations. `src/filamentapp.ts` loads and caches them per project until the
+app's files change, and runs Artisan's generators, in Sail when it's up.
+
+### Suggested components
+
+`src/filamentgen.ts` chooses the component for a database column from its type,
+cast, name, and relationships: a searchable relationship select for a belongs-to
+foreign key, a select of an enum's cases for an enum cast, a date and time
+picker, a toggle, and so on. The same column gives a table column, a filter,
+and an infolist entry. It also writes the closures behind "visible when"
+conditions and reads back the ones it wrote.
+
+### The canvas and the inspector
+
+`src/filamentcanvas.ts` draws components as Filament does, in its shapes and
+the theme's colors: fields with their labels, required marks, affixes, and
+helper text; sections, grids, fieldsets, tabs, wizards, and repeaters with
+their column spans; and tables with sample rows made from the column names.
+Drag and drop uses the HTML drag events, with the drag's payload in a module
+variable because `dataTransfer` can't be read during `dragover`. A slot takes
+only what fits: tabs take tabs, table lanes take their kinds, and nothing drops
+into itself.
+
+`src/filamentinspector.ts` shows the selected component's settings, and
+`src/filamentpages.ts` the Relations, Pages, and Settings tabs and the root's
+settings. `src/filamentview.ts` is the tool window, the palette commands, and
+the **Open in Designer** code lens.
+
+### The New Resource wizard
+
+`src/filamentwizard.ts` runs `make:filament-resource` with the choices as
+options (`--panel`, `--cluster`, `--simple`, `--view`, `--soft-deletes`,
+`--record-title-attribute`, and `--embed-schemas` with `--embed-table` when you
+don't want separate classes), without `--generate`, since that needs the table
+in the database. It finds the resource's file from the command's output, then
+replaces the generator's empty arrays with the chosen components: each root is
+found as the designer finds it, following `PostForm::configure()` to its class.
+Settings go in with `setProperty`. The components come from `src/filamentgen.ts`
+with the wizard's changes: another field type keeps only the settings that type
+has, as `methodsOf` reports them.
+
+## Model designer
+
+`src/modeldesigner.ts` stages changes to a model and writes them on Apply,
+unlike the Filament designer, which saves each change: a migration is a unit
+that runs once, so it should hold the whole change.
+
+- **Reading:** `introspect.php model <class>` reports the table's columns (type,
+  full type, nullable, default), indexes, and foreign keys from the database's
+  schema builder, and the model's fillable, hidden, casts, relationships, and
+  traits. `columnFromDatabase` in `src/modelgen.ts` turns each column into the
+  designer's `ColumnSpec`, using the cast where the database is vague, as
+  SQLite is about booleans. Each column keeps its `original`.
+- **A new model:** `make:model` makes the class, and the factory, seeder, and
+  policy when asked, so their paths and namespaces follow the project. Tusk then
+  writes the model, the factory, the create migration, and a pivot migration for
+  each many-to-many relationship, a second apart so they run in order.
+- **An existing model:** `diffColumns` compares each column with its
+  `original` and yields adds, drops, renames, and changes; `alterMigration`
+  writes them with a `down()` in reverse order. The class is edited through the
+  outline, as the Filament designer edits resources: `$fillable` or Laravel
+  13's `#[Fillable]`, new entries in `casts()` or `$casts`, the `SoftDeletes`
+  trait, and new relationship methods, with their imports.
+- **Names:** `tableFor`, `plural`, and `singular` follow Laravel's pluralizer for
+  the common cases, so the designer's table name matches the one Eloquent uses.
+
+## New Laravel projects and elements
+
+`src/laravelnew.ts` uses `laravel/installer` rather than
+`composer create-project`, because starter kits, WorkOS, teams, Pest, and Boost
+are the installer's options, and it keeps up with Laravel's changes to them.
+The editor must not depend on global tools, so the installer lives in
+`<app data>/tools/laravel-installer`, made with the bundled Composer's
+`create-project` and updated before each use. The installer runs `composer`
+from `PATH`, so a `composer` shim that runs the bundled phar goes first on the
+terminal's `PATH`. `src/laravelnewdata.ts` turns the dialog's choices into the
+installer's flags (always `--no-interaction`, so it asks nothing) and the
+script the terminal runs: the installer, then `composer require
+filament/filament`, `filament:install --panels`, and, on SQLite,
+`make:filament-user` with the dialog's name, email, and password. Other
+databases need their server and credentials first, so the first user is left
+to you.
+
+`src/laravelelements.ts` reads `artisan list --format=json`, which describes
+each command's arguments and options (required, array, takes a value, repeats),
+and builds a form for any `make:` command from it. `commandLine` in
+`src/laravelnewdata.ts` writes the arguments. Some generators report failures,
+such as a class that exists, with an `ERROR` line and a success status, so a
+run that made no files and printed one counts as failed.
+
 ## Tusk's language server
 
 `tusk-lsp/` is the PHP language server the editor runs, written in Rust. It
@@ -4243,6 +4391,7 @@ the linter gets the file named by its path relative to the root. Mago's
 | `tusk/reindex` | none | Indexes the project again, with the configuration read again |
 | `tusk/memberReferences` | `class`, `method` | Every call of the method in the project, through subclasses too, without its declarations |
 | `tusk/projectProblems` | none | Every project PHP file's problems, by path relative to the root |
+| `tusk/phpOutline` | `text`, optional `path` | The classes in the text, with their properties, constants, methods, and return expressions as a tree of nodes with UTF-16 ranges. It parses the text without the index. The Filament designer and the model designer read and edit code through it |
 
 The command (`workspace/executeCommand`) `tusk.extractMethod` applies its edit
 by sending `workspace/applyEdit` and waiting for the editor's answer before it
@@ -5816,3 +5965,32 @@ progress to the caller instead of the status bar's generic line, and cancels
 the request when the caller's `AbortSignal` aborts, which the server's
 `is_cancelled` check already honors between files. `withProgress` gained a
 `report` callback so the count shows next to **Cancel**.
+
+### 2026-09-28: The Filament designer edits code, and keeps no model of its own
+
+A visual designer could keep its own description of a resource and write the
+PHP from it. Real resources have comments that explain workarounds, closures,
+translated labels, and code no designer understands, and writing the file again
+would lose them. So the designer reads the code through Tusk's server, shows
+what it understands, and makes each change as a small edit at the range it read.
+Code it doesn't understand stays as written. The components and their settings
+come from reflecting the project's own Filament and plugins, not from a list in
+Tusk, so a new Filament version or a plugin works without an update.
+
+### 2026-09-28: The model designer stages changes and writes one migration
+
+Each change to a table could be its own migration, as each change to a resource
+is its own edit. But migrations run once and in order, and a dozen small ones
+for one sitting's work are noise in `database/migrations`. So the model designer
+keeps changes until Apply and writes one migration with all of them, shown in
+the preview first. It never edits a migration that exists, since one that has
+run won't run again.
+
+### 2026-09-28: New projects use Laravel's installer, kept in Tusk's tools
+
+`composer create-project laravel/laravel` would need no installer, but the
+starter kits and their options (authentication, teams, Pest, Boost) are the
+installer's, and they change with Laravel. So Tusk runs the installer itself,
+from its own tools folder, where the bundled Composer installs and updates it.
+Nothing is installed globally, as the editor promises.
+

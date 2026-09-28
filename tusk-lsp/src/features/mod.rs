@@ -11,6 +11,7 @@ pub mod inlay;
 pub mod links;
 pub mod moves;
 pub mod navigation;
+pub mod outline;
 pub mod references;
 pub mod rename;
 pub mod signature;

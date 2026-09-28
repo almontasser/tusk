@@ -1,0 +1,96 @@
+{
+  "errors": false,
+  "namespace": null,
+  "uses": [
+    {
+      "alias": "Migration",
+      "name": "Illuminate\\Database\\Migrations\\Migration",
+      "kind": "class",
+      "span": [
+        7,
+        52
+      ]
+    },
+    {
+      "alias": "Blueprint",
+      "name": "Illuminate\\Database\\Schema\\Blueprint",
+      "kind": "class",
+      "span": [
+        53,
+        94
+      ]
+    },
+    {
+      "alias": "Schema",
+      "name": "Illuminate\\Support\\Facades\\Schema",
+      "kind": "class",
+      "span": [
+        95,
+        133
+      ]
+    }
+  ],
+  "useInsert": 134,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "",
+      "fqn": "",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Migrations\\Migration",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        142,
+        525
+      ],
+      "bodyStart": 171,
+      "bodyEnd": 524,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "up",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            219,
+            391
+          ],
+          "docStart": 176,
+          "body": [
+            251,
+            390
+          ],
+          "returns": []
+        },
+        {
+          "name": "down",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            444,
+            523
+          ],
+          "docStart": 397,
+          "body": [
+            478,
+            522
+          ],
+          "returns": []
+        }
+      ]
+    }
+  ]
+}

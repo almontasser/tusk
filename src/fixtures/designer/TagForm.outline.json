@@ -1,0 +1,124 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources\\Tags\\Schemas",
+  "uses": [
+    {
+      "alias": "Schema",
+      "name": "Filament\\Schemas\\Schema",
+      "kind": "class",
+      "span": [
+        55,
+        83
+      ]
+    }
+  ],
+  "useInsert": 84,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "TagForm",
+      "fqn": "App\\Filament\\Resources\\Tags\\Schemas\\TagForm",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        85,
+        260
+      ],
+      "bodyStart": 100,
+      "bodyEnd": 259,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "configure",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "schema",
+              "type": "Schema",
+              "default": null,
+              "span": [
+                138,
+                152
+              ]
+            }
+          ],
+          "returnType": "Schema",
+          "attributes": [],
+          "span": [
+            105,
+            258
+          ],
+          "docStart": null,
+          "body": [
+            167,
+            257
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "schema",
+                "span": [
+                  183,
+                  190
+                ]
+              },
+              "calls": [
+                {
+                  "name": "components",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 215,
+                    "close": 250,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [],
+                          "open": 216,
+                          "close": 249,
+                          "legacy": false,
+                          "span": [
+                            216,
+                            250
+                          ]
+                        },
+                        "span": [
+                          216,
+                          250
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    203,
+                    251
+                  ],
+                  "nameSpan": [
+                    205,
+                    215
+                  ]
+                }
+              ],
+              "span": [
+                183,
+                251
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

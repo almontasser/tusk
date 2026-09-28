@@ -1,0 +1,98 @@
+{
+  "errors": false,
+  "namespace": "App\\Support",
+  "uses": [],
+  "useInsert": 30,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Bare",
+      "fqn": "App\\Support\\Bare",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        31,
+        119
+      ],
+      "bodyStart": 43,
+      "bodyEnd": 118,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "items",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            48,
+            117
+          ],
+          "docStart": null,
+          "body": [
+            84,
+            116
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "a",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      101,
+                      104
+                    ]
+                  },
+                  "span": [
+                    101,
+                    104
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "b",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      106,
+                      109
+                    ]
+                  },
+                  "span": [
+                    106,
+                    109
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 100,
+              "close": 109,
+              "legacy": false,
+              "span": [
+                100,
+                110
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

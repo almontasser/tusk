@@ -255,7 +255,7 @@ async function locations(result: L.Location | L.Location[] | L.LocationLink[] | 
 // ---- Workspace edits ----
 
 /** Writes a model to its file and tells the servers, which update their index for open files on save. */
-async function saveModel(model: monaco.editor.ITextModel) {
+export async function saveModel(model: monaco.editor.ITextModel) {
   const path = model.uri.fsPath;
   await writeText(path, model.getValue());
   host.markSaved(path);

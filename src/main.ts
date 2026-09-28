@@ -15,6 +15,9 @@ import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
+import { initLaravelElements, newLaravelElement } from "./laravelelements";
+import { initLaravelNew, newLaravelProject } from "./laravelnew";
+import { filamentFilesChanged, initFilament, installFilament, loadFilament, newResource, openFileInDesigner, openModelPicker, openResourcePicker } from "./filamentview";
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { initStash, showStashes, stashChanges } from "./stash";
 import { branches, fetchAll, initBranches } from "./branches";
@@ -585,6 +588,9 @@ async function openFolder(dir: unknown = null) {
   $("project-name").textContent = nameOf(dir);
   $("project-badge").textContent = initials(nameOf(dir));
   $("welcome").hidden = true;
+  // The Filament tool window shows the project's panels, which a new project has its own of.
+  $("filament-list").replaceChildren();
+  if (currentView === "filament") void loadFilament();
   rememberProject(dir);
   await Promise.all([renderDir($("tree") as HTMLUListElement, dir), invoke("watch", { path: dir })]);
   try { localStorage.setItem("lastFolder", dir); } catch {}
@@ -1365,6 +1371,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     refreshSearch(paths);
     refreshTodos(paths);
     httpFilesChanged([...paths]);
+    filamentFilesChanged([...paths]);
   }, 150);
 });
 
@@ -1601,6 +1608,15 @@ const actions: Action[] = [
   { label: "Database: Generate SELECT", run: () => generateSql("select") },
   { label: "Database: Generate INSERT", run: () => generateSql("insert") },
   { label: "Composer", run: () => showView("composer") },
+  { label: "Filament", run: () => showView("filament") },
+  { label: "Filament: Open Resource in Designer…", run: () => root && openResourcePicker() },
+  { label: "Filament: New Resource…", run: () => root && newResource() },
+  { label: "Filament: Install Filament", run: () => root && installFilament() },
+  { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
+  { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
+  { label: "Laravel: New Project…", run: () => newLaravelProject() },
+  { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },
+  { label: "Open in Designer", run: () => active && openFileInDesigner(active), when: () => /(Resource|RelationManager|Form|Table|Infolist)\.php$/.test(active) },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },
   { ...editorAction("Execute Query", "Meta+Enter", "phpEditor.runSql"), when: () => ["sql", "redis"].includes(editor.getModel()?.getLanguageId() ?? "") },
@@ -1938,6 +1954,7 @@ function showView(name: string) {
   if (name === "composer") loadPackages();
   if (name === "todo") loadTodos();
   if (name === "http") refreshTree();
+  if (name === "filament") loadFilament();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -1963,6 +1980,7 @@ $("tb-settings").onclick = () => openSettings();
 $("tb-debug-server").onclick = () => actions.find((a) => a.label.startsWith("Start Debug Server"))?.run();
 $("project-menu").onclick = () => projectMenu();
 $("welcome-open").onclick = () => openFolder();
+$("welcome-new").onclick = () => newLaravelProject();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
@@ -2005,6 +2023,17 @@ initHttpClient({
   showDiff: (path, original, modified, label) => showDiff(path, original, modified, label),
 });
 initComposer({ root: () => root, status });
+initLaravelElements({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
+initLaravelNew({ openTerminal: (cwd, title, command, onExit) => void openTerminal(cwd, title, command, onExit), openFolder: (dir) => void openFolder(dir), status });
+initFilament({
+  root: () => root,
+  ensureModel,
+  openAt: (path, line, column) => openAt(path, { lineNumber: line, column: column ?? 1 }),
+  status,
+  openUrl: (url) => void invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null }),
+  showView,
+  openTerminal: (title, command, done) => void openTerminal(root, title, command, done && (() => done())),
+});
 initRefactor({ root: () => root, status, ensureModel });
 initClassRefactor({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
