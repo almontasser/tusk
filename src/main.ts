@@ -10,7 +10,7 @@ import { choose, confirm, type Item, pick, rank } from "./palette";
 import { fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, showBreakpoints, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, xdebugEnv } from "./debug";
-import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
+import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -36,7 +36,8 @@ import { generate, initGenerate } from "./generate";
 import { initRefactorPreview } from "./refactorpreview";
 import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings } from "./extract";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, runPhpStan, showInlineProblems, showProblems } from "./problems";
-import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
+import { initLocalHistory, putLabel, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
+import { initLocalHistoryView } from "./localhistoryview";
 import { cancelQueries, chooseConnection, connectOverSsh, copyName, dataSources, generate as generateSql, initDatabase, loadTables, openConsole, openTable, selectedTable, showHistory } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
@@ -45,9 +46,9 @@ import { detectFormatters, formatModel, formatOnSave, initFormatting, setFormatt
 import { openFormatters } from "./formattersdialog";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
-import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
+import { initSearch, loadTodos, nextMatch, openSearch, refreshSearch, refreshTodos } from "./search";
 import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
-import { hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
+import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
@@ -187,7 +188,8 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...(tests.length ? ["-" as const] : []),
     ...breakpointMenu(path, line),
     "-",
-    { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", run: () => toggleBookmark(path, line) },
+    { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", keys: "F3", run: () => toggleBookmark(path, line) },
+    { label: "Bookmark with Mnemonic…", keys: "⌥F3", run: () => toggleMnemonic(path, line) },
     ...(hasCoverage(path) ? [{ label: "Show Tests Covering Line", run: () => (ed.setPosition({ lineNumber: line, column: 1 }), showTestsCoveringLine(ed)) }] : []),
     ...changes,
     ...(changes.length ? menuActions("Next Change", "Previous Change") : []),
@@ -1287,6 +1289,7 @@ function renderTabs() {
                   { label: "Copy Path", run: () => copyPath(path) },
                   { label: "Copy Relative Path", run: () => copyPath(path, true) },
                   { label: "Reveal in Finder", run: () => revealInFinder(path) },
+                  { label: "Show Local History", run: () => showLocalHistory(path) },
                 ]),
           ]);
         };
@@ -1339,7 +1342,7 @@ listen<string[]>("fs-change", ({ payload }) => {
         const text = await readText(path).catch(() => null);
         if (text !== null && text !== model.getValue()) {
           // Another program changed it, such as a git checkout: keep what the editor had first.
-          await recordVersion(path, model.getValue());
+          await recordVersion(path, model.getValue(), "before external");
           model.setValue(text);
           if (tab) tab.saved = model.getAlternativeVersionId();
         }
@@ -1512,6 +1515,9 @@ const actions: Action[] = [
   editorAction("Duplicate Line", "Meta+D", "editor.action.copyLinesDownAction"),
   editorAction("Delete Line", "Meta+Backspace", "editor.action.deleteLines"),
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
+  // Before the editor's ⌘⌥↓ (Add Caret Below), which it takes while the Find view shows, as in PhpStorm.
+  { label: "Next Occurrence in Files", keys: "Meta+Alt+ArrowDown", run: () => nextMatch(1), when: () => !$("view-search").hidden },
+  { label: "Previous Occurrence in Files", keys: "Meta+Alt+ArrowUp", run: () => nextMatch(-1), when: () => !$("view-search").hidden },
   ...EDITOR_COMMANDS.map(([label, id, keys]) => editorAction(label, keys, id)),
   { label: "Toggle Case", keys: "Meta+Shift+U", run: toggleCase, editorOnly: true },
   { label: "Save All", keys: "Meta+S", run: () => saveFocusedRequest() || saveAll() },
@@ -1570,6 +1576,8 @@ const actions: Action[] = [
   { label: "Run PHPStan on Project", run: () => root && runPhpStan() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Show Local History", run: () => active && showLocalHistory(active) },
+  { label: "Show Project Local History", run: () => root && showLocalHistory(root, true) },
+  { label: "Put Label…", run: () => putLabel() },
   { label: "Local History: Deleted Files…", run: showDeletedFiles },
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
@@ -1661,7 +1669,9 @@ const actions: Action[] = [
   { label: "Rerun", run: () => root && rerun() },
   { label: "TODO", run: () => showView("todo") },
   { label: "Toggle Bookmark", keys: "F3", run: () => active && toggleBookmark(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Toggle Bookmark with Mnemonic…", keys: "Alt+F3", run: () => active && toggleMnemonic(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
+  ...[..."123456789"].map((n) => ({ label: `Go to Bookmark ${n}`, keys: `Ctrl+${n}`, run: () => goToMnemonic(n) })),
   { label: "Edit Snippets (Live Templates)", run: () => editSnippets(openFile) },
   { label: "Laravel Tinker", run: () => root && tinker() },
   { label: "Choose Docker Service for Commands…", run: () => root && chooseDockerService() },
@@ -2007,16 +2017,20 @@ initCallHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) 
 initLocalHistory({
   root: () => root,
   status,
-  showDiff: (path, original, modified, label, action) =>
-    showDiff(path, original, modified, label, {
-      label: action.label,
-      run: async () => {
-        await action.run();
-        closeDiff();
-        openFile(`${root}/${path}`);
-      },
-    }),
+  openText: (path) => monaco.editor.getModel(monaco.Uri.file(path))?.getValue(),
+  // Through the open model, as its own undo step, so ⌘Z in the editor undoes a revert too.
+  async setText(path, text) {
+    const model = monaco.editor.getModel(monaco.Uri.file(path));
+    if (model) {
+      model.pushStackElement();
+      model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+      model.pushStackElement();
+    }
+    await writeText(path, text);
+    if (model) markSaved(path), didSave(model), afterSave(path, text);
+  },
 });
+initLocalHistoryView({ root: () => root, openFile: (path) => openFile(path) });
 branchListeners.push(updateBranchPullRequest);
 
 $("open-folder").onclick = () => openFolder();

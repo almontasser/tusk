@@ -39,7 +39,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Git | Push, update, and fetch can't answer a password or passphrase prompt; when one is needed, the message offers to run the command in a terminal tab (`src/sync.ts`). The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
-| Find in files | Results stop at 20,000 matches, which **Settings > Limits** changes (Replace All still changes every matching file). Refactorings that search the project, such as Safe Delete, stop at 20,000 matches whatever the setting. |
+| Find in files | Results stop at 20,000 matches, which **Settings > Limits** changes, so the replace preview lists only those; **Replace in All Files…** changes every matching file without a preview. Refactorings that search the project, such as Safe Delete, stop at 20,000 matches whatever the setting. |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
 | Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
@@ -55,9 +55,9 @@ file to change when you add it.
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project (**Settings > Limits**), without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
+| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
-| Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
+| Split editors | Up to four panes. The dividers between editor panes resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
@@ -70,7 +70,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Debugger | With Sail, `sail debug` uses Sail's own Xdebug settings, so a port other than 9003 needs `SAIL_XDEBUG_CONFIG="client_host=host.docker.internal client_port=<port>"` in `.env`. A request to Xdebug that never answers, such as while PHP is stopped in another debugger, leaves the tab running until you stop it. Values in the editor come from the lines' `$names`, so a name from another scope, such as a closure's, can show the outer value. Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
-| Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
+| Local history | Reverting to a label doesn't delete files created after it. Versions from before this release show as **Saved**. A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Rename, Extract Method, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. There's no comment that turns spelling off for one line: typos-lsp lets the project's ignore patterns replace a user-wide one. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
@@ -259,6 +259,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘O | Go to symbol in the project: classes, functions, constants, and methods (`User::save` narrows to a class's) |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
+| ⌘⌥↓, ⌘⌥↑ | Next and previous match in the Find view's results, while it shows |
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
 | ⌃⌥H | Call hierarchy of the method or function under the cursor, or the one the cursor is in |
@@ -278,7 +279,9 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌃⌥⇧↓ and ⌃⌥⇧↑ | Next and previous change |
 | ⌘F12 | File structure |
 | F3 | Toggle a bookmark on the current line |
-| ⌘F3 | Show bookmarks |
+| ⌥F3 | Toggle a bookmark with a mnemonic (a digit or letter) |
+| ⌘F3 | Show the Bookmarks tab |
+| ⌃1 … ⌃9 | Go to the bookmark with that digit |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
 | ⌃⇧B | Go to type declaration |
@@ -408,6 +411,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Git: how Update Project brings in commits (merge, rebase, or git's `pull.rebase`) | Merge |
 | Git: group changed files by folder in the Commit view | Off |
 | Database: rows per page, connection timeout, query timeout, and Redis command timeout | 1,000 rows, 10 s, none, 60 s |
+| HTTP Client: response bodies in the history | Keep, with secrets hidden |
 
 ### Tools
 
@@ -726,15 +730,29 @@ becomes the query.
 - Toggle **Aa** for a case-sensitive search, **W** for whole words, and **.\***
   for a regular expression.
 - To limit the search, list globs in the include field, such as
-  `*.php, *.blade.php` or `app/**`. Files ignored by `.gitignore` are never
-  searched.
+  `*.php, *.blade.php` or `app/**`, and files or folders to leave out in the
+  exclude field, such as `tests, *.min.js`. Files ignored by `.gitignore` are
+  never searched.
+- The query, include, and exclude fields remember your last 20 values, which
+  they offer as you type. A value is kept when you press ⏎, open a result, or
+  replace.
+- Typing starts a new search and stops the one still running.
 - Results are grouped by file, with each match highlighted. Click a match to
   open it. Files start expanded until about 2,000 matches show; click a file
-  to expand or collapse it.
-- **Replace All**, or ⏎ in the replace field, replaces every match in every
-  matching file after you confirm, including files beyond the listed results.
-  Hover over a file for **Replace** to change only that file, or over a match
-  for its replace button to change only that match. In regex mode, `$1` or
+  to expand or collapse it, or use **Expand All** and **Collapse All** in the
+  view's header.
+- In the results, ↑ and ↓ move, → and ← open and close a file, and Enter or F4
+  shows the match in the editor. While the Find view shows, ⌘⌥↓ and ⌘⌥↑ go to
+  the next and previous match from anywhere, opening each one; otherwise they
+  add carets in the editor.
+- **Replace All**, or ⏎ in the replace field, opens the **Replace Preview** tab:
+  every match by file, each line before and after. Clear a file's or a match's
+  checkbox (Space on the selected row) to leave it out, then click
+  **Replace N Matches** (⌘⏎). A line that changed since the search is left
+  alone, and the message says so. When the results stopped at 20,000 matches,
+  **Replace in All Files…** replaces in every matching file without a preview,
+  after you confirm. **Replace** on a file previews only that file, and a
+  match's replace button changes only that match. In regex mode, `$1` or
   `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
@@ -753,8 +771,29 @@ excludes, such as `vendor`, aren't searched.
 Press F3 to bookmark the current line, and F3 again to remove the bookmark. A
 bookmark shows as a blue marker in the gutter and moves with its line as you
 edit. You can also right-click the gutter at a line and choose **Add
-Bookmark**. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved
-per project.
+Bookmark**.
+
+Press ⌥F3 to give the line's bookmark a mnemonic, a digit or a letter, which
+the gutter shows instead of the marker. Type the character and press Enter.
+⌃1 to ⌃9 jump to the bookmark with that digit. Choosing a mnemonic another
+bookmark has moves it to this line.
+
+⌘F3 opens the **Bookmarks** tab in the bottom panel. It groups bookmarks by
+file and shows each line's code, even for files that aren't open, with its
+mnemonic and description.
+
+- Enter or a double-click goes to the bookmark; ↑ and ↓ move, → and ← open and
+  close a file, and typing jumps to a bookmark by its code or description.
+- F2 (or the pencil) edits the description in place: Enter keeps it, Escape
+  cancels.
+- Delete removes the selected bookmark, or a file's bookmarks when a file is
+  selected. **Remove all** asks first.
+- Drag a bookmark within its file, or a file among the others, to reorder
+  them.
+
+Bookmarks are saved in the project's local state, not in `tusk.json`, and
+bookmarks from earlier versions move there the first time you open the
+project.
 
 ## Snippets
 
@@ -1119,6 +1158,11 @@ at the top.
   to keep its tab open. Hover over it and click ▶ to send it.
 - A dot after a request means its tab has unsaved changes, and a dot after a
   file means its editor tab does.
+- The tree and the history work from the keyboard: ↓ in a filter box moves to
+  its list, ↑ and ↓ move, → and ← open and close a file, typing a name jumps to
+  it, and Enter opens a request (a history entry's response). On a request, ⌘⏎
+  sends it, F2 renames it, and ⌘⌫ deletes it. When the files can't be listed,
+  the tree says why, with **Retry**.
 - Right-click a request to send, open in the editor, rename, duplicate, delete,
   or stress test it. Right-click a file to add a request to it, run all of its
   requests, sync it with the Laravel routes, or save it.
@@ -1167,8 +1211,12 @@ at the top.
   again, pin it (pinned requests stay at the top and don't count toward the
   100), compare it with the response on screen, or copy it as cURL or Laravel
   code. The history file doesn't keep secrets: tokens, passwords, cookies, and
-  API keys in requests, and cookie values in responses. Response bodies are kept
-  as they came. **Send Again** sends a request from this session exactly as it
+  API keys in requests, and cookie values in responses. In response bodies, it
+  hides the values of JSON and form fields named like `token`, `password`,
+  `secret`, or `api_key`; you see the body as it came until you close the
+  project, and a notice says when a body from the history had secrets hidden.
+  **Settings › HTTP Client › Response bodies in the history** can keep bodies
+  as they came, or not keep them at all. **Send Again** sends a request from this session exactly as it
   went, and prepares one from an earlier session again from its file, running
   its scripts.
 - **Go to Request** (⌥⇧⌘O) finds any request in the project by name. Search
@@ -1191,7 +1239,11 @@ quit.
 The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
 menu, and the environment. Under the URL, you see it with its variables
 replaced, and the names nothing defines. While a request runs, **Send** becomes
-**Cancel** and the time it's taken counts up.
+**Cancel** and the time it's taken counts up. **Send Again** from the history
+shows the same progress and **Cancel**. When a request can't be sent, or its
+body can't be read, the response area says why, with **Retry**. Drag the line
+between the request and the response to resize them, or focus it and use ←
+and →; double-click it to reset it.
 
 When a request uses a variable nothing defines, **Send** asks for its value
 first. **Send** uses the values you type, and can save them to the environment
@@ -1455,7 +1507,8 @@ The message types come from the server's reflection service. When the server
 doesn't have one, the project's `.proto` files are compiled instead, with
 imports found from the file's folder and each folder above it. There's nothing
 to install: no `protoc`. The response shows as JSON, with every field, and a
-server streaming method's messages as an array. For a client streaming method,
+server streaming method's messages as an array. While a server stream runs,
+each message shows as it arrives, with a count, and **Cancel** stops the call. For a client streaming method,
 write the messages one after another. The status shows as the HTTP status gRPC
 maps to, such as `404 NOT_FOUND`, with `grpc-status` and `grpc-message` among
 the headers, so scripts and the runner treat a failed call as a failed request.
@@ -2021,18 +2074,40 @@ and outside git. It also keeps one before another program, such as a
 `git checkout`, changes a file you have open, and after another program
 changes a project file you don't have open, such as a file an Artisan `make:`
 command or a formatter rewrites. The first time that happens to a file, the
-version git has staged is kept too, so you can go back to it. Files git
-ignores, and `.env` files, aren't kept. It also keeps a version before you delete a file or
-folder from the tree. To see a file's versions, run **Show Local History** from
-⌘⇧A, or right-click the file in the tree. Choose a version to compare it with
-the file as it is now, and click **Restore This Version** to put it back. The
-current text is kept as a version first, so a restore can be undone the same
-way. Versions older than 14 days are deleted, and each file keeps at most 100.
-Files over 1,000 KB aren't kept. **Settings > Local History** changes all three.
+version git has staged is kept too, so you can go back to it. Refactorings keep
+the text before and after, and deleting a file or folder from the tree keeps
+it first. Files git ignores, and `.env` files, aren't kept. Versions older than
+14 days are deleted, and each file keeps at most 100. Files over 1,000 KB aren't
+kept. **Settings > Local History** changes all three.
 
-To get back a deleted file, run **Local History: Deleted Files…** from ⌘⇧A,
-choose the file, then a version, and click **Restore This Version**. Its folder
-is recreated if needed.
+To see a file's history, choose **File › Local History › Show Local History**,
+right-click the file's tab or the file in the tree, or run it from ⌘⇧A. For a
+folder, right-click it in the tree; **Show Project Local History** covers the
+whole project, deleted files included. The **Local History** tab opens in the
+bottom panel:
+
+- The left side lists the versions, newest first, with the time and what kept
+  each one: **Saved**, **External change**, a git command such as
+  **Before git checkout**, **Before refactoring** and **Refactoring**,
+  **Before delete**, or **Before revert**. A folder's list also shows each
+  file, marks deleted files, and has a filter.
+- The right side compares the selected version with the file as it is now,
+  including unsaved edits. To compare two versions, press Space or ⌘-click one
+  to mark it, then select the other.
+- **Revert** (⌘⌫ in the list) sets the file back to the selected version,
+  after asking. The current text is kept as a version first, and **Undo** in
+  the message puts it back. With the file open, ⌘Z in the editor undoes it
+  too.
+- **Put Label…** (also in the File menu and ⌘⇧A) names the current moment for
+  the whole project, such as "Before the upgrade". Labels show among the
+  versions; select one and click **Revert** to set the file, or in a folder's
+  history every file under it, back to how it was then.
+- ↑ and ↓ move through the list, Enter opens the file, and typing jumps to a
+  version by what kept it (in a folder, by path).
+
+To get back a deleted file, run **Local History: Deleted Files…** from ⌘⇧A and
+choose the file, or find it in a folder's history, then **Revert** to a
+version. Its folder is recreated if needed.
 
 ### Interactive rebase
 
@@ -2358,7 +2433,9 @@ of the bottom panel. Run these from ⌘⇧A:
   test with the profiler and opens its profile when the run ends.
 - **Profile URL…** asks for a path, such as `/posts?page=2`, requests it
   through the profiling server (starting the server if needed), and opens that
-  request's profile. The status bar shows the response code and time.
+  request's profile. The status bar shows the response code and time. While
+  it waits for the server to start or for Xdebug to finish the profile,
+  **Cancel** in the status bar stops waiting.
 - While the profiling server runs, pages you open in a browser, where you can
   sign in, are profiled too. They're listed in **Open Xdebug Profile…** by
   their URL.
@@ -2687,7 +2764,8 @@ while you type and comes back when you pause.
 The first time you open the Problems panel, it scans the project: the PHP
 server runs the checks it runs for open files (Mago's analyzer and linter, and
 its own, such as unused imports) over every project PHP file at once, in a few
-seconds. **Scan Project** rechecks every file, since a change in one file can
+seconds. The status bar and the panel count the files checked so far, and
+**Cancel** in the status bar stops the check. **Scan Project** rechecks every file, since a change in one file can
 change another's problems. Open files show their live problems as you type.
 Mago's notes and help show in the editor only, not in the panel. The status bar
 counts cover the project once it has been scanned. Laravel's, Filament's, and
@@ -2916,14 +2994,19 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |
-| `src/bookmarks.ts` | Bookmarks |
+| `src/replacepreview.ts` | Replace Preview: the matches to replace, with checkboxes |
+| `src/replacedata.ts` | Applying the replacements you kept to a file's text |
+| `src/bookmarks.ts` | Bookmarks and the Bookmarks tab |
+| `src/bookmarksdata.ts` | Reading and reordering saved bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Tusk's server (Mago's formatter) |
 | `src/markdownpreview.ts` | The Markdown preview tab |
 | `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
 | `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |
 | `src/jsonschemas.ts` | Checks JSON config files against the bundled schemas in `src/schemas` |
-| `src/localhistory.ts` | Local history of saved, changed, and deleted files |
+| `src/localhistory.ts` | Local history of saved, changed, and deleted files, and labels |
+| `src/localhistoryview.ts` | The Local History tab: versions, diffs, revert, and labels |
+| `src/localhistorydata.ts` | Version names, labels, and which version a time points at |
 | `src/retention.ts` | Which local history versions to delete |
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |

@@ -3,15 +3,23 @@
 // data folder, so you can compare with or restore a version that was never committed, even of a deleted file.
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
-import { age } from "./gitparse";
 import { localHistory } from "./limits";
 import { skippedPath } from "./treehidden";
+import { addLabel, type Label, parseLabels, parseVersions, type Version, versionName } from "./localhistorydata";
 import { pick } from "./palette";
 import { toPrune } from "./retention";
-import { readText, writeText } from "./projectfiles";
+import { readText } from "./projectfiles";
 
-type Host = { root(): string; showDiff(path: string, original: string, modified: string, label: string, action: { label: string; run(): unknown }): void; status(text: string): void };
+type Host = {
+  root(): string;
+  status(text: string): void;
+  /** An open file's text in the editor, which may be unsaved. */
+  openText(path: string): string | undefined;
+  /** Writes a file's text, through its editor tab when it has one, so ⌘Z there undoes it. */
+  setText(path: string, text: string): Promise<void>;
+};
 type Entry = { name: string; path: string; is_dir: boolean };
+export type { Label, Version };
 
 let host: Host;
 const maxSize = () => localHistory.localHistoryMaxKB * 1000;
@@ -19,23 +27,36 @@ const maxSize = () => localHistory.localHistoryMaxKB * 1000;
 const relative = (path: string) => path.slice(host.root().length + 1);
 const projectDir = async () => `${await appDataDir()}/history/${host.root().replace(/[^A-Za-z0-9]+/g, "_")}`;
 const fileDir = async (path: string) => `${await projectDir()}/${encodeURIComponent(relative(path))}`;
-const versions = async (dir: string) =>
-  (await invoke<Entry[]>("read_dir", { path: dir }).catch(() => []))
-    .map((e) => e.name)
-    .filter((n) => /^\d+\.txt$/.test(n))
-    .sort()
-    .reverse();
+/** A file's versions, newest first, from its history folder. */
+const versions = async (dir: string) => parseVersions((await invoke<Entry[]>("read_dir", { path: dir }).catch(() => [])).map((e) => e.name));
 
-/** Saves a version of a project file, unless it's large or the same as the last version. `time` names the version. */
-export async function recordVersion(path: string, text: string, time = Date.now()) {
+// What's changing files right now, such as "git checkout" or "Refactoring", to name the versions that other
+// programs' changes add, which otherwise read "External change".
+let activity: { label: string; until: number } | null = null;
+/** Names the versions changes in the next few seconds add, for a git command or a refactoring the editor runs. */
+export function historyActivity(label: string) {
+  activity = { label, until: Date.now() + 10_000 };
+}
+const external = (before = false) => {
+  const cause = activity && Date.now() < activity.until ? activity.label : "external change";
+  return before ? `Before ${cause}` : cause[0].toUpperCase() + cause.slice(1);
+};
+
+/**
+ * Saves a version of a project file, unless it's large or the same as the last version. `action` says why, such as
+ * "Saved" or "Before revert"; "external" and "before external" name the activity, or "External change". `time`
+ * names the version.
+ */
+export async function recordVersion(path: string, text: string, action = "Saved", time = Date.now()) {
   if (!host.root() || !path.startsWith(host.root() + "/") || text.length > maxSize()) return;
+  if (action === "external" || action === "before external") action = external(action !== "external");
   try {
     const dir = await fileDir(path);
     const [last] = await versions(dir);
-    if (last && (await invoke<string>("read_file", { path: `${dir}/${last}` }).catch(() => null)) === text) return;
+    if (last && (await invoke<string>("read_file", { path: `${dir}/${last.name}` }).catch(() => null)) === text) return;
     await invoke("create_dir", { path: dir });
-    await invoke("write_file", { path: `${dir}/${time}.txt`, contents: text });
-    for (const name of toPrune(await versions(dir), Date.now(), localHistory.localHistoryDays, localHistory.localHistoryVersions)) await invoke("remove_path", { path: `${dir}/${name}` });
+    await invoke("write_file", { path: `${dir}/${versionName(time, action)}`, contents: text });
+    for (const name of toPrune((await versions(dir)).map((v) => v.name), Date.now(), localHistory.localHistoryDays, localHistory.localHistoryVersions)) await invoke("remove_path", { path: `${dir}/${name}` });
   } catch {
     // History is a convenience; a failure here must never block saving.
   }
@@ -75,9 +96,9 @@ export async function recordExternalChanges(paths: string[]) {
     if (text === null || text.length > maxSize()) continue;
     if (!(await versions(await fileDir(path))).length) {
       const staged = await invoke<string>("run_capture", { cwd: root, program: "git", args: ["show", `:./${relative(path)}`], input: null }).catch(() => null);
-      if (staged !== null && staged !== text) await recordVersion(path, staged, Date.now() - 1);
+      if (staged !== null && staged !== text) await recordVersion(path, staged, "Staged in git", Date.now() - 1);
     }
-    await recordVersion(path, text);
+    await recordVersion(path, text, "external");
   }
 }
 
@@ -87,7 +108,7 @@ export async function recordBeforeDelete(path: string, isDir: boolean) {
   const files = isDir ? (await invoke<string[]>("list_files", { root: path }).catch(() => [])).slice(0, 500).map((f) => `${path}/${f.replace(/^\//, "")}`) : [path];
   for (const file of files) {
     const text = await readText(file).catch(() => null);
-    if (text !== null) await recordVersion(file, text);
+    if (text !== null) await recordVersion(file, text, "Before delete");
   }
 }
 
@@ -106,36 +127,92 @@ export async function showDeletedFiles() {
   );
 }
 
-/** Lists a file's saved versions; choosing one shows it next to the current file, with a button to restore it. */
-export async function showLocalHistory(path: string) {
-  if (!path.startsWith(host.root() + "/")) return host.status("Local history covers files in the project.");
-  const dir = await fileDir(path);
-  const names = await versions(dir);
-  if (!names.length) return host.status(`No local history for ${relative(path)} yet. A version is kept each time you save, and when another program changes it.`);
-  pick(`Local history of ${relative(path)}`, () =>
-    names.map((name) => {
-      const time = Number.parseInt(name);
-      return {
-        label: new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" }),
-        detail: age(time / 1000),
-        run: async () => {
-          const version = await invoke<string>("read_file", { path: `${dir}/${name}` });
-          // null when the file was deleted.
-          const current = await readText(path).catch(() => null);
-          host.showDiff(relative(path), version, current ?? "", `${new Date(time).toLocaleString()} ↔ ${current === null ? "Deleted" : "Current"}`, {
-            label: "Restore This Version",
-            run: async () => {
-              if (current !== null) await recordVersion(path, current); // So the restore can be undone from the history too.
-              // A deleted file's folder may be gone too.
-              await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
-              await writeText(path, version);
-              host.status(`Restored ${relative(path)} from ${new Date(time).toLocaleString()}`);
-            },
-          });
-        },
-      };
-    }),
-  );
+/** Opens the Local History tab for a file or a folder. Loaded when first used. */
+export const showLocalHistory = (path: string, folder = false) => import("./localhistoryview").then((m) => m.openLocalHistory(path, folder));
+
+// ---- For the Local History tab ----
+
+/** A version of a file in the project, which may have been deleted since. */
+export type FileVersion = Version & { path: string };
+
+/** A file's versions, newest first. */
+export async function fileVersions(path: string): Promise<FileVersion[]> {
+  return (await versions(await fileDir(path))).map((v) => ({ ...v, path }));
+}
+
+/** Every version of the files under `folder`, deleted ones too, newest first. Reports how many files it read of how many. */
+export async function folderVersions(folder: string, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<FileVersion[]> {
+  const prefix = folder === host.root() ? "" : `${relative(folder)}/`;
+  const dirs = (await invoke<Entry[]>("read_dir", { path: await projectDir() }).catch(() => [])).filter((e) => e.is_dir && decodeURIComponent(e.name).startsWith(prefix));
+  const all: FileVersion[] = [];
+  for (const [i, e] of dirs.entries()) {
+    signal.throwIfAborted();
+    progress(i, dirs.length);
+    const path = `${host.root()}/${decodeURIComponent(e.name)}`;
+    all.push(...(await versions(e.path)).map((v) => ({ ...v, path })));
+  }
+  return all.sort((a, b) => b.time - a.time);
+}
+
+/** A version's text. */
+export const readVersion = async (v: FileVersion) => invoke<string>("read_file", { path: `${await fileDir(v.path)}/${v.name}` });
+
+/** A file's text now, or null when it doesn't exist. */
+export const currentText = async (path: string): Promise<string | null> => host.openText(path) ?? readText(path).catch(async (e) => ((await invoke<boolean>("path_exists", { path }).catch(() => true)) ? Promise.reject(e) : null));
+
+/**
+ * Sets files to earlier texts, keeping each one's current text as a version first ("Before revert"), and returns
+ * what undoes it: the texts they had, with null for files that didn't exist.
+ */
+export async function revertFiles(changes: [path: string, text: string][]): Promise<[string, string | null][]> {
+  const undo: [string, string | null][] = [];
+  historyActivity("revert"); // The file watcher then names the new text's version Revert.
+  for (const [path, text] of changes) {
+    const now = await currentText(path);
+    if (now === text) continue;
+    if (now !== null) await recordVersion(path, now, "Before revert");
+    // A deleted file's folder may be gone too.
+    await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
+    await host.setText(path, text);
+    undo.push([path, now]);
+  }
+  return undo;
+}
+
+/** Undoes revertFiles: files that didn't exist go to the Trash, the rest get their text back. */
+export async function undoRevert(undo: [string, string | null][]) {
+  historyActivity("undo revert");
+  for (const [path, text] of undo) {
+    if (text === null) await invoke("trash_path", { path }).catch(() => invoke("remove_path", { path }));
+    else await host.setText(path, text);
+  }
+}
+
+const labelsFile = async () => `${await projectDir()}/labels.json`;
+/** The project's labels, newest first. */
+export const labels = async (): Promise<Label[]> => parseLabels(await invoke<string>("read_file", { path: await labelsFile() }).catch(() => "[]"));
+
+/** Asks for a name and adds a label for the whole project now, as PhpStorm's Put Label does. */
+export function putLabel(then?: () => unknown) {
+  if (!host.root()) return host.status("Open a project first.");
+  pick("Label name, such as “Before the upgrade”", (q) => [
+    {
+      label: q.trim() ? `Put Label “${q.trim()}”` : "Type a name for the label",
+      icon: "codicon-tag",
+      run: async () => {
+        const name = q.trim();
+        if (!name) return;
+        try {
+          await invoke("create_dir", { path: await projectDir() });
+          await invoke("write_file", { path: await labelsFile(), contents: JSON.stringify(addLabel(await labels(), { time: Date.now(), name })) });
+          host.status(`Put the label “${name}” in the local history`);
+          then?.();
+        } catch (e) {
+          host.status(`Couldn't put the label: ${e}`);
+        }
+      },
+    },
+  ]);
 }
 
 export function initLocalHistory(h: Host) {

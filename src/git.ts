@@ -11,6 +11,7 @@ import { age, ago, applyBlocks, applyLines, type BlameLine, type Block, type Fil
 import { confirm, type Item, pick, rank } from "./palette";
 import { errorText, showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
+import { historyActivity } from "./localhistory";
 
 type Host = {
   root(): string;
@@ -49,6 +50,7 @@ let queue: Promise<unknown> = Promise.resolve();
 /** Runs a git command that changes state, then refreshes. Errors show as errors. Resolves to whether it worked. */
 export function change(...args: string[]): Promise<boolean> {
   const next = queue.then(async () => {
+    historyActivity(`git ${args[0]}`);
     let ok = true;
     try {
       await git(...args);

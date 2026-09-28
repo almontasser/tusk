@@ -918,7 +918,8 @@ installErrorHandlers()
   an `Error`, a Tauri command's error string, or anything else, drops Git's
   `hint:` lines, and keeps it to one line.
 - `withProgress` runs a task under a spinner and reports its failure with
-  `showError`. With `cancellable: true`, the status bar shows **Cancel**, which
+  `showError`. The task gets `report(text)` too, which replaces the label while
+  it runs, such as with "12 of 40 files". With `cancellable: true`, the status bar shows **Cancel**, which
   aborts the signal the task gets; the task checks `signal.throwIfAborted()`
   between steps or passes the signal on, and calls `progress` with a new
   label, such as "Deleted 500 of 2,000 keys…", to show how far it got. A canceled task shows "Canceled", not
@@ -1568,6 +1569,10 @@ files work in PhpStorm and VS Code's REST Client.
   protobuf compiler, with the file's folder and each one above it up to the
   root as import paths. The status maps to an HTTP status as Google's APIs do,
   so `response.status` checks and the runner's failure rule work unchanged.
+  `grpc_call` also emits `grpc:<id>` with each reply's JSON as it arrives;
+  `transmitGrpc` listens when the `Cancel` it gets has `onMessage`, which
+  `sendIn` in `httpview.ts` sets to show a server stream's messages and count
+  while the call runs. The final body replaces them.
   `grpc_cancel` ends a call through a oneshot channel. `grpc_methods` lists
   methods for completion; `httpclient.ts` caches non-empty lists per address.
 - `prepare` carries `proxy`, `clientCert`, `clientKey` (absolute), `http`, and
@@ -1588,8 +1593,24 @@ files work in PhpStorm and VS Code's REST Client.
   `index.json` through `withoutSecrets`, which also hides `Set-Cookie` values,
   and marks an entry that lost secrets with `secrets`. `resend` prepares such
   an entry again from its file through `send`. The Request tab and copying go
-  through `redact` unless you choose **Show secrets**. Response bodies aren't
-  changed.
+  through `redact` unless you choose **Show secrets**.
+- Response bodies follow the `httpHistoryBodies` setting (`registerSettings`
+  in `httpclient.ts`). Before `remember` adds an exchange, `protectBody` moves
+  the body as it came to `<cache>/http-session/<project>/` and, for "redact",
+  writes `redactBody`'s copy (secret JSON and form fields hidden, the same
+  names as requests) where the history keeps it; for "drop", nothing. The
+  exchange in memory points at the session copy and remembers the history's
+  in `savedBody`, and `withoutSecrets` writes `savedBody` as `bodyPath`, with
+  `bodyHidden` saying what happened, so the body view shows a notice. The
+  session folder is removed the first time a project's history loads, and by
+  **Clear History**. A history file that can't be parsed is renamed
+  `index.json.bad` rather than overwritten by the next send.
+- `sendIn` in `httpview.ts` runs every send from the HTTP tab, including
+  **Send Again**: the tab's spinner, clock, and **Cancel**, the stream view,
+  and, on failure, the error with **Retry** (`errorPane`). Reading a body
+  shows "Loading the body…" and an error with **Retry**. The tree and history
+  use `listNav`; the request and response split uses `splitter` (saved as
+  `httpRequest`).
 - `src/httpimport.ts` has no editor imports, so Node tests it.
   `importCollection` detects a Postman collection (v2), an Insomnia export (v4),
   or an OpenAPI 3 or Swagger 2 document, and returns one file's text and
@@ -2261,6 +2282,23 @@ the file still holds the match where the search found it.
 
 `list_files` takes `all`, which turns off `.gitignore` for Go to File's second
 press.
+Searches cancel for real: each Find view search passes an `id` to
+`search_text`, and a newer one calls `search_cancel(id)`, which sets the
+search's flag in `RUNNING` (a map in `search.rs`); the walk checks it between
+files and fails with "Cancelled", which the view ignores. `exclude` adds
+negated globs to the same overrides as `include`. The field history is
+localStorage (`findHistory`), since it's per user, shown through each input's
+`<datalist>`.
+
+Replace All opens `src/replacepreview.ts`. `replacements` in `search.rs`
+works out each match's replacement against its line at its column
+(`captures_at`), so anchors and lookarounds see the same text the search did,
+in one call for every match. The preview's checkboxes pick which ones
+`applyKept` in `search.ts` applies, through `applyReplacements` in
+`src/replacedata.ts` (with tests), which leaves a line alone when it no
+longer reads as the search saw it. `nextMatch` walks the results by key
+(`<path>\n<index>`), opening a collapsed file first.
+
 ### Actions and shortcuts
 
 `main.ts` keeps one list of actions. Each action has a label, an optional
@@ -2722,8 +2760,26 @@ A save that matches the newest version adds nothing. After each write,
 days, or beyond the newest 100. Pruning a file's own folder on save keeps the
 cost small, with no sweep over the whole history.
 
-Viewing a version reuses the git diff view. `showDiff` takes an optional header
-action, which **Stage Selected** also uses.
+Each version's file name carries what kept it: `<ms>~<action>.txt`, with the
+action URI-encoded (`src/localhistorydata.ts`, with tests); older `<ms>.txt`
+files read as **Saved**. `recordVersion(path, text, action)` takes the action;
+"external" and "before external" become the current activity, which
+`historyActivity` sets for ten seconds: `change` in `git.ts` sets
+`git <command>`, and a revert sets `revert`, so the file watcher's versions
+name their cause. `applyWorkspaceEdit` in `lsp.ts` records the text before and
+after each file's refactoring, since its saves bypass `saveFile`. Labels are
+`labels.json` in the project's history folder, the newest 100.
+
+The **Local History** tab (`src/localhistoryview.ts`, loaded on first use) is
+a panel view: a `listNav` list of versions and labels, a `splitter`, and its
+own Monaco diff editor with `localhistory:` URIs, so the language servers
+don't see the models. A folder's history reads every history folder whose
+path starts with the folder, under `withProgress` with Cancel and an "N of M
+files" count. `revertFiles` records each current text as "Before revert",
+then writes through the host's `setText`, which edits an open model as one
+undo step and writes the file, and returns what `undoRevert` needs. A label's
+revert takes each file's newest version at or before the label
+(`versionAt`).
 
 Two more moments add a version. When the file watcher reports that an open,
 unmodified file changed on disk, the editor records the model's text before
@@ -2749,8 +2805,8 @@ keeps at most 200 files, so a branch switch doesn't copy the whole project;
 git has those versions anyway.
 
 A deleted file's history stays in its folder. **Deleted Files** lists the
-history folders whose project path no longer exists, and restoring creates the
-missing parent folders.
+history folders whose project path no longer exists and opens the tab for
+one, and reverting creates the missing parent folders.
 
 ### Interactive rebase
 
@@ -3202,6 +3258,7 @@ Who uses which key:
 | `databaseEnvOverride`, `databaseHistory` | `database.ts`: a URL that replaces `.env`'s connection on this Mac, and the last 100 statements run | Local only |
 | `phpstan` | `phpstan.ts`, through `registerProjectSettings`; sent to Tusk's server as the `phpstan` option | Local; the settings group's box shares it |
 | `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
+| `bookmarks` | `bookmarks.ts` | Local only |
 
 ## Sessions
 
@@ -3956,11 +4013,20 @@ the debugger.
 
 ## Bookmarks, snippets, and other small tools
 
-- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: lines per file,
-  saved in `localStorage` under `bookmarks:<project>`, and drawn as decorations
-  on open models so they follow edits. They sit in the glyph margin's left lane,
-  so a line can show a bookmark and a breakpoint together. Line changes from
-  edits are saved on each change.
+- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: one ordered list
+  of `{ path, line, mnemonic?, description? }`, saved as the local project
+  value `bookmarks` with paths relative to the project, and drawn as
+  decorations on open models so they follow edits. `syncLines` reads the lines
+  back from the decorations (kept in the same order as the file's bookmarks)
+  before any change to the list, and edits that move lines save them. They
+  sit in the glyph margin's left lane, so a line can show a bookmark and a
+  breakpoint together. A mnemonic shows through one generated CSS class per
+  character (`bookmark-m-<char>`), since Monaco's glyph margin takes only class
+  names. `loadBookmarks` moves the old `bookmarks:<project>` localStorage
+  value into project state once. `src/bookmarksdata.ts` (with tests) reads the
+  saved list, keeping each file's bookmarks together, and reorders it for
+  drag and drop. The **Bookmarks** tab is a panel view with a `listNav` tree;
+  closed files' lines are read once each time it opens.
 - **Snippets** (`src/snippets.ts`) come from `snippets.json` in the app's
   config folder, in VS Code's format. One completion provider for every
   language (`"*"`) filters them by `scope`. While the file is open in a tab, the
@@ -5711,3 +5777,42 @@ groups (`registerProjectSettings`) and module-drawn sections
 so every setting is in one dialog with one search. Tool settings that the tool
 reads itself stay in its file (`_typos.toml`, `mago.toml`), edited with
 `toml_edit` so hand-written comments survive; the rest is project state.
+
+### 2026-09-28: Hide secrets in history response bodies by default
+
+The history file already hid request secrets, but a login response's token
+stayed in its body file. Hiding by field name, as `redact` does for requests,
+catches the common cases (`access_token`, `password`) without guessing at
+values. You still need to see and copy the real body during the session, so
+the history gets the redacted copy and the session keeps the original in a
+folder that's removed next time, rather than redacting what you're looking
+at. A setting keeps bodies as they came or drops them, since some teams want
+full replays and others want nothing on disk.
+
+### 2026-09-28: Local history names versions in their file names
+
+The Local History window needs to say what kept each version. A sidecar
+index would need locking and could disagree with the files on disk, so the
+action goes in the version's name, which pruning and listing already read.
+Other programs' changes can't say who made them, so the editor sets a short-lived
+activity (a git command, a revert) that the watcher's versions pick up. The
+tab has its own diff editor rather than the git diff view, so the list and
+the diff show side by side, as in PhpStorm.
+
+### 2026-09-28: Bookmarks are one ordered list in local project state
+
+The Bookmarks tab can be reordered by dragging, so the order is data: one
+list, rather than a map from files to lines, with each file's bookmarks kept
+together. Bookmarks are personal, like PhpStorm's by default, so they stay in
+the local project state and don't go in `tusk.json`. The tab is a bottom panel
+view like Breakpoints, which it resembles, instead of another sidebar view.
+
+### 2026-09-28: Long checks report counts through `$/progress` tokens the caller owns
+
+The project problems scan runs as one request in Tusk's server. Rather than
+split it into per-file requests, the request takes a `workDoneToken`, and the
+server reports "done/total files" against it. `tuskRequest` routes a token's
+progress to the caller instead of the status bar's generic line, and cancels
+the request when the caller's `AbortSignal` aborts, which the server's
+`is_cancelled` check already honors between files. `withProgress` gained a
+`report` callback so the count shows next to **Cancel**.

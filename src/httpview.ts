@@ -73,10 +73,14 @@ import { detectAppAddress, generateFeatureTest, lastExchange, logCount, logsView
 import { addSaveAsVariable, checksSection } from "./httpchecks";
 import { editEnvironments } from "./httpenv";
 import { choose, confirm, type Item, pick, rank } from "./palette";
+import { openSettings } from "./settings";
 import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
 import { h, icon, iconButton } from "./dom";
 import { limits } from "./limits";
+import { listNav } from "./listnav";
+import { splitter } from "./splitter";
+import { errorText, showError } from "./status";
 
 
 export { selectEnvironment };
@@ -143,8 +147,8 @@ type RequestTab = {
   preview: boolean;
   /** The response shown for it: the one it sent last, or its last in the history. */
   exchange: Exchange | null;
-  /** While its request is being sent: how to cancel it, and the summary that shows it. */
-  sending: { cancel: Cancel; summary: Node[] } | null;
+  /** While its request is being sent: how to cancel it, the summary that shows it, and a stream's messages so far. */
+  sending: { cancel: Cancel; summary: Node[]; body?: Node } | null;
   /** A WebSocket connection's log, shown instead of a response. */
   live: { summary: Node[]; body: Node } | null;
 };
@@ -472,6 +476,7 @@ function renderTabResponse(tab: RequestTab) {
   if (tab.exchange) showExchange(tab.exchange);
   else renderResponse();
   if (tab.sending) resSummary.replaceChildren(...tab.sending.summary);
+  if (tab.sending?.body) resTabs.replaceChildren(), resBody.replaceChildren(tab.sending.body);
   if (tab.exchange || tab.sending) return;
   const r = requestOf(tab);
   if (!r) return;
@@ -703,7 +708,7 @@ const resTabs = h("nav", { class: "http-tabs", role: "tablist" });
 const resBody = h("div", { class: "http-tab-body" });
 const reqPane = h("section", { class: "http-req" }, reqTabs, reqBody);
 const resPane = h("section", { class: "http-res" }, resSummary, resTabs, resBody);
-const divider = h("div", { class: "http-divider" });
+const divider = h("div", { class: "pane-splitter" });
 const EMPTY_TEXT = "Choose a request in the HTTP tool window, or create one. Requests are saved in .http files in the project, so your team can use them too.";
 const emptyText = h("p", {}, EMPTY_TEXT);
 const empty = h(
@@ -735,15 +740,7 @@ panel.addEventListener("keydown", (e) => {
     sendCurrent();
   }
 });
-divider.onmousedown = (down) => {
-  down.preventDefault();
-  const start = reqPane.offsetWidth;
-  const total = reqPane.parentElement!.offsetWidth;
-  const move = (e: MouseEvent) => (reqPane.style.flexBasis = `${Math.min(total - 200, Math.max(240, start + e.clientX - down.clientX))}px`);
-  const up = () => (removeEventListener("mousemove", move), removeEventListener("mouseup", up));
-  addEventListener("mousemove", move);
-  addEventListener("mouseup", up);
-};
+splitter(divider, { target: reqPane, axis: "x", edge: "end", label: "Resize the request and the response", min: 240, minRest: 200, save: "httpRequest" });
 
 async function renderEnvironments(select: HTMLSelectElement) {
   if (!host.root()) return;
@@ -1353,42 +1350,92 @@ async function sendCurrent(mode: SendMode = "send", extraVars?: Record<string, s
     since = Math.floor(Date.now() / 1000);
     adjust = (p) => ({ ...p, url: p.url.replace(/^https?:\/\/[^/]+/, origin) });
   }
+  const label = `${mode === "debug" ? "Debugging" : mode === "profile" ? "Profiling" : "Sending"} ${r.method} ${r.url}`;
+  const x = await sendIn(tab, label, (cancel) => send(path, r, { cancel, extraVars, adjust }), () => sendCurrent(mode, extraVars));
+  const final = x?.heads.at(-1);
+  if (!x || !profiler || !final) return;
+  try {
+    const profile = await profiler.openProfileSince(since, `${r.method} ${x.request.url.replace(/^https?:\/\/[^/]+/, "")} (${final.status})`);
+    // The Queries tab lists the SQL trace written with the profile.
+    if (profile) {
+      x.queries = await profiler.loadQueries(profile);
+      await updateExchange(x);
+      if (shown === x) renderResponse();
+    }
+  } catch (e) {
+    showError("Couldn't open the request's profile", e);
+  }
+}
+
+/**
+ * Runs a send for a tab: shows it in progress (a spinner, a clock, and Cancel on the Send button), a gRPC server
+ * stream's messages as they arrive, and then the response, or the error with Retry. The response goes to the tab
+ * that sent it, even if you've switched to another. Resolves to the exchange, or undefined when it failed.
+ */
+async function sendIn(tab: RequestTab, label: string, task: (cancel: Cancel) => Promise<Exchange>, retry: () => unknown): Promise<Exchange | undefined> {
   const cancel: Cancel = {};
   const started = performance.now();
   const clock = h("span", { class: "http-stat muted" });
   const tick = () => (clock.textContent = ms((performance.now() - started) / 1000));
   tick();
   const timer = setInterval(tick, 100);
-  tab.live = null;
-  tab.sending = { cancel, summary: [h("span", { class: "muted" }, `${mode === "debug" ? "Debugging" : mode === "profile" ? "Profiling" : "Sending"} ${r.method} ${r.url}`), icon("loading codicon-modifier-spin"), clock] };
-  // The response goes to the tab that sent it, even if you've switched to another.
   const here = () => current === tab;
+  // A server stream's messages, as they arrive; the call's response replaces them when it ends.
+  let count = 0;
+  const counter = h("span", { class: "http-stat muted" });
+  const log = h("pre", { class: "http-log http-stream", ariaLive: "polite" });
+  cancel.onMessage = (json) => {
+    let text = json;
+    try {
+      text = JSON.stringify(JSON.parse(json), null, 2);
+    } catch {
+      // Show it as it came.
+    }
+    count++;
+    counter.textContent = `Streaming: ${count} ${count === 1 ? "message" : "messages"} so far`;
+    log.append(`${count > 1 ? "\n" : ""}${text}\n`);
+    if (!tab.sending) return;
+    if (!tab.sending.body) {
+      tab.sending.body = h("div", { class: "http-pane" }, log);
+      tab.sending.summary.push(counter);
+      if (here()) renderTabResponse(tab);
+    }
+    log.scrollTop = log.scrollHeight;
+  };
+  tab.live = null;
+  tab.sending = { cancel, summary: [h("span", { class: "muted" }, label), icon("loading codicon-modifier-spin"), clock] };
   if (here()) renderRequest(), renderTabResponse(tab);
   renderRequestTabs();
   try {
-    const x = await send(path, r, { cancel, extraVars, adjust });
+    const x = await task(cancel);
     tab.exchange = x;
     tab.sending = null;
     if (here()) showExchange(x);
-    const final = x.heads.at(-1);
-    if (profiler && final) {
-      const profile = await profiler.openProfileSince(since, `${r.method} ${x.request.url.replace(/^https?:\/\/[^/]+/, "")} (${final.status})`);
-      // The Queries tab lists the SQL trace written with the profile.
-      if (profile) {
-        x.queries = await profiler.loadQueries(profile);
-        await updateExchange(x);
-        if (shown === x) renderResponse();
-      }
-    }
+    return x;
   } catch (e) {
     tab.sending = null;
-    if (here()) resSummary.replaceChildren(h("span", { class: "http-error" }, `Couldn't send the request: ${e}`));
+    if (here()) sendFailed(e, retry);
+    else showError(`Couldn't send ${nameOf(tab)}`, e, { label: "Retry", run: retry });
+    return undefined;
   } finally {
     clearInterval(timer);
     tab.sending = null;
     if (here()) renderRequest();
     renderRequestTabs();
   }
+}
+
+/** Shows why a send failed in the response area, with Retry. */
+function sendFailed(e: unknown, retry: () => unknown) {
+  console.error("Couldn't send the request", e);
+  resSummary.replaceChildren(h("span", { class: "http-status bad" }, "Failed"));
+  resTabs.replaceChildren();
+  resBody.replaceChildren(errorPane(`Couldn't send the request: ${errorText(e)}`, retry));
+}
+
+/** An error in the response area, with a Retry button. */
+function errorPane(text: string, retry: () => unknown) {
+  return h("div", { class: "http-pane", role: "alert" }, h("p", { class: "http-error" }, text), h("div", { class: "http-empty-actions" }, h("button", { onclick: retry }, "Retry")));
 }
 
 // ---- WebSocket ----
@@ -1491,7 +1538,7 @@ function connectWebSocket(r: HttpRequest) {
   })();
 }
 
-/** Shows an exchange, such as one the runner sent, with its request. */
+/** Shows an exchange, such as one the runner sent, with its request. Resolves to the tab that shows it, if any. */
 export async function openExchange(x: Exchange) {
   const { request } = await requestAt(x.path, x.line).catch(() => ({ request: undefined }));
   if (request) await openRequest(x.path, request.line, false, true);
@@ -1499,6 +1546,7 @@ export async function openExchange(x: Exchange) {
   // A request that's gone from its file still shows its response, without a tab to keep it.
   if (request && current) current.exchange = x;
   showExchange(x);
+  return request ? current : null;
 }
 
 /** Sends the request in `path` at `line`, as from the editor, showing it in the HTTP tab. */
@@ -1577,7 +1625,7 @@ function bodyView(x: Exchange) {
     { class: "http-body-bar" },
     h("div", { class: "segmented" }, ...modes.map(([id, label]) => h("button", { textContent: label, ariaPressed: String(id === bodyMode), onclick: () => ((bodyMode = id), renderResponse()) }))),
     h("span", { class: "muted http-type" }, x.contentType || "No content type"),
-    iconButton("copy", "Copy the body", async () => copy(await invoke<string>("read_file", { path: x.bodyPath }), "the response body")),
+    iconButton("copy", "Copy the body", () => invoke<string>("read_file", { path: x.bodyPath }).then((text) => copy(text, "the response body"), (e) => showError("Couldn't copy the body", e))),
     iconButton("save", "Save the body as…", async () => {
       const to = await save({ defaultPath: `${host.root()}/${x.bodyPath.split("/").pop()!.replace(/^[^.]+/, "response")}` });
       if (to) await invoke("run_capture", { cwd: "/", program: "/bin/cp", args: [x.bodyPath, to], input: null }).then(() => host.status(`Saved ${to}`), (e) => host.status(`Couldn't save the body: ${e}`));
@@ -1587,22 +1635,40 @@ function bodyView(x: Exchange) {
   );
   pane.append(bar);
   const size = x.info?.size_download ?? 0;
-  if (!x.heads.length) return pane.append(h("p", { class: "http-hint" }, "No response.")), pane;
+  if (!x.heads.length) return pane.append(h("p", { class: "http-hint" }, "No response. ", h("button", { class: "link", onclick: () => (current?.exchange === x ? sendCurrent() : resendExchange(x)) }, "Retry"))), pane;
   if (!size) return pane.append(h("p", { class: "http-hint" }, "The response has no body.")), pane;
+  if (!x.bodyPath) {
+    bar.hidden = true;
+    return pane.append(h("p", { class: "http-hint" }, "The history doesn't keep response bodies. ", h("button", { class: "link", onclick: () => resendExchange(x) }, "Send Again"), " to see it, or change this in ", h("button", { class: "link", onclick: () => openSettings("Response bodies in the history") }, "Settings"), ".")), pane;
+  }
+  if (x.bodyHidden === "redacted" && x.savedBody === undefined)
+    pane.append(h("p", { class: "http-hint http-secrets" }, "Secrets in this body, such as tokens and passwords, were hidden when the history saved it. ", h("button", { class: "link", onclick: () => openSettings("Response bodies in the history") }, "Settings")));
+  // While the body loads, and why it couldn't, with Retry.
+  const loading = h("p", { class: "http-hint" }, "Loading the body…");
+  const read = <T>(load: Promise<T>, then: (value: T) => void) => {
+    pane.append(loading);
+    load.then(
+      (value) => (loading.remove(), shown === x && pane.isConnected && then(value)),
+      (e) => {
+        loading.remove();
+        if (shown === x && pane.isConnected) pane.append(errorPane(`Couldn't read the response body: ${errorText(e)}`, () => renderResponse()));
+      },
+    );
+  };
   const status = x.heads.at(-1)?.status ?? 0;
   if (status >= 500 && isText(type) && size <= MAX_SHOWN())
     invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
       const report = laravelException(text, status);
       if (report && pane.isConnected) bar.after(exceptionBanner(report, /json/.test(type)));
-    });
+    }, () => {}); // The body's own read below shows the error.
   if (bodyMode === "preview") {
     if (image || /pdf/.test(type)) {
-      invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/base64", args: ["-i", x.bodyPath], input: null }).then((b64) => {
+      read(invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/base64", args: ["-i", x.bodyPath], input: null }), (b64) => {
         const src = `data:${type.split(";")[0]};base64,${b64.replace(/\s/g, "")}`;
         pane.append(image ? h("div", { class: "http-image" }, h("img", { src, alt: "Response image" })) : h("iframe", { class: "http-preview", src }));
       });
     } else
-      invoke<string>("read_file", { path: x.bodyPath }).then((html) => {
+      read(invoke<string>("read_file", { path: x.bodyPath }), (html) => {
         // No scripts: the page renders as HTML only, with links resolving against the request's URL.
         const frame = h("iframe", { class: "http-preview" });
         frame.setAttribute("sandbox", "");
@@ -1613,10 +1679,9 @@ function bodyView(x: Exchange) {
   }
   if (!isText(type)) return pane.append(h("p", { class: "http-hint" }, `A ${bytes(size)} ${type || "binary"} body. Save it, or open it in an editor tab.`)), pane;
   if (size > MAX_SHOWN()) return pane.append(h("p", { class: "http-hint" }, `The body is ${bytes(size)}, too large to show here. Open it in an editor tab.`)), pane;
-  const el = h("div", { class: "http-code http-response-code" });
-  pane.append(el);
-  invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
-    if (shown !== x || !el.isConnected) return;
+  read(invoke<string>("read_file", { path: x.bodyPath }), (text) => {
+    const el = h("div", { class: "http-code http-response-code" });
+    pane.append(el);
     let value = text;
     let parsed: unknown;
     if (bodyMode === "pretty" && /json/.test(type)) {
@@ -2069,8 +2134,13 @@ let collections: Collection[] = [];
 const collapsed = new Set<string>();
 let filter = "";
 
+/** Why the .http files couldn't be listed, shown in the tree with Retry. */
+let collectionsError = "";
 async function loadCollections() {
-  const files = await httpFiles().catch(() => []);
+  const files = await httpFiles().then(
+    (list) => ((collectionsError = ""), list),
+    (e) => ((collectionsError = errorText(e)), [] as string[]),
+  );
   collections = await Promise.all(
     files.sort().map(async (path) => {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
@@ -2118,7 +2188,7 @@ function renderTree() {
     const dirty = host.isDirty(c.path);
     const row = h(
       "div",
-      { class: `row http-collection${dirty ? " dirty" : ""}`, title: `${relative(c.path)}${dirty ? " (unsaved changes)" : ""}` },
+      { class: `row http-collection${dirty ? " dirty" : ""}`, title: `${relative(c.path)}${dirty ? " (unsaved changes)" : ""}`, role: "treeitem", ariaLevel: "1", ariaExpanded: String(open), data: { key: c.path } },
       h("span", { class: `chevron codicon codicon-chevron-${open ? "down" : "right"}` }),
       icon("globe"),
       h("span", { class: "name" }, relative(c.path).replace(/\.(http|rest)$/, "")),
@@ -2129,18 +2199,21 @@ function renderTree() {
     row.oncontextmenu = (e) => {
       e.preventDefault();
       showMenu(e.clientX, e.clientY, [
-        { label: "New Request Here", run: () => append(c.path, formatRequest(newRequest({ title: "New request", url: "{{host}}/" }))).then((line) => openRequest(c.path, line, true)).then(refreshTree) },
         { label: "Run All Requests", run: () => runFile(c.path) },
+        { label: "New Request Here", run: () => append(c.path, formatRequest(newRequest({ title: "New request", url: "{{host}}/" }))).then((line) => openRequest(c.path, line, true)).then(refreshTree) },
         { label: "Sync with Laravel Routes…", run: () => syncRequestsWithRoutes(c.path) },
         ...(dirty ? [{ label: "Save", run: () => host.save(c.path) }] : []),
         "-",
         { label: "Open in Editor", run: () => host.openAt(c.path, 1) },
       ]);
     };
-    const children = h("ul", {}, ...(open ? requests.map((r) => requestRow(c.path, r)) : []));
-    items.push(h("li", {}, row, children));
+    const children = h("ul", { role: "group" }, ...(open ? requests.map((r) => requestRow(c.path, r)) : []));
+    items.push(h("li", { role: "none" }, row, children));
   }
-  list.replaceChildren(...(items.length ? items : [h("li", { class: "muted" }, q ? "No requests match." : "No .http files yet. Create a request with +, import one from cURL, or make them from your Laravel routes.")]));
+  const message = collectionsError
+    ? h("li", { class: "muted", role: "alert" }, `Couldn't list the .http files: ${collectionsError} `, h("button", { class: "link", onclick: () => refreshTree() }, "Retry"))
+    : h("li", { class: "muted" }, q ? "No requests match." : "No .http files yet. Create a request with +, import one from cURL, or make them from your Laravel routes.");
+  list.replaceChildren(...(items.length ? items : [message]));
   markActive();
 }
 
@@ -2155,7 +2228,7 @@ function requestRow(path: string, r: HttpRequest) {
   const unsaved = requestTabs.some((t) => t.path === path && t.draft !== null && r.start <= lineOf(t) && lineOf(t) <= r.end);
   const row = h(
     "div",
-    { class: "row http-request", title: `${r.method} ${r.url}${unsaved ? "\nIts tab has unsaved changes" : ""}`, data: { path, line: String(r.line) } },
+    { class: "row http-request", title: `${r.method} ${r.url}${unsaved ? "\nIts tab has unsaved changes" : ""}`, role: "treeitem", ariaLevel: "2", data: { path, line: String(r.line), key: `${path}:${r.name ? `@${r.name}` : r.line}`, label } },
     methodBadge(r.method),
     h("span", { class: "name" }, label),
     unsaved ? h("span", { class: "http-unsaved", ariaLabel: "Unsaved changes" }) : null,
@@ -2167,17 +2240,17 @@ function requestRow(path: string, r: HttpRequest) {
   row.oncontextmenu = (e) => {
     e.preventDefault();
     showMenu(e.clientX, e.clientY, [
-      { label: "Send", run: () => sendAt(path, r.line) },
+      { label: "Send", keys: "⌘⏎", run: () => sendAt(path, r.line) },
       { label: "Open in Editor", run: () => host.openAt(path, r.line) },
       "-",
-      { label: "Rename…", run: () => renameRequest(path, r) },
+      { label: "Rename…", keys: "F2", run: () => renameRequest(path, r) },
       { label: "Duplicate", run: () => duplicate(path, r) },
-      { label: "Delete", run: () => deleteRequest(path, r) },
+      { label: "Delete", keys: "⌘⌫", run: () => deleteRequest(path, r) },
       "-",
       { label: "Stress Test…", run: () => loadTest(path, r) },
     ]);
   };
-  return h("li", {}, row);
+  return h("li", { role: "none" }, row);
 }
 
 function markActive() {
@@ -2202,7 +2275,7 @@ async function renderHistory() {
           const final = x.heads.at(-1);
           const row = h(
             "div",
-            { class: "row http-request", title: `${x.request.method} ${x.request.url}\n${new Date(x.time).toLocaleString()}` },
+            { class: "row http-request", title: `${x.request.method} ${x.request.url}\n${new Date(x.time).toLocaleString()}`, role: "option", data: { key: x.id, label: x.request.url.replace(/^https?:\/\/[^/]+/, "") } },
             h("span", { class: `http-code-badge ${statusClass(final?.status ?? 0)}` }, final ? String(final.status) : "ERR"),
             methodBadge(x.request.method),
             h("span", { class: "name" }, x.request.url.replace(/^https?:\/\/[^/]+/, "") || "/"),
@@ -2221,7 +2294,7 @@ async function renderHistory() {
               { label: "Copy as Laravel HTTP", run: () => copyAs(x.request, "Laravel") },
             ]);
           };
-          return h("li", {}, row);
+          return h("li", { role: "none" }, row);
         })
       : [h("li", { class: "muted" }, q ? "No requests match." : "Requests you send show here.")]),
   );
@@ -2229,25 +2302,38 @@ async function renderHistory() {
 
 /** Sends a history entry's request again exactly as it went, without scripts. */
 async function resendExchange(x: Exchange) {
-  await openExchange(x);
-  const tab = current;
-  resSummary.replaceChildren(h("span", { class: "muted" }, `Sending ${x.request.method} ${x.request.url} again`), icon("loading codicon-modifier-spin"));
-  const again = await resend(x);
-  if (tab) tab.exchange = again;
-  if (current === tab) showExchange(again);
+  const tab = await openExchange(x);
+  const label = `Sending ${x.request.method} ${x.request.url} again`;
+  const retry = () => resendExchange(x);
+  if (tab) return sendIn(tab, label, (cancel) => resend(x, cancel), retry);
+  // Its request is gone from the file, so there's no tab to show it in progress or cancel it.
+  host.status(`${label}…`);
+  try {
+    showExchange(await resend(x));
+    host.status("");
+  } catch (e) {
+    showError("Couldn't send the request again", e, { label: "Retry", run: retry });
+  }
 }
 
 async function compareExchanges(a: Exchange, b: Exchange) {
   const [older, newer] = a.time < b.time ? [a, b] : [b, a];
   const text = async (e: Exchange) => {
-    const body = await invoke<string>("read_file", { path: e.bodyPath }).catch(() => "");
+    if (!e.bodyPath) throw new Error("the history doesn't keep response bodies");
+    const body = await invoke<string>("read_file", { path: e.bodyPath });
     try {
       return JSON.stringify(JSON.parse(body), null, 2);
     } catch {
       return body;
     }
   };
-  host.showDiff(newer.bodyPath, await text(older), await text(newer), `${older.request.method} ${older.request.url} at ${new Date(older.time).toLocaleTimeString()} ↔ ${new Date(newer.time).toLocaleTimeString()}`);
+  let texts: [string, string];
+  try {
+    texts = [await text(older), await text(newer)];
+  } catch (e) {
+    return showError("Couldn't compare the responses", e);
+  }
+  host.showDiff(newer.bodyPath, ...texts, `${older.request.method} ${older.request.url} at ${new Date(older.time).toLocaleTimeString()} ↔ ${new Date(newer.time).toLocaleTimeString()}`);
 }
 
 // ---- Editor integration ----
@@ -2314,6 +2400,33 @@ export function initHttpClient(h_: Host) {
   };
   ($("http-filter") as HTMLInputElement).oninput = (e) => ((filter = (e.target as HTMLInputElement).value), renderTree());
   ($("http-history-filter") as HTMLInputElement).oninput = (e) => ((historyFilter = (e.target as HTMLInputElement).value), renderHistory());
+  // The keyboard: ↑↓ and the rest from listNav; Enter opens a request in a lasting tab; ↓ in a filter goes to its list.
+  const tree = $("http-requests");
+  const treeNav = listNav(tree, {
+    open: (row) => (row.dataset.line ? openRequest(row.dataset.path!, Number(row.dataset.line)) : row.click()),
+  });
+  tree.addEventListener("keydown", (e) => {
+    const row = treeNav.selectedRow();
+    if (!row?.dataset.line || e.target !== tree) return;
+    const c = collections.find((c) => c.path === row.dataset.path);
+    const r = c?.requests.find((q) => q.line === Number(row.dataset.line));
+    if (!c || !r) return;
+    if (e.key === "Enter" && e.metaKey) sendAt(c.path, r.line);
+    else if (e.key === "Backspace" && e.metaKey) deleteRequest(c.path, r);
+    else if (e.key === "F2") renameRequest(c.path, r);
+    else return;
+    e.preventDefault();
+  });
+  const historyList = $("http-history");
+  const historyNav = listNav(historyList);
+  for (const [input, list, nav] of [["http-filter", tree, treeNav], ["http-history-filter", historyList, historyNav]] as const)
+    $(input).addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown") return;
+      e.preventDefault();
+      list.focus();
+      const first = list.querySelector<HTMLElement>("[data-key]");
+      if (first && !nav.selectedRow()) nav.select(first.dataset.key!);
+    });
   renderResponse();
 }
 

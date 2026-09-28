@@ -87,15 +87,17 @@ export async function withProgress<T>(
 ): Promise<T | undefined> {
   const source = `task${++tasks}:progress`;
   const controller = new AbortController();
+  let done = false;
   if (options.cancellable) cancels.set(source, controller);
   status(label, source);
   try {
-    return await task(controller.signal, (text) => status(text, source));
+    return await task(controller.signal, (text) => void (!done && status(text, source)));
   } catch (e) {
     if (controller.signal.aborted) status(`Canceled: ${label.replace(/…$/, "")}`, "app", "info");
     else showError(options.error ?? `${label.replace(/…$/, "")} failed`, e);
     return undefined;
   } finally {
+    done = true;
     cancels.delete(source);
     status("", source);
   }

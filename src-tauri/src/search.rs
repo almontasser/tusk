@@ -9,12 +9,21 @@ const MAX_MATCHES: usize = 20_000;
 
 /// Walks the project like ripgrep: respects .gitignore (even outside a git repo),
 /// includes dotfiles, and skips .git. `include` is a comma-separated list of globs,
-/// such as `*.php, *.blade.php`; empty means every file. With `all`, ignored files
-/// such as vendor count too.
+/// such as `*.php, *.blade.php`; empty means every file. `exclude` is another such
+/// list of files and folders to leave out, such as `tests, *.min.js`. With `all`,
+/// ignored files such as vendor count too.
 fn walk(root: &str, include: &str, all: bool) -> Result<impl Iterator<Item = ignore::DirEntry>, String> {
+    walk_excluding(root, include, "", all)
+}
+
+fn walk_excluding(root: &str, include: &str, exclude: &str, all: bool) -> Result<impl Iterator<Item = ignore::DirEntry>, String> {
     let mut overrides = OverrideBuilder::new(root);
-    for glob in include.split(',').map(str::trim).filter(|g| !g.is_empty()) {
-        overrides.add(glob).map_err(|e| e.to_string())?;
+    let globs = |list: &str| list.split(',').map(str::trim).filter(|g| !g.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+    for glob in globs(include) {
+        overrides.add(&glob).map_err(|e| e.to_string())?;
+    }
+    for glob in globs(exclude) {
+        overrides.add(&format!("!{}", glob.trim_start_matches('!'))).map_err(|e| e.to_string())?;
     }
     Ok(WalkBuilder::new(root)
         .hidden(false)
@@ -144,20 +153,44 @@ pub struct Match {
     text: String,
 }
 
-/// Every occurrence of the query in the project, up to 20,000.
+/// Searches in flight by the caller's ID, each with the flag that stops it.
+static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>> = std::sync::LazyLock::new(Default::default);
+const CANCELLED: &str = "Cancelled";
+
+/// Every occurrence of the query in the project, up to 20,000. With an `id`, `search_cancel`
+/// stops it, and it fails with "Cancelled".
 #[tauri::command]
-pub async fn search_text(root: String, query: Query, include: String, limit: Option<usize>) -> Result<Vec<Match>, String> {
-    crate::blocking(move || find_text(root, query, include, limit.unwrap_or(MAX_MATCHES))).await
+pub async fn search_text(root: String, query: Query, include: String, exclude: Option<String>, id: Option<String>, limit: Option<usize>) -> Result<Vec<Match>, String> {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Some(id) = &id {
+        RUNNING.lock().unwrap().insert(id.clone(), stop.clone());
+    }
+    let result = crate::blocking(move || find_text(root, query, include, exclude.unwrap_or_default(), &stop, limit.unwrap_or(MAX_MATCHES))).await;
+    if let Some(id) = &id {
+        RUNNING.lock().unwrap().remove(id);
+    }
+    result
 }
 
-fn find_text(root: String, query: Query, include: String, limit: usize) -> Result<Vec<Match>, String> {
+/// Stops the search started with `id`, if it's still running.
+#[tauri::command]
+pub fn search_cancel(id: String) {
+    if let Some(stop) = RUNNING.lock().unwrap().get(&id) {
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+fn find_text(root: String, query: Query, include: String, exclude: String, stop: &std::sync::atomic::AtomicBool, limit: usize) -> Result<Vec<Match>, String> {
     if query.text.is_empty() {
         return Ok(vec![]);
     }
     let matcher = query.matcher()?;
     let mut searcher = Searcher::new();
     let mut matches = Vec::new();
-    for entry in walk(&root, &include, false)? {
+    for entry in walk_excluding(&root, &include, &exclude, false)? {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(CANCELLED.into());
+        }
         let path = entry.path();
         let _ = searcher.search_path(
             &matcher,
@@ -186,15 +219,15 @@ fn find_text(root: String, query: Query, include: String, limit: usize) -> Resul
 
 /// Every file with at least one match, with no limit, for Replace All.
 #[tauri::command]
-pub async fn files_matching(root: String, query: Query, include: String) -> Result<Vec<String>, String> {
-    crate::blocking(move || find_files(root, query, include)).await
+pub async fn files_matching(root: String, query: Query, include: String, exclude: Option<String>) -> Result<Vec<String>, String> {
+    crate::blocking(move || find_files(root, query, include, exclude.unwrap_or_default())).await
 }
 
-fn find_files(root: String, query: Query, include: String) -> Result<Vec<String>, String> {
+fn find_files(root: String, query: Query, include: String, exclude: String) -> Result<Vec<String>, String> {
     let matcher = query.matcher()?;
     let mut searcher = Searcher::new();
     let mut files = Vec::new();
-    for entry in walk(&root, &include, false)? {
+    for entry in walk_excluding(&root, &include, &exclude, false)? {
         let mut found = false;
         let _ = searcher.search_path(
             &matcher,
@@ -231,6 +264,35 @@ pub fn replace_text(text: String, query: Query, replacement: String) -> Result<R
     Ok(Replaced { text, count })
 }
 
+/// What each match becomes, for Replace in Files' preview: `matches` are (line, UTF-16 column) pairs, where the
+/// search found each match. A regex's `$1` and `${name}` expand against the match in its line, so anchors and
+/// lookarounds see the same text the search did. None for a match that's no longer at its column.
+#[tauri::command(async)]
+pub fn replacements(matches: Vec<(String, usize)>, query: Query, replacement: String) -> Result<Vec<Option<String>>, String> {
+    let re = query.regex()?;
+    Ok(matches
+        .iter()
+        .map(|(line, column)| {
+            // The byte offset of the 1-based UTF-16 column.
+            let mut units = 0;
+            let start = line.char_indices().find(|(_, c)| {
+                let at = units + 1 >= *column;
+                units += c.len_utf16();
+                at
+            });
+            let start = start.map(|(i, _)| i).unwrap_or(line.len());
+            let caps = re.captures_at(line, start).filter(|c| c.get(0).is_some_and(|m| m.start() == start))?;
+            let mut out = String::new();
+            if query.regex {
+                caps.expand(&replacement, &mut out);
+            } else {
+                out.push_str(&replacement);
+            }
+            Some(out)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,7 +310,7 @@ mod tests {
         std::fs::write(dir.join("b.txt"), "needle").unwrap();
         std::fs::write(dir.join("vendor/c.php"), "needle").unwrap();
         let root = dir.to_string_lossy().to_string();
-        let search = |query: Query, include: &str| tauri::async_runtime::block_on(search_text(root.clone(), query, include.into(), None)).unwrap();
+        let search = |query: Query, include: &str| tauri::async_runtime::block_on(search_text(root.clone(), query, include.into(), None, None, None)).unwrap();
 
         let found = search(q("needle", false, false, false), "");
         assert_eq!(found.len(), 3); // Two in a.php, one in b.txt; vendor is ignored.
@@ -258,13 +320,18 @@ mod tests {
         assert_eq!(search(q("needle", false, true, false), "").len(), 2);
         assert_eq!(search(q("needle", false, false, false), "*.php").len(), 2);
         assert_eq!(search(q("Need", false, false, true), "").len(), 0);
-        assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into(), None)).is_err());
+        assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into(), None, None, None)).is_err());
+        let excluding = |exclude: &str| tauri::async_runtime::block_on(search_text(root.clone(), q("needle", false, false, false), "".into(), Some(exclude.into()), None, None)).unwrap();
+        assert_eq!(excluding("*.txt").len(), 2);
+        assert_eq!(excluding("a.php, b.txt").len(), 0);
+        let stopped = std::sync::atomic::AtomicBool::new(true);
+        assert_eq!(find_text(root.clone(), q("needle", false, false, false), "".into(), "".into(), &stopped, MAX_MATCHES).err().as_deref(), Some(CANCELLED));
 
         let files = tauri::async_runtime::block_on(list_files(root.clone(), None));
         assert!(files.contains(&"a.php".to_string()) && !files.iter().any(|f| f.starts_with("vendor")));
         let all = tauri::async_runtime::block_on(list_files(root.clone(), Some(true)));
         assert!(all.iter().any(|f| f.starts_with("vendor")));
-        let matching = tauri::async_runtime::block_on(files_matching(root.clone(), q("needle", false, false, false), "".into())).unwrap();
+        let matching = tauri::async_runtime::block_on(files_matching(root.clone(), q("needle", false, false, false), "".into(), None)).unwrap();
         assert_eq!(matching.len(), 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -294,6 +361,14 @@ mod tests {
         assert_eq!(paths, ["vendor/aws/sdk/src/data"]);
         assert_eq!(found[0].files, 2);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn works_out_each_replacement_in_its_line() {
+        let got = replacements(vec![("é foo1 foo2".into(), 3), ("é foo1 foo2".into(), 8), ("bar".into(), 1)], q(r"foo(\d)", true, false, false), "x$1".into()).unwrap();
+        assert_eq!(got, vec![Some("x1".into()), Some("x2".into()), None]);
+        let literal = replacements(vec![("a $1 a".into(), 1)], q("a", false, false, false), "$1".into()).unwrap();
+        assert_eq!(literal, vec![Some("$1".into())]);
     }
 
     #[test]

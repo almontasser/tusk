@@ -136,8 +136,22 @@ export async function profilingOrigin(): Promise<string | undefined> {
   const root = host.root();
   const port = server?.root === root && (await listening(server.port)) ? server.port : await startProfilingServer();
   if (!port) return undefined;
-  // Wait for the server to accept connections.
-  for (let i = 0; i < 25 && !(await listening(port)); i++) await sleep(200);
+  // Wait for the server to accept connections, which you can cancel from the status bar.
+  if (!(await listening(port))) {
+    const up = await withProgress(
+      "Waiting for the profiling server…",
+      async (signal) => {
+        for (let i = 0; i < 50; i++) {
+          signal.throwIfAborted();
+          if (await listening(port)) return true;
+          await sleep(200);
+        }
+        throw new Error(`nothing listens on port ${port} after 10 seconds. Its terminal tab may say why`);
+      },
+      { cancellable: true, error: "The profiling server didn't start" },
+    );
+    if (!up) return undefined;
+  }
   return `http://127.0.0.1:${port}`;
 }
 
@@ -147,13 +161,22 @@ export async function profilingOrigin(): Promise<string | undefined> {
  */
 export async function openProfileSince(since: number, label: string) {
   const dir = await profileDir();
-  let size = -1;
-  for (let i = 0; i < 25; i++) {
-    const newest = await newestProfile(dir, since);
-    if (newest && newest.size === size) break;
-    size = newest?.size ?? -1;
-    await sleep(200);
-  }
+  const finished = await withProgress(
+    "Waiting for Xdebug to finish the profile…",
+    async (signal) => {
+      let size = -1;
+      for (let i = 0; i < 25; i++) {
+        signal.throwIfAborted();
+        const newest = await newestProfile(dir, since);
+        if (newest && newest.size === size) break;
+        size = newest?.size ?? -1;
+        await sleep(200);
+      }
+      return true;
+    },
+    { cancellable: true },
+  );
+  if (!finished) return undefined;
   return openNewestProfile(dir, since, label);
 }
 

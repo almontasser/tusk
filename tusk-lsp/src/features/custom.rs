@@ -2,8 +2,11 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-use lsp_types::{Diagnostic, Location};
+use lsp_types::{Diagnostic, Location, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd, WorkDoneProgressReport};
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,24 +45,45 @@ pub fn member_references(snap: &Snapshot, params: Value) -> Result<Value, String
 }
 
 /// `tusk/projectProblems`: the problems in every project file, by path relative to the root, as open files get
-/// them. The Problems panel shows these for files that aren't open.
-pub fn project_problems(snap: &Snapshot, _params: Value) -> Result<Value, String> {
+/// them. The Problems panel shows these for files that aren't open. With a `workDoneToken` in the params, it
+/// reports "<done>/<total> files" as `$/progress` while it checks.
+pub fn project_problems(snap: &Snapshot, params: Value) -> Result<Value, String> {
     let index = snap.index.read();
     let paths: Vec<PathBuf> = index.project_files().map(|p| p.to_path_buf()).collect();
     let index = &*index;
+    let token = params.get("workDoneToken").and_then(Value::as_str).map(str::to_owned);
+    let progress = |value: WorkDoneProgress| {
+        if let (Some(client), Some(token)) = (&snap.client, &token) {
+            client.progress(token, value);
+        }
+    };
+    let total = paths.len();
+    progress(WorkDoneProgress::Begin(WorkDoneProgressBegin { title: "Checking the project".into(), cancellable: Some(true), message: Some(format!("0/{total} files")), percentage: Some(0) }));
+    let done = AtomicUsize::new(0);
+    let last = Mutex::new(Instant::now());
     let results: BTreeMap<String, Vec<Diagnostic>> = crate::index::scan_pool().install(|| paths
         .into_par_iter()
         .filter_map(|path| {
             if snap.is_cancelled() {
                 return None;
             }
-            let text = snap.read(&path)?;
-            let doc = Document::new(path_to_uri(&path), path.clone(), "php".into(), 0, text);
-            let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::diagnostics::php_problems_in(index, &doc))).ok()?;
-            let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
-            (!problems.is_empty()).then_some((rel, problems))
+            let found = (|| {
+                let text = snap.read(&path)?;
+                let doc = Document::new(path_to_uri(&path), path.clone(), "php".into(), 0, text);
+                let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::diagnostics::php_problems_in(index, &doc))).ok()?;
+                let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
+                (!problems.is_empty()).then_some((rel, problems))
+            })();
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            let mut last = last.lock();
+            if last.elapsed() > Duration::from_millis(150) {
+                *last = Instant::now();
+                progress(WorkDoneProgress::Report(WorkDoneProgressReport { cancellable: Some(true), message: Some(format!("{n}/{total} files")), percentage: Some((n * 100 / total.max(1)) as u32) }));
+            }
+            found
         })
         .collect());
+    progress(WorkDoneProgress::End(WorkDoneProgressEnd { message: None }));
     if snap.is_cancelled() {
         return Err(crate::server::CANCELLED.into());
     }

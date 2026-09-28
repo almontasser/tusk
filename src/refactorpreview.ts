@@ -37,7 +37,7 @@ export function changedLines(text: string, edits: L.TextEdit[]): { line: number;
 }
 
 /** A line with what changed marked: the text both share at the start and end stays plain. */
-function diffLine(before: string, after: string) {
+export function diffLine(before: string, after: string) {
   let start = 0;
   while (start < before.length && before[start] === after[start]) start++;
   let end = 0;
