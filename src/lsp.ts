@@ -33,8 +33,8 @@ export type Host = {
   forget(path: string): void;
   /** Opens a file at a 1-based line. */
   openAt(path: string, line: number): void;
-  /** Shows a status message; each source has its own slot, and "" clears it. */
-  status(text: string, source?: string): void;
+  /** Shows a status message; each source has its own slot, and "" clears it. "error" also shows a toast. */
+  status(text: string, source?: string, kind?: "error" | "info"): void;
 };
 
 let host: Host;
@@ -298,6 +298,16 @@ function linkUndo(models: monaco.editor.ITextModel[], created: Map<string, strin
   );
 }
 
+/**
+ * A server's message without its stack trace or dumped details, as Node servers append them: the first line, cut
+ * where "at" frames or `{ details: … }` start, and at most 240 characters.
+ */
+export function serverMessage(message: string): string {
+  const first = message.split("\n").find((l) => l.trim()) ?? "";
+  const cut = first.split(/\s+at\s+(?:[\w$.<>[\] ]+\s)?\(?\//)[0].split(/\s\{\s*details:/)[0].trim();
+  return cut.length > 240 ? `${cut.slice(0, 240)}…` : cut;
+}
+
 /** Applies an edit and saves every touched file, as PhpStorm does for refactorings. One ⌘Z undoes it in all of them. */
 export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
   const ops: (L.TextDocumentEdit | L.CreateFile | L.RenameFile | L.DeleteFile)[] =
@@ -470,7 +480,13 @@ async function startServer(
         setMarkers(model, owner, list);
       }
     } else if (msg.method === "window/showMessage" || (msg.method === "window/logMessage" && msg.params.type === 1)) {
-      host.status(`${name}: ${msg.params.message}`, name);
+      // Servers put stack traces and dumps in these; the status bar and a toast get the first sentence, and the
+      // console the whole message.
+      const full = String(msg.params.message ?? "");
+      if (msg.params.type === 1) console.warn(`[${name}] ${full}`);
+      const brief = serverMessage(full);
+      const shown = msg.method === "window/showMessage" && msg.params.type === 1;
+      host.status(`${name}: ${brief}`, name, shown ? "error" : "info");
     } else if (onNotification && msg.method !== "$/progress") {
       onNotification(msg.method, msg.params, notify);
     } else if (msg.method === "$/progress" && progressListeners.has(msg.params.token)) {

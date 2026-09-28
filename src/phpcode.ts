@@ -175,6 +175,39 @@ export function textValue(node: PNode | null | undefined): { text: string; trans
   return undefined;
 }
 
+/**
+ * An array of options read for editing: each key with its label, where a label can be a plain string or a
+ * translated one (`__('Draft')`). A list without keys uses each value as its key. Undefined when anything in the
+ * array is other code, so an editor never writes back less than the code held.
+ */
+export function mapValue(node: PNode | null | undefined): { entries: [string, string][]; translated: boolean } | undefined {
+  if (!node || node.kind !== "array") return undefined;
+  const entries: [string, string][] = [];
+  let translated = false;
+  for (const item of node.items) {
+    if (item.spread) return undefined;
+    const label = textValue(item.value) ?? (item.value.kind === "number" ? { text: String(item.value.value), translated: false } : undefined);
+    if (!label) return undefined;
+    translated ||= label.translated;
+    let key = label.text;
+    if (item.key) {
+      const k = nodeValue(item.key);
+      if (typeof k !== "string" && typeof k !== "number") return undefined;
+      key = String(k);
+    }
+    entries.push([key, label.text]);
+  }
+  return { entries, translated };
+}
+
+/** Options as PHP: keys to labels, with the labels in `__()` when `translated`. */
+export function mapCode(entries: [string, string][], translated: boolean): string {
+  if (!entries.length) return "[]";
+  const label = (s: string) => (translated ? `__(${phpString(s)})` : phpString(s));
+  const key = (k: string) => (/^(0|[1-9]\d*)$/.test(k) ? k : phpString(k));
+  return `[\n${entries.map(([k, v]) => `    ${key(k)} => ${label(v)},`).join("\n")}\n]`;
+}
+
 // ---- Layout of the text ----
 
 /** The whitespace at the start of the line that holds `offset`. */
@@ -405,6 +438,30 @@ export class Imports {
     }
     return edits;
   }
+}
+
+/**
+ * Edits that remove the imports `edits` leave unused: those the code named before and doesn't after. Imports that
+ * were already unused are the file's business and stay. Group imports (`use A\{B, C}`) stay too.
+ */
+export function droppedImports(text: string, outline: Outline, edits: Edit[]): Edit[] {
+  const after = applyEdits(text, edits);
+  const codeStart = (t: string) => {
+    const m = /^\s*(?:(?:abstract|final|readonly)\s+)*(?:class|interface|trait|enum)\s/m.exec(t);
+    return m ? m.index : t.length;
+  };
+  const used = (t: string, alias: string) => new RegExp(`(?<![\\w$\\\\])${alias.replace(/[$]/g, "\\$&")}(?![\\w])`).test(t.slice(codeStart(t)));
+  const out: Edit[] = [];
+  for (const u of outline.uses) {
+    if (u.kind !== "class" || outline.uses.filter((o) => o.span[0] === u.span[0]).length > 1) continue;
+    if (!used(text, u.alias) || used(after, u.alias)) continue;
+    const start = text.lastIndexOf("\n", u.span[0] - 1) + 1;
+    const nl = text.indexOf("\n", u.span[1]);
+    const end = nl < 0 ? u.span[1] : nl + 1;
+    if (edits.some((e) => e.start < end && start < e.end)) continue;
+    out.push({ start, end, text: "" });
+  }
+  return out;
 }
 
 // ---- Classes ----

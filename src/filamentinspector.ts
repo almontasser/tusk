@@ -9,7 +9,8 @@ import { type Condition, conditionClosure, getUtility, needsValue, type Operator
 import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
 import { type Comp, type Path, shortClass, walk } from "./filamentschema";
-import { nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
+import { confirm } from "./palette";
+import { mapCode, mapValue, nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
 
 /** A call to set: its arguments as code (`{{Fqn}}` names a class), "" for none, or null to remove it. */
 export type CallChange = { path?: Path; name: string; args: string | null };
@@ -90,10 +91,43 @@ function methodRow(ctx: InspectorCtx, m: MethodInfo, label = humanize(m.name)): 
   const doc = [m.method.doc, `${m.label}::${m.name}(${m.method.params.map((p) => `${p.types.join("|")} $${p.name}${p.default !== undefined ? ` = ${p.default}` : ""}`).join(", ")})`].filter(Boolean).join("\n");
   const named = existing?.args.items.some((a) => a.name);
   // A value the editor can't show, such as a closure, stays as code.
-  const opaque = (node: PNode | undefined) => !!node && !["string", "number", "bool", "null", "array", "classConst", "func"].includes(node.kind);
-  if (existing && (opaque(first) || (named && editor.kind !== "switch"))) return row(label, codeChip(ctx, existing.args.items[0]?.value ?? (c.node as PNode)), { set: true, reset, doc });
+  // A value the editor can't show in full, such as a closure or an array with code in it, stays as code, so an
+  // edit never writes back less than the code held.
+  if (existing && first && (!readable(editor, first) || (named && editor.kind !== "switch"))) return row(label, codeChip(ctx, first), { set: true, reset, doc });
+  if (existing && existing.args.items.length > 1 && editor.kind !== "switch" && editor.kind !== "presence") return row(label, codeChip(ctx, first ?? (c.node as PNode)), { set: true, reset, doc });
   const value = editorFor(ctx, editor, m.name, first, existing !== undefined, set);
   return row(label, value, { set: !!existing, reset, doc, stacked: editor.kind === "map" || (editor.kind === "text" && !!editor.multiline) });
+}
+
+/** Whether an editor can show a value in full. */
+function readable(editor: Editor, node: PNode): boolean {
+  switch (editor.kind) {
+    case "presence":
+    case "switch":
+      return node.kind === "bool";
+    case "number":
+      return node.kind === "number";
+    case "text":
+      return !!textValue(node) || node.kind === "number";
+    case "enum":
+      return node.kind === "classConst" || node.kind === "string" || node.kind === "number";
+    case "icon":
+      return node.kind === "classConst" || !!textValue(node);
+    case "color":
+      return node.kind === "string";
+    case "list": {
+      const v = nodeValue(node);
+      return Array.isArray(v) && v.every((x) => typeof x === "string" || typeof x === "number");
+    }
+    case "map":
+      return !!mapValue(node);
+    case "value": {
+      const v = nodeValue(node);
+      return v !== undefined && (v === null || typeof v !== "object");
+    }
+    case "code":
+      return true;
+  }
 }
 
 function editorFor(ctx: InspectorCtx, editor: Editor, name: string, value: PNode | undefined, present: boolean, set: (args: string | null) => void): HTMLElement {
@@ -137,8 +171,8 @@ function editorFor(ctx: InspectorCtx, editor: Editor, name: string, value: PNode
       }, { placeholder: "Comma-separated" });
     }
     case "map": {
-      const v = nodeValue(value);
-      return mapEditor(v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, string>) : Array.isArray(v) ? Object.fromEntries(v.map((x) => [String(x), String(x)])) : {}, (map) => set(Object.keys(map).length ? phpValue(map) : null));
+      const m = mapValue(value);
+      return mapEditor(m?.entries ?? [], (entries) => set(entries.length ? mapCode(entries, m?.translated ?? false) : null));
     }
     case "value": {
       const v = nodeValue(value);
@@ -165,10 +199,11 @@ function iconButtonEditor(ctx: InspectorCtx, current: string | null, set: (caseN
 }
 
 /** Rows of keys and labels, as options take them. */
-function mapEditor(value: Record<string, string>, commit: (map: Record<string, string>) => void): HTMLElement {
-  const rows: [string, string][] = Object.entries(value).map(([k, v]) => [k, String(v)]);
+function mapEditor(value: [string, string][], commit: (entries: [string, string][]) => void): HTMLElement {
+  const rows: [string, string][] = value.map(([k, v]) => [k, v]);
   const wrap = h("div", { class: "fd-map" });
-  const save = () => commit(Object.fromEntries(rows.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v || labelFromName(k.trim())])));
+  // Entries keep their order: an object would move keys like "3" first.
+  const save = () => commit(rows.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v || labelFromName(k.trim())]));
   const render = () => {
     wrap.replaceChildren(
       h("div", { class: "fd-map-head" }, h("span", {}, "Value saved"), h("span", {}, "Label shown")),
@@ -245,17 +280,20 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   const c = ctx.comp;
   const options = arg(c, "options");
   const rel = call(c, "relationship");
-  const source: "list" | "enum" | "relationship" | "code" = rel ? "relationship" : options?.kind === "classConst" ? "enum" : !options || options.kind === "array" ? "list" : "code";
+  const list = mapValue(options);
+  const source: "list" | "enum" | "relationship" | "code" = rel ? "relationship" : options?.kind === "classConst" ? "enum" : !options || list ? "list" : "code";
   const wrap = h("div", { class: "fd-options" });
   const clearOthers = (keep: string) => [...(keep !== "options" && options ? [{ name: "options", args: null }] : []), ...(keep !== "relationship" && rel ? [{ name: "relationship", args: null }] : [])];
-  const tabs = segmented<"list" | "enum" | "relationship">(
+  const tabs = segmented<"list" | "enum" | "relationship" | "code">(
     [
       ["list", "List"],
       ["enum", "Enum"],
       ["relationship", "Relationship"],
     ],
-    source === "code" ? "list" : source,
-    (v) => {
+    source,
+    async (v) => {
+      // Options written as code are replaced only when you say so.
+      if (source === "code" && !(await confirm("Replace the options written in code?", "Replace"))) return;
       if (v === "list") ctx.set([...clearOthers("options"), { name: "options", args: phpValue({ option: "Option" }) }]);
       if (v === "enum" && ctx.enums[0]) ctx.set([...clearOthers("options"), { name: "options", args: `{{${ctx.enums[0].class}}}::class` }]);
       if (v === "enum" && !ctx.enums[0]) wrap.append(h("p", { class: "fd-note" }, "The app has no enums under app/. Create one, then pick it here.") as HTMLElement);
@@ -268,9 +306,8 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   wrap.append(tabs);
   if (source === "code" && options) wrap.append(codeChip(ctx, options));
   if (source === "list") {
-    const v = nodeValue(options);
-    const map = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, string>) : Array.isArray(v) ? Object.fromEntries(v.map((x) => [String(x), String(x)])) : {};
-    wrap.append(mapEditor(map, (m) => ctx.set([{ name: "options", args: Object.keys(m).length ? phpValue(m) : null }])));
+    const translated = list?.translated ?? false;
+    wrap.append(mapEditor(list?.entries ?? [], (entries) => ctx.set([{ name: "options", args: entries.length ? mapCode(entries, translated) : null }])));
   }
   if (source === "enum") {
     const current = options?.kind === "classConst" ? options.class : "";
@@ -283,6 +320,10 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   }
   if (source === "relationship" && rel) {
     const [nameNode, titleNode] = [rel.args.items[0]?.value, rel.args.items[1]?.value];
+    if ((nameNode && !textValue(nameNode)) || (titleNode && !textValue(titleNode)) || rel.args.items.some((a) => a.name && !["modifyQueryUsing", "titleAttribute", "name"].includes(a.name))) {
+      wrap.append(codeChip(ctx, rel.args.items[0]?.value ?? c.node));
+      return row("Options", wrap, { stacked: true, set: true });
+    }
     const relName = textValue(nameNode)?.text ?? "";
     const title = textValue(titleNode)?.text ?? "";
     const relSelect = h("select", {}, ...ctx.relations.map((r) => h("option", { value: r.name, textContent: `${r.name} · ${r.type}`, selected: r.name === relName })));
@@ -294,7 +335,9 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
         titleSelect.replaceChildren(...cols.map((col) => h("option", { value: col, textContent: col, selected: col === title })));
         if (title && !cols.includes(title)) titleSelect.prepend(h("option", { value: title, textContent: title, selected: true }));
       });
-    const write = () => ctx.set([{ name: "relationship", args: `${phpString(relSelect.value)}, ${phpString(titleSelect.value || "name")}` }]);
+    // A third argument, such as a closure that narrows the query, stays as written.
+    const rest = rel.args.items.slice(2).map((a) => ctx.text.slice(a.span[0], a.span[1]));
+    const write = () => ctx.set([{ name: "relationship", args: [phpString(relSelect.value), phpString(titleSelect.value || "name"), ...rest].join(", ") }]);
     relSelect.onchange = write;
     titleSelect.onchange = write;
     wrap.append(h("div", { class: "fd-pair" }, h("label", {}, "Relationship", relSelect), h("label", {}, "Shows", titleSelect)));
@@ -434,10 +477,10 @@ function conditionEditor(ctx: InspectorCtx, method: "visible" | "required" | "di
         const op = h("select", { class: "fd-cond-op" }, ...OPERATORS.map(([v, l]) => h("option", { value: v, textContent: l, selected: v === cond.op })));
         op.onchange = () => ((cond.op = op.value as Operator), render(), save());
         const target = fields.find((f) => f.name === cond.field)?.comp;
-        const opts = target ? nodeValue(arg(target, "options")) : undefined;
+        const opts = target ? Object.fromEntries(mapValue(arg(target, "options"))?.entries ?? []) : undefined;
         let value: HTMLElement | null = null;
         if (needsValue(cond.op)) {
-          if (opts && typeof opts === "object" && !Array.isArray(opts) && cond.op !== "in") {
+          if (opts && Object.keys(opts).length && cond.op !== "in") {
             const s = h("select", { class: "fd-cond-value" }, h("option", { value: "", textContent: "Value…" }), ...Object.entries(opts as Record<string, string>).map(([k, l]) => h("option", { value: k, textContent: String(l), selected: k === cond.value })));
             s.onchange = () => ((cond.value = s.value), save());
             value = s;
@@ -564,6 +607,7 @@ function specialRow(ctx: InspectorCtx, m: MethodInfo): HTMLElement | null {
   const c = ctx.comp;
   if (m.name === "toggleable" && classInfo(ctx.cat, c.cls)?.kind === "column") {
     const existing = call(c, "toggleable");
+    if (existing && existing.args.items.some((a) => a.name !== "isToggledHiddenByDefault" || a.value.kind !== "bool")) return row("Can be hidden", codeChip(ctx, existing.args.items[0].value), { set: true, reset: () => ctx.set([{ name: "toggleable", args: null }]) });
     const hiddenDefault = !!existing?.args.items.some((a) => a.name === "isToggledHiddenByDefault" && a.value.kind === "bool" && a.value.value);
     const on = !!existing;
     const box = h("input", { type: "checkbox", checked: hiddenDefault, disabled: !on });
@@ -582,6 +626,7 @@ function specialRow(ctx: InspectorCtx, m: MethodInfo): HTMLElement | null {
   if (m.name === "relationship" && shortClass(c.cls) !== "Select" && shortClass(c.cls) !== "SelectFilter" && shortClass(c.cls) !== "CheckboxList") {
     // A repeater or section saved through a relationship: just its name.
     const existing = call(c, "relationship");
+    if (existing && (existing.args.items.length > 1 || (existing.args.items[0] && !textValue(existing.args.items[0].value)))) return row("Relationship", codeChip(ctx, existing.args.items[0].value), { set: true, reset: () => ctx.set([{ name: "relationship", args: null }]) });
     const name = textValue(existing?.args.items[0]?.value)?.text ?? "";
     const select = h("select", {}, h("option", { value: "", textContent: "None" }), ...ctx.relations.map((r) => h("option", { value: r.name, textContent: `${r.name} · ${r.type}`, selected: r.name === name })));
     select.onchange = () => ctx.set([{ name: "relationship", args: select.value ? phpString(select.value) : null }]);

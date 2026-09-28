@@ -123,3 +123,30 @@ test("columnFromDatabase reads SQLite's boolean defaults", () => {
   assert.equal(c.type, "boolean");
   assert.equal(c.default, "false");
 });
+
+test("columnFromDatabase reads Postgres defaults and UUID foreign keys", () => {
+  const o = { unique: false, index: false, fillable: true, hidden: false, id: "x" };
+  const read = (type: string, fullType: string, def: string | null, extra = {}) => columnFromDatabase({ name: "x", type, fullType, nullable: false, default: def }, { ...o, ...extra });
+  assert.equal(read("varchar", "character varying(255)", "'inactive'::character varying").default, "'inactive'");
+  assert.equal(read("varchar", "character varying(255)", null).length, undefined);
+  assert.equal(read("int8", "bigint", "'0'::bigint").default, "0");
+  assert.equal(read("int8", "bigint", "'0'::bigint").type, "bigInteger");
+  assert.equal(read("bool", "boolean", "false").default, "false");
+  assert.equal(read("int8", "bigint", "nextval('posts_id_seq'::regclass)").default, undefined);
+  assert.equal(read("timestamp", "timestamp(0) without time zone", "CURRENT_TIMESTAMP").default, undefined);
+  assert.equal(read("uuid", "uuid", null, { foreign: { table: "companies", onDelete: "set null" } }).type, "foreignUuid");
+});
+
+test("mergeList keeps the model's order, renames in place, and appends new attributes", async () => {
+  const { mergeList } = await import("./modelgen.ts");
+  const before = [col("title", "string"), col("slug", "string"), col("old", "string")];
+  const designed = [{ ...col("headline", "string"), original: before[0] }, { ...col("slug", "string", { fillable: false }), original: before[1] }, col("summary", "text")];
+  assert.deepEqual(mergeList(["provider_id", "title", "slug", "old"], before, designed, (c) => c.fillable), ["provider_id", "headline", "summary"]);
+});
+
+test("pivotMigration uses each side's key type", async () => {
+  const { pivotMigration } = await import("./modelgen.ts");
+  const code = pivotMigration("post_tag", { table: "posts", key: "post_id", type: "foreignUuid" }, { table: "tags", key: "tag_id" });
+  assert.match(code, /\$table->foreignUuid\('post_id'\)->constrained\('posts'\)/);
+  assert.match(code, /\$table->foreignId\('tag_id'\)->constrained\('tags'\)/);
+});

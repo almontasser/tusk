@@ -1,0 +1,280 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources",
+  "uses": [
+    {
+      "alias": "EditAction",
+      "name": "Filament\\Actions\\EditAction",
+      "kind": "class",
+      "span": [
+        42,
+        74
+      ]
+    },
+    {
+      "alias": "Resource",
+      "name": "Filament\\Resources\\Resource",
+      "kind": "class",
+      "span": [
+        75,
+        107
+      ]
+    },
+    {
+      "alias": "Table",
+      "name": "Filament\\Tables\\Table",
+      "kind": "class",
+      "span": [
+        108,
+        134
+      ]
+    }
+  ],
+  "useInsert": 135,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "HelperResource",
+      "fqn": "App\\Filament\\Resources\\HelperResource",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Resources\\Resource",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        136,
+        495
+      ],
+      "bodyStart": 175,
+      "bodyEnd": 494,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "table",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "table",
+              "type": "Table",
+              "default": null,
+              "span": [
+                209,
+                221
+              ]
+            }
+          ],
+          "returnType": "Table",
+          "attributes": [],
+          "span": [
+            180,
+            374
+          ],
+          "docStart": null,
+          "body": [
+            235,
+            373
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "static",
+                "class": "self",
+                "classSpan": [
+                  251,
+                  255
+                ],
+                "method": "configureMessageTable",
+                "args": {
+                  "open": 278,
+                  "close": 285,
+                  "items": [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "var",
+                        "name": "table",
+                        "span": [
+                          279,
+                          285
+                        ]
+                      },
+                      "span": [
+                        279,
+                        285
+                      ],
+                      "spread": false
+                    }
+                  ]
+                },
+                "span": [
+                  251,
+                  286
+                ]
+              },
+              "calls": [
+                {
+                  "name": "recordActions",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 314,
+                    "close": 366,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "static",
+                                "class": "Filament\\Actions\\EditAction",
+                                "classSpan": [
+                                  333,
+                                  343
+                                ],
+                                "method": "make",
+                                "args": {
+                                  "open": 349,
+                                  "close": 350,
+                                  "items": []
+                                },
+                                "span": [
+                                  333,
+                                  351
+                                ]
+                              },
+                              "span": [
+                                333,
+                                351
+                              ],
+                              "spread": false
+                            }
+                          ],
+                          "open": 315,
+                          "close": 365,
+                          "legacy": false,
+                          "span": [
+                            315,
+                            366
+                          ]
+                        },
+                        "span": [
+                          315,
+                          366
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    299,
+                    367
+                  ],
+                  "nameSpan": [
+                    301,
+                    314
+                  ]
+                }
+              ],
+              "span": [
+                251,
+                367
+              ]
+            }
+          ]
+        },
+        {
+          "name": "configureMessageTable",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "table",
+              "type": "Table",
+              "default": null,
+              "span": [
+                425,
+                437
+              ]
+            }
+          ],
+          "returnType": "Table",
+          "attributes": [],
+          "span": [
+            380,
+            493
+          ],
+          "docStart": null,
+          "body": [
+            451,
+            492
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "table",
+                "span": [
+                  467,
+                  473
+                ]
+              },
+              "calls": [
+                {
+                  "name": "columns",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 482,
+                    "close": 485,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [],
+                          "open": 483,
+                          "close": 484,
+                          "legacy": false,
+                          "span": [
+                            483,
+                            485
+                          ]
+                        },
+                        "span": [
+                          483,
+                          485
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    473,
+                    486
+                  ],
+                  "nameSpan": [
+                    475,
+                    482
+                  ]
+                }
+              ],
+              "span": [
+                467,
+                486
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -59,3 +59,11 @@ test("childSlot finds a layout's children in make(), as Group::make([...]) takes
   assert.equal(childSlot(section)?.via, "schema");
   assert.equal(childSlot(section)!.entries[0].comp!.name, "sender");
 });
+
+test("a chain after a helper that gets the parameter is read, with the helper named", () => {
+  const cls = fixture("HelperTable").outline.classes[0];
+  const table = readRoot(cls, "table")!;
+  assert.equal(table.custom, undefined);
+  assert.deepEqual(table.helper, { class: "self", method: "configureMessageTable" });
+  assert.equal(table.slots.get("recordActions")!.entries.length, 1);
+});

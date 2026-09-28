@@ -9,6 +9,7 @@ import { tuskRequest } from "./lsp";
 import type { Outline } from "./phpcode";
 import { pathsFor, psr4From } from "./psr4";
 import { runningContainer } from "./sail";
+import { commandError } from "./laravelnewdata";
 
 export type PageInfo = { name: string; class: string; file: string | null; kind: "list" | "create" | "edit" | "view" | "manage" | "related" | "custom" };
 export type RelationInfo = { class: string; file: string | null; relationship: string | null; title: string | null; group: string | null };
@@ -43,9 +44,17 @@ export type PanelInfo = {
   resources: ResourceInfo[];
   clusters: { class: string; file: string | null; label: string | null }[];
 };
-export type AppInfo = { version: string | null; booted: boolean; panels: PanelInfo[] };
+export type AppInfo = {
+  version: string | null;
+  booted: boolean;
+  /** Why the app couldn't boot, such as a syntax error in a resource Filament discovers. */
+  bootError?: { message: string; file: string; line: number } | null;
+  panels: PanelInfo[];
+  /** The resource files, read from the source, when the app couldn't boot. */
+  files?: { class: string; file: string }[];
+};
 export type EnumInfo = { class: string; file: string | null; backed: boolean; cases: { name: string; value: string | number | null }[]; contracts: string[] };
-export type ModelSummary = { class: string; table: string; columns: Record<string, { type: string; nullable: boolean } | null>; casts: Record<string, string>; relations: Relation[] };
+export type ModelSummary = { class: string; table: string; keyType?: string; ulid?: boolean; columns: Record<string, { type: string; nullable: boolean } | null>; casts: Record<string, string>; relations: Relation[] };
 export type ModelDetails = {
   class: string;
   file: string | null;
@@ -86,8 +95,8 @@ async function introspect<T>(root: string, mode: string, ...args: string[]): Pro
     json = JSON.parse(out);
   } catch {
     // PHP's own errors, such as a syntax error in a provider, come before any JSON.
-    const lines = out.replace(/\x1b\[[\d;]*m/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
-    throw new Error(lines.slice(0, 3).join(" ") || `introspect.php ${mode} printed nothing`);
+    console.error(`introspect.php ${mode} failed:\n${out}`);
+    throw new Error(out.trim() ? commandError(out) : `introspect.php ${mode} printed nothing`);
   }
   if (json && typeof json === "object" && "error" in json && Object.keys(json).length === 1) throw new Error(String((json as { error: string }).error));
   return json as T;
@@ -126,9 +135,12 @@ export async function modelFacts(root: string, cls: string): Promise<ModelFacts 
       .filter((c, i, list) => list.indexOf(c) === i)
       .map((name) => ({ name, type: guessType(name, details.casts[name]), nullable: true, autoIncrement: name === details.keyName && details.incrementing }));
   const titles: Record<string, string> = {};
-  for (const r of details.relations) if (r.related && all[r.related]) titles[r.related] = titleAttribute(Object.keys(all[r.related].columns));
+  for (const r of details.relations) if (r.related && all[r.related]) titles[r.related] = titleAttribute(Object.keys(all[r.related].columns), typesOf(all[r.related]));
   return { class: cls, columns, casts: details.casts, relations: details.relations, enums: appEnums.map((e) => e.class), softDeletes: details.softDeletes, titles, details };
 }
+
+/** A model summary's column types, by name. */
+export const typesOf = (m: ModelSummary) => Object.fromEntries(Object.entries(m.columns).map(([k, v]) => [k, v?.type]));
 
 /** A column's type from its cast, for a model whose table can't be read. */
 function guessType(name: string, cast?: string): string {
@@ -169,7 +181,12 @@ export async function artisan(root: string, args: string[]): Promise<string> {
   const container = await runningContainer(root);
   const command = container ? container.exec(["php", "artisan", ...args], [], false) : ["php", "artisan", ...args];
   const [program, ...rest] = command;
-  return invoke<string>("run_capture", { cwd: root, program, args: [...rest, "--no-interaction", "--no-ansi"], input: null, anyStatus: false });
+  return invoke<string>("run_capture", { cwd: root, program, args: [...rest, "--no-interaction", "--no-ansi"], input: null, anyStatus: false }).catch((e) => {
+    // The whole output, with its stack trace, goes to the console; the message says what went wrong.
+    const out = e instanceof Error ? e.message : String(e);
+    console.error(`php artisan ${args.join(" ")} failed:\n${out}`);
+    throw new Error(commandError(out));
+  });
 }
 
 /**

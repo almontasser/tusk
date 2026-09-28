@@ -86,8 +86,12 @@ export function relationFor(c: Column, m: Pick<ModelFacts, "relations">): Relati
 }
 
 /** The attribute that names a model's records: the first of name, title, and the like it has, or `id`. */
-export function titleAttribute(columns: string[]): string {
-  return ["name", "title", "label", "full_name", "display_name", "username", "email", "code", "slug", "number", "reference"].find((c) => columns.includes(c)) ?? "id";
+export function titleAttribute(columns: string[], types: Record<string, string | undefined> = {}): string {
+  const known = ["name", "title", "label", "full_name", "display_name", "username", "email", "code", "slug", "number", "reference"].find((c) => columns.includes(c));
+  if (known) return known;
+  // Otherwise the first text column that isn't a key, such as a sender's `sender`.
+  const text = columns.find((c) => /char|string|text/i.test(types[c] ?? "") && !/(^id$|_id$|uuid|ulid|token|password|_at$|_type$)/.test(c));
+  return text ?? "id";
 }
 
 const maxLengthOf = (c: Column) => Number(/\((\d+)\)/.exec(c.fullType ?? "")?.[1] ?? 0) || (/^(varchar|string)$/i.test(c.type) ? 255 : 0);

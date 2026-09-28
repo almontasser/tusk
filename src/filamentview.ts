@@ -23,6 +23,11 @@ export function initFilament(h_: typeof host) {
   initDesigner(h_);
   $("filament-new").onclick = () => void newResource();
   $("filament-refresh").onclick = () => (fapp.forget(), void loadFilament());
+  $("filament-filter").oninput = applyFilter;
+  $("filament-filter").onkeydown = (e) => {
+    if (e.key === "ArrowDown") (e.preventDefault(), document.querySelector<HTMLElement>("#filament-list li[tabindex]:not([hidden])")?.focus());
+  };
+  $("filament-list").addEventListener("keydown", moveFocus);
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {
       const text = model.getValue();
@@ -71,15 +76,18 @@ export async function loadFilament() {
     );
     return;
   }
-  if (!list.childElementCount) list.replaceChildren(h("p", { class: "fv-empty muted" }, "Reading the panels…"));
+  if (!list.childElementCount) list.replaceChildren(h("p", { class: "fv-empty muted fv-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the panels…"));
   let app: fapp.AppInfo;
+  // The designer needs the catalog too; reading it now, beside the panels, makes opening a resource quicker.
+  const catalog = fapp.catalog(root).catch(() => null);
   try {
     app = await fapp.app(root);
   } catch (e) {
     list.replaceChildren(h("div", { class: "fv-empty" }, h("p", {}, `Can't read the app: ${errorText(e)}`), h("button", { type: "button", onclick: () => (fapp.forget(), void loadFilament()) }, icon("refresh"), "Try again")));
     return;
   }
-  const cat = await fapp.catalog(root).catch(() => null);
+  const cat = await catalog;
+  void fapp.models(root).catch(() => {});
   const iconsDir = cat?.heroiconsDir ?? null;
   if (cat && majorVersion(cat) && majorVersion(cat) < 4) {
     list.replaceChildren(h("p", { class: "fv-empty muted" }, `The designers work with Filament 4 and later. This project has ${cat.version}.`));
@@ -145,8 +153,59 @@ export async function loadFilament() {
     }
     if (!panel.resources.length) rows.push(h("li", { class: "fv-none muted" }, "No resources yet"));
   }
-  if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, app.booted ? "No panels. Filament needs a panel provider." : "The app couldn't boot, so its panels aren't known."));
-  list.replaceChildren(h("ul", { class: "fv-tree", role: "tree" }, ...rows));
+  if (!app.booted) {
+    // The app can't start, often because of a mistake in a file Filament loads. Say where, and still list the
+    // resource files so they can be opened and fixed.
+    const e = app.bootError;
+    rows.push(
+      h(
+        "li",
+        { class: "fv-boot-error", title: e ? `${e.message}\n${e.file}:${e.line}` : "" },
+        icon("error"),
+        h(
+          "div",
+          {},
+          h("strong", {}, "The app can't start"),
+          h("span", {}, e?.message ?? "It failed while booting."),
+          e?.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(`${root}/${e.file}`, e.line) }, `${e.file}:${e.line}`) : null,
+        ),
+      ),
+    );
+    if (app.files?.length) rows.push(h("li", { class: "fv-group" }, "Resource files"));
+    for (const f of app.files ?? []) {
+      const path = `${root}/${f.file}`;
+      const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: f.file }, icon("symbol-structure"), h("span", { class: "fv-name" }, shortClass(f.class)), h("span", { class: "fv-detail" }, f.file.replace(/^app\/Filament\//, "").split("/")[0].replace(/^Resources$/, "")));
+      row.onclick = () => void openDesigner(path);
+      row.onkeydown = (ev) => ev.key === "Enter" && void openDesigner(path);
+      rows.push(row);
+    }
+  } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));
+  const tree = h("ul", { class: "fv-tree", role: "tree" }, ...rows);
+  list.replaceChildren(tree);
+  applyFilter();
+}
+
+/** Hides resources whose label, model, and class don't contain the filter's text, and groups left empty. */
+function applyFilter() {
+  const q = ($("filament-filter") as HTMLInputElement).value.trim().toLowerCase();
+  const rows = [...document.querySelectorAll<HTMLElement>("#filament-list .fv-tree > li")];
+  for (const row of rows) if (row.classList.contains("fv-resource")) row.hidden = !!q && !row.textContent!.toLowerCase().includes(q) && !(row.title ?? "").toLowerCase().includes(q);
+  // A group heading shows while one of its resources does.
+  rows.forEach((row, i) => {
+    if (!row.classList.contains("fv-group")) return;
+    let shown = false;
+    for (let j = i + 1; j < rows.length && rows[j].classList.contains("fv-resource"); j++) shown ||= !rows[j].hidden;
+    row.hidden = !shown;
+  });
+}
+
+/** Up and down move between the tool window's rows; Enter opens one. */
+function moveFocus(e: KeyboardEvent) {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const rows = [...document.querySelectorAll<HTMLElement>("#filament-list li[tabindex]")].filter((r) => !r.hidden);
+  const i = rows.indexOf(document.activeElement as HTMLElement);
+  const next = rows[e.key === "ArrowDown" ? Math.min(i + 1, rows.length - 1) : Math.max(i - 1, 0)];
+  if (next) (e.preventDefault(), next.focus());
 }
 
 /** Picks a resource to open in the designer. */

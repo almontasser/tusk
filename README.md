@@ -823,6 +823,12 @@ grids with column spans, tabs, wizards, repeaters, and every field type.
 | <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> | Undo or redo the designer's last change |
 | <kbd>Esc</kbd> | Select the parent |
 
+Values the designer can't show in full, such as closures, options with keys
+written as code, or settings a method decides, show as code you can open. The
+designer asks before replacing them. A file with syntax errors opens read-only
+until you fix them. When the app can't start, the Filament tool window shows
+why, with a link to the file and line, and still lists the resource files.
+
 The palette lists the components the project has: Filament's, plugins', and the
 project's own. Each setting's editor comes from its parameter types, so a new
 Filament version or a plugin needs no update to Tusk.

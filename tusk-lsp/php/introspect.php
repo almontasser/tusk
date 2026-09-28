@@ -48,12 +48,14 @@ require $root . '/vendor/autoload.php';
 
 // Boot the app so models can read their table columns from the database.
 $booted = false;
+$bootError = null;
 try {
     $app = require $root . '/bootstrap/app.php';
     $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
     $booted = true;
-} catch (Throwable) {
-    // Without a booted app, columns fall back to what the model declares.
+} catch (Throwable $e) {
+    // Without a booted app, columns fall back to what the model declares. The designers say why it failed.
+    $bootError = ['message' => $e->getMessage(), 'file' => ltrim(str_replace($root, '', $e->getFile()), '/'), 'line' => $e->getLine()];
 }
 
 /** File and line where a class or method is declared. */
@@ -777,9 +779,11 @@ function designerResource(string $resource, string $root): array
 /** The app's Filament panels, each with its folders, resources, and clusters. Needs the booted app. */
 function filamentApp(string $root): array
 {
-    global $booted;
-    $out = ['version' => packageVersion($root, 'filament/filament'), 'booted' => $booted, 'panels' => []];
+    global $booted, $bootError;
+    $out = ['version' => packageVersion($root, 'filament/filament'), 'booted' => $booted, 'bootError' => $bootError, 'panels' => []];
     if (!$booted || !class_exists('Filament\\Facades\\Filament')) {
+        // The resource files, read from the source, so they can still be opened.
+        $out['files'] = resourceFiles($root);
         return $out;
     }
     // Each panel's provider, so the designers can open it or add a resource folder.
@@ -856,6 +860,27 @@ function appEnums(string $root): array
         } catch (Throwable) {
         }
     }
+    return $out;
+}
+
+/** Resource files under app/Filament, by class name read from the source, without loading them. */
+function resourceFiles(string $root): array
+{
+    $dir = $root . '/app/Filament';
+    $out = [];
+    if (!is_dir($dir)) {
+        return [];
+    }
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+        if (!str_ends_with($file->getFilename(), 'Resource.php')) {
+            continue;
+        }
+        $source = (string) file_get_contents($file->getPathname());
+        if (preg_match('/^namespace\s+([^;]+);/m', $source, $ns) && preg_match('/^\s*(?:final\s+|abstract\s+)*class\s+(\w+)\s+extends\s+\w*Resource\b/m', $source, $cls)) {
+            $out[] = ['class' => $ns[1] . '\\' . $cls[1], 'file' => ltrim(str_replace($root, '', $file->getPathname()), '/')];
+        }
+    }
+    usort($out, fn ($a, $b) => strcmp($a['file'], $b['file']));
     return $out;
 }
 
@@ -990,7 +1015,7 @@ try {
                 try {
                     if (is_a($class, Model::class, true) && !(new ReflectionClass($class))->isAbstract()) {
                         $model = new $class();
-                        $models[$class] = ['class' => $class, 'table' => $model->getTable(), 'columns' => columnDetails($model), 'casts' => $model->getCasts(), 'relations' => array_map(fn ($r) => ['name' => $r['name'], 'type' => $r['type'], 'related' => $r['related']], relations($model)), 'accessors' => accessors($model), 'scopes' => scopes($model)];
+                        $models[$class] = ['class' => $class, 'table' => $model->getTable(), 'keyType' => $model->getKeyType(), 'uniqueIds' => method_exists($model, 'uniqueIds') ? $model->uniqueIds() : [], 'ulid' => in_array('Illuminate\\Database\\Eloquent\\Concerns\\HasUlids', class_uses_recursive($model), true), 'columns' => columnDetails($model), 'casts' => $model->getCasts(), 'relations' => array_map(fn ($r) => ['name' => $r['name'], 'type' => $r['type'], 'related' => $r['related']], relations($model)), 'accessors' => accessors($model), 'scopes' => scopes($model)];
                     }
                 } catch (Throwable) {
                 }

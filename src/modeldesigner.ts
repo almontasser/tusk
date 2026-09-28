@@ -20,6 +20,7 @@ import {
   diffColumns,
   factoryFile,
   foreignKeyFor,
+  mergeList,
   migrationFileName,
   modelFile,
   type ModelSpec,
@@ -109,6 +110,7 @@ class ModelDesigner {
   models: string[] = [];
   enums: fapp.EnumInfo[] = [];
   tables = new Map<string, string>();
+  summaries: Record<string, fapp.ModelSummary> = {};
   preview: monaco.editor.IStandaloneCodeEditor | null = null;
   previewTab: "migration" | "model" | "factory" = "migration";
   busy = "";
@@ -140,6 +142,7 @@ class ModelDesigner {
     try {
       const [models, enums, migrations] = await Promise.all([fapp.models(this.root).catch(() => ({}) as Record<string, fapp.ModelSummary>), fapp.enums(this.root).catch(() => []), fapp.migrations(this.root).catch(() => null)]);
       this.models = Object.keys(models).sort();
+      this.summaries = models;
       for (const [cls, m] of Object.entries(models)) this.tables.set(cls, m.table);
       this.enums = enums;
       const database = !!migrations?.database;
@@ -148,7 +151,7 @@ class ModelDesigner {
         this.state = {
           existing: null,
           file: null,
-          spec: { name, namespace: "App\\Models", table: name ? tableFor(name) : "", key: "id", timestamps: true, softDeletes: false, columns: [], relations: [] },
+          spec: { name, namespace: "App\\Models", table: name ? tableFor(name) : "", key: projectKey(models), timestamps: true, softDeletes: false, columns: [], relations: [] },
           before: [],
           softDeletesBefore: false,
           factory: true,
@@ -314,8 +317,8 @@ class ModelDesigner {
     for (const group of [...new Set(COLUMN_TYPES.map((t) => t.group))]) type.append(h("optgroup", { label: group }, ...COLUMN_TYPES.filter((t) => t.group === group).map((t) => h("option", { value: t.type, textContent: t.label, selected: t.type === c.type }))));
     type.onchange = () => {
       c.type = type.value;
-      if (c.type === "foreignId" && !c.references) c.references = this.guessTable(c.name);
-      if (c.type === "foreignId" && !c.onDelete) c.onDelete = "cascade";
+      if (c.type.startsWith("foreign") && !c.references) c.references = this.guessTable(c.name);
+      if (c.type.startsWith("foreign") && !c.onDelete) c.onDelete = "cascade";
       this.render();
     };
     const extra = h("div", { class: "md-col-extra" });
@@ -374,6 +377,12 @@ class ModelDesigner {
     return row;
   }
 
+  /** The foreign key type for a model's key: foreignUuid for UUIDs, foreignUlid for ULIDs, foreignId otherwise. */
+  private foreignType(model: string): string {
+    const m = this.summaries[model];
+    return m?.ulid ? "foreignUlid" : m?.keyType === "string" ? "foreignUuid" : "foreignId";
+  }
+
   /** The table a foreign key column points to: `author_id` → `authors`, or a model's table named like it. */
   private guessTable(column: string) {
     const base = column.replace(/_id$/, "");
@@ -405,7 +414,7 @@ class ModelDesigner {
     if (r.type !== "belongsTo") return;
     const key = r.foreignKey || foreignKeyFor(r.name);
     if (s.spec.columns.some((c) => c.name === key)) return;
-    s.spec.columns.push({ id: newId(), name: key, type: "foreignId", nullable: false, fillable: true, references: this.tables.get(r.related) ?? tableFor(shortClass(r.related)), onDelete: "cascade" });
+    s.spec.columns.push({ id: newId(), name: key, type: this.foreignType(r.related), nullable: false, fillable: true, references: this.tables.get(r.related) ?? tableFor(shortClass(r.related)), onDelete: "cascade" });
   }
 
   private relationRow(r: RelationSpec) {
@@ -428,7 +437,7 @@ class ModelDesigner {
       r.name = /Many$/.test(r.type) ? camel(plural(base)) : camel(base);
       // The foreign key this relationship added follows it.
       const col = s.spec.columns.find((c) => c.name === oldKey && !c.original);
-      if (col && r.type === "belongsTo") (col.name = foreignKeyFor(r.name)), (col.references = this.tables.get(r.related) ?? tableFor(base));
+      if (col && r.type === "belongsTo") (col.name = foreignKeyFor(r.name)), (col.references = this.tables.get(r.related) ?? tableFor(base)), (col.type = this.foreignType(r.related));
       else this.syncForeignKey(r);
       this.render();
     };
@@ -623,7 +632,7 @@ class ModelDesigner {
     for (const r of spec.relations.filter((x) => x.type === "belongsToMany")) {
       const pivot = r.pivot || pivotTable(spec.name, shortClass(r.related));
       const other = this.tables.get(r.related) ?? tableFor(shortClass(r.related));
-      await this.write(`${root}/database/migrations/${migrationFileName(`create_${pivot}_table`, new Date(now + 1000 * n++))}`, pivotMigration(pivot, { table: spec.table, key: `${snake(spec.name)}_id` }, { table: other, key: `${snake(shortClass(r.related))}_id` }));
+      await this.write(`${root}/database/migrations/${migrationFileName(`create_${pivot}_table`, new Date(now + 1000 * n++))}`, pivotMigration(pivot, { table: spec.table, key: `${snake(spec.name)}_id`, type: spec.key === "uuid" ? "foreignUuid" : spec.key === "ulid" ? "foreignUlid" : "foreignId" }, { table: other, key: `${snake(shortClass(r.related))}_id`, type: this.foreignType(r.related) }));
     }
     await this.addInverses(`${spec.namespace}\\${spec.name}`);
     if (s.migrate) await this.migrate();
@@ -718,12 +727,10 @@ class ModelDesigner {
     const ex = s.existing!;
     // Fillable: in the property, in Laravel 13's #[Fillable] attribute, or a new property. A model with
     // `$guarded = []` takes everything already.
-    const fillable = spec.columns.filter((c) => c.fillable).map((c) => c.name);
-    const keep = ex.fillable.filter((f) => !s.before.some((b) => b.name === f));
-    const nextFillable = [...keep, ...fillable];
+    const nextFillable = mergeList(ex.fillable, s.before, spec.columns, (c) => c.fillable);
     const unguarded = ex.guarded.length === 0 && !ex.fillable.length;
     if (!unguarded && JSON.stringify(nextFillable) !== JSON.stringify(ex.fillable)) edits.push(...this.listEdit(text, cls, "fillable", "Illuminate\\Database\\Eloquent\\Attributes\\Fillable", nextFillable, "protected $fillable", imports));
-    const hidden = [...ex.hidden.filter((f) => !s.before.some((b) => b.name === f)), ...spec.columns.filter((c) => c.hidden).map((c) => c.name)];
+    const hidden = mergeList(ex.hidden, s.before, spec.columns, (c) => !!c.hidden);
     if (JSON.stringify(hidden) !== JSON.stringify(ex.hidden)) edits.push(...this.listEdit(text, cls, "hidden", "Illuminate\\Database\\Eloquent\\Attributes\\Hidden", hidden, "protected $hidden", imports));
     // Casts: new ones go into casts() or $casts; the ones already there stay.
     const newCasts = spec.columns.map((c) => [c.name, castFor(c)] as const).filter(([n, c]) => c && !ex.casts[n] && !ex.casts[s.before.find((b) => b.name === n)?.name ?? ""]) as [string, string][];
@@ -764,6 +771,15 @@ class ModelDesigner {
     void nodeValue;
     return list.length ? [setProperty(text, cls, prop, phpValue(list), declaration)] : [];
   }
+}
+
+/** The primary key most of the app's models use, so a new model follows the project. */
+function projectKey(models: Record<string, fapp.ModelSummary>): ModelSpec["key"] {
+  const all = Object.values(models);
+  const ulid = all.filter((m) => m.ulid).length;
+  const uuid = all.filter((m) => m.keyType === "string" && !m.ulid).length;
+  if (ulid * 2 > all.length) return "ulid";
+  return uuid * 2 > all.length ? "uuid" : "id";
 }
 
 /** A default typed into the column table, as PHP: numbers and booleans as they are, anything else quoted. */

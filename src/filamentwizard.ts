@@ -11,7 +11,7 @@ import { type Column, filterFor, formField, type Gen, inFormByDefault, infolistE
 import { commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
 import { readRoot, type RootKind, shortClass } from "./filamentschema";
 import { applyWorkspaceEdit } from "./lsp";
-import { type Edit, Imports, indentCode, mergeEdits, methodNamed, type Outline, phpString, replaceNode, setCall, setProperty } from "./phpcode";
+import { droppedImports, type Edit, Imports, indentCode, mergeEdits, methodNamed, type Outline, phpString, replaceNode, setCall, setProperty } from "./phpcode";
 import { errorText, showError } from "./status";
 
 type Step = "model" | "placement" | "form" | "table" | "review";
@@ -137,7 +137,7 @@ class Wizard {
     const name = shortClass(cls);
     this.label = "";
     this.plural = "";
-    this.title = titleAttribute(f.columns.map((c) => c.name));
+    this.title = titleAttribute(f.columns.map((c) => c.name), Object.fromEntries(f.columns.map((c) => [c.name, c.type])));
     this.softDeletes = !!f.softDeletes;
     this.fields = f.columns.filter((c) => !["id", "created_at", "updated_at", "deleted_at"].includes(c.name)).map((c) => {
       const gen = formField(c, f);
@@ -510,7 +510,8 @@ class Wizard {
     const text = model.getValue();
     const outline = await fapp.outlineOf(text, path);
     const imports = new Imports(text, outline);
-    const edits = mergeEdits([...build(text, outline, imports), ...imports.edits()]);
+    const made = [...build(text, outline, imports), ...imports.edits()];
+    const edits = mergeEdits([...made, ...droppedImports(text, outline, made)]);
     if (!edits.length) return;
     const pos = (o: number) => {
       const p = model.getPositionAt(o);

@@ -5,7 +5,7 @@ import { h, icon } from "./dom";
 import { type Catalog, classInfo, humanize, isA, labelFromName, look } from "./filamentcatalog";
 import { childSlot, type Comp, type Entry, type Path, resolve, type Root, rootSlot, samePath, type Slot, shortClass, slotKey, within } from "./filamentschema";
 import { COLOR_SWATCH, heroicon } from "./filamentpickers";
-import { findCall, nodeValue, type PNode, textValue } from "./phpcode";
+import { findCall, mapValue, nodeValue, type PNode, textValue } from "./phpcode";
 
 /** Where components can go: a root's slot (owner null) or a component's. */
 export type SlotRef = { owner: Path | null; slot: string };
@@ -90,7 +90,11 @@ export function labelOf(c: Comp): string {
 
 /** How many columns a layout's grid has, from `columns()`: a number, or the widest breakpoint of a map. */
 function columnsOf(c: Comp | null, fallback: number): number {
-  const v = c ? nodeValue(arg(c, "columns")) : undefined;
+  return gridColumns(c ? nodeValue(arg(c, "columns")) : undefined, fallback);
+}
+
+/** A grid's columns from a `columns()` value: a number, or a map of breakpoints, read at the widest one given. */
+export function gridColumns(v: unknown, fallback: number): number {
   if (typeof v === "number") return Math.max(1, Math.min(v, 12));
   if (v && typeof v === "object" && !Array.isArray(v)) {
     const map = v as Record<string, unknown>;
@@ -236,13 +240,8 @@ function draggable(el: HTMLElement, path: Path) {
 /** The canvas for a form or infolist root. */
 export function renderSchema(ctx: CanvasCtx, slotName: string): HTMLElement {
   const slot = ctx.root.slots.get(slotName);
-  const columns = columnsOf(null, 2);
-  const rootColumns = (() => {
-    // `$schema->columns(3)` sets the root grid.
-    const c = findCall(ctx.root.node, "columns");
-    const v = c ? nodeValue(c.args.items[0]?.value) : undefined;
-    return typeof v === "number" ? v : columns;
-  })();
+  // `$schema->columns(3)` or `->columns(['lg' => 3])` sets the root grid, which Filament makes 2 columns by default.
+  const rootColumns = gridColumns(nodeValue(findCall(ctx.root.node, "columns")?.args.items[0]?.value), 2);
   const grid = renderSlot(ctx, slot ?? { via: slotName, arg: 0, array: null as never, entries: [] }, { owner: null, slot: slotName }, [], null, rootColumns);
   grid.classList.add("fd-root-grid");
   return grid;
@@ -263,7 +262,7 @@ function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owne
         "button",
         { type: "button", class: "fd-empty-slot", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) },
         icon("add"),
-        owner ? "Drop components here, or click to add" : "Drag fields here from the left, or click to add",
+        h("span", {}, owner ? "Drop or click to add" : "Drag fields here from the left, or click to add"),
       ),
     );
   dropTarget(grid, ctx, ref, slot, owner);
@@ -341,9 +340,8 @@ const placeholder = (c: Comp, fallback = "") => h("span", { class: "fd-placehold
 
 /** The options a choice field shows: its literal options, an enum's name, or a relationship's. */
 function optionsOf(c: Comp): string[] {
-  const v = nodeValue(arg(c, "options"));
-  if (v && typeof v === "object" && !Array.isArray(v)) return Object.values(v as Record<string, unknown>).map(String).slice(0, 6);
-  if (Array.isArray(v)) return v.map(String).slice(0, 6);
+  const m = mapValue(arg(c, "options"));
+  if (m?.entries.length) return m.entries.map(([, label]) => label).slice(0, 6);
   const o = arg(c, "options");
   if (o?.kind === "classConst") return [`${shortClass(o.class)} cases`];
   if (call(c, "relationship")) return [`${text(c, "relationship") ?? "Related"} records`];
@@ -389,7 +387,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
         const v = nodeValue(c.make.args.items[0]?.value);
         return typeof v === "number" ? v : columnsOf(c, 2);
       })() : columnsOf(c, 1);
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, name === "Grid" ? `Grid · ${n} columns` : name), inner(schemaSlot(), n));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, name === "Grid" ? `Grid · ${n} ${n === 1 ? "column" : "columns"}` : name), inner(schemaSlot(), n));
     }
     case "Flex":
       return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, "Flex"), c.slots[0] ? renderSlot(ctx, c.slots[0], { owner: path, slot: slotKey(c.slots[0]) }, path, c, Math.max(1, c.slots[0].entries.length)) : inner("schema", 2));
@@ -543,6 +541,8 @@ function renderEntryComp(c: Comp): HTMLElement {
 // ---- Tables ----
 
 const SAMPLES: [RegExp, string[]][] = [
+  [/^(id|key)$/, ["1", "2", "3"]],
+  [/(^|_)(uuid|ulid)$/, ["9d4c2f1e…", "9d4c3a7b…", "9d4c41c0…"]],
   [/email/, ["jane@example.com", "omar@example.com", "li@example.com"]],
   [/first_name|^name$|full_name|author|user|customer|owner/, ["Jane Cooper", "Omar Haddad", "Li Wei"]],
   [/title|subject|headline/, ["Getting started", "Release notes", "Quarterly report"]],
@@ -631,7 +631,7 @@ function actionButton(ctx: CanvasCtx, c: Comp | null, compact = false): HTMLElem
 }
 
 /** The table's canvas: the toolbar, the header with its columns, three sample rows, and lanes for filters and actions. */
-export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; createPage: boolean }): HTMLElement {
+export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: string; createPage: boolean }): HTMLElement {
   const root = ctx.root;
   const columns = root.slots.get("columns");
   const filters = root.slots.get("filters");
@@ -735,7 +735,7 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; createPage
   return h(
     "div",
     { class: "fd-table-canvas" },
-    h("div", { class: "fd-page-head" }, h("h2", {}, o.pluralLabel), h("span", { class: "fd-spacer" }), ...(header?.entries ?? []).map((e) => actionButton(ctx, e.comp)), o.createPage ? h("span", { class: "fd-action button", style: `--action:${COLOR_SWATCH.primary}` }, `New ${o.pluralLabel.replace(/s$/, "").toLowerCase()}`) : null),
+    h("div", { class: "fd-page-head" }, h("h2", {}, o.pluralLabel), h("span", { class: "fd-spacer" }), ...(header?.entries ?? []).map((e) => actionButton(ctx, e.comp)), o.createPage ? h("span", { class: "fd-action button", style: `--action:${COLOR_SWATCH.primary}` }, `New ${o.label ?? o.pluralLabel.replace(/s$/, "").toLowerCase()}`) : null),
     table,
     h(
       "div",
