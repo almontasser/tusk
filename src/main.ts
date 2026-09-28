@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
-import { toast } from "./dom";
+import { iconButton, toast } from "./dom";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
@@ -101,6 +101,10 @@ function addPane(): Pane {
   return pane;
 }
 
+/** Menu rows for the actions with these labels that apply now, with their shortcuts from the keymap. */
+const menuActions = (...labels: string[]) =>
+  actions.filter((a) => labels.includes(a.label) && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+
 /** The context menu of the code: the actions for the caret, as PhpStorm's editor menu has them. */
 function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
   const model = ed.getModel();
@@ -109,8 +113,7 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
   // As in Monaco's own menu, a click outside the selection moves the caret there, so actions apply to what was clicked.
   const at = e.target.position;
   if (at && !ed.getSelection()?.containsPosition(at)) ed.setPosition(at);
-  const action = (label: string) =>
-    actions.filter((a) => a.label === label && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+  const action = (label: string) => menuActions(label);
   const actionsFor = (labels: string[]) => labels.flatMap((l): MenuItem[] => (l === "-" ? ["-"] : action(l)));
   const submenu = (label: string, labels: string[]): MenuItem[] => {
     const items = actionsFor(labels);
@@ -120,10 +123,8 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
   const php = model.getLanguageId() === "php";
   const file = model.uri.scheme === "file";
   // ⌘⏎ runs the file's language's own Monaco action: a query in the console, a request in an .http file.
-  const runHere = { sql: "Execute Query", redis: "Execute Query", http: "Send HTTP Request" }[model.getLanguageId()];
-  const runId = runHere === "Send HTTP Request" ? "phpEditor.sendHttpAtCursor" : "phpEditor.runSql";
   showMenu(e.event.posx, e.event.posy, [
-    ...(runHere ? [monacoItem(runHere, "⌘⏎", runId)] : []),
+    ...menuActions("Execute Query", "Send HTTP Request"),
     ...action("Show Context Actions"),
     "-",
     monacoItem("Cut", "⌘X", "editor.action.clipboardCutAction"),
@@ -165,6 +166,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
   if (![T.GUTTER_GLYPH_MARGIN, T.GUTTER_LINE_NUMBERS, T.GUTTER_LINE_DECORATIONS].includes(e.target.type) || !line || model?.uri.scheme !== "file") return false;
   const path = model.uri.fsPath;
   const tests = testMenu(model, line);
+  const changes = changeMenu(ed, line);
   showMenu(e.event.posx, e.event.posy, [
     ...tests,
     ...(tests.length ? ["-" as const] : []),
@@ -172,10 +174,11 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     "-",
     { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", run: () => toggleBookmark(path, line) },
     ...(hasCoverage(path) ? [{ label: "Show Tests Covering Line", run: () => (ed.setPosition({ lineNumber: line, column: 1 }), showTestsCoveringLine(ed)) }] : []),
-    ...changeMenu(ed, line),
+    ...changes,
+    ...(changes.length ? menuActions("Next Change", "Previous Change") : []),
     "-",
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
-    { label: "Copy Reference", run: () => navigator.clipboard.writeText(`${relative(path)}:${line}`).then(() => status(`Copied ${relative(path)}:${line}`)) },
+    { label: "Copy Reference", keys: symbolsFor(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
   return true;
@@ -1297,6 +1300,9 @@ function renderTabs() {
         return el;
       }),
     );
+    // A Markdown file gets a preview button at the end of its pane's tabs, as PhpStorm's editor toolbar has.
+    if (tabs.get(shown)?.model.getLanguageId() === "markdown")
+      pane.bar.append(Object.assign(iconButton("open-preview", "Open Preview", () => (focusPane(pane), markdownPreview())), { className: "icon-button tab-bar-action" }));
     pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     showViews(pane, shown);
   }
@@ -1466,6 +1472,7 @@ const actions: Action[] = [
   { label: "Rename File…", run: () => rename() },
   { label: "Move File to Trash", run: () => remove() },
   { label: "Copy Path", keys: "Meta+Shift+C", run: () => copyPath() },
+  { label: "Copy Reference", keys: "Alt+Shift+Meta+C", run: () => (activeFile() ? copyReference(active, editor.getPosition()?.lineNumber ?? 1) : status("Open a file to copy a reference to its line.")) },
   { label: "Reveal in Finder", run: () => revealInFinder() },
   { label: "Select Opened File in Project", keys: "Alt+F1", run: selectOpenedFile },
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
@@ -1567,7 +1574,8 @@ const actions: Action[] = [
   { label: "Composer", run: () => showView("composer") },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },
-  editorAction("Execute Query", "", "phpEditor.runSql"),
+  { ...editorAction("Execute Query", "Meta+Enter", "phpEditor.runSql"), when: () => ["sql", "redis"].includes(editor.getModel()?.getLanguageId() ?? "") },
+  { ...editorAction("Send HTTP Request", "Meta+Enter", "phpEditor.sendHttpAtCursor"), when: () => editor.getModel()?.getLanguageId() === "http" },
   { label: "HTTP Client", run: () => showView("http") },
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },
   { label: "HTTP Client: Sync with Laravel Routes…", run: () => root && syncRequestsWithRoutes() },
@@ -1631,6 +1639,12 @@ const actions: Action[] = [
   { label: "New Terminal", run: () => openTerminal(root || "/") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
+
+/** Copies `path:line`, relative to the project, as PhpStorm's Copy Reference does for a line. */
+function copyReference(path: string, line: number) {
+  const reference = `${relative(path)}:${line}`;
+  navigator.clipboard.writeText(reference).then(() => status(`Copied ${reference}`), (e) => status(`Couldn't copy the reference: ${e}`));
+}
 
 /** ⌘⇧U: upper case, or lower case when the selection (or the word at the caret) is already upper case. */
 function toggleCase() {

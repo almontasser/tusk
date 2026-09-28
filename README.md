@@ -243,7 +243,9 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | F6 | Move the file's class to another namespace |
 | ⌘F6 | Change the signature of the method or function at the cursor |
 | ⌘⇧F10 | Open the query console |
-| ⌘⏎ | Run the SQL statement under the caret |
+| ⌘⏎ | Run the SQL statement under the caret, or send the HTTP request under the caret in an `.http` file |
+| ⌥⇧⌘C | Copy a reference to the caret's line, such as `app/Models/User.php:42` |
+| ⌃⌥⇧↓ and ⌃⌥⇧↑ | Next and previous change |
 | ⌘F12 | File structure |
 | F3 | Toggle a bookmark on the current line |
 | ⌘F3 | Show bookmarks |
@@ -480,8 +482,9 @@ Drag a file or folder onto a folder to move it there.
 
 ### Markdown preview
 
-To preview a Markdown file, run **Markdown Preview** from ⌘⇧A, or right-click
-its tab and choose **Open Preview**. The preview opens in the pane to the
+To preview a Markdown file, click the preview button at the end of its pane's
+tabs, choose **View > Markdown Preview**, right-click the code or the tab and
+choose **Markdown Preview** or **Open Preview**, or run it from ⌘⇧A. The preview opens in the pane to the
 right, splitting the editor when there's only one pane. It updates as you type
 and scrolls with the editor. Images with relative paths load from the file's
 folder. Links to other files open them in the editor, and web links open in

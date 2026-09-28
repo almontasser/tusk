@@ -4758,3 +4758,16 @@ them with their menu group, and the menu bar and the editor's context menu
 place them by label. The editor's context menu gained submenus (Go To,
 Refactor, Folding, Git) to hold PhpStorm's layout without growing past the
 screen.
+
+### 2026-09-28: Every action has a menu entry
+
+Actions that only Find Action or a shortcut reached now sit in the menus:
+Next and Previous Change and Select Opened File in Project in Navigate, Copy
+Reference (now an action, ⌥⇧⌘C) in File, Markdown Preview in View, Copy Remote
+URL in Git, Switch Connection in Tools > Database, Sync with Laravel Routes in
+Tools > HTTP Client, and Pause on Exceptions Options in Run. **Send HTTP
+Request** and **Execute Query** are app actions on ⌘⏎ with a `when` for their
+languages, so they're in Find Action and the keymap editor; their Monaco
+actions in `httpview.ts` and `database.ts` keep ⌘⏎ for the editors outside the
+panes, so rebinding them adds a key rather than moving ⌘⏎ there. A Markdown
+file's pane shows a preview button after its tabs.
