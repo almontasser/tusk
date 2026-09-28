@@ -824,6 +824,26 @@ The palette lists the components the project has: Filament's, plugins', and the
 project's own. Each setting's editor comes from its parameter types, so a new
 Filament version or a plugin needs no update to Tusk.
 
+### New resources
+
+**Filament: New Resource…**, the **+** in the Filament tool window, or
+**Filament resource** in the model designer opens a wizard:
+
+1. **Model:** pick one of the app's models, or design a new one.
+2. **Placement:** the panel, cluster, navigation group, icon, record names,
+   title attribute, and pages: separate pages or one page with modals, and a
+   View page.
+3. **Form:** which columns become fields, the field for each, and whether
+   they're required or full width. Tusk proposes them from each column's type,
+   cast, and name, so a foreign key is a relationship select.
+4. **Table:** the columns and whether each is searchable, sortable, or can be
+   hidden, the filters, the row and bulk actions, and the default sort.
+5. **Review:** a summary and the form's and table's code.
+
+Filament's generator (`make:filament-resource`) makes the files, so they follow
+the project's Filament version and published stubs. The wizard then fills in
+the form, table, infolist, and settings, and opens the designer.
+
 ### Relation managers, pages, and settings
 
 - **Relations:** lists the resource's relation managers. **Add relation

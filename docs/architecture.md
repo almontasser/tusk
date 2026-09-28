@@ -4264,6 +4264,19 @@ into itself.
 settings. `src/filamentview.ts` is the tool window, the palette commands, and
 the **Open in Designer** code lens.
 
+### The New Resource wizard
+
+`src/filamentwizard.ts` runs `make:filament-resource` with the choices as
+options (`--panel`, `--cluster`, `--simple`, `--view`, `--soft-deletes`,
+`--record-title-attribute`, and `--embed-schemas` with `--embed-table` when you
+don't want separate classes), without `--generate`, since that needs the table
+in the database. It finds the resource's file from the command's output, then
+replaces the generator's empty arrays with the chosen components: each root is
+found as the designer finds it, following `PostForm::configure()` to its class.
+Settings go in with `setProperty`. The components come from `src/filamentgen.ts`
+with the wizard's changes: another field type keeps only the settings that type
+has, as `methodsOf` reports them.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,

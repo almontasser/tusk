@@ -83,6 +83,19 @@ export function applyEdits(text: string, edits: Edit[]): string {
   return out;
 }
 
+/** Edits that start where another ends, or insert at one offset, go together, in order, as one edit. */
+export function mergeEdits(edits: Edit[]): Edit[] {
+  const sorted = [...edits].map((e, i) => ({ ...e, i })).sort((a, b) => a.start - b.start || a.i - b.i);
+  const out: Edit[] = [];
+  for (const e of sorted) {
+    const prev = out.at(-1);
+    if (prev && prev.start === prev.end && e.start === e.end && prev.start === e.start) prev.text += e.text;
+    else if (prev && e.start < prev.end) throw new Error("Two changes overlap. Try one at a time.");
+    else out.push({ start: e.start, end: e.end, text: e.text });
+  }
+  return out;
+}
+
 // ---- Values ----
 
 /** Code to write as it is, such as a class constant or a closure. */

@@ -147,3 +147,9 @@ test("addMember and removeMethod", () => {
   assert.doesNotMatch(removed, /getRelations/);
   assert.match(removed, /\n {4}}\n\n {4}public static function getPages/);
 });
+
+test("mergeEdits joins inserts at one offset in order and refuses overlaps", async () => {
+  const { mergeEdits } = await import("./phpcode.ts");
+  assert.deepEqual(mergeEdits([{ start: 5, end: 5, text: "a" }, { start: 1, end: 2, text: "x" }, { start: 5, end: 5, text: "b" }]), [{ start: 1, end: 2, text: "x" }, { start: 5, end: 5, text: "ab" }]);
+  assert.throws(() => mergeEdits([{ start: 1, end: 4, text: "" }, { start: 2, end: 3, text: "" }]));
+});

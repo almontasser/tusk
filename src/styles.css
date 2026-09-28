@@ -2416,3 +2416,68 @@ button.link:hover { text-decoration: underline; }
 .md-footer .primary { padding: 5px 16px; border-radius: var(--radius); }
 .md-problems { color: var(--yellow); font-size: 12px; }
 .md-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+
+/* The New Resource wizard (src/filamentwizard.ts) */
+.rw-dialog { width: min(1080px, calc(100vw - 48px)); height: min(760px, calc(100vh - 48px)); padding: 0; color: var(--text); background: var(--bg); border-radius: 14px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); font-size: 12.5px; --fi-primary: #f59e0b; overflow: hidden; }
+.rw-dialog::backdrop { background: #0008; }
+.rw-dialog button:not(.icon-button) { display: inline-flex; align-items: center; gap: 6px; }
+.rw-loading { height: 100%; }
+.rw-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100%; }
+.rw-steps { display: flex; flex-direction: column; gap: 2px; padding: 16px 10px; background: var(--panel); border-right: 1px solid var(--border-subtle); }
+.rw-title { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
+.rw-title > .codicon { font-size: 20px; color: var(--fi-primary); }
+.rw-title strong { display: block; font-size: 13.5px; }
+.rw-step { display: flex !important; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; color: var(--muted); text-align: left; }
+.rw-step:not(:disabled):hover { background: var(--hover); color: var(--text); }
+.rw-step.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 500; }
+.rw-step-number { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 0 1px var(--border); font-size: 11px; }
+.rw-step.active .rw-step-number { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.rw-step.done .rw-step-number { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); box-shadow: none; }
+.rw-step-number .codicon { font-size: 12px; }
+.rw-main { display: flex; flex-direction: column; min-height: 0; }
+.rw-body { flex: 1; overflow: auto; padding: 24px 28px; }
+.rw-step-view { display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
+.rw-heading h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+.rw-subheading { margin: 6px 0 0; font-size: 13px; }
+.rw-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); background: var(--panel); }
+.rw-foot button { padding: 5px 14px; border-radius: var(--radius); border: 1px solid var(--input-border); background: var(--bg); }
+.rw-foot button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.rw-search { width: 100%; }
+.rw-new-model { display: flex !important; align-items: center; gap: 12px !important; padding: 12px 14px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); text-align: left; }
+.rw-new-model:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.rw-new-model > .codicon { font-size: 18px; color: var(--accent); }
+.rw-new-model strong { display: block; }
+.rw-models { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.rw-model { display: flex !important; align-items: center; gap: 10px !important; padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border-subtle); text-align: left; min-width: 0; }
+.rw-model:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.rw-model.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rw-model > .codicon { color: var(--muted); font-size: 16px; }
+.rw-model-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rw-model-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-badge { font-size: 10.5px; padding: 1px 7px; border-radius: 8px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); white-space: nowrap; }
+.rw-warn { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--yellow); }
+.rw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
+.rw-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+.rw-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rw-field-label { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.rw-field > select, .rw-field > input { width: 100%; }
+.rw-table { display: flex; flex-direction: column; border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; }
+.rw-row { display: grid; align-items: center; gap: 10px; padding: 5px 12px; border-top: 1px solid var(--border-subtle); }
+.rw-row:first-child { border-top: 0; }
+.rw-row-head { background: var(--panel); font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.rw-form-row { grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1fr) 70px 80px; }
+.rw-table-row { grid-template-columns: 14px minmax(0, 1.6fr) 80px 70px 100px 100px; }
+.rw-row.off { color: var(--faint); }
+.rw-row select { min-width: 0; padding: 3px 7px; font-size: 12px; }
+.rw-col-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rw-col-name input { margin: 0; }
+.rw-col-name .fd-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rw-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.rw-check { font-size: 12.5px; color: var(--text); }
+.rw-summary { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 16px; margin: 0; padding: 14px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border-subtle); }
+.rw-summary dt { color: var(--muted); }
+.rw-summary dd { margin: 0; }
+.rw-code { border-radius: 10px; border: 1px solid var(--border-subtle); overflow: hidden; }
+.rw-code-title { padding: 6px 12px; background: var(--panel); font-size: 11px; font-weight: 600; color: var(--muted); }
+.rw-code pre { margin: 0; padding: 10px 14px; max-height: 220px; overflow: auto; font: 11.5px/1.5 var(--mono); -webkit-user-select: text; user-select: text; }
+.rw-field > .fd-segmented, .rw-field > .fd-switch { align-self: flex-start; }

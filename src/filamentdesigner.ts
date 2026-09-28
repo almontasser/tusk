@@ -15,7 +15,7 @@ import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsT
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
-import { classNamed, type Edit, findCall, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { classNamed, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
 
@@ -238,7 +238,7 @@ export class Designer {
       return showError("Can't change the code", e);
     }
     if (!edits?.length) return;
-    const all = merge([...edits, ...imports.edits()]);
+    const all = mergeEdits([...edits, ...imports.edits()]);
     const model = fresh.model;
     const pos = (offset: number) => {
       const p = model.getPositionAt(offset);
@@ -978,15 +978,3 @@ addEventListener("dragover", (e) => (lastPointer = { x: e.clientX, y: e.clientY 
 addEventListener("dragend", () => currentDrag() && setDragging(null), true);
 
 
-/** Edits that start where another ends, or insert at one offset, go together, in order, as one edit. */
-function merge(edits: Edit[]): Edit[] {
-  const sorted = [...edits].map((e, i) => ({ ...e, i })).sort((a, b) => a.start - b.start || a.i - b.i);
-  const out: Edit[] = [];
-  for (const e of sorted) {
-    const prev = out.at(-1);
-    if (prev && prev.start === prev.end && e.start === e.end && prev.start === e.start) prev.text += e.text;
-    else if (prev && e.start < prev.end) throw new Error("Two changes overlap. Try one at a time.");
-    else out.push({ start: e.start, end: e.end, text: e.text });
-  }
-  return out;
-}

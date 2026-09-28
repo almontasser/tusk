@@ -35,7 +35,7 @@ import {
   camel,
   plural,
 } from "./modelgen";
-import { addMember, Imports, type Edit, insertItem, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
+import { addMember, Imports, type Edit, insertItem, mergeEdits, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
 import { confirm } from "./palette";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView } from "./terminal";
@@ -671,7 +671,7 @@ class ModelDesigner {
       const p = model.getPositionAt(o);
       return { line: p.lineNumber - 1, character: p.column - 1 };
     };
-    await applyWorkspaceEdit({ changes: { [model.uri.toString()]: edits.map((e) => ({ range: { start: pos(e.start), end: pos(e.end) }, newText: e.text })) } });
+    await applyWorkspaceEdit({ changes: { [model.uri.toString()]: mergeEdits(edits).map((e) => ({ range: { start: pos(e.start), end: pos(e.end) }, newText: e.text })) } });
   }
 
   private async migrate() {
