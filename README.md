@@ -356,7 +356,9 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, Terminal, Debugger, Git, Tools, Project Tree, Limits, and Local History. A setting that depends on another, such as the AI model,
+Terminal, Tools, Git, Debugger, Database, HTTP Client, Spelling, PHPStan, PHP
+Analysis, AI, Project Tree, Local History, and Limits; PHPStan and PHP Analysis
+apply to the open project. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 

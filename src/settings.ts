@@ -75,7 +75,10 @@ export type Field = { key: string; label: string; help?: string; group: string; 
   | { type: "select"; options: [string, string][] | (() => [value: string, text: string, group: string][]) }
 );
 
-/** The settings dialog's fields, in order; groups show in the order their first field appears. */
+/** The order of the settings dialog's groups: editing first, then tools, then per-project analysis, then housekeeping. */
+const GROUP_ORDER = ["Appearance", "Editor", "Terminal", "Tools", "Git", "Debugger", "Database", "HTTP Client", "Spelling", "PHPStan", "PHP Analysis", "AI", "Project Tree", "Local History", "Limits"];
+
+/** The settings dialog's fields, in order; groups show in GROUP_ORDER, then in the order their first field appears. */
 const fields: Field[] = [
   { group: "Appearance", key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
   { group: "Appearance", key: "darkTheme", label: "Theme in dark mode", type: "select", options: () => themeOptions(true), shown: () => settings.theme === "system" },
@@ -521,6 +524,9 @@ export function openSettings(query = "") {
     section.append(row);
     rows.push({ shown: () => s.shown?.() ?? true, row, section, text: [s.group, s.keywords].join(" ").toLowerCase(), sync() {} });
   }
+  // Groups register as their modules load; show them in GROUP_ORDER, and any other group after those.
+  const rank = (group: string) => (GROUP_ORDER.indexOf(group) + GROUP_ORDER.length + 1) % (GROUP_ORDER.length + 1);
+  body.append(...[...sections].sort(([a], [b]) => rank(a) - rank(b)).map(([, section]) => section));
 
   /** Shows the settings that apply and match the search, and each one's value and reset button. */
   const refresh = () => {
