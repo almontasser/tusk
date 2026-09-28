@@ -1,0 +1,256 @@
+{
+  "errors": false,
+  "namespace": "App\\Models",
+  "uses": [
+    {
+      "alias": "HasFactory",
+      "name": "Illuminate\\Database\\Eloquent\\Factories\\HasFactory",
+      "kind": "class",
+      "span": [
+        30,
+        84
+      ]
+    },
+    {
+      "alias": "Model",
+      "name": "Illuminate\\Database\\Eloquent\\Model",
+      "kind": "class",
+      "span": [
+        85,
+        124
+      ]
+    },
+    {
+      "alias": "BelongsTo",
+      "name": "Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",
+      "kind": "class",
+      "span": [
+        125,
+        178
+      ]
+    }
+  ],
+  "useInsert": 179,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Post",
+      "fqn": "App\\Models\\Post",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Eloquent\\Model",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        180,
+        496
+      ],
+      "bodyStart": 206,
+      "bodyEnd": 495,
+      "traits": [
+        "Illuminate\\Database\\Eloquent\\Factories\\HasFactory"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "fillable",
+          "static": false,
+          "visibility": "protected",
+          "readonly": false,
+          "type": null,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "title",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    255,
+                    262
+                  ]
+                },
+                "span": [
+                  255,
+                  262
+                ],
+                "spread": false
+              },
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "slug",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    264,
+                    270
+                  ]
+                },
+                "span": [
+                  264,
+                  270
+                ],
+                "spread": false
+              }
+            ],
+            "open": 254,
+            "close": 270,
+            "legacy": false,
+            "span": [
+              254,
+              271
+            ]
+          },
+          "span": [
+            232,
+            272
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "casts",
+          "static": false,
+          "abstract": false,
+          "visibility": "protected",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            278,
+            389
+          ],
+          "docStart": null,
+          "body": [
+            317,
+            388
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "published",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      347,
+                      358
+                    ]
+                  },
+                  "value": {
+                    "kind": "string",
+                    "value": "boolean",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      362,
+                      371
+                    ]
+                  },
+                  "span": [
+                    347,
+                    371
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 333,
+              "close": 381,
+              "legacy": false,
+              "span": [
+                333,
+                382
+              ]
+            }
+          ]
+        },
+        {
+          "name": "category",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "BelongsTo",
+          "attributes": [],
+          "span": [
+            395,
+            494
+          ],
+          "docStart": null,
+          "body": [
+            438,
+            493
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "this",
+                "span": [
+                  454,
+                  459
+                ]
+              },
+              "calls": [
+                {
+                  "name": "belongsTo",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 470,
+                    "close": 486,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "classConst",
+                          "class": "App\\Models\\Category",
+                          "classSpan": [
+                            471,
+                            479
+                          ],
+                          "name": "class",
+                          "span": [
+                            471,
+                            486
+                          ]
+                        },
+                        "span": [
+                          471,
+                          486
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    459,
+                    487
+                  ],
+                  "nameSpan": [
+                    461,
+                    470
+                  ]
+                }
+              ],
+              "span": [
+                454,
+                487
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

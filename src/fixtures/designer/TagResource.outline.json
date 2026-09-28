@@ -1,0 +1,336 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources\\Tags",
+  "uses": [
+    {
+      "alias": "ManageTags",
+      "name": "App\\Filament\\Resources\\Tags\\Pages\\ManageTags",
+      "kind": "class",
+      "span": [
+        47,
+        96
+      ]
+    },
+    {
+      "alias": "TagForm",
+      "name": "App\\Filament\\Resources\\Tags\\Schemas\\TagForm",
+      "kind": "class",
+      "span": [
+        97,
+        145
+      ]
+    },
+    {
+      "alias": "TagsTable",
+      "name": "App\\Filament\\Resources\\Tags\\Tables\\TagsTable",
+      "kind": "class",
+      "span": [
+        146,
+        195
+      ]
+    },
+    {
+      "alias": "Tag",
+      "name": "App\\Models\\Tag",
+      "kind": "class",
+      "span": [
+        196,
+        215
+      ]
+    },
+    {
+      "alias": "Resource",
+      "name": "Filament\\Resources\\Resource",
+      "kind": "class",
+      "span": [
+        216,
+        248
+      ]
+    },
+    {
+      "alias": "Schema",
+      "name": "Filament\\Schemas\\Schema",
+      "kind": "class",
+      "span": [
+        249,
+        277
+      ]
+    },
+    {
+      "alias": "Table",
+      "name": "Filament\\Tables\\Table",
+      "kind": "class",
+      "span": [
+        278,
+        304
+      ]
+    }
+  ],
+  "useInsert": 305,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "TagResource",
+      "fqn": "App\\Filament\\Resources\\Tags\\TagResource",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Resources\\Resource",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        306,
+        752
+      ],
+      "bodyStart": 342,
+      "bodyEnd": 751,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "model",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Models\\Tag",
+            "classSpan": [
+              381,
+              384
+            ],
+            "name": "class",
+            "span": [
+              381,
+              391
+            ]
+          },
+          "span": [
+            347,
+            392
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "form",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "schema",
+              "type": "Schema",
+              "default": null,
+              "span": [
+                426,
+                440
+              ]
+            }
+          ],
+          "returnType": "Schema",
+          "attributes": [],
+          "span": [
+            398,
+            505
+          ],
+          "docStart": null,
+          "body": [
+            455,
+            504
+          ],
+          "returns": [
+            {
+              "kind": "static",
+              "class": "App\\Filament\\Resources\\Tags\\Schemas\\TagForm",
+              "classSpan": [
+                471,
+                478
+              ],
+              "method": "configure",
+              "args": {
+                "open": 489,
+                "close": 497,
+                "items": [
+                  {
+                    "name": null,
+                    "value": {
+                      "kind": "var",
+                      "name": "schema",
+                      "span": [
+                        490,
+                        497
+                      ]
+                    },
+                    "span": [
+                      490,
+                      497
+                    ],
+                    "spread": false
+                  }
+                ]
+              },
+              "span": [
+                471,
+                498
+              ]
+            }
+          ]
+        },
+        {
+          "name": "table",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "table",
+              "type": "Table",
+              "default": null,
+              "span": [
+                540,
+                552
+              ]
+            }
+          ],
+          "returnType": "Table",
+          "attributes": [],
+          "span": [
+            511,
+            617
+          ],
+          "docStart": null,
+          "body": [
+            566,
+            616
+          ],
+          "returns": [
+            {
+              "kind": "static",
+              "class": "App\\Filament\\Resources\\Tags\\Tables\\TagsTable",
+              "classSpan": [
+                582,
+                591
+              ],
+              "method": "configure",
+              "args": {
+                "open": 602,
+                "close": 609,
+                "items": [
+                  {
+                    "name": null,
+                    "value": {
+                      "kind": "var",
+                      "name": "table",
+                      "span": [
+                        603,
+                        609
+                      ]
+                    },
+                    "span": [
+                      603,
+                      609
+                    ],
+                    "spread": false
+                  }
+                ]
+              },
+              "span": [
+                582,
+                610
+              ]
+            }
+          ]
+        },
+        {
+          "name": "getPages",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            623,
+            750
+          ],
+          "docStart": null,
+          "body": [
+            669,
+            749
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "index",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      699,
+                      706
+                    ]
+                  },
+                  "value": {
+                    "kind": "static",
+                    "class": "App\\Filament\\Resources\\Tags\\Pages\\ManageTags",
+                    "classSpan": [
+                      710,
+                      720
+                    ],
+                    "method": "route",
+                    "args": {
+                      "open": 727,
+                      "close": 731,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "/",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              728,
+                              731
+                            ]
+                          },
+                          "span": [
+                            728,
+                            731
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      710,
+                      732
+                    ]
+                  },
+                  "span": [
+                    699,
+                    732
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 685,
+              "close": 742,
+              "legacy": false,
+              "span": [
+                685,
+                743
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

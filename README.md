@@ -20,6 +20,7 @@ The app is built with Tauri 2 (Rust backend) and the Monaco editor.
 | 5. Git, blame, and pull requests | Done |
 | 6. Filament intelligence | Done |
 | 7. Tusk's own PHP language server (`tusk-lsp/`), replacing Phpactor, Laravel LSP, and the Filament server | Done |
+| 8. Visual designers: Filament resources, models, and new projects | In progress |
 
 For the design and the reasons behind each choice, see
 [Architecture and decisions](docs/architecture.md).
@@ -767,6 +768,72 @@ comments of the project's files, grouped by file; the words in strings and
 names don't count. Click one to open it. The list updates when
 files change, and the refresh button reloads it. Files that `.gitignore`
 excludes, such as `vendor`, aren't searched.
+
+## Filament designer
+
+The designer builds a Filament resource without writing code: its form, table,
+infolist, relation managers, pages, and settings. It works with Filament 4 and
+later. To open it, do one of the following:
+
+- Open the **Filament** tool window and click a resource. It lists each panel's
+  resources by navigation group.
+- Click **Open in Designer** above a resource's or relation manager's class, or
+  above a Filament 4 schema class such as `PostForm`.
+- Run **Filament: Open Resource in Designer…** from the palette.
+
+The designer edits the resource's code, and the code is all it keeps. Each
+change is a small edit that's saved at once, with local history, and comments,
+closures, and code it doesn't read stay as written. Code it can't show as a
+component shows as a **Code** block, which you can still move or delete.
+Changes you make in the code editor show in the designer as you type.
+
+### Forms, tables, and infolists
+
+The canvas draws the form, table, or infolist as Filament does: sections,
+grids with column spans, tabs, wizards, repeaters, and every field type.
+
+- **Add a component:** drag it from the palette on the left, or click it to add
+  it after the selected component. Fields, columns, and filters ask for a name,
+  and suggest the model's columns that aren't used yet.
+- **Add a model column:** drag it from the model's column list to get the
+  component that suits it, already set up. For example, a foreign key becomes a
+  searchable relationship select, and a boolean becomes a toggle.
+  **Add N** adds every column that's missing.
+- **Change a component:** select it and use the inspector on the right. The
+  settings people change most come first, then every other setting the class
+  has, grouped and searchable. Options come from a list, an enum, or a
+  relationship. **Visible when**, **Required when**, and **Disabled when** build
+  conditions on other fields, and mark those fields `live()`.
+- **Rearrange:** drag components, or use <kbd>⌥↑</kbd> and <kbd>⌥↓</kbd>.
+  Right-click a component to duplicate it, wrap it in a section or grid, or show
+  it in the code.
+- **Tables:** columns sit in the table's header, and filters, row actions, bulk
+  actions, and header actions sit in lanes below it. With nothing selected, the
+  inspector shows the table's own settings, such as the default sort.
+
+| Key | Action |
+| --- | --- |
+| <kbd>⌫</kbd> | Delete the selected component |
+| <kbd>⌘D</kbd> | Duplicate it |
+| <kbd>⌥↑</kbd> / <kbd>⌥↓</kbd> | Move it up or down |
+| Arrow keys | Select the previous, next, parent, or first child component |
+| <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> | Undo or redo the designer's last change |
+| <kbd>Esc</kbd> | Select the parent |
+
+The palette lists the components the project has: Filament's, plugins', and the
+project's own. Each setting's editor comes from its parameter types, so a new
+Filament version or a plugin needs no update to Tusk.
+
+### Relation managers, pages, and settings
+
+- **Relations:** lists the resource's relation managers. **Add relation
+  manager** creates one for a relationship of the model, with attach or
+  associate actions, and registers it. Click one to design its form and table.
+- **Pages:** lists the resource's pages and their addresses, and adds View,
+  Create, Edit, or custom pages.
+- **Settings:** sets the navigation label, icon, group, and order, the record's
+  names and title attribute, the URL, a record count badge, and the attributes
+  global search looks in.
 
 ## Bookmarks
 

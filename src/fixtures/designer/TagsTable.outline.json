@@ -1,0 +1,161 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources\\Tags\\Tables",
+  "uses": [
+    {
+      "alias": "Table",
+      "name": "Filament\\Tables\\Table",
+      "kind": "class",
+      "span": [
+        54,
+        80
+      ]
+    }
+  ],
+  "useInsert": 81,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "TagsTable",
+      "fqn": "App\\Filament\\Resources\\Tags\\Tables\\TagsTable",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        82,
+        310
+      ],
+      "bodyStart": 99,
+      "bodyEnd": 309,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "configure",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "table",
+              "type": "Table",
+              "default": null,
+              "span": [
+                137,
+                149
+              ]
+            }
+          ],
+          "returnType": "Table",
+          "attributes": [],
+          "span": [
+            104,
+            308
+          ],
+          "docStart": null,
+          "body": [
+            163,
+            307
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "table",
+                "span": [
+                  179,
+                  185
+                ]
+              },
+              "calls": [
+                {
+                  "name": "columns",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 207,
+                    "close": 242,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [],
+                          "open": 208,
+                          "close": 241,
+                          "legacy": false,
+                          "span": [
+                            208,
+                            242
+                          ]
+                        },
+                        "span": [
+                          208,
+                          242
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    198,
+                    243
+                  ],
+                  "nameSpan": [
+                    200,
+                    207
+                  ]
+                },
+                {
+                  "name": "filters",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 265,
+                    "close": 300,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [],
+                          "open": 266,
+                          "close": 299,
+                          "legacy": false,
+                          "span": [
+                            266,
+                            300
+                          ]
+                        },
+                        "span": [
+                          266,
+                          300
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    256,
+                    301
+                  ],
+                  "nameSpan": [
+                    258,
+                    265
+                  ]
+                }
+              ],
+              "span": [
+                179,
+                301
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

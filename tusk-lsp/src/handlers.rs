@@ -53,6 +53,7 @@ pub fn find(method: &str) -> Option<Handler> {
         Formatting::METHOD => typed!(Formatting, format::formatting),
         "tusk/memberReferences" => custom::member_references,
         "tusk/overrides" => navigation::overrides,
+        "tusk/phpOutline" => outline::php_outline,
         "tusk/projectProblems" => custom::project_problems,
         _ => return None,
     };

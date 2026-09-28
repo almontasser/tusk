@@ -11,6 +11,11 @@
  *   php introspect.php <project root> aliases
  *   php introspect.php <project root> mago-stubs <folder>
  *   php introspect.php <project root> views
+ *   php introspect.php <project root> filament-catalog
+ *   php introspect.php <project root> filament-app
+ *   php introspect.php <project root> enums
+ *   php introspect.php <project root> migrations
+ *   php introspect.php <project root> model <Model class>
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
@@ -20,6 +25,12 @@
  * forward static and instance calls to. `aliases` maps root class aliases, such as `DB`, to their classes.
  * `mago-stubs` writes vendor files with corrected types for Mago into <folder>, and lists them. `views` lists
  * the names of the app's and packages' views.
+ *
+ * The designers use the rest. `filament-catalog` lists Filament's components, columns, filters, and actions,
+ * with plugins' and the project's, and the fluent methods that configure each, grouped by the class or trait
+ * that declares them. `filament-app` lists the panels with their resources, pages, relation managers, and
+ * clusters. `enums` lists the app's enums, `migrations` the migration files and which have run, and `model` one
+ * model's table, columns, indexes, and declarations.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -382,6 +393,551 @@ function viewNames(string $root): array
     return array_values(array_unique($names));
 }
 
+// ---- The designers: Filament's components, the app's panels and resources, enums, and migrations ----
+
+/** The installed version of a Composer package, such as `v4.1.0`, or null. */
+function packageVersion(string $root, string $name): ?string
+{
+    static $installed = null;
+    $installed ??= json_decode((string) @file_get_contents($root . '/vendor/composer/installed.json'), true) ?: [];
+    foreach ($installed['packages'] ?? $installed as $package) {
+        if (($package['name'] ?? null) === $name) {
+            return $package['version'] ?? null;
+        }
+    }
+    return null;
+}
+
+/**
+ * The PSR-4 folders of Filament's packages and of packages that build on Filament, such as plugins, with the
+ * project's own folders under app/: where components can be declared.
+ */
+function componentFolders(string $root): array
+{
+    $installed = json_decode((string) @file_get_contents($root . '/vendor/composer/installed.json'), true) ?: [];
+    $folders = [];
+    foreach ($installed['packages'] ?? $installed as $package) {
+        $name = $package['name'] ?? '';
+        $requires = array_keys($package['require'] ?? []);
+        $filament = str_starts_with($name, 'filament/') || array_filter($requires, fn ($r) => str_starts_with($r, 'filament/'));
+        if (!$filament || in_array($name, ['filament/upgrade', 'filament/notifications'], true)) {
+            continue;
+        }
+        $base = $root . '/vendor/composer/' . ($package['install-path'] ?? "../$name");
+        foreach ($package['autoload']['psr-4'] ?? [] as $prefix => $dirs) {
+            foreach ((array) $dirs as $dir) {
+                $folders[] = [$prefix, rtrim($base . '/' . $dir, '/'), $name];
+            }
+        }
+    }
+    $composer = json_decode((string) @file_get_contents($root . '/composer.json'), true) ?: [];
+    foreach ($composer['autoload']['psr-4'] ?? [] as $prefix => $dirs) {
+        foreach ((array) $dirs as $dir) {
+            if (is_dir($root . '/' . $dir . '/Filament')) {
+                $folders[] = [$prefix . 'Filament\\', $root . '/' . rtrim($dir, '/') . '/Filament', 'app'];
+            }
+        }
+    }
+    return $folders;
+}
+
+/** A parameter's types, each as a name, with `null` when it takes null. */
+function typeNames(?ReflectionType $type): array
+{
+    if ($type === null) {
+        return ['mixed'];
+    }
+    $types = $type instanceof ReflectionNamedType ? [$type] : ($type instanceof ReflectionUnionType || $type instanceof ReflectionIntersectionType ? $type->getTypes() : []);
+    $names = [];
+    foreach ($types as $t) {
+        $names = [...$names, ...($t instanceof ReflectionNamedType ? [$t->getName()] : typeNames($t))];
+    }
+    if ($type->allowsNull() && !in_array('null', $names, true) && !in_array('mixed', $names, true)) {
+        $names[] = 'null';
+    }
+    return array_values(array_unique($names));
+}
+
+/** A parameter for the designers: its name, types, default value as PHP source, and whether it's optional. */
+function describeParameter(ReflectionParameter $p): array
+{
+    $default = null;
+    if ($p->isDefaultValueAvailable()) {
+        try {
+            $default = $p->isDefaultValueConstant() ? '\\' . ltrim((string) $p->getDefaultValueConstantName(), '\\') : var_export($p->getDefaultValue(), true);
+            $default = match ($default) { 'NULL' => 'null', 'array (' . "\n" . ')' => '[]', default => $default };
+        } catch (Throwable) {
+        }
+    }
+    return array_filter([
+        'name' => $p->getName(),
+        'types' => typeNames($p->getType()),
+        'default' => $default,
+        'optional' => $p->isOptional(),
+        'variadic' => $p->isVariadic(),
+    ], fn ($v) => $v !== null && $v !== false);
+}
+
+/** The first paragraph of a docblock, and whether it's deprecated. */
+function docSummary(string|false $doc): array
+{
+    if (!$doc) {
+        return [];
+    }
+    $lines = array_map(fn ($l) => trim(preg_replace('/^\s*\/?\*+\/?/', '', $l)), explode("\n", $doc));
+    $summary = [];
+    foreach ($lines as $line) {
+        if ($line === '' && $summary) {
+            break;
+        }
+        if ($line !== '' && !str_starts_with($line, '@')) {
+            $summary[] = $line;
+        }
+    }
+    return array_filter(['doc' => implode(' ', $summary) ?: null, 'deprecated' => str_contains($doc, '@deprecated') ?: null]);
+}
+
+/** The traits a class uses, and the traits those use, in order. */
+function traitsOf(ReflectionClass $class): array
+{
+    $out = [];
+    foreach ($class->getTraits() as $trait) {
+        $out[] = $trait;
+        array_push($out, ...traitsOf($trait));
+    }
+    return $out;
+}
+
+/**
+ * Where a method is written: the class or trait whose file and lines hold it. A method from a trait reports the
+ * class that uses the trait as its declaring class, so the lines tell them apart.
+ */
+function sourceOf(ReflectionMethod $method): string
+{
+    $declaring = $method->getDeclaringClass();
+    foreach (traitsOf($declaring) as $trait) {
+        if ($trait->getFileName() === $method->getFileName() && $trait->getStartLine() <= $method->getStartLine() && $method->getEndLine() <= $trait->getEndLine()) {
+            return $trait->getName();
+        }
+    }
+    return $declaring->getName();
+}
+
+/** What a component class is for the designers, by the Filament class it extends, or null for other classes. */
+function componentKind(string $class): ?string
+{
+    $kinds = [
+        'Filament\\Forms\\Components\\Field' => 'field',
+        'Filament\\Infolists\\Components\\Entry' => 'entry',
+        'Filament\\Tables\\Columns\\Layout\\Component' => 'columnLayout',
+        'Filament\\Tables\\Columns\\Column' => 'column',
+        'Filament\\Tables\\Filters\\BaseFilter' => 'filter',
+        'Filament\\Actions\\BulkAction' => 'bulkAction',
+        'Filament\\Actions\\Action' => 'action',
+        'Filament\\Actions\\ActionGroup' => 'actionGroup',
+        'Filament\\Schemas\\Components\\Component' => 'layout',
+        'Filament\\Widgets\\Widget' => 'widget',
+    ];
+    foreach ($kinds as $base => $kind) {
+        if ($class === $base || is_subclass_of($class, $base)) {
+            return $kind;
+        }
+    }
+    return null;
+}
+
+/**
+ * Filament's components, columns, filters, and actions, with the fluent methods that configure them, grouped by the
+ * class or trait that declares them. Plugins' components and the project's own are included.
+ */
+function filamentCatalog(string $root): array
+{
+    $classes = [];
+    $sources = [];
+    foreach (componentFolders($root) as [$prefix, $dir, $package]) {
+        if (!is_dir($dir)) {
+            continue;
+        }
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+            $path = $file->getPathname();
+            if (!str_ends_with($path, '.php') || str_contains($path, '/Testing/') || str_contains($path, '/Commands/')) {
+                continue;
+            }
+            $source = (string) file_get_contents($path);
+            // Only concrete classes can be made; reading the source first spares loading traits, enums, and views.
+            if (!preg_match('/^\s*(final\s+|readonly\s+)*class\s+\w+/m', $source) || !str_contains($source, 'extends')) {
+                continue;
+            }
+            $class = $prefix . str_replace('/', '\\', substr($path, strlen($dir) + 1, -4));
+            try {
+                if (!class_exists($class) || !($kind = componentKind($class))) {
+                    continue;
+                }
+                $reflection = new ReflectionClass($class);
+                if ($reflection->isAbstract() || !$reflection->hasMethod('make') || !$reflection->getMethod('make')->isStatic()) {
+                    continue;
+                }
+                $order = [];
+                foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                    $name = $method->getName();
+                    $returns = $method->getReturnType();
+                    if ($method->isStatic() || str_starts_with($name, '__') || !$returns instanceof ReflectionNamedType || !in_array($returns->getName(), ['static', 'self', $method->getDeclaringClass()->getName()], true)) {
+                        continue;
+                    }
+                    $from = sourceOf($method);
+                    $order[$from] = true;
+                    $sources[$from]['methods'][$name] ??= ['params' => array_map('describeParameter', $method->getParameters())] + docSummary($method->getDocComment());
+                }
+                $parents = [];
+                for ($p = $reflection->getParentClass(); $p; $p = $p->getParentClass()) {
+                    $parents[] = $p->getName();
+                }
+                // Most specific first: the class, its traits, then each parent and its traits, as PHP resolves them.
+                $chain = [];
+                foreach ([$reflection, ...array_map(fn ($c) => new ReflectionClass($c), $parents)] as $level) {
+                    foreach ([$level, ...traitsOf($level)] as $s) {
+                        if (isset($order[$s->getName()]) && !in_array($s->getName(), $chain, true)) {
+                            $chain[] = $s->getName();
+                        }
+                    }
+                }
+                $classes[] = [
+                    'class' => $class,
+                    'kind' => $kind,
+                    'package' => $package,
+                    'parents' => $parents,
+                    'interfaces' => array_values($reflection->getInterfaceNames()),
+                    'make' => array_map('describeParameter', $reflection->getMethod('make')->getParameters()),
+                    'sources' => $chain,
+                ] + docSummary($reflection->getDocComment());
+            } catch (Throwable) {
+            }
+        }
+    }
+    foreach ($sources as $name => &$source) {
+        $source['label'] = substr($name, strrpos($name, '\\') + 1);
+        ksort($source['methods']);
+    }
+    usort($classes, fn ($a, $b) => strcmp($a['class'], $b['class']));
+    // The enums parameters take, such as Alignment, with their cases, for the designers' lists.
+    $enums = [];
+    foreach ($sources as $source) {
+        foreach ($source['methods'] as $method) {
+            foreach ($method['params'] as $param) {
+                foreach ($param['types'] as $type) {
+                    if (!isset($enums[$type]) && enum_exists($type)) {
+                        $enums[$type] = array_map(fn ($c) => ['name' => $c->name, 'value' => $c instanceof BackedEnum ? $c->value : null], $type::cases());
+                    }
+                }
+            }
+        }
+    }
+    return [
+        'enums' => $enums,
+        'version' => packageVersion($root, 'filament/filament'),
+        'classes' => $classes,
+        'sources' => $sources,
+        'resourceProperties' => staticProperties('Filament\\Resources\\Resource'),
+        'relationManagerProperties' => staticProperties('Filament\\Resources\\RelationManagers\\RelationManager'),
+        'heroicons' => enum_exists('Filament\\Support\\Icons\\Heroicon') ? array_map(fn ($c) => $c->name, Filament\Support\Icons\Heroicon::cases()) : [],
+        'heroiconsDir' => heroiconsDir(),
+    ];
+}
+
+/** A class's static properties, with their types and defaults as PHP source, for the designers' settings. */
+function staticProperties(string $class): array
+{
+    if (!class_exists($class)) {
+        return [];
+    }
+    $out = [];
+    foreach ((new ReflectionClass($class))->getProperties(ReflectionProperty::IS_STATIC) as $p) {
+        if ($p->isPrivate()) {
+            continue;
+        }
+        $default = $p->hasDefaultValue() ? var_export($p->getDefaultValue(), true) : null;
+        $out[$p->getName()] = ['type' => $p->getType() ? (string) $p->getType() : null, 'default' => $default === 'NULL' ? 'null' : $default];
+    }
+    return $out;
+}
+
+/** The folder of Heroicons' SVG files, from blade-heroicons, or null. */
+function heroiconsDir(): ?string
+{
+    if (!class_exists('BladeUI\\Heroicons\\BladeHeroiconsServiceProvider')) {
+        return null;
+    }
+    $dir = dirname((new ReflectionClass('BladeUI\\Heroicons\\BladeHeroiconsServiceProvider'))->getFileName(), 2) . '/resources/svg';
+    return is_dir($dir) ? $dir : null;
+}
+
+/** A value for JSON: an enum's value, a string, or null for anything else, such as an Htmlable icon. */
+function plainValue(mixed $value): mixed
+{
+    return match (true) {
+        $value instanceof BackedEnum => $value->value,
+        $value instanceof UnitEnum => $value->name,
+        is_scalar($value) || $value === null => $value,
+        $value instanceof Stringable => (string) $value,
+        default => null,
+    };
+}
+
+/** Calls a static method and returns its plain value, or null when it fails, as when it needs a request. */
+function tryStatic(string $class, string $method): mixed
+{
+    try {
+        return method_exists($class, $method) ? plainValue($class::$method()) : null;
+    } catch (Throwable) {
+        return null;
+    }
+}
+
+/** A class's file, relative to the project. */
+function relativeFile(string $class, string $root): ?string
+{
+    try {
+        $file = (new ReflectionClass($class))->getFileName();
+    } catch (Throwable) {
+        return null;
+    }
+    return $file ? ltrim(str_replace($root, '', $file), '/') : null;
+}
+
+/** A resource for the designers: its model, labels, navigation, pages, and relation managers. */
+function designerResource(string $resource, string $root): array
+{
+    $pages = [];
+    foreach (($resource::getPages()) as $name => $registration) {
+        try {
+            $page = $registration->getPage();
+            $kind = match (true) {
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\ListRecords') => 'list',
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\CreateRecord') => 'create',
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\EditRecord') => 'edit',
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\ViewRecord') => 'view',
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\ManageRecords') => 'manage',
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\ManageRelatedRecords') => 'related',
+                default => 'custom',
+            };
+            $pages[] = ['name' => $name, 'class' => $page, 'file' => relativeFile($page, $root), 'kind' => $kind];
+        } catch (Throwable) {
+        }
+    }
+    $relations = [];
+    $managers = [];
+    try {
+        $managers = $resource::getRelations();
+    } catch (Throwable) {
+    }
+    foreach ($managers as $manager) {
+        $group = null;
+        if (is_object($manager) && method_exists($manager, 'getManagers')) {
+            $group = plainValue($manager->getLabel());
+            $list = $manager->getManagers();
+        } else {
+            $list = [$manager];
+        }
+        foreach ($list as $m) {
+            $m = is_object($m) && method_exists($m, 'getRelationManager') ? $m->getRelationManager() : $m;
+            if (!is_string($m) || !class_exists($m)) {
+                continue;
+            }
+            $r = new ReflectionClass($m);
+            $relations[] = [
+                'class' => $m,
+                'file' => relativeFile($m, $root),
+                'relationship' => $r->hasProperty('relationship') ? $r->getStaticPropertyValue('relationship', null) : null,
+                'title' => tryStatic($m, 'getTitleAttribute') ?? ($r->hasProperty('recordTitleAttribute') ? $r->getStaticPropertyValue('recordTitleAttribute', null) : null),
+                'group' => $group,
+            ];
+        }
+    }
+    $model = $resource::getModel();
+    $cluster = tryStatic($resource, 'getCluster');
+    return [
+        'class' => $resource,
+        'file' => relativeFile($resource, $root),
+        'model' => $model,
+        'modelFile' => class_exists($model) ? relativeFile($model, $root) : null,
+        'label' => tryStatic($resource, 'getModelLabel'),
+        'pluralLabel' => tryStatic($resource, 'getPluralModelLabel'),
+        'navigationLabel' => tryStatic($resource, 'getNavigationLabel'),
+        'navigationGroup' => tryStatic($resource, 'getNavigationGroup'),
+        'navigationIcon' => tryStatic($resource, 'getNavigationIcon'),
+        'navigationSort' => tryStatic($resource, 'getNavigationSort'),
+        'slug' => tryStatic($resource, 'getSlug'),
+        'cluster' => is_string($cluster) ? $cluster : null,
+        'softDeletes' => class_exists($model) && in_array('Illuminate\\Database\\Eloquent\\SoftDeletes', class_uses_recursive($model), true),
+        'pages' => $pages,
+        'relations' => $relations,
+    ];
+}
+
+/** The app's Filament panels, each with its folders, resources, and clusters. Needs the booted app. */
+function filamentApp(string $root): array
+{
+    global $booted;
+    $out = ['version' => packageVersion($root, 'filament/filament'), 'booted' => $booted, 'panels' => []];
+    if (!$booted || !class_exists('Filament\\Facades\\Filament')) {
+        return $out;
+    }
+    // Each panel's provider, so the designers can open it or add a resource folder.
+    $providers = [];
+    foreach (classesIn($root . '/app/Providers') as $provider) {
+        try {
+            if (is_subclass_of($provider, 'Filament\\PanelProvider')) {
+                $panel = (new $provider(app()))->panel(Filament\Panel::make());
+                $providers[$panel->getId()] = ['class' => $provider, 'file' => relativeFile($provider, $root)];
+            }
+        } catch (Throwable) {
+        }
+    }
+    foreach (Filament\Facades\Filament::getPanels() as $panel) {
+        $call = fn (string $method, mixed $fallback = []) => method_exists($panel, $method) ? (function () use ($panel, $method, $fallback) {
+            try {
+                return $panel->$method();
+            } catch (Throwable) {
+                return $fallback;
+            }
+        })() : $fallback;
+        $resources = [];
+        foreach ($call('getResources') as $resource) {
+            try {
+                $resources[] = designerResource($resource, $root);
+            } catch (Throwable $e) {
+                $resources[] = ['class' => $resource, 'file' => relativeFile($resource, $root), 'error' => $e->getMessage()];
+            }
+        }
+        $clusters = [];
+        foreach ($call('getClusters') as $cluster) {
+            $clusters[] = ['class' => $cluster, 'file' => relativeFile($cluster, $root), 'label' => tryStatic($cluster, 'getClusterBreadcrumb') ?? tryStatic($cluster, 'getNavigationLabel')];
+        }
+        $relative = fn (array $dirs) => array_values(array_map(fn ($d) => ltrim(str_replace($root, '', $d), '/'), $dirs));
+        $out['panels'][] = [
+            'id' => $panel->getId(),
+            'path' => $panel->getPath(),
+            'default' => $panel->isDefault(),
+            'provider' => $providers[$panel->getId()] ?? null,
+            'resourceDirs' => $relative($call('getResourceDirectories')),
+            'resourceNamespaces' => $call('getResourceNamespaces'),
+            'clusterDirs' => $relative($call('getClusterDirectories')),
+            'clusterNamespaces' => $call('getClusterNamespaces'),
+            'url' => (function () use ($panel) {
+                try {
+                    return $panel->getUrl();
+                } catch (Throwable) {
+                    return null;
+                }
+            })(),
+            'resources' => $resources,
+            'clusters' => $clusters,
+        ];
+    }
+    return $out;
+}
+
+/** The app's enums under app/, with their cases and the Filament contracts they implement for labels, colors, and icons. */
+function appEnums(string $root): array
+{
+    $out = [];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            if (!enum_exists($class)) {
+                continue;
+            }
+            $out[] = [
+                'class' => $class,
+                'file' => relativeFile($class, $root),
+                'backed' => is_subclass_of($class, BackedEnum::class),
+                'cases' => array_map(fn ($c) => ['name' => $c->name, 'value' => $c instanceof BackedEnum ? $c->value : null], $class::cases()),
+                'contracts' => array_values(array_map(fn ($i) => substr($i, strrpos($i, '\\') + 1), array_filter(class_implements($class), fn ($i) => str_starts_with($i, 'Filament\\Support\\Contracts\\')))),
+            ];
+        } catch (Throwable) {
+        }
+    }
+    return $out;
+}
+
+/** The migration files, with whether each has run, and whether the database could be read. */
+function migrationStatus(string $root): array
+{
+    global $booted;
+    $ran = null;
+    if ($booted) {
+        try {
+            $repository = app('migrator')->getRepository();
+            $ran = $repository->repositoryExists() ? $repository->getRan() : [];
+        } catch (Throwable) {
+        }
+    }
+    $files = [];
+    foreach (glob($root . '/database/migrations/*.php') ?: [] as $file) {
+        $name = basename($file, '.php');
+        $files[] = ['name' => $name, 'file' => 'database/migrations/' . basename($file), 'ran' => $ran === null ? null : in_array($name, $ran, true)];
+    }
+    return ['database' => $ran !== null, 'files' => $files];
+}
+
+/**
+ * One model in full for the model designer: its table's columns with their types, defaults, and indexes, the
+ * foreign keys, and what the model declares: fillable, hidden, casts, relationships, soft deletes, and timestamps.
+ */
+function modelDetails(string $class, string $root): array
+{
+    global $booted;
+    if (!is_a($class, Model::class, true)) {
+        throw new InvalidArgumentException("Not a model: $class");
+    }
+    $model = new $class();
+    $table = $model->getTable();
+    $columns = null;
+    $indexes = [];
+    $foreignKeys = [];
+    $tableExists = null;
+    if ($booted) {
+        try {
+            $schema = $model->getConnection()->getSchemaBuilder();
+            $tableExists = $schema->hasTable($table);
+            if ($tableExists) {
+                $columns = array_map(fn ($c) => [
+                    'name' => $c['name'],
+                    'type' => $c['type_name'],
+                    'fullType' => $c['type'],
+                    'nullable' => $c['nullable'],
+                    'default' => $c['default'],
+                    'autoIncrement' => $c['auto_increment'],
+                    'comment' => $c['comment'] ?? null,
+                ], $schema->getColumns($table));
+                $indexes = array_map(fn ($i) => ['name' => $i['name'], 'columns' => $i['columns'], 'unique' => $i['unique'], 'primary' => $i['primary']], $schema->getIndexes($table));
+                $foreignKeys = array_map(fn ($f) => ['columns' => $f['columns'], 'foreignTable' => $f['foreign_table'], 'foreignColumns' => $f['foreign_columns'], 'onDelete' => $f['on_delete'] ?? null], $schema->getForeignKeys($table));
+            }
+        } catch (Throwable) {
+        }
+    }
+    return [
+        'class' => $class,
+        'file' => relativeFile($class, $root),
+        'table' => $table,
+        'connection' => $booted ? $model->getConnectionName() ?? config('database.default') : null,
+        'tableExists' => $tableExists,
+        'columns' => $columns,
+        'indexes' => $indexes,
+        'foreignKeys' => $foreignKeys,
+        'keyName' => $model->getKeyName(),
+        'keyType' => $model->getKeyType(),
+        'incrementing' => $model->getIncrementing(),
+        'timestamps' => $model->usesTimestamps(),
+        'softDeletes' => in_array('Illuminate\\Database\\Eloquent\\SoftDeletes', class_uses_recursive($model), true),
+        'fillable' => $model->getFillable(),
+        'guarded' => $model->getGuarded(),
+        'hidden' => $model->getHidden(),
+        'casts' => $model->getCasts(),
+        'relations' => relations($model),
+        'factory' => method_exists($model, 'newFactory') || in_array('Illuminate\\Database\\Eloquent\\Factories\\HasFactory', class_uses_recursive($model), true),
+    ];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -400,6 +956,11 @@ try {
             return $map;
         })(),
         'builder' => builderMethods(),
+        'filament-catalog' => filamentCatalog($root),
+        'filament-app' => filamentApp($root),
+        'enums' => appEnums($root),
+        'migrations' => migrationStatus($root),
+        'model' => modelDetails($argv[3], $root),
         'mago-stubs' => magoStubs($root, $argv[3]),
         'views' => viewNames($root),
         // Root aliases such as `DB` for Illuminate\Support\Facades\DB: Laravel's defaults, config/app.php's, and packages'.
