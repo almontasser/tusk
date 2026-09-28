@@ -3,6 +3,7 @@
 // designer's table tab instead.
 import { h, icon, iconButton } from "./dom";
 import { editFiles } from "./codeapply";
+import { renderEntryAccess } from "./filamentaccess";
 import * as fapp from "./filamentapp";
 import { type Catalog, humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -60,6 +61,7 @@ class WidgetDesigner {
   /** What the widget shows now, read after each change; an error says why it can't. */
   private live: (Awaited<ReturnType<typeof fapp.widgetData>> & { error?: undefined }) | { error: string } | null = null;
   private liveTimer = 0;
+  private access: { info: (fapp.PolicyInfo & { shieldKey: string | null }) | null; error: string } = { info: null, error: "" };
 
   constructor(private file: string) {}
 
@@ -152,6 +154,7 @@ class WidgetDesigner {
       main.append(h("p", { class: "fd-note" }, "A custom widget draws its own view. Open the code to change it."));
       preview = h("div");
     }
+    main.append(this.accessSection(d));
     this.el.replaceChildren(header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, h("div", { class: "ps-preview-head" }, h("strong", {}, "Preview")), preview, this.liveNote())));
   }
 
@@ -161,6 +164,38 @@ class WidgetDesigner {
     if (l.error !== undefined) return h("p", { class: "fd-note wd-live-error" }, icon("warning"), `Showing examples: the widget fails when it runs: ${l.error}`);
     if (l.chart && !l.chart.datasets?.[0]?.data?.length) return h("p", { class: "fd-note" }, "There are no records yet, so the preview shows examples.");
     return h("p", { class: "fd-note" }, l.as ? `Real numbers, as ${l.as} sees them.` : "Real numbers from the database.");
+  }
+
+  /** Who can see the widget, as the resource designer's Access tab shows it. */
+  private accessSection(d: Doc): HTMLElement {
+    const load = async (fresh = false) => {
+      if (fresh) fapp.forget([`policy:entry:${d.cls.fqn}`]);
+      try {
+        this.access = { info: await fapp.entryAccess(this.root, d.cls.fqn), error: "" };
+      } catch (e) {
+        this.access = { info: null, error: e instanceof Error ? e.message : String(e) };
+      }
+      this.render();
+    };
+    return h(
+      "section",
+      { class: "fd-settings-section wd-access" },
+      renderEntryAccess({
+        root: this.root,
+        kind: "widget",
+        fqn: d.cls.fqn,
+        text: d.text,
+        cls: d.cls,
+        host,
+        ...this.access,
+        load: () => load(!!(this.access.info || this.access.error)),
+        reveal: (offset) => this.reveal(offset),
+        edit: (build, message) => editFiles([{ path: this.file, build: (text, outline, fill) => {
+          const cls = outline.classes.find((c) => c.name);
+          return cls ? build(text, cls, fill) : null;
+        } }], message),
+      }),
+    );
   }
 
   private codeNote(d: Doc, method: string) {

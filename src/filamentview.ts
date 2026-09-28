@@ -61,6 +61,12 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(widget.index + widget[0].length - widget[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openWidget", title: "Open in Widget Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      // A custom page, not a resource's: opened in the designer.
+      const page = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+(Page|BasePage)\b/m.exec(text);
+      if (page && /use Filament\\Pages\\Page( as BasePage)?;/.test(text) && !/\$resource\s*=/.test(text)) {
+        const line = model.getPositionAt(page.index + page[0].length - page[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPageDesigner", title: "Open in Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -74,6 +80,7 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
   monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
   monaco.editor.registerCommand("tusk.openPanelSettings", (_, path: string, id: string) => void import("./panelsettings").then((m) => m.openPanelSettings(path, id)));
+  monaco.editor.registerCommand("tusk.openPageDesigner", (_, path: string) => void openDesigner(path));
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
@@ -151,7 +158,8 @@ export async function loadFilament() {
         "span",
         { class: "fv-actions" },
         ...(panel.provider?.file ? [iconButton("settings-gear", "Panel settings", () => openPanel(panel))] : []),
-        iconButton("add", "New resource in this panel", () => void newResource(panel.id)), ...(panel.url ? [iconButton("link-external", "Open the panel in the browser", () => host.openUrl(panel.url!))] : [])),
+        iconButton("add", "New resource in this panel", () => void newResource(panel.id)),
+        iconButton("new-file", "New page in this panel", () => void newPageIn(panel)), ...(panel.url ? [iconButton("link-external", "Open the panel in the browser", () => host.openUrl(panel.url!))] : [])),
     );
     head.onclick = (e) => {
       if ((e.target as HTMLElement).closest("button")) return;
@@ -204,6 +212,16 @@ export async function loadFilament() {
       }
     }
     if (!panel.resources.length) rows.push(h("li", { class: "fv-none muted" }, "No resources yet"));
+    // Custom pages, in the order the navigation shows them.
+    const pages = (panel.pages ?? []).filter((pg) => pg.file && !pg.file.startsWith("vendor/"));
+    if (pages.length) rows.push(h("li", { class: "fv-group" }, "Pages"));
+    for (const pg of pages.sort((a, b) => (a.navigationSort ?? 0) - (b.navigationSort ?? 0) || (a.label ?? "").localeCompare(b.label ?? ""))) {
+      const file = `${root}/${pg.file}`;
+      const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: pg.class }, pg.navigationIcon ? heroicon(iconsDir, pg.navigationIcon) : icon("file"), h("span", { class: "fv-name" }, pg.label ?? shortClass(pg.class)), h("span", { class: "fv-detail" }, pg.navigationGroup ?? ""));
+      row.onclick = () => void openDesigner(file);
+      row.onkeydown = (e) => e.key === "Enter" && void openDesigner(file);
+      rows.push(row);
+    }
   }
   if (!app.booted) {
     // The app can't start, often because of a mistake in a file Filament loads. Say where, and still list the
@@ -286,6 +304,21 @@ export async function openModelPicker() {
   );
   items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
   pick("Open a model in the designer", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Asks for a new custom page in a panel. */
+async function newPageIn(panel: fapp.PanelInfo, anchor?: HTMLElement) {
+  const at = anchor ?? { x: innerWidth / 2 - 160, y: 120 };
+  (await import("./newpage")).newPage(at, panel, () => void loadFilament());
+}
+
+/** Picks a panel and asks for a new page in it. */
+export async function newPagePicker() {
+  const app = await fapp.app(host.root()).catch((e) => (host.status(`Can't read the app: ${errorText(e)}`), null));
+  const panels = app?.panels ?? [];
+  if (panels.length === 1) return newPageIn(panels[0]);
+  const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-window", run: () => void newPageIn(p) }));
+  pick("New page: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Opens a panel's settings. */

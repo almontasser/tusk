@@ -87,3 +87,11 @@ test("a polymorphic pair is a morph column, left out of new forms and tables", a
   assert.equal(inTableByDefault(col("commentable_type", "varchar"), m), false);
   assert.equal(natureOf(col("category_id", "bigint"), m), "foreign");
 });
+
+test("fields start from their column's default", () => {
+  const m = { class: "App\\Models\\Brand", columns: [], casts: {}, relations: [], enums: [], softDeletes: false, titles: {} };
+  const calls = (c: Parameters<typeof formField>[0]) => formField(c, m).calls;
+  assert.deepEqual(calls({ name: "position", type: "integer", nullable: false, default: "0" }), [["integer", ""], ["default", "0"], ["required", ""]]);
+  assert.deepEqual(calls({ name: "state", type: "varchar", nullable: true, default: "'draft'::character varying" }).filter(([n]) => n === "default"), [["default", "'draft'"]]);
+  assert.deepEqual(calls({ name: "code", type: "varchar", nullable: true, default: "gen_code()" }).filter(([n]) => n === "default"), []);
+});

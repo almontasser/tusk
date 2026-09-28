@@ -1,0 +1,92 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Pages",
+  "uses": [
+    {
+      "alias": "Page",
+      "name": "Filament\\Pages\\Page",
+      "kind": "class",
+      "span": [
+        38,
+        62
+      ]
+    }
+  ],
+  "useInsert": 63,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "SettingsPage",
+      "fqn": "App\\Filament\\Pages\\SettingsPage",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Pages\\Page",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        64,
+        229
+      ],
+      "bodyStart": 97,
+      "bodyEnd": 228,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "title",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "string",
+            "value": "Settings",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              136,
+              146
+            ]
+          },
+          "span": [
+            102,
+            147
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "canAccess",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            153,
+            227
+          ],
+          "docStart": null,
+          "body": [
+            199,
+            226
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": false,
+              "span": [
+                215,
+                220
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

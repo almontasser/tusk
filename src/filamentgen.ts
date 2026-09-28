@@ -101,6 +101,21 @@ const maxLengthOf = (c: Column) => Number(/\((\d+)\)/.exec(c.fullType ?? "")?.[1
 const required = (c: Column) => !c.nullable && (c.default === null || c.default === undefined) && !c.autoIncrement;
 const cls = (fqn: string) => `{{${fqn}}}`;
 
+/**
+ * A column's default as PHP, when it's a plain value: `0`, or `'draft'` (PostgreSQL writes `'draft'::character
+ * varying`). Null for none, and for expressions such as CURRENT_TIMESTAMP.
+ */
+export function defaultCode(c: Column, nature: Nature): string | null {
+  if (c.default === null || c.default === undefined || ["date", "datetime", "time", "json", "foreign", "password", "id", "uuid", "morph"].includes(nature)) return null;
+  const raw = String(c.default).replace(/::[\w\s]+$/, "").trim();
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  const quoted = /^'((?:[^']|'')*)'$/.exec(raw);
+  if (quoted) return phpString(quoted[1].replace(/''/g, "'"));
+  // MySQL writes a string default without quotes; anything with a call or a keyword is an expression.
+  if (/^(string|email|phone|url|enum|text)$/.test(nature) && !/[()]|^(null|current_\w+)$/i.test(raw)) return phpString(raw);
+  return null;
+}
+
 /** The form field for a column. */
 export function formField(c: Column, m: ModelFacts): Gen {
   const nature = natureOf(c, m);
@@ -181,6 +196,12 @@ export function formField(c: Column, m: ModelFacts): Gen {
       g = input();
   }
   if (req) calls.push(["required", ""]);
+  // A column's default fills a new record's field, and a field whose column can't be null can't be emptied either.
+  const def = defaultCode(c, nature);
+  if (def !== null) {
+    calls.push(["default", def]);
+    if (!c.nullable) calls.push(["required", ""]);
+  }
   if (["string", "email", "phone", "url"].includes(nature)) {
     const max = maxLengthOf(c);
     if (max) calls.push(["maxLength", String(max)]);

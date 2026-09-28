@@ -878,6 +878,14 @@ have the permissions the rules name. Check a box to grant one, creating the
 permission when it's missing, and **New role** adds a role. These change the
 app's database.
 
+Custom pages and widgets have **Access** too: who can open the page, or see the
+widget, is **Everyone**, **Nobody**, **Only users who…** have a permission or a
+role, written in its `canAccess()` or `canView()`, or, with Filament Shield,
+**Filament Shield decides**, which adds Shield's `HasPageShield` or
+`HasWidgetShield` trait and shows the permission Shield gives it, such as
+`page_Settings`, with the roles that have it. A page someone can't open also
+leaves their navigation.
+
 ### Languages
 
 When text is written with `__()`, the designer helps translate it:
@@ -953,6 +961,22 @@ the panel follows it.
 Settings written as code the designer doesn't write, such as a logo from a
 closure, show as code and open it.
 
+### Custom pages
+
+Pages that aren't a resource's are listed under **Pages** in each panel in the
+Filament tool window, and open in the designer: their form or table, header
+actions, access, and navigation settings (label, icon, group, order, title,
+and address). **Open in Designer** shows above a page's class too.
+
+**New page** (the page button on a panel, or **Filament: New Page…**) makes:
+
+- **A form** that edits one record: the signed-in user's, or a model's single
+  record, such as the store's settings, made when it's first saved. Its
+  fields come from the model's columns, and **Save** saves them.
+- **A table** of a model's records, with columns from the model.
+
+New pages draw their content from `content()`, so they need no Blade view.
+
 ### Dashboards and widgets
 
 Click **Dashboard** under a panel in the Filament tool window, or run
@@ -975,6 +999,7 @@ as each one is.
   heading, color, and height, and the data: a value over the last days, weeks,
   or months, or split by a column's values. Pies get a color per part.
 - **Table widgets** open in the designer's table tab.
+- **Access:** who can see a widget, as for pages below.
 - **Resource pages:** the **Page actions** tab lists the widgets above the
   page, to add, reorder, and remove, and makes new ones for the resource.
 

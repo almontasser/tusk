@@ -4402,6 +4402,28 @@ has, as `methodsOf` reports them.
   implements its Plugin contract), the app's name, and the user model with the
   contracts tenancy needs. `src/panelsettings.ts` draws the view.
 
+### Custom pages
+
+- **Reading:** `introspect.php filament-app` lists each panel's pages that
+  aren't dashboards, with their navigation, and its page and widget folders.
+  The designer opens a page in a mode of its own: a class extending `Page`
+  without a `$resource`. Its form and table are the instance methods
+  `form()` and `table()`, read like a relation manager's; its header actions
+  are its own; its model is the one its table queries or its `getRecord()`
+  returns.
+- **New pages:** `src/pagegen.ts` writes a form page that fills from
+  `getRecord()` (the user, or `firstOrNew()`, filled from the fields' defaults
+  when the record isn't saved yet) and saves on submit, or a table page with
+  `HasTable`. Both draw `content()`, with `EmbeddedSchema` or `EmbeddedTable`,
+  as Filament 4's own pages do. `formField` gives a field its column's default
+  and makes it required when the column can't be null, since a new record's
+  empty field would otherwise insert null.
+- **Access:** `readEntry` and `entryEdits` in `src/policygen.ts` read and
+  write `canAccess()` or `canView()` as one rule on the signed-in user, or
+  Shield's trait. `introspect.php entry-access` asks Shield for the class's
+  permission. `renderEntryAccess` in `src/filamentaccess.ts` reuses the
+  Access tab's conditions and roles grid.
+
 ### Dashboards and widgets
 
 - **Reading:** `introspect.php widgets <panel>` asks the panel for its widgets,

@@ -1613,6 +1613,7 @@ const actions: Action[] = [
   { label: "Filament: New Resource…", run: () => root && newResource() },
   { label: "Filament: Install Filament", run: () => root && installFilament() },
   { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
+  { label: "Filament: New Page…", run: () => root && void import("./filamentview").then((m) => m.newPagePicker()) },
   { label: "Filament: Dashboard…", run: () => root && void import("./filamentview").then((m) => m.openDashboardPicker()) },
   { label: "Filament: Panel Settings…", run: () => root && void import("./filamentview").then((m) => m.openPanelPicker()) },
   { label: "Laravel: Model Access…", run: () => root && void import("./filamentview").then((m) => m.openAccessPicker()) },

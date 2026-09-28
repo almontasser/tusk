@@ -286,6 +286,7 @@ const GETTERS: Record<string, string[]> = {
   pluralModelLabel: ["getPluralModelLabel", "getPluralLabel"],
   recordTitleAttribute: ["getRecordTitleAttribute"],
   slug: ["getSlug"],
+  title: ["getTitle"],
   cluster: ["getCluster"],
 };
 
@@ -307,6 +308,13 @@ const LABELS: Setting[] = [
 ];
 
 /** The declaration for a new static property: the type Filament gives it, with classes imported. */
+/** A custom page's own names. */
+const PAGE_LABELS: Setting[] = [
+  { name: "title", label: "Title", kind: "text", help: "The heading at the top of the page, and the browser tab's title." },
+  { name: "slug", label: "URL slug", kind: "text", help: "The page's address in the panel. Empty uses the class name." },
+  { name: "cluster", label: "Cluster", kind: "cluster" },
+];
+
 function declaration(d: Designer, name: string, imports: { name(f: string): string }): string {
   const type = d.cat?.resourceProperties[name]?.type ?? "?string";
   const written = type
@@ -462,6 +470,14 @@ export function renderSettingsTab(d: Designer): HTMLElement {
   );
 
   const section = (title: string, iconName: string, rows: HTMLElement[], note?: string) => h("section", { class: "fd-settings-section" }, h("h3", {}, icon(iconName), title), note ? h("p", { class: "fd-note" }, note) : null, h("div", { class: "fd-rows" }, ...rows));
+  if (d.page)
+    return h(
+      "div",
+      { class: "fd-page-tab fd-settings" },
+      h("div", { class: "fd-page-tab-head" }, h("div", {}, h("h2", {}, "Page settings"), h("p", { class: "fd-note" }, "How the page appears in the panel. Empty fields use Filament's defaults."))),
+      section("Navigation", "list-tree", NAVIGATION.map(row)),
+      section("Title and address", "symbol-key", PAGE_LABELS.filter((s) => s.kind !== "cluster" || d.panel?.clusters.length).map(row)),
+    );
   const model = d.facts?.class ?? info?.model;
   return h(
     "div",

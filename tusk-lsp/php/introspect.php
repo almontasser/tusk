@@ -849,6 +849,18 @@ function filamentApp(string $root): array
             })(),
             'resources' => $resources,
             'clusters' => $clusters,
+            // Custom pages: not dashboards, which the dashboard view shows, and not the auth pages.
+            'pages' => array_values(array_map(fn ($page) => [
+                'class' => $page,
+                'file' => relativeFile($page, $root),
+                'label' => tryStatic($page, 'getNavigationLabel'),
+                'navigationIcon' => (function () use ($page) {
+                    $icon = tryStatic($page, 'getNavigationIcon');
+                    return $icon instanceof BackedEnum ? $icon->name : (is_string($icon) ? $icon : null);
+                })(),
+                'navigationGroup' => plainValue(tryStatic($page, 'getNavigationGroup')),
+                'navigationSort' => tryStatic($page, 'getNavigationSort'),
+            ], array_filter($call('getPages'), fn ($page) => !is_a($page, 'Filament\\Pages\\Dashboard', true)))),
         ];
     }
     return $out;
@@ -1273,6 +1285,25 @@ function panelOptions(string $root): array
     return ['palettes' => $palettes, 'plugins' => $plugins, 'appName' => config('app.name'), 'user' => $user];
 }
 
+/**
+ * Who can open a custom page or see a widget: the roles and permissions, as for a policy, and with Filament Shield,
+ * the permission Shield gives the page or widget.
+ */
+function entryAccess(string $class, string $root): array
+{
+    $out = policyInfo($class, $root);
+    $out['shieldKey'] = null;
+    if ($out['shield']) {
+        try {
+            $shield = BezhanSalleh\FilamentShield\Facades\FilamentShield::class;
+            $entry = is_subclass_of($class, 'Filament\\Widgets\\Widget') ? ($shield::getWidgets()[$class] ?? null) : ($shield::getPages()[$class] ?? null);
+            $out['shieldKey'] = $entry ? array_key_first($entry['permissions']) : null;
+        } catch (Throwable) {
+        }
+    }
+    return $out;
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1297,6 +1328,7 @@ try {
         'migrations' => migrationStatus($root),
         'model' => modelDetails($argv[3], $root),
         'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
+        'entry-access' => entryAccess($argv[3], $root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),
