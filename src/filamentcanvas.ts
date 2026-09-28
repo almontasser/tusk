@@ -387,7 +387,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
         const v = nodeValue(c.make.args.items[0]?.value);
         return typeof v === "number" ? v : columnsOf(c, 2);
       })() : columnsOf(c, 1);
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, name === "Grid" ? `Grid · ${n} columns` : name), inner(schemaSlot(), n));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, name === "Grid" ? `Grid · ${n} ${n === 1 ? "column" : "columns"}` : name), inner(schemaSlot(), n));
     }
     case "Flex":
       return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, "Flex"), c.slots[0] ? renderSlot(ctx, c.slots[0], { owner: path, slot: slotKey(c.slots[0]) }, path, c, Math.max(1, c.slots[0].entries.length)) : inner("schema", 2));
