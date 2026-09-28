@@ -37,7 +37,8 @@ import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
-import { detectFormatters, formatModel, initFormatting } from "./format";
+import { detectFormatters, formatModel, formatOnSave, initFormatting, setFormattersDialog } from "./format";
+import { openFormatters } from "./formattersdialog";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
@@ -1167,7 +1168,7 @@ async function writeModel(path: string) {
 async function saveFile(path: string) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
-  if (settings.formatOnSave) {
+  if (formatOnSave(tab.model.getLanguageId())) {
     // The active editor formats through Monaco, which applies minimal edits and keeps the cursor in place.
     if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
     else await formatModel(tab.model);
@@ -1642,6 +1643,7 @@ const actions: Action[] = [
   { label: "Find in Terminal", keys: "Meta+F", run: () => findInTerminal() || toast("Open a terminal to find in it.", { kind: "info", timeout: 4000 }), when: terminalFocused },
   { label: "Rename Terminal Tab…", run: () => renameTerminal() },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
+  { label: "Formatters…", run: () => root && openFormatters() },
 ];
 
 /** Copies `path:line`, relative to the project, as PhpStorm's Copy Reference does for a line. */
@@ -1856,6 +1858,7 @@ const settingsLoaded = initSettings();
 initSnippets();
 initBookmarks({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initFormatting({ root: () => root, status });
+setFormattersDialog(openFormatters);
 initToolPaths({ restartServers });
 initJsonSchemas();
 initConflicts();

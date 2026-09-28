@@ -3019,10 +3019,27 @@ each formatter finds the project's configuration:
 3. For PHP, Tusk's server (`textDocument/formatting`), which formats its copy
    of the open file with Mago's formatter.
 
-`detectFormatters` looks for Prettier and Pint when a folder opens. Monaco's
-own formatters for CSS, HTML, JSON, and TypeScript are always off
-(`setModeConfiguration`), since a Prettier is always there and they would
-otherwise compete for those languages.
+That order is **Auto**. The project's `formatters` value (the Formatters
+dialog, `src/formattersdialog.ts`) picks a formatter per language group, and
+format on save per group; `src/formatdata.ts` (with tests) holds the groups and
+the lookups, `formatterFor` and `formatsOnSave`.
+
+- A specific formatter runs alone: no fallback, and a missing one (Pint or PHP
+  CS Fixer without `vendor/bin`, Prettier for PHP without the project's own)
+  throws `Missing`, which shows with how to install it and a **Formatters…**
+  button. Other failures go to the status bar, as before.
+- PHP CS Fixer formats a copy in the temporary folder
+  (`php-cs-fixer fix --using-cache=no <copy>`), run from the project so it
+  reads the project's config; with an explicit path, its Finder doesn't apply.
+- The provider is registered again when the choices change, for every language
+  except those set to Built-in. Monaco's own formatters for CSS, HTML, JSON,
+  and TypeScript (`setModeConfiguration`) are on only for those, or for Auto
+  while Node.js is missing, so the two never compete.
+- After formatting, `status("Formatted with …", "format")` names the formatter.
+- `saveFile` asks `formatOnSave(language)` instead of reading the setting.
+
+`detectFormatters` looks for Prettier, Pint, and PHP CS Fixer when a folder
+opens.
 
 `node-tools/package.json` pins Prettier and the two plugins directly, rather
 than relying on the copies the Svelte and Astro servers pull in. The Astro
@@ -5174,4 +5191,14 @@ the modules that run tools trivial. The backend checks the tool before it
 starts a program, so a missing one fails with an error that names the setting,
 not a raw spawn error. The tools manifest's URL stays fixed: packages are
 signed with the updater's key, so a mirror would need Tusk's key anyway.
+
+### 2026-09-28: Formatters per language in project state
+
+A team's formatter is part of the project, as its `lint-staged` and CI show, so
+the choice per language lives in `formatters`, shareable in `tusk.json`, not in
+personal settings. Auto keeps the old order, so a project that sets nothing
+formats as before. Format on save stays a personal setting, with a per-language
+override in the same value rather than a second setting, so one dialog shows
+both. Built-in unregisters Tusk's provider for the language instead of
+returning nothing from it, because Monaco uses one provider when several apply.
 

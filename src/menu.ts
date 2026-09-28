@@ -27,7 +27,7 @@ const LAYOUT: [string, Entry[]][] = [
     "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-",
     ...commandsIn("navigate"), "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files", "-", "Next Change", "Previous Change"]],
   ["Code", ["Generate…", "Show Context Actions", "Basic Completion", "Parameter Info", "Quick Documentation", "-",
-    ...commandsIn("comment"), "Reformat Code", "Auto-Indent Lines", "Optimize Imports", "Fix All Safe Problems in File", "-",
+    ...commandsIn("comment"), "Reformat Code", "Formatters…", "Auto-Indent Lines", "Optimize Imports", "Fix All Safe Problems in File", "-",
     ["Folding", ["Expand", "Collapse", "Toggle Fold", "Expand Recursively", "Collapse Recursively", "-", "Expand All", "Collapse All", ["Collapse to Level", commandsIn("fold-level")], "-",
       "Collapse Doc Comments", "Collapse Regions", "Expand Regions", "-", "Fold Selection"]], "-",
     "Move Line Up", "Move Line Down", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],

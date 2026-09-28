@@ -86,7 +86,7 @@ const fields: Field[] = [
   { group: "Editor", key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
   { group: "Editor", key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
   { group: "Editor", key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
-  { group: "Editor", key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
+  { group: "Editor", key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Code > Formatters… chooses the formatter for each language in the project, and can turn this on or off per language." },
   { group: "Editor", key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
   { group: "Editor", key: "vim", label: "Vim emulation", type: "checkbox", help: "The status bar shows the mode. ⌃ keys go to Vim while you type in the editor." },
   { group: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },

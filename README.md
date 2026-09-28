@@ -59,6 +59,7 @@ file to change when you add it.
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
+| Formatters | The built-in formatter formats on save only in the active tab; a file saved in another tab, such as with Save All, isn't formatted. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Lists | The Redis key tree has ↑↓, →←, and Enter, but not yet Home, End, paging, or type-ahead, which the other lists have. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
@@ -546,7 +547,7 @@ save every file they change.
 Tusk keeps some settings per project: breakpoints, watches, and how the
 debugger pauses on exceptions; the server paths for debugging; the Docker
 service that runs commands; saved database connections and their SSH tunnels;
-the index exclusions; the PHP interpreter; the last URL you profiled; and the stress test form. Each
+the index exclusions; the PHP interpreter; the formatters; the last URL you profiled; and the stress test form. Each
 one lives in one of two places:
 
 - **On this Mac**, in a file per project in
@@ -596,6 +597,7 @@ An example:
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
 | `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `formatters` | The formatter (`use`) and format on save (`onSave`) for each language group: `php`, `blade`, `js`, `css`, `json`, `markdown`, and `yaml`. |
 | `phpInterpreter` | The PHP program this project uses instead of the one in **Settings > Tools**, such as `/opt/homebrew/opt/php@8.3/bin/php`. |
 
 The selected database connection, the last profiled URL, and the stress test
@@ -2437,6 +2439,22 @@ file's `excludes` instead.
 2. **Laravel Pint**, for PHP files Prettier doesn't handle, when the project has
    `vendor/bin/pint`.
 3. **Mago's formatter**, the fallback for PHP, built into the PHP server.
+
+That order is **Auto**. To choose a formatter per language, run **Code >
+Formatters…**. For PHP, Blade, JavaScript, TypeScript, and Vue, CSS, JSON,
+Markdown, and YAML, choose Auto, a specific formatter (Laravel Pint, PHP CS
+Fixer, Mago, Prettier, blade-formatter, or Monaco's built-in one, where they
+apply), or **None**. Each language also has an **On save** choice that turns
+format on save on or off for it; **Default** follows **Format files when
+saving**. The choices are a project setting, which you can share in
+`tusk.json`, since teams standardize their formatters.
+
+- After formatting, the status bar names the formatter that ran, such as
+  "Formatted with Laravel Pint".
+- When the chosen formatter isn't installed, Tusk says how to install it, such
+  as `composer require laravel/pint --dev`, with a **Formatters…** button.
+- PHP CS Fixer formats a copy of the file in the temporary folder with the
+  project's configuration, since it doesn't read standard input.
 
 Prettier, including the bundled one, and Pint read the project's own
 configuration files, and Prettier follows `.editorconfig`. Mago reads the
