@@ -8,6 +8,7 @@ import { type Catalog, type CClass, classInfo, COLORS, type Editor, essentials, 
 import { type Condition, conditionClosure, getUtility, needsValue, type Operator, OPERATORS, readConditions, type Relation } from "./filamentgen";
 import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
+import { ownTranslation, translate, type Translations } from "./translations";
 import { BEHAVIORS, type Behavior, behaviorCode, readBehavior, type Scope } from "./filamentactions";
 import { type Comp, type Path, shortClass, walk } from "./filamentschema";
 import { confirm } from "./palette";
@@ -41,6 +42,8 @@ export type InspectorCtx = {
   openEnum(cls: string): void;
   /** For a custom action: what it works with, and the record's model, for "What it does". */
   action?: { scope: Scope; model: string | null; casts: Record<string, string> };
+  /** The app's translations, for text written with `__()`. */
+  i18n?: { t: Translations; locale: string | null; write(locale: string, key: string, value: string): void; rename(from: string, to: string): Promise<void> };
 };
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
@@ -103,7 +106,32 @@ function methodRow(ctx: InspectorCtx, m: MethodInfo, label = humanize(m.name)): 
   if (existing && first && (!readable(editor, first) || (named && editor.kind !== "switch"))) return row(label, codeChip(ctx, first), { set: true, reset, doc });
   if (existing && existing.args.items.length > 1 && editor.kind !== "switch" && editor.kind !== "presence") return row(label, codeChip(ctx, first ?? (c.node as PNode)), { set: true, reset, doc });
   const value = editorFor(ctx, editor, m.name, first, existing !== undefined, set);
-  return row(label, value, { set: !!existing, reset, doc, stacked: editor.kind === "map" || (editor.kind === "text" && !!editor.multiline) });
+  const i18n = editor.kind === "text" ? translationRows(ctx, first, set, m.name === "label" && flag(c, "translateLabel")) : null;
+  return row(label, i18n ? h("div", { class: "fd-stack" }, value, i18n) : value, { set: !!existing, reset, doc, stacked: !!i18n || editor.kind === "map" || (editor.kind === "text" && !!editor.multiline) });
+}
+
+/**
+ * Under a text written with `__()`, its translation in each of the app's languages; under plain text, a button
+ * that makes it translatable. Nothing when the app has no lang files.
+ */
+function translationRows(ctx: InspectorCtx, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
+  const i18n = ctx.i18n;
+  const v = textValue(node);
+  if (!i18n || !v || !v.text) return null;
+  // A label with `translateLabel()` is translated as written.
+  if (!v.translated && !byFlag)
+    return h("button", { type: "button", class: "fd-chip-link fd-translate", title: "Write it with __(), so each language can have its own text", onclick: () => set(`__(${phpString(v.text)})`) }, icon("globe"), "Translate");
+  const { t } = i18n;
+  return h(
+    "div",
+    { class: "fd-translations" },
+    ...t.locales.map((locale) => {
+      const own = ownTranslation(t, locale, v.text);
+      const input = commitInput(own ?? "", (x) => x !== (own ?? "") && i18n.write(locale, v.text, x), { placeholder: own === undefined ? `${translate(t, locale, v.text).text} (not translated)` : "" }) as HTMLInputElement;
+      if (/^(ar|he|fa|ur)/.test(locale)) input.dir = "rtl";
+      return h("label", { class: `fd-translation${own === undefined ? " missing" : ""}${locale === i18n.locale ? " current" : ""}` }, h("span", { class: "fd-translation-locale" }, locale), input);
+    }),
+  );
 }
 
 /** Whether an editor can show a value in full. */
@@ -151,7 +179,11 @@ function editorFor(ctx: InspectorCtx, editor: Editor, name: string, value: PNode
     }
     case "text": {
       const t = textValue(value);
-      return commitInput(t?.text ?? "", (s) => set(s === "" ? null : stringCode(s, value)), { multiline: editor.multiline, placeholder: "" });
+      return commitInput(t?.text ?? "", async (s) => {
+        // A translated text's translations follow it to its new key.
+        if (t?.translated && s && ctx.i18n) await ctx.i18n.rename(t.text, s);
+        set(s === "" ? null : stringCode(s, value));
+      }, { multiline: editor.multiline, placeholder: "" });
     }
     case "enum": {
       const cases = ctx.cat.enums[editor.enum] ?? [];
@@ -256,7 +288,13 @@ function nameEditor(ctx: InspectorCtx, info: CClass | undefined): HTMLElement | 
     return row(kind === "column" || kind === "entry" ? "Column" : kind === "filter" ? "Name" : "Field (column)", h("div", { class: "fd-inline-editor" }, input, list), { doc: "The attribute it reads and saves, such as a column of the model. Columns and entries can reach relationships with a dot: author.name." });
   }
   const label = kind === "layout" ? (["Tab", "Step", "Fieldset"].includes(short) ? "Label" : "Heading") : "Name";
-  return row(label, commitInput(value, (v) => ctx.setMake(v ? stringCode(v, first?.value) : ""), {}), { set: !!first });
+  const input = commitInput(value, async (v) => {
+    const t = textValue(first?.value);
+    if (t?.translated && v && ctx.i18n) await ctx.i18n.rename(t.text, v);
+    ctx.setMake(v ? stringCode(v, first?.value) : "");
+  }, {});
+  const i18n = translationRows(ctx, first?.value, (args) => ctx.setMake(args ?? ""));
+  return row(label, i18n ? h("div", { class: "fd-stack" }, input, i18n) : input, { set: !!first, stacked: !!i18n });
 }
 
 const INPUT_TYPES: [string, string][] = [

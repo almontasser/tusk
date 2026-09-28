@@ -17,6 +17,7 @@
  *   php introspect.php <project root> migrations
  *   php introspect.php <project root> model <Model class>
  *   php introspect.php <project root> policy <Model class>
+ *   php introspect.php <project root> translations
  *   php introspect.php <project root> permission <create-permission|create-role|grant|revoke> <name> [<permission>]
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
@@ -34,7 +35,7 @@
  * clusters. `enums` lists the app's enums, `migrations` the migration files and which have run, and `model` one
  * model's table, columns, indexes, and declarations. `policy` names a model's policy and lists the roles and
  * permissions of spatie/laravel-permission when the app has it; `permission` creates a permission or role, or
- * grants or revokes a role's permission.
+ * grants or revokes a role's permission. `translations` lists the strings of the app's lang files by locale.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -1023,6 +1024,52 @@ function policyInfo(string $model, string $root): array
     return $out;
 }
 
+/** The app's own translations: lang/<locale>.json, and lang/<locale>/*.php flattened to `file.key`. */
+function appTranslations(string $root): array
+{
+    $dir = function_exists('lang_path') ? lang_path() : $root . '/lang';
+    $out = ['dir' => $dir, 'locale' => (string) config('app.locale', 'en'), 'fallback' => (string) config('app.fallback_locale', 'en'), 'locales' => [], 'json' => new stdClass(), 'php' => new stdClass()];
+    $flatten = function (array $values, string $prefix) use (&$flatten): array {
+        $flat = [];
+        foreach ($values as $key => $value) {
+            if (is_array($value)) {
+                $flat += $flatten($value, "{$prefix}{$key}.");
+            } elseif (is_string($value)) {
+                $flat["{$prefix}{$key}"] = $value;
+            }
+        }
+        return $flat;
+    };
+    foreach (glob($dir . '/*.json') ?: [] as $file) {
+        $locale = basename($file, '.json');
+        $values = json_decode((string) file_get_contents($file), true);
+        $out['json']->{$locale} = is_array($values) ? (object) array_filter($values, 'is_string') : new stdClass();
+        $out['locales'][] = $locale;
+    }
+    foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $folder) {
+        $locale = basename($folder);
+        if ($locale === 'vendor') {
+            continue;
+        }
+        $strings = [];
+        foreach (glob($folder . '/*.php') ?: [] as $file) {
+            try {
+                $values = include $file;
+            } catch (Throwable) {
+                continue;
+            }
+            if (is_array($values)) {
+                $strings += $flatten($values, basename($file, '.php') . '.');
+            }
+        }
+        $out['php']->{$locale} = (object) $strings;
+        $out['locales'][] = $locale;
+    }
+    $out['locales'] = array_values(array_unique([...$out['locales'], $out['locale']]));
+    sort($out['locales']);
+    return $out;
+}
+
 /** Creates a permission or role, or grants or revokes a role's permission, with spatie/laravel-permission. */
 function changePermission(string $action, string $name, ?string $permission): array
 {
@@ -1066,6 +1113,7 @@ try {
         'migrations' => migrationStatus($root),
         'model' => modelDetails($argv[3], $root),
         'policy' => policyInfo($argv[3], $root),
+        'translations' => appTranslations($root),
         'permission' => changePermission($argv[3], $argv[4], $argv[5] ?? null),
         'mago-stubs' => magoStubs($root, $argv[3]),
         'views' => viewNames($root),

@@ -7,7 +7,8 @@ import type * as L from "vscode-languageserver-protocol";
 import { h, icon, iconButton } from "./dom";
 import type { monaco } from "./editor";
 import * as fapp from "./filamentapp";
-import { type CanvasCtx, currentDrag, type Drag, hideLine, labelOf, renderActionModal, renderPageActions, renderSchema, renderTable, setDragging, type SlotRef } from "./filamentcanvas";
+import { type CanvasCtx, currentDrag, type Drag, hideLine, labelOf, renderActionModal, renderPageActions, renderSchema, renderTable, setDragging, setTranslator, type SlotRef } from "./filamentcanvas";
+import { fileFor, isRtl, renameJsonKey, setJsonKey, setPhpValue, translate, type Translations } from "./translations";
 import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
@@ -17,7 +18,7 @@ import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsT
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
-import { classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
@@ -40,6 +41,9 @@ type RootRef = { kind: RootKind; doc: Doc; root: Root } | { kind: RootKind; miss
 export type Tab = "form" | "table" | "infolist" | "actions" | "relations" | "pages" | "access" | "settings";
 
 const open = new Map<string, Designer>();
+
+/** Calls whose text people see, which "Make translatable" writes with `__()`. */
+const TEXT_CALLS = new Set(["label", "placeholder", "helperText", "hint", "heading", "description", "tooltip", "modalHeading", "modalDescription", "modalSubmitActionLabel", "modalCancelActionLabel", "emptyStateHeading", "emptyStateDescription", "addActionLabel", "successNotificationTitle", "trueLabel", "falseLabel", "loadingMessage", "noSearchResultsMessage", "searchPrompt", "pluralLabel", "modelLabel", "pluralModelLabel", "badgeTooltip"]);
 
 /** Opens the designer for a resource or relation manager file, or brings its tab forward. */
 export async function openDesigner(file: string, tab?: Tab) {
@@ -83,6 +87,9 @@ export class Designer {
   access: { info: fapp.PolicyInfo; doc: Doc | null } | null = null;
   accessError = "";
   private accessLoading: Promise<void> | null = null;
+  /** The app's translations, and the language the canvas previews, or null for the code's own text. */
+  translations: Translations | null = null;
+  locale: string | null = null;
   /** The page whose header actions the Page actions tab shows, by its file. */
   actionsPage: string | null = null;
   /** Whether it's a relation manager, which has a form and table like a resource but no pages or settings. */
@@ -136,6 +143,13 @@ export class Designer {
       const root = this.root;
       // The models are needed for relationships' titles later; reading them now overlaps the waits.
       void fapp.models(root).catch(() => {});
+      // Translations only change what the preview shows, so the designer doesn't wait for them.
+      void fapp.translations(root).then((t) => {
+        this.translations = t;
+        const saved = localStorage.getItem(`fd-locale:${root}`);
+        this.locale = saved && t.locales.includes(saved) ? saved : null;
+        if (this.el.isConnected && (this.locale || t.locales.length)) this.render();
+      }, () => {});
       const [cat, app, enums] = await Promise.all([fapp.catalog(root), fapp.app(root).catch(() => null), fapp.enums(root).catch(() => [])]);
       this.cat = cat;
       this.enums = enums;
@@ -688,6 +702,9 @@ export class Designer {
   // ---- Rendering ----
 
   render() {
+    const t = this.translations;
+    const locale = this.locale;
+    setTranslator(t && locale ? (key) => translate(t, locale, key).text : null);
     const keepScroll = this.el.querySelector<HTMLElement>(".fd-canvas");
     if (keepScroll) this.scroll.set(this.tab, keepScroll.scrollTop);
     const main = this.loadError ? this.errorView(this.loadError) : this.renderTab();
@@ -727,6 +744,7 @@ export class Designer {
         ),
       ),
       h("span", { class: "fd-spacer" }),
+      this.localePicker(),
       iconButton("discard", "Undo (⌘Z)", () => this.undoLast()),
       iconButton("redo", "Redo (⇧⌘Z)", () => this.redoLast()),
       iconButton("code", "Open the code", () => {
@@ -737,6 +755,82 @@ export class Designer {
       panel?.url && info?.slug ? iconButton("link-external", "Open in the browser", () => host.openUrl(`${panel.url}/${info.slug}`)) : null,
       iconButton("refresh", "Read the app again", () => (fapp.forget(), void this.load())),
     );
+  }
+
+  /** The language the canvas shows `__()` text in, when the app has translations. */
+  private localePicker() {
+    const t = this.translations;
+    if (!t) return null;
+    const select = h("select", { class: "fd-locale", title: "Preview the text in a language. Text written with __() shows its translation." }, h("option", { value: "", textContent: "As written" }), ...t.locales.map((l) => h("option", { value: l, textContent: l, selected: l === this.locale })), h("option", { value: "+", textContent: "Add a language…" }));
+    select.onchange = async () => {
+      if (select.value === "+") {
+        select.value = this.locale ?? "";
+        const code = await askName(select, { title: "New language", placeholder: "ar, fr, pt_BR", suggestions: [], validate: (v) => (/^[a-z]{2,3}([-_][A-Za-z]{2,4})?$/.test(v) ? (t.json[v] ? "The app has that language." : null) : "Use a language code, such as fr or pt_BR.") });
+        if (!code) return;
+        const { invoke } = await import("@tauri-apps/api/core");
+        const path = `${t.dir}/${code}.json`;
+        if (!(await invoke<boolean>("path_exists", { path }))) await invoke("create_file", { path, contents: "{}\n" });
+        t.json[code] ??= {};
+        if (!t.locales.includes(code)) t.locales.push(code), t.locales.sort();
+        select.value = code;
+      }
+      this.locale = select.value || null;
+      try {
+        localStorage.setItem(`fd-locale:${this.root}`, select.value);
+      } catch {}
+      this.render();
+    };
+    return h("label", { class: "fd-locale-picker" }, icon("globe"), select);
+  }
+
+  /** Writes a translation to the app's lang files, or removes it when `value` is empty. */
+  async writeTranslation(locale: string, key: string, value: string) {
+    const t = this.translations;
+    if (!t) return;
+    try {
+      const where = fileFor(t, locale, key);
+      let path = where.path;
+      let model = await host.ensureModel(path).catch(() => null);
+      let next: string | null = null;
+      if (where.kind === "php" && model) next = value ? setPhpValue(model.getValue(), where.inFile, value) : null;
+      if (next === null) {
+        // Not in a PHP file it can edit: the locale's JSON file, which Laravel reads first.
+        path = `${t.dir}/${locale}.json`;
+        model = await host.ensureModel(path).catch(() => null);
+        if (!model) {
+          if (!value) return;
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("create_file", { path, contents: "{}\n" });
+          model = await host.ensureModel(path);
+        }
+        next = setJsonKey(model.getValue(), key, value || null);
+        (t.json[locale] ??= {})[key] = value;
+        if (!value) delete t.json[locale][key];
+      } else (t.php[locale] ??= {})[key] = value;
+      if (!model) return;
+      const end = model.getPositionAt(model.getValue().length);
+      await applyWorkspaceEdit({ changes: { [model.uri.toString()]: [{ range: { start: { line: 0, character: 0 }, end: { line: end.lineNumber - 1, character: end.column - 1 } }, newText: next }] } });
+      if (!t.locales.includes(locale)) t.locales.push(locale);
+      this.message = `Translated to ${locale}`;
+      this.render();
+    } catch (e) {
+      showError("Can't write the translation", e);
+    }
+  }
+
+  /** Renames a key in the locales' JSON files, so a label's text and its translations change together. */
+  async renameTranslation(from: string, to: string) {
+    const t = this.translations;
+    if (!t || from === to) return;
+    for (const locale of Object.keys(t.json)) {
+      if (!(from in t.json[locale])) continue;
+      const model = await host.ensureModel(`${t.dir}/${locale}.json`).catch(() => null);
+      const next = model && renameJsonKey(model.getValue(), from, to);
+      if (!model || !next) continue;
+      const end = model.getPositionAt(model.getValue().length);
+      await applyWorkspaceEdit({ changes: { [model.uri.toString()]: [{ range: { start: { line: 0, character: 0 }, end: { line: end.lineNumber - 1, character: end.column - 1 } }, newText: next }] } });
+      t.json[locale] = Object.fromEntries(Object.entries(t.json[locale]).map(([k, v]) => [k === from ? to : k, v]));
+    }
   }
 
   private openModel() {
@@ -947,6 +1041,7 @@ export class Designer {
     const ctx = this.canvasCtx(ref);
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
+    if (isRtl(this.locale)) canvas.dir = "rtl";
     canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     const modal = this.modalAction(ref.root);
     if (modal) canvas.append(renderActionModal(ctx, modal.path, modal.comp));
@@ -1195,6 +1290,7 @@ export class Designer {
         const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;
         return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {} } : undefined;
       })(),
+      i18n: this.translations ? { t: this.translations, locale: this.locale, write: (locale, key, value) => void this.writeTranslation(locale, key, value), rename: (from, to) => this.renameTranslation(from, to) } : undefined,
       openEnum: async (cls) => {
         const known = this.enums.find((e) => e.class === cls)?.file;
         const file = known ? `${this.root}/${known}` : await fapp.fileOfClass(this.root, cls);
@@ -1205,6 +1301,51 @@ export class Designer {
 
   /** The inspector with nothing selected: the form's or table's own settings, and an overview. */
   private rootSettings(ref: { kind: RootKind; doc: Doc; root: Root }): HTMLElement {
+    const settings = this.rootSettingsOf(ref);
+    const plain = this.translations ? this.plainTexts(ref) : [];
+    if (plain.length) {
+      const note =
+        h(
+          "div",
+          { class: "fd-translate-all" },
+          icon("globe"),
+          h("span", { class: "fd-note" }, `${plain.length} ${plain.length === 1 ? "text isn't" : "texts aren't"} translatable yet.`),
+          h("button", { type: "button", class: "fd-chip-link", title: "Write labels, headings, placeholders, and the like with __(), so each language can have its own", onclick: () => void this.translateAll() }, "Make translatable"),
+        );
+      const first = settings.querySelector("details.fd-group");
+      if (first) first.after(note);
+      else settings.append(note);
+    }
+    return settings;
+  }
+
+  /** The texts people see that are written as plain strings: labels, headings, placeholders, and the like. */
+  private plainTexts(ref: { root: Root }) {
+    const found: PNode[] = [];
+    walk(ref.root, (c) => {
+      const kind = this.cat && classInfo(this.cat, c.cls)?.kind;
+      const first = c.make.args.items[0]?.value;
+      if (kind === "layout" && first?.kind === "string" && !first.interpolated && first.value) found.push(first);
+      for (const call of c.calls) {
+        const v = call.args.items[0]?.value;
+        // `translateLabel()` already translates the label.
+        if (call.name === "label" && c.calls.some((x) => x.name === "translateLabel")) continue;
+        if (TEXT_CALLS.has(call.name) && v?.kind === "string" && !v.interpolated && v.value) found.push(v);
+      }
+    });
+    return found;
+  }
+
+  async translateAll() {
+    await this.settled();
+    const live = this.live();
+    if (!live) return;
+    const text = live.doc.text;
+    const nodes = this.plainTexts(live);
+    await this.apply(live.doc, () => nodes.map((n) => ({ start: n.span[0], end: n.span[1], text: `__(${text.slice(n.span[0], n.span[1])})` })), `Made ${nodes.length} ${nodes.length === 1 ? "text" : "texts"} translatable`);
+  }
+
+  private rootSettingsOf(ref: { kind: RootKind; doc: Doc; root: Root }): HTMLElement {
     if (ref.kind === "actions") {
       const n = ref.root.slots.get("actions")?.entries.length ?? 0;
       return h(

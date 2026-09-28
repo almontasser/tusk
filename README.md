@@ -870,6 +870,26 @@ have the permissions the rules name. Check a box to grant one, creating the
 permission when it's missing, and **New role** adds a role. These change the
 app's database.
 
+### Languages
+
+When text is written with `__()`, the designer helps translate it:
+
+- **Preview:** pick a language beside the designer's title, and the canvas
+  shows each `__()` text, and each label with `translateLabel()`, in that
+  language. Arabic, Hebrew, Persian, and Urdu lay out right to left.
+  **Add a language…** adds a JSON file for a new one.
+- **Translate:** a label, heading, placeholder, or other text shows its
+  translation in each of the app's languages below it, to edit in place. A
+  missing one shows the text people see instead. Plain text has a
+  **Translate** button that writes it with `__()`. Changing a translated text
+  renames its key in the JSON files too.
+- **Make translatable:** with nothing selected, the inspector counts the texts
+  written as plain strings, and one click writes them all with `__()`.
+
+Translations go in `lang/<language>.json`, which Laravel reads first for any
+key. A translation that's already in a PHP file, such as
+`lang/ar/orders.php`, is changed there.
+
 ### New resources
 
 **Filament: New Resource…**, the **+** in the Filament tool window, or

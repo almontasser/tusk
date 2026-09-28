@@ -2599,3 +2599,16 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .fd-access-matrix > .fd-access-matrix-head { border-top: 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
 .fd-access-matrix > .center { justify-content: center; }
 .fd-access-perm code { font-size: 12px; }
+
+/* Translations in the designer */
+.fd-locale-picker { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; color: var(--muted); }
+.fd-locale-picker select { font-size: 12px; padding: 2px 4px; }
+.fd-translations { display: flex; flex-direction: column; gap: 4px; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.fd-translation { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; }
+.fd-translation input { min-width: 0; width: 100%; font-size: 12px; }
+.fd-translation-locale { font-size: 10.5px; font-weight: 600; text-transform: uppercase; color: var(--muted); }
+.fd-translation.current .fd-translation-locale { color: var(--accent); }
+.fd-translation.missing input { border-style: dashed; }
+.fd-translate { align-self: flex-start; font-size: 11.5px; }
+.fd-translate-all { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 12px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fd-translate-all .fd-note { flex: 1; margin: 0; }

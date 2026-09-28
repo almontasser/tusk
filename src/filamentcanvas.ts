@@ -45,7 +45,13 @@ export function flag(c: Comp, name: string): boolean {
   const a = found.args.items[0]?.value;
   return !a || a.kind !== "bool" || a.value;
 }
-export const text = (c: Comp, name: string, i = 0) => textValue(arg(c, name, i))?.text;
+/** How the canvas shows `__('key')`: in the language picked for the preview, or as the key. */
+let translator: ((key: string) => string) | null = null;
+export const setTranslator = (t: ((key: string) => string) | null) => (translator = t);
+const shown = (v: { text: string; translated: boolean } | undefined) => (v && v.translated && translator ? translator(v.text) : v?.text);
+export const text = (c: Comp, name: string, i = 0) => shown(textValue(arg(c, name, i)));
+/** A layout's heading, a tab's or step's label: the first argument of `make()`. */
+const heading = (c: Comp) => shown(textValue(c.make.args.items[0]?.value)) ?? c.name;
 export const number = (c: Comp, name: string) => {
   const v = nodeValue(arg(c, name));
   return typeof v === "number" ? v : undefined;
@@ -82,9 +88,11 @@ const ACTION_LABELS: Record<string, string> = {
 /** The label Filament shows: the `label()` call, or one made from the name. */
 export function labelOf(c: Comp): string {
   const own = text(c, "label");
-  if (own !== undefined) return own;
+  // `translateLabel()` passes the label through `__()`, whether it's written or made from the name.
+  if (own !== undefined) return translator && flag(c, "translateLabel") && !textValue(arg(c, "label"))?.translated ? translator(own) : own;
   if (ACTION_LABELS[short(c)] && !c.name) return ACTION_LABELS[short(c)];
-  if (c.name) return labelFromName(c.name);
+  // `translateLabel()` passes the label made from the name through `__()`.
+  if (c.name) return translator && flag(c, "translateLabel") ? translator(labelFromName(c.name)) : labelFromName(c.name);
   return humanize(short(c).replace(/(Action|Column|Filter|Entry)$/, "")) || short(c);
 }
 
@@ -363,25 +371,25 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
   const schemaSlot = () => childSlot(c)?.via ?? "schema";
   switch (name) {
     case "Section": {
-      const heading = c.name ?? text(c, "heading");
+      const title = heading(c) ?? text(c, "heading");
       const desc = text(c, "description");
       const aside = flag(c, "aside");
       const collapsible = flag(c, "collapsible") || flag(c, "collapsed");
       const iconNode = arg(c, "icon");
       const head =
-        heading || desc
+        title || desc
           ? h(
               "header",
               { class: "fd-section-head" },
               iconNode ? heroicon(ctx.iconsDir, iconNode.kind === "classConst" ? iconNode.name : textValue(iconNode)?.text, "fd-heroicon fd-section-icon") : null,
-              h("div", { class: "fd-section-titles" }, heading ? h("h3", {}, heading) : null, desc ? h("p", {}, desc) : null),
+              h("div", { class: "fd-section-titles" }, title ? h("h3", {}, title) : null, desc ? h("p", {}, desc) : null),
               collapsible ? h("span", { class: `codicon codicon-chevron-${flag(c, "collapsed") ? "down" : "up"} fd-collapse` }) : null,
             )
           : null;
       return h("section", { class: `fd-section${aside ? " aside" : ""}${flag(c, "compact") ? " compact" : ""}` }, head, h("div", { class: "fd-section-body" }, inner(schemaSlot(), columnsOf(c, 1))));
     }
     case "Fieldset":
-      return h("fieldset", { class: "fd-fieldset" }, h("legend", {}, c.name ?? text(c, "label") ?? "Fieldset"), inner(schemaSlot(), columnsOf(c, 2)));
+      return h("fieldset", { class: "fd-fieldset" }, h("legend", {}, heading(c) ?? text(c, "label") ?? "Fieldset"), inner(schemaSlot(), columnsOf(c, 2)));
     case "Grid":
     case "Group":
     case "FusedGroup": {
@@ -401,7 +409,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
       const heads = h("div", { class: name === "Tabs" ? "fd-tabs-bar" : "fd-steps-bar" });
       slot?.entries.forEach((e, i) => {
         const childPath = [...path, { slot: slotKey(slot), index: e.index }];
-        const label = e.comp ? (e.comp.name ?? text(e.comp, "label") ?? `${name === "Tabs" ? "Tab" : "Step"} ${i + 1}`) : "Code";
+        const label = e.comp ? (heading(e.comp) ?? text(e.comp, "label") ?? `${name === "Tabs" ? "Tab" : "Step"} ${i + 1}`) : "Code";
         const head = h(
           "button",
           { type: "button", class: `${i === active ? "active" : ""}${samePath(ctx.selection, childPath) ? " selected" : ""}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.active.set(key, i), ctx.select(childPath)) },
@@ -429,7 +437,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
     }
     case "Tab":
     case "Step":
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `${name}: ${c.name ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `${name}: ${heading(c) ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
     case "Repeater":
     case "RepeatableEntry":
       return h(
@@ -443,11 +451,11 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
     case "Builder":
       return h("div", { class: "fd-field" }, fieldLabel(c), h("div", { class: "fd-repeater" }, inner("blocks", 1)), h("div", { class: "fd-repeater-add" }, text(c, "addActionLabel") ?? `Add to ${labelOf(c).toLowerCase()}`), helper(c));
     case "Block":
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `Block: ${c.name ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `Block: ${heading(c) ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
     case "Text":
-      return h("p", { class: "fd-text" }, c.name ?? "Text");
+      return h("p", { class: "fd-text" }, heading(c) ?? "Text");
     case "Callout":
-      return h("div", { class: "fd-callout" }, icon("info"), h("div", {}, h("strong", {}, c.name ?? "Callout"), text(c, "description") ? h("p", {}, text(c, "description")!) : null));
+      return h("div", { class: "fd-callout" }, icon("info"), h("div", {}, h("strong", {}, heading(c) ?? "Callout"), text(c, "description") ? h("p", {}, text(c, "description")!) : null));
     case "Html":
     case "View":
     case "Livewire":

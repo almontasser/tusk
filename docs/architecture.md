@@ -4357,6 +4357,21 @@ has, as `methodsOf` reports them.
   Laravel's stub returns `false` everywhere, which would hide the resource
   from everyone, so the designer opens those rules.
 
+### Translations
+
+- **Reading:** `introspect.php translations` reads `lang_path()`: each
+  `<locale>.json`, and each `<locale>/*.php` flattened to `file.key` keys, with
+  the app's locale and fallback. The designer reads them without waiting, since
+  they only change the preview.
+- **Preview:** `setTranslator` gives the canvas a function from key to text,
+  which `text()`, `labelOf`, and headings use for translated values. The canvas
+  gets `dir="rtl"` for right-to-left languages.
+- **Writing:** `src/translations.ts` edits the files as text. A key goes to the
+  locale's JSON file, keeping its order, indentation, and `json_encode` escapes;
+  a key a PHP file already has is changed there when the file has exactly one
+  entry for it. The designer writes through the editor's models, so open files
+  and local history stay in step.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,
