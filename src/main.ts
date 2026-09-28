@@ -37,7 +37,7 @@ import { initRefactorPreview } from "./refactorpreview";
 import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings } from "./extract";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
-import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
+import { cancelQueries, chooseConnection, connectOverSsh, copyName, dataSources, generate as generateSql, initDatabase, loadTables, openConsole, openTable, selectedTable, showHistory } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
@@ -1571,10 +1571,18 @@ const actions: Action[] = [
   { label: "Database", run: () => showView("database") },
   { label: "Database: Switch Connection…", run: () => (showView("database"), chooseConnection()) },
   { label: "Database: Connect over SSH…", run: () => (showView("database"), connectOverSsh()) },
+  { label: "Database: Data Sources…", run: () => root && dataSources() },
+  { label: "Database: Query History…", run: () => root && showHistory() },
+  { label: "Database: Cancel Query", run: cancelQueries },
+  { label: "Database: Open Table", run: () => (selectedTable() ? openTable(selectedTable()!) : status("Select a table in the Database tool first.")) },
+  { label: "Database: Copy Table Name", run: () => (selectedTable() ? copyName(selectedTable()!) : status("Select a table in the Database tool first.")) },
+  { label: "Database: Generate SELECT", run: () => generateSql("select") },
+  { label: "Database: Generate INSERT", run: () => generateSql("insert") },
   { label: "Composer", run: () => showView("composer") },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },
   { ...editorAction("Execute Query", "Meta+Enter", "phpEditor.runSql"), when: () => ["sql", "redis"].includes(editor.getModel()?.getLanguageId() ?? "") },
+  { label: "Execute All Statements", run: () => (editor.focus(), editor.trigger("keyboard", "phpEditor.runAllSql", {})), editorOnly: true, when: () => ["sql", "redis"].includes(editor.getModel()?.getLanguageId() ?? "") },
   { ...editorAction("Send HTTP Request", "Meta+Enter", "phpEditor.sendHttpAtCursor"), when: () => editor.getModel()?.getLanguageId() === "http" },
   { label: "HTTP Client", run: () => showView("http") },
   { label: "HTTP Client: New Request…", run: () => root && newRequestInteractive() },

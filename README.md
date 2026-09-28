@@ -53,7 +53,7 @@ file to change when you add it.
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they edit it and type theirs. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
+| Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
@@ -61,7 +61,6 @@ file to change when you add it.
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A file reference that wraps onto the next line isn't a link. |
-| Lists | The Redis key tree has ↑↓, →←, and Enter, but not yet Home, End, paging, or type-ahead, which the other lists have. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -389,6 +388,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Debugger: IDE key (`XDEBUG_SESSION`) and the host PHP in Docker connects to | `1`, `host.docker.internal` |
 | Git: how Update Project brings in commits (merge, rebase, or git's `pull.rebase`) | Merge |
 | Git: group changed files by folder in the Commit view | Off |
+| Database: rows per page, connection timeout, query timeout, and Redis command timeout | 1,000 rows, 10 s, none, 60 s |
 
 ### Vim emulation
 
@@ -533,7 +533,8 @@ you choose to `tusk.json` or back to this Mac. The places that set these
 settings offer the same choice: **Share with the project in tusk.json** in
 **Index Exclusions**, **Save and share in tusk.json** when you set the server
 paths, and a share row in **Choose Docker Service for Commands**, **Pause on
-Exceptions Options**, and **Database: Switch Connection**. Database passwords
+Exceptions Options**, **Database: Switch Connection**, and **Share saved
+connections in tusk.json** in **Data Sources**. Database passwords
 are never shared: connection URLs leave them out, and each person's password
 stays in their Keychain.
 
@@ -571,12 +572,14 @@ An example:
 | `debugWatches` | The debugger's watch expressions. |
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
-| `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `databaseSsh` | The SSH tunnel for each connection, by name; the empty name is `.env`'s connection. A destination such as `forge@203.0.113.5`, or `{ "destination": …, "identityFile": "~/.ssh/staging" }` with a key file. |
+| `databaseReadOnly` | The names of connections that refuse changes; the empty name is `.env`'s connection. |
 | `runConfigurations` | Shared run configurations: each a `name`, a `type` (`test`, `artisan`, `php`, `composer`, `npm`, `shell`, or `server`), and that type's fields. Configurations you don't share stay on this Mac. |
 
-The selected database connection, the last profiled URL, the stress test
-form, and your own, temporary, and selected run configurations
-(`databaseConnection`, `profilerUrl`, `httpLoadTest`, `localRunConfigurations`,
+The selected database connection, `.env`'s override, the query history, the
+last profiled URL, the stress test form, and your own, temporary, and selected
+run configurations (`databaseConnection`, `databaseEnvOverride`,
+`databaseHistory`, `profilerUrl`, `httpLoadTest`, `localRunConfigurations`,
 `temporaryRunConfigurations`, and `selectedRunConfiguration`) are personal,
 so they stay on this Mac. The first time you open a project in this version,
 Tusk moves these settings out of the web view's storage, where earlier
@@ -585,8 +588,8 @@ versions kept them.
 ## Lists and trees
 
 Tool window lists and trees work from the keyboard: the Problems, Search,
-TODO, Coverage, Composer, and Pull Requests lists, and the Profiler's table.
-Click a list or press Tab to focus it, then:
+TODO, Coverage, Composer, and Pull Requests lists, the Database tool's tables
+and Redis keys, Data Sources, and the Profiler's table. Click a list or press Tab to focus it, then:
 
 | Key | Action |
 | --- | --- |
@@ -2377,51 +2380,122 @@ connection, the ones you saved, and the other connections in the app's
 `config/database.php`, such as a read replica, and the app's Redis
 connections from `.env`: **redis** (`REDIS_DB`) and **redis cache**
 (`REDIS_CACHE_DB`, database 1 unless set), where Laravel's cache store keeps
-its values. **Add Connection…** asks for a
-URL, such as `mysql://forge:secret@203.0.113.5:3306/laravel`,
-`pgsql://user@host/app?sslmode=require`, `sqlite:database/other.sqlite`, or
-`redis://:secret@203.0.113.5:6379/0` (`rediss://` for TLS),
-and then a name. Saved connections are kept per project; their passwords are
-kept in your Mac's Keychain. Select a saved connection to see **Edit** and
-**Remove** in the list. When you edit one, leave the password out of the URL to
-keep the saved password.
+its values.
 
-TLS follows the same `.env` settings as Laravel's `config/database.php`:
-`DB_SSLMODE` (`disable`, `prefer`, `require`, `verify-ca`, or `verify-full`,
-as in PostgreSQL; PostgreSQL defaults to `prefer`), and `MYSQL_ATTR_SSL_CA` or
-`DB_SSLROOTCERT` for the certificate authority. `require` encrypts without
-checking the server's certificate, and `verify-full` checks it and the host
-name.
+### Data Sources
 
-To reach a database on a server, run **Database: Connect over SSH…** from ⌘⇧A
-and type the SSH destination, such as `forge@203.0.113.5`,
-`ssh://user@host:2222`, or a host from `~/.ssh/config`. The editor opens a
-tunnel with your Mac's `ssh`, using your keys or SSH agent (it can't ask for a
-password), and `DB_HOST` and `DB_PORT` are then as the server sees them, such
-as `127.0.0.1:3306`. Leave the destination empty to connect directly again.
-Each connection keeps its own SSH destination.
+Click the gear in the tool window, or run **Database: Data Sources…**, to
+manage connections. The dialog lists them on the left and shows the selected
+one's settings on the right:
 
-- Type in **Filter tables** to list only the tables whose names contain it.
-- Click a table to see its columns. A `?` after a type marks a nullable column.
-- Double-click a table to show its rows, 1,000 at a time. Click **Next** and
-  **Previous** to page through a table or a query's results; the summary shows
-  which rows you see, and how many there are. Pages don't change while you
-  have pending changes.
-- Double-click a cell to edit it, and press Enter to keep the change, or
-  Escape to cancel. Type `NULL` for a null value. Tables without a primary key are read-only.
-- To add a row, click **Add Row**, fill in the values, and press Enter. Leave a
-  value empty to use the column's default.
-- To delete rows, click a row's number to select it (⌘-click to select
-  several), and click **Delete Rows**.
+- **Driver**, then a **Database file** for SQLite, or **Host**, **Port**,
+  **User**, **Password**, and **Database** for the others (**Database number**
+  for Redis).
+- **SSL mode** (`disable`, `prefer`, `require`, `verify-ca`, or
+  `verify-full`, as in PostgreSQL) and a **CA file**.
+- **SSH tunnel**: the SSH host, port, and user, and a **Key file**. Leave the key
+  file empty to use your SSH agent and `~/.ssh/config`. The editor opens the
+  tunnel with your Mac's `ssh`, which can't ask for a password, and the host and
+  port above are then as the server sees them, such as `127.0.0.1:3306`.
+- **Read-only**: SQLite opens the file read-only, MySQL and PostgreSQL start a
+  read-only session, and the console and grid refuse changes.
+- **URL**, kept in step with the fields. Paste a URL, such as
+  `mysql://forge:secret@203.0.113.5:3306/laravel`,
+  `pgsql://user@host/app?sslmode=require`, `sqlite:database/other.sqlite`, or
+  `redis://:secret@203.0.113.5:6379/0` (`rediss://` for TLS), to fill in the
+  fields.
+
+Click **Test Connection** to connect, through the tunnel when there is one,
+and see the server's version or why it failed. **+** adds a connection, the
+copy button duplicates one, and **−** removes a saved one. Nothing changes until
+you click **Save**.
+
+Passwords go to your Mac's Keychain, never to the project; leave the password
+empty to keep the saved one. `.env`'s connection shows its values read-only.
+Click **Override on This Mac** to change them for yourself (the project's
+`.env` stays as it is), and **Use .env's Values** to go back. The SSH tunnel and
+read-only mode apply to any connection, including `.env`'s. Check **Share saved
+connections in tusk.json** to share them with the project, without passwords.
+
+TLS for `.env`'s connection follows the same settings as Laravel's
+`config/database.php`: `DB_SSLMODE`, and `MYSQL_ATTR_SSL_CA` or
+`DB_SSLROOTCERT` for the certificate authority. PostgreSQL defaults to
+`prefer`. `require` encrypts without checking the server's certificate, and
+`verify-full` checks it and the host name.
+
+**Database: Connect over SSH…** opens Data Sources on the selected connection's
+tunnel. When a connection fails, the tool window and the results show why, with
+**Retry** and **Edit Connection…**.
+
+### Tables
+
+- Type in **Search tables and columns** to list only the tables whose names, or
+  whose columns' names, contain it. A table that matches by a column shows the
+  column's name.
+- Click a table, or press →, to see its columns, then its indexes and foreign
+  keys. A `?` after a type marks a nullable column. ↑↓, Home, End, Page Up,
+  Page Down, and typing a name move through the tree.
+- Double-click a table, or press Enter, to show its rows. Double-click a foreign
+  key to open the table it references.
+- Right-click a table to open it, copy its name, or write a `SELECT` or `INSERT`
+  with its columns at the end of the query console (**Database: Generate
+  SELECT** and **Database: Generate INSERT**). ⌘C copies the selected name.
+
+### Queries
+
+Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then press
+⌘⏎ to run the statement under the caret, or each statement in the selection.
+**Execute All Statements** runs every statement in the file. ⌘⏎ also runs SQL in
+any `.sql` file. Statements split at semicolons outside strings, comments, and
+PostgreSQL's `$$` quotes.
+
+- Several statements show a tab each, and run one after another until one
+  fails. A tab's icon shows whether its statement ran.
+- While a statement runs, the results show the time so far and **Cancel**, which
+  stops it in the database: SQLite interrupts it, MySQL and MariaDB run
+  `KILL QUERY`, and PostgreSQL cancels it. **Database: Cancel Query** does the
+  same. With a **Query timeout** in Settings, a longer query is canceled for
+  you.
+- When it's done, the results show the rows and the time it took.
+- **Database: Query History…** lists the statements you ran in this project,
+  newest first, with when, where, and how they went. Choose one to add it to the
+  console.
+- SQL completion suggests your tables and columns. After `name.`, it suggests
+  the columns of that table, or of the table that `name` is an alias for.
+
+### The results grid
+
+- Results come a page at a time (1,000 rows unless you change **Rows per page**
+  in Settings). **Next** and **Previous** page through them, and the summary shows
+  which rows you see, and how many there are.
+- Click a column's header to sort by it, then again for descending, and a third
+  time to stop sorting. A table sorts in the database with `ORDER BY`; other
+  results sort in the grid.
+- A table has **WHERE** and **ORDER BY** fields above its rows. Type a
+  condition, such as `id > 10 AND name LIKE 'a%'`, and press Enter.
+- Drag a header's right edge to resize a column; double-click it to fit.
+- Move with the arrow keys, Tab, Home, End, Page Up, and Page Down (⌘ with an
+  arrow goes to the edge). ⇧ with a move, or a drag, selects cells, and ⌘A
+  selects all. ⌘C copies the selected cells as tab-separated values.
+- Right-click for **Copy As** CSV, TSV with a header, JSON, SQL `INSERT`, or
+  Markdown, and **Export…**, which saves every row of the query or table to a
+  file in one of those formats.
+- ⇧⏎ or **Value** opens the value viewer beside the grid: long text in full,
+  JSON indented, and binary values as hex. Edit a value there to change the
+  cell. NULL shows in italics.
+- Press Enter, F2, or double-click to edit a cell, or start typing. Enter keeps
+  the change, Tab keeps it and moves on, and Escape cancels. Type `NULL` for a
+  null value, or press ⌥⌘N (**Set NULL**); ⌥⌘D (**Set Default**) sets the
+  column's default. Tables without a primary key, binary values, and read-only
+  connections can't be edited.
+- **Add Row** adds a row at the top; cells you leave get the column's default.
+  ⌘⌫ (**Delete Rows**) marks the selected rows for deletion.
 - Changes wait, marked in the grid (yellow for edited cells, green for new
   rows, and struck through for deleted ones), until you click **Submit** or
   press ⌘⏎. They apply together, in one transaction: if one fails, none do.
-  Hover over **Submit** to see the SQL. **Revert** drops them.
-- Press ⌘⇧F10 (**Open Query Console**) to open the project's console, then
-  press ⌘⏎ to run the statement under the caret, or the selection. ⌘⏎ also runs
-  SQL in any `.sql` file.
-- SQL completion suggests your tables and columns. After `name.`, it suggests
-  the columns of that table, or of the table that `name` is an alias for.
+  Hover over **Submit** to see the SQL. **Revert** drops them. Before anything
+  replaces a grid with pending changes, such as another query or another page,
+  the editor asks.
 
 Results show in the **Database** tab of the bottom panel. After you change
 `.env`, click **Refresh** in the tool window.
@@ -2438,12 +2512,16 @@ shows how many keys the database has.
 - Type in the filter box to show keys that contain the text, or type a
   pattern such as `laravel_cache:*` or `user:?`. Press Escape to clear it.
 - Click a key, or select it and press Enter, to see its value in the
-  **Database** tab. ↑ and ↓ move through the tree, and → and ← open and close
-  folders.
+  **Database** tab. ↑↓, Home, End, Page Up, and Page Down move through the
+  tree, → and ← open and close folders, and typing a name jumps to it.
 - Right-click a key to copy its name, rename it, set when it expires, or
   delete it. Right-click a folder to show only its keys, copy its pattern, add
   a key in it, or delete every key in it (all of them, not only those loaded,
-  after telling you how many). ⌘⌫ deletes the selected key or folder.
+  after telling you how many). The status bar shows the count and the deletion
+  as they go, with **Cancel**; canceling keeps what's deleted so far. ⌘⌫ deletes
+  the selected key or folder.
+- A key whose name isn't text can't be typed into a command, so it isn't
+  listed; the tree says how many it skipped.
 - Click **+** (**Add Key…**) to create a key: choose its type, then type its
   name and first value.
 
@@ -2694,7 +2772,9 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/debugexceptions.ts` | Where an exception was thrown, the class of an uncaught one, and where Laravel renders them, for pausing on exceptions |
 | `src/database.ts` | The Database tool window, query console, and results |
 | `src/dbconfig.ts` | Database connections from `.env`, URLs, and `config/database.php`, schema queries, and cell updates |
-| `src/dbgrid.ts` | The results grid and its editing, shared by SQL tables and Redis keys |
+| `src/dbgrid.ts` | The results grid: drawing rows as they scroll into view, selection, sorting, copying, the value viewer, and editing, shared by SQL tables and Redis keys |
+| `src/dbgriddata.ts` | The grid's copy and export formats, sort order, and hex dump |
+| `src/datasources.ts` | The Data Sources dialog |
 | `src/redis.ts` | The Redis key browser, key view, and console completion |
 | `src/redisdata.ts` | The Redis key tree, TTLs, filters, command syntax, and the commands that apply grid edits |
 | `src/composer.ts` | The Composer tool window |
@@ -2734,7 +2814,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src-tauri/src/lsp.rs` | Starts the language servers and relays their messages |
 | `src-tauri/src/tools.rs` | Tool paths and running commands |
 | `src-tauri/src/search.rs` | Project file listing, text search, and replace |
-| `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, and PostgreSQL |
+| `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, PostgreSQL, and Redis, and canceling them |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
 | `src-tauri/src/grpc.rs` | gRPC calls for the HTTP client, with schemas from server reflection or the project's `.proto` files |

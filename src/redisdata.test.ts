@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Changes } from "./dbgrid.ts";
 import { commandDocs, commandLine, editCommands, filterPattern, formatBytes, formatTtl, keyTree, parseDuration, replyText, splitCommand, typeLabel, valueKind, visibleRows } from "./redisdata.ts";
 
-const changes = (c: Partial<Changes>): Changes => ({ edits: new Map(), deletes: new Set(), inserts: [], ...c });
+const changes = (c: Partial<Changes<string | null>>): Changes<string | null> => ({ edits: new Map(), deletes: new Set(), inserts: [], ...c });
 
 test("groups keys into folders by colon", () => {
   const tree = keyTree([{ key: "users:10", type: "hash" }, { key: "users:2", type: "hash" }, { key: "cache:a:b", type: "string" }, { key: "solo", type: "list" }]);

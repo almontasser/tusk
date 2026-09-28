@@ -39,7 +39,8 @@ const LAYOUT: [string, Entry[]][] = [
   ["Tools", [
     ["HTTP Client", ["Send HTTP Request", "HTTP Client: New Request…", "Select HTTP Environment…", "HTTP Client: Edit Environments", "HTTP Client: Global Variables…", "HTTP Client: Detect App Address", "HTTP Client: Clear Cookies", "-",
       "HTTP Client: Run All Requests in Project", "HTTP Client: Sync with Laravel Routes…", "HTTP Client: Import…", "HTTP Client: Export to OpenAPI…"]],
-    ["Database", ["Open Query Console", "Execute Query", "-", "Database: Switch Connection…", "Database: Connect over SSH…"]],
+    ["Database", ["Open Query Console", "Execute Query", "Execute All Statements", "Database: Cancel Query", "Database: Query History…", "-",
+      "Database: Open Table", "Database: Copy Table Name", "Database: Generate SELECT", "Database: Generate INSERT", "-", "Database: Data Sources…", "Database: Switch Connection…", "Database: Connect over SSH…"]],
     ["Composer", ["Composer: Require Package…", "Composer: Update All"]],
     ["Laravel", ["Laravel Tinker", "Routes"]],
     "-", "Choose Docker Service for Commands…", "Restart Language Servers", "Reindex Project", "Index Exclusions…", "Share Project Settings in tusk.json…"]],

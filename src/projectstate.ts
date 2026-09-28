@@ -163,7 +163,7 @@ export const SHAREABLE: { label: string; keys: string[]; detail: string }[] = [
   { label: "Pause on exceptions", keys: ["debugExceptions"], detail: "Whether to pause, the classes, and paths to skip" },
   { label: "Breakpoints", keys: ["breakpoints"], detail: "Line breakpoints and their options" },
   { label: "Docker service for commands", keys: ["dockerService"], detail: "Where tests, Artisan, and Tinker run" },
-  { label: "Database connections", keys: ["databaseConnections", "databaseSsh"], detail: "Names, URLs, and SSH tunnels; passwords stay in the Keychain" },
+  { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: "Names, URLs, SSH tunnels, and read-only choices; passwords stay in the Keychain" },
 ];
 
 const isShared = (keys: string[]) => keys.some((k) => projectScope(k) === "shared");

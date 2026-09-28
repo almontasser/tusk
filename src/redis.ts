@@ -2,7 +2,9 @@
 // Keys load in batches with SCAN, which never blocks the server, and group into folders by ":".
 import { invoke } from "@tauri-apps/api/core";
 import type { Connection } from "./dbconfig";
-import { button, type Cell, el, grid, makeEditable } from "./dbgrid";
+import { button, type Cell, type Changes, dataGrid, el } from "./dbgrid";
+import { bytesOf, hexDump } from "./dbgriddata";
+import type { ListNav } from "./listnav";
 import { h, icon, iconButton, toast } from "./dom";
 import { monaco } from "./editor";
 // @ts-expect-error Monaco ships its grammars without types.
@@ -45,6 +47,10 @@ export type RedisHost = {
   results: HTMLElement;
   status(text: string): void;
   friendlyError(message: string): string;
+  /** The keyboard for the key tree, which it shares with the tables. */
+  nav: ListNav;
+  /** Asks before the panel's grid loses pending changes. */
+  confirmDiscard(): Promise<boolean>;
 };
 
 let host: RedisHost;
@@ -66,11 +72,14 @@ const guard = (action: () => Promise<unknown>) => () => action().catch((e) => to
 
 // ---- Keys ----
 
-/** Loaded keys with their types, SCAN's cursor ("0" when every key matching the filter is loaded), and DBSIZE. */
-const scan = { keys: new Map<string, string>(), cursor: "0", total: 0, pattern: "*", scanning: false, error: "", generation: 0 };
+/**
+ * Loaded keys with their types, SCAN's cursor ("0" when every key matching the filter is loaded), DBSIZE, and how
+ * many keys were skipped because their names aren't text.
+ */
+const scan = { keys: new Map<string, string>(), cursor: "0", total: 0, pattern: "*", scanning: false, error: "", generation: 0, skipped: 0 };
 const expanded = new Set<string>();
-/** The selected row: `k:` and a key, or `f:` and a folder's prefix. */
-let selected = "";
+/** The selected row, from listNav: `k:` and a key, or `f:` and a folder's prefix. */
+const selectedId = () => host.nav.selected();
 /** The server and database the tree shows, so switching connections starts over. */
 let shown = "";
 /** Keys per batch before the tree shows them; a sparse filter stops sooner, after a second of scanning. */
@@ -99,7 +108,7 @@ function toolbar() {
   input.onkeydown = (e) => {
     if (e.key === "Enter") apply();
     if (e.key === "Escape" && input.value) (input.value = ""), apply();
-    if (e.key === "ArrowDown") e.preventDefault(), $("db-tables").focus(), moveSelection(1);
+    if (e.key === "ArrowDown") e.preventDefault(), $("db-tables").focus();
   };
   const bar = h("div", { id: "redis-toolbar", class: "pr-toolbar" }, input);
   $("db-tables").before(bar);
@@ -112,7 +121,7 @@ export async function loadKeys() {
   if (id !== shown) {
     shown = id;
     expanded.clear();
-    selected = "";
+    host.nav.select("", { scroll: false });
     scan.pattern = "*";
     ($("redis-filter") as HTMLInputElement).value = "";
   }
@@ -124,7 +133,7 @@ export async function loadKeys() {
  * filter change; a scan that's overtaken by a newer one drops its results.
  */
 async function loadMore(reset = false) {
-  if (reset) (scan.generation++, scan.keys.clear()), (scan.cursor = "0"), (scan.error = "");
+  if (reset) (scan.generation++, scan.keys.clear()), (scan.cursor = "0"), (scan.error = ""), (scan.skipped = 0);
   else if (scan.cursor === "0" || scan.scanning) return;
   const generation = scan.generation;
   scan.scanning = true;
@@ -144,8 +153,11 @@ async function loadMore(reset = false) {
       if (isError(reply)) throw new Error(reply.error);
       const [cursor, batch] = reply as [string, Reply[]];
       scan.cursor = cursor;
-      // A key whose name isn't text can't be typed into a command, so it's left out.
-      for (const k of batch) if (typeof k === "string" && !scan.keys.has(k)) found.add(k);
+      // A key whose name isn't text can't be typed into a command, so it's left out, and counted.
+      for (const k of batch) {
+        if (typeof k !== "string") scan.skipped++;
+        else if (!scan.keys.has(k)) found.add(k);
+      }
     } while (scan.cursor !== "0" && found.size < BATCH && performance.now() - started < 1000);
     const keys = [...found];
     const types = keys.length ? await call(keys.map((k) => ["TYPE", k])) : [];
@@ -175,7 +187,7 @@ function render() {
   if (!n && !scan.scanning && scan.error) {
     const retry = h("button", { class: "db-action", onclick: () => loadMore(true) }, icon("refresh"), "Retry");
     items.push(h("li", { class: "muted redis-note" }, scan.error.startsWith("Can't") ? scan.error : `Can't list the keys: ${scan.error}`, h("br"), retry));
-  } else if (!n && !scan.scanning) items.push(h("li", { class: "muted redis-note" }, filtered ? `No keys match ${scan.pattern}.` : "No keys in this database."));
+  } else if (!n && !scan.scanning) items.push(h("li", { class: "muted redis-note" }, scan.cursor !== "0" ? "No keys found yet. Click Load More to scan further." : filtered ? `No keys match ${scan.pattern}.` : "No keys in this database."));
   const count = filtered
     ? `${n.toLocaleString()} ${n === 1 ? "match" : "matches"}${scan.cursor !== "0" ? " so far" : ""} in ${scan.total.toLocaleString()} keys`
     : `${n.toLocaleString()}${scan.cursor !== "0" ? ` of ${scan.total.toLocaleString()}` : ""} ${scan.total === 1 ? "key" : "keys"}`;
@@ -184,6 +196,8 @@ function render() {
   if (scan.scanning) footer.append(h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), " Scanning…");
   else if (n || filtered) footer.append(count);
   if (!scan.scanning && scan.cursor !== "0") footer.append(h("button", { class: "db-action", onclick: () => loadMore() }, icon("fold-down"), "Load More"));
+  if (scan.skipped)
+    footer.append(h("div", { class: "muted", title: "The editor can't send a key name that isn't UTF-8 text in a command. Read these keys with redis-cli." }, scan.skipped === 1 ? "1 key isn't listed: its name isn't text." : `${scan.skipped.toLocaleString()} keys aren't listed: their names aren't text.`));
   if (n && scan.error) footer.append(h("div", { class: "db-error" }, scan.error));
   list.replaceChildren(...items, ...(footer.childNodes.length ? [footer] : []));
 }
@@ -195,27 +209,30 @@ function row(r: TreeRow) {
     const open = expanded.has(f.prefix);
     const div = h(
       "div",
-      { class: `row redis-folder${selected === `f:${f.prefix}` ? " selected" : ""}`, style: indent, title: `${f.prefix}*`, data: { id: `f:${f.prefix}` } },
+      { class: "row redis-folder", style: indent, title: `${f.prefix}*`, role: "treeitem", data: { key: `f:${f.prefix}`, label: f.name } },
       h("span", { class: `chevron codicon codicon-chevron-${open ? "down" : "right"}` }),
       icon(open ? "folder-opened" : "folder"),
       h("span", { class: "name" }, f.name || "(empty)"),
       h("span", { class: "type" }, f.count.toLocaleString()),
     );
-    div.onclick = () => (select(`f:${f.prefix}`), toggle(f.prefix));
-    div.oncontextmenu = (e) => (e.preventDefault(), select(`f:${f.prefix}`), folderMenu(e, f.prefix));
-    return h("li", {}, div);
+    div.setAttribute("aria-level", String(r.depth + 1));
+    div.setAttribute("aria-expanded", String(open));
+    div.onclick = () => toggle(f.prefix);
+    div.oncontextmenu = (e) => (e.preventDefault(), host.nav.select(`f:${f.prefix}`, { scroll: false }), folderMenu(e, f.prefix));
+    return h("li", { role: "none" }, div);
   }
   const { key, type } = r.key;
   const div = h(
     "div",
-    { class: `row redis-key${selected === `k:${key}` ? " selected" : ""}`, style: indent, title: `${key}\n${typeName[type] ?? type}`, data: { id: `k:${key}` } },
+    { class: "row redis-key", style: indent, title: `${key}\n${typeName[type] ?? type}`, role: "treeitem", data: { key: `k:${key}`, label: r.name } },
     h("span", { class: "chevron" }),
     h("span", { class: "redis-type", data: { type } }, typeLabel(type)),
     h("span", { class: "name" }, r.name),
   );
-  div.onclick = () => (select(`k:${key}`), showKey(key));
-  div.oncontextmenu = (e) => (e.preventDefault(), select(`k:${key}`), keyMenu(e, key));
-  return h("li", {}, div);
+  div.setAttribute("aria-level", String(r.depth + 1));
+  div.onclick = () => showKey(key);
+  div.oncontextmenu = (e) => (e.preventDefault(), host.nav.select(`k:${key}`, { scroll: false }), keyMenu(e, key));
+  return h("li", { role: "none" }, div);
 }
 
 function toggle(prefix: string) {
@@ -223,37 +240,13 @@ function toggle(prefix: string) {
   render();
 }
 
-function select(id: string) {
-  selected = id;
-  for (const r of $("db-tables").querySelectorAll<HTMLElement>(".row[data-id]")) r.classList.toggle("selected", r.dataset.id === id);
-  $("db-tables").querySelector(".row.selected")?.scrollIntoView({ block: "nearest" });
-}
-
-function moveSelection(step: number) {
-  const rows = [...$("db-tables").querySelectorAll<HTMLElement>(".row[data-id]")];
-  if (!rows.length) return;
-  const i = rows.findIndex((r) => r.dataset.id === selected);
-  select(rows[Math.max(0, Math.min(rows.length - 1, i < 0 ? 0 : i + step))].dataset.id!);
-}
-
-/** ↑ and ↓ move, → and ← open and close folders, Enter shows a key, and ⌘⌫ deletes. */
+/** ⌘⌫ deletes the selected key or folder; listNav handles the other keys. */
 function onTreeKey(e: KeyboardEvent) {
-  if (!$("db-tables").classList.contains("redis-keys") || (e.target as HTMLElement).tagName === "INPUT") return;
+  if (!$("db-tables").classList.contains("redis-keys") || e.target !== $("db-tables")) return;
+  const selected = selectedId();
   const [kind, id] = [selected.slice(0, 2), selected.slice(2)];
-  const parent = () => {
-    const name = kind === "f:" ? id.slice(0, -1) : id;
-    const i = name.lastIndexOf(":");
-    if (i >= 0) select(`f:${name.slice(0, i + 1)}`);
-  };
-  const handled = () => e.preventDefault();
-  if (e.key === "ArrowDown") handled(), moveSelection(1);
-  else if (e.key === "ArrowUp") handled(), moveSelection(-1);
-  else if (e.key === "ArrowRight" && kind === "f:") handled(), expanded.has(id) ? moveSelection(1) : toggle(id);
-  else if (e.key === "ArrowLeft") handled(), kind === "f:" && expanded.has(id) ? toggle(id) : parent();
-  else if (e.key === "Enter" && kind === "k:") handled(), showKey(id);
-  else if (e.key === "Enter" && kind === "f:") handled(), toggle(id);
-  else if (e.key === "Backspace" && e.metaKey && kind === "k:") handled(), guard(() => deleteKey(id))();
-  else if (e.key === "Backspace" && e.metaKey && kind === "f:") handled(), guard(() => deleteFolder(id))();
+  if (e.key === "Backspace" && e.metaKey && kind === "k:") e.preventDefault(), guard(() => deleteKey(id))();
+  else if (e.key === "Backspace" && e.metaKey && kind === "f:") e.preventDefault(), guard(() => deleteFolder(id))();
 }
 
 function keyMenu(e: MouseEvent, key: string) {
@@ -329,8 +322,8 @@ async function renameKey(key: string) {
   scan.keys.delete(key);
   scan.keys.set(name, type);
   openFolders(name);
-  selected = `k:${name}`;
   render();
+  host.nav.select(`k:${name}`);
   if (view?.key === key) showKey(name);
   host.status(`Renamed ${key} to ${name}`);
 }
@@ -396,18 +389,29 @@ async function deleteFolder(prefix: string) {
   const n = keys.size.toLocaleString();
   if (!(await confirm(`Delete ${n} ${keys.size === 1 ? "key" : "keys"} under ${prefix}? This can't be undone.`, `Delete ${n} ${keys.size === 1 ? "Key" : "Keys"}`))) return;
   const all = [...keys];
-  // 500 keys per command, 10 commands per round trip.
-  for (let i = 0; i < all.length; i += 5000) {
-    const chunk = all.slice(i, i + 5000);
-    const commands: string[][] = [];
-    for (let j = 0; j < chunk.length; j += 500) commands.push(["UNLINK", ...chunk.slice(j, j + 500)]);
-    const failed = (await call(commands)).find(isError);
-    if (failed) throw new Error(failed.error);
-    host.status(`Deleted ${Math.min(i + 5000, all.length).toLocaleString()} of ${n} keys`);
-  }
-  expanded.delete(prefix);
-  forget(all);
-  host.status(`Deleted ${n} keys under ${prefix}`);
+  let deleted: string[] = [];
+  // 500 keys per command, 10 commands per round trip; Cancel stops between round trips, keeping what's deleted.
+  await withProgress(
+    `Deleting ${n} keys under ${prefix}…`,
+    async (signal, progress) => {
+      for (let i = 0; i < all.length; i += 5000) {
+        signal.throwIfAborted();
+        const chunk = all.slice(i, i + 5000);
+        const commands: string[][] = [];
+        for (let j = 0; j < chunk.length; j += 500) commands.push(["UNLINK", ...chunk.slice(j, j + 500)]);
+        const replies = await call(commands);
+        // A command that failed deleted nothing; the others went through.
+        commands.forEach((c, j) => !isError(replies[j]) && (deleted = deleted.concat(c.slice(1))));
+        const failed = replies.find(isError);
+        if (failed) throw new Error(failed.error);
+        progress(`Deleted ${deleted.length.toLocaleString()} of ${n} keys under ${prefix}…`);
+      }
+    },
+    { cancellable: true, error: `Can't delete the keys under ${prefix}` },
+  );
+  if (deleted.length === all.length) expanded.delete(prefix);
+  forget(deleted);
+  host.status(deleted.length === all.length ? `Deleted ${n} keys under ${prefix}` : `Deleted ${deleted.length.toLocaleString()} of ${n} keys under ${prefix}`);
 }
 
 const NEW_TYPES: [string, string, string][] = [
@@ -420,7 +424,7 @@ const NEW_TYPES: [string, string, string][] = [
 ];
 
 /** Adds a key, asking for its type, name, and first value, since Redis has no empty hash, list, set, or stream. */
-export async function addKey(prefix = selected.startsWith("f:") ? selected.slice(2) : "") {
+export async function addKey(prefix = selectedId().startsWith("f:") ? selectedId().slice(2) : "") {
   if (host.connection()?.driver !== "redis") return;
   const chosen = await new Promise<(typeof NEW_TYPES)[number] | null>((resolve) =>
     pick("Type of the new key", (q) => rank(q, NEW_TYPES.map((t) => ({ label: t[0], detail: t[2], run: () => resolve(t) }))), 0, { value: "", onCancel: () => resolve(null) }),
@@ -452,9 +456,8 @@ export async function addKey(prefix = selected.startsWith("f:") ? selected.slice
   scan.keys.set(key, type);
   scan.total++;
   openFolders(key);
-  selected = `k:${key}`;
   render();
-  select(selected);
+  host.nav.select(`k:${key}`);
   showKey(key);
 }
 
@@ -491,6 +494,7 @@ const EDITOR: monaco.editor.IStandaloneEditorConstructionOptions = {
  * each page shown so far starts.
  */
 export async function showKey(key: string, page = 0, pages: Page[] = FIRST) {
+  if (!(await host.confirmDiscard())) return;
   const results = host.results;
   results.onkeydown = null;
   disposeEditor();
@@ -567,15 +571,7 @@ async function textView(key: string, type: string, header: HTMLElement, summary:
   const container = el("div", "redis-value");
   if (isBinary(value)) {
     summary.textContent = `This value isn't text: ${formatBytes(value.binary)} of binary data, such as a compressed cache entry, so it's read-only.${value.binary > 1024 ? " The first 1 KB shows." : ""}`;
-    const lines = value.hex.match(/.{1,32}/g) ?? [];
-    // As xxd prints it: the offset, 16 bytes in hex, and those bytes as ASCII, with a dot for the rest.
-    const dump = lines
-      .map((l, i) => {
-        const bytes = l.match(/../g)!.map((b) => parseInt(b, 16));
-        const ascii = bytes.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ".")).join("");
-        return `${(i * 16).toString(16).padStart(8, "0")}  ${l.match(/../g)!.join(" ").padEnd(47)}  ${ascii}`;
-      })
-      .join("\n");
+    const dump = hexDump(bytesOf(`\\x${value.hex}`));
     host.results.append(container);
     valueEditor = monaco.editor.create(container, { ...EDITOR, readOnly: true, wordWrap: "off", model: monaco.editor.createModel(dump, "plaintext") });
     return;
@@ -667,32 +663,32 @@ async function collectionView(key: string, type: string, page: number, pages: Pa
   if (binary.size) summary.append(` · ${binary.size} binary ${binary.size === 1 ? "row is" : "rows are"} read-only`);
   if (page > 0) button(summary, "Previous", "chevron-left", () => showKey(key, page - 1, pages)).classList.add("db-page");
   if (next !== null) button(summary, "Next", "chevron-right", () => showKey(key, page + 1, [...pages.slice(0, page + 1), { offset: first + n, from: next! }])).classList.add("db-page");
-  // A list numbers rows by their Redis index, from 0.
-  const { scroll, body, rows } = grid(columns, cells, type === "list" ? first : first + 1);
-  host.results.append(scroll);
-  const commands = (changes: Parameters<typeof editCommands>[3]) => {
+  // The grid's changes hold text only: Redis has no NULL or DEFAULT, so the grid offers neither.
+  const commands = (changes: Changes) => {
     if ([...changes.deletes, ...changes.edits.keys()].some((r) => binary.has(r))) throw new Error("Rows with binary values can't be changed here.");
-    return editCommands(type, key, cells, changes, first);
+    return editCommands(type, key, cells, changes as Changes<Cell>, first);
   };
-  makeEditable({
-    summary,
-    results: host.results,
-    body,
-    rows,
+  const grid = dataGrid({
     columns,
-    values: cells,
-    nulls: false,
-    empty: type === "stream" ? false : "empty",
-    editable: (r) => type !== "stream" && !binary.has(r),
-    describe: (changes) => commands(changes).map(commandLine),
-    submit: async (changes) => {
-      const failed = (await call(commands(changes), true)).find(isError);
-      if (failed) throw new Error(failed.error);
+    rows: cells,
+    // A list numbers rows by their Redis index, from 0.
+    first: type === "list" ? first : first + 1,
+    toolbar: summary,
+    table: key,
+    edit: {
+      nulls: false,
+      empty: type === "stream" ? false : "empty",
+      editable: (r) => type !== "stream" && !binary.has(r),
+      describe: (changes) => commands(changes).map(commandLine),
+      submit: async (changes) => {
+        const failed = (await call(commands(changes), true)).find(isError);
+        if (failed) throw new Error(failed.error);
+      },
+      target: key,
+      again: () => showKey(key, page, pages),
     },
-    target: key,
-    status: host.status,
-    again: () => showKey(key, page, pages),
   });
+  host.results.append(grid.element);
 }
 
 // ---- Console ----
@@ -707,6 +703,7 @@ export async function confirmCommands(commands: string[][]) {
 
 /** Runs several console lines in one round trip, and shows each command's reply in a row. */
 export async function runLines(lines: string[]) {
+  if (!(await host.confirmDiscard())) return;
   const results = host.results;
   results.onkeydown = null;
   disposeEditor();
@@ -730,9 +727,9 @@ export async function runLines(lines: string[]) {
   }
   const errors = replies.filter(isError).length;
   summary.replaceChildren(`${commands.length} commands in ${Math.round(performance.now() - started)} ms${errors ? ` · ${errors} failed` : ""}`);
-  const { scroll, rows } = grid(["command", "reply"], lines.map((line, i) => [line, replyText(replies[i])]));
-  rows.forEach((r, i) => isError(replies[i]) && r.lastElementChild!.classList.add("db-error"));
-  results.append(scroll);
+  const failed = replies.map((r, i) => (isError(r) ? i + 1 : 0)).filter(Boolean);
+  if (failed.length) summary.append(` (line ${failed.slice(0, 10).join(", ")}${failed.length > 10 ? ", …" : ""})`);
+  results.append(dataGrid({ columns: ["command", "reply"], rows: lines.map((line, i) => [line, replyText(replies[i])]), toolbar: summary }).element);
 }
 
 /** Command docs from the server, for completion and signature help: COMMAND DOCS (Redis 7), or COMMAND's names. */
