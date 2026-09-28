@@ -49,13 +49,16 @@ const TIME_TYPES = /^(time|timetz)$/;
 const JSON_TYPES = /^(json|jsonb)$/;
 
 /** What a column holds, from its database type, its cast, and its name. */
-export type Nature = "id" | "foreign" | "enum" | "boolean" | "date" | "datetime" | "time" | "integer" | "decimal" | "money" | "json" | "tags" | "text" | "richtext" | "email" | "phone" | "url" | "password" | "color" | "image" | "file" | "string" | "uuid";
+export type Nature = "morph" | "id" | "foreign" | "enum" | "boolean" | "date" | "datetime" | "time" | "integer" | "decimal" | "money" | "json" | "tags" | "text" | "richtext" | "email" | "phone" | "url" | "password" | "color" | "image" | "file" | "string" | "uuid";
 
 export function natureOf(c: Column, m: Pick<ModelFacts, "casts" | "relations" | "enums">): Nature {
   const type = c.type.toLowerCase();
   const cast = m.casts[c.name] ?? "";
   const name = c.name.toLowerCase();
   if (c.autoIncrement || name === "id") return "id";
+  // The two columns of a polymorphic relationship, such as commentable_type and commentable_id.
+  const morph = /^(.+)_(type|id)$/.exec(c.name);
+  if (morph && m.relations.some((r) => /MorphTo$/.test(r.type) && (r.name === morph[1] || r.name === morph[1].replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase())))) return "morph";
   if (relationFor(c, m)) return "foreign";
   if (m.enums.includes(cast.replace(/^\\/, "").split(":")[0])) return "enum";
   if (BOOL_TYPES.test(type) || /^(bool|boolean)$/.test(cast) || (type === "tinyint" && /\(1\)/.test(c.fullType ?? "")) || /^(is|has|can)_/.test(name)) return "boolean";
@@ -233,9 +236,9 @@ export function tableColumn(c: Column, m: ModelFacts): Gen {
 }
 
 /** Whether a column goes in a new resource's table by default: not passwords, secrets, long text, or JSON. */
-export const inTableByDefault = (c: Column, m: ModelFacts) => !["password", "json", "text", "richtext", "id", "uuid", "file"].includes(natureOf(c, m)) && !/token|secret/.test(c.name);
-/** Whether a column goes in a new resource's form by default. */
-export const inFormByDefault = (c: Column) => !isSystemColumn(c);
+export const inTableByDefault = (c: Column, m: ModelFacts) => !["password", "json", "text", "richtext", "id", "uuid", "file", "morph"].includes(natureOf(c, m)) && !/token|secret/.test(c.name);
+/** Whether a column goes in a new resource's form by default: not keys, timestamps, or a polymorphic pair. */
+export const inFormByDefault = (c: Column, m?: ModelFacts) => !isSystemColumn(c) && (!m || natureOf(c, m) !== "morph");
 
 /** The filter a column suggests, if any. */
 export function filterFor(c: Column, m: ModelFacts): Gen | null {

@@ -791,7 +791,7 @@ export class Designer {
     const ctx = this.canvasCtx(ref);
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
-    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
     if (ref.doc.outline.errors)
       canvas.prepend(
@@ -954,7 +954,7 @@ export class Designer {
               h(
                 "details",
                 { class: "fd-palette-group", open: true },
-                h("summary", {}, icon("database"), `${shortClass(this.facts.class)} columns`, missing.length ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
+                h("summary", {}, icon("database"), h("span", { class: "fd-palette-title", title: `${shortClass(this.facts.class)} columns` }, `${shortClass(this.facts.class)} columns`), missing.length ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
                 ...columns.map(colItem),
                 !columns.length ? h("p", { class: "fd-note" }, this.facts.details.tableExists === false ? "The table doesn't exist yet. Run the migrations." : "No columns.") : null,
               ),

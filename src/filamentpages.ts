@@ -219,7 +219,7 @@ export function renderPagesTab(d: Designer): HTMLElement {
         card(
           icon(iconName),
           humanize(key || "page"),
-          [pageClass ? shortClass(pageClass) : "Code", route !== undefined ? h("code", {}, `${d.panel ? `/${d.panel.path}` : ""}/${d.info?.slug ?? ""}${route === "/" ? "" : route}`) : null, what],
+          [pageClass ? shortClass(pageClass) : "Code", route !== undefined ? h("code", {}, `${d.panel?.path ? `/${d.panel.path}` : ""}/${d.info?.slug ?? ""}${route === "/" ? "" : route}`) : null, what],
           [...(file ? [iconButton("go-to-file", "Open the code", () => d.host.openAt(file, 1))] : []), ...(key !== "index" ? [iconButton("trash", "Remove the page from the resource", () => void (async () => (await confirm(`Remove the ${key} page from the resource? Its file stays.`, "Remove")) && d.apply(doc, () => [removeItem(doc.text, arr, arr.items.indexOf(item))], "Removed the page"))())] : [])],
         ),
       );

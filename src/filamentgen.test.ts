@@ -77,3 +77,13 @@ test("titleAttribute falls back to the first text column", () => {
   assert.equal(titleAttribute(["id", "company_id", "sender", "status"], { id: "uuid", company_id: "uuid", sender: "varchar", status: "varchar" }), "sender");
   assert.equal(titleAttribute(["id", "count"], { id: "int8", count: "int4" }), "id");
 });
+
+test("a polymorphic pair is a morph column, left out of new forms and tables", async () => {
+  const { inFormByDefault, inTableByDefault } = await import("./filamentgen.ts");
+  const m = { ...model, relations: [...model.relations, { name: "commentable", type: "MorphTo", related: null }] };
+  assert.equal(natureOf(col("commentable_type", "varchar"), m), "morph");
+  assert.equal(natureOf(col("commentable_id", "integer"), m), "morph");
+  assert.equal(inFormByDefault(col("commentable_id", "integer"), m), false);
+  assert.equal(inTableByDefault(col("commentable_type", "varchar"), m), false);
+  assert.equal(natureOf(col("category_id", "bigint"), m), "foreign");
+});

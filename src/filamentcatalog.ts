@@ -299,7 +299,7 @@ export function palette(cat: Catalog, kinds: Kind[], query = ""): PaletteGroup[]
  * `@span`, `@format`, and `@visibility`.
  */
 const ESSENTIALS: Record<string, string[]> = {
-  field: ["@name", "label", "placeholder", "helperText", "hint", "default", "required", "disabled", "@span"],
+  field: ["@name", "label", "placeholder", "helperText", "hint", "default", "required", "disabled", "live", "@span"],
   entry: ["@name", "label", "placeholder", "helperText", "@format", "badge", "color", "icon", "copyable", "@span"],
   layout: ["@name", "description", "icon", "columns", "@span"],
   column: ["@name", "label", "searchable", "sortable", "toggleable", "@format", "badge", "color", "icon", "description", "limit", "wrap", "alignment", "tooltip"],

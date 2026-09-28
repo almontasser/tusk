@@ -1,0 +1,140 @@
+{
+  "errors": false,
+  "namespace": "App\\Support",
+  "uses": [],
+  "useInsert": 30,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Spaced",
+      "fqn": "App\\Support\\Spaced",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        31,
+        190
+      ],
+      "bodyStart": 45,
+      "bodyEnd": 189,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "items",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            50,
+            188
+          ],
+          "docStart": null,
+          "body": [
+            86,
+            187
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "a",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      116,
+                      119
+                    ]
+                  },
+                  "value": {
+                    "kind": "number",
+                    "value": 1.0,
+                    "raw": "1",
+                    "span": [
+                      123,
+                      124
+                    ]
+                  },
+                  "span": [
+                    116,
+                    124
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "b",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      139,
+                      142
+                    ]
+                  },
+                  "value": {
+                    "kind": "number",
+                    "value": 2.0,
+                    "raw": "2",
+                    "span": [
+                      146,
+                      147
+                    ]
+                  },
+                  "span": [
+                    139,
+                    147
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "c",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      162,
+                      165
+                    ]
+                  },
+                  "value": {
+                    "kind": "number",
+                    "value": 3.0,
+                    "raw": "3",
+                    "span": [
+                      169,
+                      170
+                    ]
+                  },
+                  "span": [
+                    162,
+                    170
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 102,
+              "close": 180,
+              "legacy": false,
+              "span": [
+                102,
+                181
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -184,3 +184,11 @@ test("droppedImports removes imports an edit leaves unused, and only those", asy
   assert.match(out, /use Filament\\Forms\\Components\\TextInput;/);
   assert.deepEqual(droppedImports(text, post.outline, []), []);
 });
+
+test("insertItem and moveItem follow an array's blank lines between items", () => {
+  const spaced = fixture("Spaced");
+  const arr = spaced.outline.classes[0].methods[0].returns[0] as ArrayNode;
+  assert.match(applyEdits(spaced.text, [insertItem(spaced.text, arr, 3, "'d' => 4")]), /'c' => 3,\n\n {12}'d' => 4,\n {8}\];/);
+  assert.match(applyEdits(spaced.text, [insertItem(spaced.text, arr, 1, "'z' => 0")]), /'a' => 1,\n\n {12}'z' => 0,\n\n {12}'b' => 2,/);
+  assert.match(applyEdits(spaced.text, moveItem(spaced.text, arr, 2, 0)), /return \[\n {12}'c' => 3,\n\n {12}'a' => 1,\n\n {12}'b' => 2,\n {8}\];/);
+});

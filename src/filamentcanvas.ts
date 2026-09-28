@@ -304,9 +304,11 @@ function badges(c: Comp): HTMLElement {
 
 function fieldLabel(c: Comp, after: HTMLElement | null = null): HTMLElement {
   const hint = text(c, "hint");
+  // A hidden label keeps its row only for a hint; the designer shows it faintly so the field stays identifiable.
+  const hidden = flag(c, "hiddenLabel") || arg(c, "label")?.kind === "bool";
   return h(
     "div",
-    { class: "fd-label-row" },
+    { class: `fd-label-row${hidden ? " hidden-label" : ""}`, title: hidden ? "The label is hidden" : "" },
     h("span", { class: "fd-label" }, labelOf(c), flag(c, "required") ? h("sup", { class: "fd-required" }, "*") : null),
     after,
     hint ? h("span", { class: "fd-hint" }, hint) : null,

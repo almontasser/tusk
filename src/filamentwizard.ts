@@ -141,7 +141,7 @@ class Wizard {
     this.softDeletes = !!f.softDeletes;
     this.fields = f.columns.filter((c) => !["id", "created_at", "updated_at", "deleted_at"].includes(c.name)).map((c) => {
       const gen = formField(c, f);
-      return { column: c, include: inFormByDefault(c), cls: gen.cls, required: gen.calls.some(([m]) => m === "required"), full: gen.calls.some(([m]) => m === "columnSpanFull") };
+      return { column: c, include: inFormByDefault(c, f), cls: gen.cls, required: gen.calls.some(([m]) => m === "required"), full: gen.calls.some(([m]) => m === "columnSpanFull") };
     });
     this.columns = f.columns.filter((c) => c.name !== "id").map((c) => {
       const gen = tableColumn(c, f);
@@ -372,7 +372,7 @@ class Wizard {
     const plural = this.plural || `${labelFromName(name)}s`;
     const items: [string, string][] = [
       ["Resource", `${name}Resource in ${panel?.id ?? "the panel"}${this.cluster ? `, cluster ${shortClass(this.cluster)}` : ""}`],
-      ["Address", `/${panel?.path ?? ""}/${plural.toLowerCase().replace(/\s+/g, "-")}`],
+      ["Address", `${panel?.path ? `/${panel.path}` : ""}/${plural.toLowerCase().replace(/\s+/g, "-")}`],
       ["Navigation", `${this.group ? `${this.group} › ` : ""}${plural}`],
       ["Pages", this.simple ? "One page with modals" : `List, create, edit${this.view ? ", view" : ""}`],
       ["Form", `${count(this.fields.filter((f) => f.include).length, "field")}${this.section ? " in a section" : ""}, ${count(this.formColumns, "column")}`],
