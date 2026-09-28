@@ -1,6 +1,6 @@
 // Git history: the log of the repository or of one file, commit details, and commit actions.
 import { change, git, showDiff } from "./git";
-import { age, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
+import { ago, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
 import { confirm, pick } from "./palette";
 import { interactiveRebase } from "./rebase";
 import { splitter } from "./splitter";
@@ -82,7 +82,7 @@ function render() {
       const subject = el("div", "subject");
       for (const ref of c.refs) subject.append(el("span", ref.startsWith("tag: ") ? "ref tag" : "ref", ref.replace(/^tag: /, "")));
       subject.append(c.subject);
-      li.append(subject, el("div", "meta", `${c.short} · ${c.author} · ${age(c.time)} ago`));
+      li.append(subject, el("div", "meta", `${c.short} · ${c.author} · ${ago(c.time)}`));
       li.onclick = () => select(c);
       rows.set(c, li);
       return li;

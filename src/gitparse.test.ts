@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -218,4 +218,12 @@ test("links lines on a remote's web host", () => {
   assert.equal(url("ssh://git@gitlab.example.com:2222/group/sub/shop"), "https://gitlab.example.com/group/sub/shop/blob/abc123/app/My%20File.php#L3");
   assert.equal(url("git@bitbucket.org:acme/shop.git", 5), "https://bitbucket.org/acme/shop/src/abc123/app/My%20File.php#lines-3:5");
   assert.equal(url("/Users/me/shop.git"), "");
+});
+
+test("parses stashes with and without a message", () => {
+  const out = ["stash@{0}\x1fa1\x1f100\x1fOn main: half-done login", "stash@{1}\x1fb2\x1f90\x1fWIP on feature/x: 1a2b3c4 Add Post model", ""].join("\n");
+  assert.deepEqual(parseStashList(out), [
+    { ref: "stash@{0}", hash: "a1", time: 100, branch: "main", message: "half-done login" },
+    { ref: "stash@{1}", hash: "b2", time: 90, branch: "feature/x", message: "WIP: Add Post model" },
+  ]);
 });

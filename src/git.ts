@@ -1,12 +1,16 @@
 // Git integration: commit view, diff view, and branches. Everything shells out to `git`.
 import { invoke } from "@tauri-apps/api/core";
+import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
+import { h, iconButton } from "./dom";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
-import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
+import { age, ago, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
+import { showStashes, stashChanges } from "./stash";
+import { showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
 
 type Host = {
@@ -24,6 +28,10 @@ let lastBranch: string | undefined;
 
 /** Functions to call when the checked-out branch (or the project) changes. */
 export const branchListeners: (() => void)[] = [];
+/** Functions to call after each refresh of git's status. */
+export const refreshListeners: (() => void)[] = [];
+/** The last `git status`, or undefined when the project isn't a repository. */
+export const gitStatus = () => current;
 
 // `--no-optional-locks` stops read-only commands such as `status` from rewriting .git/index.
 // Otherwise every refresh changes .git, the file watcher reports it, and the refresh repeats forever.
@@ -36,18 +44,44 @@ const gitWithInput = (input: string, ...args: string[]) => run(args, input);
 // resolved file and the one from Mark Resolved, would fail on git's index.lock.
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Runs a git command that changes state, then refreshes. Errors go to the status bar. */
-export function change(...args: string[]) {
+/** Runs a git command that changes state, then refreshes. Errors show as errors. Resolves to whether it worked. */
+export function change(...args: string[]): Promise<boolean> {
   const next = queue.then(async () => {
+    let ok = true;
     try {
       await git(...args);
     } catch (e) {
-      host.status(`git ${args[0]}: ${String(e).trim()}`);
+      ok = false;
+      showError(`git ${args[0]} failed`, e);
     }
     await refreshGit();
+    return ok;
   });
   queue = next;
   return next;
+}
+
+/**
+ * Runs git with standard error in the output and returns the exit code instead of failing, for commands whose
+ * messages matter either way, such as push, pull, and commit hooks. Credential prompts are off, since there's no
+ * terminal to answer them. Aborting `signal` stops git.
+ */
+export async function gitOutput(args: string[], signal?: AbortSignal): Promise<{ code: number; output: string }> {
+  const dir = `${await appCacheDir()}/git`;
+  await invoke("create_dir", { path: dir });
+  const pidFile = `${dir}/${Date.now()}-${Math.random().toString(36).slice(2)}.pid`;
+  // ponytail: a pid file lets the webview stop git without a Rust command for killing processes.
+  const script = `export GIT_TERMINAL_PROMPT=0; git --no-optional-locks "$@" 2>&1 & echo $! > "$0"; wait $!; code=$?; rm -f "$0"; printf '\\n\\036%s' $code`;
+  const stop = () => void invoke("run_capture", { cwd: "/", program: "/bin/sh", args: ["-c", 'kill "$(cat "$0")" 2>/dev/null', pidFile], input: null }).catch(() => {});
+  signal?.addEventListener("abort", stop);
+  try {
+    const out = await invoke<string>("run_capture", { cwd: host.root(), program: "/bin/sh", args: ["-c", script, pidFile, ...args], input: null });
+    signal?.throwIfAborted();
+    const at = out.lastIndexOf("\n\x1e");
+    return { code: Number(out.slice(at + 2)), output: out.slice(0, at).trim() };
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
 }
 
 // ---- Status ----
@@ -91,6 +125,7 @@ async function loadStatus() {
   renderBranch();
   renderCommitView();
   refreshers.forEach((r) => r());
+  refreshListeners.forEach((f) => f());
 }
 
 function renderBranch() {
@@ -415,6 +450,43 @@ export function showDiff(path: string, original: string, modified: string, label
   return diffEditor;
 }
 
+/** A file in a diff of several, such as a commit's or a stash's, loaded when you move to it. */
+export type DiffFile = { path: string; status?: string; load(): Promise<[string, string]> };
+let diffFiles: { files: DiffFile[]; index: number; label: string } | undefined;
+
+/**
+ * Shows the diff of one of several files, with a file list and previous and next buttons (⌥⌘← and ⌥⌘→) in the
+ * header, as PhpStorm's diff viewer does. Loading shows progress, so a slow `git show` doesn't look like nothing.
+ */
+export async function showDiffs(files: DiffFile[], label: string, index = 0) {
+  const f = files[index];
+  if (!f) return host.status("There are no changed files to show.");
+  const texts = await withProgress(`Loading the diff of ${f.path}…`, () => f.load(), { error: `Can't show the diff of ${f.path}` });
+  if (!texts) return;
+  showDiff(f.path, texts[0], texts[1], label);
+  diffFiles = { files, index, label };
+  const nav = $("diff-files");
+  nav.hidden = files.length < 2;
+  if (files.length < 2) return;
+  const select = h("select", { ariaLabel: "Changed file", onchange: () => showDiffs(files, label, select.selectedIndex) });
+  files.forEach((x, i) => select.append(new Option(`${x.status ? `${x.status} ` : ""}${x.path}`, String(i), false, i === index)));
+  nav.replaceChildren(
+    iconButton("arrow-left", "Previous file (⌥⌘←)", () => moveDiff(-1)),
+    select,
+    h("span", { class: "muted" }, `${index + 1} of ${files.length}`),
+    iconButton("arrow-right", "Next file (⌥⌘→)", () => moveDiff(1)),
+  );
+}
+
+/** Moves to the previous or next file of a diff of several files. */
+export function moveDiff(by: 1 | -1) {
+  if (!diffFiles) return;
+  const { files, index, label } = diffFiles;
+  const next = index + by;
+  if (next < 0 || next >= files.length) return host.status(by > 0 ? "This is the last file." : "This is the first file.");
+  showDiffs(files, label, next);
+}
+
 /** The side of the diff on screen that you last clicked, and the line the cursor is on there. */
 export function diffCursor(): { side: "original" | "modified"; line: number; startLine: number } | null {
   if (!diffEditor?.getModel()) return null;
@@ -431,6 +503,8 @@ export const closeDiff = () => closeView($("diff"));
 
 function clearDiff() {
   staging = undefined;
+  diffFiles = undefined;
+  $("diff-files").hidden = true;
   $("diff-action").hidden = true;
   const model = diffEditor?.getModel();
   diffEditor?.setModel(null);
@@ -467,7 +541,7 @@ export async function branches() {
     { label: "Push (git push)", detail: "⌘⇧K", icon: "codicon-arrow-up", run: pushBranch },
     { label: "Fetch (git fetch)", icon: "codicon-sync", run: fetchAll },
     { label: "Stash Changes…", icon: "codicon-archive", run: stashChanges },
-    { label: "Stashes…", icon: "codicon-list-unordered", run: stashes },
+    { label: "Stashes…", icon: "codicon-list-unordered", run: showStashes },
     { label: "Worktrees…", icon: "codicon-folder-library", run: worktrees },
   ];
   // Checking out a remote branch such as origin/feature creates a local tracking branch.
@@ -619,7 +693,7 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     return model && rel ? blameOf(model, rel) : Promise.resolve([]);
   };
   const describe = (b: BlameLine) =>
-    /^0+$/.test(b.hash) ? "You · Not committed yet" : `${b.author}, ${age(b.time)} ago · ${b.summary}`;
+    /^0+$/.test(b.hash) ? "You · Not committed yet" : `${b.author}, ${ago(b.time)} · ${b.summary}`;
 
   const updateInline = debounce(async () => {
     const model = editor.getModel();
@@ -830,6 +904,12 @@ export function initGit(h: Host) {
   $("stage-all").onclick = () => change("add", "--all");
   $("unstage-all").onclick = () => change("reset", "--quiet");
   $("diff-close").onclick = closeDiff;
+  $("diff").addEventListener("keydown", (e) => {
+    if (!e.altKey || !e.metaKey || !diffFiles || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    moveDiff(e.key === "ArrowLeft" ? -1 : 1);
+  }, true);
   $("commit-message").onkeydown = (e) => {
     if (e.key === "Enter" && e.metaKey) commit(false);
   };
@@ -840,61 +920,4 @@ export function focusCommit() {
   host.showView("commit");
   refreshGit();
   $("commit-message").focus();
-}
-
-// ---- Stash ----
-
-/** Stashes uncommitted changes to tracked files, with an optional message. */
-export function stashChanges() {
-  if (!current) return host.status("This folder isn't a git repository.");
-  pick("Stash changes: type a message, or press ⏎ for none", (q) => [
-    {
-      label: q.trim() ? `Stash with message "${q.trim()}"` : "Stash without a message",
-      detail: "git stash push",
-      run: () => change("stash", "push", ...(q.trim() ? ["-m", q.trim()] : [])),
-    },
-    {
-      label: "Stash, including new files",
-      detail: "git stash push --include-untracked",
-      run: () => change("stash", "push", "--include-untracked", ...(q.trim() ? ["-m", q.trim()] : [])),
-    },
-  ]);
-}
-
-/** Lists stashes; choosing one offers to apply, pop, drop, or show its files. */
-export async function stashes() {
-  if (!current) return host.status("This folder isn't a git repository.");
-  const out = await git("stash", "list", "--format=%gd%x1f%s%x1f%cr").catch(() => "");
-  const list = out.split("\n").filter(Boolean).map((l) => l.split("\x1f"));
-  if (!list.length) return host.status("There are no stashes.");
-  pick("Stashes", (q) =>
-    rank(q, list.map(([ref, subject, when]) => ({ label: subject, detail: `${ref} · ${when}`, run: () => stashActions(ref, subject) }))),
-  );
-}
-
-function stashActions(ref: string, subject: string) {
-  const items: Item[] = [
-    { label: "Apply", detail: "Keep the stash", run: () => change("stash", "apply", ref) },
-    { label: "Pop", detail: "Apply, then drop the stash", run: () => change("stash", "pop", ref) },
-    { label: "Show Files", detail: "Diff each file", run: () => stashFiles(ref) },
-    {
-      label: "Drop",
-      detail: "Delete the stash",
-      run: async () => (await confirm(`Delete the stash "${subject}"? This can't be undone.`, "Delete Stash")) && change("stash", "drop", ref),
-    },
-  ];
-  pick(`${ref}: ${subject}`, (q) => rank(q, items));
-}
-
-async function stashFiles(ref: string) {
-  const out = await git("stash", "show", "--include-untracked", "--name-only", ref).catch(() => git("stash", "show", "--name-only", ref));
-  const files = out.split("\n").filter(Boolean);
-  const show = (spec: string) => git("show", spec).catch(() => "");
-  pick(`Files in ${ref}`, (q) =>
-    rank(q, files.map((path) => ({
-      label: path,
-      // Untracked files live in the stash's third parent.
-      run: async () => showDiff(path, await show(`${ref}^1:${path}`), (await show(`${ref}:${path}`)) || (await show(`${ref}^3:${path}`)), `${ref} ↔ its base`),
-    }))),
-  );
 }

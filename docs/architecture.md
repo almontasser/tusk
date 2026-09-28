@@ -2510,11 +2510,40 @@ itself refuses to continue until they're committed).
 
 ### Stash
 
-Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
-`--include-untracked` as a second choice. **Stashes…** reads `git stash list`
-and offers apply, pop, drop, and show files for the chosen stash. A stashed
-file's diff compares the stash's first parent (the commit it was made on) with
-the stash; untracked files come from the stash's third parent.
+`src/stash.ts` draws the **Stashes** tab of the Commit tool window, a tree with
+`listNav`. It reads `git stash list --format=%gd%x1f%H%x1f%ct%x1f%gs`
+(`parseStashList` takes the branch and message from the reflog subject) and
+keys rows by commit hash, since `stash@{n}` refs shift when an older stash is
+dropped. A stash's files come from
+`git stash show --include-untracked --name-status -z`, read once per hash
+because a stash never changes. A stashed file's diff compares the stash's first
+parent (the commit it was made on) with the stash; untracked files come from
+the stash's third parent. The tab reloads after each git refresh while it's
+shown (`refreshListeners` in `git.ts`), so stashes made in a terminal appear.
+
+Apply, pop, and unstash as a branch (`git stash branch`) run through
+`gitOutput`, which returns git's combined output and exit code instead of
+failing with standard error only, so a conflicting apply can say so and offer
+the merge tool.
+
+### Diffs of several files
+
+`showDiffs` in `git.ts` shows one file of a list, such as a stash's or a
+commit's files, with a file picker and previous and next buttons (⌥⌘← and
+⌥⌘→) in the diff's header. Each file loads when you move to it, under
+`withProgress`, so a slow `git show` shows a spinner rather than nothing.
+
+### Commands with messages
+
+`run_capture` returns standard output on success and standard error on
+failure, so a command's messages are lost either way for commands such as
+`push`, whose news goes to standard error, or `stash apply`, which reports
+conflicts on standard output and fails. `gitOutput` runs git through
+`/bin/sh` with `2>&1` and appends the exit code, and sets
+`GIT_TERMINAL_PROMPT=0`, since no terminal can answer a credential prompt.
+It writes git's process ID to a file in the app cache, so an aborted signal
+can `kill` it: Tauri commands can't be aborted, and this avoids a Rust
+command for it.
 
 ### Worktrees
 
@@ -5058,3 +5087,11 @@ output are found with one regex over each line rather than per-tool parsers,
 since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
 `path(line)`, and a reference becomes a link only when the file exists, which
 keeps false matches, such as version numbers, from turning into links.
+
+### 2026-09-28: Stashes in a tab of the Commit tool window
+
+PhpStorm keeps stashes in a tab beside the commit view, and so does Tusk,
+rather than the palette pickers it had: a list shows each stash's branch and
+age, and its files and diffs, at a glance. `stash@{n}` names shift, so rows
+are keyed by the stash's commit hash, and actions use the ref only when they
+run.

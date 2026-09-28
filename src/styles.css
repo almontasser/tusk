@@ -585,6 +585,21 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .commit-buttons { display: flex; gap: 8px; }
 #git-operation { margin: 8px 12px 4px; padding: 8px 10px; border-radius: 6px; background: #e5c07b1f; box-shadow: inset 0 0 0 1px #e5c07b55; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #git-operation span { flex-basis: 100%; }
+.view-tabs { display: flex; gap: 2px; height: 100%; }
+.view-tabs [role="tab"] { position: relative; padding: 0 8px; font-weight: 600; color: var(--muted); }
+.view-tabs [role="tab"]:hover { color: var(--text); }
+.view-tabs [role="tab"][aria-selected="true"] { color: var(--text); }
+.view-tabs [role="tab"][aria-selected="true"]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: var(--accent); }
+#git-commit-pane { flex-grow: 1; display: flex; flex-direction: column; }
+#git-commit-pane[hidden], #git-stashes[hidden] { display: none; }
+#git-stashes { flex-grow: 1; display: flex; flex-direction: column; min-height: 0; }
+.stash-toolbar { display: flex; gap: 2px; padding: 2px 6px; border-bottom: 1px solid var(--border-subtle); }
+#stash-list { flex: 1; overflow: auto; }
+#stash-list .twisty { font-size: 12px; color: var(--muted); margin-left: -6px; }
+#stash-list .stash-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+#stash-list .stash-file { padding-left: 34px; }
+.git-files .buttons .icon-button { width: 22px; height: 20px; }
+.git-files li.selected .buttons { display: flex; }
 
 /* ==========================================================================
    Find in files

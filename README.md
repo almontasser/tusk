@@ -1846,10 +1846,22 @@ of them, even single lines from the diff, commit, and repeat, then click
 
 ### Stash
 
-Run **Stash Changes…** (from ⌘⇧A or the branch menu) to set your uncommitted
-changes aside, optionally with a message and including new files. **Stashes…**
-lists them: choose one to **Apply** it, **Pop** it (apply, then delete), **Drop**
-it, or **Show Files** to see each file's diff.
+Run **Stash Changes…** (from ⌘⇧A, the **Git** menu, or the **+** in the
+**Stashes** tab) to set your uncommitted changes aside. The dialog takes an
+optional message, and has two options: **Keep staged changes** leaves what you
+staged in place, and **Include untracked files** stashes new files too.
+
+The **Stashes** tab of the Commit tool window (or **Stashes…** from ⌘⇧A) lists
+your stashes, newest first, with the branch each was made on and its age.
+Click a stash, or press →, to list its changed files, and click a file, or
+press ⏎, to see its diff. ⏎ on a stash opens the whole stash's diff: move
+between its files with the arrows in the diff's header, or ⌥⌘← and ⌥⌘→.
+Hover over a stash for **Apply** (keep the stash), **Pop** (apply, then drop
+it), and **Drop**, or right-click it for these plus **Unstash as New
+Branch…**, which checks out a new branch at the commit the stash was made on
+and pops the stash there. Press ⌫ to drop the selected stash; dropping asks
+first. If a stash applies with conflicts, it's kept, and the message offers
+the merge tool.
 
 ### Worktrees
 
@@ -2438,7 +2450,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/layout.ts` | The window's layout: the sidebar and panel sizes, the full-width bottom panel, and maximizing it |
 | `src/splitter.ts` | Resizable splits, with the keyboard, reset, limits, and saved sizes |
 | `src/projectstate.ts`, `src/projectstatedata.ts` | Per-project settings, in `tusk.json` when shared or else on this Mac |
-| `src/git.ts` | Commit view, diff view, partial staging, branches, and stash |
+| `src/git.ts` | Commit view, diff view, partial staging, and branches |
+| `src/stash.ts` | The Stashes tab and the Stash Changes dialog |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |
 | `src/merge.ts` | The three-pane merge tool |

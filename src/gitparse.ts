@@ -83,6 +83,12 @@ export function age(seconds: number, now = Date.now() / 1000): string {
   return "now";
 }
 
+/** A relative age for a sentence: "3d ago", or "just now". */
+export const ago = (seconds: number, now = Date.now() / 1000) => {
+  const a = age(seconds, now);
+  return a === "now" ? "just now" : `${a} ago`;
+};
+
 /**
  * Compares two versions of a file line by line and returns the changed ranges of the new
  * version, like `parseHunks`. Trims the common start and end, then runs a longest common
@@ -485,4 +491,22 @@ export function remoteLineUrl(remote: string, commit: string, path: string, star
   const file = path.split("/").map(encodeURIComponent).join("/");
   if (hostName.includes("bitbucket")) return `https://${hostName}/${repo}/src/${commit}/${file}#lines-${start}${end > start ? `:${end}` : ""}`;
   return `https://${hostName}/${repo}/blob/${commit}/${file}#L${start}${end > start ? `-L${end}` : ""}`;
+}
+
+export type Stash = { ref: string; hash: string; branch: string; message: string; time: number };
+
+/**
+ * Parses `git stash list --format=%gd%x1f%H%x1f%ct%x1f%gs`. The reflog subject is "On <branch>: <message>" for a
+ * stash with a message and "WIP on <branch>: <hash> <subject>" for one without.
+ */
+export function parseStashList(out: string): Stash[] {
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [ref, hash, time, subject = ""] = line.split("\x1f");
+      const m = subject.match(/^(WIP on|On) ([^:]+): (.*)$/);
+      const message = !m ? subject : m[1] === "On" ? m[3] : `WIP: ${m[3].replace(/^[0-9a-f]{7,40} /, "")}`;
+      return { ref, hash, time: Number(time), branch: m?.[2] ?? "", message };
+    });
 }
