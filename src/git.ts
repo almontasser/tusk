@@ -4,12 +4,11 @@ import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { h, icon, iconButton } from "./dom";
-import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
 import { age, ago, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
-import { showError, withProgress } from "./status";
+import { errorText, showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
 
 type Host = {
@@ -31,6 +30,9 @@ export const branchListeners: (() => void)[] = [];
 export const refreshListeners: (() => void)[] = [];
 /** The last `git status`, or undefined when the project isn't a repository. */
 export const gitStatus = () => current;
+let statusError = "";
+/** Why the last `git status` failed, such as "not a git repository", or "" when it worked. */
+export const gitStatusError = () => statusError;
 
 // `--no-optional-locks` stops read-only commands such as `status` from rewriting .git/index.
 // Otherwise every refresh changes .git, the file watcher reports it, and the refresh repeats forever.
@@ -149,7 +151,10 @@ let cachedHead: string | undefined;
 async function loadStatus() {
   if (!host.root()) return;
   const [status, head] = await Promise.all([
-    git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(parseStatus, () => undefined),
+    git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(
+      (out) => ((statusError = ""), parseStatus(out)),
+      (e) => ((statusError = errorText(e)), undefined),
+    ),
     git("rev-parse", "HEAD").catch(() => ""),
   ]);
   current = status;
@@ -167,7 +172,7 @@ async function loadStatus() {
     branchListeners.forEach((f) => f());
   }
   renderBranch();
-  renderCommitView();
+  renderOperation();
   refreshers.forEach((r) => r());
   refreshListeners.forEach((f) => f());
 }
@@ -184,8 +189,6 @@ function renderBranch() {
   }
 }
 
-const staged = (f: FileStatus) => !isConflict(f) && f.index !== " " && f.index !== "?";
-const unstaged = (f: FileStatus) => !isConflict(f) && f.worktree !== " ";
 
 // ---- Merges, rebases, cherry-picks, and reverts in progress ----
 
@@ -195,6 +198,8 @@ const unstaged = (f: FileStatus) => !isConflict(f) && f.worktree !== " ";
  */
 type Operation = { kind: "merge" | "rebase" | "cherry-pick" | "revert"; gitDir: string; editing?: string; split?: boolean };
 let operation: Operation | null = null;
+/** The merge, rebase, cherry-pick, or revert in progress, if any. */
+export const gitOperation = () => operation;
 let gitDir: { root: string; path: string } | undefined;
 
 /** Reads git's state files to find an operation that stopped, usually for conflicts. */
@@ -254,43 +259,6 @@ function renderOperation() {
   if (kind === "merge" && !message.value) invoke<string>("read_file", { path: `${dir}/MERGE_MSG` }).then((m) => (message.value ||= m.replace(/^#.*$/gm, "").trim()), () => {});
 }
 
-function conflictRow(f: FileStatus) {
-  const li = document.createElement("li");
-  li.className = "status-C";
-  const name = f.path.split("/").pop()!;
-  li.innerHTML = `<span class="letter">!</span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
-  li.querySelector(".name")!.textContent = name;
-  li.querySelector(".dir")!.textContent = f.path.slice(0, -name.length - 1);
-  li.title = "Open the merge tool to resolve each conflict, or accept one side";
-  li.onclick = () => openMerge(f.path);
-  const buttons = li.querySelector(".buttons")!;
-  const button = (label: string, title: string, run: () => unknown) => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.title = title;
-    b.onclick = (e) => (e.stopPropagation(), run());
-    buttons.append(b);
-  };
-  button("Yours", "Keep your version of the whole file", () => acceptSide(f, "ours"));
-  button("Theirs", "Keep their version of the whole file", () => acceptSide(f, "theirs"));
-  button("✓", "Mark as resolved (stage the file as it is)", () => change("add", "--", f.path));
-  return li;
-}
-
-/** Resolves a whole file with one side. If that side deleted the file, resolving deletes it. */
-async function acceptSide(f: FileStatus, side: "ours" | "theirs") {
-  const deleted = side === "ours" ? f.index === "D" : f.worktree === "D";
-  const what = deleted ? `delete ${f.path}, as ${side === "ours" ? "your" : "their"} side did` : `replace ${f.path} with ${side === "ours" ? "your" : "their"} version`;
-  if (!(await confirm(`Resolve the conflict and ${what}? Other changes to the file are lost.`, `Use ${side === "ours" ? "your" : "their"} version`))) return;
-  if (deleted) return change("rm", "--quiet", "--", f.path);
-  try {
-    await git("checkout", `--${side}`, "--", f.path);
-  } catch (e) {
-    host.status(`git checkout: ${String(e).trim()}`);
-  }
-  await change("add", "--", f.path);
-}
-
 /** Stages a conflicted file once it's saved without conflict markers, as PhpStorm does. */
 export async function afterSave(path: string, text: string) {
   const rel = path.slice(host.root().length + 1);
@@ -298,86 +266,6 @@ export async function afterSave(path: string, text: string) {
   if (!f || hasConflicts(text)) return;
   await change("add", "--", rel);
   host.status(`Marked ${rel} as resolved.`);
-}
-
-function renderCommitView() {
-  $("git-empty").hidden = !!current;
-  $("git-changes").hidden = !current;
-  if (!current) return;
-  const conflicted = current.files.filter(isConflict);
-  const stagedFiles = current.files.filter(staged);
-  const changedFiles = current.files.filter(unstaged);
-  $("conflicts-group").hidden = !conflicted.length;
-  $("conflicts-count").textContent = String(conflicted.length);
-  $("conflicts").replaceChildren(...conflicted.map(conflictRow));
-  $("staged-count").textContent = String(stagedFiles.length);
-  $("changes-count").textContent = String(changedFiles.length);
-  $("staged").replaceChildren(...stagedFiles.map((f) => fileRow(f, true)));
-  $("changes").replaceChildren(...changedFiles.map((f) => fileRow(f, false)));
-  renderOperation();
-}
-
-function fileRow(f: FileStatus, inIndex: boolean) {
-  const letter = inIndex ? f.index : f.worktree === "?" ? "U" : f.worktree;
-  const li = document.createElement("li");
-  li.className = `status-${letter}`;
-  li.title = f.from ? `${f.from} → ${f.path}` : f.path;
-  const name = f.path.split("/").pop()!;
-  const dir = f.path.slice(0, -name.length - 1);
-  const icon = fileIcon(name);
-  li.innerHTML = `<span class="letter"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span><span class="dir"></span><span class="buttons"></span>`;
-  li.querySelector(".letter")!.textContent = letter;
-  li.querySelector(".name")!.textContent = name;
-  li.querySelector(".dir")!.textContent = dir;
-  li.onclick = () => showChange(f, inIndex);
-  const buttons = li.querySelector(".buttons")!;
-  const button = (label: string, title: string, run: () => unknown) => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.title = title;
-    b.onclick = (e) => (e.stopPropagation(), run());
-    buttons.append(b);
-  };
-  button("↗", "Open file", () => host.openFile(`${host.root()}/${f.path}`));
-  if (inIndex) button("−", "Unstage", () => change("restore", "--staged", "--", f.path));
-  else {
-    button("↺", "Discard changes", () => discard(f));
-    button("+", "Stage", () => change("add", "--", f.path));
-  }
-  return li;
-}
-
-async function discard(f: FileStatus) {
-  const untracked = f.worktree === "?";
-  const ok = await confirm(untracked ? `Move the new file ${f.path} to the Trash?` : `Discard your changes to ${f.path}?`, untracked ? "Move to Trash" : "Discard Changes");
-  if (!ok) return;
-  if (untracked) await invoke("trash_path", { path: `${host.root()}/${f.path}` });
-  else await change("restore", "--", f.path);
-  await refreshGit();
-}
-
-async function commit(push: boolean) {
-  const message = ($("commit-message") as HTMLTextAreaElement).value.trim();
-  const amend = ($("amend") as HTMLInputElement).checked;
-  if (!message && !amend) return host.status("Write a commit message first.");
-  if (current?.files.some(isConflict)) return host.status("Resolve the merge conflicts first.");
-  if (!current?.files.some(staged) && !amend && operation?.kind !== "merge") {
-    const count = current?.files.length ?? 0;
-    if (!count) return host.status("There are no changes to commit.");
-    if (!(await confirm(`Nothing is staged. Stage all ${count} ${count === 1 ? "change" : "changes"} and commit them?`, "Stage All and Commit"))) return;
-    await change("add", "--all");
-  }
-  const args = ["commit", ...(amend ? ["--amend"] : []), ...(message ? ["-m", message] : ["--no-edit"])];
-  try {
-    await git(...args);
-    ($("commit-message") as HTMLTextAreaElement).value = "";
-    ($("amend") as HTMLInputElement).checked = false;
-    host.status(amend ? "Amended the last commit." : "Committed.");
-    if (push) pushBranch();
-  } catch (e) {
-    host.status(`Commit failed: ${String(e).trim()}`);
-  }
-  await refreshGit();
 }
 
 // ---- Diff view ----
@@ -389,7 +277,7 @@ let staging: { f: FileStatus; inIndex: boolean; original: string; modified: stri
 let lastSide: "original" | "modified" = "modified";
 
 /** Shows a file's staged change (HEAD to index) or unstaged change (index to working tree). */
-async function showChange(f: FileStatus, inIndex: boolean) {
+export async function showChange(f: FileStatus, inIndex: boolean) {
   const show = (spec: string) => git("show", spec).catch(() => "");
   const original = inIndex ? await show(`HEAD:${f.from ?? f.path}`) : await show(`:${f.path}`);
   const modified = inIndex
@@ -558,19 +446,18 @@ function clearDiff() {
   model?.modified.dispose();
 }
 
-// ---- Branches ----
-
-export const pushBranch = () =>
-  openTerminal(host.root(), "git push", current?.upstream ? ["git", "push"] : ["git", "push", "-u", "origin", "HEAD"]);
-export const updateProject = () => openTerminal(host.root(), "git pull", ["git", "pull"]);
-
 // ---- Worktrees ----
 
 /** Lists worktrees to open or remove, and creates one for the branch you type, beside the main worktree. */
 export async function worktrees() {
   if (!current) return host.status("This folder isn't a git repository.");
-  const list = parseWorktrees(await git("worktree", "list", "--porcelain"));
-  const refs = (await git("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads", "refs/remotes")).split("\n");
+  let list, refs: string[];
+  try {
+    list = parseWorktrees(await git("worktree", "list", "--porcelain"));
+    refs = (await git("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads", "refs/remotes")).split("\n");
+  } catch (e) {
+    return showError("Can't list the worktrees", e);
+  }
   const taken = new Set(list.map((w) => w.branch));
   const items: Item[] = list.map((w) => ({
     label: w.branch || w.path,
@@ -895,12 +782,6 @@ export function changeMenu(editor: monaco.editor.ICodeEditor, line: number): Men
 
 export function initGit(h: Host) {
   host = h;
-  $("git-pull").onclick = updateProject;
-  $("git-push").onclick = pushBranch;
-  $("commit").onclick = () => commit(false);
-  $("commit-push").onclick = () => commit(true);
-  $("stage-all").onclick = () => change("add", "--all");
-  $("unstage-all").onclick = () => change("reset", "--quiet");
   $("diff-close").onclick = closeDiff;
   $("diff").addEventListener("keydown", (e) => {
     if (!e.altKey || !e.metaKey || !diffFiles || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
@@ -908,9 +789,6 @@ export function initGit(h: Host) {
     e.stopPropagation();
     moveDiff(e.key === "ArrowLeft" ? -1 : 1);
   }, true);
-  $("commit-message").onkeydown = (e) => {
-    if (e.key === "Enter" && e.metaKey) commit(false);
-  };
 }
 
 /** Opens the commit view with the message box focused. */

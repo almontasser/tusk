@@ -2330,8 +2330,10 @@ While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for examp
 ### Commands
 
 `src/git.ts` runs `git` through the `run_capture` command in the project
-folder. Commands that can prompt for credentials (`pull`, `push`, and `fetch`)
-run in terminal tabs instead. `src/gitparse.ts` parses the machine-readable
+folder. `pull`, `push`, and `fetch` run through `gitOutput` (see
+[Commands with messages](#commands-with-messages)) with credential prompts off,
+and a failure that needs a password offers to run the command in a terminal
+tab. `src/gitparse.ts` parses the machine-readable
 output, and `src/gitparse.test.ts` covers it:
 
 | Parser | Input |
@@ -2349,9 +2351,34 @@ terminal show up too.
 
 ### Commit view and diffs
 
-The commit view splits files by `git status` letter: a file with an index
-letter is staged, and a file with a working tree letter has unstaged changes.
-A file can be in both lists.
+`src/commitview.ts` draws the Commit view's files as one tree (`listNav`):
+group rows for conflicts, staged, and unstaged files, optional folder rows, and
+file rows keyed `<group>:<path>`. It splits files by `git status` letter: a
+file with an index letter is staged, and a file with a working tree letter has
+unstaged changes. A file can be in both groups. `listNav` moves one cursor; the
+view keeps its own set of picked rows for multi-select, updated by ⌘ and ⇧
+clicks and by ⇧ with the arrow keys (a capturing keydown listener notes ⇧
+before `listNav` moves). Bulk actions take the picked rows when the row acted
+on is one of them.
+
+If `git status` fails, `gitStatusError` keeps git's message, so the empty view
+tells "not a git repository" (with **Initialize Repository**) from git missing
+or a folder git doesn't trust.
+
+A commit runs through `gitOutput` under `withProgress`, with the buttons off
+until it ends, so a double click can't commit twice, and a failing hook's
+output is kept for **Show Details**.
+
+### Push and update
+
+`src/sync.ts` has the Push dialog and Update Project. The dialog lists
+`git log <upstream>..HEAD`, or `HEAD --not --remotes` for a branch with no
+upstream, and pushes `HEAD:refs/heads/<branch>` with `--porcelain`, `-u` for a
+first push, and optionally `--force-with-lease`. `rejected` and `authFailed`
+read git's output to choose the next step. Update runs
+`git pull --autostash` with `--no-rebase` or `--rebase` from the
+`gitUpdateMethod` setting, and counts the new commits from HEAD before and
+after.
 
 The diff view is a Monaco diff editor in an editor tab, which each new diff
 reuses. A staged change compares `HEAD` with the index, and an
@@ -5116,3 +5143,11 @@ PhpStorm's branches popup opens a submenu per branch. The palette has no
 submenus, and a custom popup would need its own search, keyboard, and
 placement, so choosing a branch opens a numbered popup of its actions at the
 same place. It keeps the popup's search and keys, and a number picks an action.
+
+### 2026-09-28: Push, pull, and fetch in the background
+
+They ran in terminal tabs so you could answer credential prompts, but then a
+rejected push or a conflicting pull never reached the UI. Most setups
+authenticate without a prompt (the macOS keychain helper, an SSH agent), so
+they now run in the background with `GIT_TERMINAL_PROMPT=0`, and only a failure
+that needed a prompt falls back to a terminal tab.

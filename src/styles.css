@@ -599,6 +599,25 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #stash-list .stash-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
 #stash-list .stash-file { padding-left: 34px; }
 .git-files .buttons .icon-button { width: 22px; height: 20px; }
+#git-changes > #git-files { margin: 0; }
+#git-files .git-group { padding-left: 4px; cursor: default; }
+#git-files .git-group .icon-button { margin-left: auto; }
+#git-files .twisty { font-size: 12px; color: var(--muted); }
+#git-files .git-folder { padding-left: 16px; color: var(--muted); }
+#git-files .git-folder .name { color: var(--text); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+#git-files .git-file[aria-level="2"] { padding-left: 22px; }
+#git-files .git-file[aria-level="3"] { padding-left: 40px; }
+#git-files .git-none { padding: 2px 0 4px 26px; }
+.git-files li.picked { background: var(--selected-inactive); }
+.git-files:focus li.picked { background: color-mix(in srgb, var(--selected) 70%, transparent); }
+#git-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+#git-empty[hidden] { display: none; }
+#git-empty p { margin: 0; }
+#git-empty button { padding: 4px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+#commit:disabled, #commit-push:disabled { opacity: 0.6; cursor: progress; }
+.output-text { margin: 0; padding: 10px 12px; max-height: 50vh; overflow: auto; font: 12px/1.5 var(--mono); white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 8px; -webkit-user-select: text; user-select: text; }
+.push-commits { max-height: 30vh; }
+.push-commit code { flex-shrink: 0; }
 .git-files li.selected .buttons { display: flex; }
 
 /* ==========================================================================

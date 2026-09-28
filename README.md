@@ -307,7 +307,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘F2 | Stop debugging |
 | ⌘K | Commit |
 | ⌘⇧K | Push |
-| ⌘T | Update the project (`git pull`) |
+| ⌘T | Update the project (pull, merging or rebasing) |
 | ⌘1 | Show the project tree |
 | ⌥F1 | Select the current file in the project tree (also the target button above the tree) |
 | ⌘\ | Split the editor to the right, or move to the next pane |
@@ -346,7 +346,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, and Terminal. A setting that depends on another, such as the AI model,
+AI, Spelling, Terminal, and Git. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -378,6 +378,8 @@ shows only when it applies. Changes apply immediately and are saved in
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
+| Git: how Update Project brings in commits (merge, rebase, or git's `pull.rebase`) | Merge |
+| Git: group changed files by folder in the Commit view | Off |
 
 ### Vim emulation
 
@@ -1762,13 +1764,48 @@ in terminal tabs, and ⌃R reruns the last one.
 
 ## Git
 
-The **Commit** tab in the sidebar lists staged changes and unstaged changes,
-including new files. Click a file to see its diff. Hover over a file for
-buttons to open, stage, unstage, or discard it. The message box sits at the
-bottom of the view, and stays in view while a long list of changes scrolls.
-Write a message and press ⌘⏎ or click **Commit**. **Commit and Push** also pushes, and sets the upstream
-branch on the first push. With nothing staged, **Commit** offers to stage all
-the changes and commit them.
+The **Commit** tab in the sidebar lists merge conflicts, staged changes, and
+unstaged changes, including new files, as a tree. Click a file, or press ⏎, to
+see its diff; F4 opens the file. Click a group to collapse it. The folder
+button in the header groups files by folder. Select several files with ⌘-click
+or ⇧-click, or ⇧↑ and ⇧↓, and ⌘A selects every file. Then act on all of them:
+Space stages or unstages, ⌥⌘Z rolls back, and right-click (or ⇧F10) shows every
+action. Hover over a file for buttons to open, stage, unstage, or roll it back.
+**Rollback** asks first: a staged file goes back to the last commit, an
+unstaged one to its staged version, and a new file goes to the Trash.
+
+The message box sits at the bottom of the view, and stays in view while a long
+list of changes scrolls. Write a message and press ⌘⏎ or click **Commit**. The
+buttons are off while the commit runs, and the status bar shows progress while
+git hooks run. If a hook or git refuses the commit, the message offers **Show
+Details** with the full output. **Commit and Push** opens the Push dialog after
+committing. With nothing staged, **Commit** offers to stage all the changes and
+commit them.
+
+If the folder isn't a git repository, the Commit view says so and offers
+**Initialize Repository** (also in the **Git** menu). If git isn't installed,
+or can't read the folder, it says that instead, with **Try Again**.
+
+### Push, update, and fetch
+
+**Push…** (⌘⇧K) opens the Push dialog: the commits that will go, the remote
+and branch to push to, and **Force push (with lease)**, which overwrites the
+remote branch unless someone pushed to it since you last fetched. The first
+push of a branch sets its upstream branch. Press ⌘⏎ or click **Push**.
+
+**Update Project** (⌘T) pulls the upstream branch, merging by default; the
+**Git** settings can make it rebase, or follow git's `pull.rebase`. Local
+changes are stashed and restored around it.
+
+Push, update, and fetch run in the background with progress and **Cancel** in
+the status bar, and say what happened, such as "Pushed 3 commits to
+origin/main." When they can't finish, the message says why and offers the next
+step:
+
+- The remote has commits you don't: **Update and Push** updates, then pushes.
+- The update stopped for conflicts: **Resolve** opens the merge tool.
+- Git needs a password or passphrase: **Run in Terminal** runs the command in a
+  terminal tab, where you can type it.
 
 To stage part of a file, open its diff from **Changes** and click **Stage
 Selected**:
@@ -2479,6 +2516,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/git.ts` | Commit view, diff view, partial staging, and branches |
 | `src/stash.ts` | The Stashes tab and the Stash Changes dialog |
 | `src/branches.ts` | The branches popup, branch actions, and fetch |
+| `src/commitview.ts` | The Commit view's file tree, bulk actions, and commit |
+| `src/sync.ts` | The Push dialog and Update Project |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |
 | `src/merge.ts` | The three-pane merge tool |

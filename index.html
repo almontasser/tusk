@@ -67,23 +67,17 @@
               <button role="tab" id="stash-tab" aria-selected="false">Stashes</button>
             </div>
             <div class="view-actions">
+              <button class="icon-button" id="git-group-folders" title="Group by folder" aria-pressed="false"><span class="codicon codicon-list-tree"></span></button>
               <button class="icon-button" id="git-fetch" title="Fetch (git fetch)"><span class="codicon codicon-sync"></span></button>
               <button class="icon-button" id="git-pull" title="Update Project (git pull, ⌘T)"><span class="codicon codicon-arrow-down"></span></button>
               <button class="icon-button" id="git-push" title="Push (git push, ⌘⇧K)"><span class="codicon codicon-arrow-up"></span></button>
             </div>
           </header>
           <div id="git-commit-pane">
-          <p id="git-empty" class="empty-note">This folder isn't a git repository.</p>
+          <div id="git-empty" class="empty-note" hidden></div>
           <div id="git-changes">
             <div id="git-operation" hidden><span></span><button id="operation-split" hidden title="Undo this commit and keep its changes unstaged, so you can commit them in several parts">Split Commit</button><button id="operation-continue">Continue</button><button id="operation-abort">Abort</button></div>
-            <div id="conflicts-group" hidden>
-              <header class="git-group">Merge Conflicts <span class="count" id="conflicts-count"></span></header>
-              <ul id="conflicts" class="git-files"></ul>
-            </div>
-            <header class="git-group">Staged <span class="count" id="staged-count"></span><button class="icon-button" id="unstage-all" title="Unstage all"><span class="codicon codicon-remove"></span></button></header>
-            <ul id="staged" class="git-files"></ul>
-            <header class="git-group">Changes <span class="count" id="changes-count"></span><button class="icon-button" id="stage-all" title="Stage all"><span class="codicon codicon-add"></span></button></header>
-            <ul id="changes" class="git-files"></ul>
+            <ul id="git-files" class="git-files" role="tree" aria-label="Changed files" aria-multiselectable="true"></ul>
             <div class="commit-box">
               <textarea id="commit-message" placeholder="Commit message" aria-label="Commit message"></textarea>
               <label class="amend"><input type="checkbox" id="amend" /> Amend the last commit</label>
