@@ -848,7 +848,8 @@ at the top.
 - Click a request to preview it in the **HTTP** tab. The next request you click
   takes the preview's place, until you edit or send it. Double-click a request
   to keep its tab open. Hover over it and click ▶ to send it.
-- A dot after a file means it has unsaved changes.
+- A dot after a request means its tab has unsaved changes, and a dot after a
+  file means its editor tab does.
 - Right-click a request to send, open in the editor, rename, duplicate, delete,
   or stress test it. Right-click a file to add a request to it, run all of its
   requests, sync it with the Laravel routes, or save it.
@@ -911,10 +912,12 @@ method and title, and its file when two tabs have the same title. A preview
 tab's title is in italics. Drag tabs to reorder them. Middle-click or ⌘W (with
 the **HTTP** tab focused) closes one. Right-click a tab to close others, those
 to the right, the saved ones, or all of them, to keep a preview open, to save
-its file, or to show it in the editor or the tool window. ← and → move between
-focused tabs. Each tab keeps its own response, and a request goes on sending
-when you switch to another tab. The tabs, the one you had open, and whether
-the **HTTP** tab showed come back when you reopen the project.
+or revert it, to save every unsaved tab, or to show it in the editor or the
+tool window. ← and → move between focused tabs. Each tab keeps its own
+response, and a request goes on sending when you switch to another tab. The
+tabs, their unsaved changes, the one you had open, and whether the **HTTP** tab
+showed come back when you reopen the project, after a reload, or after you
+quit.
 
 The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
 menu, and the environment. Under the URL, you see it with its variables
@@ -925,14 +928,18 @@ When a request uses a variable nothing defines, **Send** asks for its value
 first. **Send** uses the values you type, and can save them to the environment
 in the private environment file. **Send Anyway** sends `{{name}}` as written.
 
-The request's tabs edit its text in the `.http` file, and edits in the editor
-show in the tabs. Each change rewrites only the lines it touches, keeping
-comments and a URL split over several lines. The file stays unsaved, with a dot
-on its tabs, until you save it with ⌘S. Auto-save doesn't save it: closing its
-last tab asks whether to save, and so do quitting and opening another project.
-If the file also has an editor tab, that tab shows the changes too, and closing
-it keeps them in the request tabs. Adding, duplicating, deleting, or renaming a
-request from the tool window saves the file, unless it had unsaved changes.
+Changes in the request's tabs belong to its request tab until you save it:
+the tab shows a dot, and the `.http` file doesn't change. ⌘S (with the **HTTP**
+tab focused) writes that request alone into the file, rewriting only the lines
+it changes and keeping comments and a URL split over several lines, and saves
+the file. Other tabs' changes stay unsaved, even in the same file. When the
+file has unsaved changes in its editor tab, the request goes into those
+instead, and you save the file there. Closing a tab with unsaved changes asks
+whether to save them; auto-save doesn't save them. A tab without changes shows
+edits made in the editor as you make them; a tab with changes keeps them, and
+saving writes them over the file's version. Adding, duplicating, deleting, or
+renaming a request from the tool window saves the file, unless its editor tab
+has unsaved changes.
 
 | Tab | What you set |
 | --- | --- |

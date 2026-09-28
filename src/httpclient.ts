@@ -31,10 +31,11 @@ export type Host = {
   status(text: string): void;
   openAt(path: string, line: number): Promise<unknown>;
   ensureModel(path: string): Promise<monaco.editor.ITextModel>;
-  /** Keeps a file open for request tabs, so its unsaved edits outlive its editor tab. */
+  /** A file's model, kept for request tabs when its editor tab closes. */
   hold(path: string): Promise<monaco.editor.ITextModel>;
-  /** Lets go of a held file; `discard` first reverts unsaved edits when no editor tab has them. */
-  release(path: string, discard: boolean): Promise<void>;
+  /** Lets go of a file no request tab uses any more. */
+  release(path: string): void;
+  /** Whether a file has unsaved changes in its editor tab. */
   isDirty(path: string): boolean;
   hasTab(path: string): boolean;
   /** Saves a file, whether or not a tab has it. True when it's saved. */

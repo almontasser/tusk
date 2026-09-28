@@ -1235,31 +1235,33 @@ files work in PhpStorm and VS Code's REST Client.
   log (`live`). A preview tab (`preview`) is replaced by the next request
   opened as a preview, and becomes a lasting tab when you edit or send it.
   `requestsIn` caches each model's parse by version, since every tab label
-  parses its file. Each form edit parses the model, changes the request,
-  formats it, and replaces only the lines between the unchanged ones at the
-  block's start and end, in one undoable edit. The parser keeps comments among
-  the headers and in the body with their positions, and a URL written over
-  several lines, so formatting puts them back. Edits in the editor re-render
-  the form unless focus is in it.
-- Form edits leave the file unsaved. `main.ts` keeps `held`, the files request
-  tabs have, with the version last saved, beside the editor's `tabs`.
-  `fileDirty`, `saveFile`, Save All, the quit prompt, and the check before a
-  disk change reloads a model all cover held files. A held file's model isn't
-  disposed when its editor tab closes: `closeFile` moves the tab's saved
-  version to `held` instead of asking, and a new editor tab takes it back
-  (`addTab`). The HTTP tab reaches this through `host.hold`, `release` (which
-  reverts on **Don't Save**), `isDirty`, `hasTab`, and `save`. Closing a
-  file's last request tab asks, unless an editor tab has the file, since that
-  tab asks when it closes. Auto-save leaves held files alone: the window
-  losing focus saves editor tabs only, and quitting asks when a held file
-  without an editor tab has changes. Actions in the tool window, such as
-  deleting a request, save the file only when it had no unsaved changes
-  (`edited`). A moved file's tabs follow it (`requestFileMoved`), and a deleted
-  one's close with its model (`onWillDispose`).
-- The session keeps the request tabs (`HttpSession`) as file, line, and key:
-  `@name`, or else method and URL. Restoring finds the request with the same
-  key nearest its old line, since the file may have changed. Unsaved text isn't
-  kept, as with editor tabs, since closing asks about it.
+  parses its file.
+- Form edits go to the tab's `draft`: the request, formatted, while it differs
+  from `formatRequest` of the file's request. So unsaved state is per tab, not
+  per file, and the file's model changes only when a tab is saved.
+  `requestOf` gives the draft with the file request's line numbers, so the
+  history and the tool window still match it. `saveRequestTab` writes the
+  draft over the request's block with `writeRequest`, which replaces only the
+  lines between the unchanged ones at the block's start and end, in one
+  undoable edit (the parser keeps comments among the headers and in the body,
+  and a URL over several lines, so formatting puts them back), and saves the
+  file, unless its editor tab has unsaved changes, which would be saved with
+  it. `renderRequestTabs` drops a draft the file has come to match.
+- `main.ts` keeps `held`, the files request tabs use, so closing a file's
+  editor tab keeps the model (reverted to the disk's text on **Don't Save**)
+  and the tabs' decorations. A moved file's tabs follow it
+  (`requestFileMoved`), and a deleted one's close with its model
+  (`onWillDispose`). ⌘S and ⌘W act on the request tab when focus is in the
+  HTTP tab (`saveFocusedRequest`, `closeFocusedRequest`). Actions in the tool
+  window, such as deleting a request, save the file only when its editor tab
+  has no unsaved changes (`edited`).
+- The session keeps the request tabs (`HttpSession`) as file, line, key
+  (`@name`, or else method and URL, of the file's request, since a draft may
+  change them), and draft. Restoring finds the request with the same key
+  nearest its old line, since the file may have changed, and keeps a draft of
+  a request that's gone, which saving puts at the file's end. Since drafts
+  come back, quitting and opening another project don't ask about them; only
+  closing a tab does.
 - A Laravel error response is read by `laravelException`: the JSON Laravel
   sends when asked for it, or file and line references in an HTML error page.
 - WebSockets use the webview's `WebSocket`: curl in macOS has no WebSocket

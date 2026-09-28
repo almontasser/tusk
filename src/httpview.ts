@@ -96,9 +96,17 @@ function ago(time: number) {
   const when: Intl.DateTimeFormatOptions = s < 6 * 86400 ? { weekday: "short" } : { month: "short", day: "numeric" };
   return new Date(time).toLocaleString(undefined, { ...when, hour: "numeric", minute: "2-digit" });
 }
+/** `fn` after calls stop for `wait` ms. `flush` runs a pending call now. */
 function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  return (...args: A) => (clearTimeout(timer), (timer = setTimeout(() => fn(...args), wait)));
+  let pending: A | null = null;
+  const run = () => {
+    clearTimeout(timer);
+    const args = pending;
+    pending = null;
+    if (args) fn(...args);
+  };
+  return Object.assign((...args: A) => (clearTimeout(timer), (pending = args), (timer = setTimeout(run, wait))), { flush: run });
 }
 const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   automaticLayout: true,
@@ -120,14 +128,16 @@ const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 
 // ---- Request tabs ----
 // The HTTP tab has a tab for each request you open. A decoration on the request's first line follows it as the file
-// changes, so a tab keeps editing the same request when you edit the file above it. The form edits the file's model,
-// which stays unsaved until you save it (⌘S) or close the last tab that has it; the editor host keeps the model open
-// for the tabs, so closing the file's editor tab doesn't lose the edits.
+// changes, so a tab keeps the same request when you edit the file above it. Form edits go to the tab's draft, not the
+// file: a tab with a draft is unsaved, and saving it (⌘S) writes that request alone into the file. Drafts are kept
+// with the session, so they come back when you reopen the project.
 
 type RequestTab = {
   path: string;
   model: monaco.editor.ITextModel;
   decoration: string;
+  /** The request as you've edited it, formatted, while it differs from the file's. */
+  draft: string | null;
   /** A preview tab gives its place to the next request you open, until you edit it, send it, or keep it open. */
   preview: boolean;
   /** The response shown for it: the one it sent last, or its last in the history. */
@@ -158,39 +168,65 @@ function requestsIn(model: monaco.editor.ITextModel) {
   return entry.requests;
 }
 
-/** A tab's request, parsed from its file's current text. */
-function requestOf(tab: RequestTab | null): HttpRequest | undefined {
-  if (!tab || tab.model.isDisposed()) return undefined;
+/** A tab's request as its file has it. */
+function fileRequestOf(tab: RequestTab): HttpRequest | undefined {
+  if (tab.model.isDisposed()) return undefined;
   const line = tab.model.getDecorationRange(tab.decoration)?.startLineNumber;
   if (!line) return undefined;
-  // A copy, since callers change it before writing it back.
-  const r = requestsIn(tab.model).find((q) => q.start <= line && line <= q.end);
-  return r && structuredClone(r);
+  return requestsIn(tab.model).find((q) => q.start <= line && line <= q.end);
 }
 
-/** The request the tab edits, parsed from the editor's current text. */
+/**
+ * A tab's request: its draft, or else the file's. A copy, since callers change it. A draft's lines are the file
+ * request's, so history and the tool window still find it.
+ */
+function requestOf(tab: RequestTab | null): HttpRequest | undefined {
+  if (!tab) return undefined;
+  const file = fileRequestOf(tab);
+  const draft = tab.draft !== null ? parseHttp(tab.draft).requests[0] : undefined;
+  if (!draft) return file && structuredClone(file);
+  const shift = (file?.start ?? lineOf(tab) ?? 1) - draft.start;
+  return { ...draft, line: draft.line + shift, start: draft.start + shift, end: draft.end + shift };
+}
+
+/** The request the tab edits: its draft, or the file's. */
 export function currentRequest(): HttpRequest | undefined {
   return requestOf(current);
 }
 
-/** Changes the request and writes it back into its file, as one undoable edit. The file stays unsaved. */
+/** Changes the tab's request. The change goes to the tab's draft; the file changes when you save the tab. */
 export function update(change: (r: HttpRequest) => void) {
   const r = currentRequest();
   if (!r || !current) return;
   change(r);
-  const model = current.model;
+  const text = formatRequest(r);
+  const file = fileRequestOf(current);
+  // Back to what the file has: no draft.
+  current.draft = file && formatRequest(file) === text ? null : text;
+  keep(current);
+  renderRequestTabs();
+  renderTreeSoon();
+  renderTabLabels();
+  renderPreview();
+  host.sessionChanged();
+}
+
+/**
+ * Writes a request over its block in a model, as one undoable edit, replacing only the lines between the unchanged
+ * ones at the block's start and end, so the cursor, folding, and undo stay put elsewhere.
+ */
+function writeRequest(model: monaco.editor.ITextModel, block: HttpRequest, r: HttpRequest) {
   // Keep the blank line that separates it from the next request.
   const after = formatRequest(r).replace(/\n$/, "").split("\n");
-  if (r.end < model.getLineCount() || !model.getLineContent(r.end)) after.push("");
-  const before = model.getLinesContent().slice(r.start - 1, r.end);
-  // Replace only the lines that changed, so the cursor, folding, and undo stay put elsewhere in the block.
+  if (block.end < model.getLineCount() || !model.getLineContent(block.end)) after.push("");
+  const before = model.getLinesContent().slice(block.start - 1, block.end);
   let head = 0;
   while (head < before.length && head < after.length && before[head] === after[head]) head++;
   let tail = 0;
   while (tail < before.length - head && tail < after.length - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
   if (head === before.length && head === after.length) return;
-  const from = r.start + head;
-  const to = r.end - tail;
+  const from = block.start + head;
+  const to = block.end - tail;
   const lines = after.slice(head, after.length - tail);
   // Replaced lines, inserted lines (none replaced: to < from), or removed lines (none inserted).
   const edit =
@@ -207,10 +243,62 @@ export function update(change: (r: HttpRequest) => void) {
   } finally {
     ownEdit = false;
   }
-  mark(r.start);
-  keep(current);
-  renderTabLabels();
-  renderPreview();
+}
+
+/**
+ * Saves a tab: writes its draft into the file and saves the file. When the file has unsaved changes in its editor
+ * tab, the request goes into those, and the file stays unsaved there, so saving doesn't save your other edits. A
+ * request that's gone from the file goes at its end. False when the file couldn't be saved.
+ */
+async function saveRequestTab(tab: RequestTab) {
+  if (tab.draft === null) return true;
+  const r = requestOf(tab);
+  if (!r) return true;
+  const model = tab.model;
+  const editorDirty = host.isDirty(tab.path);
+  const block = fileRequestOf(tab);
+  if (block) {
+    writeRequest(model, block, r);
+    mark(block.start, tab);
+  } else {
+    const text = model.getValue();
+    const sep = !text.trim() ? "" : text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+    const line = text.trim() ? model.getLineCount() + (sep === "\n\n" ? 2 : sep ? 1 : 0) : 1;
+    ownEdit = true;
+    try {
+      model.pushEditOperations([], [{ range: monaco.Range.fromPositions(model.getFullModelRange().getEndPosition()), text: sep + formatRequest(r) }], () => null);
+    } finally {
+      ownEdit = false;
+    }
+    mark(line, tab);
+  }
+  tab.draft = null;
+  const saved = editorDirty || (await host.save(tab.path));
+  if (editorDirty) host.status(`Saved the request into ${relative(tab.path)}, which has other unsaved changes in the editor. Save it there to write them to disk.`);
+  else if (!saved) host.status(`Couldn't save ${relative(tab.path)}.`);
+  renderRequestTabs();
+  renderTree();
+  if (tab === current) renderRequest();
+  host.sessionChanged();
+  return saved;
+}
+
+/** Drops a tab's unsaved edits, back to the file's request. */
+function revert(tab: RequestTab) {
+  tab.draft = null;
+  renderRequestTabs();
+  renderTree();
+  if (tab === current) renderRequest();
+  host.sessionChanged();
+}
+
+/** ⌘S in the HTTP tab saves the request tab. False when the HTTP tab doesn't have focus. */
+export function saveFocusedRequest() {
+  if (!current || !panel.contains(document.activeElement)) return false;
+  // Let a pending form edit land in the draft first.
+  updateSoon.flush();
+  saveRequestTab(current);
+  return true;
 }
 const updateSoon = debounce(update, 250);
 
@@ -264,48 +352,44 @@ export async function openRequest(path: string, line: number, focusUrl = false, 
   const model = await host.hold(path);
   const r = requestsIn(model).find((q) => q.start <= line && line <= q.end);
   if (!r) {
-    if (!requestTabs.some((t) => t.path === path)) await host.release(path, false);
+    if (!requestTabs.some((t) => t.path === path)) host.release(path);
     return;
   }
   let tab = requestTabs.find((t) => t.model === model && r.start <= lineOf(t) && lineOf(t) <= r.end);
   if (tab) {
     if (!preview) tab.preview = false;
   } else {
-    tab = { path, model, decoration: "", preview, exchange: null, sending: null, live: null };
-    mark(r.start, tab);
+    const added: RequestTab = { path, model, decoration: "", draft: null, preview, exchange: null, sending: null, live: null };
+    tab = added;
+    mark(r.start, added);
     watch(model);
-    const old = preview ? requestTabs.find((t) => t.preview && droppable(t)) : undefined;
+    const old = preview ? requestTabs.find((t) => t.preview && !t.sending && t.draft === null) : undefined;
     if (old) {
-      requestTabs.splice(requestTabs.indexOf(old), 1, tab);
-      await dropTab(old, false);
-    } else requestTabs.splice(current ? requestTabs.indexOf(current) + 1 : requestTabs.length, 0, tab);
+      requestTabs.splice(requestTabs.indexOf(old), 1, added);
+      dropTab(old);
+    } else requestTabs.splice(current ? requestTabs.indexOf(current) + 1 : requestTabs.length, 0, added);
   }
   activate(tab);
   showHttpPanel("HTTP", panel);
   if (focusUrl) urlInput.focus();
 }
 
-/** Whether a tab can close without asking: it's not sending, and closing it loses no unsaved edits. */
-function droppable(tab: RequestTab) {
-  return !tab.sending && (!host.isDirty(tab.path) || host.hasTab(tab.path) || requestTabs.some((t) => t !== tab && t.path === tab.path));
-}
-
 /** Takes a tab out of the list, letting go of its file when no other tab has it. */
-async function dropTab(tab: RequestTab, discard: boolean) {
+function dropTab(tab: RequestTab) {
   const i = requestTabs.indexOf(tab);
   if (i >= 0) requestTabs.splice(i, 1);
   tab.sending?.cancel.current?.();
   if (socket && socket.tab === tab) socket.close();
   if (!tab.model.isDisposed()) tab.model.deltaDecorations([tab.decoration], []);
   if (!requestTabs.some((t) => t.model === tab.model)) unwatch(tab.model);
-  if (!requestTabs.some((t) => t.path === tab.path)) await host.release(tab.path, discard);
+  if (!requestTabs.some((t) => t.path === tab.path)) host.release(tab.path);
 }
 
 /** Closes the tabs of the requests in lines `start` to `end` of a model, which are about to be deleted, without asking. */
 export async function dropTabsIn(model: monaco.editor.ITextModel, start: number, end: number) {
   for (const t of requestTabs.filter((t) => t.model === model && start <= lineOf(t) && lineOf(t) <= end)) {
     const i = requestTabs.indexOf(t);
-    await dropTab(t, false);
+    dropTab(t);
     if (current === t) current = requestTabs[Math.min(i, requestTabs.length - 1)] ?? null;
   }
 }
@@ -320,22 +404,26 @@ function keep(tab: RequestTab | null) {
   if (tab?.preview) (tab.preview = false), renderRequestTabs(), host.sessionChanged();
 }
 
+/** A tab's name for messages: its request's title, or method and path. */
+function nameOf(tab: RequestTab) {
+  const r = requestOf(tab);
+  return r ? (r.title || r.name || `${r.method} ${tabLabel(r)}`) : "the request";
+}
+
 /**
- * Closes a request tab. When it's the last tab of a file with unsaved changes and no editor tab has the file, it asks
- * whether to save them first. False when you cancel, or the save fails.
+ * Closes a request tab. When it has unsaved edits, it asks whether to save them first; Don't Save drops them. False
+ * when you cancel, or the save fails.
  */
 async function closeRequestTab(tab: RequestTab) {
-  let discard = false;
-  const last = !requestTabs.some((t) => t !== tab && t.path === tab.path);
-  if (last && !host.hasTab(tab.path) && host.isDirty(tab.path)) {
+  if (current === tab) updateSoon.flush();
+  if (tab.draft !== null) {
     if (current !== tab) activate(tab);
-    const choice = await choose(`Save changes to ${relative(tab.path)}?`, ["Save", "Don't Save", "Cancel"]);
+    const choice = await choose(`Save changes to “${nameOf(tab)}”?`, ["Save", "Don't Save", "Cancel"]);
     if (choice === "Cancel" || choice === null) return false;
-    if (choice === "Save" && !(await host.save(tab.path))) return false;
-    discard = choice === "Don't Save";
+    if (choice === "Save" && !(await saveRequestTab(tab))) return false;
   }
   const i = requestTabs.indexOf(tab);
-  await dropTab(tab, discard);
+  dropTab(tab);
   if (current === tab) activate(requestTabs[Math.min(i, requestTabs.length - 1)] ?? null);
   else renderRequestTabs();
   host.sessionChanged();
@@ -347,9 +435,6 @@ async function closeTabs(list: RequestTab[]) {
   for (const t of [...list]) if (requestTabs.includes(t) && !(await closeRequestTab(t))) return false;
   return true;
 }
-
-/** Closes every request tab, as opening another project does. False when you keep unsaved changes. */
-export const closeAllRequests = () => closeTabs(requestTabs);
 
 /** ⌘W in the HTTP tab closes the request tab. False when the HTTP tab doesn't have focus. */
 export function closeFocusedRequest() {
@@ -400,7 +485,8 @@ function renderTabResponse(tab: RequestTab) {
 
 /** After an edit in the editor, shows the new text, unless you're typing in the form. */
 const refreshFromFile = debounce(() => {
-  if (panel.contains(document.activeElement) && document.activeElement !== document.body && !requestStrip.contains(document.activeElement)) return;
+  // A tab with a draft shows the draft, whatever the file says.
+  if (current?.draft !== null || (panel.contains(document.activeElement) && document.activeElement !== document.body && !requestStrip.contains(document.activeElement))) return refreshTree();
   renderRequest();
   refreshTree();
 }, 200);
@@ -439,6 +525,11 @@ function tabLabel(r: HttpRequest) {
 let dragged: RequestTab | null = null;
 
 function renderRequestTabs() {
+  // A draft the file now matches, such as after the same edit in the editor, is saved.
+  for (const t of requestTabs) {
+    const file = t.draft !== null && fileRequestOf(t);
+    if (file && formatRequest(file) === t.draft) t.draft = null;
+  }
   requestStrip.hidden = !requestTabs.length;
   const labels = requestTabs.map((t) => {
     const r = requestOf(t);
@@ -447,10 +538,10 @@ function renderRequestTabs() {
   requestStrip.replaceChildren(
     ...requestTabs.map((tab, i) => {
       const r = requestOf(tab);
-      const dirty = host.isDirty(tab.path);
+      const dirty = tab.draft !== null;
       // The file tells apart tabs with the same name.
       const clash = labels.some((l, j) => j !== i && l === labels[i] && requestTabs[j].path !== tab.path);
-      const close = h("span", { class: "close", role: "button", title: dirty ? `Close (${relative(tab.path)} has unsaved changes)` : "Close (⌘W)" });
+      const close = h("span", { class: "close", role: "button", title: dirty ? "Close (unsaved changes: ⌘S saves them)" : "Close (⌘W)" });
       const el = h(
         "div",
         {
@@ -482,7 +573,8 @@ function renderRequestTabs() {
         e.preventDefault();
         const others = requestTabs.filter((t) => t !== tab);
         const right = requestTabs.slice(i + 1);
-        const saved = requestTabs.filter((t) => !host.isDirty(t.path));
+        const saved = requestTabs.filter((t) => t.draft === null);
+        const unsaved = requestTabs.filter((t) => t.draft !== null);
         showMenu(e.clientX, e.clientY, [
           { label: "Close", run: () => closeRequestTab(tab) },
           ...(others.length ? [{ label: "Close Others", run: () => closeTabs(others) }] : []),
@@ -491,7 +583,8 @@ function renderRequestTabs() {
           { label: "Close All", run: () => closeTabs(requestTabs) },
           "-",
           ...(tab.preview ? [{ label: "Keep Open", run: () => keep(tab) }] : []),
-          ...(dirty ? [{ label: `Save ${relative(tab.path)}`, run: () => host.save(tab.path) }] : []),
+          ...(dirty ? [{ label: "Save", run: () => saveRequestTab(tab) }, { label: "Revert", run: () => revert(tab) }] : []),
+          ...(unsaved.length > 1 ? [{ label: `Save All (${unsaved.length})`, run: async () => { for (const t of unsaved) await saveRequestTab(t); } }] : []),
           { label: "Open in Editor", run: () => host.openAt(tab.path, lineOf(tab) || 1) },
           { label: "Reveal in Tool Window", run: () => reveal(tab) },
         ]);
@@ -539,14 +632,17 @@ function reveal(tab: RequestTab) {
 
 // ---- Session ----
 
-export type HttpSession = { tabs: { path: string; line: number; key: string; preview?: boolean }[]; active: number; panel: boolean };
+export type HttpSession = { tabs: { path: string; line: number; key: string; preview?: boolean; draft?: string }[]; active: number; panel: boolean };
 /** What identifies a request when its line has moved: its name, or its method and URL. */
 const requestKey = (r: HttpRequest) => (r.name ? `@${r.name}` : `${r.method} ${r.url}`);
 
 export function httpSession(): HttpSession | undefined {
+  updateSoon.flush();
   const tabs = requestTabs.flatMap((t) => {
-    const r = requestOf(t);
-    return r ? [{ path: t.path, line: r.line, key: requestKey(r), ...(t.preview ? { preview: true } : {}) }] : [];
+    // The file's request identifies it; a draft may have changed its name or URL.
+    const r = fileRequestOf(t);
+    if (!r && t.draft === null) return [];
+    return [{ path: t.path, line: r?.line ?? lineOf(t), key: r ? requestKey(r) : "", ...(t.preview ? { preview: true } : {}), ...(t.draft !== null ? { draft: t.draft } : {}) }];
   });
   if (!tabs.length) return undefined;
   return { tabs, active: current ? Math.max(0, requestTabs.indexOf(current)) : 0, panel: panelOpen };
@@ -567,13 +663,15 @@ export async function restoreHttpSession(session: HttpSession | undefined) {
     // The same request, nearest its old line, or else whatever is at the line now.
     const same = requests.filter((r) => requestKey(r) === saved.key).sort((a, b) => Math.abs(a.line - saved.line) - Math.abs(b.line - saved.line))[0];
     const r = same ?? requests.find((q) => q.start <= saved.line && saved.line <= q.end);
-    if (!r || requestTabs.some((t) => t.model === model && lineOf(t) === r.start)) {
-      if (!requestTabs.some((t) => t.path === saved.path)) await host.release(saved.path, false);
+    // A draft of a request that's gone from the file comes back too, to save at the file's end.
+    if ((!r && saved.draft === undefined) || (r && requestTabs.some((t) => t.model === model && lineOf(t) === r.start))) {
+      if (!requestTabs.some((t) => t.path === saved.path)) host.release(saved.path);
       restored.push(null);
       continue;
     }
-    const tab: RequestTab = { path: saved.path, model, decoration: "", preview: !!saved.preview, exchange: null, sending: null, live: null };
-    mark(r.start, tab);
+    const draft = saved.draft !== undefined && (!r || formatRequest(r) !== saved.draft) ? saved.draft : null;
+    const tab: RequestTab = { path: saved.path, model, decoration: "", draft, preview: !!saved.preview && draft === null, exchange: null, sending: null, live: null };
+    mark(r?.start ?? Math.min(saved.line, model.getLineCount()), tab);
     watch(model);
     requestTabs.push(tab);
     restored.push(tab);
@@ -661,13 +759,18 @@ async function renderEnvironments(select: HTMLSelectElement) {
   select.dataset.value = selected;
 }
 
+/** The tab the form last showed. */
+let formTab: RequestTab | null = null;
+
 function renderRequest() {
   const r = currentRequest();
   empty.hidden = !!r;
   main.hidden = !r;
   emptyText.textContent = current && !r ? `This request is no longer in ${relative(current.path)}. Close its tab, or undo the change in the file.` : EMPTY_TEXT;
   if (!r) return;
-  if (document.activeElement !== urlInput) urlInput.value = r.url;
+  // Typing in the URL isn't interrupted, but another tab's URL always shows.
+  if (document.activeElement !== urlInput || formTab !== current) urlInput.value = r.url;
+  formTab = current;
   methodSelect.value = METHODS.includes(r.method) ? r.method : "GET";
   methodSelect.dataset.method = r.method;
   if (current?.sending) {
@@ -1848,6 +1951,7 @@ async function deleteRequest(path: string, r: HttpRequest) {
   refreshTree();
 }
 
+/** Renames a request in its file, and in its tab's draft, if it has one. */
 async function renameRequest(path: string, r: HttpRequest) {
   pick(
     "New title",
@@ -1855,12 +1959,21 @@ async function renameRequest(path: string, r: HttpRequest) {
       {
         label: q.trim() ? `Rename to ${q.trim()}` : "Type a title",
         run: async () => {
-          if (!q.trim()) return;
+          const title = q.trim();
+          if (!title) return;
+          const model = await host.ensureModel(path);
+          const block = requestsIn(model).find((x) => x.start <= r.line && r.line <= x.end);
+          if (!block) return;
           const dirty = host.isDirty(path);
-          await openRequest(path, r.line);
-          update((x) => (x.title = q.trim()));
+          for (const t of requestTabs.filter((t) => t.model === model && block.start <= lineOf(t) && lineOf(t) <= block.end && t.draft !== null)) {
+            const draft = parseHttp(t.draft!).requests[0];
+            if (draft) t.draft = formatRequest({ ...draft, title });
+          }
+          writeRequest(model, block, { ...structuredClone(block), title });
           await edited(path, dirty);
+          if (current) renderRequest();
           refreshTree();
+          host.sessionChanged();
         },
       },
     ],
@@ -2030,13 +2143,23 @@ function renderTree() {
   markActive();
 }
 
+const renderTreeSoon = debounce(() => renderTree(), 150);
+
 function requestRow(path: string, r: HttpRequest) {
   const title = r.title || r.name || r.url.replace(/^\{\{[^}]+\}\}/, "");
   // Titles made from routes start with the method, which the badge already shows.
   const label = title.startsWith(`${r.method} `) ? title.slice(r.method.length + 1) : title;
   const run = iconButton("play", "Send", () => sendAt(path, r.line));
   run.classList.add("http-row-send");
-  const row = h("div", { class: "row http-request", title: `${r.method} ${r.url}`, data: { path, line: String(r.line) } }, methodBadge(r.method), h("span", { class: "name" }, label), run);
+  const unsaved = requestTabs.some((t) => t.path === path && t.draft !== null && r.start <= lineOf(t) && lineOf(t) <= r.end);
+  const row = h(
+    "div",
+    { class: "row http-request", title: `${r.method} ${r.url}${unsaved ? "\nIts tab has unsaved changes" : ""}`, data: { path, line: String(r.line) } },
+    methodBadge(r.method),
+    h("span", { class: "name" }, label),
+    unsaved ? h("span", { class: "http-unsaved", ariaLabel: "Unsaved changes" }) : null,
+    run,
+  );
   // A click previews the request in a tab that the next click reuses; a double-click keeps the tab open.
   row.onclick = () => openRequest(path, r.line, false, true);
   row.ondblclick = () => openRequest(path, r.line);
@@ -2200,7 +2323,7 @@ export function httpFilesChanged(paths: string[]) {
 
 /** Clears the HTTP tab when another project opens. */
 export function resetHttpClient() {
-  for (const t of [...requestTabs]) dropTab(t, false);
+  for (const t of [...requestTabs]) dropTab(t);
   current = null;
   panelOpen = false;
   shown = null;
