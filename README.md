@@ -833,6 +833,63 @@ The palette lists the components the project has: Filament's, plugins', and the
 project's own. Each setting's editor comes from its parameter types, so a new
 Filament version or a plugin needs no update to Tusk.
 
+### Actions and their forms
+
+- **Page actions:** the **Page actions** tab shows the header actions of the
+  resource's list, create, edit, and view pages: the buttons beside the page's
+  title. Pick a page at the top, then add, arrange, and set up its actions as
+  in a table's lanes. A page without header actions gets them with one click,
+  starting with the ones that page usually has.
+- **Forms:** select an action, in a table or on a page, and its modal shows
+  below: the heading, the description, the form, and the buttons. Drag fields
+  or model columns into it, or click them in the palette, as in a form.
+- **What it does:** a custom action can save its form to the record, set a
+  column to a value (an enum column offers its cases), delete the record, or,
+  on a list page, create a record. It can then show a success notification.
+  Bulk actions do the same to each selected record. Saving the form also fills
+  it with the record's values when it opens. The designer writes these as the
+  action's code; an action written otherwise shows as code.
+
+### Access
+
+The **Access** tab decides who can do what with the resource's records, from
+the model's policy. Each ability (see the list, view, create, edit, delete, and
+under **More abilities** the bulk and soft-delete ones) is **Everyone**,
+**Nobody**, or **Only users who…** have a permission, have a role, or own the
+record, by a column such as `user_id`. Join conditions with **or** or **and**.
+Filament hides what someone can't do. An ability the policy doesn't have is
+allowed. A rule written as other code, such as a call to a helper, shows as
+code, which you can open or replace.
+
+A model without a policy gets one with **Create a policy**, which runs
+`make:policy` and starts with everything allowed, so no one is locked out.
+New permissions are named as Filament Shield names them, such as `update_post`.
+
+With spatie/laravel-permission, **Roles and permissions** shows which roles
+have the permissions the rules name. Check a box to grant one, creating the
+permission when it's missing, and **New role** adds a role. These change the
+app's database.
+
+### Languages
+
+When text is written with `__()`, the designer helps translate it:
+
+- **Preview:** pick a language beside the designer's title, and the canvas
+  shows each `__()` text, and each label with `translateLabel()`, in that
+  language. Arabic, Hebrew, Persian, and Urdu lay out right to left.
+  **Add a language…** adds a JSON file for a new one.
+- **Translate:** a label, heading, placeholder, or other text shows its
+  translation in each of the app's languages below it, to edit in place. A
+  missing one shows the text people see instead. Plain text has a
+  **Translate** button that writes it with `__()`. Changing a translated text
+  renames its key in the JSON files too.
+- **Make translatable:** with nothing selected, the inspector counts the texts
+  written as plain strings, and one click writes them all with `__()`.
+
+Translations go in `lang/<language>.json`, which Laravel reads first for any
+key. A translation that's already in a PHP file, such as
+`lang/ar/orders.php`, is changed there.
+
 ### New resources
 
 **Filament: New Resource…**, the **+** in the Filament tool window, or
@@ -891,6 +948,28 @@ Tusk writes a migration with only the changes, such as
 the model's fillable attributes, casts, soft deletes, and relationships in
 place, and keeps everything else. Dropping a column asks first. **Run the
 migration** runs `php artisan migrate` afterwards, in Sail when it's up.
+
+## Enum designer
+
+The enum designer creates a PHP enum or changes one: its cases, their values,
+and the labels, colors, icons, and descriptions Filament shows in selects,
+badges, and filters. To open it, click **Open in Enum Designer** above an enum,
+run **Laravel: New Enum…**, pick **New enum…** as a column's cast in the model
+designer, or use the Enum options of a select in the Filament designer, where
+**Make an enum of these** turns a list of options into an enum.
+
+- **Cases:** name, value, label, color, and icon for each case. Type several
+  values at once, such as `draft, published, archived`. Drag rows to reorder
+  them.
+- **Filament shows:** turns `HasLabel`, `HasColor`, `HasIcon`, and
+  `HasDescription` on or off, which adds or removes the method.
+- **Translated:** labels and descriptions go through `__()`.
+
+Changes are staged until you click **Create enum** or **Apply changes**, with
+the code previewed. A method the designer can't read, such as an icon that
+comes from a helper, shows as **In code** and is kept. A renamed case is renamed
+there too. When a new case is missing from such a method, the designer says so
+and opens the method after applying.
 
 ## New Laravel projects and elements
 

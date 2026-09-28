@@ -4322,6 +4322,56 @@ Settings go in with `setProperty`. The components come from `src/filamentgen.ts`
 with the wizard's changes: another field type keeps only the settings that type
 has, as `methodsOf` reports them.
 
+### Page actions and action forms
+
+- **Page actions:** `readRoot(cls, "actions")` reads a page's
+  `getHeaderActions()`, or the older `getActions()`, whose return value is an
+  array: the root's one slot, `actions`. The designer's **Page actions** tab
+  reads the page it shows (`actionsPage`) with the resource's other files, so
+  edits, undo, and the palette work as on the other tabs.
+- **Action forms:** an action's `schema([...])` is a slot like a section's.
+  `modalAction` finds the action that holds the selection, and the canvas draws
+  its modal under the page. While it's open, the palette and the + menus offer
+  fields, and model columns become form fields (`inActionForm`), whatever the tab.
+- **What it does:** `src/filamentactions.ts` writes the closure of
+  `->action(...)` for a behavior and scope (a record, the selected records, or
+  none), and reads it back with `readBehavior`. Anything else is custom and
+  shows as code. The record parameter is typed as the resource's model.
+
+### Access
+
+- **Reading:** `introspect.php policy <model>` asks the Gate for the model's
+  policy and its file, and, with spatie/laravel-permission, lists the roles
+  with their permissions, whether the user model has `HasRoles`, and whether
+  Filament Shield is installed. `introspect.php permission` creates a role or
+  permission, or grants or revokes one, through Spatie's models.
+- **Rules:** `src/policygen.ts` reads each ability method whose body is one
+  `return`: `true`, `false`, or conditions joined by `||` or `&&`, each
+  `$user->can(…)` (or `hasPermissionTo`), `$user->hasRole(…)`, or
+  `$user->id === $record->column`. The parameter names are the method's own.
+  Anything else, including statements before the return, is custom. A rule is
+  written back over the return's expression, or as a new method typed like the
+  others. `src/filamentaccess.ts` draws the tab.
+- **New policies:** `make:policy <Model>Policy --model=…` puts it in
+  `App\Policies`, where Laravel's discovery finds it for nested models too.
+  Laravel's stub returns `false` everywhere, which would hide the resource
+  from everyone, so the designer opens those rules.
+
+### Translations
+
+- **Reading:** `introspect.php translations` reads `lang_path()`: each
+  `<locale>.json`, and each `<locale>/*.php` flattened to `file.key` keys, with
+  the app's locale and fallback. The designer reads them without waiting, since
+  they only change the preview.
+- **Preview:** `setTranslator` gives the canvas a function from key to text,
+  which `text()`, `labelOf`, and headings use for translated values. The canvas
+  gets `dir="rtl"` for right-to-left languages.
+- **Writing:** `src/translations.ts` edits the files as text. A key goes to the
+  locale's JSON file, keeping its order, indentation, and `json_encode` escapes;
+  a key a PHP file already has is changed there when the file has exactly one
+  entry for it. The designer writes through the editor's models, so open files
+  and local history stay in step.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,
@@ -4346,6 +4396,24 @@ that runs once, so it should hold the whole change.
   trait, and new relationship methods, with their imports.
 - **Names:** `tableFor`, `plural`, and `singular` follow Laravel's pluralizer for
   the common cases, so the designer's table name matches the one Eloquent uses.
+
+## Enum designer
+
+`src/enumdesigner.ts` stages changes to an enum, as the model designer does, and
+`src/enumgen.ts` turns them into code.
+
+- **Reading:** `readEnum` takes the cases from the outline, and each Filament
+  contract's method (`getLabel()`, `getColor()`, and so on) when it returns a
+  `match ($this)` whose arms are `self::Case` to a string, a translated string,
+  or a Heroicon case. `readMatch` reads shared arms (`self::A, self::B =>`) and
+  `default`. A method written otherwise is not readable, and the designer shows
+  its column as code.
+- **Writing:** `enumEdits` rewrites the case block and the readable matches,
+  adds and removes methods and their contracts in `implements`, and renames a
+  renamed case's other `self::` references. Cases with the same value share an
+  arm. A `default => null` arm makes the method's return type nullable.
+- **New enums** are written whole by `enumFile`, into the namespace's PSR-4
+  folder. `make:enum` would make an empty class that Tusk would then replace.
 
 ## New Laravel projects and elements
 
@@ -6030,6 +6098,24 @@ for one sitting's work are noise in `database/migrations`. So the model designer
 keeps changes until Apply and writes one migration with all of them, shown in
 the preview first. It never edits a migration that exists, since one that has
 run won't run again.
+
+### 2026-09-28: The enum designer keeps methods it can't read
+
+An enum's `getIcon()` can resolve icons through a helper, as Filament's demo
+does. The designer could rewrite such a method from its table, but that would
+lose the helper. So a method that isn't a plain `match` stays as it is, its
+column shows as code, and a new case that such a method would throw for is
+called out, with the method opened after Apply.
+
+### 2026-09-28: Policy rules are the code, not a permission table
+
+Tools like Shield generate a permission per ability and check it in every
+policy method. The Access tab could store rules elsewhere and generate the
+policy, but a policy is code people edit, often with a helper that narrows
+access, as in "a permission, and a member of the project". So the designer
+reads and writes the methods themselves, understands the common shapes, and
+keeps anything else as code. Permissions stay in Spatie's tables, which the
+tab changes through Spatie's own models.
 
 ### 2026-09-28: New projects use Laravel's installer, kept in Tusk's tools
 

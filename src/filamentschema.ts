@@ -73,13 +73,15 @@ export const callOf = (comp: Comp, name: string) => findCall(comp.node, name);
 
 // ---- Roots: the form, infolist, or table a method returns ----
 
-export type RootKind = "form" | "infolist" | "table";
+/** A page's header actions are a root too: `getHeaderActions()` returns their list. */
+export type RootKind = "form" | "infolist" | "table" | "actions";
 
 /** The calls that hold a root's components, by what they hold, in the order the designer shows them. */
 export const ROOT_SLOTS: Record<RootKind, string[][]> = {
   form: [["components", "schema"]],
   infolist: [["components", "schema"]],
   table: [["columns"], ["filters"], ["recordActions", "actions"], ["toolbarActions", "bulkActions", "groupedBulkActions"], ["headerActions"]],
+  actions: [["actions"]],
 };
 
 export type Root = {
@@ -105,13 +107,18 @@ export type Root = {
 };
 
 /** The class's form, infolist, or table method, read, or null when the class has none. */
-export function readRoot(cls: OClass, kind: RootKind, methodName: string = kind === "table" ? "table" : kind): Root | null {
+export function readRoot(cls: OClass, kind: RootKind, methodName: string = kind === "actions" ? "getHeaderActions" : kind): Root | null {
   const method = cls.methods.find((m) => m.name.toLowerCase() === methodName.toLowerCase());
   if (!method) return null;
   const param = method.params[0]?.name ?? (kind === "table" ? "table" : "schema");
   const node = method.returns.at(-1);
   const root: Root = { kind, cls, method, node: node ?? ({ kind: "other", span: method.body ?? method.span } as PNode), param, slots: new Map() };
   if (!node) return { ...root, custom: "It doesn't return a value." };
+  if (kind === "actions") {
+    if (node.kind !== "array") return { ...root, custom: "It returns something other than a list of actions." };
+    root.slots.set("actions", { via: "actions", arg: 0, array: node, entries: node.items.map((it, index) => ({ index, node: it.value, comp: it.key || it.spread ? null : readComp(it.value) })) });
+    return root;
+  }
   if (node.kind === "static" && node.args.items.some((a) => a.value.kind === "var" && a.value.name === param))
     return { ...root, delegate: { class: node.class, method: node.method } };
   const base = baseOf(node);

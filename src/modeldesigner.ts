@@ -345,7 +345,22 @@ class ModelDesigner {
     fillable.onchange = () => ((c.fillable = fillable.checked), changed());
     // The cast: automatic from the type, or an enum.
     const cast = h("select", { class: "md-cast", title: "How Eloquent reads and writes the value" }, h("option", { value: "", textContent: castFor({ ...c, enum: undefined, cast: undefined })?.replace(/'/g, "") ?? "—" }), ...this.enums.map((e) => h("option", { value: e.class, textContent: `${shortClass(e.class)} enum`, selected: e.class === c.enum })));
-    cast.onchange = () => ((c.enum = cast.value || undefined), changed());
+    cast.append(h("option", { value: "new", textContent: "New enum…" }));
+    cast.onchange = () => {
+      if (cast.value !== "new") return (c.enum = cast.value || undefined), changed();
+      cast.value = c.enum ?? "";
+      void import("./enumdesigner").then((m) =>
+        m.openNewEnum({
+          // Named for the model and column, as OrderStatus for an order's status.
+          name: `${s.spec.name}${studly(c.name)}`,
+          then: async (cls) => {
+            this.enums = await fapp.enums(this.root).catch(() => this.enums);
+            c.enum = cls;
+            this.render();
+          },
+        }),
+      );
+    };
     const removed = () => {
       cols.splice(i, 1);
       this.render();

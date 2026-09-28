@@ -8,6 +8,8 @@ import { type Catalog, type CClass, classInfo, COLORS, type Editor, essentials, 
 import { type Condition, conditionClosure, getUtility, needsValue, type Operator, OPERATORS, readConditions, type Relation } from "./filamentgen";
 import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
+import { ownTranslation, translate, type Translations } from "./translations";
+import { BEHAVIORS, type Behavior, behaviorCode, readBehavior, type Scope } from "./filamentactions";
 import { type Comp, type Path, shortClass, walk } from "./filamentschema";
 import { confirm } from "./palette";
 import { mapCode, mapValue, nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
@@ -34,6 +36,14 @@ export type InspectorCtx = {
   remove(): void;
   duplicate(): void;
   wrap(cls: string): void;
+  /** Opens the enum designer for a new enum, seeded with `values`, and makes it the field's options once it's made. */
+  newEnum(options: [value: string, label: string][]): void;
+  /** Opens the enum designer for an enum of the app's. */
+  openEnum(cls: string): void;
+  /** For a custom action: what it works with, and the record's model, for "What it does". */
+  action?: { scope: Scope; model: string | null; casts: Record<string, string> };
+  /** The app's translations, for text written with `__()`. */
+  i18n?: { t: Translations; locale: string | null; write(locale: string, key: string, value: string): void; rename(from: string, to: string): Promise<void> };
 };
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
@@ -96,7 +106,32 @@ function methodRow(ctx: InspectorCtx, m: MethodInfo, label = humanize(m.name)): 
   if (existing && first && (!readable(editor, first) || (named && editor.kind !== "switch"))) return row(label, codeChip(ctx, first), { set: true, reset, doc });
   if (existing && existing.args.items.length > 1 && editor.kind !== "switch" && editor.kind !== "presence") return row(label, codeChip(ctx, first ?? (c.node as PNode)), { set: true, reset, doc });
   const value = editorFor(ctx, editor, m.name, first, existing !== undefined, set);
-  return row(label, value, { set: !!existing, reset, doc, stacked: editor.kind === "map" || (editor.kind === "text" && !!editor.multiline) });
+  const i18n = editor.kind === "text" ? translationRows(ctx, first, set, m.name === "label" && flag(c, "translateLabel")) : null;
+  return row(label, i18n ? h("div", { class: "fd-stack" }, value, i18n) : value, { set: !!existing, reset, doc, stacked: !!i18n || editor.kind === "map" || (editor.kind === "text" && !!editor.multiline) });
+}
+
+/**
+ * Under a text written with `__()`, its translation in each of the app's languages; under plain text, a button
+ * that makes it translatable. Nothing when the app has no lang files.
+ */
+function translationRows(ctx: InspectorCtx, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
+  const i18n = ctx.i18n;
+  const v = textValue(node);
+  if (!i18n || !v || !v.text) return null;
+  // A label with `translateLabel()` is translated as written.
+  if (!v.translated && !byFlag)
+    return h("button", { type: "button", class: "fd-chip-link fd-translate", title: "Write it with __(), so each language can have its own text", onclick: () => set(`__(${phpString(v.text)})`) }, icon("globe"), "Translate");
+  const { t } = i18n;
+  return h(
+    "div",
+    { class: "fd-translations" },
+    ...t.locales.map((locale) => {
+      const own = ownTranslation(t, locale, v.text);
+      const input = commitInput(own ?? "", (x) => x !== (own ?? "") && i18n.write(locale, v.text, x), { placeholder: own === undefined ? `${translate(t, locale, v.text).text} (not translated)` : "" }) as HTMLInputElement;
+      if (/^(ar|he|fa|ur)/.test(locale)) input.dir = "rtl";
+      return h("label", { class: `fd-translation${own === undefined ? " missing" : ""}${locale === i18n.locale ? " current" : ""}` }, h("span", { class: "fd-translation-locale" }, locale), input);
+    }),
+  );
 }
 
 /** Whether an editor can show a value in full. */
@@ -144,7 +179,11 @@ function editorFor(ctx: InspectorCtx, editor: Editor, name: string, value: PNode
     }
     case "text": {
       const t = textValue(value);
-      return commitInput(t?.text ?? "", (s) => set(s === "" ? null : stringCode(s, value)), { multiline: editor.multiline, placeholder: "" });
+      return commitInput(t?.text ?? "", async (s) => {
+        // A translated text's translations follow it to its new key.
+        if (t?.translated && s && ctx.i18n) await ctx.i18n.rename(t.text, s);
+        set(s === "" ? null : stringCode(s, value));
+      }, { multiline: editor.multiline, placeholder: "" });
     }
     case "enum": {
       const cases = ctx.cat.enums[editor.enum] ?? [];
@@ -249,7 +288,13 @@ function nameEditor(ctx: InspectorCtx, info: CClass | undefined): HTMLElement | 
     return row(kind === "column" || kind === "entry" ? "Column" : kind === "filter" ? "Name" : "Field (column)", h("div", { class: "fd-inline-editor" }, input, list), { doc: "The attribute it reads and saves, such as a column of the model. Columns and entries can reach relationships with a dot: author.name." });
   }
   const label = kind === "layout" ? (["Tab", "Step", "Fieldset"].includes(short) ? "Label" : "Heading") : "Name";
-  return row(label, commitInput(value, (v) => ctx.setMake(v ? stringCode(v, first?.value) : ""), {}), { set: !!first });
+  const input = commitInput(value, async (v) => {
+    const t = textValue(first?.value);
+    if (t?.translated && v && ctx.i18n) await ctx.i18n.rename(t.text, v);
+    ctx.setMake(v ? stringCode(v, first?.value) : "");
+  }, {});
+  const i18n = translationRows(ctx, first?.value, (args) => ctx.setMake(args ?? ""));
+  return row(label, i18n ? h("div", { class: "fd-stack" }, input, i18n) : input, { set: !!first, stacked: !!i18n });
 }
 
 const INPUT_TYPES: [string, string][] = [
@@ -296,7 +341,7 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
       if (source === "code" && !(await confirm("Replace the options written in code?", "Replace"))) return;
       if (v === "list") ctx.set([...clearOthers("options"), { name: "options", args: phpValue({ option: "Option" }) }]);
       if (v === "enum" && ctx.enums[0]) ctx.set([...clearOthers("options"), { name: "options", args: `{{${ctx.enums[0].class}}}::class` }]);
-      if (v === "enum" && !ctx.enums[0]) wrap.append(h("p", { class: "fd-note" }, "The app has no enums under app/. Create one, then pick it here.") as HTMLElement);
+      if (v === "enum" && !ctx.enums[0]) ctx.newEnum(list?.entries ?? []);
       if (v === "relationship") {
         const r = ctx.relations.find((x) => /BelongsTo|BelongsToMany|MorphToMany/.test(x.type));
         ctx.set([...clearOthers("relationship"), { name: "relationship", args: `${phpString(r?.name ?? "relation")}, 'name'` }, ...(r && /Many/.test(r.type) && !call(c, "multiple") && shortClass(c.cls) === "Select" ? [{ name: "multiple", args: "" }] : [])]);
@@ -306,6 +351,7 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   wrap.append(tabs);
   if (source === "code" && options) wrap.append(codeChip(ctx, options));
   if (source === "list") {
+    if (list?.entries.length) wrap.append(h("button", { type: "button", class: "fd-chip-link fd-options-enumify", title: "Move these options into a PHP enum, which the model can cast to", onclick: () => ctx.newEnum(list.entries) }, icon("symbol-enum"), "Make an enum of these"));
     const translated = list?.translated ?? false;
     wrap.append(mapEditor(list?.entries ?? [], (entries) => ctx.set([{ name: "options", args: entries.length ? mapCode(entries, translated) : null }])));
   }
@@ -315,7 +361,15 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
     if (current && !ctx.enums.some((e) => e.class === current)) select.prepend(h("option", { value: current, textContent: shortClass(current), selected: true }));
     select.onchange = () => ctx.set([{ name: "options", args: `{{${select.value}}}::class` }]);
     const e = ctx.enums.find((x) => x.class === current);
-    wrap.append(select);
+    wrap.append(
+      h(
+        "div",
+        { class: "fd-options-enum" },
+        select,
+        current ? iconButton("edit", "Edit the enum's cases, labels, and colors", () => ctx.openEnum(current)) : null,
+        iconButton("add", "New enum…", () => ctx.newEnum([])),
+      ),
+    );
     if (e) wrap.append(h("p", { class: "fd-note" }, `${e.cases.length} cases${e.contracts.includes("HasLabel") ? ", with labels" : ""}: ${e.cases.slice(0, 5).map((x) => x.name).join(", ")}${e.cases.length > 5 ? "…" : ""}`));
   }
   if (source === "relationship" && rel) {
@@ -541,6 +595,7 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
     else if (name === "@options") essentialRows.push(optionsEditor(ctx)), shown.add("options"), shown.add("relationship");
     else if (name === "@span") essentialRows.push(spanEditor(ctx)), shown.add("columnSpan"), shown.add("columnSpanFull");
     else if (name === "@format") essentialRows.push(formatEditor(ctx)), FORMATS.forEach(([m]) => shown.add(m));
+    else if (name === "@behavior") essentialRows.push(...behaviorEditor(ctx)), shown.add("action"), shown.add("fillForm");
     else if (methods.has(name) && !shown.has(name)) {
       shown.add(name);
       essentialRows.push(specialRow(ctx, methods.get(name)!) ?? methodRow(ctx, methods.get(name)!));
@@ -600,6 +655,62 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
     h("div", { class: "fd-all-head" }, h("span", {}, "All settings"), search),
     all,
   );
+}
+
+/** The code `fillForm` gets with "Save the form to the record", so the form opens with the record's values. */
+const FILL_FORM = (model: string) => `fn ({{${model}}} $record): array => $record->attributesToArray()`;
+
+/**
+ * "What it does" for a custom action: a behavior the designer writes as `->action(...)`'s closure, with a success
+ * notification. A closure it didn't write shows as code.
+ */
+function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
+  const c = ctx.comp;
+  const a = ctx.action;
+  if (!a || !["Action", "BulkAction"].includes(shortClass(c.cls))) return [];
+  const node = arg(c, "action");
+  const current = readBehavior(node ? codeOf(ctx, node) : null);
+  const model = a.model ?? "Illuminate\\Database\\Eloquent\\Model";
+  const fill = call(c, "fillForm");
+  const ourFill = !!fill && /^fn\s*\([\w\\]+ \$record\): array => \$record->attributesToArray\(\)$/.test(codeOf(ctx, fill.args.items[0]?.value ?? c.node));
+  const write = async (b: Behavior) => {
+    if (current.kind === "custom" && node && !(await confirm("Replace what the action does, written as code?", "Replace"))) return;
+    const code = behaviorCode(b, a.scope, a.model);
+    const changes: { name: string; args: string | null }[] = [{ name: "action", args: code }];
+    if (b.kind === "update" && a.scope === "record" && !fill) changes.push({ name: "fillForm", args: FILL_FORM(model) });
+    if (b.kind !== "update" && ourFill) changes.push({ name: "fillForm", args: null });
+    if (b.kind === "delete" && !call(c, "requiresConfirmation")) changes.push({ name: "requiresConfirmation", args: "" });
+    ctx.set(changes);
+  };
+  if (current.kind === "custom" && node) {
+    const choose = h("select", {}, h("option", { value: "", textContent: "Replace with…" }), ...BEHAVIORS[a.scope].filter(([k]) => k !== "none").map(([k, l]) => h("option", { value: k, textContent: l })));
+    choose.onchange = () => choose.value && void write({ kind: choose.value } as Behavior);
+    return [row("What it does", h("div", { class: "fd-stack" }, codeChip(ctx, node), choose), { stacked: true, set: true, reset: () => ctx.set([{ name: "action", args: null }]) })];
+  }
+  const select = h("select", {}, ...BEHAVIORS[a.scope].map(([k, l]) => h("option", { value: k, textContent: l, selected: k === current.kind })));
+  select.onchange = () => {
+    const kind = select.value as Behavior["kind"];
+    const notify = "notify" in current ? current.notify : undefined;
+    if (kind === "set") void write({ kind, column: ctx.columns.find((x) => /status|state|active|published/.test(x)) ?? ctx.columns[0] ?? "status", value: "", notify });
+    else void write({ kind, notify } as Behavior);
+  };
+  const rows = [row("What it does", select, { set: !!node, reset: () => ctx.set([{ name: "action", args: null }, ...(ourFill ? [{ name: "fillForm", args: null }] : [])]), doc: "What happens when the action runs, after its form or confirmation." })];
+  if (current.kind === "set") {
+    const column = h("select", {}, ...ctx.columns.map((x) => h("option", { value: x, textContent: x, selected: x === current.column })));
+    if (!ctx.columns.includes(current.column)) column.prepend(h("option", { value: current.column, textContent: current.column, selected: true }));
+    column.onchange = () => void write({ ...current, column: column.value });
+    // A column cast to an enum takes one of its cases' values.
+    const e = ctx.enums.find((x) => x.class === a.casts[current.column]?.replace(/^\\/, ""));
+    const values = e?.cases.filter((k) => k.value !== null).map((k) => [String(k.value), k.name]) ?? [];
+    const value = values.length
+      ? h("select", {}, ...(values.some(([v]) => v === current.value) ? [] : [h("option", { value: current.value, textContent: current.value || "(choose)", selected: true })]), ...values.map(([v, n]) => h("option", { value: v, textContent: n, selected: v === current.value })))
+      : commitInput(current.value, (v) => void write({ ...current, value: v }), { placeholder: "paid, true, 3", className: "fd-mono" });
+    if (values.length) (value as HTMLSelectElement).onchange = () => void write({ ...current, value: (value as HTMLSelectElement).value });
+    rows.push(row("Column", column), row("Value", value, { doc: e ? `One of ${shortClass(e.class)}'s cases.` : "Numbers, true, false, and null are written as they are; anything else as text." }));
+  }
+  if (current.kind !== "none" && current.kind !== "custom")
+    rows.push(row("Then notify", commitInput(current.notify ?? "", (v) => void write({ ...current, notify: v.trim() || undefined }), { placeholder: "Saved" }), { set: !!current.notify, doc: "A success notification's title, shown after it runs." }));
+  return rows;
 }
 
 /** Rows for methods that take more than a value: they get an editor of their own. */

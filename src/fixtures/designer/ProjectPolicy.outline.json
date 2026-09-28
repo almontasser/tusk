@@ -1,0 +1,910 @@
+{
+  "errors": false,
+  "namespace": "App\\Policies",
+  "uses": [
+    {
+      "alias": "Project",
+      "name": "App\\Models\\Project",
+      "kind": "class",
+      "span": [
+        58,
+        81
+      ]
+    },
+    {
+      "alias": "HandlesAuthorization",
+      "name": "Illuminate\\Auth\\Access\\HandlesAuthorization",
+      "kind": "class",
+      "span": [
+        82,
+        130
+      ]
+    },
+    {
+      "alias": "AuthUser",
+      "name": "Illuminate\\Foundation\\Auth\\User",
+      "kind": "class",
+      "span": [
+        131,
+        179
+      ]
+    }
+  ],
+  "useInsert": 180,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "ProjectPolicy",
+      "fqn": "App\\Policies\\ProjectPolicy",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        181,
+        2418
+      ],
+      "bodyStart": 202,
+      "bodyEnd": 2417,
+      "traits": [
+        "Illuminate\\Auth\\Access\\HandlesAuthorization"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "hasAccessToProject",
+          "static": false,
+          "abstract": false,
+          "visibility": "private",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                435,
+                453
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                455,
+                471
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            399,
+            696
+          ],
+          "docStart": 238,
+          "body": [
+            484,
+            695
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": true,
+              "span": [
+                594,
+                598
+              ]
+            },
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "project",
+                "span": [
+                  626,
+                  634
+                ]
+              },
+              "calls": [
+                {
+                  "name": "members",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 643,
+                    "close": 644,
+                    "items": []
+                  },
+                  "span": [
+                    634,
+                    645
+                  ],
+                  "nameSpan": [
+                    636,
+                    643
+                  ]
+                },
+                {
+                  "name": "where",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 652,
+                    "close": 678,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "users.id",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            653,
+                            663
+                          ]
+                        },
+                        "span": [
+                          653,
+                          663
+                        ],
+                        "spread": false
+                      },
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "prop",
+                          "object": {
+                            "kind": "var",
+                            "name": "authUser",
+                            "span": [
+                              665,
+                              674
+                            ]
+                          },
+                          "name": "id",
+                          "nullsafe": false,
+                          "span": [
+                            665,
+                            678
+                          ]
+                        },
+                        "span": [
+                          665,
+                          678
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    645,
+                    679
+                  ],
+                  "nameSpan": [
+                    647,
+                    652
+                  ]
+                },
+                {
+                  "name": "exists",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 687,
+                    "close": 688,
+                    "items": []
+                  },
+                  "span": [
+                    679,
+                    689
+                  ],
+                  "nameSpan": [
+                    681,
+                    687
+                  ]
+                }
+              ],
+              "span": [
+                626,
+                689
+              ]
+            }
+          ]
+        },
+        {
+          "name": "viewAny",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                726,
+                744
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            702,
+            814
+          ],
+          "docStart": 238,
+          "body": [
+            757,
+            813
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "authUser",
+                "span": [
+                  773,
+                  782
+                ]
+              },
+              "calls": [
+                {
+                  "name": "can",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 787,
+                    "close": 806,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "view_any_project",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            788,
+                            806
+                          ]
+                        },
+                        "span": [
+                          788,
+                          806
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    782,
+                    807
+                  ],
+                  "nameSpan": [
+                    784,
+                    787
+                  ]
+                }
+              ],
+              "span": [
+                773,
+                807
+              ]
+            }
+          ]
+        },
+        {
+          "name": "view",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                841,
+                859
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                861,
+                877
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            820,
+            993
+          ],
+          "docStart": 238,
+          "body": [
+            890,
+            992
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                906,
+                986
+              ]
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1022,
+                1040
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            999,
+            1108
+          ],
+          "docStart": 238,
+          "body": [
+            1053,
+            1107
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "authUser",
+                "span": [
+                  1069,
+                  1078
+                ]
+              },
+              "calls": [
+                {
+                  "name": "can",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1083,
+                    "close": 1100,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "create_project",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1084,
+                            1100
+                          ]
+                        },
+                        "span": [
+                          1084,
+                          1100
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1078,
+                    1101
+                  ],
+                  "nameSpan": [
+                    1080,
+                    1083
+                  ]
+                }
+              ],
+              "span": [
+                1069,
+                1101
+              ]
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1137,
+                1155
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                1157,
+                1173
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1114,
+            1291
+          ],
+          "docStart": 238,
+          "body": [
+            1186,
+            1290
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                1202,
+                1284
+              ]
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1320,
+                1338
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                1340,
+                1356
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1297,
+            1474
+          ],
+          "docStart": 238,
+          "body": [
+            1369,
+            1473
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                1385,
+                1467
+              ]
+            }
+          ]
+        },
+        {
+          "name": "restore",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1504,
+                1522
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                1524,
+                1540
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1480,
+            1659
+          ],
+          "docStart": 238,
+          "body": [
+            1553,
+            1658
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                1569,
+                1652
+              ]
+            }
+          ]
+        },
+        {
+          "name": "forceDelete",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1693,
+                1711
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                1713,
+                1729
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1665,
+            1853
+          ],
+          "docStart": 238,
+          "body": [
+            1742,
+            1852
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                1758,
+                1846
+              ]
+            }
+          ]
+        },
+        {
+          "name": "forceDeleteAny",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                1890,
+                1908
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1859,
+            1986
+          ],
+          "docStart": 238,
+          "body": [
+            1921,
+            1985
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "authUser",
+                "span": [
+                  1937,
+                  1946
+                ]
+              },
+              "calls": [
+                {
+                  "name": "can",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1951,
+                    "close": 1978,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "force_delete_any_project",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1952,
+                            1978
+                          ]
+                        },
+                        "span": [
+                          1952,
+                          1978
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1946,
+                    1979
+                  ],
+                  "nameSpan": [
+                    1948,
+                    1951
+                  ]
+                }
+              ],
+              "span": [
+                1937,
+                1979
+              ]
+            }
+          ]
+        },
+        {
+          "name": "restoreAny",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                2019,
+                2037
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1992,
+            2110
+          ],
+          "docStart": 238,
+          "body": [
+            2050,
+            2109
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "authUser",
+                "span": [
+                  2066,
+                  2075
+                ]
+              },
+              "calls": [
+                {
+                  "name": "can",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 2080,
+                    "close": 2102,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "restore_any_project",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            2081,
+                            2102
+                          ]
+                        },
+                        "span": [
+                          2081,
+                          2102
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    2075,
+                    2103
+                  ],
+                  "nameSpan": [
+                    2077,
+                    2080
+                  ]
+                }
+              ],
+              "span": [
+                2066,
+                2103
+              ]
+            }
+          ]
+        },
+        {
+          "name": "replicate",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                2142,
+                2160
+              ]
+            },
+            {
+              "name": "project",
+              "type": "Project",
+              "default": null,
+              "span": [
+                2162,
+                2178
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            2116,
+            2299
+          ],
+          "docStart": 238,
+          "body": [
+            2191,
+            2298
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                2207,
+                2292
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reorder",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "authUser",
+              "type": "AuthUser",
+              "default": null,
+              "span": [
+                2329,
+                2347
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            2305,
+            2416
+          ],
+          "docStart": 238,
+          "body": [
+            2360,
+            2415
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "authUser",
+                "span": [
+                  2376,
+                  2385
+                ]
+              },
+              "calls": [
+                {
+                  "name": "can",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 2390,
+                    "close": 2408,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "reorder_project",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            2391,
+                            2408
+                          ]
+                        },
+                        "span": [
+                          2391,
+                          2408
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    2385,
+                    2409
+                  ],
+                  "nameSpan": [
+                    2387,
+                    2390
+                  ]
+                }
+              ],
+              "span": [
+                2376,
+                2409
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

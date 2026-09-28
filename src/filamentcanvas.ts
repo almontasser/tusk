@@ -45,7 +45,13 @@ export function flag(c: Comp, name: string): boolean {
   const a = found.args.items[0]?.value;
   return !a || a.kind !== "bool" || a.value;
 }
-export const text = (c: Comp, name: string, i = 0) => textValue(arg(c, name, i))?.text;
+/** How the canvas shows `__('key')`: in the language picked for the preview, or as the key. */
+let translator: ((key: string) => string) | null = null;
+export const setTranslator = (t: ((key: string) => string) | null) => (translator = t);
+const shown = (v: { text: string; translated: boolean } | undefined) => (v && v.translated && translator ? translator(v.text) : v?.text);
+export const text = (c: Comp, name: string, i = 0) => shown(textValue(arg(c, name, i)));
+/** A layout's heading, a tab's or step's label: the first argument of `make()`. */
+const heading = (c: Comp) => shown(textValue(c.make.args.items[0]?.value)) ?? c.name;
 export const number = (c: Comp, name: string) => {
   const v = nodeValue(arg(c, name));
   return typeof v === "number" ? v : undefined;
@@ -82,9 +88,11 @@ const ACTION_LABELS: Record<string, string> = {
 /** The label Filament shows: the `label()` call, or one made from the name. */
 export function labelOf(c: Comp): string {
   const own = text(c, "label");
-  if (own !== undefined) return own;
+  // `translateLabel()` passes the label through `__()`, whether it's written or made from the name.
+  if (own !== undefined) return translator && flag(c, "translateLabel") && !textValue(arg(c, "label"))?.translated ? translator(own) : own;
   if (ACTION_LABELS[short(c)] && !c.name) return ACTION_LABELS[short(c)];
-  if (c.name) return labelFromName(c.name);
+  // `translateLabel()` passes the label made from the name through `__()`.
+  if (c.name) return translator && flag(c, "translateLabel") ? translator(labelFromName(c.name)) : labelFromName(c.name);
   return humanize(short(c).replace(/(Action|Column|Filter|Entry)$/, "")) || short(c);
 }
 
@@ -248,7 +256,7 @@ export function renderSchema(ctx: CanvasCtx, slotName: string): HTMLElement {
 }
 
 /** A slot's grid of components, with a drop target and an empty state. */
-function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owner: Comp | null, columns: number): HTMLElement {
+export function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owner: Comp | null, columns: number): HTMLElement {
   const grid = h("div", { class: "fd-grid", style: `--cols:${columns}` });
   for (const e of slot.entries) {
     const path = [...prefix, { slot: prefix.length ? slotKey(slot) : slot.via, index: e.index }];
@@ -363,25 +371,25 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
   const schemaSlot = () => childSlot(c)?.via ?? "schema";
   switch (name) {
     case "Section": {
-      const heading = c.name ?? text(c, "heading");
+      const title = heading(c) ?? text(c, "heading");
       const desc = text(c, "description");
       const aside = flag(c, "aside");
       const collapsible = flag(c, "collapsible") || flag(c, "collapsed");
       const iconNode = arg(c, "icon");
       const head =
-        heading || desc
+        title || desc
           ? h(
               "header",
               { class: "fd-section-head" },
               iconNode ? heroicon(ctx.iconsDir, iconNode.kind === "classConst" ? iconNode.name : textValue(iconNode)?.text, "fd-heroicon fd-section-icon") : null,
-              h("div", { class: "fd-section-titles" }, heading ? h("h3", {}, heading) : null, desc ? h("p", {}, desc) : null),
+              h("div", { class: "fd-section-titles" }, title ? h("h3", {}, title) : null, desc ? h("p", {}, desc) : null),
               collapsible ? h("span", { class: `codicon codicon-chevron-${flag(c, "collapsed") ? "down" : "up"} fd-collapse` }) : null,
             )
           : null;
       return h("section", { class: `fd-section${aside ? " aside" : ""}${flag(c, "compact") ? " compact" : ""}` }, head, h("div", { class: "fd-section-body" }, inner(schemaSlot(), columnsOf(c, 1))));
     }
     case "Fieldset":
-      return h("fieldset", { class: "fd-fieldset" }, h("legend", {}, c.name ?? text(c, "label") ?? "Fieldset"), inner(schemaSlot(), columnsOf(c, 2)));
+      return h("fieldset", { class: "fd-fieldset" }, h("legend", {}, heading(c) ?? text(c, "label") ?? "Fieldset"), inner(schemaSlot(), columnsOf(c, 2)));
     case "Grid":
     case "Group":
     case "FusedGroup": {
@@ -401,7 +409,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
       const heads = h("div", { class: name === "Tabs" ? "fd-tabs-bar" : "fd-steps-bar" });
       slot?.entries.forEach((e, i) => {
         const childPath = [...path, { slot: slotKey(slot), index: e.index }];
-        const label = e.comp ? (e.comp.name ?? text(e.comp, "label") ?? `${name === "Tabs" ? "Tab" : "Step"} ${i + 1}`) : "Code";
+        const label = e.comp ? (heading(e.comp) ?? text(e.comp, "label") ?? `${name === "Tabs" ? "Tab" : "Step"} ${i + 1}`) : "Code";
         const head = h(
           "button",
           { type: "button", class: `${i === active ? "active" : ""}${samePath(ctx.selection, childPath) ? " selected" : ""}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.active.set(key, i), ctx.select(childPath)) },
@@ -429,7 +437,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
     }
     case "Tab":
     case "Step":
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `${name}: ${c.name ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `${name}: ${heading(c) ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
     case "Repeater":
     case "RepeatableEntry":
       return h(
@@ -443,11 +451,11 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
     case "Builder":
       return h("div", { class: "fd-field" }, fieldLabel(c), h("div", { class: "fd-repeater" }, inner("blocks", 1)), h("div", { class: "fd-repeater-add" }, text(c, "addActionLabel") ?? `Add to ${labelOf(c).toLowerCase()}`), helper(c));
     case "Block":
-      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `Block: ${c.name ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
+      return h("div", { class: "fd-layout-box" }, h("span", { class: "fd-layout-tag" }, `Block: ${heading(c) ?? ""}`), inner(schemaSlot(), columnsOf(c, 1)));
     case "Text":
-      return h("p", { class: "fd-text" }, c.name ?? "Text");
+      return h("p", { class: "fd-text" }, heading(c) ?? "Text");
     case "Callout":
-      return h("div", { class: "fd-callout" }, icon("info"), h("div", {}, h("strong", {}, c.name ?? "Callout"), text(c, "description") ? h("p", {}, text(c, "description")!) : null));
+      return h("div", { class: "fd-callout" }, icon("info"), h("div", {}, h("strong", {}, heading(c) ?? "Callout"), text(c, "description") ? h("p", {}, text(c, "description")!) : null));
     case "Html":
     case "View":
     case "Livewire":
@@ -700,40 +708,6 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: st
   );
   if (!colComps.length) head.prepend(h("div", { class: "fd-th fd-empty-cols" }, "Drag columns here from the left, or click +"));
 
-  const lane = (title: string, iconName: string, slot: Slot | undefined, slotName: string, hint: string) => {
-    const chips = h("div", { class: "fd-lane-items" });
-    for (const e of slot?.entries ?? []) {
-      const path = [{ slot: slot!.via, index: e.index }];
-      const chip = h("div", { class: `fd-chip-item${samePath(ctx.selection, path) ? " selected" : ""}` }, e.comp ? actionOrFilterChip(ctx, e.comp) : h("span", {}, icon("code"), "Code"));
-      chip.dataset.index = String(e.index);
-      chip.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
-      chip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(path), ctx.menu(path, ev.clientX, ev.clientY));
-      draggable(chip, path);
-      // An action group's actions show inside it, and take drops.
-      const groupSlot = e.comp?.slots[0];
-      if (groupSlot && e.comp) {
-        const inner = h("div", { class: "fd-lane-items nested" });
-        for (const g of groupSlot.entries) {
-          const gp = [...path, { slot: slotKey(groupSlot), index: g.index }];
-          const gchip = h("div", { class: `fd-chip-item${samePath(ctx.selection, gp) ? " selected" : ""}` }, g.comp ? actionOrFilterChip(ctx, g.comp) : h("span", {}, "Code"));
-          gchip.dataset.index = String(g.index);
-          gchip.onclick = (ev) => (ev.stopPropagation(), ctx.select(gp));
-          gchip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(gp), ctx.menu(gp, ev.clientX, ev.clientY));
-          draggable(gchip, gp);
-          inner.append(gchip);
-        }
-        inner.append(h("button", { type: "button", class: "fd-lane-add", title: "Add to the group", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slotKey(groupSlot) }, ev.currentTarget as HTMLElement)) }, icon("add")));
-        dropTarget(inner, ctx, { owner: path, slot: slotKey(groupSlot) }, groupSlot, e.comp, true);
-        chip.append(inner);
-      }
-      chips.append(chip);
-    }
-    const ref: SlotRef = { owner: null, slot: slot?.via ?? slotName };
-    chips.append(h("button", { type: "button", class: "fd-lane-add", title: `Add ${title.toLowerCase()}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) }, icon("add"), slot?.entries.length ? null : h("span", {}, "Add")));
-    dropTarget(chips, ctx, ref, slot ?? { via: slotName }, null, true);
-    return h("div", { class: "fd-lane" }, h("div", { class: "fd-lane-title", title: hint }, icon(iconName), title), chips);
-  };
-
   return h(
     "div",
     { class: "fd-table-canvas" },
@@ -742,10 +716,10 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: st
     h(
       "div",
       { class: "fd-lanes" },
-      lane("Filters", "filter", filters, "filters", "Filters narrow the records the table shows."),
-      lane("Row actions", "play", recordActions, "recordActions", "Buttons on each row, such as Edit."),
-      lane("Bulk actions", "checklist", toolbar, "toolbarActions", "Actions on the selected rows, usually in a group."),
-      lane("Header actions", "window", header, "headerActions", "Buttons above the table."),
+      actionLane(ctx, "Filters", "filter", filters, "filters", "Filters narrow the records the table shows."),
+      actionLane(ctx, "Row actions", "play", recordActions, "recordActions", "Buttons on each row, such as Edit."),
+      actionLane(ctx, "Bulk actions", "checklist", toolbar, "toolbarActions", "Actions on the selected rows, usually in a group."),
+      actionLane(ctx, "Header actions", "window", header, "headerActions", "Buttons above the table."),
     ),
   );
 }
@@ -760,5 +734,83 @@ function actionOrFilterChip(ctx: CanvasCtx, c: Comp): HTMLElement {
     iconName ? heroicon(ctx.iconsDir, iconName) : icon(look(info ?? c.cls).icon),
     h("span", {}, labelOf(c)),
     labelOf(c).toLowerCase().startsWith((short(c).replace(/(BulkAction|Action|Filter)$/, "") || short(c)).toLowerCase()) ? null : h("span", { class: "fd-chip-type" }, short(c).replace(/(Action|Filter)$/, "") || short(c)),
+  );
+}
+
+/** A lane of action or filter chips, which take drops and have a + button, as under a table or on a page. */
+export function actionLane(ctx: CanvasCtx, title: string, iconName: string, slot: Slot | undefined, slotName: string, hint: string): HTMLElement {
+  const chips = h("div", { class: "fd-lane-items" });
+  for (const e of slot?.entries ?? []) {
+    const path = [{ slot: slot!.via, index: e.index }];
+    const chip = h("div", { class: `fd-chip-item${samePath(ctx.selection, path) ? " selected" : ""}` }, e.comp ? actionOrFilterChip(ctx, e.comp) : h("span", {}, icon("code"), "Code"));
+    chip.dataset.index = String(e.index);
+    chip.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
+    chip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(path), ctx.menu(path, ev.clientX, ev.clientY));
+    draggable(chip, path);
+    // An action group's actions show inside it, and take drops.
+    const groupSlot = e.comp?.slots[0];
+    if (groupSlot && e.comp) {
+      const inner = h("div", { class: "fd-lane-items nested" });
+      for (const g of groupSlot.entries) {
+        const gp = [...path, { slot: slotKey(groupSlot), index: g.index }];
+        const gchip = h("div", { class: `fd-chip-item${samePath(ctx.selection, gp) ? " selected" : ""}` }, g.comp ? actionOrFilterChip(ctx, g.comp) : h("span", {}, "Code"));
+        gchip.dataset.index = String(g.index);
+        gchip.onclick = (ev) => (ev.stopPropagation(), ctx.select(gp));
+        gchip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(gp), ctx.menu(gp, ev.clientX, ev.clientY));
+        draggable(gchip, gp);
+        inner.append(gchip);
+      }
+      inner.append(h("button", { type: "button", class: "fd-lane-add", title: "Add to the group", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slotKey(groupSlot) }, ev.currentTarget as HTMLElement)) }, icon("add")));
+      dropTarget(inner, ctx, { owner: path, slot: slotKey(groupSlot) }, groupSlot, e.comp, true);
+      chip.append(inner);
+    }
+    chips.append(chip);
+  }
+  const ref: SlotRef = { owner: null, slot: slot?.via ?? slotName };
+  chips.append(h("button", { type: "button", class: "fd-lane-add", title: `Add ${title.toLowerCase()}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) }, icon("add"), slot?.entries.length ? null : h("span", {}, "Add")));
+  dropTarget(chips, ctx, ref, slot ?? { via: slotName }, null, true);
+  return h("div", { class: "fd-lane" }, h("div", { class: "fd-lane-title", title: hint }, icon(iconName), title), chips);
+}
+
+/** A page's header: its title and header actions as buttons, and a lane to edit them. */
+export function renderPageActions(ctx: CanvasCtx, title: string): HTMLElement {
+  const slot = ctx.root.slots.get("actions");
+  return h(
+    "div",
+    { class: "fd-table-canvas" },
+    h("div", { class: "fd-page-head" }, h("h2", {}, title), h("span", { class: "fd-spacer" }), ...(slot?.entries ?? []).map((e) => actionButton(ctx, e.comp))),
+    h("div", { class: "fd-page-body" }, h("span", {}, "The page's content")),
+    h("div", { class: "fd-lanes" }, actionLane(ctx, "Header actions", "window", slot, "actions", "Buttons at the top of the page, beside its title.")),
+  );
+}
+
+/**
+ * An action's modal as Filament shows it: its heading and description, its form, which takes fields like any form,
+ * and its buttons. An action with neither a form nor a confirmation runs when it's clicked.
+ */
+export function renderActionModal(ctx: CanvasCtx, path: Path, c: Comp): HTMLElement {
+  const slot = c.slots.find((s) => s.via === "schema" || s.via === "form");
+  const confirmation = flag(c, "requiresConfirmation");
+  const label = labelOf(c);
+  const fields = !!slot?.entries.length;
+  const desc = text(c, "modalDescription") ?? (confirmation && !fields ? "Are you sure you would like to do this?" : null);
+  const color = COLOR_SWATCH[text(c, "color") ?? (confirmation && /delete|remove/i.test(label) ? "danger" : "primary")] ?? COLOR_SWATCH.primary;
+  const add = (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slot ? slotKey(slot) : "schema" }, ev.currentTarget as HTMLElement));
+  const body = slot
+    ? renderSlot(ctx, slot, { owner: path, slot: slotKey(slot) }, path, c, gridColumns(nodeValue(arg(c, "columns")), 1))
+    : h("button", { type: "button", class: "fd-empty-slot", onclick: add }, icon("add"), h("span", {}, "Add a field to ask for input"));
+  const modal = h(
+    "div",
+    { class: `fd-modal${flag(c, "slideOver") ? " slide" : ""}` },
+    h("header", { class: "fd-modal-head" }, h("h3", {}, text(c, "modalHeading") ?? label), desc ? h("p", {}, desc) : null),
+    fields || !confirmation ? body : h("button", { type: "button", class: "fd-lane-add fd-modal-add", onclick: add }, icon("add"), h("span", {}, "Add a field")),
+    h("footer", { class: "fd-modal-foot" }, h("span", { class: "fd-action button", style: `--action:${color}` }, text(c, "modalSubmitActionLabel") ?? (confirmation && !fields ? "Confirm" : "Submit")), h("span", { class: "fd-action button outlined" }, text(c, "modalCancelActionLabel") ?? "Cancel")),
+  );
+  modal.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
+  return h(
+    "div",
+    { class: "fd-modal-wrap" },
+    h("div", { class: "fd-modal-caption" }, icon("window"), h("span", {}, `When ${label} is clicked`), !fields && !confirmation ? h("span", { class: "fd-faint" }, "· it runs right away, without a modal") : null),
+    modal,
   );
 }

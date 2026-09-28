@@ -1,0 +1,274 @@
+{
+  "errors": false,
+  "namespace": "App\\Enums",
+  "uses": [
+    {
+      "alias": "DemoIconAlias",
+      "name": "App\\Filament\\DemoIconAlias",
+      "kind": "class",
+      "span": [
+        29,
+        60
+      ]
+    },
+    {
+      "alias": "BackedEnum",
+      "name": "BackedEnum",
+      "kind": "class",
+      "span": [
+        61,
+        76
+      ]
+    },
+    {
+      "alias": "HasColor",
+      "name": "Filament\\Support\\Contracts\\HasColor",
+      "kind": "class",
+      "span": [
+        77,
+        117
+      ]
+    },
+    {
+      "alias": "HasIcon",
+      "name": "Filament\\Support\\Contracts\\HasIcon",
+      "kind": "class",
+      "span": [
+        118,
+        157
+      ]
+    },
+    {
+      "alias": "HasLabel",
+      "name": "Filament\\Support\\Contracts\\HasLabel",
+      "kind": "class",
+      "span": [
+        158,
+        198
+      ]
+    },
+    {
+      "alias": "FilamentIcon",
+      "name": "Filament\\Support\\Facades\\FilamentIcon",
+      "kind": "class",
+      "span": [
+        199,
+        241
+      ]
+    },
+    {
+      "alias": "Heroicon",
+      "name": "Filament\\Support\\Icons\\Heroicon",
+      "kind": "class",
+      "span": [
+        242,
+        278
+      ]
+    },
+    {
+      "alias": "Htmlable",
+      "name": "Illuminate\\Contracts\\Support\\Htmlable",
+      "kind": "class",
+      "span": [
+        279,
+        321
+      ]
+    }
+  ],
+  "useInsert": 322,
+  "classes": [
+    {
+      "kind": "enum",
+      "name": "OrderStatus",
+      "fqn": "App\\Enums\\OrderStatus",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [
+        "Filament\\Support\\Contracts\\HasColor",
+        "Filament\\Support\\Contracts\\HasIcon",
+        "Filament\\Support\\Contracts\\HasLabel"
+      ],
+      "attributes": [],
+      "span": [
+        323,
+        1825
+      ],
+      "bodyStart": 388,
+      "bodyEnd": 1824,
+      "traits": [],
+      "constants": [],
+      "cases": [
+        {
+          "name": "New",
+          "value": {
+            "kind": "string",
+            "value": "new",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              404,
+              409
+            ]
+          },
+          "span": [
+            393,
+            410
+          ]
+        },
+        {
+          "name": "Processing",
+          "value": {
+            "kind": "string",
+            "value": "processing",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              434,
+              446
+            ]
+          },
+          "span": [
+            416,
+            447
+          ]
+        },
+        {
+          "name": "Shipped",
+          "value": {
+            "kind": "string",
+            "value": "shipped",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              468,
+              477
+            ]
+          },
+          "span": [
+            453,
+            478
+          ]
+        },
+        {
+          "name": "Delivered",
+          "value": {
+            "kind": "string",
+            "value": "delivered",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              501,
+              512
+            ]
+          },
+          "span": [
+            484,
+            513
+          ]
+        },
+        {
+          "name": "Cancelled",
+          "value": {
+            "kind": "string",
+            "value": "cancelled",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              536,
+              547
+            ]
+          },
+          "span": [
+            519,
+            548
+          ]
+        }
+      ],
+      "properties": [],
+      "methods": [
+        {
+          "name": "getLabel",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            554,
+            848
+          ],
+          "docStart": null,
+          "body": [
+            594,
+            847
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                610,
+                841
+              ]
+            }
+          ]
+        },
+        {
+          "name": "getColor",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            854,
+            1116
+          ],
+          "docStart": null,
+          "body": [
+            894,
+            1115
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                910,
+                1109
+              ]
+            }
+          ]
+        },
+        {
+          "name": "getIcon",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string | BackedEnum | Htmlable",
+          "attributes": [],
+          "span": [
+            1122,
+            1823
+          ],
+          "docStart": null,
+          "body": [
+            1185,
+            1822
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                1201,
+                1816
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
