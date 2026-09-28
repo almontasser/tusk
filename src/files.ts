@@ -7,6 +7,7 @@ import { confirm, pick } from "./palette";
 import { newFileContent, psr4From } from "./psr4";
 import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
+import { hideInTree } from "./treehidden";
 
 type Host = {
   root(): string;
@@ -228,7 +229,7 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     { label: "New Folder…", run: () => newFolder(dir) },
   ];
   if (path !== host.root()) {
-    items.push("-", { label: "Rename…", run: () => rename(path) }, { label: "Move to Trash", run: () => remove(path) });
+    items.push("-", { label: "Rename…", run: () => rename(path) }, { label: "Move to Trash", run: () => remove(path) }, { label: "Hide in Project Tree", run: () => hideInTree(rel) });
   }
   items.push(
     "-",

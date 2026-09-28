@@ -4,7 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 import { age } from "./gitparse";
-import { EXCLUDED_FOLDERS } from "./icons";
+import { localHistory } from "./limits";
+import { skippedPath } from "./treehidden";
 import { pick } from "./palette";
 import { toPrune } from "./retention";
 import { readText, writeText } from "./projectfiles";
@@ -13,7 +14,7 @@ type Host = { root(): string; showDiff(path: string, original: string, modified:
 type Entry = { name: string; path: string; is_dir: boolean };
 
 let host: Host;
-const MAX_SIZE = 1_000_000;
+const maxSize = () => localHistory.localHistoryMaxKB * 1000;
 
 const relative = (path: string) => path.slice(host.root().length + 1);
 const projectDir = async () => `${await appDataDir()}/history/${host.root().replace(/[^A-Za-z0-9]+/g, "_")}`;
@@ -27,14 +28,14 @@ const versions = async (dir: string) =>
 
 /** Saves a version of a project file, unless it's large or the same as the last version. `time` names the version. */
 export async function recordVersion(path: string, text: string, time = Date.now()) {
-  if (!host.root() || !path.startsWith(host.root() + "/") || text.length > MAX_SIZE) return;
+  if (!host.root() || !path.startsWith(host.root() + "/") || text.length > maxSize()) return;
   try {
     const dir = await fileDir(path);
     const [last] = await versions(dir);
     if (last && (await invoke<string>("read_file", { path: `${dir}/${last}` }).catch(() => null)) === text) return;
     await invoke("create_dir", { path: dir });
     await invoke("write_file", { path: `${dir}/${time}.txt`, contents: text });
-    for (const name of toPrune(await versions(dir), Date.now())) await invoke("remove_path", { path: `${dir}/${name}` });
+    for (const name of toPrune(await versions(dir), Date.now(), localHistory.localHistoryDays, localHistory.localHistoryVersions)) await invoke("remove_path", { path: `${dir}/${name}` });
   } catch {
     // History is a convenience; a failure here must never block saving.
   }
@@ -64,14 +65,14 @@ async function ignored(paths: string[]): Promise<Set<string> | null> {
 export async function recordExternalChanges(paths: string[]) {
   const root = host.root();
   // .env files hold secrets, so they're never copied, even in a project without git to ignore them.
-  const candidates = paths.filter((p) => p.startsWith(root + "/") && !/(^|\/)\.env[^/]*$/.test(p) && !relative(p).split("/").some((part) => EXCLUDED_FOLDERS.has(part)));
+  const candidates = paths.filter((p) => p.startsWith(root + "/") && !/(^|\/)\.env[^/]*$/.test(p) && !skippedPath(relative(p)));
   if (!candidates.length) return;
   const skip = await ignored(candidates);
   if (!skip) return; // Rather than copy files git might ignore.
   // ponytail: 200 files per batch, so a branch switch that rewrites thousands doesn't copy them all; git has those anyway.
   for (const path of candidates.filter((p) => !skip.has(p)).slice(0, 200)) {
     const text = await readText(path).catch(() => null); // Deleted, a folder, or not text.
-    if (text === null || text.length > MAX_SIZE) continue;
+    if (text === null || text.length > maxSize()) continue;
     if (!(await versions(await fileDir(path))).length) {
       const staged = await invoke<string>("run_capture", { cwd: root, program: "git", args: ["show", `:./${relative(path)}`], input: null }).catch(() => null);
       if (staged !== null && staged !== text) await recordVersion(path, staged, Date.now() - 1);

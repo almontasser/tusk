@@ -35,7 +35,7 @@ const byExtension: [RegExp, Icon][] = [
   [/\.(http|rest)$/, { codicon: "globe", color: "icon-ts" }],
 ];
 
-/** Folders that hold dependencies or generated files, shown dimmed, as PhpStorm marks excluded folders. */
+/** Folders shown as excluded when the caller doesn't say; the project tree uses the project's list (treehidden.ts). */
 export const EXCLUDED_FOLDERS = new Set(["vendor", "node_modules", "storage", ".git", ".idea", ".claude", ".phpunit.cache", "dist", "build"]);
 
 export function fileIcon(name: string): Icon {
@@ -44,9 +44,9 @@ export function fileIcon(name: string): Icon {
   return { codicon: "file", color: "icon-config" };
 }
 
-export function folderIcon(name: string, open: boolean): Icon {
+export function folderIcon(name: string, open: boolean, excluded = EXCLUDED_FOLDERS.has(name)): Icon {
   const codicon = open ? "folder-opened" : "folder";
-  if (EXCLUDED_FOLDERS.has(name)) return { codicon, color: "icon-folder-excluded" };
+  if (excluded) return { codicon, color: "icon-folder-excluded" };
   if (name === "tests") return { codicon, color: "icon-folder-test" };
   if (name === "app" || name === "src") return { codicon, color: "icon-folder-special" };
   return { codicon, color: "icon-folder" };

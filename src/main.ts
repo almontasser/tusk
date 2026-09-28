@@ -7,7 +7,7 @@ import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
-import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
+import { fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, showBreakpoints, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, xdebugEnv } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
@@ -57,6 +57,8 @@ import { initJsonSchemas } from "./jsonschemas";
 import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import { choosePhpInterpreter, configureTools, initToolPaths } from "./toolpaths";
+import { editTreeHidden, initTreeHidden, toggleHiddenFiles, treeState } from "./treehidden";
+import { limits } from "./limits";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -839,7 +841,7 @@ const recentProjects = (): string[] => {
 
 function rememberProject(dir: string) {
   try {
-    localStorage.setItem("recentProjects", JSON.stringify([dir, ...recentProjects().filter((d) => d !== dir)].slice(0, 12)));
+    localStorage.setItem("recentProjects", JSON.stringify([dir, ...recentProjects().filter((d) => d !== dir)].slice(0, limits.recentProjects)));
   } catch {}
 }
 
@@ -891,7 +893,7 @@ function showWelcome() {
 /** Draws a tree row: chevron (folders), icon, and name, indented by depth. */
 function paintRow(row: HTMLElement, name: string, isDir: boolean) {
   const open = row.classList.contains("open");
-  const icon = isDir ? folderIcon(name, open) : fileIcon(name);
+  const icon = isDir ? folderIcon(name, open, row.classList.contains("excluded")) : fileIcon(name);
   const depth = relative(row.dataset.path!).split("/").length - 1;
   row.style.paddingLeft = `${6 + depth * 14}px`;
   row.innerHTML = `<span class="chevron codicon ${isDir ? (open ? "codicon-chevron-down" : "codicon-chevron-right") : ""}"></span><span class="file-icon codicon codicon-${icon.codicon} ${icon.color}"></span><span class="name"></span>`;
@@ -908,11 +910,12 @@ async function renderDir(ul: HTMLUListElement, dir: string, onlyIfChanged = fals
   const listing = entries.map((e) => `${e.is_dir ? "d" : "f"}${e.name}`).join("\0");
   if (onlyIfChanged && listings.get(ul) === listing) return;
   listings.set(ul, listing);
+  const states = new Map(entries.map((e) => [e, treeState(relative(e.path))]));
   ul.replaceChildren(
-    ...entries.map((e) => {
+    ...entries.filter((e) => states.get(e) !== "omit").map((e) => {
       const li = document.createElement("li");
       const row = document.createElement("div");
-      row.className = `row ${e.is_dir ? "dir" : "file"}${e.is_dir && EXCLUDED_FOLDERS.has(e.name) ? " excluded" : ""}`;
+      row.className = `row ${e.is_dir ? "dir" : "file"}${states.get(e) ? ` ${states.get(e)}` : ""}`;
       row.dataset.path = e.path;
       row.role = "treeitem";
       if (e.is_dir && openDirs.has(e.path)) row.classList.add("open");
@@ -1560,6 +1563,8 @@ const actions: Action[] = [
   { label: "Reindex Project", run: () => reindex() },
   { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
   { label: "Choose PHP Interpreter…", run: () => root && choosePhpInterpreter() },
+  { label: "Hidden Files and Folders…", run: () => root && editTreeHidden() },
+  { label: "Show Hidden Files", run: toggleHiddenFiles },
   { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
@@ -1921,6 +1926,8 @@ $("welcome-open").onclick = () => openFolder();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
+$("tree-hidden").onclick = toggleHiddenFiles;
+initTreeHidden(() => root && renderDir($("tree") as HTMLUListElement, root));
 $("tree-locate").onclick = selectOpenedFile;
 $("todo-refresh").onclick = () => loadTodos();
 

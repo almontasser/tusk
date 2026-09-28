@@ -194,8 +194,10 @@ async function persist() {
   }
 }
 
-/** Changes one setting, applies it, and saves. */
-export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
+/** Changes one setting, applies it, and saves. A key another module added with registerSettings takes its own value's type. */
+export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]): void;
+export function updateSetting(key: string, value: Value): void;
+export function updateSetting(key: string, value: unknown) {
   set(key, value);
 }
 

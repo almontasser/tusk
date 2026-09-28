@@ -76,6 +76,7 @@ import { choose, confirm, type Item, pick, rank } from "./palette";
 import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
 import { h, icon, iconButton } from "./dom";
+import { limits } from "./limits";
 
 
 export { selectEnvironment };
@@ -1512,7 +1513,7 @@ type ResTab = "body" | "headers" | "cookies" | "timing" | "tests" | "logs" | "qu
 let resTab: ResTab = "body";
 let bodyMode: "pretty" | "raw" | "preview" = "pretty";
 let responseEditor: monaco.editor.IStandaloneCodeEditor | null = null;
-const MAX_SHOWN = 5 * 1024 * 1024;
+const MAX_SHOWN = () => limits.httpShownMB * 1024 * 1024;
 
 function showExchange(x: Exchange) {
   shown = x;
@@ -1589,7 +1590,7 @@ function bodyView(x: Exchange) {
   if (!x.heads.length) return pane.append(h("p", { class: "http-hint" }, "No response.")), pane;
   if (!size) return pane.append(h("p", { class: "http-hint" }, "The response has no body.")), pane;
   const status = x.heads.at(-1)?.status ?? 0;
-  if (status >= 500 && isText(type) && size <= MAX_SHOWN)
+  if (status >= 500 && isText(type) && size <= MAX_SHOWN())
     invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
       const report = laravelException(text, status);
       if (report && pane.isConnected) bar.after(exceptionBanner(report, /json/.test(type)));
@@ -1611,7 +1612,7 @@ function bodyView(x: Exchange) {
     return pane;
   }
   if (!isText(type)) return pane.append(h("p", { class: "http-hint" }, `A ${bytes(size)} ${type || "binary"} body. Save it, or open it in an editor tab.`)), pane;
-  if (size > MAX_SHOWN) return pane.append(h("p", { class: "http-hint" }, `The body is ${bytes(size)}, too large to show here. Open it in an editor tab.`)), pane;
+  if (size > MAX_SHOWN()) return pane.append(h("p", { class: "http-hint" }, `The body is ${bytes(size)}, too large to show here. Open it in an editor tab.`)), pane;
   const el = h("div", { class: "http-code http-response-code" });
   pane.append(el);
   invoke<string>("read_file", { path: x.bodyPath }).then((text) => {

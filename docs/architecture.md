@@ -2496,7 +2496,8 @@ For files that aren't open, the editor has no copy of the text before the
 change, so `recordExternalChanges` keeps the text after it: the next change
 then finds its earlier text in the history. The watcher batch in `main.ts`
 passes it every changed path without a Monaco model. It skips folders in
-`EXCLUDED_FOLDERS` (such as `vendor`, `node_modules`, and `.git`), `.env`
+the project tree's hidden and excluded patterns (`skippedPath` in
+`src/treehidden.ts`, such as `vendor` and `node_modules`), `.env`
 files, and anything `git check-ignore --stdin` names, in one call per batch.
 `run_capture` fails on any non-zero exit: an empty error is exit status 1 (none
 ignored), and "not a git repository" means there's nothing to ignore, but any
@@ -3666,8 +3667,30 @@ Icons come from Monaco's icon font (codicons), which the page already loads, so
 there's no icon dependency. Monaco's `.codicon[class*='codicon-']` rule sets
 the icon size with high specificity, so the stylesheet uses `!important` where
 it changes a size. `src/icons.ts` maps file and folder names to a codicon and a
-color class; `src/icons.test.ts` covers it. Folders such as `vendor`,
-`node_modules`, and `storage` are dimmed, as PhpStorm marks excluded folders.
+color class; `src/icons.test.ts` covers it. Excluded entries are dimmed, as
+PhpStorm marks excluded folders.
+
+### Hidden and excluded files
+
+The project values `treeHidden` and `treeExcluded` (`src/treehidden.ts`, with
+defaults and the matcher in `src/treefilter.ts`, tested) decide how the tree
+shows each entry: `treeState(rel)` returns `omit`, `hidden` (when **Show hidden
+files and folders** is on), `excluded`, or nothing, and `renderDir` filters and
+classes the rows with it. A pattern without `/` matches a name at any depth; one
+with `/` goes through `covers` from `indexexclude.ts`, relative to the project.
+`folderIcon` takes the excluded flag from the row instead of a fixed set. A
+change to either list or the setting redraws the tree from the root, which
+keeps open folders open. The fixed `EXCLUDED_FOLDERS` in `icons.ts` remains
+only as `folderIcon`'s default.
+
+### Limits
+
+`src/limits.ts` registers the **Limits** and **Local History** settings groups,
+and each module reads them when it needs the value: recent projects
+(`rememberProject`), Find in Files and TODO (`search_text` takes a `limit`;
+other callers keep the backend's 20,000), the HTTP history's size and the
+largest response body shown, and local history's `toPrune` arguments and file
+size cap.
 
 ### Breadcrumbs
 
@@ -5201,4 +5224,15 @@ formats as before. Format on save stays a personal setting, with a per-language
 override in the same value rather than a second setting, so one dialog shows
 both. Built-in unregisters Tusk's provider for the language instead of
 returning nothing from it, because Monaco uses one provider when several apply.
+
+### 2026-09-28: Which hardcoded limits became settings
+
+The recent projects cap, the Find in Files limit, local history's retention,
+the HTTP history's size and largest shown body, and the tree's hidden and
+excluded folders became settings; the tree's lists are project state, since a
+team's generated folders are part of the project. The Git log's page of 300
+stayed: the log already loads the next page on demand, so the size only tunes
+how often it asks. AI completion's internal limits stayed, since they're tuned
+against the model's context. The tools manifest URL stayed, since a mirror
+would need a list signed with Tusk's key.
 

@@ -4,6 +4,7 @@ use grep::searcher::{sinks::UTF8, Searcher};
 use ignore::{overrides::OverrideBuilder, WalkBuilder};
 use serde::{Deserialize, Serialize};
 
+/// The default most matches; Find in Files and TODO pass the Limits setting.
 const MAX_MATCHES: usize = 20_000;
 
 /// Walks the project like ripgrep: respects .gitignore (even outside a git repo),
@@ -145,11 +146,11 @@ pub struct Match {
 
 /// Every occurrence of the query in the project, up to 20,000.
 #[tauri::command]
-pub async fn search_text(root: String, query: Query, include: String) -> Result<Vec<Match>, String> {
-    crate::blocking(move || find_text(root, query, include)).await
+pub async fn search_text(root: String, query: Query, include: String, limit: Option<usize>) -> Result<Vec<Match>, String> {
+    crate::blocking(move || find_text(root, query, include, limit.unwrap_or(MAX_MATCHES))).await
 }
 
-fn find_text(root: String, query: Query, include: String) -> Result<Vec<Match>, String> {
+fn find_text(root: String, query: Query, include: String, limit: usize) -> Result<Vec<Match>, String> {
     if query.text.is_empty() {
         return Ok(vec![]);
     }
@@ -171,12 +172,12 @@ fn find_text(root: String, query: Query, include: String) -> Result<Vec<Match>, 
                         end: utf16(m.end()),
                         text: text.trim_end().into(),
                     });
-                    matches.len() < MAX_MATCHES
+                    matches.len() < limit
                 });
-                Ok(matches.len() < MAX_MATCHES)
+                Ok(matches.len() < limit)
             }),
         );
-        if matches.len() >= MAX_MATCHES {
+        if matches.len() >= limit {
             break;
         }
     }
@@ -247,7 +248,7 @@ mod tests {
         std::fs::write(dir.join("b.txt"), "needle").unwrap();
         std::fs::write(dir.join("vendor/c.php"), "needle").unwrap();
         let root = dir.to_string_lossy().to_string();
-        let search = |query: Query, include: &str| tauri::async_runtime::block_on(search_text(root.clone(), query, include.into())).unwrap();
+        let search = |query: Query, include: &str| tauri::async_runtime::block_on(search_text(root.clone(), query, include.into(), None)).unwrap();
 
         let found = search(q("needle", false, false, false), "");
         assert_eq!(found.len(), 3); // Two in a.php, one in b.txt; vendor is ignored.
@@ -257,7 +258,7 @@ mod tests {
         assert_eq!(search(q("needle", false, true, false), "").len(), 2);
         assert_eq!(search(q("needle", false, false, false), "*.php").len(), 2);
         assert_eq!(search(q("Need", false, false, true), "").len(), 0);
-        assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into())).is_err());
+        assert!(tauri::async_runtime::block_on(search_text(root.clone(), q("(", true, false, false), "".into(), None)).is_err());
 
         let files = tauri::async_runtime::block_on(list_files(root.clone(), None));
         assert!(files.contains(&"a.php".to_string()) && !files.iter().any(|f| f.starts_with("vendor")));
