@@ -774,6 +774,46 @@ Each language server has its own status slot, and the status bar shows the
 most recent message that is still set. Otherwise one server finishing a task
 would clear another server's indexing progress.
 
+### Errors and progress
+
+`src/status.ts` is the one place the app reports what's happening. Use it
+instead of writing to the status bar or `toast()` directly:
+
+```ts
+status(text, source = "app", kind?: "error" | "info")
+showError(message, error?, action?: { label, run })
+errorText(error): string
+withProgress<T>(label, task: (signal: AbortSignal) => Promise<T>, { cancellable?, error? }): Promise<T | undefined>
+installErrorHandlers()
+```
+
+- `status` sets a message per source. A source ending in `:progress` shows a
+  spinner until you clear it; any other message clears after 8 seconds. Pass
+  `"error"` to toast it too. Without a kind, a message that reads like a
+  failure ("failed", "can't") still toasts, for the modules whose `Host.status`
+  predates `kind`.
+- `showError("Can't merge #12", e)` shows "Can't merge #12: <reason>" as a
+  toast and in the status bar, and logs `e` with its stack. `errorText` reads
+  an `Error`, a Tauri command's error string, or anything else, drops Git's
+  `hint:` lines, and keeps it to one line.
+- `withProgress` runs a task under a spinner and reports its failure with
+  `showError`. With `cancellable: true`, the status bar shows **Cancel**, which
+  aborts the signal the task gets; the task checks `signal.throwIfAborted()`
+  between steps or passes the signal on. A canceled task shows "Canceled", not
+  an error. It resolves to `undefined` when the task failed or was canceled, so
+  callers that need to stop check for that. Tauri commands can't be aborted,
+  so a task that waits on a slow command stops at its next step.
+- `installErrorHandlers` (called once in `main.ts`) turns unhandled promise
+  rejections and uncaught errors into a toast. Monaco's `Canceled` errors,
+  `AbortError`, and `ResizeObserver` loop warnings are dropped. `toast()`
+  shows a message once while an identical one is on screen.
+- The palette shows a failing source's error as a row, rather than an empty
+  list that reads as "no results".
+
+A search that a destructive action depends on, such as Safe Delete's usages or
+Inline Constant's uses, fails rather than falling back to "none found", so the
+action stops instead of working on incomplete results.
+
 ### Language server client
 
 `src/lsp.ts` is a small client written for this editor:
@@ -4711,3 +4751,15 @@ it `vendor`'s symbols (370 MB since the index loads only the library code the
 project reaches); Mago's crates are
 pinned to `=1.50.0`, because their API changes between minor versions, and
 upgrading them is deliberate work.
+
+### 2026-09-28: One module for errors and progress
+
+Failures were reported three ways: `status()` toasted any message that matched
+a regex for failure words, modules wrote their own "Loading…" and error text,
+and many `invoke` calls had no catch at all, so they failed silently.
+`src/status.ts` now holds `status`, `showError`, `withProgress`, and a global
+handler for unhandled rejections. The regex stays as a fallback for the
+`Host.status` callers that don't pass a kind, rather than changing every
+module's `Host` type at once. `withProgress` takes an `AbortSignal` so long
+operations added later (the debugger, git, database, HTTP) share one cancel
+button in the status bar rather than each drawing its own.

@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
+import { showError, withProgress } from "./status";
 import { openTerminal, showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): unknown; status(text: string, source?: string): void };
@@ -161,16 +162,15 @@ async function requestAndProfile(path: string) {
   const origin = await profilingOrigin();
   if (!origin) return;
   const since = Math.floor(Date.now() / 1000);
-  host.status(`Requesting ${path}…`, "profiler:progress");
-  const result = await invoke<string>("run_capture", {
-    cwd: "/",
-    program: "/usr/bin/curl",
-    args: ["-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}", `${origin}${path}`],
-    input: null,
-  }).catch(() => "");
-  host.status("", "profiler:progress");
+  // -S prints why a request failed, such as a refused connection or a timeout, which the message then shows.
+  const result = await withProgress(
+    `Requesting ${path}…`,
+    () => invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["-sS", "-o", "/dev/null", "-w", "%{http_code} %{time_total}", `${origin}${path}`], input: null }),
+    { error: `Couldn't request ${path}. The profiling server's terminal tab may say why` },
+  );
+  if (result === undefined) return;
   const [code, seconds] = result.split(" ");
-  if (!code || code === "000") return host.status(`Couldn't request ${path}: the profiling server didn't answer. See its terminal tab.`);
+  if (!code || code === "000") return showError(`Couldn't request ${path}: the profiling server didn't answer. See its terminal tab.`);
   await openProfileSince(since, `GET ${path} (${code})`);
   host.status(`GET ${path}: ${code} in ${Math.round(Number(seconds) * 1000)} ms (with the profiler, which slows PHP down).`);
 }
@@ -286,14 +286,14 @@ export async function openProfile(path: string, label?: string) {
 /** Reads and parses a profile, decompressing it when Xdebug gzipped it (the default). Null, with a message, when it can't. */
 async function load(path: string): Promise<Profile | null> {
   host.status(`Reading ${path.split("/").pop()}…`, "profiler:progress");
-  const done = (message = "") => (host.status("", "profiler:progress"), message && host.status(message), null);
+  const done = () => host.status("", "profiler:progress");
   let parsed: Profile;
   try {
     parsed = fromRaw(await invoke<RawProfile>("parse_profile", { path }));
   } catch (e) {
-    return done(`Couldn't read the profile: ${e}`);
+    return done(), showError("Couldn't read the profile", e), null;
   }
-  if (!parsed.functions.length) return done(`Couldn't read the profile: ${path} isn't a Cachegrind file.`);
+  if (!parsed.functions.length) return done(), showError(`Couldn't read the profile: ${path} isn't a Cachegrind file.`), null;
   done();
   return parsed;
 }

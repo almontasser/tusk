@@ -251,7 +251,7 @@ async function inlineConstant(editor: monaco.editor.ICodeEditor): Promise<boolea
   host.status(`Looking for uses of ${name}…`);
   // Subclasses that don't declare their own reach it as self::, static::, or by their own name.
   const heirs = new Set([owner, ...(await descendantsOf(owner)).filter((d) => !constantDeclaration(d.text, name, bodyOf(d.text, d.type))).map((d) => d.type.fqn)]);
-  const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: `::\\s*${name}\\b`, regex: true, caseSensitive: true, wholeWord: false }, include: "*.php" }).catch(() => [] as Match[]);
+  const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: `::\\s*${name}\\b`, regex: true, caseSensitive: true, wholeWord: false }, include: "*.php" });
   const uses: { path: string; text: string; start: number; end: number }[] = [];
   for (const path of new Set([model.uri.fsPath, ...matches.map((m) => m.path)])) {
     const source = await textOf(path).catch(() => null);
@@ -402,7 +402,7 @@ export async function descendantsOf(fqn: string): Promise<Descendant[]> {
   const found: Descendant[] = [];
   for (let parent = queue.shift(); parent; parent = queue.shift()) {
     const query = { text: parent.split("\\").pop()!, regex: false, caseSensitive: true, wholeWord: true };
-    const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
+    const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" });
     for (const path of new Set(matches.map((m) => m.path))) {
       const text = await textOf(path).catch(() => null);
       if (text === null) continue;
@@ -451,7 +451,7 @@ async function constructorCallsOf(model: monaco.editor.ITextModel, container: L.
     if (classes.has(d.type.extends[0] ?? "") && !/\bfunction\s+&?__construct\s*\(/i.test(d.body)) classes.add(d.type.fqn);
   const alternatives = [...classes].map((c) => c.split("\\").pop()).join("|");
   const query = { text: `\\bnew\\s+\\\\?([\\w\\\\]*\\\\)?(${alternatives})\\s*\\(`, regex: true, caseSensitive: false, wholeWord: false };
-  const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" }).catch(() => []);
+  const matches = await invoke<Match[]>("search_text", { root: host.root(), query, include: "*.php" });
   const paths = new Set([model.uri.fsPath, ...descendants.map((d) => d.path), ...matches.map((m) => m.path)]);
   const locations: L.Location[] = [];
   for (const path of paths) {
@@ -543,7 +543,7 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
     const own = declarationParts(o.text, o.nameEnd)?.params ?? [];
     const after = forOverride(base.params, s.params, own);
     declare(monaco.Uri.file(o.path).toString(), o.text, o.nameEnd, after, { returnTypeWas: base.returnType });
-    const refs = (await tuskRequest<L.Location[]>("tusk/memberReferences", { class: o.fqn, method: symbol.name }).catch(() => null)) ?? [];
+    const refs = (await tuskRequest<L.Location[]>("tusk/memberReferences", { class: o.fqn, method: symbol.name })) ?? [];
     groups.push({ refs, before: own, after, owner: { fqn: o.fqn, text: o.text } });
   }
   const skipped: Skipped[] = [];

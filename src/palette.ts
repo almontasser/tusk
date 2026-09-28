@@ -1,4 +1,5 @@
 // A keyboard-driven picker used by go to file, go to class, find in files, and actions.
+import { errorText } from "./status.ts";
 
 /**
  * A palette row. `icon` is codicon and color classes, such as "codicon-file-code icon-php".
@@ -183,7 +184,9 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
 
   const update = () => {
     const current = ++generation;
-    Promise.resolve(source(input.value)).then((result) => {
+    // A source that fails shows why in the list, rather than an empty list that reads as "no results".
+    const failed = (e: unknown): Item[] => (console.error(placeholder, e), [{ label: "Couldn't load the list", detail: errorText(e), icon: "codicon-error icon-error", run: () => {} }]);
+    new Promise<Item[]>((resolve) => resolve(source(input.value))).then(null, failed).then((result) => {
       if (current !== generation) return; // A newer query already ran.
       items = result;
       selected = 0;

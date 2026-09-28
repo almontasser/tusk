@@ -9,6 +9,7 @@ import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
 import { settings, onSettings } from "./settings";
+import { errorText, showError } from "./status";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
 type Host = {
@@ -28,7 +29,7 @@ let host: Host;
 /** Problems in files that aren't open, by path, from the last scan or from a file's markers when it closed. */
 const scanned = new Map<string, Problem[]>();
 /** The project the scan is for, and a number that tells a newer scan from an older one. */
-let scan = { root: "", run: 0, running: false, progress: "" };
+let scan = { root: "", run: 0, running: false, progress: "", error: "" };
 
 const panel = document.createElement("div");
 panel.className = "problems";
@@ -215,7 +216,8 @@ function render() {
   warningToggle.update(warnings);
   currentFile.classList.toggle("on", currentOnly);
   currentFile.setAttribute("aria-pressed", String(currentOnly));
-  summary.textContent = [scan.progress, `${files.length} files`].filter(Boolean).join(" · ");
+  summary.textContent = [scan.progress, scan.error, `${files.length} files`].filter(Boolean).join(" · ");
+  summary.classList.toggle("error", !!scan.error);
   rescan.disabled = scan.running;
   rows = [];
   list.dataset.empty = scan.running ? "Checking the project…" : words || shown.size < 2 || currentOnly ? "No problems match." : "No problems found.";
@@ -316,7 +318,7 @@ export function showProblems() {
 /** Forgets the last project's scan, when another project opens. */
 export function forgetProblems() {
   scanned.clear();
-  scan = { root: "", run: scan.run + 1, running: false, progress: "" };
+  scan = { root: "", run: scan.run + 1, running: false, progress: "", error: "" };
   render();
 }
 
@@ -337,7 +339,7 @@ export async function scanProject(_useCache = false) {
   if (!root || scan.running) return;
   const run = ++scan.run;
   const current = () => run === scan.run;
-  scan = { root, run, running: true, progress: "Checking the project…" };
+  scan = { root, run, running: true, progress: "Checking the project…", error: "" };
   render();
   try {
     await readModels(root);
@@ -365,7 +367,8 @@ export async function scanProject(_useCache = false) {
     renderSoon();
   } catch (e) {
     if (!current()) return;
-    host.status(`Couldn't scan the project: ${e}`);
+    showError("Couldn't check the project", e, { label: "Try Again", run: () => scanProject() });
+    scan.error = `Couldn't check the project: ${errorText(e)}`;
     scan.progress = "";
   } finally {
     if (current()) scan.running = false;

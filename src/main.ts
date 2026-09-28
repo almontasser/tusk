@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { toast } from "./dom";
+import { installErrorHandlers, showError, status } from "./status";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
@@ -56,6 +57,7 @@ type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
 
 const $ = (id: string) => document.getElementById(id)!;
+installErrorHandlers();
 // ---- Editor panes ----
 // Each pane has its own tabs (`Pane.paths`); `tabs` holds every open file's model, shared by
 // panes that show it. `editor` and `active` are the focused pane's editor and file. Panes nest in
@@ -756,29 +758,6 @@ function forget(path: string) {
   markActiveInTree();
 }
 
-/**
- * Status messages by source, so one language server finishing a task doesn't clear another's
- * progress. The status bar shows the most recent message that is still set.
- */
-const statuses = new Map<string, string>();
-const statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-/**
- * Shows a status message. Sources ending in ":progress" are background work and show a
- * spinner until cleared; other messages clear themselves after 8 seconds.
- */
-function status(text: string, source = "app") {
-  statuses.delete(source);
-  if (text) statuses.set(source, text);
-  clearTimeout(statusTimers.get(source));
-  if (text && !source.endsWith(":progress")) statusTimers.set(source, setTimeout(() => status("", source), 8000));
-  const [latestSource, latest] = [...statuses].at(-1) ?? ["", ""];
-  $("lsp-status").textContent = latest;
-  $("lsp-status").classList.toggle("busy", latestSource.endsWith(":progress"));
-  // Failures also show as a toast, so they aren't missed in the status bar.
-  if (/\b(failed|error|fatal|can't|couldn't|invalid)\b/i.test(text)) toast(text);
-}
-
 // ---- Status bar items for the focused editor ----
 
 function updateStatusItems() {
@@ -1117,7 +1096,7 @@ function changeEncoding() {
           } else if (how === "Reopen") {
             if (isDirty(tab) && !(await confirm(`Reopen ${nameOf(path)}? Its unsaved changes are lost.`, "Reopen"))) return;
             setCharset(path, charset);
-            const text = await readText(path).catch((e) => (setCharset(path, undefined), status(`Couldn't reopen ${relative(path)}: ${e}`), null));
+            const text = await readText(path).catch((e) => (setCharset(path, undefined), showError(`Couldn't reopen ${relative(path)}`, e), null));
             if (text === null) return;
             tab.model.setValue(text);
             tab.saved = tab.model.getAlternativeVersionId();
@@ -1174,7 +1153,7 @@ async function saveFile(path: string) {
   try {
     await writeText(path, text);
   } catch (e) {
-    return status(`Couldn't save ${relative(path)}: ${e}`);
+    return showError(`Couldn't save ${relative(path)}`, e);
   }
   markSaved(path);
   didSave(tab.model);
@@ -1409,7 +1388,8 @@ const goToSymbol = () => pick("Go to symbol", (q) => symbolItems(q, false), 150)
 /** Shows the current file against the clipboard, or against another file, in the diff view. */
 async function compareWithClipboard() {
   if (!active) return;
-  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch(() => "");
+  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch((e) => (showError("Can't read the clipboard", e), null));
+  if (clipboard === null) return;
   showDiff(relative(active), clipboard, editor.getValue(), "Clipboard ↔ Current file");
 }
 

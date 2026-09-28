@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Advisory, advisories, dependents, namespaceChecks, packages, type Package, requiredBy } from "./composerdata";
 import { toolPath } from "./lsp";
 import { confirm, pick } from "./palette";
+import { errorText, showError } from "./status";
 import { openTerminal } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
@@ -138,7 +139,7 @@ function render(list: Package[], info: Info) {
  * up to composer.json, so you can follow the chain from a package to the requirement that brought it in.
  */
 async function why(name: string) {
-  const out = await capture("why", name).catch((e) => (host.status(`Can't tell why ${name} is installed: ${String(e).trim()}`), null));
+  const out = await capture("why", name).catch((e) => (showError(`Can't tell why ${name} is installed`, e), null));
   if (out === null) return;
   const project = JSON.parse(await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => "{}")).name;
   const list = dependents(out);
@@ -195,15 +196,21 @@ function packageActions(p: Package, found: Advisory[]) {
 type SearchResult = { name: string; description: string; downloads: number };
 
 /** Searches Packagist and requires the chosen package, as a dependency or a dev dependency. */
-export function requirePackage() {
+export function requirePackage(query = "") {
   if (!host.root()) return;
   pick(
     "Require a package: search Packagist",
     async (q) => {
       if (q.trim().length < 2) return [];
       const url = `https://packagist.org/search.json?per_page=20&q=${encodeURIComponent(q.trim())}`;
-      const out = await invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["-fsSL", "--max-time", "10", url], input: null }).catch(() => "{}");
-      const results: SearchResult[] = JSON.parse(out).results ?? [];
+      let results: SearchResult[];
+      try {
+        results = JSON.parse(await invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["-fsSL", "--max-time", "10", url], input: null })).results ?? [];
+      } catch (e) {
+        // Choosing the row searches again.
+        return [{ label: "Can't search Packagist. Choose to try again.", detail: errorText(e), icon: "codicon-error icon-error", run: () => requirePackage(q) }];
+      }
+      if (!results.length) return [{ label: `No packages match "${q.trim()}"`, icon: "codicon-info", run: () => requirePackage(q) }];
       return results.map((r) => ({
         label: r.name,
         detail: `${r.downloads.toLocaleString()} downloads · ${r.description}`,
@@ -215,6 +222,7 @@ export function requirePackage() {
       }));
     },
     300,
+    { value: query },
   );
 }
 
@@ -224,6 +232,6 @@ export function initComposer(h: Host) {
   host = h;
   $("composer-refresh").onclick = loadPackages;
   $("composer-filter").onchange = loadPackages;
-  $("composer-require").onclick = requirePackage;
+  $("composer-require").onclick = () => requirePackage();
   $("composer-update").onclick = updateAll;
 }

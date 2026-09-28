@@ -388,6 +388,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #path { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #lsp-status { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #lsp-status.busy::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--faint); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex-shrink: 0; }
+#status-cancel { flex-shrink: 0; color: var(--muted); }
+#status-cancel[hidden] { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ==========================================================================
@@ -547,6 +549,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .search-field button[aria-pressed="true"] { background: var(--selected); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
 #find-summary, #todo-summary { margin: 2px 12px 6px; color: var(--faint); font-size: 12px; }
 #find-summary:empty, #todo-summary:empty { display: none; }
+#find-summary.error, #todo-summary.error { color: var(--red); -webkit-user-select: text; user-select: text; }
 #find-results, #find-results ul, #todo-results, #todo-results ul { list-style: none; margin: 0; padding: 0; }
 .find-file { display: flex; align-items: center; gap: 6px; height: var(--row); padding: 0 6px 0 10px; font-weight: 600; }
 .find-file .dir { color: var(--faint); font-weight: normal; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -576,6 +579,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .checks-pending { color: var(--yellow); }
 .checks-skipped, .checks-none { color: var(--faint); }
 #pr-detail { padding: 8px 12px 16px; }
+.pr-problem { padding: 8px 12px; display: block !important; }
+.pr-problem button { margin-top: 8px; }
 #pr-detail h2 { font-size: 15px; margin: 8px 0 4px; }
 #pr-detail h3 { font-size: 11px; color: var(--faint); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
 button.link { color: var(--accent); }
@@ -966,6 +971,7 @@ button.link:hover { text-decoration: underline; }
 .problems-toolbar button { display: flex; gap: 4px; align-items: center; padding: 3px 10px; }
 .problems-toolbar .problems-toggle.on { background: var(--selected); border-color: var(--accent); }
 .problems-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problems-summary.error { color: var(--red); }
 .problems-tree, .problems-tree ul { list-style: none; margin: 0; padding: 0; }
 .problems-tree { flex: 1; overflow: auto; border-top: 1px solid var(--border-subtle); padding: 4px 0; }
 .problems-row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 10px 0 6px; white-space: nowrap; cursor: default; }

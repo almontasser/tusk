@@ -1,5 +1,6 @@
 // Call hierarchy (⌃⌥H): the methods and functions that call the one at the cursor, or that it calls. Tusk's server
 // answers (`textDocument/prepareCallHierarchy`, `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls`).
+import { showError } from "./status";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { tuskRequest } from "./lsp";
@@ -103,7 +104,8 @@ export async function showCallHierarchy(editor: monaco.editor.ICodeEditor) {
   const items = await tuskRequest<L.CallHierarchyItem[] | null>("textDocument/prepareCallHierarchy", {
     textDocument: { uri: model.uri.toString() },
     position: { line: pos.lineNumber - 1, character: pos.column - 1 },
-  }).catch(() => null);
+  }).catch((e) => (showError("Can't show the call hierarchy", e), undefined));
+  if (items === undefined) return;
   if (!items?.length) return host.status("Put the cursor in or on a method or function.");
   current = { item: items[0], line: items[0].selectionRange.start.line + 1 };
   render();

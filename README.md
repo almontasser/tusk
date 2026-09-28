@@ -200,7 +200,10 @@ DMG that everyone installs by hand.
   projects. Tab and Enter open one; right-click one to remove it from the list.
 
 Errors, such as a failed git command, also appear briefly in the lower-right
-corner.
+corner. Any failure the app doesn't otherwise handle shows there too, once
+while its message is on screen, so nothing fails silently. Long tasks, such as
+merging a pull request or counting Redis keys, show a spinner in the status
+bar, and a **Cancel** button when you can stop them.
 
 ## Keyboard shortcuts
 

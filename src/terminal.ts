@@ -6,6 +6,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { showMenu } from "./files";
 import { scrollbackText } from "./scrollback";
+import { showError } from "./status";
 import { onTheme } from "./themes";
 
 /**
@@ -60,7 +61,7 @@ const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addo
  * opened with `restorable` (such as a dev server), reopen with the project while they still run. `scrollback` is
  * output from the last session to show first.
  */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false, scrollback?: string) {
+export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false, scrollback?: string): Promise<void> {
   showPanel(true);
   const [{ Terminal }, { FitAddon }] = await loadXterm();
   const el = document.createElement("div");
@@ -82,7 +83,17 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
     ]);
   };
 
-  const id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
+  let id: number;
+  try {
+    id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
+  } catch (e) {
+    term.dispose();
+    el.remove();
+    if (!sessions.length) showPanel(false);
+    const what = command ? command.join(" ") : "the shell";
+    showError(`Couldn't start ${what} in ${cwd}`, e, { label: "Retry", run: () => openTerminal(cwd, title, command, onExit, onClose, restorable, scrollback) });
+    return;
+  }
   const restore = !command || restorable ? { title, cwd, command } : undefined;
   const session: Session = { title, term, fit, el, exited: false, dispose: () => {}, restore };
   // A shell's folder changes with `cd`, so after you press Enter, read where it is now.

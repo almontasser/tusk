@@ -1,5 +1,6 @@
 // Pull Members Up and Extract Interface, as in PhpStorm: a dialog to choose the members, with the code they become
 // and what they'd break shown as you choose, then edits to the class and its parent, or a new interface file.
+import { errorText } from "./status";
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import {
@@ -529,7 +530,6 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
   let files: Promise<Map<string, string>> | null = null;
   const filesNaming = () =>
     (files ??= invoke<{ path: string }[]>("search_text", { root: host.root(), query: { text: name, regex: false, caseSensitive: true, wholeWord: true }, include: "*.php" })
-      .catch(() => [])
       .then(async (matches) => {
         const texts = new Map<string, string>();
         for (const path of new Set(matches.map((m) => m.path)))
@@ -607,7 +607,12 @@ export async function extractInterface(editor: monaco.editor.ICodeEditor) {
       await globals;
       if (hints.checked) {
         hintsSummary.textContent = " · looking…";
-        const plans = await hintPlans(d.fqn, moving);
+        const plans = await hintPlans(d.fqn, moving).catch((e) => (files = null, e as unknown));
+        if (!(plans instanceof Map)) {
+          hintsSummary.textContent = " · couldn't search for them";
+          problems.push({ level: "error", text: `Can't search the project for type hints: ${errorText(plans)}. Turn off type hints, or try again.` });
+          return { title: "", code: "", problems };
+        }
         const used = [...plans.values()].reduce((n, p) => n + p.used.length, 0);
         const left = [...plans.values()].reduce((n, p) => n + p.skipped.length, 0);
         const inFiles = [...plans.values()].filter((p) => p.used.length).length;

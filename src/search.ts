@@ -6,6 +6,7 @@ import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
 import { commentMask, inComment } from "./comments";
 import { readText, writeText } from "./projectfiles";
+import { errorText, showError } from "./status";
 
 type Host = {
   root(): string;
@@ -47,7 +48,7 @@ async function search() {
   } catch (e) {
     if (current !== generation) return;
     matches = [];
-    render(`Invalid search: ${String(e)}`);
+    render(`${q.regex ? "Invalid search" : "Search failed"}: ${errorText(e)}`);
   } finally {
     clearTimeout(slow);
   }
@@ -76,6 +77,7 @@ function preview(m: Match) {
 
 function render(error: string) {
   const groups = byFile();
+  $("find-summary").classList.toggle("error", !!error);
   $("find-summary").textContent =
     error ||
     (matches.length
@@ -165,7 +167,7 @@ async function replaceOne(m: Match) {
       await writeText(m.path, lines.join("\n"));
     }
   } catch (e) {
-    return host.status(`Replace failed: ${String(e)}`);
+    return showError("Replace failed", e);
   }
   await search();
 }
@@ -190,6 +192,7 @@ async function replaceIn(paths: string[]) {
   const where = paths.length === 1 ? paths[0].slice(host.root().length + 1) : `${paths.length} files`;
   if (!(await confirm(`Replace ${count} matches in ${where} with "${replacement()}"?`, "Replace All"))) return;
   let replaced = 0;
+  const failed: string[] = [];
   for (const path of paths) {
     try {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
@@ -204,10 +207,13 @@ async function replaceIn(paths: string[]) {
       }
       replaced += result.count;
     } catch (e) {
-      host.status(`Replace failed in ${path}: ${String(e)}`);
+      console.error(`Replace failed in ${path}`, e);
+      failed.push(`${path.slice(host.root().length + 1)} (${errorText(e)})`);
     }
   }
-  host.status(`Replaced ${replaced} matches.`);
+  const done = `Replaced ${replaced} ${replaced === 1 ? "match" : "matches"}`;
+  if (failed.length) showError(`${done}, but couldn't replace in ${failed.length} ${failed.length === 1 ? "file" : "files"}: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? ", …" : ""}`);
+  else host.status(`${done}.`);
   await search();
 }
 
@@ -278,8 +284,17 @@ export async function loadTodos() {
   const root = host.root();
   if (!root) return;
   const current = ++todoGeneration;
-  const matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" }).catch(() => [] as Match[]);
+  let matches: Match[];
+  try {
+    matches = await invoke<Match[]>("search_text", { root, query: TODO_QUERY, include: "" });
+  } catch (e) {
+    if (current !== todoGeneration) return;
+    $("todo-summary").textContent = `Can't list TODO comments: ${errorText(e)}`;
+    $("todo-summary").classList.add("error");
+    return $("todo-results").replaceChildren();
+  }
   if (current !== todoGeneration) return; // A newer load already started.
+  $("todo-summary").classList.remove("error");
   // Only keywords in comments, not in strings or names such as TODO_LIMIT. Each file with matches is read and
   // scanned whole, so lines inside a multi-line comment count; a file that can't be read is judged line by line.
   const byFile = new Map<string, Match[]>();
