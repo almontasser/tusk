@@ -17,6 +17,7 @@ import { covers, DEFAULT_EXCLUDES, magoExcludes } from "./indexexclude";
 import { onProjectValue, projectScope, projectValue, setProjectValue } from "./projectstate";
 import { editExclusions, type Folder } from "./indexexcludedialog";
 import { toast } from "./dom";
+import { recordVersion } from "./localhistory";
 
 type M = typeof monaco.languages;
 
@@ -305,11 +306,14 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
   for (const op of ops) {
     if (!("kind" in op)) {
       const model = await host.ensureModel(pathOf(op.textDocument.uri));
+      const before = model.getValue();
       // Stops on both sides keep the refactoring its own undo step, apart from typing before or after it.
       model.pushStackElement();
       model.pushEditOperations([], op.edits.map((e) => ({ range: toRange(e.range), text: "newText" in e ? e.newText : "" })), () => null);
       model.pushStackElement();
       await saveModel(model);
+      const path = model.uri.fsPath;
+      recordVersion(path, before, "Before refactoring").then(() => recordVersion(path, model.getValue(), "Refactoring"));
       edited.push(model);
     } else if (op.kind === "create") {
       // A new file never replaces one that exists, unless the edit asks to.

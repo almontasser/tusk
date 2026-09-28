@@ -8,6 +8,7 @@ import type { MenuItem } from "./files";
 import { age, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
 import { closeView, openTerminal, showEditorView } from "./terminal";
+import { historyActivity } from "./localhistory";
 
 type Host = {
   root(): string;
@@ -39,6 +40,7 @@ let queue: Promise<unknown> = Promise.resolve();
 /** Runs a git command that changes state, then refreshes. Errors go to the status bar. */
 export function change(...args: string[]) {
   const next = queue.then(async () => {
+    historyActivity(`git ${args[0]}`);
     try {
       await git(...args);
     } catch (e) {

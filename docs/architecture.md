@@ -2524,8 +2524,26 @@ A save that matches the newest version adds nothing. After each write,
 days, or beyond the newest 100. Pruning a file's own folder on save keeps the
 cost small, with no sweep over the whole history.
 
-Viewing a version reuses the git diff view. `showDiff` takes an optional header
-action, which **Stage Selected** also uses.
+Each version's file name carries what kept it: `<ms>~<action>.txt`, with the
+action URI-encoded (`src/localhistorydata.ts`, with tests); older `<ms>.txt`
+files read as **Saved**. `recordVersion(path, text, action)` takes the action;
+"external" and "before external" become the current activity, which
+`historyActivity` sets for ten seconds: `change` in `git.ts` sets
+`git <command>`, and a revert sets `revert`, so the file watcher's versions
+name their cause. `applyWorkspaceEdit` in `lsp.ts` records the text before and
+after each file's refactoring, since its saves bypass `saveFile`. Labels are
+`labels.json` in the project's history folder, the newest 100.
+
+The **Local History** tab (`src/localhistoryview.ts`, loaded on first use) is
+a panel view: a `listNav` list of versions and labels, a `splitter`, and its
+own Monaco diff editor with `localhistory:` URIs, so the language servers
+don't see the models. A folder's history reads every history folder whose
+path starts with the folder, under `withProgress` with Cancel and an "N of M
+files" count. `revertFiles` records each current text as "Before revert",
+then writes through the host's `setText`, which edits an open model as one
+undo step and writes the file, and returns what `undoRevert` needs. A label's
+revert takes each file's newest version at or before the label
+(`versionAt`).
 
 Two more moments add a version. When the file watcher reports that an open,
 unmodified file changed on disk, the editor records the model's text before
@@ -2550,8 +2568,8 @@ keeps at most 200 files, so a branch switch doesn't copy the whole project;
 git has those versions anyway.
 
 A deleted file's history stays in its folder. **Deleted Files** lists the
-history folders whose project path no longer exists, and restoring creates the
-missing parent folders.
+history folders whose project path no longer exists and opens the tab for
+one, and reverting creates the missing parent folders.
 
 ### Interactive rebase
 
@@ -5235,3 +5253,13 @@ the history gets the redacted copy and the session keeps the original in a
 folder that's removed next time, rather than redacting what you're looking
 at. A setting keeps bodies as they came or drops them, since some teams want
 full replays and others want nothing on disk.
+
+### 2026-09-28: Local history names versions in their file names
+
+The Local History window needs to say what kept each version. A sidecar
+index would need locking and could disagree with the files on disk, so the
+action goes in the version's name, which pruning and listing already read.
+Other programs' changes can't say who made them, so the editor sets a short-lived
+activity (a git command, a revert) that the watcher's versions pick up. The
+tab has its own diff editor rather than the git diff view, so the list and
+the diff show side by side, as in PhpStorm.

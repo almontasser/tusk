@@ -68,7 +68,7 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Debugger | With Sail, `sail debug` uses Sail's own Xdebug settings, so a port other than 9003 needs `SAIL_XDEBUG_CONFIG="client_host=host.docker.internal client_port=<port>"` in `.env`. A request to Xdebug that never answers, such as while PHP is stopped in another debugger, leaves the tab running until you stop it. Values in the editor come from the lines' `$names`, so a name from another scope, such as a closure's, can show the outer value. Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
-| Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
+| Local history | Reverting to a label doesn't delete files created after it. Versions from before this release show as **Saved**. A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Rename, Extract Method, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
@@ -1896,18 +1896,40 @@ and outside git. It also keeps one before another program, such as a
 `git checkout`, changes a file you have open, and after another program
 changes a project file you don't have open, such as a file an Artisan `make:`
 command or a formatter rewrites. The first time that happens to a file, the
-version git has staged is kept too, so you can go back to it. Files git
-ignores, and `.env` files, aren't kept. It also keeps a version before you delete a file or
-folder from the tree. To see a file's versions, run **Show Local History** from
-⌘⇧A, or right-click the file in the tree. Choose a version to compare it with
-the file as it is now, and click **Restore This Version** to put it back. The
-current text is kept as a version first, so a restore can be undone the same
-way. Versions older than 14 days are deleted, and each file keeps at most 100.
-Files over 1 MB aren't kept.
+version git has staged is kept too, so you can go back to it. Refactorings keep
+the text before and after, and deleting a file or folder from the tree keeps
+it first. Files git ignores, and `.env` files, aren't kept. Versions older than
+14 days are deleted, and each file keeps at most 100. Files over 1 MB aren't
+kept.
 
-To get back a deleted file, run **Local History: Deleted Files…** from ⌘⇧A,
-choose the file, then a version, and click **Restore This Version**. Its folder
-is recreated if needed.
+To see a file's history, choose **File › Local History › Show Local History**,
+right-click the file's tab or the file in the tree, or run it from ⌘⇧A. For a
+folder, right-click it in the tree; **Show Project Local History** covers the
+whole project, deleted files included. The **Local History** tab opens in the
+bottom panel:
+
+- The left side lists the versions, newest first, with the time and what kept
+  each one: **Saved**, **External change**, a git command such as
+  **Before git checkout**, **Before refactoring** and **Refactoring**,
+  **Before delete**, or **Before revert**. A folder's list also shows each
+  file, marks deleted files, and has a filter.
+- The right side compares the selected version with the file as it is now,
+  including unsaved edits. To compare two versions, press Space or ⌘-click one
+  to mark it, then select the other.
+- **Revert** (⌘⌫ in the list) sets the file back to the selected version,
+  after asking. The current text is kept as a version first, and **Undo** in
+  the message puts it back. With the file open, ⌘Z in the editor undoes it
+  too.
+- **Put Label…** (also in the File menu and ⌘⇧A) names the current moment for
+  the whole project, such as "Before the upgrade". Labels show among the
+  versions; select one and click **Revert** to set the file, or in a folder's
+  history every file under it, back to how it was then.
+- ↑ and ↓ move through the list, Enter opens the file, and typing jumps to a
+  version by what kept it (in a folder, by path).
+
+To get back a deleted file, run **Local History: Deleted Files…** from ⌘⇧A and
+choose the file, or find it in a folder's history, then **Revert** to a
+version. Its folder is recreated if needed.
 
 ### Interactive rebase
 
@@ -2591,7 +2613,9 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |
 | `src/links.ts` | Resolves paths files name relative to their folder: Markdown links and `$schema` |
 | `src/jsonschemas.ts` | Checks JSON config files against the bundled schemas in `src/schemas` |
-| `src/localhistory.ts` | Local history of saved, changed, and deleted files |
+| `src/localhistory.ts` | Local history of saved, changed, and deleted files, and labels |
+| `src/localhistoryview.ts` | The Local History tab: versions, diffs, revert, and labels |
+| `src/localhistorydata.ts` | Version names, labels, and which version a time points at |
 | `src/retention.ts` | Which local history versions to delete |
 | `src/editorconfig.ts` | Reads `.editorconfig` files |
 | `src/settings.ts` | Settings, the settings dialog, and the color theme picker and import |

@@ -13,7 +13,7 @@ const LAYOUT: [string, Entry[]][] = [
   ["Tusk", ["About", "Check for Updates…", "-", "Settings…", "Keymap…", "-", native("Services"), "-", native("Hide"), native("HideOthers"), native("ShowAll"), "-", "Quit Tusk"]],
   ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", "Move File to Trash", "Copy Path", "Copy Reference", "Reveal in Finder", "Change File Encoding…", "-",
     ["Compare", ["Compare with Clipboard", "Compare with File…"]],
-    ["Local History", ["Show Local History", "Local History: Deleted Files…"]]]],
+    ["Local History", ["Show Local History", "Show Project Local History", "Put Label…", "Local History: Deleted Files…"]]]],
   ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-",
     ["Find", [...commandsIn("find"), "-", "Add Selection for Next Occurrence", "Select All Occurrences", "Change All Occurrences", "-", "Find in Files", "Replace in Files"]],
     ["Multiple Carets", ["Add Caret Above", "Add Caret Below", "Add Carets to Line Ends"]], "-",

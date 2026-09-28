@@ -237,7 +237,7 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     { label: "Open in Terminal", run: () => openTerminal(dir, nameOf(dir)) },
     "-",
     { label: "Show History", run: () => showFileHistory(path) },
-    ...(isDir(path) ? [] : [{ label: "Show Local History", run: () => showLocalHistory(path) }]),
+    { label: "Show Local History", run: () => showLocalHistory(path, isDir(path)) },
     { label: "Copy Path", run: () => copyPath(path) },
     { label: "Copy Relative Path", run: () => copyPath(path, true) },
     { label: "Reveal in Finder", run: () => revealInFinder(path) },
