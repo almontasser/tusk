@@ -8,6 +8,7 @@ import { gridColumns } from "./filamentcanvas";
 import type { Designer, Doc } from "./filamentdesigner";
 import { titleAttribute } from "./filamentgen";
 import { askName, commitInput, heroicon, pickHeroicon, popover, segmented, toggleSwitch } from "./filamentpickers";
+import { translationRows } from "./filamentinspector";
 import { type Root, type RootKind, shortClass, walk } from "./filamentschema";
 import { addMember, type Edit, findCall, insertItem, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, removeItem, removeMethod, removeProperty, setProperty, textValue } from "./phpcode";
 import { confirm } from "./palette";
@@ -286,6 +287,7 @@ const GETTERS: Record<string, string[]> = {
   pluralModelLabel: ["getPluralModelLabel", "getPluralLabel"],
   recordTitleAttribute: ["getRecordTitleAttribute"],
   slug: ["getSlug"],
+  title: ["getTitle"],
   cluster: ["getCluster"],
 };
 
@@ -307,6 +309,22 @@ const LABELS: Setting[] = [
 ];
 
 /** The declaration for a new static property: the type Filament gives it, with classes imported. */
+/** Names that can be translated, and the getter that returns them translated. */
+const TRANSLATED: Record<string, string> = {
+  navigationLabel: "public static function getNavigationLabel(): string",
+  navigationGroup: "public static function getNavigationGroup(): ?string",
+  modelLabel: "public static function getModelLabel(): string",
+  pluralModelLabel: "public static function getPluralModelLabel(): string",
+  title: "public function getTitle(): string",
+};
+
+/** A custom page's own names. */
+const PAGE_LABELS: Setting[] = [
+  { name: "title", label: "Title", kind: "text", help: "The heading at the top of the page, and the browser tab's title." },
+  { name: "slug", label: "URL slug", kind: "text", help: "The page's address in the panel. Empty uses the class name." },
+  { name: "cluster", label: "Cluster", kind: "cluster" },
+];
+
 function declaration(d: Designer, name: string, imports: { name(f: string): string }): string {
   const type = d.cat?.resourceProperties[name]?.type ?? "?string";
   const written = type
@@ -334,15 +352,33 @@ export function renderSettingsTab(d: Designer): HTMLElement {
       message,
     );
   const current = (name: string) => propertyNamed(cls, name)?.value ?? null;
+  const page = d.page ? d.panel?.pages.find((x) => x.class === cls.fqn) : undefined;
   const fallback: Record<string, string | null | undefined> = {
-    navigationLabel: info?.navigationLabel,
+    navigationLabel: info?.navigationLabel ?? page?.label,
     modelLabel: info?.label,
     pluralModelLabel: info?.pluralLabel,
     slug: info?.slug,
-    navigationGroup: info?.navigationGroup,
+    navigationGroup: info?.navigationGroup ?? page?.navigationGroup,
   };
   const row = (s: Setting) => {
     const getter = (GETTERS[s.name] ?? []).map((g) => methodNamed(cls, g)).find(Boolean);
+    // A translated name is a getter that returns `__('…')`: its text, and a row per language.
+    const translatedText = getter && TRANSLATED[s.name] && getter.returns.length === 1 ? textValue(getter.returns[0]) : undefined;
+    if (getter && translatedText?.translated) {
+      const ret = getter.returns[0];
+      const editor = commitInput(translatedText.text, (x) => {
+        const v = x.trim();
+        if (!v || v === translatedText.text) return;
+        void d.apply(doc, () => [{ start: ret.span[0], end: ret.span[1], text: `__(${phpString(v)})` }], `Changed the ${s.label.toLowerCase()}`).then(() => d.renameTranslation(translatedText.text, v));
+      });
+      return h(
+        "div",
+        { class: "fd-row set stacked", title: s.help ?? "" },
+        h("span", { class: "fd-row-label" }, s.label, h("span", { class: "fd-note" }, " · translated")),
+        h("div", { class: "fd-row-editor fd-translated" }, editor, translationRows({ i18n: d.i18n() }, ret, () => {})),
+        iconButton("discard", "Use Filament's default", () => void d.apply(doc, () => [removeMethod(doc.text, getter)], `Reset ${s.label.toLowerCase()}`)),
+      );
+    }
     if (getter)
       return h(
         "div",
@@ -402,6 +438,18 @@ export function renderSettingsTab(d: Designer): HTMLElement {
       default:
         editor = commitInput(textValue(node)?.text ?? "", (x) => void setProp(s.name, x ? phpString(x) : null, `Changed the ${s.label.toLowerCase()}`), { placeholder: fallback[s.name] ?? "" });
     }
+    // Text in a static property can't be translated; a getter returning `__()` can.
+    const text = (s.kind === "text" || s.kind === "group") && TRANSLATED[s.name] ? (textValue(node)?.text ?? fallback[s.name]) : null;
+    if (text && d.translations?.locales.length)
+      editor = h(
+        "div",
+        { class: "fd-inline-editor" },
+        editor,
+        h("button", { type: "button", class: "fd-chip-link fd-translate", title: "Write it with __(), so each language can have its own text", onclick: () => void d.apply(doc, () => {
+          const prop = propertyNamed(cls, s.name);
+          return [...(prop ? [removeProperty(doc.text, prop)] : []), addMember(doc.text, cls, `${TRANSLATED[s.name]}\n{\n    return __(${phpString(text)});\n}`)];
+        }, `Translated the ${s.label.toLowerCase()}`) }, icon("globe"), "Translate"),
+      );
     const readable = !node || (s.kind === "icon" ? node.kind === "classConst" || !!textValue(node) : s.kind === "number" ? node.kind === "number" : s.kind === "switch" ? node.kind === "bool" : s.kind === "cluster" ? node.kind === "classConst" || node.kind === "null" : !!textValue(node) || node.kind === "null");
     if (!readable) editor = h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(node, doc) }, icon("code"), "Set in code");
     return h("div", { class: `fd-row${set ? " set" : ""}`, title: s.help ?? "" }, h("span", { class: "fd-row-label" }, s.label), h("div", { class: "fd-row-editor" }, editor), set ? iconButton("discard", "Use Filament's default", reset) : h("span", { class: "fd-row-spacer" }));
@@ -462,6 +510,14 @@ export function renderSettingsTab(d: Designer): HTMLElement {
   );
 
   const section = (title: string, iconName: string, rows: HTMLElement[], note?: string) => h("section", { class: "fd-settings-section" }, h("h3", {}, icon(iconName), title), note ? h("p", { class: "fd-note" }, note) : null, h("div", { class: "fd-rows" }, ...rows));
+  if (d.page)
+    return h(
+      "div",
+      { class: "fd-page-tab fd-settings" },
+      h("div", { class: "fd-page-tab-head" }, h("div", {}, h("h2", {}, "Page settings"), h("p", { class: "fd-note" }, "How the page appears in the panel. Empty fields use Filament's defaults."))),
+      section("Navigation", "list-tree", NAVIGATION.map(row)),
+      section("Title and address", "symbol-key", PAGE_LABELS.filter((s) => s.kind !== "cluster" || d.panel?.clusters.length).map(row)),
+    );
   const model = d.facts?.class ?? info?.model;
   return h(
     "div",

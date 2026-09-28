@@ -4381,6 +4381,110 @@ has, as `methodsOf` reports them.
   designers both use it. The enum designer stages translations and writes
   them on Apply, after renaming the keys of labels that changed.
 
+### Panel settings
+
+- **Reading:** `src/panelgen.ts` reads the calls on `$panel` in the provider's
+  `panel()`: the returned chain, and chains in the body's own statements,
+  such as `$panel = $panel->…;` or `$panel->path(…);`. The outline gives a
+  method's top-level expression statements in `statements` for this. A setting
+  is read from the last call that sets it; new calls go on the longest chain.
+  A value the settings don't write, such as `brandLogo(fn () => …)`, shows as
+  code.
+- **Writing:** flags go back to Filament's default by removing the call, so a
+  provider only says what differs. Turning on a call that's there keeps its
+  arguments, such as a custom login page. Colors are `Color::` palettes or hex
+  strings; navigation groups are labels, or `NavigationGroup::make()` once
+  they get an icon or start collapsed; plugins are `Plugin::make()` in
+  `plugins([...])`.
+- **Options:** `introspect.php panel-options` reads Filament's palettes (their
+  500 shade, for swatches and the preview), the Filament plugins Composer
+  installed (a `*Plugin` class in a package that requires Filament that
+  implements its Plugin contract), the app's name, and the user model with the
+  contracts tenancy needs. `src/panelsettings.ts` draws the view.
+
+### Import and export
+
+- **Reading:** `introspect.php porters` lists the app's importers and
+  exporters with their models, whether the `imports`, `exports`,
+  `failed_import_rows`, `job_batches`, and `notifications` tables exist, and
+  the queue connection.
+- **Actions:** `essentials()` gives ImportAction, ExportAction, and
+  ExportBulkAction an Importer or Exporter row in place of "What it does",
+  and the designer shows no modal lane for them, since Filament draws theirs.
+  New importers and exporters come from `make:filament-importer --generate`,
+  whose `[Class]` in the output names the new class.
+- **Designing:** `src/portergen.ts` reads `getColumns()` as a list of
+  `ImportColumn` or `ExportColumn` chains and changes one call at a time, so
+  calls it doesn't write, such as a relationship's `resolveUsing`, stay.
+  `resolveRecord()` is one of three forms: `new Model()`, `firstOrNew()` by a
+  column, or `query()->where()->first()`. `src/porterdesigner.ts` draws the
+  view.
+
+### Custom pages
+
+- **Reading:** `introspect.php filament-app` lists each panel's pages that
+  aren't dashboards, with their navigation, and its page and widget folders.
+  The designer opens a page in a mode of its own: a class extending `Page`
+  without a `$resource`. Its form and table are the instance methods
+  `form()` and `table()`, read like a relation manager's; its header actions
+  are its own; its model is the one its table queries or its `getRecord()`
+  returns.
+- **New pages:** `src/pagegen.ts` writes a form page that fills from
+  `getRecord()` (the user, or `firstOrNew()`, filled from the fields' defaults
+  when the record isn't saved yet) and saves on submit, or a table page with
+  `HasTable`. Both draw `content()`, with `EmbeddedSchema` or `EmbeddedTable`,
+  as Filament 4's own pages do. `formField` gives a field its column's default
+  and makes it required when the column can't be null, since a new record's
+  empty field would otherwise insert null.
+- **Access:** `readEntry` and `entryEdits` in `src/policygen.ts` read and
+  write `canAccess()` or `canView()` as one rule on the signed-in user, or
+  Shield's trait. `introspect.php entry-access` asks Shield for the class's
+  permission. `renderEntryAccess` in `src/filamentaccess.ts` reuses the
+  Access tab's conditions and roles grid.
+
+### Dashboards and widgets
+
+- **Reading:** `introspect.php widgets <panel>` asks the panel for its widgets,
+  sorted as Filament sorts them, with each one's kind, sort, column span, and
+  heading, read from an instance. It lists each dashboard page with its
+  columns, and its own widget list when the page overrides `getWidgets()`,
+  since Filament only sorts the panel's list. Widgets that turned discovery off
+  are listed too, so they can be shown again.
+- **Arranging:** `src/dashboarddesigner.ts` reorders the panel's dashboard by
+  writing `$sort` to each project widget in the new order (packages' widgets
+  keep theirs), and a dashboard's own list by moving its items. Hiding removes
+  a widget from the provider's `widgets([...])` when it's there, and otherwise
+  sets `$isDiscovered = false`. `src/codeapply.ts` applies edits to several
+  files at once, each computed from its current code.
+- **Widgets:** `src/widgetgen.ts` writes and reads values as
+  `Model::query()` with `where` conditions and a count or aggregate, reading
+  them back from the code with its layout squashed, so a value the designer
+  wrote reads the same after a formatter changes its lines. Charts are one
+  return of `getData()`; the designer changes a dataset's `label` and `data`
+  and the `labels` in place, so other keys, such as colors, stay.
+  `src/widgetdesigner.ts` draws the view. New widgets are written by the
+  designer, not `make:filament-widget`, which asks for a table widget's model
+  and a chart's type interactively.
+- **Live data:** `introspect.php widget-data <class>` runs the widget's
+  `getStats()` or `getData()` as the first user, and the preview shows what it
+  returns, or why it failed.
+- **Resource pages:** `src/pagewidgets.ts` adds a widget to both the
+  resource's `getWidgets()`, which registers it, and the page's
+  `getHeaderWidgets()`. A page that returns its resource's `getWidgets()`
+  changes the resource's list.
+
+### Sample records, translated names, and boot checks
+
+- `src/sampledata.ts` runs `Model::factory()->count(n)->create()` with
+  `artisan tinker --execute`, in Sail's container when it's up.
+- A static property can't call `__()`, so translating a resource's or page's
+  name replaces the property with its getter returning `__('text')`; the
+  settings tab reads a getter that is one such return as translated text, and
+  renames its translations when the text changes.
+- `watchBoot` in `src/filamentview.ts` reads the app 1.5 seconds after a
+  change under `app/`, and speaks only when booting starts or stops failing,
+  so a working app stays quiet.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,

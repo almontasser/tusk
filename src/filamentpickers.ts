@@ -131,7 +131,8 @@ export function heroiconSvg(dir: string | null, file: string): Promise<string> {
 export function heroicon(dir: string | null, name: string | null | undefined, className = "fd-heroicon"): HTMLElement {
   const el = h("span", { class: className });
   if (!name) return el;
-  const file = /^(heroicon-)?[osmc]-/.test(name) ? name.replace(/^heroicon-/, "") : heroiconFile(name.replace(/^Heroicon::/, ""));
+  // A solid icon's enum value has no style prefix: Heroicon::Cog6Tooth is `cog-6-tooth`.
+  const file = /^(heroicon-)?[osmc]-/.test(name) ? name.replace(/^heroicon-/, "") : /^[a-z0-9-]+$/.test(name) ? `s-${name}` : heroiconFile(name.replace(/^Heroicon::/, ""));
   heroiconSvg(dir, file).then((svg) => {
     if (svg) el.innerHTML = svg;
     else el.replaceChildren(icon("symbol-misc"));

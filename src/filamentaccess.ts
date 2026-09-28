@@ -6,10 +6,10 @@ import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import type { Doc } from "./filamentdesigner";
 import type { Edit, Imports } from "./phpcode";
-import { askName } from "./filamentpickers";
+import { askName, popover } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
-import { addMember } from "./phpcode";
-import { abilityMethod, type Cond, permissionName, permissionsOf, readPolicy, type ReadAbility, type Rule, ruleCode } from "./policygen";
+import { addMember, type OClass } from "./phpcode";
+import { abilityMethod, type Cond, type EntryRule, entryEdits, permissionName, permissionsOf, readEntry, readPolicy, type ReadAbility, type Rule, ruleCode } from "./policygen";
 import { showError } from "./status";
 
 /** What the Access tab needs from the view it's in: the resource designer, or a model's own Access view. */
@@ -105,8 +105,7 @@ function fresh(kind: Rule["kind"], r: ReadAbility, model: string, info: fapp.Pol
   return { kind } as Rule;
 }
 
-function conditions(d: AccessHost, r: ReadAbility, rule: Extract<Rule, { kind: "when" }>, info: fapp.PolicyInfo, model: string): HTMLElement {
-  const set = (next: Rule) => void setRule(d, r, next, model);
+function conditions(d: AccessHost, r: Pick<ReadAbility, "ability">, rule: Extract<Rule, { kind: "when" }>, info: fapp.PolicyInfo, model: string, set: (next: Rule) => void = (next) => void setRule(d, r as ReadAbility, next, model)): HTMLElement {
   const columns = (d.facts?.columns ?? []).map((c) => c.name).filter((c) => /(^|_)(user|owner|author|created_by|creator)(_id)?$|_by$/.test(c) || c === "user_id");
   const list = h("div", { class: "fd-access-conds" });
   rule.conds.forEach((c, i) => {
@@ -233,12 +232,106 @@ function permissionsSection(d: AccessHost, info: fapp.PolicyInfo, used: string[]
       }),
     );
   }
+  // Shield makes permissions for every resource, page, and widget of each panel; policies only where none exist,
+  // since it would otherwise replace the policies these rules are written in.
+  const generate = info.shield ? h("button", { type: "button" }, icon("sparkle"), "Generate with Shield…") : null;
+  if (generate)
+    generate.onclick = () => {
+      const run = async (option: string, label: string) => {
+        p.close();
+        try {
+          const app = await fapp.app(d.root);
+          for (const panel of app.panels) await fapp.artisan(d.root, ["shield:generate", "--all", `--option=${option}`, "--ignore-existing-policies", `--panel=${panel.id}`]);
+          fapp.forget([`policy:`, "app"]);
+          await d.loadAccess();
+          d.host.status(label);
+        } catch (e) {
+          showError("Shield couldn't generate them", e);
+        }
+      };
+      const p = popover(
+        generate,
+        h(
+          "div",
+          { class: "fd-menu" },
+          h("button", { type: "button", class: "fd-menu-item", onclick: () => void run("permissions", "Shield created the permissions.") }, icon("key"), h("span", {}, "Create the permissions"), h("span", { class: "fd-note" }, "for every resource, page, and widget")),
+          h("button", { type: "button", class: "fd-menu-item", onclick: () => void run("policies_and_permissions", "Shield created the permissions and the missing policies.") }, icon("shield"), h("span", {}, "Also write missing policies"), h("span", { class: "fd-note" }, "existing ones stay")),
+        ),
+      );
+    };
   return h(
     "section",
     { class: "fd-access-perms" },
-    h("div", { class: "fd-access-perms-head" }, title, h("span", { class: "fd-spacer" }), newRole),
+    h("div", { class: "fd-access-perms-head" }, title, h("span", { class: "fd-spacer" }), generate, newRole),
     ...notes,
     !info.roles.length ? h("p", { class: "fd-note" }, "No roles yet. Create one, then give it permissions here.") : null,
     perms.length && info.roles.length ? table : perms.length ? null : h("p", { class: "fd-note" }, "The rules name no permissions yet. Pick “Only users who…” and “has the permission” for an ability."),
+  );
+}
+
+// ---- Custom pages and widgets ----
+
+/** What the Access section of a custom page or a widget needs from the view it's in. */
+export type EntryHost = {
+  root: string;
+  kind: "page" | "widget";
+  fqn: string;
+  text: string;
+  cls: OClass;
+  host: AccessHost["host"];
+  info: (fapp.PolicyInfo & { shieldKey: string | null }) | null;
+  error: string;
+  /** Shows code in the class's file. */
+  reveal(offset: number): void;
+  /** Reads who can again, after a role or permission changed. */
+  load(): Promise<void>;
+  edit(build: (text: string, cls: OClass, fill: (code: string) => string) => Edit[] | null, message: string): unknown;
+};
+
+/**
+ * Who can open a custom page or see a widget: everyone, nobody, users with a permission or role (the same
+ * conditions as a resource's abilities), or, with Filament Shield, the permission Shield gives it.
+ */
+export function renderEntryAccess(e: EntryHost): HTMLElement {
+  const noun = e.kind === "page" ? "open this page" : "see this widget";
+  const head = h("div", { class: "fd-page-tab-head" }, h("div", {}, h("h2", {}, "Access"), h("p", { class: "fd-note" }, `Who can ${noun}. ${e.kind === "page" ? "The page is also left out of the navigation for everyone else." : "Everyone else doesn't see it on the dashboard."}`)));
+  if (e.error) return h("div", { class: "fd-page-tab" }, head, h("p", { class: "fd-note" }, icon("warning"), ` Can't read the roles: ${e.error}`));
+  if (!e.info) {
+    void e.load();
+    return h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the roles…");
+  }
+  const info = e.info;
+  const method = e.kind === "page" ? "canAccess" : "canView";
+  const rule = readEntry(e.text, e.cls, e.kind);
+  const ability = { name: method, label: e.kind === "page" ? "Open the page" : "See the widget", record: false, more: false, hint: "" };
+  const short = shortClass(e.fqn);
+  const permission = info.shieldKey ?? permissionName("view", short, { keys: null, format: info.shieldFormat });
+  const write = (next: EntryRule) =>
+    e.edit((text, cls, fill) => entryEdits(text, cls, e.kind, next, fill), `Access: ${next.kind === "when" ? "only some users" : next.kind === "shield" ? "Filament Shield decides" : next.kind}`);
+  const who = h(
+    "select",
+    { class: "fd-access-who" },
+    h("option", { value: "everyone", textContent: "Everyone who can open the panel", selected: rule.kind === "everyone" }),
+    h("option", { value: "nobody", textContent: "Nobody", selected: rule.kind === "nobody" }),
+    h("option", { value: "when", textContent: "Only users who…", selected: rule.kind === "when" }),
+    ...(info.shield ? [h("option", { value: "shield", textContent: "Filament Shield decides", selected: rule.kind === "shield" })] : []),
+    ...(rule.kind === "custom" ? [h("option", { value: "custom", textContent: "Code", selected: true, disabled: true })] : []),
+  );
+  who.onchange = () => void write(who.value === "when" ? { kind: "when", join: "any", conds: [{ kind: "permission", name: permission }] } : ({ kind: who.value } as EntryRule));
+  let detail: HTMLElement | null = null;
+  if (rule.kind === "when") detail = conditions({ root: e.root } as AccessHost, { ability }, rule, info, short, (next) => void write(next));
+  else if (rule.kind === "shield") detail = h("p", { class: "fd-note" }, info.shieldKey ? `Users with the ${info.shieldKey} permission. Give it to roles below, or on Shield's Roles page.` : "Shield doesn't list this class yet, so everyone can. Check Shield's config for pages and widgets.");
+  else if (rule.kind === "custom") {
+    const m = e.cls.methods.find((x) => x.name === method);
+    detail = h("button", { type: "button", class: "fd-code-chip", onclick: () => m && e.reveal(m.span[0]) }, icon("code"), `Written as code in ${method}()`);
+  }
+  const used = [...(rule.kind === "when" ? rule.conds.filter((c) => c.kind === "permission").map((c) => (c as { name: string }).name) : []), ...(rule.kind === "shield" && info.shieldKey ? [info.shieldKey] : [])];
+  const adapter = { root: e.root, host: e.host, loadAccess: e.load } as AccessHost;
+  return h(
+    "div",
+    { class: "fd-page-tab" },
+    head,
+    h("div", { class: "fd-access" }, h("div", { class: "fd-access-row" }, h("div", { class: "fd-access-label" }, h("strong", {}, ability.label), h("span", { class: "fd-note" }, `${method}()`)), h("div", { class: "fd-access-rule" }, who, detail))),
+    permissionsSection(adapter, info, used, short),
   );
 }

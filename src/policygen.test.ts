@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { applyEdits } from "./phpcode.ts";
 import { test } from "node:test";
 import { fixture } from "./designerfixture.ts";
-import { permissionName, permissionsOf, readPolicy, readRule, type Rule, ruleCode, splitAt } from "./policygen.ts";
+import { entryBody, entryEdits, permissionName, permissionsOf, readEntry, readPolicy, readRule, type Rule, ruleCode, splitAt } from "./policygen.ts";
 
 const v = { user: "user", model: "post" };
 
@@ -48,4 +49,46 @@ test("permissionName follows Shield", () => {
   assert.equal(permissionName("viewAny", "Project", { keys: { viewAny: "view_any_project" }, format: { separator: ":", case: "pascal" } }), "view_any_project");
   // An ability Shield has no key for follows the keys it has, over the config.
   assert.equal(permissionName("deleteAny", "Project", { keys: { viewAny: "view_any_project" }, format: { separator: ":", case: "pascal" } }), "delete_any_project");
+});
+
+test("page and widget rules round-trip through their method", () => {
+  const cls = (body: string | null, traits: string[] = []) => {
+    const text = `<?php class P { ${body === null ? "" : `public static function canAccess(): bool {${body}}`} }`;
+    const start = text.indexOf("bool {") + 6;
+    const methods = body === null ? [] : [{ name: "canAccess", body: [start, start + body.length] as [number, number] }];
+    return { text, cls: { traits, methods } as never };
+  };
+  const rules: Rule[] = [
+    { kind: "nobody" },
+    { kind: "when", join: "all", conds: [{ kind: "permission", name: "page_Settings" }] },
+    { kind: "when", join: "all", conds: [{ kind: "role", name: "admin" }, { kind: "permission", name: "x" }] },
+  ];
+  for (const r of rules) {
+    const c = cls(entryBody(r));
+    assert.deepEqual(readEntry(c.text, c.cls, "page"), r);
+  }
+  assert.equal(entryBody({ kind: "everyone" }), null);
+  const none = cls(null);
+  assert.deepEqual(readEntry(none.text, none.cls, "page"), { kind: "everyone" });
+  const shield = cls(null, ["HasPageShield"]);
+  assert.deepEqual(readEntry(shield.text, shield.cls, "page"), { kind: "shield" });
+  const custom = cls("return auth()->user()?->isAdmin();");
+  assert.deepEqual(readEntry(custom.text, custom.cls, "page"), { kind: "custom" });
+});
+
+/** A class's outline where only its body's bounds and methods matter: for text changed in a test. */
+const fixtureOf = (text: string) => ({ ...fixture("SettingsPage").outline.classes[0], bodyStart: text.indexOf("{", text.indexOf("class ")) + 1, bodyEnd: text.lastIndexOf("}"), methods: [] });
+
+test("page access is written in canAccess(), or as Shield's trait", () => {
+  const f = fixture("SettingsPage");
+  const cls = f.outline.classes[0];
+  const fill = (c: string) => c.replace(/\{\{[\w\\]*?(\w+)\}\}/g, "$1");
+  const when = applyEdits(f.text, entryEdits(f.text, cls, "page", { kind: "when", join: "any", conds: [{ kind: "permission", name: "page_Settings" }, { kind: "role", name: "admin" }] }, fill));
+  assert.match(when, /public static function canAccess\(\): bool\n {4}\{\n {8}\$user = auth\(\)->user\(\);\n\n {8}return \$user !== null && \(\$user->can\('page_Settings'\) \|\| \$user->hasRole\('admin'\)\);\n {4}\}/);
+  const shield = applyEdits(f.text, entryEdits(f.text, cls, "page", { kind: "shield" }, fill));
+  assert.match(shield, /class SettingsPage extends Page\n\{\n {4}use HasPageShield;\n\n {4}protected static/);
+  assert.doesNotMatch(shield, /canAccess/);
+  const back = fixtureOf(shield);
+  assert.match(applyEdits(shield, entryEdits(shield, back, "page", { kind: "nobody" }, fill)), /class SettingsPage extends Page\n\{\n {4}protected static/);
+  assert.doesNotMatch(applyEdits(f.text, entryEdits(f.text, cls, "page", { kind: "everyone" }, fill)), /canAccess/);
 });

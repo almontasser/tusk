@@ -45,6 +45,8 @@ export type OMethod = {
   docStart: number | null;
   body: Span | null;
   returns: PNode[];
+  /** The body's own expression statements; an assignment to a variable names it in `assigns`. */
+  statements?: { assigns: string | null; value: PNode }[];
 };
 export type OClass = {
   kind: "class" | "enum" | "trait" | "interface";
@@ -521,4 +523,21 @@ export function removeMethod(text: string, method: OMethod): Edit {
   let start = text.lastIndexOf("\n", from - 1);
   if (/\n[ \t]*$/.test(text.slice(0, start))) start = text.lastIndexOf("\n", start - 1);
   return { start: Math.max(start, 0), end: method.span[1], text: "" };
+}
+
+/**
+ * A new PHP file in `namespace` whose code names classes as `{{Fqn}}`: each is imported and written by its short
+ * name, or fully qualified when another import already took that name.
+ */
+export function phpFile(namespace: string, code: string): string {
+  const taken = new Map<string, string>();
+  const body = code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => {
+    const short = shortName(fqn);
+    const owner = taken.get(short.toLowerCase());
+    if (!owner) taken.set(short.toLowerCase(), fqn);
+    else if (owner !== fqn) return `\\${fqn}`;
+    return short;
+  });
+  const uses = [...taken.values()].filter((fqn) => fqn.slice(0, fqn.lastIndexOf("\\")) !== namespace).sort((a, b) => a.localeCompare(b));
+  return `<?php\n\nnamespace ${namespace};\n${uses.length ? `\n${uses.map((u) => `use ${u};`).join("\n")}\n` : ""}\n${body.trim()}\n`;
 }

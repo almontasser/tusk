@@ -10,7 +10,7 @@ import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
 import { ownTranslation, translate, type Translations } from "./translations";
 import { BEHAVIORS, type Behavior, behaviorCode, readBehavior, type Scope } from "./filamentactions";
-import { type Comp, type Path, shortClass, walk } from "./filamentschema";
+import { callOf, type Comp, type Path, shortClass, walk } from "./filamentschema";
 import { confirm } from "./palette";
 import { mapCode, mapValue, nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
 
@@ -40,6 +40,10 @@ export type InspectorCtx = {
   newEnum(options: [value: string, label: string][]): void;
   /** Opens the enum designer for an enum of the app's. */
   openEnum(cls: string): void;
+  /** Lists the model's importers or exporters, or makes a new one, and calls `set` with the class picked. */
+  porter?(kind: "importer" | "exporter", anchor: HTMLElement, set: (fqn: string) => void): void;
+  /** Opens an importer or exporter in its designer. */
+  openPorter?(fqn: string): void;
   /** For a custom action: what it works with, and the record's model, for "What it does". */
   action?: { scope: Scope; model: string | null; casts: Record<string, string> };
   /** The app's translations, for text written with `__()`. */
@@ -114,7 +118,7 @@ function methodRow(ctx: InspectorCtx, m: MethodInfo, label = humanize(m.name)): 
  * Under a text written with `__()`, its translation in each of the app's languages; under plain text, a button
  * that makes it translatable. Nothing when the app has no lang files.
  */
-function translationRows(ctx: InspectorCtx, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
+export function translationRows(ctx: Pick<InspectorCtx, "i18n">, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
   const i18n = ctx.i18n;
   const v = textValue(node);
   if (!i18n || !v || !v.text) return null;
@@ -596,6 +600,7 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
     else if (name === "@span") essentialRows.push(spanEditor(ctx)), shown.add("columnSpan"), shown.add("columnSpanFull");
     else if (name === "@format") essentialRows.push(formatEditor(ctx)), FORMATS.forEach(([m]) => shown.add(m));
     else if (name === "@behavior") essentialRows.push(...behaviorEditor(ctx)), shown.add("action"), shown.add("fillForm");
+    else if (name === "@porter") essentialRows.push(porterEditor(ctx)), shown.add("importer"), shown.add("exporter");
     else if (methods.has(name) && !shown.has(name)) {
       shown.add(name);
       essentialRows.push(specialRow(ctx, methods.get(name)!) ?? methodRow(ctx, methods.get(name)!));
@@ -664,6 +669,22 @@ const FILL_FORM = (model: string) => `fn ({{${model}}} $record): array => $recor
  * "What it does" for a custom action: a behavior the designer writes as `->action(...)`'s closure, with a success
  * notification. A closure it didn't write shows as code.
  */
+/** An import or export action's importer or exporter: which class, to design it, or a new one. */
+function porterEditor(ctx: InspectorCtx): HTMLElement {
+  const kind = /Import/.test(ctx.comp.cls) ? "importer" : "exporter";
+  const arg = callOf(ctx.comp, kind)?.args.items[0]?.value;
+  const current = arg?.kind === "classConst" && arg.name === "class" ? arg.class : null;
+  const change = h("button", { type: "button" }, icon(current ? "edit" : "add"), current ? "Change…" : `Choose an ${kind}…`);
+  change.onclick = () => ctx.porter?.(kind, change, (fqn) => ctx.set([{ name: kind, args: `{{${fqn}}}::class` }]));
+  const editor = h(
+    "div",
+    { class: "fd-inline-editor" },
+    current ? h("button", { type: "button", class: "fd-chip-link", title: `Design ${current}`, onclick: () => ctx.openPorter?.(current) }, icon("table"), shortClass(current)) : arg ? h("span", { class: "fd-note" }, "Written as code") : null,
+    change,
+  );
+  return h("div", { class: `fd-row${current ? " set" : ""}`, title: `The ${kind} decides the CSV's columns${kind === "importer" ? " and how each row makes a record" : ""}.` }, h("span", { class: "fd-row-label" }, humanize(kind)), h("div", { class: "fd-row-editor" }, editor), h("span", { class: "fd-row-spacer" }));
+}
+
 function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
   const c = ctx.comp;
   const a = ctx.action;

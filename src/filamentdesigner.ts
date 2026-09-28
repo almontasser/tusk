@@ -13,13 +13,14 @@ import { renameTranslation, writeTranslation } from "./translationfiles";
 import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
-import { type CallChange, renderCodeInspector, renderInspector } from "./filamentinspector";
-import { renderAccessTab } from "./filamentaccess";
+import { type CallChange, type InspectorCtx, renderCodeInspector, renderInspector } from "./filamentinspector";
+import { renderAccessTab, renderEntryAccess } from "./filamentaccess";
 import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsTab } from "./filamentpages";
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
-import { type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { renderPageWidgets } from "./pagewidgets";
+import { addMember, type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, methodNamed, moveCode, propertyNamed, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
@@ -30,6 +31,8 @@ export type DesignerHost = {
   openAt(path: string, line: number, column?: number): void;
   status(text: string): void;
   openUrl(url: string): void;
+  /** Runs a command in a terminal tab, calling `done` when it ends. */
+  openTerminal(title: string, command: string[], done?: () => void): void;
 };
 
 export let host: DesignerHost;
@@ -95,6 +98,12 @@ export class Designer {
   actionsPage: string | null = null;
   /** Whether it's a relation manager, which has a form and table like a resource but no pages or settings. */
   manager = false;
+  /** Whether it's a table widget: a table of its own, designed like a relation manager's, and nothing else. */
+  widget = false;
+  /** Whether it's a custom page, not a resource's: its form or table, header actions, and navigation settings. */
+  page = false;
+  /** Who can open the page or see the widget, read when its Access tab first shows. */
+  private entry: { info: (fapp.PolicyInfo & { shieldKey: string | null }) | null; error: string } = { info: null, error: "" };
   private undo: string[] = [];
   private redo: string[] = [];
   private applying = false;
@@ -114,7 +123,7 @@ export class Designer {
 
   /** The panel the resource is in. */
   get panel(): fapp.PanelInfo | null {
-    return this.app?.panels.find((p) => p.resources.some((r) => r.class === this.info?.class)) ?? null;
+    return this.app?.panels.find((p) => p.resources.some((r) => r.class === this.info?.class) || (this.page && p.pages.some((x) => x.class === this.cls?.fqn))) ?? null;
   }
 
   get host() {
@@ -162,6 +171,8 @@ export class Designer {
       const model = this.info?.model ?? (this.manager ? await this.relatedModel(app) : null) ?? this.modelOfCode();
       this.facts = model ? await fapp.modelFacts(root, model).catch(() => null) : null;
       await this.readPageActions();
+      // A page without a form opens on its table, or its actions.
+      if (this.page && this.tab === "form" && "missing" in (this.roots.get("form") ?? { missing: true })) this.tab = "missing" in (this.roots.get("table") ?? { missing: true }) ? "actions" : "table";
       this.loadError = "";
     } catch (e) {
       this.loadError = e instanceof Error ? e.message : String(e);
@@ -184,7 +195,17 @@ export class Designer {
   private modelOfCode(): string | null {
     const prop = this.cls?.properties.find((p) => p.name === "model");
     if (prop?.value?.kind === "classConst") return prop.value.class;
-    return null;
+    // A table's model is the one its query starts from, `->query(fn () => Order::query())`, and a page's form
+    // edits the record its getRecord() returns.
+    const doc = this.docs.get(this.file);
+    const table = this.cls && doc ? methodNamed(this.cls, "table") : null;
+    const record = this.cls ? methodNamed(this.cls, "getRecord")?.returnType?.replace(/^\?/, "") : undefined;
+    const name = (table && /(\\?[A-Z][\w\\]*)::query\(/.exec(doc!.text.slice(table.span[0], table.span[1]))?.[1]) || (record && /^\\?[A-Z][\w\\]*$/.test(record) ? record : undefined);
+    if (!name || !doc) return null;
+    if (name.startsWith("\\")) return name.slice(1);
+    const [first, ...rest] = name.split("\\");
+    const use = doc.outline.uses.find((u) => u.kind === "class" && u.alias === first);
+    return use ? [use.name, ...rest].join("\\") : `${doc.outline.namespace ? `${doc.outline.namespace}\\` : ""}${name}`;
   }
 
   async doc(path: string): Promise<Doc> {
@@ -212,7 +233,10 @@ export class Designer {
     const cls = main.outline.classes.find((c) => c.name) ?? null;
     if (!cls) throw new Error("There's no class in this file.");
     this.cls = cls;
-    this.manager = /RelationManager$/.test(cls.extends ?? "") || /RelationManagers?\\/.test(cls.fqn);
+    this.widget = /TableWidget$/.test(cls.extends ?? "");
+    this.manager = this.widget || /RelationManager$/.test(cls.extends ?? "") || /RelationManagers?\\/.test(cls.fqn);
+    this.page = !this.manager && !propertyNamed(cls, "resource") && /(^|\\)(Page|SettingsPage)$/.test(cls.extends ?? "");
+    if (this.widget) this.tab = "table";
     this.roots.clear();
     for (const kind of ["form", "table", "infolist"] as RootKind[]) {
       const root = readRoot(cls, kind);
@@ -267,8 +291,9 @@ export class Designer {
   /** Reads the header actions of the page the Page actions tab shows: the list page's, unless another was picked. */
   private async readPageActions() {
     const pages = this.pageFiles;
-    if (this.manager || !pages.length) return void this.roots.set("actions", { kind: "actions", missing: true });
-    const file = pages.find((p) => p.file === this.actionsPage)?.file ?? (pages.find((p) => p.kind === "list" || p.kind === "manage") ?? pages[0]).file;
+    if (!this.page && (this.manager || !pages.length)) return void this.roots.set("actions", { kind: "actions", missing: true });
+    // A custom page's header actions are its own.
+    const file = this.page ? this.file : (pages.find((p) => p.file === this.actionsPage)?.file ?? (pages.find((p) => p.kind === "list" || p.kind === "manage") ?? pages[0]).file);
     this.actionsPage = file;
     const doc = await this.doc(file);
     const cls = doc.outline.classes.find((c) => c.name);
@@ -722,14 +747,15 @@ export class Designer {
 
   private header() {
     const info = this.info;
-    const title = this.manager ? humanize(this.cls?.name.replace(/RelationManager$/, "") ?? "") : (info?.navigationLabel ?? (info?.pluralLabel ? info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : humanize(this.cls?.name.replace(/Resource$/, "") ?? "Resource")));
+    const pageInfo = this.page ? this.panel?.pages.find((p) => p.class === this.cls?.fqn) : undefined;
+    const title = this.page ? (pageInfo?.label ?? humanize(this.cls?.name ?? "Page")) : this.manager ? humanize(this.cls?.name.replace(/RelationManager$/, "") ?? "") : (info?.navigationLabel ?? (info?.pluralLabel ? info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : humanize(this.cls?.name.replace(/Resource$/, "") ?? "Resource")));
     const panel = this.panel;
     const model = this.facts?.class ?? info?.model;
     const doc = this.docs.get(this.file);
     return h(
       "header",
       { class: "fd-header" },
-      h("span", { class: "fd-header-icon" }, info?.navigationIcon ? heroicon(this.cat?.heroiconsDir ?? null, info.navigationIcon) : icon(this.manager ? "references" : "symbol-structure")),
+      h("span", { class: "fd-header-icon" }, (info?.navigationIcon ?? pageInfo?.navigationIcon) ? heroicon(this.cat?.heroiconsDir ?? null, info?.navigationIcon ?? pageInfo?.navigationIcon) : icon(this.page ? "file" : this.widget ? "graph" : this.manager ? "references" : "symbol-structure")),
       h(
         "div",
         { class: "fd-header-titles" },
@@ -737,7 +763,7 @@ export class Designer {
         h(
           "div",
           { class: "fd-header-chips" },
-          h("span", { class: "fd-chip-static", title: this.file }, this.manager ? "Relation manager" : "Resource", " · ", this.cls?.name ?? ""),
+          h("span", { class: "fd-chip-static", title: this.file }, this.page ? "Page" : this.widget ? "Table widget" : this.manager ? "Relation manager" : "Resource", " · ", this.cls?.name ?? ""),
           model ? h("button", { type: "button", class: "fd-chip-link", title: "Open the model", onclick: () => this.openModel() }, icon("database"), shortClass(model)) : null,
           panel ? h("span", { class: "fd-chip-static", title: "Panel" }, icon("window"), panel.id) : null,
           this.facts?.details.tableExists === false ? h("span", { class: "fd-chip-warn", title: "The database has no table for the model yet. Run the migrations." }, icon("warning"), "No table") : null,
@@ -808,7 +834,8 @@ export class Designer {
   }
 
   private tabs() {
-    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "access", "settings"];
+    const has = (k: RootKind) => { const r = this.roots.get(k); return !!r && !("missing" in r); };
+    const tabs: Tab[] = this.page ? [...(["form", "table"] as const).filter(has), "actions", "access", "settings"] : this.widget ? ["table", "access"] : this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "access", "settings"];
     const count = (t: Tab) => {
       if (t === "relations") return this.info?.relations.length;
       if (t === "pages") return this.info?.pages.length;
@@ -857,7 +884,7 @@ export class Designer {
     if (this.tab === "relations") return renderRelationsTab(this);
     if (this.tab === "pages") return renderPagesTab(this);
     if (this.tab === "settings") return renderSettingsTab(this);
-    if (this.tab === "access") return renderAccessTab(this);
+    if (this.tab === "access") return this.page || this.widget ? this.entryAccess() : renderAccessTab(this);
     const ref = this.roots.get(this.tab as RootKind);
     if (!ref || "missing" in ref) return this.missingRoot(this.tab as RootKind);
     if ("error" in ref) return h("div", { class: "fd-error" }, icon("code"), h("div", {}, h("strong", {}, `The ${this.tab} is built by code the designer doesn't read`), h("p", {}, ref.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => this.reveal(ref.root?.node ?? { span: [0, 0] }, ref.doc) }, icon("go-to-file"), "Open the code"))));
@@ -867,7 +894,7 @@ export class Designer {
   /** A tab for a form, table, or infolist the resource doesn't have yet, with a button that adds it. */
   private missingRoot(kind: RootKind) {
     if (kind === "actions") {
-      const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+      const page = this.actionsTarget();
       if (!page) return h("div", { class: "fd-error fd-empty-root" }, icon(TAB_ICONS.actions), h("div", {}, h("strong", {}, "The resource has no pages in its folder"), h("p", {}, "Header actions belong to a page, such as the list or edit page. Add pages on the Pages tab.")));
       return h(
         "div",
@@ -911,8 +938,89 @@ export class Designer {
   }
 
   /** Adds `getHeaderActions()` to the page the Page actions tab shows, with the actions that page usually has. */
+  /**
+   * Picks an importer or exporter for an import or export action: the model's first, then the app's others, or a new
+   * one Filament generates from the model's columns, which then opens in its designer.
+   */
+  private async pickPorter(kind: "importer" | "exporter", anchor: HTMLElement, set: (fqn: string) => void) {
+    const all = await fapp.porters(this.root).catch(() => null);
+    const list = (kind === "importer" ? all?.importers : all?.exporters) ?? [];
+    const model = this.facts?.class ?? null;
+    const mine = list.filter((p) => p.model === model);
+    const others = list.filter((p) => p.model !== model);
+    const choose = (fqn: string) => (p.close(), set(fqn));
+    const create = async () => {
+      if (!model) return;
+      p.close();
+      // Filament's generator takes the model under App\Models, with folders, or its namespace apart.
+      const rel = model.startsWith("App\\Models\\") ? model.slice(11).replace(/\\/g, "/") : shortClass(model);
+      const args = [`make:filament-${kind}`, rel, "--generate", ...(model.startsWith("App\\Models\\") ? [] : [`--model-namespace=${model.slice(0, model.lastIndexOf("\\"))}`])];
+      try {
+        host.status(`Making the ${kind}…`);
+        const out = await fapp.artisan(this.root, args);
+        const fqn = /\[([\w\\]+(?:Importer|Exporter))\]/.exec(out.replace(/\x1b\[[\d;]*m/g, ""))?.[1];
+        fapp.forget(["app:porters"]);
+        if (!fqn) return host.status(`Made the ${kind}, but couldn't tell its class: ${out.trim().slice(0, 120)}`);
+        set(fqn);
+        const file = await fapp.fileOfClass(this.root, fqn);
+        if (file) void import("./porterdesigner").then((m) => m.openPorter(file));
+      } catch (e) {
+        showError(`Can't make the ${kind}`, e);
+      }
+    };
+    const row = (x: fapp.PorterInfo) => h("button", { type: "button", class: "fd-menu-item", onclick: () => choose(x.class) }, icon("table"), h("span", {}, shortClass(x.class)), h("span", { class: "fd-note" }, x.model ? shortClass(x.model) : ""));
+    const p = popover(
+      anchor,
+      h(
+        "div",
+        { class: "fd-menu fd-porter-menu" },
+        ...mine.map(row),
+        model ? h("button", { type: "button", class: "fd-menu-item", onclick: () => void create() }, icon("add"), h("span", {}, `New ${kind} for ${shortClass(model)}`), h("span", { class: "fd-note" }, "from its columns")) : null,
+        others.length ? h("div", { class: "fd-menu-sep" }, "Other models") : null,
+        ...others.map(row),
+      ),
+    );
+  }
+
+  /** The app's translations, for editors of text written with `__()`. */
+  i18n(): InspectorCtx["i18n"] {
+    return this.translations ? { t: this.translations, locale: this.locale, write: (locale, key, value) => void this.writeTranslation(locale, key, value), rename: (from, to) => this.renameTranslation(from, to) } : undefined;
+  }
+
+  /** A page's or widget's Access tab. */
+  private entryAccess() {
+    const doc = this.docs.get(this.file);
+    if (!doc || !this.cls) return h("div");
+    const load = async () => {
+      try {
+        this.entry = { info: await fapp.entryAccess(this.root, this.cls!.fqn), error: "" };
+      } catch (e) {
+        this.entry = { info: null, error: e instanceof Error ? e.message : String(e) };
+      }
+      if (this.tab === "access") this.render();
+    };
+    return renderEntryAccess({
+      root: this.root,
+      kind: this.page ? "page" : "widget",
+      fqn: this.cls.fqn,
+      text: doc.text,
+      cls: this.cls,
+      host,
+      ...this.entry,
+      load: () => (this.entry.info || this.entry.error ? (fapp.forget([`policy:entry:${this.cls!.fqn}`]), load()) : load()),
+      reveal: (offset) => this.reveal({ span: [offset, offset] }, doc),
+      edit: (build, message) => this.apply(doc, (_imports, fill) => build(doc.text, this.cls!, fill), message),
+    });
+  }
+
+  /** The page whose header actions the tab shows: a resource's page, or a custom page itself. */
+  private actionsTarget() {
+    if (this.page && this.cls) return { name: this.cls.name, kind: "custom" as const, file: this.file };
+    return this.pageFiles.find((p) => p.file === this.actionsPage);
+  }
+
   private async addHeaderActions() {
-    const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+    const page = this.actionsTarget();
     const doc = page && this.docs.get(page.file);
     const cls = doc?.outline.classes.find((c) => c.name);
     if (!page || !doc || !cls) return;
@@ -922,8 +1030,8 @@ export class Designer {
     await this.apply(
       doc,
       (_imports, fill) => {
-        const method = `protected function getHeaderActions(): array\n{\n    return [\n${seed.map((a) => `        ${fill(a)},\n`).join("")}    ];\n}`;
-        return [{ start: cls.bodyEnd, end: cls.bodyEnd, text: `${cls.methods.length || cls.properties.length ? "\n" : ""}\n    ${indentCode(method, "    ")}\n` }];
+        const method = `protected function getHeaderActions(): array\n{\n    return [${seed.length ? `\n${seed.map((a) => `        ${fill(a)},\n`).join("")}    ` : ""}];\n}`;
+        return [addMember(doc.text, cls, method)];
       },
       "Added header actions",
       null,
@@ -951,6 +1059,7 @@ export class Designer {
 
   /** The title a page shows, as Filament writes it: the plural label on the list, "Edit post" on the edit page. */
   private pageTitle(): string {
+    if (this.page) return this.panel?.pages.find((p) => p.class === this.cls?.fqn)?.label ?? humanize(this.cls?.name ?? "Page");
     const page = this.pageFiles.find((p) => p.file === this.actionsPage);
     const label = this.info?.label ?? humanize(shortClass(this.info?.model ?? "Record")).toLowerCase();
     const plural = this.info?.navigationLabel ?? this.info?.pluralLabel ?? `${label}s`;
@@ -975,7 +1084,8 @@ export class Designer {
       const path = this.selection!.slice(0, i);
       const comp = resolve(root, path)?.entry.comp;
       const kind = comp && this.cat && classInfo(this.cat, comp.cls)?.kind;
-      if (comp && (kind === "action" || kind === "bulkAction")) return { path, comp };
+      // Import and export actions draw their own modal, from the importer or exporter.
+      if (comp && (kind === "action" || kind === "bulkAction")) return /(Import|Export|ExportBulk)Action$/.test(comp.cls) ? null : { path, comp };
     }
     return null;
   }
@@ -1010,7 +1120,7 @@ export class Designer {
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
     if (isRtl(this.locale)) canvas.dir = "rtl";
-    canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), this.page ? null : renderPageWidgets(this), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     const modal = this.modalAction(ref.root);
     if (modal) canvas.append(renderActionModal(ctx, modal.path, modal.comp));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
@@ -1253,12 +1363,14 @@ export class Designer {
             },
           }),
         ),
+      porter: (kind, anchor, set) => void this.pickPorter(kind, anchor, set),
+      openPorter: (fqn) => void fapp.fileOfClass(this.root, fqn).then((f) => { if (f) void import("./porterdesigner").then((m) => m.openPorter(f)); }),
       action: (() => {
         const kind = classInfo(this.cat!, found.entry.comp!.cls)?.kind ?? "";
         const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;
         return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {} } : undefined;
       })(),
-      i18n: this.translations ? { t: this.translations, locale: this.locale, write: (locale, key, value) => void this.writeTranslation(locale, key, value), rename: (from, to) => this.renameTranslation(from, to) } : undefined,
+      i18n: this.i18n(),
       openEnum: async (cls) => {
         const known = this.enums.find((e) => e.class === cls)?.file;
         const file = known ? `${this.root}/${known}` : await fapp.fileOfClass(this.root, cls);

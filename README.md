@@ -49,7 +49,7 @@ file to change when you add it.
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
-| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. |
+| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods, and don't set up two-factor authentication or tenancy's user contract. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. Stats on a list page don't follow the table's filters. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
@@ -878,6 +878,18 @@ have the permissions the rules name. Check a box to grant one, creating the
 permission when it's missing, and **New role** adds a role. These change the
 app's database.
 
+Custom pages and widgets have **Access** too: who can open the page, or see the
+widget, is **Everyone**, **Nobody**, **Only users who…** have a permission or a
+role, written in its `canAccess()` or `canView()`, or, with Filament Shield,
+**Filament Shield decides**, which adds Shield's `HasPageShield` or
+`HasWidgetShield` trait and shows the permission Shield gives it, such as
+`page_Settings`, with the roles that have it. A page someone can't open also
+leaves their navigation.
+
+With Filament Shield, **Generate with Shield…** runs `shield:generate` for each
+panel: **Create the permissions** for every resource, page, and widget, or
+**Also write missing policies**, which leaves existing policies alone.
+
 ### Languages
 
 When text is written with `__()`, the designer helps translate it:
@@ -928,6 +940,110 @@ the form, table, infolist, and settings, and opens the designer.
 - **Settings:** sets the navigation label, icon, group, and order, the record's
   names and title attribute, the URL, a record count badge, and the attributes
   global search looks in.
+
+### Panel settings
+
+Click the gear on a panel in the Filament tool window, **Open Panel
+Settings** above a panel provider's class, or run **Filament: Panel
+Settings…**. Each change is saved to the provider at once, and a preview of
+the panel follows it.
+
+- **Brand:** name, logo and dark mode logo (a file in `public/` or a URL),
+  logo height, favicon, and font.
+- **Colors:** each of Filament's colors from its palettes, or any color.
+- **Sign-in:** login, registration, password reset, email verification, and
+  the profile page.
+- **Layout and features:** top navigation, collapsible sidebar, content width,
+  breadcrumbs, dark mode, global search, the notifications bell, single-page
+  navigation, and strict authorization.
+- **Navigation groups:** their order, icons, and whether they start
+  collapsed, with the groups resources use that aren't listed yet.
+- **Plugins:** the Filament plugins installed with Composer, added to the
+  panel or removed from it.
+- **Tenancy:** the tenant model, and what the user model still needs for it.
+
+Settings written as code the designer doesn't write, such as a logo from a
+closure, show as code and open it.
+
+### Import and export
+
+Add an **ImportAction**, **ExportAction**, or **ExportBulkAction** from the
+palette, and its **Importer** or **Exporter** setting picks one of the model's,
+or makes a new one from the model's columns with Filament's generator. Click
+it, or **Open in Import Designer** above an importer's class, to design it:
+
+- **Columns:** each CSV column's heading; for imports, whether the file must
+  have it, how its value is read (text, a number, yes or no, or a list), its
+  validation rules, and an example value; for exports, whether it starts
+  checked. Add the model's other columns, reorder, and remove.
+- **Records:** whether each imported row makes a new record, updates the one
+  with the same value in a column (such as `sku`) or makes it, or only
+  updates.
+- **What it needs:** the tables imports and exports use, with a button that
+  creates them, and whether a queue worker must run.
+
+The preview shows the CSV: the example people download before importing, or
+the columns an export writes.
+
+### Custom pages
+
+Pages that aren't a resource's are listed under **Pages** in each panel in the
+Filament tool window, and open in the designer: their form or table, header
+actions, access, and navigation settings (label, icon, group, order, title,
+and address). **Open in Designer** shows above a page's class too.
+
+**New page** (the page button on a panel, or **Filament: New Page…**) makes:
+
+- **A form** that edits one record: the signed-in user's, or a model's single
+  record, such as the store's settings, made when it's first saved. Its
+  fields come from the model's columns, and **Save** saves them.
+- **A table** of a model's records, with columns from the model.
+
+New pages draw their content from `content()`, so they need no Blade view.
+
+### Dashboards and widgets
+
+Click **Dashboard** under a panel in the Filament tool window, or run
+**Filament: Dashboard…**. The dashboard shows its widgets in a grid, as wide
+as each one is.
+
+- **Arrange:** move widgets earlier or later, change how many columns each
+  spans, and the dashboard's column count. Hide a widget, and show it again
+  from **Hidden widgets**. A dashboard page that lists its own widgets changes
+  that list instead.
+- **New widget:** a stats overview, a chart, or a table of a model's records.
+  It starts useful: a stat that counts the records, a chart of new records per
+  month, or a table of the latest ones.
+- **Stats:** each stat's label, value, description with its icon, color, and a
+  trend of the last 7 days. A value counts a model's records, or sums,
+  averages, or finds the lowest or highest of a column, of the records that
+  match its conditions, in a time window, shown as it is, as a number, as
+  1.2K, or as money.
+- **Charts:** the type (line, bar, pie, doughnut, polar area, or radar), the
+  heading, color, and height, and the data: a value over the last days, weeks,
+  or months, or split by a column's values. Pies get a color per part.
+- **Table widgets** open in the designer's table tab.
+- **Access:** who can see a widget, as for pages below.
+- **Resource pages:** the **Page actions** tab lists the widgets above the
+  page, to add, reorder, and remove, and makes new ones for the resource.
+
+The preview runs the widget to show its real numbers, as the first user when
+there is one.
+
+### Sample records and checks
+
+- **Sample records:** **Sample records** in the model designer, or **Laravel:
+  Add Sample Records…**, makes as many records as you ask for with the
+  model's factory, in the app's database.
+- **Translated names:** in a resource's or page's settings, **Translate**
+  beside the label, group, record names, or title writes it as a getter that
+  returns `__('…')`, with a field for each language. A group's name must be
+  translated the same way in the panel's navigation groups for their order to
+  apply.
+- **When the app stops starting:** after a change to `app/`, the app is read
+  again, and a notice says when it can't start, with the file and line; another
+  says when it starts again. **Laravel: Check the App (Boot and Tests)**
+  loads the routes and runs the tests in a terminal tab.
 
 ## Model designer
 

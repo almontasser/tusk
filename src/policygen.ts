@@ -1,7 +1,7 @@
 // Policies for the Access tab: each ability of a model's policy (viewAny, update, …) as a rule the designer can
 // show and change (everyone, nobody, or users with a permission or role, or who own the record), written as the
 // method's one `return`. A method written otherwise is code the designer keeps. No editor imports, so Node tests it.
-import { type OClass, type OMethod, phpString } from "./phpcode.ts";
+import { addMember, type Edit, type OClass, type OMethod, phpString, removeMethod } from "./phpcode.ts";
 
 export type Ability = { name: string; label: string; record: boolean; more?: boolean; hint: string };
 
@@ -169,3 +169,58 @@ export function permissionName(ability: string, modelShort: string, shield?: Shi
 
 /** The permissions a policy's rules name. */
 export const permissionsOf = (read: ReadAbility[]) => [...new Set(read.flatMap((r) => (r.rule?.kind === "when" ? r.rule.conds.filter((c) => c.kind === "permission").map((c) => (c as { name: string }).name) : [])))];
+
+// ---- Pages and widgets ----
+
+/**
+ * Who can open a custom page (`canAccess()`) or see a widget (`canView()`): a rule like a policy's, on the signed-in
+ * user, or Filament Shield's trait, which checks the permission Shield gives the class.
+ */
+export type EntryRule = Rule | { kind: "shield" };
+export const SHIELD_TRAITS = { page: "BezhanSalleh\\FilamentShield\\Traits\\HasPageShield", widget: "BezhanSalleh\\FilamentShield\\Traits\\HasWidgetShield" };
+const ENTRY_VARS: Vars = { user: "user", model: "record" };
+
+/** The method's body for a rule, or null for everyone, which needs no method. */
+export function entryBody(r: Rule): string | null {
+  if (r.kind === "everyone" || r.kind === "custom") return null;
+  if (r.kind === "nobody") return "return false;";
+  const expr = ruleCode(r, ENTRY_VARS);
+  if (!expr) return null;
+  return `$user = auth()->user();\n\nreturn $user !== null && ${r.conds.length > 1 ? `(${expr})` : expr};`;
+}
+
+/** Reads who can open a page or see a widget from its class. */
+export function readEntry(text: string, cls: OClass, kind: "page" | "widget"): EntryRule {
+  const trait = SHIELD_TRAITS[kind];
+  if (cls.traits.some((t) => t.replace(/^\\/, "") === trait || t === trait.slice(trait.lastIndexOf("\\") + 1))) return { kind: "shield" };
+  const method = cls.methods.find((m) => m.name === (kind === "page" ? "canAccess" : "canView"));
+  if (!method?.body) return { kind: "everyone" };
+  const body = text.slice(method.body[0], method.body[1]).replace(/\s+/g, " ").trim();
+  if (/^return true;$/i.test(body)) return { kind: "everyone" };
+  if (/^return false;$/i.test(body)) return { kind: "nobody" };
+  const m = /^\$user = (?:auth\(\)|\\?(?:[\w\\]*\\)?Filament::auth\(\))->user\(\); return \$user !== null && (.+);$/.exec(body);
+  const rule = m ? readRule(m[1], ENTRY_VARS) : null;
+  return rule && rule.kind === "when" ? rule : { kind: "custom" };
+}
+
+/** The edits that give a page or widget a rule: its method, or Shield's trait. */
+export function entryEdits(text: string, cls: OClass, kind: "page" | "widget", rule: EntryRule, fill: (code: string) => string): Edit[] {
+  const name = kind === "page" ? "canAccess" : "canView";
+  const edits: Edit[] = [];
+  const method = cls.methods.find((m) => m.name === name);
+  const trait = SHIELD_TRAITS[kind];
+  const short = trait.slice(trait.lastIndexOf("\\") + 1);
+  const body = text.slice(cls.bodyStart, cls.bodyEnd);
+  const use = new RegExp(`\\n[ \\t]*use\\s+\\\\?(?:[\\w\\\\]*\\\\)?${short}\\s*;[ \\t]*(?:\\n[ \\t]*(?=\\n))?`).exec(body);
+  if (rule.kind !== "shield" && use) edits.push({ start: cls.bodyStart + use.index, end: cls.bodyStart + use.index + use[0].length, text: "" });
+  if (rule.kind === "shield") {
+    if (method) edits.push(removeMethod(text, method));
+    // Beside the class's other traits, or on its own before the rest of the class.
+    if (!use) edits.push({ start: cls.bodyStart, end: cls.bodyStart, text: `\n    use ${fill(`{{${trait}}}`)};${/^\s*use\s/.test(body) ? "" : "\n"}` });
+    return edits;
+  }
+  const code = entryBody(rule as Rule);
+  if (!code) return [...edits, ...(method ? [removeMethod(text, method)] : [])];
+  if (method?.body) return [...edits, { start: method.body[0], end: method.body[1], text: `\n        ${code.replace(/\n(?=.)/g, "\n        ")}\n    ` }];
+  return [...edits, addMember(text, cls, `public static function ${name}(): bool\n{\n    ${code.replace(/\n(?=.)/g, "\n    ")}\n}`)];
+}

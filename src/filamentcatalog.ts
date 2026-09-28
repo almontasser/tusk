@@ -358,7 +358,9 @@ const BY_CLASS: Record<string, string[]> = {
 /** The inspector's first settings for a class, in order: its kind's, then its own and its parents'. */
 export function essentials(cls: CClass): string[] {
   const own = [shortClass(cls.class), ...cls.parents.map(shortClass)].flatMap((n) => BY_CLASS[n] ?? []);
-  const list = [...(ESSENTIALS[cls.kind] ?? []), ...own];
+  // Import and export actions do what their importer or exporter says, so that's what they're set up with.
+  const porter = [shortClass(cls.class), ...cls.parents.map(shortClass)].some((n) => /^(ImportAction|ExportAction|ExportBulkAction)$/.test(n));
+  const list = [...(ESSENTIALS[cls.kind] ?? []).map((n) => (n === "@behavior" && porter ? "@porter" : n)), ...own];
   // Text columns and entries format with the designer's editor, which covers these calls.
   return [...new Set(list)];
 }

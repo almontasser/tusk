@@ -40,6 +40,7 @@ import { addMember, Imports, type Edit, insertItem, mergeEdits, methodNamed, nod
 import { confirm } from "./palette";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView } from "./terminal";
+import { sampleButton } from "./sampledata";
 
 let ids = 0;
 const newId = () => `c${++ids}`;
@@ -243,6 +244,7 @@ class ModelDesigner {
           existing && existing.columns === null ? h("span", { class: "fd-chip-warn", title: "The database can't be reached, so columns come from the model." }, icon("warning"), "Database not reachable") : null,
           this.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => designerHost.openAt(this.file!, 1) }, icon("go-to-file"), "Open the code") : null,
           existing ? h("button", { type: "button", class: "fd-chip-link", title: "Who can see, create, edit, and delete these records", onclick: () => void import("./accessview").then((m) => m.openAccess(existing.class)) }, icon("shield"), "Access") : null,
+          existing?.factory && existing.tableExists !== false ? sampleButton(existing.class) : null,
         ),
       ),
       h("span", { class: "fd-spacer" }),

@@ -1,0 +1,699 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Exports\\Shop",
+  "uses": [
+    {
+      "alias": "Brand",
+      "name": "App\\Models\\Shop\\Brand",
+      "kind": "class",
+      "span": [
+        45,
+        71
+      ]
+    },
+    {
+      "alias": "ExportColumn",
+      "name": "Filament\\Actions\\Exports\\ExportColumn",
+      "kind": "class",
+      "span": [
+        72,
+        114
+      ]
+    },
+    {
+      "alias": "Exporter",
+      "name": "Filament\\Actions\\Exports\\Exporter",
+      "kind": "class",
+      "span": [
+        115,
+        153
+      ]
+    },
+    {
+      "alias": "Export",
+      "name": "Filament\\Actions\\Exports\\Models\\Export",
+      "kind": "class",
+      "span": [
+        154,
+        197
+      ]
+    }
+  ],
+  "useInsert": 198,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "BrandExporter",
+      "fqn": "App\\Filament\\Exports\\Shop\\BrandExporter",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Actions\\Exports\\Exporter",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        199,
+        1191
+      ],
+      "bodyStart": 237,
+      "bodyEnd": 1190,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "model",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Models\\Shop\\Brand",
+            "classSpan": [
+              276,
+              281
+            ],
+            "name": "class",
+            "span": [
+              276,
+              288
+            ]
+          },
+          "span": [
+            242,
+            289
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "getColumns",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            295,
+            704
+          ],
+          "docStart": null,
+          "body": [
+            343,
+            703
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Exports\\ExportColumn",
+                      "classSpan": [
+                        373,
+                        385
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 391,
+                        "close": 396,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "id",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                392,
+                                396
+                              ]
+                            },
+                            "span": [
+                              392,
+                              396
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        373,
+                        397
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "label",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 421,
+                          "close": 426,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "ID",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  422,
+                                  426
+                                ]
+                              },
+                              "span": [
+                                422,
+                                426
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          414,
+                          427
+                        ],
+                        "nameSpan": [
+                          416,
+                          421
+                        ]
+                      }
+                    ],
+                    "span": [
+                      373,
+                      427
+                    ]
+                  },
+                  "span": [
+                    373,
+                    427
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Actions\\Exports\\ExportColumn",
+                    "classSpan": [
+                      441,
+                      453
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 459,
+                      "close": 466,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "name",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              460,
+                              466
+                            ]
+                          },
+                          "span": [
+                            460,
+                            466
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      441,
+                      467
+                    ]
+                  },
+                  "span": [
+                    441,
+                    467
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Actions\\Exports\\ExportColumn",
+                    "classSpan": [
+                      481,
+                      493
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 499,
+                      "close": 506,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "slug",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              500,
+                              506
+                            ]
+                          },
+                          "span": [
+                            500,
+                            506
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      481,
+                      507
+                    ]
+                  },
+                  "span": [
+                    481,
+                    507
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Actions\\Exports\\ExportColumn",
+                    "classSpan": [
+                      521,
+                      533
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 539,
+                      "close": 549,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "website",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              540,
+                              549
+                            ]
+                          },
+                          "span": [
+                            540,
+                            549
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      521,
+                      550
+                    ]
+                  },
+                  "span": [
+                    521,
+                    550
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Actions\\Exports\\ExportColumn",
+                    "classSpan": [
+                      564,
+                      576
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 582,
+                      "close": 595,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "created_at",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              583,
+                              595
+                            ]
+                          },
+                          "span": [
+                            583,
+                            595
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      564,
+                      596
+                    ]
+                  },
+                  "span": [
+                    564,
+                    596
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Actions\\Exports\\ExportColumn",
+                      "classSpan": [
+                        610,
+                        622
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 628,
+                        "close": 641,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "updated_at",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                629,
+                                641
+                              ]
+                            },
+                            "span": [
+                              629,
+                              641
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        610,
+                        642
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "label",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 666,
+                          "close": 685,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Last modified at",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  667,
+                                  685
+                                ]
+                              },
+                              "span": [
+                                667,
+                                685
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          659,
+                          686
+                        ],
+                        "nameSpan": [
+                          661,
+                          666
+                        ]
+                      }
+                    ],
+                    "span": [
+                      610,
+                      686
+                    ]
+                  },
+                  "span": [
+                    610,
+                    686
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 359,
+              "close": 696,
+              "legacy": false,
+              "span": [
+                359,
+                697
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "getCompletedNotificationBody",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "export",
+              "type": "Export",
+              "default": null,
+              "span": [
+                762,
+                776
+              ]
+            }
+          ],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            710,
+            1189
+          ],
+          "docStart": null,
+          "body": [
+            791,
+            1188
+          ],
+          "returns": [
+            {
+              "kind": "var",
+              "name": "body",
+              "span": [
+                1177,
+                1182
+              ]
+            }
+          ],
+          "statements": [
+            {
+              "assigns": "body",
+              "value": {
+                "kind": "concat",
+                "parts": [
+                  {
+                    "kind": "string",
+                    "value": "Your brand export has completed and ",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      808,
+                      846
+                    ]
+                  },
+                  {
+                    "kind": "func",
+                    "name": "number_format",
+                    "nameSpan": [
+                      849,
+                      862
+                    ],
+                    "args": {
+                      "open": 862,
+                      "close": 887,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "prop",
+                            "object": {
+                              "kind": "var",
+                              "name": "export",
+                              "span": [
+                                863,
+                                870
+                              ]
+                            },
+                            "name": "successful_rows",
+                            "nullsafe": false,
+                            "span": [
+                              863,
+                              887
+                            ]
+                          },
+                          "span": [
+                            863,
+                            887
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      849,
+                      888
+                    ]
+                  },
+                  {
+                    "kind": "string",
+                    "value": " ",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      891,
+                      894
+                    ]
+                  },
+                  {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "func",
+                      "name": "str",
+                      "nameSpan": [
+                        897,
+                        900
+                      ],
+                      "args": {
+                        "open": 900,
+                        "close": 906,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "row",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                901,
+                                906
+                              ]
+                            },
+                            "span": [
+                              901,
+                              906
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        897,
+                        907
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "plural",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 915,
+                          "close": 940,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "prop",
+                                "object": {
+                                  "kind": "var",
+                                  "name": "export",
+                                  "span": [
+                                    916,
+                                    923
+                                  ]
+                                },
+                                "name": "successful_rows",
+                                "nullsafe": false,
+                                "span": [
+                                  916,
+                                  940
+                                ]
+                              },
+                              "span": [
+                                916,
+                                940
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          907,
+                          941
+                        ],
+                        "nameSpan": [
+                          909,
+                          915
+                        ]
+                      }
+                    ],
+                    "span": [
+                      897,
+                      941
+                    ]
+                  },
+                  {
+                    "kind": "string",
+                    "value": " exported.",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      944,
+                      956
+                    ]
+                  }
+                ],
+                "span": [
+                  808,
+                  956
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
