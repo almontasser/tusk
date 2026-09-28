@@ -40,6 +40,10 @@ export type PanelInfo = {
   resourceNamespaces: string[];
   clusterDirs: string[];
   clusterNamespaces: string[];
+  widgetDirs: string[];
+  widgetNamespaces: string[];
+  pageDirs: string[];
+  pageNamespaces: string[];
   url: string | null;
   resources: ResourceInfo[];
   clusters: { class: string; file: string | null; label: string | null }[];
@@ -137,6 +141,10 @@ export const models = (root: string) => cached(root, "models", () => introspect<
 export const migrations = (root: string) => cached(root, "migrations", () => introspect<Migrations>(root, "migrations"));
 export const translations = (root: string) => cached(root, "translations", () => introspect<import("./translations").Translations>(root, "translations"));
 export const panelOptions = (root: string) => cached(root, "panel-options", () => introspect<import("./panelsettings").PanelOptions>(root, "panel-options"));
+export type WidgetInfo = { class: string; file: string | null; kind: "stats" | "chart" | "table" | "other"; sort: number | null; columnSpan: number | string | Record<string, number | string> | null; heading: string | null; discovered: boolean };
+export const widgets = (root: string, panel: string) => cached(root, `app:widgets:${panel}`, () => introspect<{ widgets: WidgetInfo[]; dashboards: { class: string; file: string | null; title: string | null; columns: number | Record<string, number>; widgets: WidgetInfo[] | null }[]; hidden: WidgetInfo[] }>(root, "widgets", panel));
+/** What a stats or chart widget shows now, from running it as the first user; not kept, since the data changes. */
+export const widgetData = (root: string, cls: string) => introspect<{ as: string | null; stats?: { label: string | null; value: string | null; chart: number[] | null }[]; chart?: { datasets?: { data?: unknown[]; label?: string }[]; labels?: unknown[] }; type?: string }>(root, "widget-data", cls);
 export const policy = (root: string, cls: string, resource?: string) => cached(root, `policy:${cls}:${resource ?? ""}`, () => introspect<PolicyInfo>(root, "policy", cls, ...(resource ? [resource] : [])));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);

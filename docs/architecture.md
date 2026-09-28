@@ -4402,6 +4402,37 @@ has, as `methodsOf` reports them.
   implements its Plugin contract), the app's name, and the user model with the
   contracts tenancy needs. `src/panelsettings.ts` draws the view.
 
+### Dashboards and widgets
+
+- **Reading:** `introspect.php widgets <panel>` asks the panel for its widgets,
+  sorted as Filament sorts them, with each one's kind, sort, column span, and
+  heading, read from an instance. It lists each dashboard page with its
+  columns, and its own widget list when the page overrides `getWidgets()`,
+  since Filament only sorts the panel's list. Widgets that turned discovery off
+  are listed too, so they can be shown again.
+- **Arranging:** `src/dashboarddesigner.ts` reorders the panel's dashboard by
+  writing `$sort` to each project widget in the new order (packages' widgets
+  keep theirs), and a dashboard's own list by moving its items. Hiding removes
+  a widget from the provider's `widgets([...])` when it's there, and otherwise
+  sets `$isDiscovered = false`. `src/codeapply.ts` applies edits to several
+  files at once, each computed from its current code.
+- **Widgets:** `src/widgetgen.ts` writes and reads values as
+  `Model::query()` with `where` conditions and a count or aggregate, reading
+  them back from the code with its layout squashed, so a value the designer
+  wrote reads the same after a formatter changes its lines. Charts are one
+  return of `getData()`; the designer changes a dataset's `label` and `data`
+  and the `labels` in place, so other keys, such as colors, stay.
+  `src/widgetdesigner.ts` draws the view. New widgets are written by the
+  designer, not `make:filament-widget`, which asks for a table widget's model
+  and a chart's type interactively.
+- **Live data:** `introspect.php widget-data <class>` runs the widget's
+  `getStats()` or `getData()` as the first user, and the preview shows what it
+  returns, or why it failed.
+- **Resource pages:** `src/pagewidgets.ts` adds a widget to both the
+  resource's `getWidgets()`, which registers it, and the page's
+  `getHeaderWidgets()`. A page that returns its resource's `getWidgets()`
+  changes the resource's list.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,

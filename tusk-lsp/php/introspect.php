@@ -836,6 +836,10 @@ function filamentApp(string $root): array
             'resourceNamespaces' => $call('getResourceNamespaces'),
             'clusterDirs' => $relative($call('getClusterDirectories')),
             'clusterNamespaces' => $call('getClusterNamespaces'),
+            'widgetDirs' => $relative($call('getWidgetDirectories')),
+            'widgetNamespaces' => $call('getWidgetNamespaces'),
+            'pageDirs' => $relative($call('getPageDirectories')),
+            'pageNamespaces' => $call('getPageNamespaces'),
             'url' => (function () use ($panel) {
                 try {
                     return $panel->getUrl();
@@ -1106,6 +1110,116 @@ function changePermission(string $action, string $name, ?string $permission): ar
 }
 
 /**
+ * A panel's dashboards and widgets: the widgets the panel registers or discovers, in the order a dashboard shows
+ * them, each with its kind, sort, column span, and heading; each dashboard page with its columns and, when it lists
+ * its own widgets in getWidgets(), those; and widgets in the panel's folders that turned discovery off. Needs the
+ * booted app.
+ */
+function panelWidgets(string $root, string $id): array
+{
+    $panel = Filament\Facades\Filament::getPanel($id);
+    $kinds = [
+        'stats' => 'Filament\\Widgets\\StatsOverviewWidget',
+        'chart' => 'Filament\\Widgets\\ChartWidget',
+        'table' => 'Filament\\Widgets\\TableWidget',
+    ];
+    $read = function (object $widget, string $property): mixed {
+        try {
+            $r = new ReflectionProperty($widget, $property);
+            return $r->isInitialized($widget) ? plainValue($r->getValue($widget)) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    };
+    $describe = function (mixed $entry) use ($kinds, $read, $root): ?array {
+        $class = is_string($entry) ? $entry : ($entry->widget ?? null);
+        if (!is_string($class) || !class_exists($class)) {
+            return null;
+        }
+        $kind = 'other';
+        foreach ($kinds as $name => $base) {
+            if (is_subclass_of($class, $base)) {
+                $kind = $name;
+            }
+        }
+        try {
+            $widget = app($class);
+        } catch (Throwable) {
+            $widget = null;
+        }
+        return [
+            'class' => $class,
+            'file' => relativeFile($class, $root),
+            'kind' => $kind,
+            'sort' => tryStatic($class, 'getSort'),
+            'columnSpan' => $widget ? $read($widget, 'columnSpan') : null,
+            'heading' => $widget ? $read($widget, 'heading') : null,
+            'discovered' => method_exists($class, 'isDiscovered') ? $class::isDiscovered() : true,
+        ];
+    };
+    // The panel's list, sorted as Filament sorts it.
+    $widgets = array_values(array_filter(array_map($describe, $panel->getWidgets())));
+    $dashboards = [];
+    foreach ($panel->getPages() as $page) {
+        if (!is_a($page, 'Filament\\Pages\\Dashboard', true)) {
+            continue;
+        }
+        $own = null;
+        try {
+            $instance = app($page);
+            $columns = plainValue($instance->getColumns());
+            if ((new ReflectionMethod($page, 'getWidgets'))->getDeclaringClass()->getName() !== 'Filament\\Pages\\Dashboard') {
+                $own = array_values(array_filter(array_map($describe, $instance->getWidgets())));
+            }
+        } catch (Throwable) {
+            $columns = 2;
+        }
+        $dashboards[] = ['class' => $page, 'file' => relativeFile($page, $root), 'title' => tryStatic($page, 'getNavigationLabel'), 'columns' => $columns, 'widgets' => $own];
+    }
+    $hidden = [];
+    foreach ($panel->getWidgetDirectories() as $dir) {
+        foreach (classesIn($dir) as $class) {
+            try {
+                if (is_subclass_of($class, 'Filament\\Widgets\\Widget') && method_exists($class, 'isDiscovered') && !$class::isDiscovered() && !(new ReflectionClass($class))->isAbstract()) {
+                    $hidden[] = $describe($class);
+                }
+            } catch (Throwable) {
+            }
+        }
+    }
+    return ['widgets' => $widgets, 'dashboards' => $dashboards, 'hidden' => $hidden];
+}
+
+/** What a stats or chart widget shows, from its own code: each stat's label, value, and chart, or the chart's data. */
+function widgetData(string $class): array
+{
+    // Widgets often read the signed-in user, so the preview runs as the first one.
+    $as = null;
+    try {
+        $model = config('auth.providers.users.model');
+        if (is_string($model) && ($user = $model::query()->first())) {
+            auth()->setUser($user);
+            $as = $user->email ?? $user->name ?? (string) $user->getKey();
+        }
+    } catch (Throwable) {
+    }
+    $widget = app($class);
+    $call = function (string $method) use ($widget): mixed {
+        $m = new ReflectionMethod($widget, $method);
+        $m->setAccessible(true);
+        return $m->invoke($widget);
+    };
+    $text = fn (mixed $v): ?string => $v === null ? null : ($v instanceof Illuminate\Contracts\Support\Htmlable ? strip_tags($v->toHtml()) : (is_scalar($v) || $v instanceof Stringable ? (string) $v : null));
+    if (method_exists($widget, 'getStats')) {
+        return ['as' => $as, 'stats' => array_map(fn ($s) => ['label' => $text($s->getLabel()), 'value' => $text($s->getValue()), 'chart' => $s->getChart()], $call('getStats'))];
+    }
+    $plain = function (mixed $v) use (&$plain): mixed {
+        return is_array($v) ? array_map($plain, $v) : ($v instanceof Illuminate\Support\Collection ? $plain($v->all()) : plainValue($v));
+    };
+    return ['as' => $as, 'chart' => $plain($call('getData')), 'type' => $call('getType')];
+}
+
+/**
  * What the panel settings offer: Filament's color palettes (each one's 500 shade, for previews), the Filament
  * plugins installed with Composer, the app's name (the default brand name), and the user model with the contracts
  * a panel's features need.
@@ -1185,6 +1299,8 @@ try {
         'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
+        'widgets' => panelWidgets($root, $argv[3]),
+        'widget-data' => widgetData($argv[3]),
         'permission' => changePermission($argv[3], $argv[4], $argv[5] ?? null),
         'mago-stubs' => magoStubs($root, $argv[3]),
         'views' => viewNames($root),

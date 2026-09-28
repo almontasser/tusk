@@ -49,7 +49,7 @@ file to change when you add it.
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
-| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods, and don't set up two-factor authentication or tenancy's user contract. |
+| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods, and don't set up two-factor authentication or tenancy's user contract. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. Stats on a list page don't follow the table's filters. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
@@ -952,6 +952,34 @@ the panel follows it.
 
 Settings written as code the designer doesn't write, such as a logo from a
 closure, show as code and open it.
+
+### Dashboards and widgets
+
+Click **Dashboard** under a panel in the Filament tool window, or run
+**Filament: Dashboard…**. The dashboard shows its widgets in a grid, as wide
+as each one is.
+
+- **Arrange:** move widgets earlier or later, change how many columns each
+  spans, and the dashboard's column count. Hide a widget, and show it again
+  from **Hidden widgets**. A dashboard page that lists its own widgets changes
+  that list instead.
+- **New widget:** a stats overview, a chart, or a table of a model's records.
+  It starts useful: a stat that counts the records, a chart of new records per
+  month, or a table of the latest ones.
+- **Stats:** each stat's label, value, description with its icon, color, and a
+  trend of the last 7 days. A value counts a model's records, or sums,
+  averages, or finds the lowest or highest of a column, of the records that
+  match its conditions, in a time window, shown as it is, as a number, as
+  1.2K, or as money.
+- **Charts:** the type (line, bar, pie, doughnut, polar area, or radar), the
+  heading, color, and height, and the data: a value over the last days, weeks,
+  or months, or split by a column's values. Pies get a color per part.
+- **Table widgets** open in the designer's table tab.
+- **Resource pages:** the **Page actions** tab lists the widgets above the
+  page, to add, reorder, and remove, and makes new ones for the resource.
+
+The preview runs the widget to show its real numbers, as the first user when
+there is one.
 
 ## Model designer
 

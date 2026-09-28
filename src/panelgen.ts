@@ -327,3 +327,19 @@ export function tenantEdits(text: string, code: PanelCode, model: string | null)
   if (found && first) return [{ start: first.value.span[0], end: first.value.span[1], text: `{{${model}}}::class` }];
   return code.main ? [setCall(text, code.main, "tenant", `{{${model}}}::class`, undefined, "path")] : [];
 }
+
+// ---- Widgets ----
+
+/** The widget classes the panel registers with `widgets([...])`, each with the edit that removes it. */
+export function readPanelWidgets(text: string, code: PanelCode): { class: string | null; remove: () => Edit[] }[] {
+  const out: { class: string | null; remove: () => Edit[] }[] = [];
+  for (const chain of code.chains)
+    for (const call of chain.calls) {
+      const v = call.name === "widgets" ? call.args.items[0]?.value : undefined;
+      if (v?.kind !== "array") continue;
+      v.items.forEach((item, index) =>
+        out.push({ class: item.value.kind === "classConst" && item.value.name === "class" ? item.value.class : null, remove: () => [v.items.length === 1 ? setArgs(text, call.args, "[]") : removeItem(text, v, index)] }),
+      );
+    }
+  return out;
+}

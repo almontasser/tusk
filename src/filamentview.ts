@@ -55,6 +55,12 @@ export function initFilament(h_: typeof host) {
         const id = /->id\(\s*['"]([^'"]+)['"]/.exec(text)?.[1] ?? "admin";
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPanelSettings", title: "Open Panel Settings", arguments: [model.uri.fsPath, id] } }], dispose() {} };
       }
+      // A stats or chart widget: the widget designer. A table widget opens in the designer's table tab.
+      const widget = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+\w*(StatsOverviewWidget|ChartWidget|TableWidget|BaseWidget)\b/m.exec(text);
+      if (widget && /Filament\\Widgets\\/.test(text)) {
+        const line = model.getPositionAt(widget.index + widget[0].length - widget[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openWidget", title: "Open in Widget Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -68,6 +74,7 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
   monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
   monaco.editor.registerCommand("tusk.openPanelSettings", (_, path: string, id: string) => void import("./panelsettings").then((m) => m.openPanelSettings(path, id)));
+  monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
 }
@@ -154,6 +161,10 @@ export async function loadFilament() {
     };
     rows.push(head);
     if (!open) continue;
+    const dash = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The panel's dashboards and widgets" }, icon("dashboard"), h("span", { class: "fv-name" }, "Dashboard"), h("span", { class: "fv-detail" }, "widgets"));
+    dash.onclick = () => void import("./dashboarddesigner").then((m) => m.openDashboard(panel.id));
+    dash.onkeydown = (e) => e.key === "Enter" && dash.click();
+    rows.push(dash);
     const groups = new Map<string, fapp.ResourceInfo[]>();
     for (const r of panel.resources) {
       const g = r.navigationGroup ?? "";
@@ -290,6 +301,16 @@ export async function openPanelPicker() {
   if (panels.length === 1) return openPanel(panels[0]);
   const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-window", run: () => openPanel(p) }));
   pick("Panel settings: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Picks a panel and opens its dashboard. */
+export async function openDashboardPicker() {
+  const app = await fapp.app(host.root()).catch((e) => (host.status(`Can't read the app: ${errorText(e)}`), null));
+  const panels = app?.panels ?? [];
+  const go = (id: string) => void import("./dashboarddesigner").then((m) => m.openDashboard(id));
+  if (panels.length === 1) return go(panels[0].id);
+  const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-dashboard", run: () => go(p.id) }));
+  pick("Dashboard: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Picks a model and opens its Access view: who can do what with its records. */

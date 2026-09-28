@@ -1,0 +1,923 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Widgets",
+  "uses": [
+    {
+      "alias": "Order",
+      "name": "App\\Models\\Order",
+      "kind": "class",
+      "span": [
+        40,
+        61
+      ]
+    },
+    {
+      "alias": "Heroicon",
+      "name": "Filament\\Support\\Icons\\Heroicon",
+      "kind": "class",
+      "span": [
+        62,
+        98
+      ]
+    },
+    {
+      "alias": "StatsOverviewWidget",
+      "name": "Filament\\Widgets\\StatsOverviewWidget",
+      "kind": "class",
+      "span": [
+        99,
+        140
+      ]
+    },
+    {
+      "alias": "Stat",
+      "name": "Filament\\Widgets\\StatsOverviewWidget\\Stat",
+      "kind": "class",
+      "span": [
+        141,
+        187
+      ]
+    },
+    {
+      "alias": "Number",
+      "name": "Illuminate\\Support\\Number",
+      "kind": "class",
+      "span": [
+        188,
+        218
+      ]
+    }
+  ],
+  "useInsert": 219,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "OrderStatsWidget",
+      "fqn": "App\\Filament\\Widgets\\OrderStatsWidget",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Widgets\\StatsOverviewWidget",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        220,
+        1045
+      ],
+      "bodyStart": 272,
+      "bodyEnd": 1044,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "getStats",
+          "static": false,
+          "abstract": false,
+          "visibility": "protected",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            277,
+            1043
+          ],
+          "docStart": null,
+          "body": [
+            319,
+            1042
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "static",
+                      "class": "Filament\\Widgets\\StatsOverviewWidget\\Stat",
+                      "classSpan": [
+                        349,
+                        353
+                      ],
+                      "method": "make",
+                      "args": {
+                        "open": 359,
+                        "close": 422,
+                        "items": [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "string",
+                              "value": "Open orders",
+                              "quote": "single",
+                              "interpolated": false,
+                              "span": [
+                                360,
+                                373
+                              ]
+                            },
+                            "span": [
+                              360,
+                              373
+                            ],
+                            "spread": false
+                          },
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": "chain",
+                              "base": {
+                                "kind": "static",
+                                "class": "App\\Models\\Order",
+                                "classSpan": [
+                                  375,
+                                  380
+                                ],
+                                "method": "query",
+                                "args": {
+                                  "open": 387,
+                                  "close": 388,
+                                  "items": []
+                                },
+                                "span": [
+                                  375,
+                                  389
+                                ]
+                              },
+                              "calls": [
+                                {
+                                  "name": "where",
+                                  "nullsafe": false,
+                                  "args": {
+                                    "open": 396,
+                                    "close": 412,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "status",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            397,
+                                            405
+                                          ]
+                                        },
+                                        "span": [
+                                          397,
+                                          405
+                                        ],
+                                        "spread": false
+                                      },
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "new",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            407,
+                                            412
+                                          ]
+                                        },
+                                        "span": [
+                                          407,
+                                          412
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    389,
+                                    413
+                                  ],
+                                  "nameSpan": [
+                                    391,
+                                    396
+                                  ]
+                                },
+                                {
+                                  "name": "count",
+                                  "nullsafe": false,
+                                  "args": {
+                                    "open": 420,
+                                    "close": 421,
+                                    "items": []
+                                  },
+                                  "span": [
+                                    413,
+                                    422
+                                  ],
+                                  "nameSpan": [
+                                    415,
+                                    420
+                                  ]
+                                }
+                              ],
+                              "span": [
+                                375,
+                                422
+                              ]
+                            },
+                            "span": [
+                              375,
+                              422
+                            ],
+                            "spread": false
+                          }
+                        ]
+                      },
+                      "span": [
+                        349,
+                        423
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "description",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 453,
+                          "close": 470,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "Waiting for us",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  454,
+                                  470
+                                ]
+                              },
+                              "span": [
+                                454,
+                                470
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          440,
+                          471
+                        ],
+                        "nameSpan": [
+                          442,
+                          453
+                        ]
+                      },
+                      {
+                        "name": "descriptionIcon",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 505,
+                          "close": 529,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "classConst",
+                                "class": "Filament\\Support\\Icons\\Heroicon",
+                                "classSpan": [
+                                  506,
+                                  514
+                                ],
+                                "name": "OutlinedClock",
+                                "span": [
+                                  506,
+                                  529
+                                ]
+                              },
+                              "span": [
+                                506,
+                                529
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          488,
+                          530
+                        ],
+                        "nameSpan": [
+                          490,
+                          505
+                        ]
+                      },
+                      {
+                        "name": "color",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 554,
+                          "close": 564,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "warning",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  555,
+                                  564
+                                ]
+                              },
+                              "span": [
+                                555,
+                                564
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          547,
+                          565
+                        ],
+                        "nameSpan": [
+                          549,
+                          554
+                        ]
+                      },
+                      {
+                        "name": "chart",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 589,
+                          "close": 737,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "func",
+                                  "name": "collect",
+                                  "nameSpan": [
+                                    590,
+                                    597
+                                  ],
+                                  "args": {
+                                    "open": 597,
+                                    "close": 609,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "func",
+                                          "name": "range",
+                                          "nameSpan": [
+                                            598,
+                                            603
+                                          ],
+                                          "args": {
+                                            "open": 603,
+                                            "close": 608,
+                                            "items": [
+                                              {
+                                                "name": null,
+                                                "value": {
+                                                  "kind": "number",
+                                                  "value": 6.0,
+                                                  "raw": "6",
+                                                  "span": [
+                                                    604,
+                                                    605
+                                                  ]
+                                                },
+                                                "span": [
+                                                  604,
+                                                  605
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "name": null,
+                                                "value": {
+                                                  "kind": "number",
+                                                  "value": 0.0,
+                                                  "raw": "0",
+                                                  "span": [
+                                                    607,
+                                                    608
+                                                  ]
+                                                },
+                                                "span": [
+                                                  607,
+                                                  608
+                                                ],
+                                                "spread": false
+                                              }
+                                            ]
+                                          },
+                                          "span": [
+                                            598,
+                                            609
+                                          ]
+                                        },
+                                        "span": [
+                                          598,
+                                          609
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    590,
+                                    610
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "map",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 615,
+                                      "close": 729,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "closure",
+                                            "arrow": true,
+                                            "static": false,
+                                            "params": [
+                                              "days"
+                                            ],
+                                            "body": [
+                                              634,
+                                              729
+                                            ],
+                                            "span": [
+                                              616,
+                                              729
+                                            ]
+                                          },
+                                          "span": [
+                                            616,
+                                            729
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      610,
+                                      730
+                                    ],
+                                    "nameSpan": [
+                                      612,
+                                      615
+                                    ]
+                                  },
+                                  {
+                                    "name": "all",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 735,
+                                      "close": 736,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      730,
+                                      737
+                                    ],
+                                    "nameSpan": [
+                                      732,
+                                      735
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  590,
+                                  737
+                                ]
+                              },
+                              "span": [
+                                590,
+                                737
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          582,
+                          738
+                        ],
+                        "nameSpan": [
+                          584,
+                          589
+                        ]
+                      }
+                    ],
+                    "span": [
+                      349,
+                      738
+                    ]
+                  },
+                  "span": [
+                    349,
+                    738
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Widgets\\StatsOverviewWidget\\Stat",
+                    "classSpan": [
+                      752,
+                      756
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 762,
+                      "close": 973,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "Revenue",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              763,
+                              772
+                            ]
+                          },
+                          "span": [
+                            763,
+                            772
+                          ],
+                          "spread": false
+                        },
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "static",
+                            "class": "Illuminate\\Support\\Number",
+                            "classSpan": [
+                              774,
+                              780
+                            ],
+                            "method": "currency",
+                            "args": {
+                              "open": 790,
+                              "close": 972,
+                              "items": [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": "chain",
+                                    "base": {
+                                      "kind": "static",
+                                      "class": "App\\Models\\Order",
+                                      "classSpan": [
+                                        808,
+                                        813
+                                      ],
+                                      "method": "query",
+                                      "args": {
+                                        "open": 820,
+                                        "close": 821,
+                                        "items": []
+                                      },
+                                      "span": [
+                                        808,
+                                        822
+                                      ]
+                                    },
+                                    "calls": [
+                                      {
+                                        "name": "where",
+                                        "nullsafe": false,
+                                        "args": {
+                                          "open": 850,
+                                          "close": 889,
+                                          "items": [
+                                            {
+                                              "name": null,
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "created_at",
+                                                "quote": "single",
+                                                "interpolated": false,
+                                                "span": [
+                                                  851,
+                                                  863
+                                                ]
+                                              },
+                                              "span": [
+                                                851,
+                                                863
+                                              ],
+                                              "spread": false
+                                            },
+                                            {
+                                              "name": null,
+                                              "value": {
+                                                "kind": "string",
+                                                "value": ">=",
+                                                "quote": "single",
+                                                "interpolated": false,
+                                                "span": [
+                                                  865,
+                                                  869
+                                                ]
+                                              },
+                                              "span": [
+                                                865,
+                                                869
+                                              ],
+                                              "spread": false
+                                            },
+                                            {
+                                              "name": null,
+                                              "value": {
+                                                "kind": "chain",
+                                                "base": {
+                                                  "kind": "func",
+                                                  "name": "now",
+                                                  "nameSpan": [
+                                                    871,
+                                                    874
+                                                  ],
+                                                  "args": {
+                                                    "open": 874,
+                                                    "close": 875,
+                                                    "items": []
+                                                  },
+                                                  "span": [
+                                                    871,
+                                                    876
+                                                  ]
+                                                },
+                                                "calls": [
+                                                  {
+                                                    "name": "subDays",
+                                                    "nullsafe": false,
+                                                    "args": {
+                                                      "open": 885,
+                                                      "close": 888,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "number",
+                                                            "value": 30.0,
+                                                            "raw": "30",
+                                                            "span": [
+                                                              886,
+                                                              888
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            886,
+                                                            888
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      876,
+                                                      889
+                                                    ],
+                                                    "nameSpan": [
+                                                      878,
+                                                      885
+                                                    ]
+                                                  }
+                                                ],
+                                                "span": [
+                                                  871,
+                                                  889
+                                                ]
+                                              },
+                                              "span": [
+                                                871,
+                                                889
+                                              ],
+                                              "spread": false
+                                            }
+                                          ]
+                                        },
+                                        "span": [
+                                          843,
+                                          890
+                                        ],
+                                        "nameSpan": [
+                                          845,
+                                          850
+                                        ]
+                                      },
+                                      {
+                                        "name": "sum",
+                                        "nullsafe": false,
+                                        "args": {
+                                          "open": 916,
+                                          "close": 930,
+                                          "items": [
+                                            {
+                                              "name": null,
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "total_price",
+                                                "quote": "single",
+                                                "interpolated": false,
+                                                "span": [
+                                                  917,
+                                                  930
+                                                ]
+                                              },
+                                              "span": [
+                                                917,
+                                                930
+                                              ],
+                                              "spread": false
+                                            }
+                                          ]
+                                        },
+                                        "span": [
+                                          911,
+                                          931
+                                        ],
+                                        "nameSpan": [
+                                          913,
+                                          916
+                                        ]
+                                      }
+                                    ],
+                                    "span": [
+                                      808,
+                                      931
+                                    ]
+                                  },
+                                  "span": [
+                                    808,
+                                    931
+                                  ],
+                                  "spread": false
+                                },
+                                {
+                                  "name": "in",
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "USD",
+                                    "quote": "single",
+                                    "interpolated": false,
+                                    "span": [
+                                      953,
+                                      958
+                                    ]
+                                  },
+                                  "span": [
+                                    949,
+                                    958
+                                  ],
+                                  "spread": false
+                                }
+                              ]
+                            },
+                            "span": [
+                              774,
+                              973
+                            ]
+                          },
+                          "span": [
+                            774,
+                            973
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      752,
+                      974
+                    ]
+                  },
+                  "span": [
+                    752,
+                    974
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "static",
+                    "class": "Filament\\Widgets\\StatsOverviewWidget\\Stat",
+                    "classSpan": [
+                      988,
+                      992
+                    ],
+                    "method": "make",
+                    "args": {
+                      "open": 998,
+                      "close": 1024,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "Custom",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              999,
+                              1007
+                            ]
+                          },
+                          "span": [
+                            999,
+                            1007
+                          ],
+                          "spread": false
+                        },
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "chain",
+                            "base": {
+                              "kind": "var",
+                              "name": "this",
+                              "span": [
+                                1009,
+                                1014
+                              ]
+                            },
+                            "calls": [
+                              {
+                                "name": "custom",
+                                "nullsafe": false,
+                                "args": {
+                                  "open": 1022,
+                                  "close": 1023,
+                                  "items": []
+                                },
+                                "span": [
+                                  1014,
+                                  1024
+                                ],
+                                "nameSpan": [
+                                  1016,
+                                  1022
+                                ]
+                              }
+                            ],
+                            "span": [
+                              1009,
+                              1024
+                            ]
+                          },
+                          "span": [
+                            1009,
+                            1024
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      988,
+                      1025
+                    ]
+                  },
+                  "span": [
+                    988,
+                    1025
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 335,
+              "close": 1035,
+              "legacy": false,
+              "span": [
+                335,
+                1036
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

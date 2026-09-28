@@ -19,7 +19,8 @@ import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsT
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
-import { type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { renderPageWidgets } from "./pagewidgets";
+import { type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, methodNamed, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
@@ -95,6 +96,8 @@ export class Designer {
   actionsPage: string | null = null;
   /** Whether it's a relation manager, which has a form and table like a resource but no pages or settings. */
   manager = false;
+  /** Whether it's a table widget: a table of its own, designed like a relation manager's, and nothing else. */
+  widget = false;
   private undo: string[] = [];
   private redo: string[] = [];
   private applying = false;
@@ -184,7 +187,15 @@ export class Designer {
   private modelOfCode(): string | null {
     const prop = this.cls?.properties.find((p) => p.name === "model");
     if (prop?.value?.kind === "classConst") return prop.value.class;
-    return null;
+    // A table widget's model is the one its query starts from: `->query(fn () => Order::query())`.
+    const doc = this.docs.get(this.file);
+    const table = this.cls && doc ? methodNamed(this.cls, "table") : null;
+    const name = table && /(\\?[A-Z][\w\\]*)::query\(/.exec(doc!.text.slice(table.span[0], table.span[1]))?.[1];
+    if (!name || !doc) return null;
+    if (name.startsWith("\\")) return name.slice(1);
+    const [first, ...rest] = name.split("\\");
+    const use = doc.outline.uses.find((u) => u.kind === "class" && u.alias === first);
+    return use ? [use.name, ...rest].join("\\") : `${doc.outline.namespace ? `${doc.outline.namespace}\\` : ""}${name}`;
   }
 
   async doc(path: string): Promise<Doc> {
@@ -212,7 +223,9 @@ export class Designer {
     const cls = main.outline.classes.find((c) => c.name) ?? null;
     if (!cls) throw new Error("There's no class in this file.");
     this.cls = cls;
-    this.manager = /RelationManager$/.test(cls.extends ?? "") || /RelationManagers?\\/.test(cls.fqn);
+    this.widget = /TableWidget$/.test(cls.extends ?? "");
+    this.manager = this.widget || /RelationManager$/.test(cls.extends ?? "") || /RelationManagers?\\/.test(cls.fqn);
+    if (this.widget) this.tab = "table";
     this.roots.clear();
     for (const kind of ["form", "table", "infolist"] as RootKind[]) {
       const root = readRoot(cls, kind);
@@ -729,7 +742,7 @@ export class Designer {
     return h(
       "header",
       { class: "fd-header" },
-      h("span", { class: "fd-header-icon" }, info?.navigationIcon ? heroicon(this.cat?.heroiconsDir ?? null, info.navigationIcon) : icon(this.manager ? "references" : "symbol-structure")),
+      h("span", { class: "fd-header-icon" }, info?.navigationIcon ? heroicon(this.cat?.heroiconsDir ?? null, info.navigationIcon) : icon(this.widget ? "graph" : this.manager ? "references" : "symbol-structure")),
       h(
         "div",
         { class: "fd-header-titles" },
@@ -737,7 +750,7 @@ export class Designer {
         h(
           "div",
           { class: "fd-header-chips" },
-          h("span", { class: "fd-chip-static", title: this.file }, this.manager ? "Relation manager" : "Resource", " · ", this.cls?.name ?? ""),
+          h("span", { class: "fd-chip-static", title: this.file }, this.widget ? "Table widget" : this.manager ? "Relation manager" : "Resource", " · ", this.cls?.name ?? ""),
           model ? h("button", { type: "button", class: "fd-chip-link", title: "Open the model", onclick: () => this.openModel() }, icon("database"), shortClass(model)) : null,
           panel ? h("span", { class: "fd-chip-static", title: "Panel" }, icon("window"), panel.id) : null,
           this.facts?.details.tableExists === false ? h("span", { class: "fd-chip-warn", title: "The database has no table for the model yet. Run the migrations." }, icon("warning"), "No table") : null,
@@ -808,7 +821,7 @@ export class Designer {
   }
 
   private tabs() {
-    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "access", "settings"];
+    const tabs: Tab[] = this.widget ? ["table"] : this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "access", "settings"];
     const count = (t: Tab) => {
       if (t === "relations") return this.info?.relations.length;
       if (t === "pages") return this.info?.pages.length;
@@ -1010,7 +1023,7 @@ export class Designer {
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
     if (isRtl(this.locale)) canvas.dir = "rtl";
-    canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), renderPageWidgets(this), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     const modal = this.modalAction(ref.root);
     if (modal) canvas.append(renderActionModal(ctx, modal.path, modal.comp));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());

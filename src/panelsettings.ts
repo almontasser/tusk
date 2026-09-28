@@ -1,14 +1,13 @@
 // A panel's settings, in an editor tab of its own: its brand, colors, sign-in pages, layout, navigation groups,
 // plugins, and tenancy, read from the panel provider's `panel()` and changed there (src/panelgen.ts), with a preview
 // of the panel beside them. Each change is saved at once, as in the other designers.
-import type * as L from "vscode-languageserver-protocol";
 import { h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import type { Catalog } from "./filamentcatalog";
 import { type Doc, host } from "./filamentdesigner";
 import { askName, commitInput, heroicon, pickHeroicon, toggleSwitch } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
-import { applyWorkspaceEdit } from "./lsp";
+import { editFiles } from "./codeapply";
 import {
   addNavGroupEdits,
   addPluginEdits,
@@ -31,8 +30,7 @@ import {
   WIDTHS,
 } from "./panelgen";
 import { iconNameOf } from "./filamentinspector";
-import { droppedImports, type Edit, Imports, mergeEdits, methodNamed, type PNode } from "./phpcode";
-import { showError } from "./status";
+import { type Edit, methodNamed, type PNode } from "./phpcode";
 import { showEditorView } from "./terminal";
 
 export type PanelOptions = { palettes: Record<string, string>; plugins: { class: string; package: string; description: string | null }[]; appName: string | null; user: { class: string; file: string | null; hasTenants: boolean; filamentUser: boolean } | null };
@@ -56,7 +54,6 @@ class PanelSettings {
   private app: fapp.AppInfo | null = null;
   private models: string[] = [];
   private error = "";
-  private pending: Promise<unknown> = Promise.resolve();
   private listening = false;
   private darkPreview = false;
 
@@ -102,29 +99,13 @@ class PanelSettings {
     this.doc = { path: this.file, model, text, outline: await fapp.outlineOf(text, this.file) };
   }
 
-  /** Applies edits to the provider, against the text they were computed from, with imports added. */
+  /** Applies edits to the provider, computed from its current code. */
   private apply(build: (text: string, code: PanelCode) => Edit[], message: string) {
-    const run = this.pending.then(async () => {
-      const doc = this.doc;
-      const code = this.code();
-      if (!doc || !code) return;
-      if (doc.model.getValue() !== doc.text) return;
-      if (doc.outline.errors) return host.status("Fix the syntax errors in the provider first.");
-      const imports = new Imports(doc.text, doc.outline);
-      const fill = (c: string) => c.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
-      const edits = build(doc.text, code).map((e) => ({ ...e, text: fill(e.text) }));
-      if (!edits.length) return;
-      const added = [...edits, ...imports.edits()];
-      const all = mergeEdits([...added, ...droppedImports(doc.text, doc.outline, added)]);
-      const pos = (o: number) => {
-        const p = doc.model.getPositionAt(o);
-        return { line: p.lineNumber - 1, character: p.column - 1 };
-      };
-      await applyWorkspaceEdit({ changes: { [doc.model.uri.toString()]: all.map((e): L.TextEdit => ({ range: { start: pos(e.start), end: pos(e.end) }, newText: e.text })) } });
-      host.status(message);
-    });
-    this.pending = run.catch((e) => showError("Can't change the panel", e));
-    return run;
+    return editFiles([{ path: this.file, build: (text, outline) => {
+      const cls = outline.classes.find((c) => c.name);
+      const method = cls && methodNamed(cls, "panel");
+      return method ? build(text, panelChains(method)) : null;
+    } }], message);
   }
 
   private code(): PanelCode | null {
