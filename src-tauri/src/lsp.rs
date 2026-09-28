@@ -330,3 +330,11 @@ pub fn toml_read(path: String) -> Result<serde_json::Value, String> {
         Err(e) => Err(format!("Can't read {path}: {e}")),
     }
 }
+
+/// The PHP Analysis settings page's view of a Mago configuration (`tusk_lsp::mago_config::describe`): `path` is
+/// the project's `mago.toml`, or the editor's generated copy when the project has none.
+#[tauri::command]
+pub fn mago_settings(root: String, path: String) -> Result<serde_json::Value, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Can't read {path}: {e}"))?;
+    tusk_lsp::mago_config::describe(&text, std::path::Path::new(&root))
+}

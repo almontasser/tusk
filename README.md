@@ -46,7 +46,7 @@ file to change when you add it.
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
-| Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. |
+| Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
@@ -570,6 +570,7 @@ An example:
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
 | `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `phpAnalysis` | The PHP index: `loadAllLibraries`, and `stubs`, comma-separated folders or files read as library code. |
 | `phpstan` | PHPStan's settings: `enabled` (`auto`, `on`, `off`), `config`, `level`, `memoryLimit`, `timeout`, and `run` (`save` or `demand`). |
 
 The selected database connection, the last profiled URL, and the stress test
@@ -2465,6 +2466,37 @@ applies the safe fixes without the menu. **Suppress *rule* for this line**
 adds a `// @mago-expect lint:rule` comment (`analysis:` for the analyzer)
 above the line, or adds the rule to one already there. Mago reports the
 comment once the problem is gone, and its fix removes the comment.
+⌥⏎ on a linter problem also offers **Disable *rule* in mago.toml** and
+**Change *rule*'s level…**, and on an analyzer problem **Ignore *code* in
+mago.toml**.
+
+### PHP analysis settings
+
+**Tools > PHP Analysis Settings…** opens **Settings > PHP Analysis** for the
+open project:
+
+- **Index every library file in full**: off by default, the PHP server reads
+  the vendor code your project reaches in full and the rest by name only. On,
+  it reads all of `vendor` in full, for complete types everywhere, at several
+  times the memory.
+- **Extra stub folders**: folders or PHP files, relative to the project or
+  absolute, that the index reads as library code, such as stubs for a PHP
+  extension.
+- **PHP version**: the version Mago checks against, from `composer.json` or
+  one you choose (`php-version` in `mago.toml`).
+- The analyzer's switches, such as reporting unused parameters or missing
+  `@throws`, the problem codes it ignores, and the paths the analyzer and the
+  linter skip.
+- Every linter rule that applies to the project's PHP version and
+  integrations, with Mago's own name and description: filter them, turn each
+  on or off, and set its level. A changed rule has a blue edge.
+
+The first two are project settings you can share in `tusk.json`
+(`phpAnalysis`). The rest live in `mago.toml`: Tusk edits the file in place,
+keeping your comments and every key the page doesn't show, and Mago uses the
+change at once. A project without a `mago.toml` uses Tusk's defaults; your
+first change creates `mago.toml` from them. **Open mago.toml** edits the file
+by hand.
 
 ### PHPStan
 

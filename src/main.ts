@@ -57,6 +57,7 @@ import { chooseSharedState, initProjectState, openProjectState, projectFilesChan
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import "./spelling";
 import "./phpstan";
+import "./magosettings";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1559,6 +1560,7 @@ const actions: Action[] = [
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
+  { label: "PHP Analysis Settings…", run: () => openSettings("php analysis") },
   { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },

@@ -1991,6 +1991,46 @@ linter options, and its `includes` and `excludes` for the index. The file is
 outside the project, so the client asks the server to reindex after it writes
 the file again with corrected vendor copies.
 
+### Mago's settings page
+
+`src/magosettings.ts` draws **Settings > PHP Analysis** and the quick fixes
+that change `mago.toml`:
+
+- The Tauri command `mago_settings(root, path)` reads a configuration through
+  `tusk_lsp::mago_config::describe`: its `php-version` and composer.json's,
+  the analyzer's switches (the file's value and the default from
+  `analysis::settings`), its excludes and ignores, the linter's excludes, and
+  every rule whose requirements the configured PHP version and integrations
+  meet (`RuleRegistry::build` with disabled rules, and each rule's
+  `RuleMeta`: name, description, and category). Each rule's `enabled` and
+  `level` come from `filter_rules_settings`, and its defaults from the rule.
+  Nothing is listed by hand, so the page follows Mago's crates when they're
+  upgraded. `path` is the project's `mago.toml`, or `magoConfigPath`, the
+  editor's copy, when there's none.
+- Every change goes through `editMago`, which applies `toml_edit` edits to
+  the project's `mago.toml`. A value equal to Mago's default removes the key,
+  and a rule's table is inline (`no-empty = { level = "warning" }`), as the
+  bundled file writes them; `config_edit` formats an inline table again after
+  a key is added. Without a `mago.toml`, the first change creates it from
+  `newMagoConfigText` (the bundled defaults with the project's PHP version and
+  top-level folders), then `useProjectMagoConfig` drops `magoConfig` from the
+  server's options (`configureTusk`), which reindexes with the new file, and
+  Blade checks read it too. Otherwise `reindex` reads the file again at once
+  rather than waiting for the file watcher.
+- The page keeps its controls as you change them, so a toggle doesn't lose
+  the rules list's scroll or filter; a failed write draws the page again from
+  the file.
+- The quick fixes, a provider for `php`: **Disable *rule* in mago.toml** and
+  **Change *rule*'s level…** (a `choose` picker) for `mago-lint` problems, and
+  **Ignore *code* in mago.toml** (`[analyzer] ignore`) for `mago` ones.
+
+The page's first two settings, `loadAllLibraries` and `stubs`, are the
+server's own options, not Mago's: project settings under `phpAnalysis`, sent
+through `tuskOptions`. `tuskSettings` adds list options together, so the user's
+stub folders join Laravel's alias stubs. Stub paths are made absolute and
+normalized: the index compares paths by their text, and a `..` in one made its
+files project code under a wrong path.
+
 ### PHPStan and Larastan
 
 The server (`phpstan.rs`) runs `php vendor/bin/phpstan analyse

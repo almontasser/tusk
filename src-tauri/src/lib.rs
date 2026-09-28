@@ -223,6 +223,7 @@ pub fn run() {
             lsp::lsp_stop,
             lsp::toml_edit,
             lsp::toml_read,
+            lsp::mago_settings,
             lsp::ai_start,
             lsp::ai_request,
             lsp::ai_cancel,

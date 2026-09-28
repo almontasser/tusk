@@ -1148,6 +1148,27 @@ async function suggestExclusions(root: string) {
   });
 }
 
+/**
+ * The text of a new mago.toml for the project: the editor's defaults (src-tauri/resources/mago.toml) with its PHP
+ * version and top-level folders, as the settings the project used until then.
+ */
+export async function newMagoConfigText(root: string) {
+  const [bundled, composer, top] = await Promise.all([
+    toolPath("mago.toml").then((path) => invoke<string>("read_file", { path })),
+    invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"),
+    invoke<{ name: string; is_dir: boolean }[]>("read_dir", { path: root }).catch(() => []),
+  ]);
+  const text = magoConfigText(bundled, composer, [], [], top);
+  const header = "# Mago's settings for this project. Tusk made this file from its defaults for Laravel;\n# Settings > PHP Analysis edits it, and keeps your comments.\n";
+  return header + text.replace(/^# Default Mago configuration.*\n# A project's mago.toml replaces this file completely.\n/m, "");
+}
+
+/** Makes the servers and Blade checks use the project's new mago.toml instead of the editor's copy. */
+export function useProjectMagoConfig() {
+  magoConfigPath = undefined;
+  configureTusk({ magoConfig: undefined });
+}
+
 /** The Mago settings the servers use, or undefined when the project has its own mago.toml. */
 export let magoConfigPath: string | undefined;
 
@@ -1299,7 +1320,15 @@ export const tuskOptions: Record<string, () => unknown> = {};
 /** Handlers for Tusk's server's own notifications, such as `tusk/phpstan`. */
 export const tuskNotifications: Record<string, (params: any) => void> = {};
 
-const tuskSettings = () => ({ ...tuskInit, ...Object.fromEntries(Object.entries(tuskOptions).map(([k, f]) => [k, f()])) });
+/** The editor's options with the other modules' over them; lists, such as `stubs`, add up. */
+function tuskSettings() {
+  const all: Record<string, unknown> = { ...tuskInit };
+  for (const [k, f] of Object.entries(tuskOptions)) {
+    const v = f();
+    all[k] = Array.isArray(all[k]) && Array.isArray(v) ? [...all[k], ...v] : v;
+  }
+  return all;
+}
 
 /**
  * Sends Tusk's server its options again (`workspace/didChangeConfiguration`), with `change` applied to the

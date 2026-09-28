@@ -70,6 +70,9 @@ fn apply(table: &mut dyn TableLike, path: &[String], value: Option<&Value>, inli
     apply(child, rest, value, inline, false)?;
     if value.is_none() && child.is_empty() {
         table.remove(key);
+    } else if let Some(Item::Value(toml_edit::Value::InlineTable(t))) = table.get_mut(key) {
+        // A key added to `{ level = "error" }` would otherwise read `{ level = "error" , enabled = false }`.
+        t.fmt();
     }
     Ok(())
 }
@@ -116,6 +119,9 @@ mod tests {
         enable.inline = true;
         let mut new = e(&["linter", "rules", "no-isset", "enabled"], json!(false));
         new.inline = true;
+        let mut more = e(&["linter", "rules", "no-empty", "enabled"], json!(false));
+        more.inline = true;
+        assert!(edit(text, &[more]).unwrap().contains("no-empty = { level = \"warning\", enabled = false }\n"));
         let out = edit(text, &[enable, new, e(&["linter", "rules", "no-empty", "level"], Value::Null)]).unwrap();
         assert_eq!(
             out,
