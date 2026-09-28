@@ -29,12 +29,18 @@ export function initFilament(h_: typeof host) {
       const m = /^\s*(?:final\s+|abstract\s+)*class\s+(\w+)\s+extends\s+(\w*(?:Resource|RelationManager))\b/m.exec(text);
       const schema = !m && /^\s*(?:final\s+)?class\s+\w+(Form|Table|Infolist)\s*\{/m.exec(text) && /public static function configure\((Schema|Table) \$/.test(text) ? /^\s*(?:final\s+)?class/m.exec(text) : null;
       const found = m ?? schema;
+      const modelClass = !found && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+(Model|Authenticatable|Pivot)\b/m.exec(text);
+      if (modelClass && /Illuminate\\Database\\Eloquent|Illuminate\\Foundation\\Auth/.test(text)) {
+        const line = model.getPositionAt(modelClass.index + modelClass[0].length - modelClass[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openModelDesigner", title: "Open in Model Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       if (!found || !/Filament\\/.test(text)) return { lenses: [], dispose() {} };
       const line = model.getPositionAt(found.index + found[0].length - found[0].trimStart().length).lineNumber;
       return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openDesigner", title: "Open in Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
     },
   });
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
+  monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
 }
 
 /** Opens a file in the designer: a resource or relation manager itself, or the resource a schema class belongs to. */
@@ -153,6 +159,22 @@ export async function openResourcePicker() {
   );
   items.push({ label: "New Resource…", detail: "Create a resource with the wizard", icon: "codicon-add", run: () => void newResource() });
   pick("Open a resource in the designer", () => items);
+}
+
+/** Picks a model to open in the model designer, or makes a new one. */
+export async function openModelPicker() {
+  const root = host.root();
+  const models = await fapp.models(root).catch((e) => (host.status(`Can't read the models: ${errorText(e)}`), null));
+  if (!models) return;
+  const { openModelDesigner, openNewModel } = await import("./modeldesigner");
+  const items: Item[] = await Promise.all(
+    Object.values(models).map(async (m) => ({ label: shortClass(m.class), detail: `${m.table} · ${Object.keys(m.columns).length} columns`, icon: "codicon-database", run: async () => {
+      const file = await fapp.fileOfClass(root, m.class);
+      if (file) void openModelDesigner(file);
+    } })),
+  );
+  items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
+  pick("Open a model in the designer", () => items);
 }
 
 export async function newResource(panel?: string) {

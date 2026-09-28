@@ -15,7 +15,7 @@ import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
-import { filamentFilesChanged, initFilament, installFilament, loadFilament, newResource, openFileInDesigner, openResourcePicker } from "./filamentview";
+import { filamentFilesChanged, initFilament, installFilament, loadFilament, newResource, openFileInDesigner, openModelPicker, openResourcePicker } from "./filamentview";
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { initStash, showStashes, stashChanges } from "./stash";
 import { branches, fetchAll, initBranches } from "./branches";
@@ -1607,6 +1607,8 @@ const actions: Action[] = [
   { label: "Filament: Open Resource in Designer…", run: () => root && openResourcePicker() },
   { label: "Filament: New Resource…", run: () => root && newResource() },
   { label: "Filament: Install Filament", run: () => root && installFilament() },
+  { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
+  { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },
   { label: "Open in Designer", run: () => active && openFileInDesigner(active), when: () => /(Resource|RelationManager|Form|Table|Infolist)\.php$/.test(active) },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },

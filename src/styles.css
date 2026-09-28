@@ -2367,3 +2367,52 @@ button.link:hover { text-decoration: underline; }
 .fv-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; font-size: 12.5px; }
 .fv-empty p { margin: 0; }
 .fv-empty button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: var(--radius); border: 1px solid var(--input-border); }
+
+/* The model designer (src/modeldesigner.ts) */
+.md-designer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); font-size: 12.5px; --fi-primary: #f59e0b; }
+.md-designer button:not(.icon-button) { display: inline-flex; align-items: center; gap: 6px; }
+.md-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 32%, 460px); }
+.md-main { overflow: auto; padding: 18px 20px 40px; display: flex; flex-direction: column; gap: 14px; }
+.md-main .fd-settings-section h3 { display: flex; align-items: center; }
+.md-rows .fd-row { grid-template-columns: 130px minmax(0, 1fr) 24px; }
+.md-rows .fd-row-editor > input:not([type="checkbox"]) { max-width: 320px; }
+.md-add { padding: 3px 10px; border-radius: var(--radius); border: 1px solid var(--input-border); background: var(--panel); font-size: 12px; font-weight: 400; }
+.md-add:hover { background: var(--hover); }
+.md-columns { display: flex; flex-direction: column; gap: 2px; margin: 0 2px; }
+.md-col-head, .md-col-row { display: grid; grid-template-columns: 14px minmax(110px, 1.1fr) minmax(150px, 1.5fr) 38px minmax(64px, 0.7fr) 78px 38px minmax(80px, 0.8fr) 24px; gap: 6px; align-items: start; }
+.md-col-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-col-row > .md-center, .md-col-row > .md-grip, .md-col-row > .icon-button { align-self: start; margin-top: 5px; }
+.md-col-head { padding: 2px 4px 4px; font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.md-col-row { padding: 3px 4px; border-radius: 6px; }
+.md-col-row:hover { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
+.md-col-row.fixed { color: var(--muted); font-size: 12px; min-height: 28px; }
+.md-col-row.new { box-shadow: inset 2px 0 0 var(--green); }
+.md-col-row.renamed { box-shadow: inset 2px 0 0 var(--yellow); }
+.md-col-row input:not([type="checkbox"]), .md-col-row select { min-width: 0; width: 100%; padding: 3px 6px; font-size: 12px; }
+.md-col-row > .icon-button { opacity: 0.5; }
+.md-col-row:hover > .icon-button { opacity: 1; }
+.md-col-typecell { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.md-col-typecell > select { flex: 1 1 110px; }
+.md-col-extra { display: contents; }
+.md-tiny { width: 52px !important; flex: 0 0 52px; }
+.md-ref { flex: 1 1 90px; }
+.md-center { display: flex; justify-content: center; }
+.md-center input { margin: 0; }
+.md-grip { color: var(--faint); cursor: grab; font-size: 12px; }
+.md-muted { color: var(--muted); }
+.md-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 4px 4px; }
+.md-relations { display: flex; flex-direction: column; gap: 6px; margin: 0 4px 6px; }
+.md-rel-row { display: grid; grid-template-columns: minmax(100px, 130px) minmax(100px, 150px) minmax(90px, 130px) minmax(0, 1fr) auto 24px; gap: 6px; align-items: center; }
+.md-rel-row .fd-check-label { overflow: hidden; text-overflow: ellipsis; }
+.md-rel-row.existing { display: flex; gap: 8px; color: var(--muted); padding: 2px 0; }
+.md-rel-row.existing .fd-mono { color: var(--text); }
+.md-rel-row select, .md-rel-row input:not([type="checkbox"]) { min-width: 0; padding: 3px 6px; font-size: 12px; }
+.md-also-row { display: flex; flex-wrap: wrap; gap: 18px; margin: 0 4px 6px; }
+.md-also { font-size: 12.5px; color: var(--text); }
+.md-preview { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border-subtle); background: var(--panel); }
+.md-preview-tabs { padding: 0 8px; }
+.md-preview-editor { flex: 1; min-height: 0; }
+.md-footer { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); }
+.md-footer .primary { padding: 5px 16px; border-radius: var(--radius); }
+.md-problems { color: var(--yellow); font-size: 12px; }
+.md-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }

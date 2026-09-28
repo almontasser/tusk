@@ -27,7 +27,7 @@ export type DesignerHost = {
   openUrl(url: string): void;
 };
 
-let host: DesignerHost;
+export let host: DesignerHost;
 export const initDesigner = (h_: DesignerHost) => (host = h_);
 
 /** A file the designer reads and edits, with the outline of its current text. */

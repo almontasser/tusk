@@ -835,6 +835,34 @@ Filament version or a plugin needs no update to Tusk.
   names and title attribute, the URL, a record count badge, and the attributes
   global search looks in.
 
+## Model designer
+
+The model designer creates an Eloquent model or changes one and its table. To
+open it, click **Open in Model Designer** above a model's class, run
+**Laravel: New Model…** or **Laravel: Open Model in Designer…**, or click the
+model's name in the Filament designer.
+
+- **Columns:** each column's name, type, length or precision, whether it can be
+  null, default, index, whether it's fillable, and its cast, which is chosen
+  from the type unless you pick an enum. A foreign key names its table and what
+  happens when the other row is deleted. **Quick add** adds common columns, such
+  as a slug or a price. Drag rows to reorder them.
+- **Relationships:** belongs-to, has-one, has-many, many-to-many, and morph
+  relationships. A belongs-to relationship adds its foreign key column, and a
+  many-to-many relationship adds its pivot table. You can add the other side of
+  the relationship to the related model too.
+- **Preview:** the right side shows the migration, the model, and the factory as
+  they'll be written.
+
+Changes are staged until you click **Create model** or **Apply changes**. A new
+model gets its class, a migration, and optionally a factory that fakes each
+column, a seeder, a policy, and a Filament resource. For an existing model,
+Tusk writes a migration with only the changes, such as
+`add_description_to_posts_table`, with a `down()` that reverses them. It edits
+the model's fillable attributes, casts, soft deletes, and relationships in
+place, and keeps everything else. Dropping a column asks first. **Run the
+migration** runs `php artisan migrate` afterwards, in Sail when it's up.
+
 ## Bookmarks
 
 Press F3 to bookmark the current line, and F3 again to remove the bookmark. A

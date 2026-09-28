@@ -4264,6 +4264,31 @@ into itself.
 settings. `src/filamentview.ts` is the tool window, the palette commands, and
 the **Open in Designer** code lens.
 
+## Model designer
+
+`src/modeldesigner.ts` stages changes to a model and writes them on Apply,
+unlike the Filament designer, which saves each change: a migration is a unit
+that runs once, so it should hold the whole change.
+
+- **Reading:** `introspect.php model <class>` reports the table's columns (type,
+  full type, nullable, default), indexes, and foreign keys from the database's
+  schema builder, and the model's fillable, hidden, casts, relationships, and
+  traits. `columnFromDatabase` in `src/modelgen.ts` turns each column into the
+  designer's `ColumnSpec`, using the cast where the database is vague, as
+  SQLite is about booleans. Each column keeps its `original`.
+- **A new model:** `make:model` makes the class, and the factory, seeder, and
+  policy when asked, so their paths and namespaces follow the project. Tusk then
+  writes the model, the factory, the create migration, and a pivot migration for
+  each many-to-many relationship, a second apart so they run in order.
+- **An existing model:** `diffColumns` compares each column with its
+  `original` and yields adds, drops, renames, and changes; `alterMigration`
+  writes them with a `down()` in reverse order. The class is edited through the
+  outline, as the Filament designer edits resources: `$fillable` or Laravel
+  13's `#[Fillable]`, new entries in `casts()` or `$casts`, the `SoftDeletes`
+  trait, and new relationship methods, with their imports.
+- **Names:** `tableFor`, `plural`, and `singular` follow Laravel's pluralizer for
+  the common cases, so the designer's table name matches the one Eloquent uses.
+
 ## Tusk's language server
 
 `tusk-lsp/` is the PHP language server the editor runs, written in Rust. It
@@ -5914,4 +5939,13 @@ what it understands, and makes each change as a small edit at the range it read.
 Code it doesn't understand stays as written. The components and their settings
 come from reflecting the project's own Filament and plugins, not from a list in
 Tusk, so a new Filament version or a plugin works without an update.
+
+### 2026-09-28: The model designer stages changes and writes one migration
+
+Each change to a table could be its own migration, as each change to a resource
+is its own edit. But migrations run once and in order, and a dozen small ones
+for one sitting's work are noise in `database/migrations`. So the model designer
+keeps changes until Apply and writes one migration with all of them, shown in
+the preview first. It never edits a migration that exists, since one that has
+run won't run again.
 
