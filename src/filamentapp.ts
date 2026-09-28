@@ -92,7 +92,9 @@ async function introspect<T>(root: string, mode: string, ...args: string[]): Pro
   const out = await invoke<string>("run_capture", { cwd: root, program: "php", args: [script, root, mode, ...args], input: null, anyStatus: true });
   let json: unknown;
   try {
-    json = JSON.parse(out);
+    // Anything a package prints before the JSON, such as a notice, is skipped.
+    const start = out.search(/^[[{]/m);
+    json = JSON.parse(start > 0 ? out.slice(start) : out);
   } catch {
     // PHP's own errors, such as a syntax error in a provider, come before any JSON.
     console.error(`introspect.php ${mode} failed:\n${out}`);

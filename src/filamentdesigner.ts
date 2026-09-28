@@ -617,7 +617,7 @@ export class Designer {
     const used = new Set<string>();
     walk(live.root, (c) => c.name && used.add(c.name.split(".")[0]));
     const relUsed = (col: Column) => this.facts!.relations.some((r) => used.has(r.name) && col.name === `${r.name.replace(/([A-Z])/g, "_$1").toLowerCase()}_id`);
-    const columns = this.facts.columns.filter((c) => !used.has(c.name) && !relUsed(c) && (this.tab === "table" ? c.name !== "id" && !/password|token|secret/.test(c.name) : !isSystemColumn(c)));
+    const columns = this.facts.columns.filter((c) => !used.has(c.name) && !relUsed(c) && !/password|token|secret/.test(c.name) && (this.tab === "table" ? c.name !== "id" : !isSystemColumn(c)));
     if (!columns.length) return host.status("Every column is already there.");
     const slotName = live.kind === "table" ? "columns" : (live.root.slots.has("schema") ? "schema" : "components");
     const slot = live.kind === "table" ? live.root.slots.get("columns") : rootSlot(live.root, ["components", "schema"]);
@@ -937,7 +937,8 @@ export class Designer {
       this.paletteQuery = search.value;
       const groups = palette(this.cat!, kinds, q);
       const columns = (this.facts?.columns ?? []).filter((c) => (ref.kind === "table" ? c.name !== "id" : !isSystemColumn(c)) && (!q || c.name.toLowerCase().includes(q)));
-      const missing = columns.filter((c) => !used.has(c.name));
+      // The same columns Add N adds: secrets never go in a form or table on their own.
+      const missing = columns.filter((c) => !used.has(c.name) && !/password|token|secret/.test(c.name));
       const colItem = (c: Column) => {
         const el = h("div", { class: `fd-palette-item fd-column-item${used.has(c.name) ? " used" : ""}`, draggable: true, title: `${c.name}: ${c.fullType ?? c.type}${c.nullable ? ", nullable" : ""}${used.has(c.name) ? " (already used)" : ""}` }, icon(used.has(c.name) ? "pass" : "database"), h("span", {}, c.name), h("span", { class: "fd-palette-detail" }, c.type));
         el.ondragstart = (e) => (setDragging({ kind: "column", name: c.name }), e.dataTransfer!.setData("text/plain", c.name));

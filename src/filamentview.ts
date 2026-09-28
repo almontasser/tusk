@@ -66,6 +66,19 @@ export async function loadFilament() {
   const list = $("filament-list");
   if (!root) return list.replaceChildren();
   if (!(await fapp.hasFilament(root))) {
+    // A project that requires Filament but hasn't installed its packages, such as a fresh clone.
+    const composerJson = await (await import("@tauri-apps/api/core")).invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "");
+    if (/"filament\/filament"\s*:/.test(composerJson)) {
+      list.replaceChildren(
+        h(
+          "div",
+          { class: "fv-empty" },
+          h("p", {}, "The project requires Filament, but its packages aren't installed yet."),
+          h("button", { type: "button", class: "primary", onclick: () => void composerInstall() }, icon("package"), "Run composer install"),
+        ),
+      );
+      return;
+    }
     list.replaceChildren(
       h(
         "div",
@@ -249,6 +262,12 @@ export async function installFilament() {
   const composer = composerCommand(await toolPath("composer/composer.phar")).map(shellQuote).join(" ");
   const line = `${composer} require filament/filament --no-interaction && php artisan filament:install --panels && php artisan make:filament-user`;
   host.openTerminal("Install Filament", ["/bin/sh", "-c", line], () => (fapp.forget(), void loadFilament()));
+}
+
+/** Installs the project's Composer packages in a terminal tab, then reads the app. */
+async function composerInstall() {
+  const composer = composerCommand(await toolPath("composer/composer.phar")).map(shellQuote).join(" ");
+  host.openTerminal("composer install", ["/bin/sh", "-c", `${composer} install`], () => (fapp.forget(), void loadFilament()));
 }
 
 /** The app's code changed on disk: what introspect.php read may be stale. */

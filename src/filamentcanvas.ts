@@ -346,7 +346,7 @@ function optionsOf(c: Comp): string[] {
   if (m?.entries.length) return m.entries.map(([, label]) => label).slice(0, 6);
   const o = arg(c, "options");
   if (o?.kind === "classConst") return [`${shortClass(o.class)} cases`];
-  if (call(c, "relationship")) return [`${text(c, "relationship") ?? "Related"} records`];
+  if (call(c, "relationship")) return [labelFromName(text(c, "relationship") ?? "Related")];
   if (flag(c, "boolean")) return ["Yes", "No"];
   return ["Option 1", "Option 2", "Option 3"];
 }

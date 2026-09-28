@@ -4242,6 +4242,18 @@ The designer never writes back less than the code held:
   leaves unused, such as `RichEditor` after changing its field to a textarea.
   Imports that were unused before stay.
 
+`introspect.php` sends PHP's notices to stderr, since an older package on a newer
+PHP can print deprecations while it loads, before the JSON; the editor also
+skips anything printed before the JSON. A project that requires Filament but
+hasn't installed its packages, such as a fresh clone, is offered
+`composer install` rather than a Filament install.
+
+The designers were checked against open-source Filament apps (the official demo,
+relaticle, academico, dewakoding-project-management, and simple-cms): they read
+2,626 components, and everything they leave as code is a call to the app's own
+helpers. After designer edits and a resource from the wizard, the demo's own
+test suite gave the same results as before.
+
 When the app can't boot, often because of a mistake in a file Filament loads,
 `introspect.php filament-app` reports the exception's message, file, and line,
 and lists the resource files it finds by reading the source. The tool window
