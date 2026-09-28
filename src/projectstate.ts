@@ -98,6 +98,9 @@ export function projectValue<T>(key: string): T | undefined {
 /** Where a value is kept now, or undefined when it isn't set. */
 export const projectScope = (key: string): Scope | undefined => (key in shared ? "shared" : key in local ? "local" : undefined);
 
+/** Whether a project is open, so its values can be read and set. */
+export const projectOpen = () => !!root;
+
 /** Why tusk.json can't be read, or null. */
 export const sharedStateError = () => sharedError;
 
@@ -165,6 +168,8 @@ export const SHAREABLE: { label: string; keys: string[]; detail: string }[] = [
   { label: "Docker service for commands", keys: ["dockerService"], detail: "Where tests, Artisan, and Tinker run" },
   { label: "PHP interpreter", keys: ["phpInterpreter"], detail: "The PHP this project runs instead of the one in Settings > Tools" },
   { label: "Formatters", keys: ["formatters"], detail: "The formatter and format on save for each language" },
+  { label: "PHP analysis settings", keys: ["phpAnalysis"], detail: "Extra stub folders, and whether to index every library file" },
+  { label: "PHPStan settings", keys: ["phpstan"], detail: "When it runs, its configuration file, level, memory limit, and timeout" },
   { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: "Names, URLs, SSH tunnels, and read-only choices; passwords stay in the Keychain" },
 ];
 

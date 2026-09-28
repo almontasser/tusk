@@ -166,6 +166,33 @@ openSettingsFile()      // settings.json in the editor
 `shown` hides a field that doesn't apply; the search matches a field's group,
 label, help, and key.
 
+Two more kinds of entries, for what plain fields can't hold:
+
+```ts
+registerProjectSettings<T>(group, key, defaults: T, fields, onChange?): () => T
+registerSettingsSection({ group, keywords, shown?, render(): HTMLElement | Promise<HTMLElement> })
+listEditor({ label, items, placeholder, empty, add(v): Promise<string[]>, remove(v): Promise<string[]> })
+openPath(path)          // a file in the editor, such as a tool's configuration
+```
+
+- `registerProjectSettings` adds fields for the open project, kept as one
+  object under `key` in the project's state (`projectstate.ts`), not in
+  `settings.json`. Values equal to their defaults aren't saved, and a saved value
+  of the wrong type reads as its default. The group's heading says **This
+  project** and has a **Share in tusk.json** box (`setProjectScope`). The fields
+  show only while a project is open, and **Reset All** leaves them alone.
+  `onChange` runs after a change in the dialog and when `tusk.json` changes on
+  disk. Add the key to `SHAREABLE` and the tusk.json schema too.
+- `registerSettingsSection` adds a part the module draws itself under a
+  group's heading, such as the dictionaries or Mago's rules. `render` runs each
+  time the dialog opens; the dialog shows "Loading…" until it resolves, and
+  the error in place if it fails. The search matches its group and `keywords`,
+  and shows or hides the whole section.
+- `listEditor` is the list of strings such sections use: a box that adds an
+  entry on Enter or **Add**, and the entries with remove buttons. `add` and
+  `remove` save and return the new list; a failure shows with `showError` and
+  keeps the list.
+
 `apply` updates Monaco's editor options and calls `applyTheme` in
 `src/themes.ts` with the theme in use: `theme`, or `darkTheme` or `lightTheme`
 when `theme` is `system`, which follows `prefers-color-scheme` as it changes.
@@ -1614,12 +1641,46 @@ Spelling comes from `typos-lsp`, a language server for the `typos` checker,
 bundled per architecture like Mago. `typos` checks words against a list of
 known misspellings, not a dictionary, so it doesn't flag names, jargon, or
 abbreviations, and it understands `camelCase` and `snake_case`. The server
-reports misspellings as information, with a fix and an "ignore in the project"
-code action, which writes `typos.toml`. The editor underlines them with a
-green wave of their own (`typoDecorations` in `lsp.ts`), and next and previous
-problem skip them. It's a native binary, so the bridge
-runs it without a runtime (an empty runtime in `lsp.rs`). Changing the
-**Check spelling** setting restarts the servers, which starts or stops it.
+reports misspellings as information with their corrections. The editor
+underlines them with a green wave of their own (`typoDecorations` in
+`lsp.ts`), or shows them as warnings or errors when **Show misspellings as**
+says so (`spelling.severity`, applied in `toMarker`), and next and previous
+problem skip them. It's a native binary, so the bridge runs it without a
+runtime (an empty runtime in `lsp.rs`). Changing the **Check spelling**
+setting restarts the servers, which starts or stops it.
+
+`src/spelling.ts` owns the rest, and sets `spelling` in `lsp.ts` (the
+languages, the severity, and the user dictionary's path) rather than
+`lsp.ts` importing it:
+
+- A dictionary is `word = "word"` entries under `[default.extend-words]`. The
+  project's is the `typos.toml`, `_typos.toml`, or `.typos.toml` it has, else
+  `_typos.toml`. The user's is `spelling.toml` in the app's config folder,
+  passed as typos-lsp's `config` option, which it merges over the project's
+  file: `extend-words` from both apply. (Its `extend-ignore-re` replaces the
+  project's instead, so the user file holds only words; that rules out a
+  per-line suppression comment.) The file is created before the server starts,
+  since typos-lsp drops every configuration when its `config` file is missing.
+- Saving a word runs typos-lsp's own `ignore-in-project` command with the
+  chosen file: the server writes the file with `toml_edit` and checks every
+  open file again, without a restart. The command doesn't fail when it can't
+  write, so `addWord` reads the file back to confirm. With the server stopped,
+  the Tauri command `toml_edit` writes the word.
+- Removing a word, or **Don't check spelling in this file** (`[files]
+  extend-exclude`), edits the file with `toml_edit`, then `restartSpelling`
+  starts typos-lsp alone again, since it reads its files only as it starts.
+  Changing the file types does the same.
+- Monaco's code action provider for every language (`"*"`) offers the
+  dictionary actions for markers from `typos`; the generic provider drops
+  typos-lsp's own "Ignore in the project" actions.
+- **Settings > Spelling** adds a section (`registerSettingsSection`) with the
+  file types (`spellingSkip`, the languages you turned off) and a
+  `listEditor` for each dictionary.
+
+`toml_edit` and `toml_read` (`src-tauri/src/lsp.rs`) are the app's TOML
+access. `toml_edit` applies `{ path, value, inline? }` edits through
+`tusk_lsp::config_edit`, which keeps comments, key order, and keys it doesn't
+touch; a null value removes a key, and a table left empty goes with it.
 
 ### AI code completion
 
@@ -1973,15 +2034,84 @@ linter options, and its `includes` and `excludes` for the index. The file is
 outside the project, so the client asks the server to reindex after it writes
 the file again with corrected vendor copies.
 
+### Mago's settings page
+
+`src/magosettings.ts` draws **Settings > PHP Analysis** and the quick fixes
+that change `mago.toml`:
+
+- The Tauri command `mago_settings(root, path)` reads a configuration through
+  `tusk_lsp::mago_config::describe`: its `php-version` and composer.json's,
+  the analyzer's switches (the file's value and the default from
+  `analysis::settings`), its excludes and ignores, the linter's excludes, and
+  every rule whose requirements the configured PHP version and integrations
+  meet (`RuleRegistry::build` with disabled rules, and each rule's
+  `RuleMeta`: name, description, and category). Each rule's `enabled` and
+  `level` come from `filter_rules_settings`, and its defaults from the rule.
+  Nothing is listed by hand, so the page follows Mago's crates when they're
+  upgraded. `path` is the project's `mago.toml`, or `magoConfigPath`, the
+  editor's copy, when there's none.
+- Every change goes through `editMago`, which applies `toml_edit` edits to
+  the project's `mago.toml`. A value equal to Mago's default removes the key,
+  and a rule's table is inline (`no-empty = { level = "warning" }`), as the
+  bundled file writes them; `config_edit` formats an inline table again after
+  a key is added. Without a `mago.toml`, the first change creates it from
+  `newMagoConfigText` (the bundled defaults with the project's PHP version and
+  top-level folders), then `useProjectMagoConfig` drops `magoConfig` from the
+  server's options (`configureTusk`), which reindexes with the new file, and
+  Blade checks read it too. Otherwise `reindex` reads the file again at once
+  rather than waiting for the file watcher.
+- The page keeps its controls as you change them, so a toggle doesn't lose
+  the rules list's scroll or filter; a failed write draws the page again from
+  the file.
+- The quick fixes, a provider for `php`: **Disable *rule* in mago.toml** and
+  **Change *rule*'s level…** (a `choose` picker) for `mago-lint` problems, and
+  **Ignore *code* in mago.toml** (`[analyzer] ignore`) for `mago` ones.
+
+The page's first two settings, `loadAllLibraries` and `stubs`, are the
+server's own options, not Mago's: project settings under `phpAnalysis`, sent
+through `tuskOptions`. `tuskSettings` adds list options together, so the user's
+stub folders join Laravel's alias stubs. Stub paths are made absolute and
+normalized: the index compares paths by their text, and a `..` in one made its
+files project code under a wrong path.
+
 ### PHPStan and Larastan
 
-When the project has `vendor/bin/phpstan`, the server (`phpstan.rs`) runs
-`php vendor/bin/phpstan analyse --error-format=json` on a PHP file when it
-opens and each time it's saved, one run at a time on a thread of its own,
-with the project's own configuration. PHPStan reads files from disk, so its
-problems (source `phpstan`, severity Error, the identifier as the code) cover
-their line and keep it until the next run. A run that fails or passes its
-3-minute limit keeps the last results.
+The server (`phpstan.rs`) runs `php vendor/bin/phpstan analyse
+--error-format=json` on a PHP file when it opens and each time it's saved, one
+run at a time on a thread of its own, with the project's own configuration.
+PHPStan reads files from disk, so its problems (source `phpstan`, severity
+Error, the identifier as the code) cover their line and keep it until the next
+run. A run that fails keeps the last results.
+
+The `phpstan` option (`phpstan::Settings`: `enabled`, `config`, `level`,
+`memoryLimit`, `timeout`, `run`) comes from `src/phpstan.ts`, which registers
+it as project settings (`registerProjectSettings`, key `phpstan`, shareable)
+and as one of `tuskOptions` in `lsp.ts`. A change sends every option again
+with `workspace/didChangeConfiguration` (`configureTusk`). The server gives
+PHPStan's part to `PhpStan::configure`, which drops the problems found with
+the old settings and checks the open files again; any other option that
+changed rebuilds the index. PHPStan's arguments are `arguments()`:
+`--configuration`, `--level`, and `--memory-limit` only when set.
+
+Each run reports its state with a `tusk/phpstan` notification (`off`,
+`missing`, `idle`, `running`, `failed`, and a message). `parse_report` reads
+the reason for a failure: out of memory (PHP's "Allowed memory size" or
+"Failed to set memory limit"), the report's first general error when no file
+has problems (such as a path that doesn't exist), or the first line PHPStan
+printed instead of a report, without PHP's `in phar://…` location. PHP writes
+an empty `files` as `[]`, so the report is read as JSON first. A run past the
+timeout is killed. `phpstan.ts` shows a running check as a status bar spinner,
+toasts a failure once per new reason, and hands the state to the Problems
+panel's **PHPStan** button (`setPhpStanState`), which is hidden while the
+project has no PHPStan and nobody turned it on.
+
+`tusk/phpstanProject` runs PHPStan with no paths, so it checks the
+configuration's `paths`, on the PHPStan thread after any file run, and answers
+with the problems by relative path. It waits on a thread of its own, not the
+request pool, since it takes minutes on a large project. Its results replace
+every file's PHPStan problems, so open files show them too, and
+`runPhpStan` in `problems.ts` keeps them in `phpstanFound`, beside the Mago
+scan's `scanned`, so each scan leaves the other's results alone.
 
 ### Blade
 
@@ -3070,6 +3200,7 @@ Who uses which key:
 | `dockerService` | `sail.ts`, through `setServiceChoice` from `main.ts`, so `sail.ts` loads in tests without the app's modules | Local |
 | `databaseConnections`, `databaseSsh`, `databaseReadOnly`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; Data Sources' checkbox shares the first three; the selection never shares |
 | `databaseEnvOverride`, `databaseHistory` | `database.ts`: a URL that replaces `.env`'s connection on this Mac, and the last 100 statements run | Local only |
+| `phpstan` | `phpstan.ts`, through `registerProjectSettings`; sent to Tusk's server as the `phpstan` option | Local; the settings group's box shares it |
 | `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
 
 ## Sessions
@@ -5571,3 +5702,12 @@ how often it asks. AI completion's internal limits stayed, since they're tuned
 against the model's context. The tools manifest URL stayed, since a mirror
 would need a list signed with Tusk's key.
 
+
+### 2026-09-28: Language tool settings
+
+Spelling, PHPStan, and Mago got settings pages. `settings.ts` grew project
+groups (`registerProjectSettings`) and module-drawn sections
+(`registerSettingsSection`, `listEditor`) instead of a second settings system,
+so every setting is in one dialog with one search. Tool settings that the tool
+reads itself stay in its file (`_typos.toml`, `mago.toml`), edited with
+`toml_edit` so hand-written comments survive; the rest is project state.

@@ -26,7 +26,7 @@ use crate::text::{path_to_uri, uri_to_path};
 use crate::{capabilities, diagnostics, handlers};
 
 /// `initializationOptions`, all optional.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Options {
     /// Globs relative to the project root that the index skips, on top of its defaults.
@@ -39,6 +39,8 @@ pub struct Options {
     pub mago_config: Option<PathBuf>,
     /// Index every library file in full, not only what the project reaches. Uses several times the memory.
     pub load_all_libraries: bool,
+    /// When and how PHPStan runs.
+    pub phpstan: crate::phpstan::Settings,
 }
 
 /// The index's configuration from the options and the project's files.
@@ -184,6 +186,11 @@ impl Client {
         let _ = self.sender.send(Message::Response(response));
     }
 
+    /// Sends a notification of the server's own, such as `tusk/phpstan`.
+    pub fn notify_custom(&self, method: &str, params: impl serde::Serialize) {
+        let _ = self.sender.send(Message::Notification(Notification::new(method.into(), params)));
+    }
+
     /// Reports a long task's progress. Titles starting with "Indexing" drive the editor's status bar.
     pub fn progress(&self, token: &str, value: WorkDoneProgress) {
         self.notify::<notification::Progress>(ProgressParams {
@@ -298,12 +305,21 @@ impl Server {
         let (tx, rx) = crossbeam_channel::unbounded();
         let applied = Arc::new((Mutex::new(0), Condvar::new()));
         let framework = Arc::new(crate::framework::State::new(root.clone()));
-        let phpstan = Arc::new(crate::phpstan::PhpStan::default());
+        // PHPStan and the diagnostics thread need each other: PHPStan says which files to publish again.
+        let refresh = Arc::new(std::sync::OnceLock::<Sender<diagnostics::Event>>::new());
+        let (to_refresh, reporter) = (refresh.clone(), client.clone());
+        let phpstan = crate::phpstan::PhpStan::start(
+            &root,
+            options.phpstan.clone(),
+            move |status| reporter.notify_custom("tusk/phpstan", status),
+            move |path| {
+                if let Some(tx) = to_refresh.get() {
+                    let _ = tx.send(diagnostics::Event::Refresh(path));
+                }
+            },
+        );
         let diagnostics = diagnostics::spawn(client.clone(), docs.clone(), index.clone(), framework.clone(), phpstan.clone(), root.clone());
-        let refresh = diagnostics.clone();
-        phpstan.start(&root, move |path| {
-            let _ = refresh.send(diagnostics::Event::Refresh(path));
-        });
+        let _ = refresh.set(diagnostics.clone());
         spawn_indexer(rx, index.clone(), docs.clone(), applied.clone(), client.clone(), diagnostics.clone());
         let indexer = Indexer { tx, queued: AtomicU64::new(0), applied };
         indexer.send(Job::Build(None));
@@ -395,6 +411,24 @@ impl Server {
                 self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
                 self.client.respond(Response::new_ok(id, ()));
             }
+            // PHPStan on the whole project: minutes on a large one, so it waits on a thread of its own.
+            "tusk/phpstanProject" => {
+                let (phpstan, client, root) = (self.phpstan.clone(), self.client.clone(), self.root.clone());
+                std::thread::spawn(move || {
+                    let response = match phpstan.check_project() {
+                        Ok(found) => {
+                            let by_file: std::collections::BTreeMap<String, Vec<Diagnostic>> = found
+                                .into_iter()
+                                .filter(|(_, problems)| !problems.is_empty())
+                                .map(|(path, problems)| (path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().into_owned(), problems))
+                                .collect();
+                            Response::new_ok(id, by_file)
+                        }
+                        Err(e) => Response::new_err(id, ErrorCode::RequestFailed as i32, e),
+                    };
+                    client.respond(response);
+                });
+            }
             _ => self.client.respond(Response::new_err(id, ErrorCode::MethodNotFound as i32, format!("Unknown method {method}"))),
         }
     }
@@ -466,6 +500,22 @@ impl Server {
                 }
                 // A new mago.toml, or packages installed or removed, change what's indexed and how.
                 if reconfigure {
+                    self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
+                }
+            }
+            // The editor's settings changed: the same shape as the initialization options.
+            notification::DidChangeConfiguration::METHOD => {
+                let Some(p) = extract::<DidChangeConfigurationParams>(note) else { return };
+                let Ok(options) = serde_json::from_value::<Options>(p.settings) else { return };
+                if self.phpstan.configure(options.phpstan.clone()) {
+                    let open: Vec<PathBuf> = self.docs.read().iter().map(|d| d.path.clone()).collect();
+                    open.iter().for_each(|path| self.phpstan.check(path));
+                }
+                let without_phpstan = |o: &Options| Options { phpstan: Default::default(), ..o.clone() };
+                let reindex = without_phpstan(&options) != without_phpstan(&self.options);
+                self.options = options;
+                if reindex {
+                    self.framework.clear();
                     self.indexer.send(Job::Build(Some(index_config(&self.root, &self.options))));
                 }
             }

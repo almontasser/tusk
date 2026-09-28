@@ -6,6 +6,7 @@ import { monaco } from "./editor";
 import { h, icon, toast } from "./dom";
 import { choose, confirm, pick, rank } from "./palette";
 import { parseSettingsFile, type Ranges, readSaved, settingsToWrite, type Value } from "./settingsdata";
+import { onProjectValue, projectOpen, projectScope, projectValue, setProjectScope, setProjectValue } from "./projectstate";
 import { errorText, showError } from "./status";
 import { applyTheme, importThemeFile, loadImportedThemes, removeImportedTheme, themeList } from "./themes";
 import { setVim } from "./vim";
@@ -61,7 +62,7 @@ const defaults: Settings = {
  * mode theme while the theme doesn't follow the system. `key` is a key of Settings, or of a group another module
  * adds with registerSettings.
  */
-export type Field = { key: string; label: string; help?: string; group: string; shown?: () => boolean } & (
+export type Field = { key: string; label: string; help?: string; group: string; shown?: () => boolean; /** The project state key that holds it; see registerProjectSettings. */ project?: string } & (
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
   | { type: "text"; placeholder?: string }
@@ -102,7 +103,7 @@ const fields: Field[] = [
       ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
     ],
   },
-  { group: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
+  { group: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. ⌥⏎ on a misspelling saves it to a dictionary." },
 ];
 
 /** Defaults of the settings other modules add with registerSettings. */
@@ -230,12 +231,94 @@ export function registerSettings<T extends Record<string, Value>>(group: string,
   return settings as unknown as T;
 }
 
+/** The groups of project settings, by their project state key. */
+const projectGroups = new Map<string, { defaults: Record<string, Value>; onChange?: () => void }>();
+
+/** A project group's values: the saved ones that have their default's type, else the defaults. */
+function projectSettingsOf(key: string): Record<string, Value> {
+  const { defaults } = projectGroups.get(key)!;
+  const saved = projectValue<Record<string, unknown>>(key);
+  const values = { ...defaults };
+  if (saved && typeof saved === "object") for (const k of Object.keys(defaults)) if (typeof saved[k] === typeof defaults[k]) values[k] = saved[k] as Value;
+  return values;
+}
+
+/**
+ * Adds a group of settings for the open project, kept as one object under `key` in the project's state
+ * (projectstate.ts): on this Mac, or in tusk.json when the group's **Share in tusk.json** box is on. Values equal to
+ * their defaults aren't saved. The group shows only while a project is open. `onChange` runs after each change in
+ * the dialog and when tusk.json changes the value on disk. Returns a function that reads the current values.
+ */
+export function registerProjectSettings<T extends Record<string, Value>>(group: string, key: string, values: T, list: (FieldInput & { key: keyof T & string })[], onChange?: () => void): () => T {
+  projectGroups.set(key, { defaults: values, onChange });
+  fields.push(...list.map((f) => ({ ...f, group, project: key }) as Field));
+  if (onChange) onProjectValue(key, onChange);
+  return () => projectSettingsOf(key) as T;
+}
+
+async function setProjectSetting(project: string, key: string, value: unknown) {
+  const { defaults, onChange } = projectGroups.get(project)!;
+  const next: Record<string, unknown> = { ...projectSettingsOf(project), [key]: value };
+  for (const k of Object.keys(next)) if (next[k] === defaults[k]) delete next[k];
+  try {
+    await setProjectValue(project, Object.keys(next).length ? next : undefined);
+    onChange?.();
+  } catch (e) {
+    showError("Can't save the project setting", e);
+  }
+}
+
+/**
+ * A part of the settings dialog that a module draws itself, under the heading `group`, for what fields can't hold,
+ * such as a list of words or rules. `render` runs each time the dialog opens; while it loads, the dialog says so, and
+ * if it fails, it shows the error in place. The search box matches `keywords`.
+ */
+export type SettingsSection = { group: string; keywords: string; shown?: () => boolean; render(): HTMLElement | Promise<HTMLElement> };
+const customSections: SettingsSection[] = [];
+export const registerSettingsSection = (s: SettingsSection) => void customSections.push(s);
+
+/**
+ * An editable list of strings, such as dictionary words or folders to skip, for a settings section: a box to add
+ * an entry (Enter or Add), and the entries, each with a remove button. `add` and `remove` save the change and
+ * return the new list; a failure shows as an error and keeps the list as it was.
+ */
+export function listEditor(o: { label: string; items: string[]; placeholder: string; empty: string; add(v: string): Promise<string[]>; remove(v: string): Promise<string[]> }) {
+  let items = o.items;
+  const input = h("input", { type: "text", placeholder: o.placeholder, ariaLabel: `Add to ${o.label}`, spellcheck: false });
+  const list = h("ul", { class: "setting-list", role: "list", ariaLabel: o.label });
+  const run = async (change: () => Promise<string[]>, what: string) => {
+    try {
+      items = await change();
+      draw();
+    } catch (e) {
+      showError(`Can't ${what}`, e);
+    }
+  };
+  const draw = () =>
+    list.replaceChildren(
+      ...(items.length
+        ? items.map((v) => h("li", {}, h("span", {}, v), h("button", { type: "button", class: "icon-button", title: `Remove ${v}`, ariaLabel: `Remove ${v}`, onclick: () => run(() => o.remove(v), `remove ${v}`) }, icon("close"))))
+        : [h("li", { class: "muted" }, o.empty)]),
+    );
+  const add = () => {
+    const v = input.value.trim();
+    if (!v) return input.focus();
+    if (items.includes(v)) return (input.value = ""), void toast(`${o.label} already has ${v}.`, { kind: "info", timeout: 3000 });
+    run(() => o.add(v), `add ${v}`).then(() => ((input.value = ""), input.focus()));
+  };
+  input.onkeydown = (e) => e.key === "Enter" && (e.preventDefault(), add());
+  draw();
+  return h("div", { class: "setting-list-editor" }, h("div", { class: "setting-control" }, input, h("button", { type: "button", onclick: add }, "Add")), list);
+}
+
 let keymapEditor = () => {};
 /** Sets what the Keymap button in the dialog opens. */
 export const setKeymapEditor = (open: () => void) => (keymapEditor = open);
 let openFile: (path: string) => unknown = () => {};
 /** Sets how the dialog opens settings.json in the editor. */
 export const setFileOpener = (open: (path: string) => unknown) => (openFile = open);
+/** Opens a file in the editor, such as a tool's configuration from its settings section. */
+export const openPath = (path: string) => openFile(path);
 
 /** Opens settings.json in the editor, writing it first when there's none yet. */
 export async function openSettingsFile() {
@@ -322,13 +405,29 @@ export function openSettings(query = "") {
     ? h("div", { class: "settings-banner", role: "alert" }, icon("warning"), h("span", {}, `${blocked}. Changes here apply, but aren't saved until you fix the file.`), h("button", { type: "button", onclick: () => (dialog.close(), openSettingsFile()) }, "Open settings.json"))
     : null;
 
-  type Row = { f: Field; row: HTMLElement; section: HTMLElement; text: string; sync(): void };
+  type Row = { shown: () => boolean; row: HTMLElement; section: HTMLElement; text: string; sync(): void };
   const rows: Row[] = [];
   const sections = new Map<string, HTMLElement>();
-  const current = (key: string) => (settings as Record<string, unknown>)[key];
+  /** The group's section, made the first time; a project group's heading says so and has its share box. */
+  const sectionOf = (group: string, project?: string) => {
+    if (sections.has(group)) return sections.get(group)!;
+    const heading = h("h3", {}, group);
+    const section = body.appendChild(h("section", { class: "settings-group" }, heading));
+    if (project) {
+      const share = h("input", { type: "checkbox", id: `share-${project}`, checked: projectScope(project) === "shared" });
+      share.onchange = () => setProjectScope(project, share.checked ? "shared" : "local").catch((e) => ((share.checked = !share.checked), showError("Can't move the setting", e)));
+      heading.append(
+        h("span", { class: "settings-project-tag", title: "These settings apply to the open project" }, "This project"),
+        h("label", { class: "settings-share", title: "Keep these settings in tusk.json, so your team gets them when you commit it" }, share, " Share in tusk.json"),
+      );
+    }
+    sections.set(group, section);
+    return section;
+  };
+  const current = (f: Field) => (f.project ? projectSettingsOf(f.project)[f.key] : (settings as Record<string, unknown>)[f.key]);
+  const change = (f: Field, value: unknown) => (f.project ? setProjectSetting(f.project, f.key, value).then(refresh) : (set(f.key, value), refresh()));
   fields.forEach((f, n) => {
-    if (!sections.has(f.group)) sections.set(f.group, body.appendChild(h("section", { class: "settings-group" }, h("h3", {}, f.group))));
-    const section = sections.get(f.group)!;
+    const section = sectionOf(f.group, f.project);
     const id = `setting-${n}`;
     const error = h("small", { class: "setting-error", role: "alert" });
     let input: HTMLInputElement | HTMLSelectElement;
@@ -341,9 +440,9 @@ export function openSettings(query = "") {
         parent.append(new Option(text, value));
       }
     } else input = h("input", { id, type: f.type === "path" ? "text" : f.type, ...(f.type === "number" ? { min: String(f.min), max: String(f.max) } : {}), ...(f.type === "text" || f.type === "path" ? { placeholder: f.placeholder ?? "", spellcheck: false } : {}) });
-    const fallback = allDefaults()[f.key];
+    const fallback = f.project ? projectGroups.get(f.project)!.defaults[f.key] : allDefaults()[f.key];
     const reset = h("button", { type: "button", class: "icon-button setting-reset", title: `Reset to the default (${valueText(fallback) || "empty"})`, ariaLabel: `Reset ${f.label} to the default` }, icon("discard"));
-    reset.onclick = () => (set(f.key, fallback), refresh(), input.focus(), void check());
+    reset.onclick = () => (change(f, fallback), input.focus(), void check());
     const label = h("label", { htmlFor: id }, f.label);
     const row = h("div", { class: `setting setting-${f.type}` });
     const note = h("small", { class: "setting-note", ariaLive: "polite" });
@@ -382,9 +481,9 @@ export function openSettings(query = "") {
     else row.append(label, h("span", { class: "setting-control" }, input, ...extra, reset));
     if (f.help) row.append(h("small", {}, f.help));
     row.append(note, error);
-    const invalidNote = () => (invalid.has(f.key) ? `The value in settings.json ${invalid.get(f.key)}, so the default is used.` : "");
+    const invalidNote = () => (!f.project && invalid.has(f.key) ? `The value in settings.json ${invalid.get(f.key)}, so the default is used.` : "");
     const sync = () => {
-      const v = current(f.key);
+      const v = current(f);
       if (input instanceof HTMLInputElement && f.type === "checkbox") input.checked = v as boolean;
       else if (document.activeElement !== input || f.type === "select") input.value = String(v);
       reset.style.visibility = v === fallback ? "hidden" : "";
@@ -400,21 +499,34 @@ export function openSettings(query = "") {
           return;
         }
         el.ariaInvalid = null;
-        return set(f.key, n), refresh();
+        return change(f, n);
       }
-      set(f.key, f.type === "checkbox" ? el.checked : f.type === "path" ? el.value.trim() : el.value);
-      refresh();
+      change(f, f.type === "checkbox" ? el.checked : f.type === "path" ? el.value.trim() : el.value);
       void check();
     };
     section.append(row);
-    rows.push({ f, row, section, text: [f.group, f.label, f.help, f.key].join(" ").toLowerCase(), sync });
+    const shown = () => (!f.project || projectOpen()) && (f.shown?.() ?? true);
+    rows.push({ shown, row, section, text: [f.group, f.label, f.help, f.key].join(" ").toLowerCase(), sync });
   });
+  for (const s of customSections) {
+    const section = sectionOf(s.group);
+    const row = h("div", { class: "setting setting-custom", ariaBusy: "true" }, h("p", { class: "muted" }, "Loading…"));
+    Promise.resolve()
+      .then(() => s.render())
+      .then(
+        (el) => row.replaceChildren(el),
+        (e) => row.replaceChildren(h("p", { class: "setting-error", role: "alert" }, `Can't show these settings: ${errorText(e)}`)),
+      )
+      .finally(() => (row.ariaBusy = "false"));
+    section.append(row);
+    rows.push({ shown: () => s.shown?.() ?? true, row, section, text: [s.group, s.keywords].join(" ").toLowerCase(), sync() {} });
+  }
 
   /** Shows the settings that apply and match the search, and each one's value and reset button. */
   const refresh = () => {
     const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     for (const r of rows) {
-      r.row.hidden = !(r.f.shown?.() ?? true) || !words.every((w) => r.text.includes(w));
+      r.row.hidden = !r.shown() || !words.every((w) => r.text.includes(w));
       r.sync();
     }
     for (const section of sections.values()) section.hidden = rows.every((r) => r.section !== section || r.row.hidden);
@@ -426,10 +538,10 @@ export function openSettings(query = "") {
   const button = (text: string, run: () => unknown) => h("button", { type: "button", onclick: () => (dialog.close(), run()) }, text);
   const resetAll = h("button", { type: "button" }, "Reset All…");
   resetAll.onclick = async () => {
-    const changed = fields.filter((f) => current(f.key) !== allDefaults()[f.key]);
+    const changed = fields.filter((f) => !f.project && current(f) !== allDefaults()[f.key]);
     if (!changed.length) return toast("Every setting already has its default value.", { kind: "info", timeout: 4000 });
     dialog.close();
-    if (!(await confirm(`Reset ${changed.length} ${changed.length === 1 ? "setting" : "settings"} to the defaults? Your keymap stays as it is.`, "Reset All"))) return openSettings(search.value);
+    if (!(await confirm(`Reset ${changed.length} ${changed.length === 1 ? "setting" : "settings"} to the defaults? Your keymap and project settings stay as they are.`, "Reset All"))) return openSettings(search.value);
     for (const f of changed) {
       (settings as Record<string, unknown>)[f.key] = allDefaults()[f.key];
       invalid.delete(f.key);

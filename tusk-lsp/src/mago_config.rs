@@ -42,7 +42,7 @@ struct Analyzer {
     check_property_initialization: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 #[serde(untagged)]
 enum Ignore {
     Code(String),
@@ -201,6 +201,79 @@ impl MagoConfig {
     }
 }
 
+/// The analyzer's switches that `mago.toml` can set, as its keys name them.
+const ANALYZER_SWITCHES: [&str; 8] = [
+    "find-unused-expressions",
+    "find-unused-parameters",
+    "check-missing-override",
+    "check-missing-type-hints",
+    "check-throws",
+    "allow-possibly-undefined-array-keys",
+    "strict-list-index-checks",
+    "check-property-initialization",
+];
+
+/// What the editor's PHP Analysis settings show for a `mago.toml`'s text: the PHP version it sets and the one
+/// `composer.json` gives, the analyzer's switches (each with its value in the file, if any, and its default), its
+/// excludes and ignored codes, the linter's excludes, and every linter rule that applies to the configured PHP
+/// version and integrations, with Mago's own name, description, and category, whether it's on, and its level.
+pub fn describe(text: &str, root: &Path) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+    let file: File = toml::from_str(text).map_err(|e| format!("mago.toml: {}", e.message()))?;
+    let composer = crate::server::composer_php_version(root);
+    let version = file.php_version.as_deref().and_then(crate::server::parse_php_version).or(composer).unwrap_or(PHPVersion::PHP84);
+    let defaults = crate::analysis::settings(version);
+    let a = &file.analyzer;
+    let values = [
+        (a.find_unused_expressions, defaults.find_unused_expressions),
+        (a.find_unused_parameters, defaults.find_unused_parameters),
+        (a.check_missing_override, defaults.check_missing_override),
+        (a.check_missing_type_hints, defaults.check_missing_type_hints),
+        (a.check_throws, defaults.check_throws),
+        (a.allow_possibly_undefined_array_keys, defaults.allow_possibly_undefined_array_keys),
+        (a.strict_list_index_checks, defaults.strict_list_index_checks),
+        (a.check_property_initialization, defaults.check_property_initialization),
+    ];
+    let analyzer: Vec<_> = ANALYZER_SWITCHES.iter().zip(values).map(|(key, (value, default))| json!({ "key": key, "value": value, "default": default })).collect();
+    let mut integrations = IntegrationSet::empty();
+    for i in &file.linter.integrations {
+        integrations.insert(*i);
+    }
+    let settings = mago_linter::settings::Settings { php_version: version, integrations, rules: file.linter.rules, glob: Default::default() };
+    let configured = mago_linter::rule::filter_rules_settings(&settings.rules, version, integrations);
+    let registry = mago_linter::registry::RuleRegistry::build(&settings, None, true);
+    let mut rules: Vec<_> = registry
+        .rules()
+        .iter()
+        .filter_map(|rule| {
+            let meta = rule.meta();
+            let current = configured.get(meta.code)?;
+            let level = |l: String| l.to_lowercase();
+            Some(json!({
+                "code": meta.code,
+                "name": meta.name,
+                "description": meta.description.trim(),
+                "category": meta.category.as_str(),
+                "enabled": current.get("enabled").and_then(|e| e.as_bool()).unwrap_or(rule.default_enabled()),
+                "level": current.get("level").and_then(|l| l.as_str()).map(|l| level(l.to_string())).unwrap_or_else(|| level(rule.default_level().to_string())),
+                "defaultEnabled": rule.default_enabled(),
+                "defaultLevel": level(rule.default_level().to_string()),
+            }))
+        })
+        .collect();
+    rules.sort_by(|a, b| a["code"].as_str().cmp(&b["code"].as_str()));
+    Ok(json!({
+        "phpVersion": file.php_version,
+        "composerPhpVersion": composer.map(|v| format!("{}.{}", v.major(), v.minor())),
+        "analyzer": analyzer,
+        "analyzerExcludes": file.analyzer.excludes,
+        "ignore": file.analyzer.ignore,
+        "linterExcludes": file.linter.excludes,
+        "integrations": file.linter.integrations.iter().map(|i| i.to_string().to_lowercase()).collect::<Vec<_>>(),
+        "rules": rules,
+    }))
+}
+
 /// `[formatter]`: a `preset` (Mago's default when missing) with the other options over it, and `excludes`. An
 /// option the formatter doesn't know makes the settings an error, as Mago's command line refuses them.
 fn formatter(mut table: toml::Table) -> (Result<mago_formatter::settings::FormatSettings, String>, GlobSet) {
@@ -251,6 +324,25 @@ mod tests {
         assert!(config.reports_analysis(Path::new("app/a.php"), Some("possibly-null-argument")));
         assert!(!config.analyzer_settings(PHPVersion::PHP84).find_unused_expressions);
         assert!(MagoConfig::parse("[linter\n", Path::new("/p")).is_err());
+    }
+
+    #[test]
+    fn describes_rules_and_switches_for_the_settings_page() {
+        let d = describe(BUNDLED, Path::new("/nonexistent")).unwrap();
+        let rules = d["rules"].as_array().unwrap();
+        let rule = |code: &str| rules.iter().find(|r| r["code"] == code).cloned();
+        let strict = rule("strict-types").unwrap();
+        assert_eq!((strict["enabled"].as_bool(), strict["defaultEnabled"].as_bool()), (Some(false), Some(true)));
+        assert!(!strict["description"].as_str().unwrap().is_empty());
+        assert_eq!(rule("no-empty").unwrap()["level"], "warning");
+        // Laravel's rules apply, Symfony's don't.
+        assert!(rules.iter().any(|r| r["code"].as_str().unwrap().contains("eloquent") || r["code"] == "middleware-in-routes"));
+        assert!(d["analyzer"].as_array().unwrap().iter().any(|a| a["key"] == "check-throws" && a["value"].is_null()));
+        let d = describe("php-version = \"8.2.0\"\n[analyzer]\ncheck-throws = true\nignore = [\"mixed-assignment\"]\n", Path::new("/p")).unwrap();
+        assert_eq!(d["phpVersion"], "8.2.0");
+        assert!(d["analyzer"].as_array().unwrap().iter().any(|a| a["key"] == "check-throws" && a["value"] == true));
+        assert_eq!(d["ignore"], serde_json::json!(["mixed-assignment"]));
+        assert!(describe("[linter\n", Path::new("/p")).is_err());
     }
 
     #[test]

@@ -109,7 +109,9 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
 const toMarker = (d: L.Diagnostic, owner: string): monaco.editor.IMarkerData => ({
   ...toRange(d.range),
   message: typeof d.message === "string" ? d.message : d.message.value,
-  ...(owner === "lsp:typos"
+  ...(owner === "lsp:typos" && spelling.severity !== "typo"
+    ? { severity: spelling.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning }
+    : owner === "lsp:typos"
     ? // Monaco draws a hint with the deprecated tag without a squiggle; the typo decorations below draw spelling's own.
       { severity: monaco.MarkerSeverity.Hint, tags: [monaco.MarkerTag.Deprecated] }
     : {
@@ -130,7 +132,7 @@ monaco.editor.onDidChangeMarkers((uris) => {
   for (const uri of uris) {
     const model = monaco.editor.getModel(uri);
     const old = typoDecorations.get(uri.toString()) ?? [];
-    const typos = model ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
+    const typos = model && spelling.severity === "typo" ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
     if (!model || (!old.length && !typos.length)) continue;
     typoDecorations.set(uri.toString(), model.deltaDecorations(old, typos.map((range) => ({ range, options: { description: "typo", inlineClassName: "typo" } }))));
   }
@@ -390,6 +392,7 @@ type Server = {
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
   willRename(files: L.FileRename[]): Promise<L.WorkspaceEdit | null>;
   executeCommand(command: string, args: unknown[]): Promise<any>;
+  notify(method: string, params: unknown): void;
   /** Runs a code action or command: its edit (resolved first if the server resolves them), then its command. */
   codeAction(action: L.CodeAction | L.Command): Promise<void>;
   filesChanged(changes: L.FileEvent[]): void;
@@ -611,6 +614,7 @@ async function startServer(
       if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
     },
     executeCommand: (command, args) => request("workspace/executeCommand", { command, arguments: args }),
+    notify: (method, params) => void ready.then(() => notify(method, params)),
     codeAction: runCodeAction,
     async willRename(files) {
       if (!c.workspace?.fileOperations?.willRename) return null;
@@ -787,7 +791,8 @@ async function startServer(
             context: { diagnostics: overlapping, only: context.only ? [context.only] : undefined },
           }, token);
           return {
-            actions: (res ?? []).map((a) => {
+            // typos-lsp's own "Ignore in the project" actions: spelling.ts offers the dictionaries instead.
+            actions: (res ?? []).filter((a) => (typeof a.command === "string" ? a.command : a.command?.command) !== "ignore-in-project").map((a) => {
               // A bare Command has no kind. The hover's Quick Fix link lists only `quickfix` actions, so a command
               // answering problems here counts as one.
               const action = typeof a.command === "string" ? { title: a.title, kind: overlapping.length ? "quickfix" : undefined, diagnostics: overlapping } : (a as L.CodeAction);
@@ -900,7 +905,8 @@ async function startServer(
   }
 }
 
-const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
+/** Every language the spell checker can check. */
+export const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
 /** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
 const tailwindSettings = {
@@ -1094,23 +1100,22 @@ export async function startLsp(root: string, h: Host) {
   // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, in about a
   // second, so nothing is kept between starts.
   // `.env` files too, for the server's quick fix that turns their variables into Vite ones.
-  const tusk = startServer("tusk", root, ["php", "blade", "dotenv"], {
+  tuskInit = {
     // The project's folders to skip (indexexclude.ts), on top of the server's defaults.
     exclude: excluded.list,
     // Laravel's root aliases (`use DB;`).
     stubs: aliasDir ? [aliasDir.dir] : [],
     // Without a project mago.toml, defaults tuned for Laravel (src-tauri/resources/mago.toml).
     ...(!hasMagoToml && { magoConfig: (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir, magoExcludes(excluded.list))) }),
-  });
+  };
+  const tusk = startServer("tusk", root, ["php", "blade", "dotenv"], tuskSettings(), {}, (method, params) => tuskNotifications[method]?.(params));
   bladeReady = true;
   monaco.editor.getModels().forEach(checkBlade);
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue", "svelte", "astro"], {}, tailwindSettings)
     : null;
-  // Spelling in comments, strings, and names. Words the project uses on purpose go in _typos.toml.
-  const typos = settings.spellCheck
-    ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
-    : null;
+  // Spelling in comments, strings, and names, set up by spelling.ts.
+  const typos = startSpelling(root);
   startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
   for (const s of await Promise.allSettled([tusk, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
@@ -1141,6 +1146,27 @@ async function suggestExclusions(root: string) {
     kind: "info",
     action: { label: "Review", run: () => manageExclusions(root, found) },
   });
+}
+
+/**
+ * The text of a new mago.toml for the project: the editor's defaults (src-tauri/resources/mago.toml) with its PHP
+ * version and top-level folders, as the settings the project used until then.
+ */
+export async function newMagoConfigText(root: string) {
+  const [bundled, composer, top] = await Promise.all([
+    toolPath("mago.toml").then((path) => invoke<string>("read_file", { path })),
+    invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "{}"),
+    invoke<{ name: string; is_dir: boolean }[]>("read_dir", { path: root }).catch(() => []),
+  ]);
+  const text = magoConfigText(bundled, composer, [], [], top);
+  const header = "# Mago's settings for this project. Tusk made this file from its defaults for Laravel;\n# Settings > PHP Analysis edits it, and keeps your comments.\n";
+  return header + text.replace(/^# Default Mago configuration.*\n# A project's mago.toml replaces this file completely.\n/m, "");
+}
+
+/** Makes the servers and Blade checks use the project's new mago.toml instead of the editor's copy. */
+export function useProjectMagoConfig() {
+  magoConfigPath = undefined;
+  configureTusk({ magoConfig: undefined });
 }
 
 /** The Mago settings the servers use, or undefined when the project has its own mago.toml. */
@@ -1242,6 +1268,76 @@ export async function updateReferences(renames: { from: string; to: string }[]):
     if (edit) await applyWorkspaceEdit(edit);
   }
   return failure;
+}
+
+/**
+ * How spelling.ts sets up the spell checker: the languages it checks, how its problems show ("typo" is a green
+ * wavy underline of its own), and the user dictionary's file, which typos-lsp reads on top of the project's
+ * `_typos.toml`.
+ */
+export const spelling = {
+  languages: SPELLING_LANGUAGES,
+  severity: "typo" as "typo" | "warning" | "error",
+  userDictionary: async (): Promise<string | undefined> => undefined,
+};
+
+async function startSpelling(root: string) {
+  if (!settings.spellCheck || !spelling.languages.length) return null;
+  const config = await spelling.userDictionary().catch((e) => void host.status(`Spelling runs without your dictionary: ${e}`));
+  return startServer("typos", root, spelling.languages, { diagnosticSeverity: "Info", ...(config && { config }) });
+}
+
+/** The open project's folder, or "" before one opens. */
+export const spellingRoot = () => projectRoot;
+
+/** The spell checker, when it runs. */
+export const spellingServer = () => servers.find((s) => s.name === "typos");
+
+/** Starts the spell checker again, alone, such as after a word leaves a dictionary: typos-lsp reads its files as it starts. */
+export async function restartSpelling() {
+  const start = starts;
+  const old = spellingServer();
+  if (old) (servers.splice(servers.indexOf(old), 1), old.stop());
+  if (!projectRoot) return;
+  const s = await startSpelling(projectRoot);
+  if (s && start !== starts) return s.stop();
+  if (s) servers.push(s);
+}
+
+/** Shows the spell checker's problems again, as the severity setting says. */
+export function redrawSpelling() {
+  lastDiagnostics.forEach(({ model, owner, list }) => owner === "lsp:typos" && !model.isDisposed() && setMarkers(model, owner, list));
+}
+
+/** The options startLsp gives Tusk's server; tuskOptions adds the other modules'. */
+let tuskInit: Record<string, unknown> = {};
+
+/**
+ * Options other modules add to Tusk's server, by name, such as `phpstan` (phpstan.ts). The server reads them as it
+ * starts, and configureTusk sends them again after a change, so they apply without a restart.
+ */
+export const tuskOptions: Record<string, () => unknown> = {};
+/** Handlers for Tusk's server's own notifications, such as `tusk/phpstan`. */
+export const tuskNotifications: Record<string, (params: any) => void> = {};
+
+/** The editor's options with the other modules' over them; lists, such as `stubs`, add up. */
+function tuskSettings() {
+  const all: Record<string, unknown> = { ...tuskInit };
+  for (const [k, f] of Object.entries(tuskOptions)) {
+    const v = f();
+    all[k] = Array.isArray(all[k]) && Array.isArray(v) ? [...all[k], ...v] : v;
+  }
+  return all;
+}
+
+/**
+ * Sends Tusk's server its options again (`workspace/didChangeConfiguration`), with `change` applied to the
+ * editor's own, such as no `magoConfig` once the project has a mago.toml. The server applies PHPStan's at once and
+ * reindexes when the others changed.
+ */
+export function configureTusk(change: Record<string, unknown> = {}) {
+  tuskInit = { ...tuskInit, ...change };
+  servers.find((s) => s.name === "tusk")?.notify("workspace/didChangeConfiguration", { settings: tuskSettings() });
 }
 
 /** Sends a request to Tusk's PHP server, or returns null when it isn't running. */

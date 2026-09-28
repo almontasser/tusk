@@ -8,7 +8,7 @@ import { formatType, inlineProblem, matchesFilter, messageParts, realProblems, r
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
-import { settings, onSettings } from "./settings";
+import { openSettings, settings, onSettings } from "./settings";
 import { listNav } from "./listnav";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView, showPanelView } from "./terminal";
@@ -29,6 +29,8 @@ const toProblem = (m: monaco.editor.IMarker): Problem => ({ range: m, message: m
 let host: Host;
 /** Problems in files that aren't open, by path, from the last scan or from a file's markers when it closed. */
 const scanned = new Map<string, Problem[]>();
+/** PHPStan's problems from the last Run PHPStan on Project, by path, shown for files that aren't open. */
+const phpstanFound = new Map<string, Problem[]>();
 /** The project the scan is for, and a number that tells a newer scan from an older one. */
 let scan = { root: "", run: 0, running: false, progress: "", error: "" };
 
@@ -96,7 +98,31 @@ currentFile.onclick = () => {
   } catch {}
   render();
 };
-toolbar.append(rescan, errorToggle.button, warningToggle.button, currentFile, filter, summary);
+/** PHPStan's state, from Tusk's server (phpstan.ts): a button that says what it's doing and offers its actions. */
+const phpstan = document.createElement("button");
+phpstan.className = "problems-phpstan";
+phpstan.hidden = true;
+phpstan.onclick = (e) => {
+  const r = phpstan.getBoundingClientRect();
+  e.stopPropagation();
+  showMenu(r.left, r.bottom, [
+    { label: "Run PHPStan on Project", run: () => runPhpStan() },
+    { label: "PHPStan Settings…", run: () => openSettings("phpstan") },
+  ]);
+};
+const PHPSTAN_LABELS = { off: "PHPStan: off", missing: "PHPStan: not installed", idle: "PHPStan", running: "PHPStan: running…", failed: "PHPStan: failed" } as const;
+
+/** Shows PHPStan's state in the toolbar: hidden when the project doesn't have it and nobody turned it on. */
+export function setPhpStanState(state: keyof typeof PHPSTAN_LABELS, message: string) {
+  phpstan.hidden = state === "missing";
+  const icon = { off: "circle-slash", missing: "circle-slash", idle: "check", running: "loading codicon-modifier-spin", failed: "warning icon-warning" }[state];
+  phpstan.innerHTML = `<span class="codicon codicon-${icon}"></span>`;
+  phpstan.append(PHPSTAN_LABELS[state]);
+  phpstan.title = message || "PHPStan checks files as they open and each time they're saved";
+  phpstan.ariaLabel = `${PHPSTAN_LABELS[state]}${message ? `. ${message}` : ""}`;
+}
+
+toolbar.append(rescan, errorToggle.button, warningToggle.button, currentFile, filter, summary, phpstan);
 const list = document.createElement("ul");
 list.className = "problems-tree";
 list.role = "tree";
@@ -124,7 +150,8 @@ const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path)
 function allProblems(): Map<string, Problem[]> {
   const root = host.root();
   const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || path.endsWith(".blade.php") || diagnosed.has(path));
-  const all = new Map([...scanned].filter(([path]) => !live(path)));
+  const all = new Map([...scanned].filter(([path]) => !live(path)).map(([path, list]) => [path, [...list]]));
+  for (const [path, list] of phpstanFound) if (!live(path)) (all.get(path) ?? all.set(path, []).get(path)!).push(...list);
   for (const m of monaco.editor.getModelMarkers({})) {
     const path = m.resource.fsPath;
     if (m.resource.scheme !== "file" || !path.startsWith(`${root}/`) || !isShown(m.severity) || !live(path)) continue;
@@ -307,6 +334,7 @@ export function showProblems() {
 /** Forgets the last project's scan, when another project opens. */
 export function forgetProblems() {
   scanned.clear();
+  phpstanFound.clear();
   scan = { root: "", run: scan.run + 1, running: false, progress: "", error: "" };
   render();
 }
@@ -315,6 +343,7 @@ export function forgetProblems() {
 export function forgetPath(path: string) {
   const inside = (p: string) => p === path || p.startsWith(`${path}/`);
   [...scanned.keys()].filter(inside).forEach((p) => scanned.delete(p));
+  [...phpstanFound.keys()].filter(inside).forEach((p) => phpstanFound.delete(p));
   renderSoon();
 }
 
@@ -364,6 +393,46 @@ export async function scanProject(_useCache = false) {
     render();
   }
 }
+
+/**
+ * Runs PHPStan on the whole project through Tusk's server, and lists what it finds with the other problems. Open
+ * files get PHPStan's problems from the server too. The Problems panel's summary shows the run; it can take
+ * minutes, up to the timeout in Settings > PHPStan.
+ */
+export async function runPhpStan() {
+  const root = host.root();
+  if (!root || phpstanRunning) return;
+  showProblems();
+  phpstanRunning = true;
+  scan.progress = "PHPStan is checking the project…";
+  render();
+  try {
+    const results = (await tuskRequest<Record<string, Diagnostic[]>>("tusk/phpstanProject", {})) ?? {};
+    if (root !== host.root()) return;
+    phpstanFound.clear();
+    for (const [rel, list] of Object.entries(results))
+      phpstanFound.set(
+        `${root}/${rel}`,
+        list.map((d) => ({
+          range: { startLineNumber: d.range.start.line + 1, startColumn: d.range.start.character + 1, endLineNumber: d.range.end.line + 1, endColumn: d.range.end.character + 1 },
+          message: typeof d.message === "string" ? d.message : d.message.value,
+          severity: monaco.MarkerSeverity.Error,
+          source: "phpstan",
+          code: d.code?.toString(),
+        })),
+      );
+    const count = [...phpstanFound.values()].flat().length;
+    host.status(`PHPStan found ${count} ${count === 1 ? "problem" : "problems"} in ${phpstanFound.size} ${phpstanFound.size === 1 ? "file" : "files"}`);
+  } catch (e) {
+    // The server's message says why, such as a timeout, and the toolbar's PHPStan button keeps it.
+    showError("PHPStan couldn't check the project", (e as { message?: string })?.message ?? e, { label: "Settings", run: () => openSettings("phpstan") });
+  } finally {
+    phpstanRunning = false;
+    scan.progress = scan.running ? scan.progress : "";
+    render();
+  }
+}
+let phpstanRunning = false;
 
 /**
  * With the Inline Problems setting on, shows the worst problem on the cursor line after the line's end, as Error Lens

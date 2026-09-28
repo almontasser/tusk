@@ -133,6 +133,28 @@
       "description": "The PHP program this project uses instead of the one in Settings > Tools, such as /opt/homebrew/opt/php@8.3/bin/php.",
       "examples": ["/opt/homebrew/opt/php@8.3/bin/php"]
     },
+    "phpAnalysis": {
+      "type": "object",
+      "description": "Tusk's PHP index for this project. Mago's own settings live in mago.toml.",
+      "properties": {
+        "loadAllLibraries": { "type": "boolean", "default": false, "description": "Read every file in vendor in full, not only the code the project reaches. Uses several times the memory." },
+        "stubs": { "type": "string", "default": "", "description": "Comma-separated folders or PHP files, relative to the project, that the index reads as library code, such as stubs for a PHP extension." }
+      },
+      "additionalProperties": false
+    },
+    "phpstan": {
+      "type": "object",
+      "description": "How Tusk runs PHPStan in this project. Settings > PHPStan sets these; a missing key uses its default.",
+      "properties": {
+        "enabled": { "enum": ["auto", "on", "off"], "default": "auto", "description": "`auto` runs PHPStan when the project has vendor/bin/phpstan; `on` also says so when it doesn't; `off` never runs it." },
+        "config": { "type": "string", "default": "", "description": "The configuration file, relative to the project. Empty lets PHPStan find phpstan.neon, phpstan.neon.dist, or phpstan.dist.neon." },
+        "level": { "type": "string", "pattern": "^([0-9]|10|max)?$", "default": "", "description": "The rule level, `0` to `10` or `max`, over the configuration file's. Empty uses the file's." },
+        "memoryLimit": { "type": "string", "default": "2G", "description": "PHP's memory limit for PHPStan, such as `2G`, or `-1` for none." },
+        "timeout": { "type": "integer", "minimum": 10, "maximum": 3600, "default": 180, "description": "Seconds a run may take before it's stopped." },
+        "run": { "enum": ["save", "demand"], "default": "save", "description": "`save` checks files as they open and each time they're saved; `demand` only when you run PHPStan on the project." }
+      },
+      "additionalProperties": false
+    },
     "databaseSsh": {
       "type": "object",
       "description": "The SSH tunnel each database connection goes through, by connection name. The empty name is .env's connection.",
