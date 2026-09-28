@@ -16,6 +16,7 @@ import {
   prepare,
   type Prepared,
   redact,
+  redactBody,
   redactHeader,
   resolve,
   type ResponseHead,
@@ -25,6 +26,7 @@ import type { Query } from "./cachegrind";
 import type { Output, Test } from "./httpscript.worker";
 import ScriptWorker from "./httpscript.worker?worker";
 import { pick } from "./palette";
+import { registerSettings } from "./settings";
 
 export type Host = {
   root(): string;
@@ -97,7 +99,28 @@ export type Exchange = {
   queries?: Query[];
   /** Set on exchanges read from the history file whose request had secrets, which the file doesn't keep. */
   secrets?: boolean;
+  /**
+   * Set when the history keeps a different body from the one you saw (see `httpHistoryBodies`): "redacted" with
+   * secret fields hidden, or "dropped" with none. While the session lasts, `bodyPath` is the body as it came, in
+   * the session folder, and `savedBody` is the history's copy ("" for none).
+   */
+  bodyHidden?: "redacted" | "dropped";
+  savedBody?: string;
 };
+
+export const httpSettings = registerSettings("HTTP Client", { httpHistoryBodies: "redact" }, [
+  {
+    key: "httpHistoryBodies",
+    label: "Response bodies in the history",
+    type: "select",
+    options: [
+      ["redact", "Keep, with secrets hidden"],
+      ["keep", "Keep as received"],
+      ["drop", "Don't keep"],
+    ],
+    help: "What the history file keeps of each response's body. Hiding secrets masks the values of JSON and form fields named like token, password, secret, or API key. You see the body as it came until you close the project.",
+  },
+]);
 
 export let host: Host;
 export const setHost = (h: Host) => (host = h);
@@ -313,8 +336,8 @@ export async function spawnStreaming(cwd: string, command: string[], onOutput: (
   return { exited, kill: () => invoke("pty_kill", { id }).catch(() => {}) };
 }
 
-/** Lets the caller stop a request that's being sent. */
-export type Cancel = { current?: () => void; cancelled?: boolean };
+/** Lets the caller stop a request that's being sent, and see a gRPC server stream's messages as they arrive. */
+export type Cancel = { current?: () => void; cancelled?: boolean; onMessage?: (json: string) => void };
 
 type Transfer = Pick<Exchange, "heads" | "info" | "bodyPath" | "contentType" | "error">;
 
@@ -377,6 +400,8 @@ type GrpcResponse = { status: number; status_text: string; headers: [string, str
 async function transmitGrpc(p: Prepared, bodyPath: string, id: string, cancel: Cancel): Promise<Transfer> {
   const t: Transfer = { heads: [], bodyPath, contentType: "application/json" };
   cancel.current = () => ((cancel.cancelled = true), invoke("grpc_cancel", { id }));
+  const onMessage = cancel.onMessage;
+  const unlisten = onMessage ? await listen<string>(`grpc:${id}`, (e) => onMessage(e.payload)) : undefined;
   try {
     const r = await invoke<GrpcResponse>("grpc_call", { id, root: host.root(), target: p.url, body: p.body ?? "", metadata: p.headers, timeout: p.timeout, connectTimeout: p.connectTimeout ?? 10 });
     await invoke("write_file", { path: bodyPath, contents: r.body });
@@ -388,6 +413,8 @@ async function transmitGrpc(p: Prepared, bodyPath: string, id: string, cancel: C
     } as CurlInfo;
   } catch (e) {
     t.error = String(e);
+  } finally {
+    unlisten?.();
   }
   cancel.current = undefined;
   return t;
@@ -498,7 +525,7 @@ export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchan
     host.status("The history doesn't keep secrets, so the request was prepared again from its file, with its scripts.");
     return send(old.path, named ?? request, { cancel });
   }
-  const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false, queries: undefined };
+  const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false, queries: undefined, bodyHidden: undefined, savedBody: undefined };
   const cookies = await cookieJar(old.env);
   const log = await logSizes();
   Object.assign(exchange, await transmit(old.request, parentOf(old.path), await cacheDir("http-history"), exchange.id, cookies, cancel));
@@ -579,19 +606,64 @@ let historyRoot = "";
 export async function history(): Promise<Exchange[]> {
   if (historyCache && historyRoot === host.root()) return historyCache;
   historyRoot = host.root();
-  historyCache = await invoke<string>("read_file", { path: `${await cacheDir("http-history")}/index.json` })
+  // The last session's bodies as they came, kept aside from the history's copies; nothing points at them now.
+  // ponytail: a second window on the same project loses its session's bodies too; key the folder by window if that matters.
+  await invoke("remove_path", { path: await cacheDir("http-session") }).catch(() => {});
+  const file = `${await cacheDir("http-history")}/index.json`;
+  historyCache = await invoke<string>("read_file", { path: file })
     .then((t) => JSON.parse(t) as Exchange[])
-    .catch(() => []);
+    .catch(async (e) => {
+      // No file yet is an empty history. A file that can't be read is set aside, so the next send doesn't overwrite it.
+      if (!(await invoke<boolean>("path_exists", { path: file }).catch(() => false))) return [];
+      await invoke("rename_path", { from: file, to: `${file}.bad` }).catch(() => {});
+      host.status(`Couldn't read the HTTP history, so it starts over. The old file is ${file}.bad: ${e}`);
+      return [];
+    });
   return historyCache;
 }
 
+/** Text bodies up to this size get their secrets hidden; larger ones are kept as they came. */
+const MAX_REDACTED = 5 * 1024 * 1024;
+
+/**
+ * Applies `httpHistoryBodies` to an exchange's body before the history keeps it: moves the body as it came to the
+ * session folder, for this session's views, and leaves a copy with secrets hidden, or nothing, in the history.
+ */
+async function protectBody(x: Exchange) {
+  const mode = httpSettings.httpHistoryBodies;
+  if (mode === "keep" || !x.bodyPath || x.bodyHidden || !(await invoke<boolean>("path_exists", { path: x.bodyPath }).catch(() => false))) return;
+  let redacted: string | undefined;
+  if (mode === "redact") {
+    if (!isText(x.contentType) || (x.info?.size_download ?? 0) > MAX_REDACTED) return;
+    const text = await invoke<string>("read_file", { path: x.bodyPath }).catch(() => undefined);
+    if (text === undefined) return;
+    redacted = redactBody(text, x.contentType);
+    if (redacted === text) return;
+  }
+  try {
+    const dir = await cacheDir("http-session");
+    await invoke("create_dir", { path: dir });
+    const raw = `${dir}/${x.bodyPath.split("/").pop()}`;
+    await invoke("rename_path", { from: x.bodyPath, to: raw });
+    if (redacted !== undefined) await invoke("write_file", { path: x.bodyPath, contents: redacted });
+    x.savedBody = redacted === undefined ? "" : x.bodyPath;
+    x.bodyPath = raw;
+    x.bodyHidden = redacted === undefined ? "dropped" : "redacted";
+  } catch (e) {
+    host.status(`Couldn't keep the response body's secrets out of the history: ${e}`);
+  }
+}
+
 async function remember(exchange: Exchange) {
-  const all = [exchange, ...(await history())];
+  // The history loads first: its first load clears the last session's folder, which protectBody writes to.
+  const earlier = await history();
+  await protectBody(exchange);
+  const all = [exchange, ...earlier];
   // Pinned exchanges don't count toward the limit.
   let unpinned = 0;
   const keep = all.filter((x) => x.pinned || ++unpinned <= HISTORY_SIZE);
   await saveHistory(keep);
-  for (const old of all.filter((x) => !keep.includes(x))) await invoke("remove_path", { path: old.bodyPath }).catch(() => {});
+  for (const old of all.filter((x) => !keep.includes(x))) for (const path of [old.bodyPath, old.savedBody]) if (path) await invoke("remove_path", { path }).catch(() => {});
 }
 
 /** An exchange for the history file, with its request's secrets and its cookies' values hidden. */
@@ -600,7 +672,7 @@ function withoutSecrets(x: Exchange): Exchange {
   const heads = x.heads.map((head) => ({ ...head, headers: head.headers.map(([k, v]): [string, string] => [k, k.toLowerCase() === "set-cookie" ? redactHeader(k, v) : v]) }));
   // The final URL can carry the same secrets as the request's, such as an API key in the query.
   const info = x.info && ({ ...Object.fromEntries(INFO_FIELDS.map((k) => [k, x.info![k]])), url_effective: redact({ ...x.request, url: x.info.url_effective ?? "" }).url } as CurlInfo);
-  return { ...x, request, heads, info, secrets: x.secrets || JSON.stringify(request) !== JSON.stringify(x.request) || undefined };
+  return { ...x, request, heads, info, bodyPath: x.savedBody ?? x.bodyPath, savedBody: undefined, secrets: x.secrets || JSON.stringify(request) !== JSON.stringify(x.request) || undefined };
 }
 
 async function saveHistory(list: Exchange[]) {
@@ -621,7 +693,7 @@ export async function setPinned(id: string, pinned: boolean) {
 }
 
 export async function clearHistory() {
-  await invoke("remove_path", { path: await cacheDir("http-history") }).catch(() => {});
+  for (const kind of ["http-history", "http-session"]) await invoke("remove_path", { path: await cacheDir(kind) }).catch(() => {});
   historyCache = [];
   changed();
 }

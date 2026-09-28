@@ -54,9 +54,9 @@ file to change when you add it.
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they edit it and type theirs. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
-| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
+| HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
-| Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
+| Split editors | Up to four panes. The dividers between editor panes resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A file reference that wraps onto the next line isn't a link. |
@@ -386,6 +386,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Debugger: pause at the first line of each script | Off |
 | Debugger: show variable values in the editor while paused | On |
 | Debugger: IDE key (`XDEBUG_SESSION`) and the host PHP in Docker connects to | `1`, `host.docker.internal` |
+| HTTP Client: response bodies in the history | Keep, with secrets hidden |
 
 ### Vim emulation
 
@@ -1042,6 +1043,11 @@ at the top.
   to keep its tab open. Hover over it and click ▶ to send it.
 - A dot after a request means its tab has unsaved changes, and a dot after a
   file means its editor tab does.
+- The tree and the history work from the keyboard: ↓ in a filter box moves to
+  its list, ↑ and ↓ move, → and ← open and close a file, typing a name jumps to
+  it, and Enter opens a request (a history entry's response). On a request, ⌘⏎
+  sends it, F2 renames it, and ⌘⌫ deletes it. When the files can't be listed,
+  the tree says why, with **Retry**.
 - Right-click a request to send, open in the editor, rename, duplicate, delete,
   or stress test it. Right-click a file to add a request to it, run all of its
   requests, sync it with the Laravel routes, or save it.
@@ -1090,8 +1096,12 @@ at the top.
   again, pin it (pinned requests stay at the top and don't count toward the
   100), compare it with the response on screen, or copy it as cURL or Laravel
   code. The history file doesn't keep secrets: tokens, passwords, cookies, and
-  API keys in requests, and cookie values in responses. Response bodies are kept
-  as they came. **Send Again** sends a request from this session exactly as it
+  API keys in requests, and cookie values in responses. In response bodies, it
+  hides the values of JSON and form fields named like `token`, `password`,
+  `secret`, or `api_key`; you see the body as it came until you close the
+  project, and a notice says when a body from the history had secrets hidden.
+  **Settings › HTTP Client › Response bodies in the history** can keep bodies
+  as they came, or not keep them at all. **Send Again** sends a request from this session exactly as it
   went, and prepares one from an earlier session again from its file, running
   its scripts.
 - **Go to Request** (⌥⇧⌘O) finds any request in the project by name. Search
@@ -1114,7 +1124,11 @@ quit.
 The top bar holds the method, the URL, **Send** (⌘⏎ anywhere in the tab), a
 menu, and the environment. Under the URL, you see it with its variables
 replaced, and the names nothing defines. While a request runs, **Send** becomes
-**Cancel** and the time it's taken counts up.
+**Cancel** and the time it's taken counts up. **Send Again** from the history
+shows the same progress and **Cancel**. When a request can't be sent, or its
+body can't be read, the response area says why, with **Retry**. Drag the line
+between the request and the response to resize them, or focus it and use ←
+and →; double-click it to reset it.
 
 When a request uses a variable nothing defines, **Send** asks for its value
 first. **Send** uses the values you type, and can save them to the environment
@@ -1378,7 +1392,8 @@ The message types come from the server's reflection service. When the server
 doesn't have one, the project's `.proto` files are compiled instead, with
 imports found from the file's folder and each folder above it. There's nothing
 to install: no `protoc`. The response shows as JSON, with every field, and a
-server streaming method's messages as an array. For a client streaming method,
+server streaming method's messages as an array. While a server stream runs,
+each message shows as it arrives, with a count, and **Cancel** stops the call. For a client streaming method,
 write the messages one after another. The status shows as the HTTP status gRPC
 maps to, such as `404 NOT_FOUND`, with `grpc-status` and `grpc-message` among
 the headers, so scripts and the runner treat a failed call as a failed request.

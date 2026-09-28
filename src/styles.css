@@ -1183,10 +1183,8 @@ button.link:hover { text-decoration: underline; }
 .http-bar > span, .http-bar > label { align-self: center; white-space: nowrap; }
 
 .http-split { flex: 1; display: flex; min-height: 0; }
-.http-req { flex: 0 0 46%; min-width: 240px; display: flex; flex-direction: column; min-height: 0; }
+.http-req { flex: 0 0 auto; width: 46%; min-width: 240px; display: flex; flex-direction: column; min-height: 0; }
 .http-res { flex: 1; min-width: 200px; display: flex; flex-direction: column; min-height: 0; padding-left: 10px; }
-.http-divider { width: 5px; margin-left: 5px; cursor: col-resize; flex-shrink: 0; border-right: 1px solid var(--border); }
-.http-divider:hover { border-right-color: var(--accent); }
 .http-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
 .http-tabs button { padding: 4px 9px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .http-tabs button:hover { color: var(--text); }

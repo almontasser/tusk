@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 use tonic::codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder};
 use tonic::codegen::http::uri::PathAndQuery;
@@ -217,8 +217,9 @@ fn pairs(metadata: &MetadataMap) -> Vec<(String, String)> {
 
 /// Makes the call. The body is JSON messages one after another: one for a unary or server streaming
 /// method, any number for a client or bidirectional streaming one. A streaming method's response is
-/// an array of every message the server sent.
-async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, String)>, timeout: f64, connect_timeout: f64) -> Result<GrpcResponse, String> {
+/// an array of every message the server sent. `on_reply` gets each reply's JSON as it arrives, so a
+/// server stream shows before the call ends.
+async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, String)>, timeout: f64, connect_timeout: f64, on_reply: &(dyn Fn(String) + Send + Sync)) -> Result<GrpcResponse, String> {
     let (tls, address, service, method) = parse_target(target)?;
     let started = Instant::now();
     let channel = connect(tls, address, connect_timeout).await?;
@@ -243,13 +244,18 @@ async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, Stri
     grpc.ready().await.map_err(|e| source(&e))?;
     let mut headers = Vec::new();
     let mut replies = Vec::new();
+    let options = SerializeOptions::new().skip_default_fields(false);
+    let json = |m: &DynamicMessage| m.serialize_with_options(serde_json::value::Serializer, &options).unwrap_or_default();
     let status = match grpc.streaming(request, path, DynamicCodec(method.output())).await {
         Ok(response) => {
             headers = pairs(response.metadata());
             let mut stream = response.into_inner();
             let status = loop {
                 match stream.message().await {
-                    Ok(Some(reply)) => replies.push(reply),
+                    Ok(Some(reply)) => {
+                        on_reply(serde_json::to_string(&json(&reply)).unwrap_or_default());
+                        replies.push(reply)
+                    }
                     Ok(None) => break Status::ok(""),
                     Err(status) => break status,
                 }
@@ -261,8 +267,6 @@ async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, Stri
         }
         Err(status) => status,
     };
-    let options = SerializeOptions::new().skip_default_fields(false);
-    let json = |m: &DynamicMessage| m.serialize_with_options(serde_json::value::Serializer, &options).unwrap_or_default();
     let value = if status.code() != Code::Ok && replies.is_empty() {
         serde_json::json!({ "code": http_status(status.code()).1, "message": status.message() })
     } else if method.is_server_streaming() {
@@ -281,12 +285,17 @@ async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, Stri
 
 /// Calls `target` (see `parse_target`) with `body` and `metadata`. `grpc_cancel` with the same `id`
 /// stops it. `root` is the project, whose .proto files are the schema when the server has no reflection.
+/// Each reply is also emitted as `grpc:<id>`, with its JSON, as it arrives.
 #[tauri::command]
-pub async fn grpc_call(state: State<'_, GrpcState>, id: String, root: String, target: String, body: String, metadata: Vec<(String, String)>, timeout: f64, connect_timeout: f64) -> Result<GrpcResponse, String> {
+pub async fn grpc_call(app: AppHandle, state: State<'_, GrpcState>, id: String, root: String, target: String, body: String, metadata: Vec<(String, String)>, timeout: f64, connect_timeout: f64) -> Result<GrpcResponse, String> {
     let (cancel, cancelled) = oneshot::channel();
     state.0.lock().unwrap().insert(id.clone(), cancel);
+    let event = format!("grpc:{id}");
+    let on_reply = |json: String| {
+        let _ = app.emit(&event, json);
+    };
     let result = tokio::select! {
-        r = call(Path::new(&root), &target, &body, metadata, timeout, connect_timeout) => r,
+        r = call(Path::new(&root), &target, &body, metadata, timeout, connect_timeout, &on_reply) => r,
         _ = cancelled => Err("Cancelled".into()),
     };
     state.0.lock().unwrap().remove(&id);
@@ -421,29 +430,31 @@ service Echo {
         let (address, root) = serve(true).await;
         let target = format!("{address}/test.Echo/Say");
         let body = r#"{"name": "Ada", "at": "2026-09-26T00:00:00Z"}"#;
-        let r = call(&root, &target, body, vec![("X-Token".into(), "t1".into())], 10.0, 5.0).await.unwrap();
+        let r = call(&root, &target, body, vec![("X-Token".into(), "t1".into())], 10.0, 5.0, &|_| {}).await.unwrap();
         assert_eq!((r.status, r.status_text.as_str()), (200, "OK"));
         let json: serde_json::Value = serde_json::from_str(&r.body).unwrap();
         assert_eq!(json["name"], "hi Ada t1");
         assert_eq!(json["times"], 0, "default fields are shown");
-        let r = call(&root, &format!("{address}/test.Echo/Repeat"), r#"{"name": "Bo", "times": 3}"#, vec![], 10.0, 5.0).await.unwrap();
+        let streamed = std::sync::Mutex::new(Vec::new());
+        let r = call(&root, &format!("{address}/test.Echo/Repeat"), r#"{"name": "Bo", "times": 3}"#, vec![], 10.0, 5.0, &|json| streamed.lock().unwrap().push(json)).await.unwrap();
+        assert_eq!(streamed.lock().unwrap().len(), 3, "each reply streams as it arrives");
         assert_eq!(serde_json::from_str::<serde_json::Value>(&r.body).unwrap().as_array().unwrap().len(), 3);
-        let r = call(&root, &target, r#"{"name": "fail"}"#, vec![], 10.0, 5.0).await.unwrap();
+        let r = call(&root, &target, r#"{"name": "fail"}"#, vec![], 10.0, 5.0, &|_| {}).await.unwrap();
         assert_eq!((r.status, r.status_text.as_str()), (404, "NOT_FOUND"));
         assert!(r.headers.contains(&("grpc-message".into(), "nobody".into())));
-        assert!(call(&root, &format!("{address}/test.Echo/Nope"), "", vec![], 10.0, 5.0).await.unwrap_err().contains("has no method Nope"));
-        assert!(call(&root, &target, r#"{"nam": 1}"#, vec![], 10.0, 5.0).await.unwrap_err().contains("doesn't match test.Hello"));
+        assert!(call(&root, &format!("{address}/test.Echo/Nope"), "", vec![], 10.0, 5.0, &|_| {}).await.unwrap_err().contains("has no method Nope"));
+        assert!(call(&root, &target, r#"{"nam": 1}"#, vec![], 10.0, 5.0, &|_| {}).await.unwrap_err().contains("doesn't match test.Hello"));
         assert_eq!(grpc_methods(root.display().to_string(), address).await.unwrap(), ["test.Echo/Repeat", "test.Echo/Say"]);
     }
 
     #[tokio::test]
     async fn calls_with_project_protos() {
         let (address, root) = serve(false).await;
-        let r = call(&root, &format!("{address}/test.Echo/Say"), r#"{"name": "Cy"}"#, vec![], 10.0, 5.0).await.unwrap();
+        let r = call(&root, &format!("{address}/test.Echo/Say"), r#"{"name": "Cy"}"#, vec![], 10.0, 5.0, &|_| {}).await.unwrap();
         assert!(r.body.contains("hi Cy"), "{}", r.body);
         assert_eq!(grpc_methods(root.display().to_string(), address.clone()).await.unwrap(), ["test.Echo/Repeat", "test.Echo/Say"]);
         let empty = std::env::temp_dir().join(format!("tusk-grpc-{}-empty", std::process::id()));
         std::fs::create_dir_all(&empty).unwrap();
-        assert!(call(&empty, &format!("{address}/test.Echo/Say"), "{}", vec![], 10.0, 5.0).await.unwrap_err().contains("No .proto file in the project declares test.Echo"));
+        assert!(call(&empty, &format!("{address}/test.Echo/Say"), "{}", vec![], 10.0, 5.0, &|_| {}).await.unwrap_err().contains("No .proto file in the project declares test.Echo"));
     }
 }

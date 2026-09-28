@@ -1474,7 +1474,8 @@ function redactJson(v: unknown, secret = false): unknown {
   return secret && v !== null ? mask(String(v)) : v;
 }
 
-function redactBody(body: string, type: string): string {
+/** A JSON or form body with the values of secret fields hidden; other bodies as they are. */
+export function redactBody(body: string, type: string): string {
   const t = body.trim();
   if (/^[{[]/.test(t)) {
     try {

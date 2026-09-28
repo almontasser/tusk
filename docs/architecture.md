@@ -1498,6 +1498,10 @@ files work in PhpStorm and VS Code's REST Client.
   protobuf compiler, with the file's folder and each one above it up to the
   root as import paths. The status maps to an HTTP status as Google's APIs do,
   so `response.status` checks and the runner's failure rule work unchanged.
+  `grpc_call` also emits `grpc:<id>` with each reply's JSON as it arrives;
+  `transmitGrpc` listens when the `Cancel` it gets has `onMessage`, which
+  `sendIn` in `httpview.ts` sets to show a server stream's messages and count
+  while the call runs. The final body replaces them.
   `grpc_cancel` ends a call through a oneshot channel. `grpc_methods` lists
   methods for completion; `httpclient.ts` caches non-empty lists per address.
 - `prepare` carries `proxy`, `clientCert`, `clientKey` (absolute), `http`, and
@@ -1518,8 +1522,24 @@ files work in PhpStorm and VS Code's REST Client.
   `index.json` through `withoutSecrets`, which also hides `Set-Cookie` values,
   and marks an entry that lost secrets with `secrets`. `resend` prepares such
   an entry again from its file through `send`. The Request tab and copying go
-  through `redact` unless you choose **Show secrets**. Response bodies aren't
-  changed.
+  through `redact` unless you choose **Show secrets**.
+- Response bodies follow the `httpHistoryBodies` setting (`registerSettings`
+  in `httpclient.ts`). Before `remember` adds an exchange, `protectBody` moves
+  the body as it came to `<cache>/http-session/<project>/` and, for "redact",
+  writes `redactBody`'s copy (secret JSON and form fields hidden, the same
+  names as requests) where the history keeps it; for "drop", nothing. The
+  exchange in memory points at the session copy and remembers the history's
+  in `savedBody`, and `withoutSecrets` writes `savedBody` as `bodyPath`, with
+  `bodyHidden` saying what happened, so the body view shows a notice. The
+  session folder is removed the first time a project's history loads, and by
+  **Clear History**. A history file that can't be parsed is renamed
+  `index.json.bad` rather than overwritten by the next send.
+- `sendIn` in `httpview.ts` runs every send from the HTTP tab, including
+  **Send Again**: the tab's spinner, clock, and **Cancel**, the stream view,
+  and, on failure, the error with **Retry** (`errorPane`). Reading a body
+  shows "Loading the body…" and an error with **Retry**. The tree and history
+  use `listNav`; the request and response split uses `splitter` (saved as
+  `httpRequest`).
 - `src/httpimport.ts` has no editor imports, so Node tests it.
   `importCollection` detects a Postman collection (v2), an Insomnia export (v4),
   or an OpenAPI 3 or Swagger 2 document, and returns one file's text and
@@ -5204,3 +5224,14 @@ output, whose format changes with Collision's versions, every test run also
 writes a TeamCity log, which PHPUnit 9 through 11 and Pest 1 through 3 write
 the same way, with full values and stacks. The JUnit report stays the source
 of the results and times, since the log has no data sets' names in Pest.
+
+### 2026-09-28: Hide secrets in history response bodies by default
+
+The history file already hid request secrets, but a login response's token
+stayed in its body file. Hiding by field name, as `redact` does for requests,
+catches the common cases (`access_token`, `password`) without guessing at
+values. You still need to see and copy the real body during the session, so
+the history gets the redacted copy and the session keeps the original in a
+folder that's removed next time, rather than redacting what you're looking
+at. A setting keeps bodies as they came or drops them, since some teams want
+full replays and others want nothing on disk.

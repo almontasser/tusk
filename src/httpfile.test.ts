@@ -10,6 +10,7 @@ import {
   graphqlParts,
   hasSecrets,
   redact,
+  redactBody,
   redactHeader,
   jsonQuery,
   laravelException,
@@ -473,4 +474,14 @@ test("routeSync adds routes, updates bodies, and finds requests with no route", 
   assert.deepEqual(routeSync(applyLineEdits(text, syncEdits(text, changes.filter((c) => c.kind !== "remove"))), routes, rules).filter((c) => c.kind !== "remove"), []);
   // An empty file gets every route.
   assert.equal(applyLineEdits("", syncEdits("", routeSync("", routes.slice(1), rules))), "### otp.verify\nPOST {{host}}/api/otp/verify\nAccept: application/json\nContent-Type: application/json\n\n{\n  \"code\": \"\"\n}\n");
+});
+
+test("redactBody hides secret fields in response bodies", () => {
+  const body = JSON.stringify({ user: { name: "Ada", password: "hunter2" }, access_token: "abcdefghijklmnop", tokens: 3 }, null, 2);
+  const out = JSON.parse(redactBody(body, "application/json"));
+  assert.equal(out.user.name, "Ada");
+  assert.equal(out.user.password, "••••");
+  assert.equal(out.access_token, "••••mnop");
+  assert.equal(redactBody("token=abc&name=x", "application/x-www-form-urlencoded"), "token=••••&name=x");
+  assert.equal(redactBody("<p>token</p>", "text/html"), "<p>token</p>");
 });
