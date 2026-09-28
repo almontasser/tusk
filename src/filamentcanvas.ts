@@ -3,7 +3,7 @@
 // them from the palette. The canvas only reads; the designer (filamentdesigner.ts) makes the changes.
 import { h, icon } from "./dom";
 import { type Catalog, classInfo, humanize, isA, labelFromName, look } from "./filamentcatalog";
-import { type Comp, type Entry, type Path, resolve, type Root, rootSlot, samePath, type Slot, shortClass, slotKey, within } from "./filamentschema";
+import { childSlot, type Comp, type Entry, type Path, resolve, type Root, rootSlot, samePath, type Slot, shortClass, slotKey, within } from "./filamentschema";
 import { COLOR_SWATCH, heroicon } from "./filamentpickers";
 import { findCall, nodeValue, type PNode, textValue } from "./phpcode";
 
@@ -360,7 +360,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
     if (className) grid.classList.add(className);
     return grid;
   };
-  const schemaSlot = () => (c.slots.find((s) => s.via === "schema") ? "schema" : c.slots.find((s) => s.via === "components") ? "components" : "schema");
+  const schemaSlot = () => childSlot(c)?.via ?? "schema";
   switch (name) {
     case "Section": {
       const heading = c.name ?? text(c, "heading");
@@ -419,7 +419,7 @@ function renderComp(ctx: CanvasCtx, c: Comp, path: Path, kind: string): HTMLElem
       const body = current?.comp
         ? (() => {
             const childPath = [...path, { slot: slotKey(slot!), index: current.index }];
-            const tabSlot = current.comp.slots.find((s) => s.via === "schema" || s.via === "components");
+            const tabSlot = childSlot(current.comp);
             return tabSlot
               ? renderSlot(ctx, tabSlot, { owner: childPath, slot: slotKey(tabSlot) }, childPath, current.comp, columnsOf(current.comp, 1))
               : h("button", { type: "button", class: "fd-empty-slot", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: childPath, slot: "schema" }, ev.currentTarget as HTMLElement)) }, icon("add"), "Add components");

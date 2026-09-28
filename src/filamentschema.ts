@@ -62,6 +62,12 @@ export function readComp(node: PNode): Comp | null {
   return { node, cls: base.class, make: base, calls, name: first && !first.name ? (textValue(first.value)?.text ?? null) : null, slots };
 }
 
+/**
+ * The slot that holds a layout's children: `schema([...])`, `components([...])`, or `make([...])`, as
+ * `Group::make([...])` and `Grid::make([...])` take them.
+ */
+export const childSlot = (comp: Comp): Slot | undefined => ["schema", "components", "childComponents", "make"].map((via) => comp.slots.find((s) => s.via === via)).find(Boolean);
+
 /** A component's last call named `name`. */
 export const callOf = (comp: Comp, name: string) => findCall(comp.node, name);
 

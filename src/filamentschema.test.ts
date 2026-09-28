@@ -49,3 +49,13 @@ test("paths resolve, walk visits depth first, and within spots descendants", () 
   assert.equal(within([{ slot: "components", index: 0 }, { slot: "schema", index: 1 }], [{ slot: "components", index: 0 }]), true);
   assert.equal(within([{ slot: "components", index: 1 }], [{ slot: "components", index: 0 }]), false);
 });
+
+test("childSlot finds a layout's children in make(), as Group::make([...]) takes them", async () => {
+  const { childSlot } = await import("./filamentschema.ts");
+  const form = readRoot(fixture("GroupForm").outline.classes[0], "form", "configure")!;
+  const group = form.slots.get("components")!.entries[0].comp!;
+  assert.equal(childSlot(group)?.via, "make");
+  const section = childSlot(group)!.entries[0].comp!;
+  assert.equal(childSlot(section)?.via, "schema");
+  assert.equal(childSlot(section)!.entries[0].comp!.name, "sender");
+});

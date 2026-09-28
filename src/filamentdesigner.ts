@@ -13,7 +13,7 @@ import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemCol
 import { type CallChange, renderCodeInspector, renderInspector } from "./filamentinspector";
 import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsTab } from "./filamentpages";
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
-import { type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotNamed, walk } from "./filamentschema";
+import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
 import { classNamed, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
@@ -854,7 +854,7 @@ export class Designer {
       const found = resolve(ref.root, this.selection);
       if (!found) return end();
       const comp = found.entry.comp;
-      const inner = comp?.slots.find((s) => s.via === "schema" || s.via === "components");
+      const inner = comp && childSlot(comp);
       if (inner && classInfo(this.cat!, cls)?.kind !== "layout" && ref.kind !== "table") return { to: { owner: this.selection, slot: inner.via }, index: inner.entries.length };
       const { parent, last } = parentOf(this.selection);
       return { to: { owner: parent.length ? parent : null, slot: last.slot }, index: last.index + 1 };
