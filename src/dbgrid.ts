@@ -165,7 +165,7 @@ export function dataGrid(o: GridOptions): Grid {
       addEventListener("pointermove", move);
       addEventListener("pointerup", up);
     };
-    grip.ondblclick = (ev) => (ev.stopPropagation(), (widths[c] = `${contentWidth(c, 5000) + 3}ch`), applyWidths());
+    grip.ondblclick = (ev) => (ev.stopPropagation(), (widths[c] = `${Math.min(120, contentWidth(c, 5000)) + 3}ch`), applyWidths());
     head.append(th);
     return th;
   });
