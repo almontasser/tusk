@@ -34,7 +34,7 @@ import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, 
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
-import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu } from "./files";
+import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
@@ -48,6 +48,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
+import { EDITOR_COMMANDS } from "./editorcommands";
 import { attachSuperMethods, goToSuperMethod, initSuperMethods } from "./supermethod";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
@@ -110,6 +111,11 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
   if (at && !ed.getSelection()?.containsPosition(at)) ed.setPosition(at);
   const action = (label: string) =>
     actions.filter((a) => a.label === label && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+  const actionsFor = (labels: string[]) => labels.flatMap((l): MenuItem[] => (l === "-" ? ["-"] : action(l)));
+  const submenu = (label: string, labels: string[]): MenuItem[] => {
+    const items = actionsFor(labels);
+    return items.some((i) => i !== "-") ? [{ label, items }] : [];
+  };
   const monacoItem = (label: string, keys: string, id: string) => ({ label, keys, run: () => (ed.focus(), ed.trigger("contextmenu", id, null)) });
   const php = model.getLanguageId() === "php";
   const file = model.uri.scheme === "file";
@@ -120,23 +126,29 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
     ...(runHere ? [monacoItem(runHere, "⌘⏎", runId)] : []),
     ...action("Show Context Actions"),
     "-",
-    ...action("Go to Declaration"),
-    ...action("Go to Implementation"),
-    ...action("Find Usages"),
-    "-",
-    ...action("Refactor This…"),
-    ...action("Rename"),
-    ...(php ? action("Generate…") : []),
-    ...action("Reformat Code"),
-    ...(php ? action("Optimize Imports") : []),
-    "-",
-    ...(file && isTestFile(model.uri.fsPath) ? [...action("Run Test at Cursor"), ...action("Debug Test at Cursor")] : []),
-    "-",
     monacoItem("Cut", "⌘X", "editor.action.clipboardCutAction"),
     monacoItem("Copy", "⌘C", "editor.action.clipboardCopyAction"),
+    ...(file ? action("Copy Reference") : []),
     monacoItem("Paste", "⌘V", "editor.action.clipboardPasteAction"),
     "-",
-    ...(file ? [...action("Annotate with Git Blame"), ...action("Show File History"), ...action("Compare with Clipboard")] : []),
+    ...action("Find Usages"),
+    ...submenu("Go To", ["Go to Declaration", "Go to Implementation", "Go to Type Declaration", ...(php ? ["Go to Super Method"] : []), "-", "Go to Line/Column…", "Go to Matching Bracket"]),
+    ...submenu("Refactor", php
+      ? ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]
+      : ["Rename"]),
+    ...(php ? action("Generate…") : []),
+    "-",
+    ...action("Comment with Line Comment"),
+    ...action("Comment with Block Comment"),
+    ...action("Reformat Code"),
+    ...(php ? action("Optimize Imports") : []),
+    ...submenu("Folding", ["Expand", "Collapse", "Expand Recursively", "Collapse Recursively", "-", "Expand All", "Collapse All", "Collapse Doc Comments", "-", "Fold Selection"]),
+    "-",
+    ...(file && isTestFile(model.uri.fsPath) ? [...action("Run Test at Cursor"), ...action("Debug Test at Cursor")] : []),
+    ...(model.getLanguageId() === "markdown" ? action("Markdown Preview") : []),
+    "-",
+    ...(file ? submenu("Git", ["Annotate with Git Blame", "Show File History", "-", "Next Change", "Previous Change", "-", "Copy Remote URL"]) : []),
+    ...(file ? [...action("Show Local History"), ...action("Compare with Clipboard")] : []),
     "-",
     ...action("Find Action"),
   ]);
@@ -1491,6 +1503,8 @@ const actions: Action[] = [
   editorAction("Duplicate Line", "Meta+D", "editor.action.copyLinesDownAction"),
   editorAction("Delete Line", "Meta+Backspace", "editor.action.deleteLines"),
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
+  ...EDITOR_COMMANDS.map(([label, id, keys]) => editorAction(label, keys, id)),
+  { label: "Toggle Case", keys: "Meta+Shift+U", run: toggleCase, editorOnly: true },
   { label: "Save All", keys: "Meta+S", run: () => saveFocusedRequest() || saveAll() },
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
   { label: "Check for Updates…", run: () => invoke("check_update") },
@@ -1618,6 +1632,16 @@ const actions: Action[] = [
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
+/** ⌘⇧U: upper case, or lower case when the selection (or the word at the caret) is already upper case. */
+function toggleCase() {
+  const model = editor.getModel();
+  const selection = editor.getSelection();
+  if (!model || !selection) return;
+  const text = selection.isEmpty() ? (model.getWordAtPosition(selection.getPosition())?.word ?? "") : model.getValueInRange(selection);
+  editor.focus();
+  editor.trigger("keyboard", text === text.toUpperCase() ? "editor.action.transformToLowercase" : "editor.action.transformToUppercase", {});
+}
+
 /** Picks the Compose service that runs tests, Artisan, and Tinker, or this Mac. Sail projects use Sail. */
 async function chooseDockerService() {
   forgetComposeServices(root);
@@ -1631,7 +1655,10 @@ async function chooseDockerService() {
 }
 
 // Keys shown as the Mac draws them.
-const KEY_SYMBOLS: Record<string, string> = { Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space" };
+const KEY_SYMBOLS: Record<string, string> = {
+  Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
+  Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
+};
 const symbolsFor = (keys?: string) =>
   keys
     ?.replace(/^(\w+) \1$/, "$1+$1+")

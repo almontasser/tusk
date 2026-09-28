@@ -20,8 +20,8 @@ type Host = {
   status(text: string): void;
 };
 
-/** A menu row, with its shortcut as symbols (such as ⌥⏎) in `keys`, or a separator. */
-export type MenuItem = { label: string; keys?: string; run(): unknown } | "-";
+/** A menu row, with its shortcut as symbols (such as ⌥⏎) in `keys`, a submenu, or a separator. */
+export type MenuItem = { label: string; keys?: string; run(): unknown } | { label: string; items: MenuItem[] } | "-";
 
 const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
@@ -135,51 +135,84 @@ export const revealInFinder = (path = selected || host.active()) =>
 
 // ---- Context menu ----
 
+let closeMenu: (() => void) | null = null;
+
+/** Shows a context menu at a point. Submenus open to the side on hover, click, or → and close with ← or Escape. */
 export function showMenu(x: number, y: number, items: MenuItem[]) {
-  $("menu")?.remove();
-  const menu = document.createElement("ul");
-  menu.id = "menu";
-  menu.role = "menu";
-  // Groups can come out empty, so separators appear only between items.
-  const shown = items.filter((item, i) => item !== "-" || (i > 0 && items[i - 1] !== "-" && items.slice(i + 1).some((next) => next !== "-")));
-  for (const item of shown) {
-    const li = document.createElement("li");
-    if (item === "-") li.className = "separator";
-    else {
+  closeMenu?.();
+  type Level = { el: HTMLUListElement; rows: HTMLElement[]; index: number };
+  const levels: Level[] = [];
+  const submenus = new Map<HTMLElement, () => void>();
+  const focus = (level: Level, i: number) => ((level.index = i), level.rows.forEach((r, j) => r.classList.toggle("focused", j === i)));
+  const closeFrom = (depth: number) => levels.splice(depth).forEach((l) => l.el.remove());
+  const open = (list: MenuItem[], x: number, y: number, depth: number, beside?: DOMRect) => {
+    closeFrom(depth);
+    const el = document.createElement("ul");
+    el.className = "context-menu";
+    if (!depth) el.id = "menu";
+    el.role = "menu";
+    const level: Level = { el, rows: [], index: -1 };
+    // Groups can come out empty, so separators appear only between items.
+    const shown = list.filter((item, i) => item !== "-" || (i > 0 && list[i - 1] !== "-" && list.slice(i + 1).some((next) => next !== "-")));
+    for (const item of shown) {
+      const li = document.createElement("li");
+      el.append(li);
+      if (item === "-") {
+        li.className = "separator";
+        continue;
+      }
       li.role = "menuitem";
       li.append(Object.assign(document.createElement("span"), { textContent: item.label }));
-      if (item.keys) li.append(Object.assign(document.createElement("kbd"), { textContent: item.keys }));
-      li.onclick = () => (close(), item.run());
+      const i = level.rows.push(li) - 1;
+      if ("items" in item) {
+        li.setAttribute("aria-haspopup", "menu");
+        li.append(Object.assign(document.createElement("span"), { className: "codicon codicon-chevron-right submenu-arrow" }));
+        const sub = () => {
+          if (levels[depth + 1]?.el.dataset.parent === item.label) return;
+          const r = li.getBoundingClientRect();
+          open(item.items, r.right, r.top - 5, depth + 1, r);
+          levels[depth + 1].el.dataset.parent = item.label;
+        };
+        submenus.set(li, sub);
+        li.onmouseenter = () => (focus(level, i), sub());
+        li.onclick = sub;
+      } else {
+        if (item.keys) li.append(Object.assign(document.createElement("kbd"), { textContent: item.keys }));
+        li.onmouseenter = () => (focus(level, i), closeFrom(depth + 1));
+        li.onclick = () => (close(), item.run());
+      }
     }
-    menu.append(li);
-  }
-  document.body.append(menu);
-  // Keep the menu on screen.
-  menu.style.left = `${Math.min(x, innerWidth - menu.offsetWidth - 4)}px`;
-  menu.style.top = `${Math.min(y, innerHeight - menu.offsetHeight - 4)}px`;
+    el.onmouseleave = () => levels.length === depth + 1 && focus(level, -1);
+    document.body.append(el);
+    levels.push(level);
+    // Keep the menu on screen: a submenu that doesn't fit on the right opens on the left.
+    const left = beside && x + el.offsetWidth > innerWidth - 4 ? beside.left - el.offsetWidth : Math.min(x, innerWidth - el.offsetWidth - 4);
+    el.style.left = `${Math.max(4, left)}px`;
+    el.style.top = `${Math.max(4, Math.min(y, innerHeight - el.offsetHeight - 4))}px`;
+  };
   const close = () => {
-    menu.remove();
+    closeFrom(0);
+    closeMenu = null;
     removeEventListener("mousedown", outside, true);
     removeEventListener("keydown", keys, true);
   };
-  const outside = (e: MouseEvent) => !menu.contains(e.target as Node) && close();
+  const outside = (e: MouseEvent) => !levels.some((l) => l.el.contains(e.target as Node)) && close();
   // The arrow keys move through the items and Enter picks one, before the editor or tree sees the keys.
-  const rows = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  let index = -1;
   const keys = (e: KeyboardEvent) => {
+    const level = levels.at(-1)!;
+    const row = level.rows[level.index];
     const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    if (e.key === "Escape") close();
-    else if (step) index = (index + step + rows.length) % rows.length;
-    else if (e.key === "Enter" && rows[index]) return (e.preventDefault(), e.stopPropagation(), rows[index].click());
+    if (step) focus(level, (level.index + step + level.rows.length) % level.rows.length);
+    else if ((e.key === "ArrowRight" || e.key === "Enter") && row && submenus.has(row)) submenus.get(row)!(), focus(levels.at(-1)!, 0);
+    else if ((e.key === "ArrowLeft" || e.key === "Escape") && levels.length > 1) closeFrom(levels.length - 1);
+    else if (e.key === "Escape") close();
+    else if (e.key === "Enter" && row) row.click();
     else return;
     e.preventDefault();
     e.stopPropagation();
-    rows.forEach((row, i) => row.classList.toggle("focused", i === index));
   };
-  // The pointer moves the keyboard's place too, so only one row is ever highlighted.
-  const focus = (i: number) => ((index = i), rows.forEach((r, j) => r.classList.toggle("focused", j === i)));
-  rows.forEach((row, i) => (row.onmouseenter = () => focus(i)));
-  menu.onmouseleave = () => focus(-1);
+  open(items, x, y, 0);
+  closeMenu = close;
   addEventListener("mousedown", outside, true);
   addEventListener("keydown", keys, true);
 }

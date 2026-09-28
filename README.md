@@ -289,6 +289,26 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘W | Close the tab |
 | ⌃\` | Color theme |
 | ⌃Space | Show completions |
+| ⌘F, ⌘R | Find or replace in the file |
+| ⌘G, ⌘⇧G | Next and previous match |
+| ⌘L | Go to line and column |
+| ⌃M | Go to the matching bracket |
+| ⌘/ | Comment or uncomment lines with line comments |
+| ⌥⌘/ | Comment or uncomment with a block comment |
+| ⌃G | Add the next occurrence of the selection to the selection |
+| ⌃⌘G | Select all occurrences |
+| ⌥⌘↑ and ⌥⌘↓ | Add a caret above or below |
+| ⌥⇧G | Add carets to the ends of the selected lines |
+| ⌃⇧J | Join lines |
+| ⌘⇧U | Toggle case |
+| ⌃⌥I | Auto-indent lines |
+| ⌘= and ⌘- | Expand or collapse the fold at the caret (with ⌥, recursively; with ⇧, all) |
+
+Monaco's other editing commands, such as sorting lines, changing case, and
+folding by level, are in the Edit and Code menus and in Find Action, with
+Monaco's own shortcuts where it has them (such as ⌘K ⌘X to trim trailing
+whitespace). The keymap editor can give them other shortcuts; a two-key chord
+such as ⌘K ⌘X stays Monaco's and can't be changed there.
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
 Folder…** action.
@@ -427,8 +447,11 @@ save every file they change.
 ## Context menus
 
 Right-click the code for the actions at the caret, as in PhpStorm: context
-actions, navigation, refactoring, formatting, running the test (in test files),
-the clipboard, and git. Each shows its shortcut from your keymap. Right-click
+actions, the clipboard and **Copy Reference**, **Find Usages**, the **Go To**,
+**Refactor**, **Folding**, and **Git** submenus, **Generate…**, comments,
+formatting, running the test (in test files), and the Markdown preview (in
+Markdown files). Each shows its shortcut from your keymap. Hover over a
+submenu, or press → on it, to open it. Right-click
 the gutter for breakpoints, bookmarks, the line's change, and blame.
 
 ## Files

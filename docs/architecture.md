@@ -230,6 +230,20 @@ window. An editor-only action, or one with `when`, passes keys on in some cases,
 so the menu would run it anyway. Those items, and double taps such as ⇧⇧, get
 no accelerator (`accelerator()`, tested in `menu.test.ts`).
 
+### Monaco's commands as actions
+
+`src/editorcommands.ts` is a table of Monaco's editing commands: label, Monaco
+action id, default keys, and a menu group. `main.ts` turns each row into an
+editor-only action, and `menu.ts` places each group with `commandsIn(group)`,
+so a command is one row. Keys are PhpStorm's where it has the command, else
+Monaco's. A chord such as `Meta+K Meta+X` is shown but never matches the app's
+key handler, which compares single combinations, so Monaco's own binding runs
+it. Code > Folding follows PhpStorm, which keeps folding in the Code menu.
+
+`showMenu` in `src/files.ts` takes submenus (`{ label, items }`). Each level is
+its own `.context-menu` list; hovering, clicking, or → opens a submenu beside
+its row (on the left when there's no room), and ← or Escape closes it.
+
 ### EditorConfig
 
 `src/editorconfig.ts` parses `.editorconfig` files and turns their section
@@ -4735,3 +4749,12 @@ one per method and ⌘U inside a method body would first need the enclosing
 method from document symbols. The custom request walks the parsed document
 once and reads the rest from the index. `textDocument/declaration` still
 answers ⌘B-style requests for a method's parent declaration.
+
+### 2026-09-28: Monaco's commands from a table
+
+With Monaco's command palette and context menu turned off, its editing commands
+had no menu entries. Rather than an action per command, `EDITOR_COMMANDS` lists
+them with their menu group, and the menu bar and the editor's context menu
+place them by label. The editor's context menu gained submenus (Go To,
+Refactor, Folding, Git) to hold PhpStorm's layout without growing past the
+screen.

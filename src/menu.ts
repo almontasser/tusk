@@ -1,5 +1,6 @@
 // The native menu bar. Its items run the same actions as Find Action, looked up by label.
 import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
+import { commandsIn } from "./editorcommands.ts";
 
 type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean; when?: () => boolean };
 type Native = { native: "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll" | "Services" | "Hide" | "HideOthers" | "ShowAll" | "Quit" | "Minimize" | "Maximize" | "Fullscreen" };
@@ -13,13 +14,22 @@ const LAYOUT: [string, Entry[]][] = [
   ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", "Move File to Trash", "Copy Path", "Reveal in Finder", "Change File Encoding…", "-",
     ["Compare", ["Compare with Clipboard", "Compare with File…"]],
     ["Local History", ["Show Local History", "Local History: Deleted Files…"]]]],
-  ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-", "Find in Files", "Replace in Files", "-",
-    "Duplicate Line", "Delete Line", "Move Line Up", "Move Line Down", "Extend Selection", "Shrink Selection", "-", "Toggle Bookmark", "Show Bookmarks", "Edit Snippets (Live Templates)"]],
+  ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-",
+    ["Find", [...commandsIn("find"), "-", "Add Selection for Next Occurrence", "Select All Occurrences", "Change All Occurrences", "-", "Find in Files", "Replace in Files"]],
+    ["Multiple Carets", ["Add Caret Above", "Add Caret Below", "Add Carets to Line Ends"]], "-",
+    "Extend Selection", "Shrink Selection", "-", "Duplicate Line", "Delete Line", "Join Lines", "Toggle Case",
+    ["Change Case", commandsIn("case")], ["Lines", commandsIn("lines").filter((l) => l !== "Join Lines")], ["Indentation", [...commandsIn("indent").slice(0, 2), "-", ...commandsIn("indent").slice(2)]], "-",
+    "Toggle Bookmark", "Show Bookmarks", "Edit Snippets (Live Templates)"]],
   ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-", native("Fullscreen")]],
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "-",
-    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],
-  ["Code", ["Generate…", "Show Context Actions", "Parameter Info", "Quick Documentation", "-", "Reformat Code", "Optimize Imports", "Fix All Safe Problems in File", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],
+    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-",
+    ...commandsIn("navigate"), "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],
+  ["Code", ["Generate…", "Show Context Actions", "Basic Completion", "Parameter Info", "Quick Documentation", "-",
+    ...commandsIn("comment"), "Reformat Code", "Auto-Indent Lines", "Optimize Imports", "Fix All Safe Problems in File", "-",
+    ["Folding", ["Expand", "Collapse", "Toggle Fold", "Expand Recursively", "Collapse Recursively", "-", "Expand All", "Collapse All", ["Collapse to Level", commandsIn("fold-level")], "-",
+      "Collapse Doc Comments", "Collapse Regions", "Expand Regions", "-", "Fold Selection"]], "-",
+    "Move Line Up", "Move Line Down", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],
   ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]],
   ["Run", ["Run Anything", "Rerun", "-", "Run Test at Cursor", "Debug Test at Cursor", "Run Test at Cursor with Coverage", "Run All Tests", "Run All Tests with Coverage", "-",
     "Start Listening for PHP Debug Connections", "Start Debug Server (php artisan serve with Xdebug)", "Stop Debugging", "Resume Program", "Step Over", "Step Into", "Step Out", "-",
