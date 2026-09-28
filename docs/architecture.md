@@ -3058,22 +3058,60 @@ Rust bridge runs it as the `xdebug` "server", and `lsp_stop` ends it.
 `src/debug.ts` is a small DAP client:
 
 1. `startDebugging` starts the adapter and sends `initialize`, then `launch`
-   with port 9003. The adapter listens for Xdebug connections.
+   with the port, `stopOnEntry`, and `xdebugSettings` (`max_children`,
+   `max_data`, and `max_depth` 1) from the **Debugger** settings group, which
+   `debug.ts` adds with `registerSettings`. The adapter listens for Xdebug
+   connections. When those settings change while nothing is being debugged,
+   the listener restarts with them.
 2. On the adapter's `initialized` event, the client sends every breakpoint
    (`setBreakpoints` per file), no exception filters, and `configurationDone`.
 3. On a `stopped` event, it reads the `stackTrace`, opens the top frame's file
-   at its line, marks the line, and loads the frame's `scopes`. Variables load
-   one level at a time, when you expand them.
+   at its line, marks the line, and loads the frame's `scopes` and each cheap
+   scope's variables at once: the first scope shows open, the names feed the
+   console's completion, and the first scope's values show at the ends of the
+   lines above the paused one (`inlineValues`). Deeper values load one level at
+   a time, when you expand them.
 4. Stepping sends `continue`, `next`, `stepIn`, or `stepOut` for the stopped
    thread. `evaluate` runs in the selected frame.
 
-Debugging starts processes with `XDEBUG_MODE=debug` and `XDEBUG_SESSION=1`, so
-Xdebug connects without a `php.ini` change. `php artisan serve` passes both
-variables to the PHP server it starts.
+Debugging starts processes with `xdebugEnv()`: `XDEBUG_MODE=debug`,
+`XDEBUG_SESSION=<IDE key>`, and `XDEBUG_CONFIG=client_port=<port>` (plus
+`client_host=<container host>` for a container, through `containerXdebugEnv`),
+so Xdebug connects to the port the debugger listens on without a `php.ini`
+change. `XDEBUG_CONFIG` overrides `xdebug.client_port` in `php.ini`. `php
+artisan serve` passes all three variables to the PHP server it starts. Sail's
+`sail debug` sets its own Xdebug configuration from `SAIL_XDEBUG_CONFIG`, so
+there the port comes from `.env`.
+
+Every DAP request fails instead of waiting forever when the bridge can't send
+it (the adapter exited), and `stopDebugging` rejects the requests still
+pending. Failures show where they happen: a `stackTrace` failure replaces the
+call stack with the reason and **Retry**, a `scopes` failure does the same in
+the variables, a `variables` failure shows under the row you expanded, and a
+failed step shows an error and restores the paused state unless the
+connection closed. When `launch` fails with `EADDRINUSE`, `portBusy` names the
+program on the port (`lsof -Fcp`) and offers **Choose Another Port**, which
+saves the setting and listens again; the adapter's own dump of Node's error is
+dropped while starting.
+
+The panel tracks Xdebug connections from the adapter's `thread` events, so its
+state reads Not listening, Listening on port N (with how to trigger a
+connection), Running, or Paused at a file and line.
 
 Breakpoints are model decorations with a glyph in the gutter, so they show in
-every pane and move with the lines as you edit. The line numbers are saved per
-project in `localStorage`.
+every pane and move with the lines as you edit. They're saved in the project
+state (`breakpoints`).
+
+The **Breakpoints** tab (`src/breakpointsview.ts`) is a panel view, not a modal
+dialog as in PhpStorm, so the gutter stays usable and changes there show in it
+at once: `debug.ts` calls `view.refresh()` from `update`, `loadBreakpoints`, the
+exception options, and edits that move a breakpoint. The view doesn't import
+`debug.ts`; it gets an `Api` object of functions, which avoids an import cycle.
+The tree is a flat run of rows with `aria-level`, driven by `listNav`; the
+right side edits the selected item and applies each field on `change`, and it
+isn't redrawn while one of its fields has focus. A line's code comes from its
+model when the file is open, or else from one `read_file` per file each time
+the tab opens.
 
 Each breakpoint has options named as in the Debug Adapter Protocol:
 `condition`, `hitCondition`, and `logMessage`, all optional. The decorations
@@ -3097,7 +3135,7 @@ inside a larger repository; `remoteLineUrl` in `gitparse.ts` turns SSH and
 HTTPS remotes into GitHub and GitLab `blob` links, or Bitbucket `src` links.
 If no remote branch contains HEAD, the status bar says to push first.
 
-Watches are a list of expressions per project in `localStorage`. After a frame
+Watches are a list of expressions in the project state (`debugWatches`). After a frame
 is selected, each one goes to `evaluate` with the `watch` context, and the
 result renders with the same row as a variable, so objects expand.
 
@@ -3106,7 +3144,9 @@ Xdebug exception breakpoint on that class name, whatever the name (its own
 filter list, such as `Notice`, is only what it suggests), and Xdebug also
 matches subclasses. Without chosen classes the filters are `Exception` and
 `Error`, which cover every `Throwable`. Turning it on or off is app-wide; the
-classes and the other options are per project, all in `localStorage`.
+classes and the other options are per project, in the project state
+(`debugExceptions`). The Breakpoints tab edits them; the toolbar's zap button
+turns them on and off and the arrow beside it opens them.
 
 Xdebug pauses at the throw, before PHP searches for a catch, and DBGp has no
 notion of caught, so **Only uncaught** pauses where an uncaught exception
@@ -3134,8 +3174,10 @@ showing the pause when one matches.
 
 Changing a variable sends `setVariable` with the reference of the scope or
 value that holds it. The adapter sets it through Xdebug's `property_set`, which
-evaluates the text as PHP, and replies with the text as typed, so the row
-reloads its parent's variables to show the value as PHP sees it.
+evaluates the text as PHP, and replies with the text as typed. The adapter also
+keeps a value's children as first read, so the row evaluates the variable's
+`evaluateName` to show the value as PHP now sees it. **Copy Value** on an array
+or object evaluates `print_r(<name>, true)`.
 
 Path mappings go in the `launch` request as `pathMappings`, from server paths
 to local ones. The adapter translates breakpoint paths and stack frames, so the
@@ -5058,3 +5100,17 @@ output are found with one regex over each line rather than per-tool parsers,
 since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
 `path(line)`, and a reference becomes a link only when the file exists, which
 keeps false matches, such as version numbers, from turning into links.
+
+### 2026-09-28: Breakpoints in a panel tab, and the debugger's settings in Settings
+
+PhpStorm lists breakpoints in a modal dialog. Here they're a tab in the bottom
+panel, because a modal blocks the gutter, and adding a breakpoint while you
+look at the list is the common case. The exception options moved from a
+palette flow behind a right-click to the same tab, with the zap button's arrow
+as the visible way in. The port, limits, pause at the first line, IDE key, and
+container host are app settings, not project state: they describe this Mac's
+PHP and other listeners, not the project. Inline values scan the lines above
+the paused one for `$names` rather than asking the language server for the
+variables in scope, which keeps them to one pass over at most 50 lines; a name
+from another scope can show a value it doesn't have there, which PhpStorm's
+own heuristic also allows.

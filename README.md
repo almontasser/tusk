@@ -66,7 +66,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Debugger | Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
+| Debugger | With Sail, `sail debug` uses Sail's own Xdebug settings, so a port other than 9003 needs `SAIL_XDEBUG_CONFIG="client_host=host.docker.internal client_port=<port>"` in `.env`. A request to Xdebug that never answers, such as while PHP is stopped in another debugger, leaves the tab running until you stop it. Values in the editor come from the lines' `$names`, so a name from another scope, such as a closure's, can show the outer value. Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Rename, Extract Method, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
@@ -301,7 +301,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌃R | Rerun the last test or command |
 | ⌃⇧D | Debug the test at the cursor |
 | ⌘F8 | Toggle a breakpoint on the current line |
-| ⇧⌘F8 | Edit the breakpoint on the current line: condition, hit count, or log message |
+| ⇧⌘F8 | View breakpoints, with the current line's breakpoint selected to edit its condition, hit count, or log message |
 | F9 | Resume (while debugging) |
 | F8, F7, ⇧F8 | Step over, step into, step out (when not paused, F8 and ⇧F8 go to the next and previous problem across files) |
 | ⌘F2 | Stop debugging |
@@ -346,7 +346,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, and Terminal. A setting that depends on another, such as the AI model,
+AI, Spelling, Terminal, and Debugger. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -378,6 +378,11 @@ shows only when it applies. Changes apply immediately and are saved in
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
+| Debugger: Xdebug port | 9003 |
+| Debugger: items to load per array or object, and the longest string to load | 128, 2048 bytes |
+| Debugger: pause at the first line of each script | Off |
+| Debugger: show variable values in the editor while paused | On |
+| Debugger: IDE key (`XDEBUG_SESSION`) and the host PHP in Docker connects to | `1`, `host.docker.internal` |
 
 ### Vim emulation
 
@@ -1954,15 +1959,50 @@ debugging on for the processes it starts.
      Xdebug on, so every page you open in the browser stops at your breakpoints.
    - For another setup, such as Herd or Valet, run **Start Listening for PHP
      Debug Connections**, then start a request with Xdebug's trigger (the
-     `XDEBUG_SESSION` cookie, which browser extensions set) and
-     `xdebug.mode=debug` in your PHP configuration.
+     `XDEBUG_SESSION` cookie, which browser extensions set, or
+     `XDEBUG_TRIGGER=1` in the URL) and `xdebug.mode=debug` in your PHP
+     configuration.
+
+   The Debug tab says what the debugger is doing: not listening, listening on
+   a port and waiting for PHP (with these ways to connect), running, or paused
+   at a file and line.
 3. When execution stops, the **Debug** tab in the bottom panel shows the call
-   stack and variables. Click a frame to see its variables, expand objects and
-   arrays, and type an expression, such as `$request->all()`, to evaluate it.
-   To change a variable, double-click its value, type a PHP expression, such as
-   `'text'` (with quotes), `42`, or `null`, and press Enter.
+   stack and variables, and the editor shows the values of the variables on
+   the lines above the paused one at the ends of those lines. Click a frame, or
+   use ↑ and ↓ in the call stack, to see its variables. In the variables, ↑ ↓
+   move, → and ← expand and collapse objects and arrays, F2 changes a value,
+   and ⌘C copies it. Right-click a variable for **Copy Value**, **Copy Name**,
+   **Add to Watches**, and **Set Value…**. To change a value, type a PHP
+   expression, such as `'text'` (with quotes), `42`, or `null`, and press
+   Enter.
+   Type an expression, such as `$request->all()`, in the field at the bottom
+   to evaluate it: ↑ and ↓ go through earlier expressions, and typing `$`
+   suggests the names in the frame's scopes (Tab or Enter completes one).
    Use F9 to resume, F8 to step over, F7 to step into, ⇧F8 to step out, and ⌘F2
    to stop.
+
+If another program already listens on the port, such as another editor's
+debugger, the Debug tab names it and offers **Choose Another Port**. The port
+and the other debugger options are in **Settings** under Debugger (the gear in
+the Debug tab). Runs the editor starts use the port you choose; for PHP you
+start yourself, set `xdebug.client_port` to match.
+
+### The Breakpoints tab
+
+Press ⇧⌘F8, click the breakpoint button in the Debug tab, or run **View
+Breakpoints…** to open the **Breakpoints** tab in the bottom panel. It lists
+line breakpoints by file, with each line's code, and the exception
+breakpoints. Changes you make in the gutter show there at once.
+
+- Select a breakpoint to edit it on the right: turn it on or off, and set its
+  condition, hit count, or log message. Each field applies when you press
+  Enter or leave it.
+- Use ↑ ↓ to move, → ← to expand and collapse files, Space to turn the selected
+  breakpoint (or file's breakpoints) on or off, Enter or F4 to go to its line,
+  and Delete to remove it. Select a file to turn all its breakpoints on or off
+  or remove them.
+- **Remove all breakpoints** (in the toolbar) asks first.
+- Select **Pause on exceptions** for the exception options described below.
 
 ### Breakpoint options, watches, and exceptions
 
@@ -1972,7 +2012,9 @@ all breakpoints, annotate the file with Git blame, or copy the line's
 reference (`path:line`) or its link on the remote, such as GitHub, at the
 current commit. **Copy Remote URL** in ⌘⇧A
 copies the link to the selected lines. While execution is paused, **Run to Line** resumes
-and pauses at that line once. Press ⇧⌘F8 to edit the breakpoint at the cursor:
+and pauses at that line once. Run **Edit Breakpoint…** from ⌘⇧A to edit the
+breakpoint at the cursor in the palette, or press ⇧⌘F8 to edit it in the
+Breakpoints tab:
 
 - **Condition:** pause only when a PHP expression is true, such as
   `$user->id === 5`.
@@ -1990,8 +2032,9 @@ execution pauses, expand like variables, and are saved with the project.
 
 To pause wherever an exception is thrown, even if the code catches it, turn
 on **Pause on exceptions** (the lightning icon in the Debug tab). The log
-shows the exception's class and message. To narrow it, right-click the icon,
-or run **Pause on Exceptions Options…** from ⌘⇧A:
+shows the exception's class and message. To narrow it, click the arrow next to
+the icon, or run **Pause on Exceptions Options…** from ⌘⇧A. Both open the
+Breakpoints tab at its exception breakpoints:
 
 - **Classes:** enter them separated by commas, such as
   `App\Exceptions\PaymentFailed`. Their subclasses count too. Leave the field
@@ -2042,7 +2085,9 @@ Xdebug in the container must connect back to your Mac. With Sail, set
 `SAIL_XDEBUG_MODE=develop,debug` in `.env` and rebuild the containers; Sail
 already points Xdebug at `host.docker.internal`. With another setup, the
 container's PHP needs Xdebug installed; **Debug** on a test sets
-`XDEBUG_MODE=debug` and points it at `host.docker.internal`.
+`XDEBUG_MODE=debug` and points it at the Debugger setting **Host that PHP in
+Docker connects to** (`host.docker.internal` by default) and the debugger's
+port.
 
 ## Profiling
 

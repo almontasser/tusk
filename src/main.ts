@@ -9,7 +9,7 @@ import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, st
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
-import { attachDebugger, breakpointMenu, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
+import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, showBreakpoints, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, xdebugEnv } from "./debug";
 import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
@@ -1596,10 +1596,12 @@ const actions: Action[] = [
   { label: "Run Test at Cursor", keys: "Ctrl+Shift+R", run: () => runTestAtCursor(editor) },
   { label: "Debug Test at Cursor", keys: "Ctrl+Shift+D", run: () => runTestAtCursor(editor, "debug") },
   { label: "Toggle Breakpoint", keys: "Meta+F8", run: () => active && toggleBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
-  { label: "Edit Breakpoint…", keys: "Meta+Shift+F8", run: () => active && editBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Edit Breakpoint…", run: () => active && editBreakpoint(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "View Breakpoints…", keys: "Meta+Shift+F8", run: () => (active ? showBreakpoints(active, editor.getPosition()?.lineNumber) : showBreakpoints()) },
   { label: "Toggle Pause on Exceptions", run: togglePauseOnExceptions },
   { label: "Pause on Exception Classes…", run: () => root && setExceptionClasses() },
   { label: "Pause on Exceptions Options…", run: () => root && exceptionOptions() },
+  { label: "Choose Xdebug Port…", run: choosePort },
   { label: "Set Server Paths for Debugging…", run: () => root && setServerRoot() },
   { label: "Start Listening for PHP Debug Connections", run: () => root && startDebugging() },
   { label: "Stop Debugging", keys: "Meta+F2", run: stopDebugging },
@@ -1614,7 +1616,7 @@ const actions: Action[] = [
       if (!root) return;
       await startDebugging();
       // Laravel's serve command passes XDEBUG_MODE and XDEBUG_SESSION to the PHP server it starts.
-      openTerminal(root, "Debug server", ["/usr/bin/env", ...XDEBUG_ENV, "php", "artisan", "serve"], undefined, undefined, true);
+      openTerminal(root, "Debug server", ["/usr/bin/env", ...xdebugEnv(), "php", "artisan", "serve"], undefined, undefined, true);
     },
   },
   { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },

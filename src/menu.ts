@@ -34,7 +34,7 @@ const LAYOUT: [string, Entry[]][] = [
   ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]],
   ["Run", ["Run Anything", "Rerun", "-", "Run Test at Cursor", "Debug Test at Cursor", "Run Test at Cursor with Coverage", "Run All Tests", "Run All Tests with Coverage", "-",
     "Start Listening for PHP Debug Connections", "Start Debug Server (php artisan serve with Xdebug)", "Stop Debugging", "Resume Program", "Step Over", "Step Into", "Step Out", "-",
-    "Toggle Breakpoint", "Edit Breakpoint…", "Toggle Pause on Exceptions", "Pause on Exception Classes…", "Pause on Exceptions Options…", "Set Server Paths for Debugging…", "-",
+    "Toggle Breakpoint", "Edit Breakpoint…", "View Breakpoints…", "Toggle Pause on Exceptions", "Pause on Exception Classes…", "Pause on Exceptions Options…", "Choose Xdebug Port…", "Set Server Paths for Debugging…", "-",
     ["Profile", ["Profile Test at Cursor", "Profile URL…", "Start Profiling Server (PHP's server with the Xdebug profiler)", "Open Xdebug Profile…"]]]],
   ["Tools", [
     ["HTTP Client", ["Send HTTP Request", "HTTP Client: New Request…", "Select HTTP Environment…", "HTTP Client: Edit Environments", "HTTP Client: Global Variables…", "HTTP Client: Detect App Address", "HTTP Client: Clear Cookies", "-",

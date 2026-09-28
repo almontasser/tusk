@@ -4,7 +4,7 @@ import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
-import { startDebugging, XDEBUG_ENV } from "./debug";
+import { containerXdebugEnv, startDebugging, xdebugEnv } from "./debug";
 import { filterFor, type TestResult } from "./junit";
 import { type Container, runningContainer } from "./sail";
 import { openTerminal } from "./terminal";
@@ -84,14 +84,11 @@ async function reportPath() {
 /** A command for this Mac: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in PATH. */
 const onMac = (command: string[]) => (command[0].startsWith("vendor/") ? [`${getRoot()}/${command[0]}`, ...command.slice(1)] : command);
 
-/** Xdebug's trigger for PHP in a container, which reaches the editor on this Mac through Docker's host name. */
-const CONTAINER_XDEBUG = [...XDEBUG_ENV, "XDEBUG_CONFIG=client_host=host.docker.internal"];
-
 /** A PHP command in the project's running container (Sail or a Compose service), or else on this Mac. */
 async function php(command: string[], debug = false): Promise<{ command: string[]; container: Container | null }> {
   const container = await runningContainer(getRoot());
-  if (container) return { command: container.exec(command, debug ? CONTAINER_XDEBUG : []), container };
-  return { command: debug ? ["/usr/bin/env", ...XDEBUG_ENV, ...onMac(command)] : onMac(command), container };
+  if (container) return { command: container.exec(command, debug ? containerXdebugEnv() : []), container };
+  return { command: debug ? ["/usr/bin/env", ...xdebugEnv(), ...onMac(command)] : onMac(command), container };
 }
 
 /**

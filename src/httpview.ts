@@ -1344,7 +1344,7 @@ async function sendCurrent(mode: SendMode = "send", extraVars?: Record<string, s
     const debug = await import("./debug");
     if (!debug.isListening()) await debug.startDebugging();
     host.status("Sent with XDEBUG_SESSION. The server's PHP needs Xdebug in debug mode: Start Debug Server runs one.");
-    adjust = (p) => ({ ...p, url: addQuery(p.url, "XDEBUG_SESSION=1"), timeout: Math.max(p.timeout, 3600) });
+    adjust = (p) => ({ ...p, url: addQuery(p.url, `XDEBUG_SESSION=${encodeURIComponent(debug.debugIdeKey())}`), timeout: Math.max(p.timeout, 3600) });
   } else if (mode === "profile") {
     profiler = await host.profiler();
     const origin = await profiler.profilingOrigin();
