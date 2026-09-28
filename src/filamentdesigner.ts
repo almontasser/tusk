@@ -7,13 +7,14 @@ import type * as L from "vscode-languageserver-protocol";
 import { h, icon, iconButton } from "./dom";
 import type { monaco } from "./editor";
 import * as fapp from "./filamentapp";
-import { type CanvasCtx, currentDrag, type Drag, hideLine, labelOf, renderSchema, renderTable, setDragging, type SlotRef } from "./filamentcanvas";
+import { type CanvasCtx, currentDrag, type Drag, hideLine, labelOf, renderActionModal, renderPageActions, renderSchema, renderTable, setDragging, type SlotRef } from "./filamentcanvas";
+import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
 import { type CallChange, renderCodeInspector, renderInspector } from "./filamentinspector";
 import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsTab } from "./filamentpages";
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
-import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotNamed, walk } from "./filamentschema";
+import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
 import { classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
@@ -35,7 +36,7 @@ export const initDesigner = (h_: DesignerHost) => (host = h_);
 export type Doc = { path: string; model: monaco.editor.ITextModel; text: string; outline: Outline };
 /** A form, table, or infolist, in the file that builds it: the resource's, or the class it hands the work to. */
 type RootRef = { kind: RootKind; doc: Doc; root: Root } | { kind: RootKind; missing: true } | { kind: RootKind; doc: Doc; error: string; root?: Root };
-export type Tab = "form" | "table" | "infolist" | "relations" | "pages" | "settings";
+export type Tab = "form" | "table" | "infolist" | "actions" | "relations" | "pages" | "settings";
 
 const open = new Map<string, Designer>();
 
@@ -58,7 +59,7 @@ export function projectChanged() {
   }
 }
 
-const TAB_ICONS: Record<Tab, string> = { form: "note", table: "table", infolist: "list-flat", relations: "references", pages: "files", settings: "settings-gear" };
+const TAB_ICONS: Record<Tab, string> = { form: "note", table: "table", infolist: "list-flat", actions: "play", relations: "references", pages: "files", settings: "settings-gear" };
 
 export class Designer {
   file: string;
@@ -77,6 +78,8 @@ export class Designer {
   paletteQuery = "";
   message = "";
   stale = false;
+  /** The page whose header actions the Page actions tab shows, by its file. */
+  actionsPage: string | null = null;
   /** Whether it's a relation manager, which has a form and table like a resource but no pages or settings. */
   manager = false;
   private undo: string[] = [];
@@ -138,6 +141,7 @@ export class Designer {
       this.info = app?.panels.flatMap((p) => p.resources).find((r) => r.file === rel || r.class === this.cls?.fqn) ?? null;
       const model = this.info?.model ?? (this.manager ? await this.relatedModel(app) : null) ?? this.modelOfCode();
       this.facts = model ? await fapp.modelFacts(root, model).catch(() => null) : null;
+      await this.readPageActions();
       this.loadError = "";
     } catch (e) {
       this.loadError = e instanceof Error ? e.message : String(e);
@@ -213,6 +217,27 @@ export class Designer {
       if (root.custom) this.roots.set(kind, { kind, doc: main, error: root.custom, root });
       else this.roots.set(kind, { kind, doc: main, root });
     }
+    await this.readPageActions();
+  }
+
+  /** The resource's pages that have files, for the Page actions tab. */
+  get pageFiles(): { name: string; kind: fapp.PageInfo["kind"]; file: string }[] {
+    return (this.info?.pages ?? []).filter((p) => p.file).map((p) => ({ name: p.file!.split("/").pop()!.replace(/\.php$/, ""), kind: p.kind, file: `${this.root}/${p.file}` }));
+  }
+
+  /** Reads the header actions of the page the Page actions tab shows: the list page's, unless another was picked. */
+  private async readPageActions() {
+    const pages = this.pageFiles;
+    if (this.manager || !pages.length) return void this.roots.set("actions", { kind: "actions", missing: true });
+    const file = pages.find((p) => p.file === this.actionsPage)?.file ?? (pages.find((p) => p.kind === "list" || p.kind === "manage") ?? pages[0]).file;
+    this.actionsPage = file;
+    const doc = await this.doc(file);
+    const cls = doc.outline.classes.find((c) => c.name);
+    // `getActions()` is the older name, which Filament still reads.
+    const root = cls && (readRoot(cls, "actions") ?? readRoot(cls, "actions", "getActions"));
+    if (!root) this.roots.set("actions", { kind: "actions", missing: true });
+    else if (root.custom) this.roots.set("actions", { kind: "actions", doc, error: root.custom, root });
+    else this.roots.set("actions", { kind: "actions", doc, root });
   }
 
   /** Reads the files again after an edit, here or in the code editor, and redraws. */
@@ -320,7 +345,7 @@ export class Designer {
   }
 
   currentRoot(): RootRef | undefined {
-    const kind = this.tab === "form" || this.tab === "table" || this.tab === "infolist" ? this.tab : null;
+    const kind = this.tab === "form" || this.tab === "table" || this.tab === "infolist" || this.tab === "actions" ? this.tab : null;
     return kind ? this.roots.get(kind) : undefined;
   }
 
@@ -592,20 +617,21 @@ export class Designer {
     const kind = this.cat && classInfo(this.cat, cls)?.kind;
     const rel = kind === "filter" && name ? facts?.relations.find((r) => r.name === name && /BelongsTo/.test(r.type)) : undefined;
     const column = name && facts?.columns.find((c) => c.name === name || (rel && c.name === (rel.foreignKey ?? `${name.replace(/([A-Z])/g, "_$1").toLowerCase()}_id`)));
-    const gen = column && facts ? (kind === "filter" ? filterFor(column, facts) : this.genFor(column)) : null;
+    const gen = column && facts ? (kind === "filter" ? filterFor(column, facts) : this.genFor(column, to)) : null;
     if (gen && gen.cls === cls) return this.insert(to, index, gen, `Added ${shortClass(cls)} ${name}`);
     await this.insert(to, index, this.newComponent(cls, name), `Added ${shortClass(cls)}${name ? ` ${name}` : ""}`);
   }
 
   /** The component for a model column in the current tab. */
-  private genFor(column: Column): Gen | null {
+  private genFor(column: Column, to?: SlotRef): Gen | null {
     if (!this.facts) return null;
+    if (this.inActionForm(to?.owner ?? null)) return formField(column, this.facts);
     return this.tab === "table" ? tableColumn(column, this.facts) : this.tab === "infolist" ? infolistEntry(column, this.facts) : formField(column, this.facts);
   }
 
   async addColumn(name: string, to: SlotRef, index: number) {
     const column = this.facts?.columns.find((c) => c.name === name);
-    const gen = column && this.genFor(column);
+    const gen = column && this.genFor(column, to);
     if (gen) await this.insert(to, index, gen, `Added ${name}`);
   }
 
@@ -696,7 +722,7 @@ export class Designer {
   }
 
   private tabs() {
-    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "relations", "pages", "settings"];
+    const tabs: Tab[] = this.manager ? ["form", "table", "infolist"] : ["form", "table", "infolist", "actions", "relations", "pages", "settings"];
     const count = (t: Tab) => {
       if (t === "relations") return this.info?.relations.length;
       if (t === "pages") return this.info?.pages.length;
@@ -711,13 +737,13 @@ export class Designer {
       { class: "fd-tabs-nav", role: "tablist" },
       ...tabs.map((t) => {
         const n = count(t);
-        const ref = t === "form" || t === "table" || t === "infolist" ? this.roots.get(t) : undefined;
+        const ref = t === "form" || t === "table" || t === "infolist" || t === "actions" ? this.roots.get(t) : undefined;
         const missing = !!ref && "missing" in ref;
         return h(
           "button",
           { type: "button", role: "tab", class: `${t === this.tab ? "active" : ""}${missing ? " missing" : ""}`, ariaSelected: String(t === this.tab), onclick: () => this.switchTab(t) },
           icon(TAB_ICONS[t]),
-          humanize(t),
+          t === "actions" ? "Page actions" : humanize(t),
           n ? h("span", { class: "fd-count" }, String(n)) : null,
         );
       }),
@@ -734,7 +760,7 @@ export class Designer {
 
   private footer() {
     const ref = this.currentRoot();
-    const where = ref && "doc" in ref ? ref.doc.path.slice(this.root.length + 1) : this.file.slice(this.root.length + 1);
+    const where = (ref && "doc" in ref ? ref.doc.path : this.tab === "actions" && this.actionsPage ? this.actionsPage : this.file).slice(this.root.length + 1);
     // A class outside the resource's folder can be shared, such as one table for two panels' resources.
     const folder = this.file.slice(0, this.file.lastIndexOf("/"));
     const shared = ref && "doc" in ref && !ref.doc.path.startsWith(`${folder}/`);
@@ -753,6 +779,16 @@ export class Designer {
 
   /** A tab for a form, table, or infolist the resource doesn't have yet, with a button that adds it. */
   private missingRoot(kind: RootKind) {
+    if (kind === "actions") {
+      const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+      if (!page) return h("div", { class: "fd-error fd-empty-root" }, icon(TAB_ICONS.actions), h("div", {}, h("strong", {}, "The resource has no pages in its folder"), h("p", {}, "Header actions belong to a page, such as the list or edit page. Add pages on the Pages tab.")));
+      return h(
+        "div",
+        { class: "fd-actions-empty" },
+        this.pageSwitcher(),
+        h("div", { class: "fd-error fd-empty-root" }, icon(TAB_ICONS.actions), h("div", {}, h("strong", {}, `${humanize(page.name)} has no header actions`), h("p", {}, "Header actions are buttons at the top of the page, beside its title, such as New or Delete."), h("div", { class: "fd-error-actions" }, h("button", { type: "button", class: "primary", onclick: () => void this.addRoot("actions") }, icon("add"), "Add header actions")))),
+      );
+    }
     const what = { form: "a form", table: "a table", infolist: "an infolist" }[kind];
     const why = { form: "The form creates and edits records.", table: "The table lists records on the resource's index page.", infolist: "An infolist shows a record on its View page, read-only." }[kind];
     return h("div", { class: "fd-error fd-empty-root" }, icon(TAB_ICONS[kind]), h("div", {}, h("strong", {}, `This ${this.manager ? "relation manager" : "resource"} has no ${kind}`), h("p", {}, why), h("div", { class: "fd-error-actions" }, h("button", { type: "button", class: "primary", onclick: () => void this.addRoot(kind) }, icon("add"), `Add ${what}`))));
@@ -761,6 +797,7 @@ export class Designer {
   /** Adds a form, table, or infolist method, filled from the model's columns. */
   async addRoot(kind: RootKind) {
     await this.settled();
+    if (kind === "actions") return this.addHeaderActions();
     const doc = this.docs.get(this.file);
     if (!doc || !this.cls) return;
     const cls = this.cls;
@@ -786,12 +823,108 @@ export class Designer {
     );
   }
 
+  /** Adds `getHeaderActions()` to the page the Page actions tab shows, with the actions that page usually has. */
+  private async addHeaderActions() {
+    const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+    const doc = page && this.docs.get(page.file);
+    const cls = doc?.outline.classes.find((c) => c.name);
+    if (!page || !doc || !cls) return;
+    const A = (name: string) => `{{Filament\\Actions\\${name}}}::make()`;
+    const has = (k: string) => this.pageFiles.some((p) => p.kind === k);
+    const seed = page.kind === "list" ? (has("create") || !has("manage") ? [A("CreateAction")] : []) : page.kind === "manage" ? [A("CreateAction")] : page.kind === "edit" ? [...(has("view") ? [A("ViewAction")] : []), A("DeleteAction")] : page.kind === "view" ? [A("EditAction")] : [];
+    await this.apply(
+      doc,
+      (_imports, fill) => {
+        const method = `protected function getHeaderActions(): array\n{\n    return [\n${seed.map((a) => `        ${fill(a)},\n`).join("")}    ];\n}`;
+        return [{ start: cls.bodyEnd, end: cls.bodyEnd, text: `${cls.methods.length || cls.properties.length ? "\n" : ""}\n    ${indentCode(method, "    ")}\n` }];
+      },
+      "Added header actions",
+      null,
+    );
+  }
+
+  /** Buttons that pick the page whose header actions the tab shows. */
+  private pageSwitcher() {
+    const names: Record<string, string> = { list: "List", create: "Create", edit: "Edit", view: "View", manage: "Manage" };
+    return h(
+      "div",
+      { class: "fd-page-switch", role: "tablist" },
+      ...this.pageFiles.map((p) =>
+        h("button", { type: "button", class: p.file === this.actionsPage ? "active" : "", title: p.file.slice(this.root.length + 1), onclick: async (e: MouseEvent) => {
+          e.stopPropagation();
+          if (p.file === this.actionsPage) return;
+          this.actionsPage = p.file;
+          this.selection = null;
+          await this.readPageActions();
+          this.render();
+        } }, names[p.kind] ?? humanize(p.name)),
+      ),
+    );
+  }
+
+  /** The title a page shows, as Filament writes it: the plural label on the list, "Edit post" on the edit page. */
+  private pageTitle(): string {
+    const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+    const label = this.info?.label ?? humanize(shortClass(this.info?.model ?? "Record")).toLowerCase();
+    const plural = this.info?.navigationLabel ?? this.info?.pluralLabel ?? `${label}s`;
+    const cap = (x: string) => x.replace(/^./, (c) => c.toUpperCase());
+    switch (page?.kind) {
+      case "create":
+        return `Create ${label}`;
+      case "edit":
+        return `Edit ${label}`;
+      case "view":
+        return `View ${label}`;
+      case "list":
+      case "manage":
+        return cap(plural);
+    }
+    return humanize(page?.name ?? "Page");
+  }
+
+  /** The action whose modal shows: the selected action, or the action whose form holds the selection. */
+  modalAction(root: Root): { path: Path; comp: Comp } | null {
+    for (let i = this.selection?.length ?? 0; i > 0; i--) {
+      const path = this.selection!.slice(0, i);
+      const comp = resolve(root, path)?.entry.comp;
+      const kind = comp && this.cat && classInfo(this.cat, comp.cls)?.kind;
+      if (comp && (kind === "action" || kind === "bulkAction")) return { path, comp };
+    }
+    return null;
+  }
+
+  /** Whether a place is in an action's form, where fields go whatever the tab. */
+  private inActionForm(owner: Path | null): boolean {
+    const live = this.live();
+    if (!owner || !live || !this.cat) return false;
+    for (let i = owner.length; i > 0; i--) {
+      const comp = resolve(live.root, owner.slice(0, i))?.entry.comp;
+      const kind = comp && classInfo(this.cat, comp.cls)?.kind;
+      if (kind === "action" || kind === "bulkAction") return true;
+    }
+    return false;
+  }
+
+  /** What a custom action works with: the row's record, the selected records, or neither. */
+  private scopeOf(path: Path, kind: string): Scope | null {
+    if (kind === "bulkAction") return "records";
+    const slot = path[0]?.slot;
+    if (this.tab === "table") return slot === "recordActions" || slot === "actions" ? "record" : slot === "headerActions" || slot === "toolbarActions" ? "none" : null;
+    if (this.tab === "actions") {
+      const page = this.pageFiles.find((p) => p.file === this.actionsPage);
+      return page?.kind === "edit" || page?.kind === "view" ? "record" : "none";
+    }
+    return this.tab === "infolist" ? "record" : null;
+  }
+
   /** The palette, the canvas, and the inspector. */
   private workspace(ref: { kind: RootKind; doc: Doc; root: Root }) {
     const ctx = this.canvasCtx(ref);
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
-    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "actions" ? h("div", {}, this.pageSwitcher(), renderPageActions(ctx, this.pageTitle())) : ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    const modal = this.modalAction(ref.root);
+    if (modal) canvas.append(renderActionModal(ctx, modal.path, modal.comp));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
     if (ref.doc.outline.errors)
       canvas.prepend(
@@ -855,14 +988,15 @@ export class Designer {
     if (!live || !this.cat) return;
     const t = this.target(live.root, to);
     const slotName = to.slot.replace(/#\d+$/, "");
-    const kinds = to.owner ? (t?.owner && /ActionGroup$/.test(t.owner.cls) ? PALETTE_KINDS.recordActions : live.kind === "table" ? PALETTE_KINDS.columns : PALETTE_KINDS[live.kind === "infolist" ? "infolist" : "form"]) : (PALETTE_KINDS[slotName === "actions" ? "recordActions" : slotName === "bulkActions" || slotName === "groupedBulkActions" ? "toolbarActions" : slotName] ?? PALETTE_KINDS[live.kind === "infolist" ? "infolist" : "form"]);
+    const inForm = this.inActionForm(to.owner);
+    const kinds = inForm ? PALETTE_KINDS.form : to.owner ? (t?.owner && /ActionGroup$/.test(t.owner.cls) ? PALETTE_KINDS.recordActions : live.kind === "table" ? PALETTE_KINDS.columns : PALETTE_KINDS[live.kind === "infolist" ? "infolist" : "form"]) : (PALETTE_KINDS[slotName === "actions" ? "recordActions" : slotName === "bulkActions" || slotName === "groupedBulkActions" ? "toolbarActions" : slotName] ?? PALETTE_KINDS[live.kind === "infolist" ? "infolist" : "form"]);
     const special = slotName === "tabs" ? "Tab" : slotName === "steps" ? "Step" : slotName === "blocks" ? "Block" : "";
     const search = h("input", { type: "search", class: "fd-add-search", placeholder: "Search components", spellcheck: false });
     const list = h("div", { class: "fd-add-list" });
     const index = t?.slot?.entries.length ?? 0;
     const render = () => {
       const groups = special ? [{ label: special, classes: this.cat!.classes.filter((c) => shortClass(c.class) === special) }] : palette(this.cat!, kinds, search.value);
-      const columns = !to.owner || live.kind !== "table" ? (this.facts?.columns ?? []).filter((c) => !isSystemColumn(c) || live.kind === "table") : [];
+      const columns = inForm || !to.owner || live.kind !== "table" ? (this.facts?.columns ?? []).filter((c) => !isSystemColumn(c) || (live.kind === "table" && !inForm)) : [];
       const q = search.value.trim().toLowerCase();
       list.replaceChildren(
         ...(columns.length && !special && (slotName === "components" || slotName === "schema" || slotName === "columns")
@@ -912,23 +1046,29 @@ export class Designer {
   }
 
   private palette(ref: { kind: RootKind; doc: Doc; root: Root }, _ctx: CanvasCtx) {
-    const kinds = ref.kind === "table" ? PALETTE_KINDS.columns : PALETTE_KINDS[ref.kind];
+    // With an action's modal open, the palette offers fields for its form.
+    const modal = this.modalAction(ref.root);
+    const modalSlot = modal?.comp.slots.find((s) => s.via === "schema" || s.via === "form");
+    const kinds = modal ? PALETTE_KINDS.form : ref.kind === "table" ? PALETTE_KINDS.columns : PALETTE_KINDS[ref.kind];
     const search = h("input", { type: "search", class: "fd-palette-search", placeholder: "Search components", value: this.paletteQuery, spellcheck: false });
     const body = h("div", { class: "fd-palette-body" });
     const used = new Set<string>();
     walk(ref.root, (c) => c.name && used.add(c.name.split(".")[0]));
     // A relationship shown by its title, such as author.name, uses its foreign key column.
     for (const r of this.facts?.relations ?? []) if (used.has(r.name) && /BelongsTo$/.test(r.type)) used.add(r.foreignKey ?? `${r.name.replace(/([A-Z])/g, "_$1").toLowerCase()}_id`);
-    const slotName = ref.kind === "table" ? "columns" : ref.root.slots.has("schema") ? "schema" : "components";
-    const end = () => ({ to: { owner: null, slot: slotName } as SlotRef, index: (ref.kind === "table" ? ref.root.slots.get("columns") : rootSlot(ref.root, ["components", "schema"]))?.entries.length ?? 0 });
+    const slotName = ref.kind === "table" ? "columns" : ref.kind === "actions" ? "actions" : ref.root.slots.has("schema") ? "schema" : "components";
+    const end = (): { to: SlotRef; index: number } =>
+      modal
+        ? { to: { owner: modal.path, slot: modalSlot ? slotKey(modalSlot) : "schema" }, index: modalSlot?.entries.length ?? 0 }
+        : { to: { owner: null, slot: slotName }, index: (ref.kind === "table" ? ref.root.slots.get("columns") : ref.kind === "actions" ? ref.root.slots.get("actions") : rootSlot(ref.root, ["components", "schema"]))?.entries.length ?? 0 };
     /** Where a click adds: after the selected component, or inside it when it's a container, or at the end. */
     const place = (cls: string): { to: SlotRef; index: number } => {
-      if (!this.selection) return end();
+      if (!this.selection || (modal && samePath(this.selection, modal.path))) return end();
       const found = resolve(ref.root, this.selection);
       if (!found) return end();
       const comp = found.entry.comp;
       const inner = comp && childSlot(comp);
-      if (inner && classInfo(this.cat!, cls)?.kind !== "layout" && ref.kind !== "table") return { to: { owner: this.selection, slot: inner.via }, index: inner.entries.length };
+      if (inner && classInfo(this.cat!, cls)?.kind !== "layout" && (ref.kind !== "table" || modal)) return { to: { owner: this.selection, slot: inner.via }, index: inner.entries.length };
       const { parent, last } = parentOf(this.selection);
       return { to: { owner: parent.length ? parent : null, slot: last.slot }, index: last.index + 1 };
     };
@@ -936,7 +1076,7 @@ export class Designer {
       const q = search.value.trim().toLowerCase();
       this.paletteQuery = search.value;
       const groups = palette(this.cat!, kinds, q);
-      const columns = (this.facts?.columns ?? []).filter((c) => (ref.kind === "table" ? c.name !== "id" : !isSystemColumn(c)) && (!q || c.name.toLowerCase().includes(q)));
+      const columns = (ref.kind === "actions" && !modal ? [] : (this.facts?.columns ?? [])).filter((c) => (ref.kind === "table" && !modal ? c.name !== "id" : !isSystemColumn(c)) && (!q || c.name.toLowerCase().includes(q)));
       // The same columns Add N adds: secrets never go in a form or table on their own.
       const missing = columns.filter((c) => !used.has(c.name) && !/password|token|secret/.test(c.name));
       const colItem = (c: Column) => {
@@ -950,17 +1090,19 @@ export class Designer {
         return el;
       };
       body.replaceChildren(
-        ...(this.facts
+        ...(this.facts && (ref.kind !== "actions" || modal)
           ? [
               h(
                 "details",
                 { class: "fd-palette-group", open: true },
-                h("summary", {}, icon("database"), h("span", { class: "fd-palette-title", title: `${shortClass(this.facts.class)} columns` }, `${shortClass(this.facts.class)} columns`), missing.length ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
+                h("summary", {}, icon("database"), h("span", { class: "fd-palette-title", title: `${shortClass(this.facts.class)} columns` }, `${shortClass(this.facts.class)} columns`), missing.length && !modal ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
                 ...columns.map(colItem),
                 !columns.length ? h("p", { class: "fd-note" }, this.facts.details.tableExists === false ? "The table doesn't exist yet. Run the migrations." : "No columns.") : null,
               ),
             ]
-          : [h("p", { class: "fd-note fd-palette-note" }, "The model's columns show here when the app can be read.")]),
+          : ref.kind === "actions" && !modal
+            ? []
+            : [h("p", { class: "fd-note fd-palette-note" }, "The model's columns show here when the app can be read.")]),
         ...groups.map((g) =>
           h(
             "details",
@@ -1023,6 +1165,11 @@ export class Designer {
             },
           }),
         ),
+      action: (() => {
+        const kind = classInfo(this.cat!, found.entry.comp!.cls)?.kind ?? "";
+        const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;
+        return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {} } : undefined;
+      })(),
       openEnum: async (cls) => {
         const known = this.enums.find((e) => e.class === cls)?.file;
         const file = known ? `${this.root}/${known}` : await fapp.fileOfClass(this.root, cls);
@@ -1033,6 +1180,15 @@ export class Designer {
 
   /** The inspector with nothing selected: the form's or table's own settings, and an overview. */
   private rootSettings(ref: { kind: RootKind; doc: Doc; root: Root }): HTMLElement {
+    if (ref.kind === "actions") {
+      const n = ref.root.slots.get("actions")?.entries.length ?? 0;
+      return h(
+        "div",
+        { class: "fd-inspector-body" },
+        h("header", { class: "fd-inspector-head" }, h("span", { class: "codicon codicon-play fd-type-icon" }), h("div", { class: "fd-inspector-title" }, h("strong", {}, "Header actions"), h("span", { class: "fd-note" }, `${n} ${n === 1 ? "action" : "actions"} on ${this.pageTitle()}`))),
+        h("p", { class: "fd-note fd-row-note" }, "Select an action to change it. A custom action can ask for input with a form, which shows below the page, and do something with it: pick what it does in its settings."),
+      );
+    }
     return renderRootSettings(this, ref);
   }
 

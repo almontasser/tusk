@@ -268,6 +268,7 @@ export const PALETTE_KINDS: Record<string, Kind[]> = {
   recordActions: ["action", "actionGroup"],
   toolbarActions: ["bulkAction", "actionGroup", "action"],
   headerActions: ["action", "actionGroup"],
+  actions: ["action", "actionGroup"],
 };
 
 const GROUP_ORDER = ["Text", "Choice", "Date and time", "Files", "Structured", "Columns", "Editable columns", "Entries", "Layout", "Content", "Filters", "Record", "Bulk", "Groups", "Page", "Relationship", "Custom", "Other", "Project", "Plugins"];
@@ -305,8 +306,8 @@ const ESSENTIALS: Record<string, string[]> = {
   column: ["@name", "label", "searchable", "sortable", "toggleable", "@format", "badge", "color", "icon", "description", "limit", "wrap", "alignment", "tooltip"],
   columnLayout: ["@name", "columns", "from", "space"],
   filter: ["@name", "label", "@options", "multiple", "searchable", "preload", "default", "toggle"],
-  action: ["label", "icon", "color", "tooltip", "requiresConfirmation", "modalHeading", "modalDescription", "url", "openUrlInNewTab", "button", "link", "iconButton", "outlined", "size"],
-  bulkAction: ["label", "icon", "color", "requiresConfirmation", "modalHeading", "deselectRecordsAfterCompletion"],
+  action: ["@behavior", "label", "icon", "color", "tooltip", "requiresConfirmation", "modalHeading", "modalDescription", "modalSubmitActionLabel", "modalWidth", "slideOver", "url", "openUrlInNewTab", "button", "link", "iconButton", "outlined", "size"],
+  bulkAction: ["@behavior", "label", "icon", "color", "requiresConfirmation", "modalHeading", "modalDescription", "modalSubmitActionLabel", "deselectRecordsAfterCompletion"],
   actionGroup: ["label", "icon", "color", "tooltip", "button", "link", "iconButton", "dropdownPlacement"],
   widget: [],
 };

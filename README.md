@@ -833,6 +833,23 @@ The palette lists the components the project has: Filament's, plugins', and the
 project's own. Each setting's editor comes from its parameter types, so a new
 Filament version or a plugin needs no update to Tusk.
 
+### Actions and their forms
+
+- **Page actions:** the **Page actions** tab shows the header actions of the
+  resource's list, create, edit, and view pages: the buttons beside the page's
+  title. Pick a page at the top, then add, arrange, and set up its actions as
+  in a table's lanes. A page without header actions gets them with one click,
+  starting with the ones that page usually has.
+- **Forms:** select an action, in a table or on a page, and its modal shows
+  below: the heading, the description, the form, and the buttons. Drag fields
+  or model columns into it, or click them in the palette, as in a form.
+- **What it does:** a custom action can save its form to the record, set a
+  column to a value (an enum column offers its cases), delete the record, or,
+  on a list page, create a record. It can then show a success notification.
+  Bulk actions do the same to each selected record. Saving the form also fills
+  it with the record's values when it opens. The designer writes these as the
+  action's code; an action written otherwise shows as code.
+
 ### New resources
 
 **Filament: New Resource…**, the **+** in the Filament tool window, or

@@ -248,7 +248,7 @@ export function renderSchema(ctx: CanvasCtx, slotName: string): HTMLElement {
 }
 
 /** A slot's grid of components, with a drop target and an empty state. */
-function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owner: Comp | null, columns: number): HTMLElement {
+export function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owner: Comp | null, columns: number): HTMLElement {
   const grid = h("div", { class: "fd-grid", style: `--cols:${columns}` });
   for (const e of slot.entries) {
     const path = [...prefix, { slot: prefix.length ? slotKey(slot) : slot.via, index: e.index }];
@@ -700,40 +700,6 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: st
   );
   if (!colComps.length) head.prepend(h("div", { class: "fd-th fd-empty-cols" }, "Drag columns here from the left, or click +"));
 
-  const lane = (title: string, iconName: string, slot: Slot | undefined, slotName: string, hint: string) => {
-    const chips = h("div", { class: "fd-lane-items" });
-    for (const e of slot?.entries ?? []) {
-      const path = [{ slot: slot!.via, index: e.index }];
-      const chip = h("div", { class: `fd-chip-item${samePath(ctx.selection, path) ? " selected" : ""}` }, e.comp ? actionOrFilterChip(ctx, e.comp) : h("span", {}, icon("code"), "Code"));
-      chip.dataset.index = String(e.index);
-      chip.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
-      chip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(path), ctx.menu(path, ev.clientX, ev.clientY));
-      draggable(chip, path);
-      // An action group's actions show inside it, and take drops.
-      const groupSlot = e.comp?.slots[0];
-      if (groupSlot && e.comp) {
-        const inner = h("div", { class: "fd-lane-items nested" });
-        for (const g of groupSlot.entries) {
-          const gp = [...path, { slot: slotKey(groupSlot), index: g.index }];
-          const gchip = h("div", { class: `fd-chip-item${samePath(ctx.selection, gp) ? " selected" : ""}` }, g.comp ? actionOrFilterChip(ctx, g.comp) : h("span", {}, "Code"));
-          gchip.dataset.index = String(g.index);
-          gchip.onclick = (ev) => (ev.stopPropagation(), ctx.select(gp));
-          gchip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(gp), ctx.menu(gp, ev.clientX, ev.clientY));
-          draggable(gchip, gp);
-          inner.append(gchip);
-        }
-        inner.append(h("button", { type: "button", class: "fd-lane-add", title: "Add to the group", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slotKey(groupSlot) }, ev.currentTarget as HTMLElement)) }, icon("add")));
-        dropTarget(inner, ctx, { owner: path, slot: slotKey(groupSlot) }, groupSlot, e.comp, true);
-        chip.append(inner);
-      }
-      chips.append(chip);
-    }
-    const ref: SlotRef = { owner: null, slot: slot?.via ?? slotName };
-    chips.append(h("button", { type: "button", class: "fd-lane-add", title: `Add ${title.toLowerCase()}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) }, icon("add"), slot?.entries.length ? null : h("span", {}, "Add")));
-    dropTarget(chips, ctx, ref, slot ?? { via: slotName }, null, true);
-    return h("div", { class: "fd-lane" }, h("div", { class: "fd-lane-title", title: hint }, icon(iconName), title), chips);
-  };
-
   return h(
     "div",
     { class: "fd-table-canvas" },
@@ -742,10 +708,10 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: st
     h(
       "div",
       { class: "fd-lanes" },
-      lane("Filters", "filter", filters, "filters", "Filters narrow the records the table shows."),
-      lane("Row actions", "play", recordActions, "recordActions", "Buttons on each row, such as Edit."),
-      lane("Bulk actions", "checklist", toolbar, "toolbarActions", "Actions on the selected rows, usually in a group."),
-      lane("Header actions", "window", header, "headerActions", "Buttons above the table."),
+      actionLane(ctx, "Filters", "filter", filters, "filters", "Filters narrow the records the table shows."),
+      actionLane(ctx, "Row actions", "play", recordActions, "recordActions", "Buttons on each row, such as Edit."),
+      actionLane(ctx, "Bulk actions", "checklist", toolbar, "toolbarActions", "Actions on the selected rows, usually in a group."),
+      actionLane(ctx, "Header actions", "window", header, "headerActions", "Buttons above the table."),
     ),
   );
 }
@@ -760,5 +726,83 @@ function actionOrFilterChip(ctx: CanvasCtx, c: Comp): HTMLElement {
     iconName ? heroicon(ctx.iconsDir, iconName) : icon(look(info ?? c.cls).icon),
     h("span", {}, labelOf(c)),
     labelOf(c).toLowerCase().startsWith((short(c).replace(/(BulkAction|Action|Filter)$/, "") || short(c)).toLowerCase()) ? null : h("span", { class: "fd-chip-type" }, short(c).replace(/(Action|Filter)$/, "") || short(c)),
+  );
+}
+
+/** A lane of action or filter chips, which take drops and have a + button, as under a table or on a page. */
+export function actionLane(ctx: CanvasCtx, title: string, iconName: string, slot: Slot | undefined, slotName: string, hint: string): HTMLElement {
+  const chips = h("div", { class: "fd-lane-items" });
+  for (const e of slot?.entries ?? []) {
+    const path = [{ slot: slot!.via, index: e.index }];
+    const chip = h("div", { class: `fd-chip-item${samePath(ctx.selection, path) ? " selected" : ""}` }, e.comp ? actionOrFilterChip(ctx, e.comp) : h("span", {}, icon("code"), "Code"));
+    chip.dataset.index = String(e.index);
+    chip.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
+    chip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(path), ctx.menu(path, ev.clientX, ev.clientY));
+    draggable(chip, path);
+    // An action group's actions show inside it, and take drops.
+    const groupSlot = e.comp?.slots[0];
+    if (groupSlot && e.comp) {
+      const inner = h("div", { class: "fd-lane-items nested" });
+      for (const g of groupSlot.entries) {
+        const gp = [...path, { slot: slotKey(groupSlot), index: g.index }];
+        const gchip = h("div", { class: `fd-chip-item${samePath(ctx.selection, gp) ? " selected" : ""}` }, g.comp ? actionOrFilterChip(ctx, g.comp) : h("span", {}, "Code"));
+        gchip.dataset.index = String(g.index);
+        gchip.onclick = (ev) => (ev.stopPropagation(), ctx.select(gp));
+        gchip.oncontextmenu = (ev) => (ev.preventDefault(), ev.stopPropagation(), ctx.select(gp), ctx.menu(gp, ev.clientX, ev.clientY));
+        draggable(gchip, gp);
+        inner.append(gchip);
+      }
+      inner.append(h("button", { type: "button", class: "fd-lane-add", title: "Add to the group", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slotKey(groupSlot) }, ev.currentTarget as HTMLElement)) }, icon("add")));
+      dropTarget(inner, ctx, { owner: path, slot: slotKey(groupSlot) }, groupSlot, e.comp, true);
+      chip.append(inner);
+    }
+    chips.append(chip);
+  }
+  const ref: SlotRef = { owner: null, slot: slot?.via ?? slotName };
+  chips.append(h("button", { type: "button", class: "fd-lane-add", title: `Add ${title.toLowerCase()}`, onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) }, icon("add"), slot?.entries.length ? null : h("span", {}, "Add")));
+  dropTarget(chips, ctx, ref, slot ?? { via: slotName }, null, true);
+  return h("div", { class: "fd-lane" }, h("div", { class: "fd-lane-title", title: hint }, icon(iconName), title), chips);
+}
+
+/** A page's header: its title and header actions as buttons, and a lane to edit them. */
+export function renderPageActions(ctx: CanvasCtx, title: string): HTMLElement {
+  const slot = ctx.root.slots.get("actions");
+  return h(
+    "div",
+    { class: "fd-table-canvas" },
+    h("div", { class: "fd-page-head" }, h("h2", {}, title), h("span", { class: "fd-spacer" }), ...(slot?.entries ?? []).map((e) => actionButton(ctx, e.comp))),
+    h("div", { class: "fd-page-body" }, h("span", {}, "The page's content")),
+    h("div", { class: "fd-lanes" }, actionLane(ctx, "Header actions", "window", slot, "actions", "Buttons at the top of the page, beside its title.")),
+  );
+}
+
+/**
+ * An action's modal as Filament shows it: its heading and description, its form, which takes fields like any form,
+ * and its buttons. An action with neither a form nor a confirmation runs when it's clicked.
+ */
+export function renderActionModal(ctx: CanvasCtx, path: Path, c: Comp): HTMLElement {
+  const slot = c.slots.find((s) => s.via === "schema" || s.via === "form");
+  const confirmation = flag(c, "requiresConfirmation");
+  const label = labelOf(c);
+  const fields = !!slot?.entries.length;
+  const desc = text(c, "modalDescription") ?? (confirmation && !fields ? "Are you sure you would like to do this?" : null);
+  const color = COLOR_SWATCH[text(c, "color") ?? (confirmation && /delete|remove/i.test(label) ? "danger" : "primary")] ?? COLOR_SWATCH.primary;
+  const add = (ev: MouseEvent) => (ev.stopPropagation(), ctx.add({ owner: path, slot: slot ? slotKey(slot) : "schema" }, ev.currentTarget as HTMLElement));
+  const body = slot
+    ? renderSlot(ctx, slot, { owner: path, slot: slotKey(slot) }, path, c, gridColumns(nodeValue(arg(c, "columns")), 1))
+    : h("button", { type: "button", class: "fd-empty-slot", onclick: add }, icon("add"), h("span", {}, "Add a field to ask for input"));
+  const modal = h(
+    "div",
+    { class: `fd-modal${flag(c, "slideOver") ? " slide" : ""}` },
+    h("header", { class: "fd-modal-head" }, h("h3", {}, text(c, "modalHeading") ?? label), desc ? h("p", {}, desc) : null),
+    fields || !confirmation ? body : h("button", { type: "button", class: "fd-lane-add fd-modal-add", onclick: add }, icon("add"), h("span", {}, "Add a field")),
+    h("footer", { class: "fd-modal-foot" }, h("span", { class: "fd-action button", style: `--action:${color}` }, text(c, "modalSubmitActionLabel") ?? (confirmation && !fields ? "Confirm" : "Submit")), h("span", { class: "fd-action button outlined" }, text(c, "modalCancelActionLabel") ?? "Cancel")),
+  );
+  modal.onclick = (ev) => (ev.stopPropagation(), ctx.select(path));
+  return h(
+    "div",
+    { class: "fd-modal-wrap" },
+    h("div", { class: "fd-modal-caption" }, icon("window"), h("span", {}, `When ${label} is clicked`), !fields && !confirmation ? h("span", { class: "fd-faint" }, "· it runs right away, without a modal") : null),
+    modal,
   );
 }

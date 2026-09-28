@@ -8,6 +8,7 @@ import { type Catalog, type CClass, classInfo, COLORS, type Editor, essentials, 
 import { type Condition, conditionClosure, getUtility, needsValue, type Operator, OPERATORS, readConditions, type Relation } from "./filamentgen";
 import type { EnumInfo } from "./filamentapp";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
+import { BEHAVIORS, type Behavior, behaviorCode, readBehavior, type Scope } from "./filamentactions";
 import { type Comp, type Path, shortClass, walk } from "./filamentschema";
 import { confirm } from "./palette";
 import { mapCode, mapValue, nodeValue, type PNode, phpString, phpValue, textValue } from "./phpcode";
@@ -38,6 +39,8 @@ export type InspectorCtx = {
   newEnum(options: [value: string, label: string][]): void;
   /** Opens the enum designer for an enum of the app's. */
   openEnum(cls: string): void;
+  /** For a custom action: what it works with, and the record's model, for "What it does". */
+  action?: { scope: Scope; model: string | null; casts: Record<string, string> };
 };
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
@@ -554,6 +557,7 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
     else if (name === "@options") essentialRows.push(optionsEditor(ctx)), shown.add("options"), shown.add("relationship");
     else if (name === "@span") essentialRows.push(spanEditor(ctx)), shown.add("columnSpan"), shown.add("columnSpanFull");
     else if (name === "@format") essentialRows.push(formatEditor(ctx)), FORMATS.forEach(([m]) => shown.add(m));
+    else if (name === "@behavior") essentialRows.push(...behaviorEditor(ctx)), shown.add("action"), shown.add("fillForm");
     else if (methods.has(name) && !shown.has(name)) {
       shown.add(name);
       essentialRows.push(specialRow(ctx, methods.get(name)!) ?? methodRow(ctx, methods.get(name)!));
@@ -613,6 +617,62 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
     h("div", { class: "fd-all-head" }, h("span", {}, "All settings"), search),
     all,
   );
+}
+
+/** The code `fillForm` gets with "Save the form to the record", so the form opens with the record's values. */
+const FILL_FORM = (model: string) => `fn ({{${model}}} $record): array => $record->attributesToArray()`;
+
+/**
+ * "What it does" for a custom action: a behavior the designer writes as `->action(...)`'s closure, with a success
+ * notification. A closure it didn't write shows as code.
+ */
+function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
+  const c = ctx.comp;
+  const a = ctx.action;
+  if (!a || !["Action", "BulkAction"].includes(shortClass(c.cls))) return [];
+  const node = arg(c, "action");
+  const current = readBehavior(node ? codeOf(ctx, node) : null);
+  const model = a.model ?? "Illuminate\\Database\\Eloquent\\Model";
+  const fill = call(c, "fillForm");
+  const ourFill = !!fill && /^fn\s*\([\w\\]+ \$record\): array => \$record->attributesToArray\(\)$/.test(codeOf(ctx, fill.args.items[0]?.value ?? c.node));
+  const write = async (b: Behavior) => {
+    if (current.kind === "custom" && node && !(await confirm("Replace what the action does, written as code?", "Replace"))) return;
+    const code = behaviorCode(b, a.scope, a.model);
+    const changes: { name: string; args: string | null }[] = [{ name: "action", args: code }];
+    if (b.kind === "update" && a.scope === "record" && !fill) changes.push({ name: "fillForm", args: FILL_FORM(model) });
+    if (b.kind !== "update" && ourFill) changes.push({ name: "fillForm", args: null });
+    if (b.kind === "delete" && !call(c, "requiresConfirmation")) changes.push({ name: "requiresConfirmation", args: "" });
+    ctx.set(changes);
+  };
+  if (current.kind === "custom" && node) {
+    const choose = h("select", {}, h("option", { value: "", textContent: "Replace with…" }), ...BEHAVIORS[a.scope].filter(([k]) => k !== "none").map(([k, l]) => h("option", { value: k, textContent: l })));
+    choose.onchange = () => choose.value && void write({ kind: choose.value } as Behavior);
+    return [row("What it does", h("div", { class: "fd-stack" }, codeChip(ctx, node), choose), { stacked: true, set: true, reset: () => ctx.set([{ name: "action", args: null }]) })];
+  }
+  const select = h("select", {}, ...BEHAVIORS[a.scope].map(([k, l]) => h("option", { value: k, textContent: l, selected: k === current.kind })));
+  select.onchange = () => {
+    const kind = select.value as Behavior["kind"];
+    const notify = "notify" in current ? current.notify : undefined;
+    if (kind === "set") void write({ kind, column: ctx.columns.find((x) => /status|state|active|published/.test(x)) ?? ctx.columns[0] ?? "status", value: "", notify });
+    else void write({ kind, notify } as Behavior);
+  };
+  const rows = [row("What it does", select, { set: !!node, reset: () => ctx.set([{ name: "action", args: null }, ...(ourFill ? [{ name: "fillForm", args: null }] : [])]), doc: "What happens when the action runs, after its form or confirmation." })];
+  if (current.kind === "set") {
+    const column = h("select", {}, ...ctx.columns.map((x) => h("option", { value: x, textContent: x, selected: x === current.column })));
+    if (!ctx.columns.includes(current.column)) column.prepend(h("option", { value: current.column, textContent: current.column, selected: true }));
+    column.onchange = () => void write({ ...current, column: column.value });
+    // A column cast to an enum takes one of its cases' values.
+    const e = ctx.enums.find((x) => x.class === a.casts[current.column]?.replace(/^\\/, ""));
+    const values = e?.cases.filter((k) => k.value !== null).map((k) => [String(k.value), k.name]) ?? [];
+    const value = values.length
+      ? h("select", {}, ...(values.some(([v]) => v === current.value) ? [] : [h("option", { value: current.value, textContent: current.value || "(choose)", selected: true })]), ...values.map(([v, n]) => h("option", { value: v, textContent: n, selected: v === current.value })))
+      : commitInput(current.value, (v) => void write({ ...current, value: v }), { placeholder: "paid, true, 3", className: "fd-mono" });
+    if (values.length) (value as HTMLSelectElement).onchange = () => void write({ ...current, value: (value as HTMLSelectElement).value });
+    rows.push(row("Column", column), row("Value", value, { doc: e ? `One of ${shortClass(e.class)}'s cases.` : "Numbers, true, false, and null are written as they are; anything else as text." }));
+  }
+  if (current.kind !== "none" && current.kind !== "custom")
+    rows.push(row("Then notify", commitInput(current.notify ?? "", (v) => void write({ ...current, notify: v.trim() || undefined }), { placeholder: "Saved" }), { set: !!current.notify, doc: "A success notification's title, shown after it runs." }));
+  return rows;
 }
 
 /** Rows for methods that take more than a value: they get an editor of their own. */

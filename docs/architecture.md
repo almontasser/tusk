@@ -4322,6 +4322,22 @@ Settings go in with `setProperty`. The components come from `src/filamentgen.ts`
 with the wizard's changes: another field type keeps only the settings that type
 has, as `methodsOf` reports them.
 
+### Page actions and action forms
+
+- **Page actions:** `readRoot(cls, "actions")` reads a page's
+  `getHeaderActions()`, or the older `getActions()`, whose return value is an
+  array: the root's one slot, `actions`. The designer's **Page actions** tab
+  reads the page it shows (`actionsPage`) with the resource's other files, so
+  edits, undo, and the palette work as on the other tabs.
+- **Action forms:** an action's `schema([...])` is a slot like a section's.
+  `modalAction` finds the action that holds the selection, and the canvas draws
+  its modal under the page. While it's open, the palette and the + menus offer
+  fields, and model columns become form fields (`inActionForm`), whatever the tab.
+- **What it does:** `src/filamentactions.ts` writes the closure of
+  `->action(...)` for a behavior and scope (a record, the selected records, or
+  none), and reads it back with `readBehavior`. Anything else is custom and
+  shows as code. The record parameter is typed as the resource's model.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,
