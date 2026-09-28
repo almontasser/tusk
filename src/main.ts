@@ -10,12 +10,16 @@ import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, showBreakpoints, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, xdebugEnv } from "./debug";
-import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, branches, stashChanges, stashes, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, pushBranch, refreshGit, updateProject } from "./git";
+import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { chooseRebaseBase, initRebase } from "./rebase";
+import { initStash, showStashes, stashChanges } from "./stash";
+import { branches, fetchAll, initBranches } from "./branches";
+import { initSync, push, updateProject } from "./sync";
+import { initCommitView, initRepository } from "./commitview";
 import { initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
 import { detectAppAddress } from "./httplaravel";
@@ -181,6 +185,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...changes,
     ...(changes.length ? menuActions("Next Change", "Previous Change") : []),
     "-",
+    ...blameMenu(ed, line, e.event.posx, e.event.posy),
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
     { label: "Copy Reference", keys: symbolsFor(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
@@ -1522,14 +1527,16 @@ const actions: Action[] = [
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
   { label: "Commit…", keys: "Meta+K", run: focusCommit },
-  { label: "Push…", keys: "Meta+Shift+K", run: () => root && pushBranch() },
+  { label: "Push…", keys: "Meta+Shift+K", run: () => root && push() },
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
-  { label: "Branches…", run: branches },
+  { label: "Branches…", run: () => root && branches() },
+  { label: "Fetch", run: () => root && fetchAll() },
+  { label: "Initialize Repository", run: () => initRepository() },
   { label: "Stash Changes…", run: stashChanges },
   { label: "Interactive Rebase…", run: () => root && chooseRebaseBase() },
   { label: "Resolve Conflicts in Merge Tool", run: () => active && openMerge(relative(active)) },
   { label: "Stage Selected Changes (in a diff)", run: stageSelected },
-  { label: "Stashes…", run: stashes },
+  { label: "Stashes…", run: () => root && showStashes() },
   { label: "Worktrees…", run: worktrees },
   { label: "Annotate with Git Blame", run: () => annotate(editor) },
   { label: "Next Change", keys: "Ctrl+Alt+Shift+ArrowDown", run: () => goToChange(editor, 1), editorOnly: true },
@@ -1933,7 +1940,11 @@ initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
 initRebase({ root: () => root, status });
-initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
+initStash({ showView });
+initBranches({ commit: focusCommit, push, update: updateProject });
+initSync({ root: () => root });
+initCommitView({ root: () => root, openFile, push, showHistory: showFileHistory });
+initMerge({ root: () => root, ensureModel, status, openFile, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel, remove) => (remove ? change("rm", "--quiet", "--", rel) : change("add", "--", rel)) });
 initHttpClient({
   root: () => root,
   status,

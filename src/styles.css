@@ -599,6 +599,40 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .commit-buttons { display: flex; gap: 8px; }
 #git-operation { margin: 8px 12px 4px; padding: 8px 10px; border-radius: 6px; background: #e5c07b1f; box-shadow: inset 0 0 0 1px #e5c07b55; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #git-operation span { flex-basis: 100%; }
+.view-tabs { display: flex; gap: 2px; height: 100%; }
+.view-tabs [role="tab"] { position: relative; padding: 0 8px; font-weight: 600; color: var(--muted); }
+.view-tabs [role="tab"]:hover { color: var(--text); }
+.view-tabs [role="tab"][aria-selected="true"] { color: var(--text); }
+.view-tabs [role="tab"][aria-selected="true"]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: var(--accent); }
+#git-commit-pane { flex-grow: 1; display: flex; flex-direction: column; }
+#git-commit-pane[hidden], #git-stashes[hidden] { display: none; }
+#git-stashes { flex-grow: 1; display: flex; flex-direction: column; min-height: 0; }
+.stash-toolbar { display: flex; gap: 2px; padding: 2px 6px; border-bottom: 1px solid var(--border-subtle); }
+#stash-list { flex: 1; overflow: auto; }
+#stash-list .twisty { font-size: 12px; color: var(--muted); margin-left: -6px; }
+#stash-list .stash-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+#stash-list .stash-file { padding-left: 34px; }
+.git-files .buttons .icon-button { width: 22px; height: 20px; }
+#git-changes > #git-files { margin: 0; }
+#git-files .git-group { padding-left: 4px; cursor: default; }
+#git-files .git-group .icon-button { margin-left: auto; }
+#git-files .twisty { font-size: 12px; color: var(--muted); }
+#git-files .git-folder { padding-left: 16px; color: var(--muted); }
+#git-files .git-folder .name { color: var(--text); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+#git-files .git-file[aria-level="2"] { padding-left: 22px; }
+#git-files .git-file[aria-level="3"] { padding-left: 40px; }
+#git-files .git-none { padding: 2px 0 4px 26px; }
+.git-files li.picked { background: var(--selected-inactive); }
+.git-files:focus li.picked { background: color-mix(in srgb, var(--selected) 70%, transparent); }
+#git-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+#git-empty[hidden] { display: none; }
+#git-empty p { margin: 0; }
+#git-empty button { padding: 4px 12px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+#commit:disabled, #commit-push:disabled { opacity: 0.6; cursor: progress; }
+.output-text { margin: 0; padding: 10px 12px; max-height: 50vh; overflow: auto; font: 12px/1.5 var(--mono); white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 8px; -webkit-user-select: text; user-select: text; }
+.push-commits { max-height: 30vh; }
+.push-commit code { flex-shrink: 0; }
+.git-files li.selected .buttons { display: flex; }
 
 /* ==========================================================================
    Find in files
@@ -705,13 +739,37 @@ button.link:hover { text-decoration: underline; }
 #diff-label { margin-right: auto; }
 #diff-editor { flex: 1; min-height: 0; }
 #history-title { font-weight: 600; white-space: nowrap; }
-#history-filter { flex: 1; min-width: 80px; max-width: 380px; height: 26px; }
+#history-filter { flex: 1; min-width: 80px; max-width: 320px; height: 26px; }
+#history header .history-small { width: 110px; min-width: 60px; height: 26px; }
+#history header select { height: 26px; max-width: 180px; }
+#history header [hidden] { display: none; }
 #history header { overflow: hidden; }
 #history header label { color: var(--muted); white-space: nowrap; }
 .history-body { flex: 1; min-height: 0; display: flex; }
 .history-commits { width: 50%; min-width: 0; overflow: auto; }
 #history-list { list-style: none; margin: 0; padding: 0; }
-#history-list li { padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); }
+#history-list li { padding: 0 12px 0 6px; height: 40px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+#history-list li.muted { display: block; padding: 10px 12px; height: auto; }
+#history-list .text { min-width: 0; flex: 1; padding: 4px 0; }
+#history-list .graph { flex-shrink: 0; overflow: visible; }
+#history-list .graph path { fill: none; stroke-width: 1.6; }
+#history-list .graph circle { stroke: var(--panel); stroke-width: 1.5; }
+#history-list .graph circle.merge { fill: var(--panel) !important; stroke-width: 2; }
+.graph .lane-0 { stroke: var(--blue); fill: var(--blue); }
+.graph .lane-1 { stroke: var(--green); fill: var(--green); }
+.graph .lane-2 { stroke: var(--orange); fill: var(--orange); }
+.graph .lane-3 { stroke: var(--purple); fill: var(--purple); }
+.graph .lane-4 { stroke: var(--red); fill: var(--red); }
+.graph .lane-5 { stroke: var(--yellow); fill: var(--yellow); }
+.graph circle.merge.lane-0 { stroke: var(--blue); } .graph circle.merge.lane-1 { stroke: var(--green); } .graph circle.merge.lane-2 { stroke: var(--orange); }
+.graph circle.merge.lane-3 { stroke: var(--purple); } .graph circle.merge.lane-4 { stroke: var(--red); } .graph circle.merge.lane-5 { stroke: var(--yellow); }
+button.link { border: 0; background: none; padding: 0; color: var(--blue); cursor: pointer; }
+button.link:hover { text-decoration: underline; }
+.commit-popup { position: fixed; z-index: 1000; width: 420px; max-height: 60vh; overflow: auto; padding: 10px 12px; background: var(--panel); border: 1px solid var(--popover-border); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.commit-popup-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.commit-popup-head .icon-button { margin-left: auto; }
+.commit-popup .message { margin: 0; white-space: pre-wrap; font: 12px var(--mono); max-height: 160px; overflow: auto; -webkit-user-select: text; user-select: text; }
+.commit-popup .history-actions button { display: inline-flex; align-items: center; gap: 4px; }
 #history-list li:hover { background: var(--hover); }
 #history-list li.selected { background: var(--selected); }
 #history-list .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1362,6 +1420,25 @@ button.link:hover { text-decoration: underline; }
 .merge-titles { display: grid; grid-template-columns: 1fr 1.2fr 1fr; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border-subtle); color: var(--muted); font-size: 12px; }
 .merge-titles span { padding: 4px 12px; }
 .merge-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr 1fr; }
+.merge-body { flex: 1; min-height: 0; display: flex; }
+.merge-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.merge-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); color: var(--muted); z-index: 2; }
+.merge-loading[hidden] { display: none; }
+#merge-files { width: 220px; flex-shrink: 0; overflow: auto; list-style: none; margin: 0; padding: 4px 0; border-right: 1px solid var(--border); background: var(--panel); }
+#merge-files[hidden] { display: none; }
+#merge-files li { display: flex; align-items: center; gap: 6px; height: var(--row); padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+#merge-files li:hover { background: var(--hover); }
+#merge-files li.current { font-weight: 600; }
+#merge-files li .codicon-check { color: var(--green); }
+#merge-files li .codicon-warning { color: var(--red); }
+#merge-files li.done .name { color: var(--muted); }
+#merge-deleted { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #e5c07b1f; border-bottom: 1px solid var(--border-subtle); }
+#merge-deleted[hidden] { display: none; }
+#merge-deleted span { margin-right: auto; }
+#merge-deleted button { padding: 3px 10px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+#merge-deleted button:hover { background: var(--hover); }
+#merge header button:disabled { opacity: 0.5; }
+.merge-current-conflict { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .merge-panes > div { min-width: 0; min-height: 0; }
 .merge-panes > div + div { border-left: 1px solid var(--border); }
 .merge-ours { background: #3574f026; }
@@ -1393,6 +1470,11 @@ button.link:hover { text-decoration: underline; }
 .rebase-step.action-drop .subject { text-decoration: line-through; color: var(--faint); }
 .rebase-step.action-squash .subject, .rebase-step.action-fixup .subject { color: var(--muted); padding-left: 16px; }
 .rebase-step.command { color: var(--muted); }
+.rebase-step .grip { padding-top: 5px; color: var(--faint); cursor: grab; }
+.rebase-step.dragging { opacity: 0.5; }
+.rebase-step.drop-before { box-shadow: inset 0 2px var(--accent); }
+.rebase-step.drop-after { box-shadow: inset 0 -2px var(--accent); }
+#rebase .buttons .dialog-hint { margin-right: auto; font-size: 11.5px; color: var(--faint); align-self: center; }
 .rebase-step .command-name { width: 170px; flex-shrink: 0; padding: 3px 0 0 8px; }
 #rebase .buttons { display: flex; justify-content: flex-end; gap: 8px; }
 #rebase .buttons button { padding: 4px 16px; }

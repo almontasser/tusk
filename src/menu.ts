@@ -43,7 +43,7 @@ const LAYOUT: [string, Entry[]][] = [
     ["Composer", ["Composer: Require Package…", "Composer: Update All"]],
     ["Laravel", ["Laravel Tinker", "Routes"]],
     "-", "Choose Docker Service for Commands…", "Restart Language Servers", "Reindex Project", "Index Exclusions…", "Share Project Settings in tusk.json…"]],
-  ["Git", ["Commit…", "Push…", "Update Project", "-", "Branches…", "Worktrees…", "Stash Changes…", "Stashes…", "Interactive Rebase…", "Resolve Conflicts in Merge Tool", "Stage Selected Changes (in a diff)", "-",
+  ["Git", ["Commit…", "Push…", "Update Project", "Fetch", "-", "Branches…", "Worktrees…", "Stash Changes…", "Stashes…", "Interactive Rebase…", "Resolve Conflicts in Merge Tool", "Stage Selected Changes (in a diff)", "-", "Initialize Repository", "-",
     "Annotate with Git Blame", "Show File History", "Copy Remote URL", "-", "Create Pull Request…"]],
   ["Window", [native("Minimize"), native("Maximize")]],
   ["Help", ["Find Action", "Keyboard Shortcuts", "Keymap…"]],

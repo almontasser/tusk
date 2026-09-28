@@ -38,6 +38,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
+| Git | Push, update, and fetch can't answer a password or passphrase prompt; when one is needed, the message offers to run the command in a terminal tab (`src/sync.ts`). The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
 | Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
@@ -310,7 +311,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | F8, F7, ⇧F8 | Step over, step into, step out (when not paused, F8 and ⇧F8 go to the next and previous problem across files) |
 | ⌘K | Commit |
 | ⌘⇧K | Push |
-| ⌘T | Update the project (`git pull`) |
+| ⌘T | Update the project (pull, merging or rebasing) |
 | ⌘1 | Show the project tree |
 | ⌥F1 | Select the current file in the project tree (also the target button above the tree) |
 | ⌘\ | Split the editor to the right, or move to the next pane |
@@ -349,7 +350,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, Terminal, and Debugger. A setting that depends on another, such as the AI model,
+AI, Spelling, Terminal, Debugger, and Git. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -386,6 +387,8 @@ shows only when it applies. Changes apply immediately and are saved in
 | Debugger: pause at the first line of each script | Off |
 | Debugger: show variable values in the editor while paused | On |
 | Debugger: IDE key (`XDEBUG_SESSION`) and the host PHP in Docker connects to | `1`, `host.docker.internal` |
+| Git: how Update Project brings in commits (merge, rebase, or git's `pull.rebase`) | Merge |
+| Git: group changed files by folder in the Commit view | Off |
 
 ### Vim emulation
 
@@ -1833,13 +1836,48 @@ Anything says so and offers to run it in a terminal to see the whole error.
 
 ## Git
 
-The **Commit** tab in the sidebar lists staged changes and unstaged changes,
-including new files. Click a file to see its diff. Hover over a file for
-buttons to open, stage, unstage, or discard it. The message box sits at the
-bottom of the view, and stays in view while a long list of changes scrolls.
-Write a message and press ⌘⏎ or click **Commit**. **Commit and Push** also pushes, and sets the upstream
-branch on the first push. With nothing staged, **Commit** offers to stage all
-the changes and commit them.
+The **Commit** tab in the sidebar lists merge conflicts, staged changes, and
+unstaged changes, including new files, as a tree. Click a file, or press ⏎, to
+see its diff; F4 opens the file. Click a group to collapse it. The folder
+button in the header groups files by folder. Select several files with ⌘-click
+or ⇧-click, or ⇧↑ and ⇧↓, and ⌘A selects every file. Then act on all of them:
+Space stages or unstages, ⌥⌘Z rolls back, and right-click (or ⇧F10) shows every
+action. Hover over a file for buttons to open, stage, unstage, or roll it back.
+**Rollback** asks first: a staged file goes back to the last commit, an
+unstaged one to its staged version, and a new file goes to the Trash.
+
+The message box sits at the bottom of the view, and stays in view while a long
+list of changes scrolls. Write a message and press ⌘⏎ or click **Commit**. The
+buttons are off while the commit runs, and the status bar shows progress while
+git hooks run. If a hook or git refuses the commit, the message offers **Show
+Details** with the full output. **Commit and Push** opens the Push dialog after
+committing. With nothing staged, **Commit** offers to stage all the changes and
+commit them.
+
+If the folder isn't a git repository, the Commit view says so and offers
+**Initialize Repository** (also in the **Git** menu). If git isn't installed,
+or can't read the folder, it says that instead, with **Try Again**.
+
+### Push, update, and fetch
+
+**Push…** (⌘⇧K) opens the Push dialog: the commits that will go, the remote
+and branch to push to, and **Force push (with lease)**, which overwrites the
+remote branch unless someone pushed to it since you last fetched. The first
+push of a branch sets its upstream branch. Press ⌘⏎ or click **Push**.
+
+**Update Project** (⌘T) pulls the upstream branch, merging by default; the
+**Git** settings can make it rebase, or follow git's `pull.rebase`. Local
+changes are stashed and restored around it.
+
+Push, update, and fetch run in the background with progress and **Cancel** in
+the status bar, and say what happened, such as "Pushed 3 commits to
+origin/main." When they can't finish, the message says why and offers the next
+step:
+
+- The remote has commits you don't: **Update and Push** updates, then pushes.
+- The update stopped for conflicts: **Resolve** opens the merge tool.
+- Git needs a password or passphrase: **Run in Terminal** runs the command in a
+  terminal tab, where you can type it.
 
 To stage part of a file, open its diff from **Changes** and click **Stage
 Selected**:
@@ -1865,11 +1903,25 @@ last changed it, when, and the commit message. To show the commit, age, and
 author of every line in place of line numbers, run **Annotate with Git Blame**
 from ⌘⇧A. Run it again to hide them.
 
-Press ⌘9 for the **Git Log** in the bottom panel: the commits of the current branch, or of every
-branch, with branch and tag labels. Filter them by message, author, hash, or
-branch name. Select a commit to see its message and changed files, and click a
-file to see its diff against the previous commit. From a commit, you can copy
-its hash, check it out, create a branch at it, cherry-pick it onto the current
+Clicking an annotation shows its commit in a popup: the message, author,
+date, and changed files, with **Show in Git Log**, **Show Diff**, and **Copy
+Hash**. Click a file in the popup for its diff in that commit. Right-click an
+annotation for the same actions.
+
+Press ⌘9 for the **Git Log** in the bottom panel: the commits of the current
+branch, with branch and tag labels and a graph of branches and merges. The
+header's filters search through git, not just the loaded commits: type in the
+search box to find commits by message or hash, choose a branch or **All
+branches**, and filter by author or by path. When nothing matches, the log
+says so, with **Clear filters**. The log loads 300 commits at a time; **Load
+More** at the end loads more. The graph shows when no filter is set.
+
+Use ↑ and ↓ to move through the commits; the details follow the selection.
+Press ⏎ for the commit's diff, → to move to its changed files, and ⌘C to copy
+its hash. In the details, click a file, or press ⏎ on it, to see its diff
+against the previous commit, and move to the commit's other files with the
+arrows in the diff's header. From a commit, you can show its diff, copy its
+hash, check it out, create a branch at it, cherry-pick it onto the current
 branch, or revert it. To see the commits that changed one file, run **Show File
 History**, or right-click the file in the tree and choose **Show History**. File
 history follows renames.
@@ -1901,7 +1953,9 @@ To rewrite recent commits, open a commit in the Git Log and choose
 choose the commit to rebase onto. The commits after it are listed, oldest
 first. For each, choose **Pick**, **Reword** (and edit its message), **Edit**
 (stop at it to change its files), **Squash into previous**, **Fixup** (squash
-and discard its message), or **Drop**, and use the arrows to reorder them.
+and discard its message), or **Drop**. Reorder them by dragging, with the
+arrows, or with ⌥↑ and ⌥↓. As in git's own list, P, R, E, S, F, and D set the
+selected commit's action.
 If the commits include merges, the merges are kept: the list also shows git's
 **Label**, **Reset**, and **Merge** steps, which rebuild each merged branch and
 merge it again, and they stay where they are.
@@ -1917,10 +1971,22 @@ of them, even single lines from the diff, commit, and repeat, then click
 
 ### Stash
 
-Run **Stash Changes…** (from ⌘⇧A or the branch menu) to set your uncommitted
-changes aside, optionally with a message and including new files. **Stashes…**
-lists them: choose one to **Apply** it, **Pop** it (apply, then delete), **Drop**
-it, or **Show Files** to see each file's diff.
+Run **Stash Changes…** (from ⌘⇧A, the **Git** menu, or the **+** in the
+**Stashes** tab) to set your uncommitted changes aside. The dialog takes an
+optional message, and has two options: **Keep staged changes** leaves what you
+staged in place, and **Include untracked files** stashes new files too.
+
+The **Stashes** tab of the Commit tool window (or **Stashes…** from ⌘⇧A) lists
+your stashes, newest first, with the branch each was made on and its age.
+Click a stash, or press →, to list its changed files, and click a file, or
+press ⏎, to see its diff. ⏎ on a stash opens the whole stash's diff: move
+between its files with the arrows in the diff's header, or ⌥⌘← and ⌥⌘→.
+Hover over a stash for **Apply** (keep the stash), **Pop** (apply, then drop
+it), and **Drop**, or right-click it for these plus **Unstash as New
+Branch…**, which checks out a new branch at the commit the stash was made on
+and pops the stash there. Press ⌫ to drop the selected stash; dropping asks
+first. If a stash applies with conflicts, it's kept, and the message offers
+the merge tool.
 
 ### Worktrees
 
@@ -1946,20 +2012,60 @@ and theirs on the right, each with the lines it changed from the common base
 highlighted. The middle pane is the file itself: above each conflict, choose
 **Accept Yours**, **Accept Theirs**, or **Accept Both**, or edit it directly.
 Where one version has lines the others don't, the others show striped blank
-space, so the lines all three share stay side by side. **Accept All Yours** and **Accept All Theirs** resolve every
-remaining conflict at once, and **Mark Resolved** saves and stages the file
-when no conflicts are left. The panes scroll together. The same links appear when a conflicted file is
-open in a tab, and saving it with no conflicts left also marks it resolved.
+space, so the lines all three share stay side by side. The panes scroll
+together.
+
+The header counts the conflicts left and marks the one at the cursor. Move
+between conflicts with the arrows or F7 and ⇧F7. **Accept Left** (⌥⇧←),
+**Accept Right** (⌥⇧→), and **Accept Both** resolve the conflict at the cursor
+and move to the next. **Apply Non-Conflicting Changes** merges every conflict
+whose two sides changed different lines, even neighboring ones, and says how
+many are left for you. The **⋯** menu has **Accept All Yours** and **Accept All
+Theirs**. **Mark Resolved** saves and stages the file when no conflicts are
+left, then opens the next conflicted file. When several files conflict, a list
+on the left shows each one, with a check mark once it's resolved.
+
+If one side deleted the file and the other changed it, the pane titles say
+which, and a bar offers **Keep File** or **Delete File**.
+
+The same links appear when a conflicted file is open in a tab, and saving it
+with no conflicts left also marks it resolved.
 For a merge, the commit message is filled in, so you can click **Commit** to
 finish.
 
-The branch name in the title bar shows commits ahead (↑) and behind (↓) the
-upstream branch. Click it for a dropdown with pull, push, and fetch at the top,
-then the current branch, local branches, and remote branches, most recently
-committed first. Choose a branch to check it out, or type a name to create one.
-The **Commit** view's header also has fetch, pull, and push buttons. Pull, push,
-and fetch run in a terminal tab, so you can answer credential prompts. Running one
-again reuses its tab once the last run has finished.
+### Branches
+
+The branch name in the title bar, and again at the right of the status bar,
+shows commits ahead (↑) and behind (↓) the upstream branch. Click either, or
+run **Branches…** from ⌘⇧A, for the branches popup. Type to search. At the top
+are **Update Project…**, **Commit…**, **Push…**, **Fetch**, **New Branch…**,
+**Checkout Tag or Revision…**, the stash actions, and **Worktrees…**. Below them
+are the local branches, current first, then the remote branches, each with its
+ahead and behind counts, its upstream branch, and the age of its last commit.
+Type a name that isn't a branch to create it.
+
+Choose a branch for its actions. Press a number to pick one:
+
+- **Checkout.** A remote branch gets a local branch that tracks it. If your
+  changes would be overwritten, the message offers **Smart Checkout**, which
+  stashes them, checks out, and brings them back.
+- **New Branch from…** creates a branch at that branch and checks it out.
+- **Checkout and Rebase onto** the current branch.
+- **Compare with** the current branch lists the commits on either side in the
+  Git Log. **Show Diff with** the current branch lists the files that differ,
+  as a diff you can step through.
+- **Rebase** the current branch onto it, or **Merge** it into the current
+  branch. If that stops for conflicts, the message offers the merge tool.
+- **Push…**, **Rename…**, **Set Upstream Branch…** (or **Track Another
+  Branch…**), and **Stop Tracking**.
+- **Delete…**. A branch with commits that aren't merged asks before a force
+  delete, and the message after deleting offers **Restore**. Deleting a remote
+  branch deletes it on the remote, after asking.
+
+**Fetch** (the popup, the **Git** menu, or the Commit view's header) fetches
+every remote, prunes branches deleted there, and says how many branches
+changed. Long operations show progress in the status bar, with **Cancel** for
+the ones that talk to a remote.
 
 ## Pull requests
 
@@ -2549,7 +2655,11 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/layout.ts` | The window's layout: the sidebar and panel sizes, the full-width bottom panel, and maximizing it |
 | `src/splitter.ts` | Resizable splits, with the keyboard, reset, limits, and saved sizes |
 | `src/projectstate.ts`, `src/projectstatedata.ts` | Per-project settings, in `tusk.json` when shared or else on this Mac |
-| `src/git.ts` | Commit view, diff view, partial staging, branches, and stash |
+| `src/git.ts` | Commit view, diff view, partial staging, and branches |
+| `src/stash.ts` | The Stashes tab and the Stash Changes dialog |
+| `src/branches.ts` | The branches popup, branch actions, and fetch |
+| `src/commitview.ts` | The Commit view's file tree, bulk actions, and commit |
+| `src/sync.ts` | The Push dialog and Update Project |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |
 | `src/merge.ts` | The three-pane merge tool |

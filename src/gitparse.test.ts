@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -218,4 +218,57 @@ test("links lines on a remote's web host", () => {
   assert.equal(url("ssh://git@gitlab.example.com:2222/group/sub/shop"), "https://gitlab.example.com/group/sub/shop/blob/abc123/app/My%20File.php#L3");
   assert.equal(url("git@bitbucket.org:acme/shop.git", 5), "https://bitbucket.org/acme/shop/src/abc123/app/My%20File.php#lines-3:5");
   assert.equal(url("/Users/me/shop.git"), "");
+});
+
+test("parses stashes with and without a message", () => {
+  const out = ["stash@{0}\x1fa1\x1f100\x1fOn main: half-done login", "stash@{1}\x1fb2\x1f90\x1fWIP on feature/x: 1a2b3c4 Add Post model", ""].join("\n");
+  assert.deepEqual(parseStashList(out), [
+    { ref: "stash@{0}", hash: "a1", time: 100, branch: "main", message: "half-done login" },
+    { ref: "stash@{1}", hash: "b2", time: 90, branch: "feature/x", message: "WIP: Add Post model" },
+  ]);
+});
+
+test("parses local and remote branches with tracking", () => {
+  const out = [
+    "refs/heads/main\t*\torigin/main\tahead 2, behind 1\t200",
+    "refs/heads/origin/x\t \t\t\t150",
+    "refs/heads/old\t \torigin/old\tgone\t100",
+    "refs/remotes/origin/HEAD\t \t\t\t200",
+    "refs/remotes/origin/main\t \t\t\t190",
+    "",
+  ].join("\n");
+  const refs = parseRefs(out);
+  assert.deepEqual(refs.map((r) => [r.name, r.remote, r.current]), [["main", false, true], ["origin/x", false, false], ["old", false, false], ["origin/main", true, false]]);
+  assert.deepEqual([refs[0].upstream, refs[0].ahead, refs[0].behind, refs[2].gone, refs[1].upstream], ["origin/main", 2, 1, true, undefined]);
+});
+
+test("lays out a commit graph with a branch and a merge", () => {
+  // m merges f into c; f and c both come from a.
+  const rows = graphRows([
+    { hash: "m", parents: ["c", "f"] },
+    { hash: "f", parents: ["a"] },
+    { hash: "c", parents: ["a"] },
+    { hash: "a", parents: [] },
+  ]);
+  assert.deepEqual(rows.map((r) => r.col), [0, 1, 0, 0]);
+  // The merge opens lane 1 for f.
+  assert.deepEqual(rows[0].lines.filter((l) => l.y1 === "mid").map((l) => l.to), [0, 1]);
+  // c's row passes lane 1 (waiting for a) straight through.
+  assert.ok(rows[2].lines.some((l) => l.from === 1 && l.to === 1 && l.y1 === "top" && l.y2 === "bottom"));
+  // a ends both lanes: two lines come in, none go out.
+  assert.deepEqual(rows[3].lines.map((l) => [l.from, l.to, l.y1]), [[0, 0, "top"], [1, 0, "top"]]);
+  assert.equal(rows[3].width, 2);
+});
+
+test("merges conflicts whose sides changed different lines", () => {
+  const base = ["a", "b", "c", "d"];
+  assert.deepEqual(resolveSimple(base, ["A", "b", "c", "d"], ["a", "b", "c", "D"]), ["A", "b", "c", "D"]);
+  // Neighboring lines merge.
+  assert.deepEqual(resolveSimple(base, ["a", "B", "c", "d"], ["a", "b", "C", "d"]), ["a", "B", "C", "d"]);
+  // One side unchanged, or both the same, takes the other.
+  assert.deepEqual(resolveSimple(base, base, ["x"]), ["x"]);
+  assert.deepEqual(resolveSimple(base, ["x"], ["x"]), ["x"]);
+  // The same line changed two ways, or two insertions at one place, stay conflicts.
+  assert.equal(resolveSimple(base, ["a", "B1", "c", "d"], ["a", "B2", "c", "d"]), null);
+  assert.equal(resolveSimple(base, ["a", "x", "b", "c", "d"], ["a", "y", "b", "c", "d"]), null);
 });

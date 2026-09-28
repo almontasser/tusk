@@ -2393,8 +2393,10 @@ While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for examp
 ### Commands
 
 `src/git.ts` runs `git` through the `run_capture` command in the project
-folder. Commands that can prompt for credentials (`pull`, `push`, and `fetch`)
-run in terminal tabs instead. `src/gitparse.ts` parses the machine-readable
+folder. `pull`, `push`, and `fetch` run through `gitOutput` (see
+[Commands with messages](#commands-with-messages)) with credential prompts off,
+and a failure that needs a password offers to run the command in a terminal
+tab. `src/gitparse.ts` parses the machine-readable
 output, and `src/gitparse.test.ts` covers it:
 
 | Parser | Input |
@@ -2412,9 +2414,34 @@ terminal show up too.
 
 ### Commit view and diffs
 
-The commit view splits files by `git status` letter: a file with an index
-letter is staged, and a file with a working tree letter has unstaged changes.
-A file can be in both lists.
+`src/commitview.ts` draws the Commit view's files as one tree (`listNav`):
+group rows for conflicts, staged, and unstaged files, optional folder rows, and
+file rows keyed `<group>:<path>`. It splits files by `git status` letter: a
+file with an index letter is staged, and a file with a working tree letter has
+unstaged changes. A file can be in both groups. `listNav` moves one cursor; the
+view keeps its own set of picked rows for multi-select, updated by ⌘ and ⇧
+clicks and by ⇧ with the arrow keys (a capturing keydown listener notes ⇧
+before `listNav` moves). Bulk actions take the picked rows when the row acted
+on is one of them.
+
+If `git status` fails, `gitStatusError` keeps git's message, so the empty view
+tells "not a git repository" (with **Initialize Repository**) from git missing
+or a folder git doesn't trust.
+
+A commit runs through `gitOutput` under `withProgress`, with the buttons off
+until it ends, so a double click can't commit twice, and a failing hook's
+output is kept for **Show Details**.
+
+### Push and update
+
+`src/sync.ts` has the Push dialog and Update Project. The dialog lists
+`git log <upstream>..HEAD`, or `HEAD --not --remotes` for a branch with no
+upstream, and pushes `HEAD:refs/heads/<branch>` with `--porcelain`, `-u` for a
+first push, and optionally `--force-with-lease`. `rejected` and `authFailed`
+read git's output to choose the next step. Update runs
+`git pull --autostash` with `--no-rebase` or `--rebase` from the
+`gitUpdateMethod` setting, and counts the new commits from HEAD before and
+after.
 
 The diff view is a Monaco diff editor in an editor tab, which each new diff
 reuses. A staged change compares `HEAD` with the index, and an
@@ -2483,7 +2510,25 @@ stops read-only commands from writing the index and breaks the loop.
 `src/history.ts` shows the log as a bottom panel tab (`showPanelView`), as
 PhpStorm does, so the editor tabs stay in view. It
 reads `git log` in pages of 300 with a format of unit-separated fields
-(`LOG_FORMAT`), parsed by `parseLog`. File history adds `--follow` to track
+(`LOG_FORMAT`), parsed by `parseLog`. The header's filters become `git log`
+arguments, so they search the whole history: `--grep` with
+`--fixed-strings --regexp-ignore-case` for the text, `--author`, a branch or
+`--all`, and a path after `--`. Text that looks like a hash also runs
+`git log -1 <text>^{commit}`, and that commit goes first. A counter drops the
+results of a search that a newer one replaced.
+
+Without filters, the list has a branch graph. `graphRows` in `gitparse.ts`
+lays it out from each commit's parents: every lane waits for a commit, a
+commit takes the lane that waits for it and hands it to its first parent, and
+merged parents join a lane that waits for them or take a free one. Lanes don't
+shift, so lines that pass a row are straight, and each row is its own small
+SVG. The graph needs children before parents, so the log runs with
+`--date-order` while it shows; the default order breaks that when commits share
+a timestamp. Filters leave gaps in the parents, so the graph hides then.
+
+Clicking a blame annotation (a `GUTTER_LINE_NUMBERS` mouse target while the
+editor is annotated) opens `showCommitPopup` with the commit's message and
+files. `blameMenu` gives the gutter's context menu the same actions. File history adds `--follow` to track
 renames; `--follow` accepts only one file, so a folder's history runs without
 it.
 
@@ -2556,6 +2601,14 @@ working tree doesn't stop it. Hooks are off for both commands.
 `rebaseTodo` writes back unchanged. Those rows can't move, and a squash or
 fixup must follow a commit or a merge, not a label or reset.
 
+The dialog's list uses `listNav`. Each step keeps a key as it moves, so the
+selection follows it. ⌥↑ and ⌥↓ move a commit, and a letter sets its action,
+in a capturing listener that runs before `listNav`'s type-ahead. Drag and drop
+uses the HTML drag events, dropping before or after a row by which half the
+pointer is over. Merge commands (label, reset, merge) never move, and no commit
+moves past one. Building the merges list runs under `withProgress`, since it
+checks out a temporary worktree.
+
 An `edit` step stops the rebase with the commit applied. git then writes
 `rebase-merge/amend` with the commit's hash, which `detectOperation` reads to
 tell an edit stop from a conflict. git refuses `--continue` while changes are
@@ -2573,11 +2626,40 @@ itself refuses to continue until they're committed).
 
 ### Stash
 
-Stash actions use the palette. **Stash Changes…** runs `git stash push`, with
-`--include-untracked` as a second choice. **Stashes…** reads `git stash list`
-and offers apply, pop, drop, and show files for the chosen stash. A stashed
-file's diff compares the stash's first parent (the commit it was made on) with
-the stash; untracked files come from the stash's third parent.
+`src/stash.ts` draws the **Stashes** tab of the Commit tool window, a tree with
+`listNav`. It reads `git stash list --format=%gd%x1f%H%x1f%ct%x1f%gs`
+(`parseStashList` takes the branch and message from the reflog subject) and
+keys rows by commit hash, since `stash@{n}` refs shift when an older stash is
+dropped. A stash's files come from
+`git stash show --include-untracked --name-status -z`, read once per hash
+because a stash never changes. A stashed file's diff compares the stash's first
+parent (the commit it was made on) with the stash; untracked files come from
+the stash's third parent. The tab reloads after each git refresh while it's
+shown (`refreshListeners` in `git.ts`), so stashes made in a terminal appear.
+
+Apply, pop, and unstash as a branch (`git stash branch`) run through
+`gitOutput`, which returns git's combined output and exit code instead of
+failing with standard error only, so a conflicting apply can say so and offer
+the merge tool.
+
+### Diffs of several files
+
+`showDiffs` in `git.ts` shows one file of a list, such as a stash's or a
+commit's files, with a file picker and previous and next buttons (⌥⌘← and
+⌥⌘→) in the diff's header. Each file loads when you move to it, under
+`withProgress`, so a slow `git show` shows a spinner rather than nothing.
+
+### Commands with messages
+
+`run_capture` returns standard output on success and standard error on
+failure, so a command's messages are lost either way for commands such as
+`push`, whose news goes to standard error, or `stash apply`, which reports
+conflicts on standard output and fails. `gitOutput` runs git through
+`/bin/sh` with `2>&1` and appends the exit code, and sets
+`GIT_TERMINAL_PROMPT=0`, since no terminal can answer a credential prompt.
+It writes git's process ID to a file in the app cache, so an aborted signal
+can `kill` it: Tauri commands can't be aborted, and this avoids a Rust
+command for it.
 
 ### Worktrees
 
@@ -2633,6 +2715,24 @@ copies one position to the others, with `ScrollType.Immediate` (a smooth scroll
 fires its events after the `syncing` guard is released and would scroll the
 panes back). The zones are recomputed 150 ms after the result changes.
 
+The view first shows a loading cover and a spinner while the three `git show`
+calls and `git ls-files -u` run. A missing stage 2 or 3 in `ls-files -u` means
+that side deleted the file, which the titles and a bar with **Keep File**
+(`git add`) and **Delete File** (`git rm`) show.
+
+**Apply Non-Conflicting Changes** runs `resolveSimple` in `gitparse.ts` on each
+conflict: it diffs each side against the base and applies both sets of changes
+when no two overlap or insert at the same place. The base comes from the
+block's diff3 section, or, for the default conflict style, from
+`git merge-file -p --diff3` run on the three stages in the app cache, matched
+to the file's conflicts by the text of both sides. All the merges go in as one
+undoable edit.
+
+The list of conflicted files on the left is the files `git status` still
+reports as conflicted, plus those resolved in the tool since, until none are
+left. **Mark Resolved** reports a failed save or `git add` and keeps the file
+open; otherwise it moves to the next conflicted file.
+
 The result pane turns off CodeLens and draws its own **Accept** buttons as
 one-line view zones above each conflict, because a CodeLens takes height the
 alignment can't count. Monaco draws its text layer above view zones, so a click
@@ -2640,11 +2740,25 @@ never reaches the buttons; `onMouseDown` reports a view-zone target with its
 id, and the button under the pointer is found by position.
 ### Branches
 
-The branch picker reads `git for-each-ref` with full ref names, which tell
-local branches (`refs/heads/`) from remote ones (`refs/remotes/`) even when a
-local name contains a slash. It sorts by `-committerdate`, then puts the
-current branch first and local branches before remote ones. Checking out a
-remote branch runs `git checkout --track`.
+`src/branches.ts` draws the branches popup with the palette, anchored below
+the title bar's branch name or above the status bar's. It reads
+`git for-each-ref` in `REF_FORMAT` (`parseRefs` in `gitparse.ts`), with full
+ref names, which tell local branches (`refs/heads/`) from remote ones
+(`refs/remotes/`) even when a local name contains a slash, and
+`%(upstream:track)` for the ahead and behind counts. It sorts by
+`-committerdate`, then puts local branches before remote ones and the current
+branch first. A branch's actions open as a second, numbered popup, as
+PhpStorm's submenu does; the palette has no submenus.
+
+Actions that change the repository run through `gitTask` in `git.ts`:
+`gitOutput` under `withProgress`, then a refresh. A failure shows git's
+message, with **Show Details** for output longer than a line; a failure that
+left conflicted files offers the merge tool instead. Checking out a remote
+branch runs `git checkout --track`, or checks out the local branch of the same
+name. When checkout fails, `git checkout --dry-run` tells whether local changes
+were in the way, and only then offers Smart Checkout (stash, check out, pop).
+Delete tries `git branch -d` and asks before `-D` when git says the branch
+isn't fully merged; the hash it had goes into a **Restore** action.
 
 ### Pull requests
 
@@ -5204,3 +5318,40 @@ output, whose format changes with Collision's versions, every test run also
 writes a TeamCity log, which PHPUnit 9 through 11 and Pest 1 through 3 write
 the same way, with full values and stacks. The JUnit report stays the source
 of the results and times, since the log has no data sets' names in Pest.
+
+### 2026-09-28: Stashes in a tab of the Commit tool window
+
+PhpStorm keeps stashes in a tab beside the commit view, and so does Tusk,
+rather than the palette pickers it had: a list shows each stash's branch and
+age, and its files and diffs, at a glance. `stash@{n}` names shift, so rows
+are keyed by the stash's commit hash, and actions use the ref only when they
+run.
+
+### 2026-09-28: Branch actions in a second popup
+
+PhpStorm's branches popup opens a submenu per branch. The palette has no
+submenus, and a custom popup would need its own search, keyboard, and
+placement, so choosing a branch opens a numbered popup of its actions at the
+same place. It keeps the popup's search and keys, and a number picks an action.
+
+### 2026-09-28: Push, pull, and fetch in the background
+
+They ran in terminal tabs so you could answer credential prompts, but then a
+rejected push or a conflicting pull never reached the UI. Most setups
+authenticate without a prompt (the macOS keychain helper, an SSH agent), so
+they now run in the background with `GIT_TERMINAL_PROMPT=0`, and only a failure
+that needed a prompt falls back to a terminal tab.
+
+### 2026-09-28: The log searches through git
+
+The log's filter used to match the loaded page of commits only, so an older
+commit never matched. Each filter now maps to a `git log` option and runs a new
+query, as PhpStorm's does, with pages of 300 still loading on demand.
+
+### 2026-09-28: Resolve simple conflicts in the app, not with git's options
+
+git's `merge-file` and `-X` strategies resolve a conflict for a whole side, not
+by merging two sides that changed different lines of one block. The merge tool
+therefore merges such blocks itself (`resolveSimple`), on request, as
+PhpStorm's magic wand does, and leaves blocks where both sides changed the same
+lines.

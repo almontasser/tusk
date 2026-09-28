@@ -83,6 +83,12 @@ export function age(seconds: number, now = Date.now() / 1000): string {
   return "now";
 }
 
+/** A relative age for a sentence: "3d ago", or "just now". */
+export const ago = (seconds: number, now = Date.now() / 1000) => {
+  const a = age(seconds, now);
+  return a === "now" ? "just now" : `${a} ago`;
+};
+
 /**
  * Compares two versions of a file line by line and returns the changed ranges of the new
  * version, like `parseHunks`. Trims the common start and end, then runs a longest common
@@ -485,4 +491,136 @@ export function remoteLineUrl(remote: string, commit: string, path: string, star
   const file = path.split("/").map(encodeURIComponent).join("/");
   if (hostName.includes("bitbucket")) return `https://${hostName}/${repo}/src/${commit}/${file}#lines-${start}${end > start ? `:${end}` : ""}`;
   return `https://${hostName}/${repo}/blob/${commit}/${file}#L${start}${end > start ? `-L${end}` : ""}`;
+}
+
+export type Stash = { ref: string; hash: string; branch: string; message: string; time: number };
+
+/**
+ * Parses `git stash list --format=%gd%x1f%H%x1f%ct%x1f%gs`. The reflog subject is "On <branch>: <message>" for a
+ * stash with a message and "WIP on <branch>: <hash> <subject>" for one without.
+ */
+export function parseStashList(out: string): Stash[] {
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [ref, hash, time, subject = ""] = line.split("\x1f");
+      const m = subject.match(/^(WIP on|On) ([^:]+): (.*)$/);
+      const message = !m ? subject : m[1] === "On" ? m[3] : `WIP: ${m[3].replace(/^[0-9a-f]{7,40} /, "")}`;
+      return { ref, hash, time: Number(time), branch: m?.[2] ?? "", message };
+    });
+}
+
+export type Ref = {
+  /** Short name, such as `main` or `origin/main`. */
+  name: string;
+  remote: boolean;
+  current: boolean;
+  /** The upstream branch of a local branch, such as `origin/main`. */
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  /** The upstream branch is gone from the remote. */
+  gone: boolean;
+  /** Commit time, in Unix seconds. */
+  time: number;
+};
+
+/** The `git for-each-ref` format that `parseRefs` reads. */
+export const REF_FORMAT = "--format=%(refname)%09%(HEAD)%09%(upstream:short)%09%(upstream:track,nobracket)%09%(committerdate:unix)";
+
+/**
+ * Parses `git for-each-ref` output in REF_FORMAT for refs/heads and refs/remotes, leaving out remotes' HEAD
+ * aliases. Full ref names tell a local branch named `origin/x` from a remote one.
+ */
+export function parseRefs(out: string): Ref[] {
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [ref, head, upstream, track = "", time] = line.split("\t");
+      return {
+        name: ref.replace(/^refs\/(heads|remotes)\//, ""),
+        remote: ref.startsWith("refs/remotes/"),
+        current: head === "*",
+        upstream: upstream || undefined,
+        ahead: Number(track.match(/ahead (\d+)/)?.[1] ?? 0),
+        behind: Number(track.match(/behind (\d+)/)?.[1] ?? 0),
+        gone: track === "gone",
+        time: Number(time),
+      };
+    })
+    .filter((r) => !(r.remote && r.name.endsWith("/HEAD")));
+}
+
+/** A line in a row of the commit graph, from lane `from` at `y1` to lane `to` at `y2`, colored by `lane`. */
+export type GraphLine = { from: number; to: number; y1: "top" | "mid"; y2: "mid" | "bottom"; lane: number };
+export type GraphRow = { col: number; lines: GraphLine[]; width: number };
+
+/**
+ * Lays out the commit graph, one row per commit, newest first, as PhpStorm's log draws it. Each lane holds the
+ * commit it waits for; a commit takes the lane waiting for it (the first, if several branches meet there), hands
+ * that lane to its first parent, and opens lanes for merged parents (or joins a lane already waiting for one). Free lanes are reused, and lanes never shift,
+ * so lines that pass a row are straight.
+ * Expects children before parents, as `git log --date-order` gives.
+ */
+export function graphRows(commits: { hash: string; parents: string[] }[]): GraphRow[] {
+  const lanes: (string | null)[] = [];
+  return commits.map(({ hash, parents }) => {
+    const lines: GraphLine[] = [];
+    let col = lanes.indexOf(hash);
+    if (col < 0) {
+      col = lanes.indexOf(null);
+      if (col < 0) col = lanes.push(null) - 1;
+    }
+    // Lines into this row: lanes waiting for this commit end at its node; the others pass through.
+    const through: number[] = [];
+    lanes.forEach((h, i) => {
+      if (h === hash) lines.push({ from: i, to: col, y1: "top", y2: "mid", lane: i });
+      else if (h) through.push(i);
+    });
+    for (let i = 0; i < lanes.length; i++) if (lanes[i] === hash) lanes[i] = null;
+    // Lines out: the first parent continues in this lane, merged parents join their lane or open one.
+    parents.forEach((p, n) => {
+      // The first parent keeps this lane even when another lane waits for it too; the lanes meet at the parent.
+      let j = n === 0 ? col : lanes.indexOf(p);
+      if (j < 0) {
+        j = lanes.indexOf(null);
+        if (j < 0 || j === col) j = lanes.findIndex((h, i) => h === null && i !== col);
+        if (j < 0) j = lanes.push(null) - 1;
+      }
+      lanes[j] = p;
+      lines.push({ from: col, to: j, y1: "mid", y2: "bottom", lane: j === col ? col : j });
+    });
+    for (const i of through) lines.push({ from: i, to: i, y1: "top", y2: "bottom", lane: i });
+    while (lanes.length && lanes.at(-1) === null) lanes.pop();
+    return { col, lines, width: Math.max(lanes.length, col + 1, ...lines.map((l) => Math.max(l.from, l.to) + 1)) };
+  });
+}
+
+/**
+ * Merges one conflict's two sides line by line against their base, as PhpStorm's "resolve simple conflicts" does:
+ * returns the merged lines when the sides changed different lines of the base, or null when their changes overlap
+ * or insert at the same place. Changes on neighboring lines merge.
+ */
+export function resolveSimple(base: string[], ours: string[], theirs: string[]): string[] | null {
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((l, i) => l === b[i]);
+  if (same(ours, theirs) || same(theirs, base)) return ours;
+  if (same(ours, base)) return theirs;
+  // Each side's changes as hunks of the base: replace base[start, end) with lines.
+  const hunks = (side: string[]) =>
+    lineChanges(base, side).map(({ block: b }) => ({
+      start: b!.originalEndLineNumber ? b!.originalStartLineNumber - 1 : b!.originalStartLineNumber,
+      end: b!.originalEndLineNumber || b!.originalStartLineNumber,
+      lines: b!.modifiedEndLineNumber ? side.slice(b!.modifiedStartLineNumber - 1, b!.modifiedEndLineNumber) : [],
+    }));
+  const all = [...hunks(ours), ...hunks(theirs)].sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < all.length; i++) if (all[i].start < all[i - 1].end || all[i].start === all[i - 1].start) return null;
+  const out: string[] = [];
+  let at = 0;
+  for (const hk of all) {
+    out.push(...base.slice(at, hk.start), ...hk.lines);
+    at = hk.end;
+  }
+  return [...out, ...base.slice(at)];
 }
