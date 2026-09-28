@@ -1,7 +1,7 @@
 // The Filament tool window: the app's panels with their resources, each opening in the designer, and commands to
 // make resources, models, and projects. Also the "Open in Designer" link above a resource's class, and what the
 // designers need to hear from the rest of the app, such as the app's files changing.
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, toast } from "./dom";
 import { monaco } from "./editor";
 import * as fapp from "./filamentapp";
 import { majorVersion } from "./filamentcatalog";
@@ -391,4 +391,38 @@ export function filamentFilesChanged(paths: string[]) {
   fapp.forget(paths.some((p) => p.endsWith("/composer.lock")) ? undefined : ["app", "models", "model:", "enums", "migrations"]);
   projectChanged();
   if (!$("view-filament").hidden) void loadFilament();
+  if (paths.some((p) => p.startsWith(`${root}/app/`))) watchBoot();
+}
+
+let bootTimer = 0;
+/** Whether the app booted the last time it was read, so a change that breaks it can say so once. */
+let booted: { root: string; ok: boolean } | null = null;
+
+/**
+ * Reads the app again after its code changes, and says when the change stopped it from starting, such as a
+ * provider a designer changed, with the file and line to fix.
+ */
+function watchBoot() {
+  clearTimeout(bootTimer);
+  bootTimer = window.setTimeout(async () => {
+    const root = host.root();
+    if (!(await fapp.hasFilament(root))) return;
+    const app = await fapp.app(root).catch(() => null);
+    if (!app) return;
+    const was = booted?.root === root ? booted.ok : true;
+    booted = { root, ok: app.booted };
+    const e = app.bootError;
+    if (was && !app.booted)
+      toast(`The app can't start after this change: ${e?.message ?? "it failed while booting"}`, e?.file ? { action: { label: `Open ${e.file.split("/").pop()}:${e.line}`, run: () => host.openAt(`${root}/${e.file}`, e.line) } } : {});
+    else if (!was && app.booted) toast("The app starts again.", { kind: "info", timeout: 3000 });
+  }, 1500);
+}
+
+/** Checks the app in a terminal tab: that it boots and its routes load, then runs its tests. */
+export function checkApp() {
+  const script = [
+    "php artisan route:list --except-vendor > /dev/null && echo 'The app starts, and its routes load.'",
+    "if [ -d tests ]; then php artisan test; else echo 'The project has no tests folder.'; fi",
+  ].join(" && ");
+  host.openTerminal("Check the app", ["/bin/sh", "-c", script]);
 }

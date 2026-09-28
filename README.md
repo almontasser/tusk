@@ -886,6 +886,10 @@ role, written in its `canAccess()` or `canView()`, or, with Filament Shield,
 `page_Settings`, with the roles that have it. A page someone can't open also
 leaves their navigation.
 
+With Filament Shield, **Generate with Shield…** runs `shield:generate` for each
+panel: **Create the permissions** for every resource, page, and widget, or
+**Also write missing policies**, which leaves existing policies alone.
+
 ### Languages
 
 When text is written with `__()`, the designer helps translate it:
@@ -1025,6 +1029,21 @@ as each one is.
 
 The preview runs the widget to show its real numbers, as the first user when
 there is one.
+
+### Sample records and checks
+
+- **Sample records:** **Sample records** in the model designer, or **Laravel:
+  Add Sample Records…**, makes as many records as you ask for with the
+  model's factory, in the app's database.
+- **Translated names:** in a resource's or page's settings, **Translate**
+  beside the label, group, record names, or title writes it as a getter that
+  returns `__('…')`, with a field for each language. A group's name must be
+  translated the same way in the panel's navigation groups for their order to
+  apply.
+- **When the app stops starting:** after a change to `app/`, the app is read
+  again, and a notice says when it can't start, with the file and line; another
+  says when it starts again. **Laravel: Check the App (Boot and Tests)**
+  loads the routes and runs the tests in a terminal tab.
 
 ## Model designer
 

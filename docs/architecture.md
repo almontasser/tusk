@@ -4473,6 +4473,18 @@ has, as `methodsOf` reports them.
   `getHeaderWidgets()`. A page that returns its resource's `getWidgets()`
   changes the resource's list.
 
+### Sample records, translated names, and boot checks
+
+- `src/sampledata.ts` runs `Model::factory()->count(n)->create()` with
+  `artisan tinker --execute`, in Sail's container when it's up.
+- A static property can't call `__()`, so translating a resource's or page's
+  name replaces the property with its getter returning `__('text')`; the
+  settings tab reads a getter that is one such return as translated text, and
+  renames its translations when the text changes.
+- `watchBoot` in `src/filamentview.ts` reads the app 1.5 seconds after a
+  change under `app/`, and speaks only when booting starts or stops failing,
+  so a working app stays quiet.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,

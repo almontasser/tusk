@@ -6,7 +6,7 @@ import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import type { Doc } from "./filamentdesigner";
 import type { Edit, Imports } from "./phpcode";
-import { askName } from "./filamentpickers";
+import { askName, popover } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
 import { addMember, type OClass } from "./phpcode";
 import { abilityMethod, type Cond, type EntryRule, entryEdits, permissionName, permissionsOf, readEntry, readPolicy, type ReadAbility, type Rule, ruleCode } from "./policygen";
@@ -232,10 +232,37 @@ function permissionsSection(d: AccessHost, info: fapp.PolicyInfo, used: string[]
       }),
     );
   }
+  // Shield makes permissions for every resource, page, and widget of each panel; policies only where none exist,
+  // since it would otherwise replace the policies these rules are written in.
+  const generate = info.shield ? h("button", { type: "button" }, icon("sparkle"), "Generate with Shield…") : null;
+  if (generate)
+    generate.onclick = () => {
+      const run = async (option: string, label: string) => {
+        p.close();
+        try {
+          const app = await fapp.app(d.root);
+          for (const panel of app.panels) await fapp.artisan(d.root, ["shield:generate", "--all", `--option=${option}`, "--ignore-existing-policies", `--panel=${panel.id}`]);
+          fapp.forget([`policy:`, "app"]);
+          await d.loadAccess();
+          d.host.status(label);
+        } catch (e) {
+          showError("Shield couldn't generate them", e);
+        }
+      };
+      const p = popover(
+        generate,
+        h(
+          "div",
+          { class: "fd-menu" },
+          h("button", { type: "button", class: "fd-menu-item", onclick: () => void run("permissions", "Shield created the permissions.") }, icon("key"), h("span", {}, "Create the permissions"), h("span", { class: "fd-note" }, "for every resource, page, and widget")),
+          h("button", { type: "button", class: "fd-menu-item", onclick: () => void run("policies_and_permissions", "Shield created the permissions and the missing policies.") }, icon("shield"), h("span", {}, "Also write missing policies"), h("span", { class: "fd-note" }, "existing ones stay")),
+        ),
+      );
+    };
   return h(
     "section",
     { class: "fd-access-perms" },
-    h("div", { class: "fd-access-perms-head" }, title, h("span", { class: "fd-spacer" }), newRole),
+    h("div", { class: "fd-access-perms-head" }, title, h("span", { class: "fd-spacer" }), generate, newRole),
     ...notes,
     !info.roles.length ? h("p", { class: "fd-note" }, "No roles yet. Create one, then give it permissions here.") : null,
     perms.length && info.roles.length ? table : perms.length ? null : h("p", { class: "fd-note" }, "The rules name no permissions yet. Pick “Only users who…” and “has the permission” for an ability."),

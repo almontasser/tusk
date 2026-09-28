@@ -13,7 +13,7 @@ import { renameTranslation, writeTranslation } from "./translationfiles";
 import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
-import { type CallChange, renderCodeInspector, renderInspector } from "./filamentinspector";
+import { type CallChange, type InspectorCtx, renderCodeInspector, renderInspector } from "./filamentinspector";
 import { renderAccessTab, renderEntryAccess } from "./filamentaccess";
 import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsTab } from "./filamentpages";
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
@@ -982,6 +982,11 @@ export class Designer {
     );
   }
 
+  /** The app's translations, for editors of text written with `__()`. */
+  i18n(): InspectorCtx["i18n"] {
+    return this.translations ? { t: this.translations, locale: this.locale, write: (locale, key, value) => void this.writeTranslation(locale, key, value), rename: (from, to) => this.renameTranslation(from, to) } : undefined;
+  }
+
   /** A page's or widget's Access tab. */
   private entryAccess() {
     const doc = this.docs.get(this.file);
@@ -1365,7 +1370,7 @@ export class Designer {
         const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;
         return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {} } : undefined;
       })(),
-      i18n: this.translations ? { t: this.translations, locale: this.locale, write: (locale, key, value) => void this.writeTranslation(locale, key, value), rename: (from, to) => this.renameTranslation(from, to) } : undefined,
+      i18n: this.i18n(),
       openEnum: async (cls) => {
         const known = this.enums.find((e) => e.class === cls)?.file;
         const file = known ? `${this.root}/${known}` : await fapp.fileOfClass(this.root, cls);

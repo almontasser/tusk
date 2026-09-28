@@ -118,7 +118,7 @@ function methodRow(ctx: InspectorCtx, m: MethodInfo, label = humanize(m.name)): 
  * Under a text written with `__()`, its translation in each of the app's languages; under plain text, a button
  * that makes it translatable. Nothing when the app has no lang files.
  */
-function translationRows(ctx: InspectorCtx, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
+export function translationRows(ctx: Pick<InspectorCtx, "i18n">, node: PNode | undefined, set: (args: string | null) => void, byFlag = false): HTMLElement | null {
   const i18n = ctx.i18n;
   const v = textValue(node);
   if (!i18n || !v || !v.text) return null;
