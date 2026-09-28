@@ -15,7 +15,7 @@ const LAYOUT: [string, Entry[]][] = [
     ["Local History", ["Show Local History", "Local History: Deleted Files…"]]]],
   ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-", "Find in Files", "Replace in Files", "-",
     "Duplicate Line", "Delete Line", "Move Line Up", "Move Line Down", "Extend Selection", "Shrink Selection", "-", "Toggle Bookmark", "Show Bookmarks", "Edit Snippets (Live Templates)"]],
-  ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
+  ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Find in Terminal", "Rename Terminal Tab…", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-", native("Fullscreen")]],
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "-",
     "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],

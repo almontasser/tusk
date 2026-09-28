@@ -3,10 +3,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { SearchAddon } from "@xterm/addon-search";
 import type { Terminal } from "@xterm/xterm";
+import { h, icon, iconButton } from "./dom";
 import { showMenu } from "./files";
+import { containerRoot } from "./sail";
 import { scrollbackText } from "./scrollback";
+import { onSettings, registerSettings, settings as editorSettings } from "./settings";
 import { showError } from "./status";
+import { candidatePaths, fileLinks } from "./termlinks";
 import { onTheme } from "./themes";
 
 /**
@@ -15,7 +20,7 @@ import { onTheme } from "./themes";
  */
 export type Restore = { title: string; cwd: string; command?: string[]; scrollback?: string };
 /** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; restore?: Restore; icon?: string; editorOnly?: boolean };
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; search?: SearchAddon; restore?: Restore; icon?: string; editorOnly?: boolean };
 /** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
 export type PanelTab = Session;
 
@@ -23,7 +28,13 @@ const $ = (id: string) => document.getElementById(id)!;
 const sessions: Session[] = [];
 /** Tabs dragged into an editor pane. They keep running there; the editor shows and closes them. */
 const docked: Session[] = [];
-let editorHost: { root(): string; reveal(tab: PanelTab): void; open(tab: PanelTab): void; close(tab: PanelTab): void } = { root: () => "/", reveal() {}, open() {}, close() {} };
+let editorHost: { root(): string; reveal(tab: PanelTab): void; open(tab: PanelTab): void; close(tab: PanelTab): void; openAt(path: string, line: number, column?: number): unknown } = {
+  root: () => "/",
+  reveal() {},
+  open() {},
+  close() {},
+  openAt() {},
+};
 let active: Session | undefined;
 let panelVisible = false;
 // Whether you last clicked or focused inside the panel, so ⌘W closes a panel tab instead of an editor tab.
@@ -52,8 +63,69 @@ let changed = () => {};
 /** Runs `f` when a terminal prints or the panel's tabs change, so the session can save them. */
 export const onPanelChange = (f: () => void) => (changed = f);
 
+// The terminal's font follows the editor's unless you set its own.
+const terminalSettings = registerSettings("Terminal", { terminalFontFamily: "", terminalFontSize: "" }, [
+  { key: "terminalFontFamily", label: "Terminal font", type: "text", placeholder: "Same as editor", help: "A CSS font list. Leave it empty to use the editor font." },
+  {
+    key: "terminalFontSize",
+    label: "Terminal font size",
+    type: "select",
+    options: () => [["", "Same as editor", ""], ...Array.from({ length: 17 }, (_, i): [string, string, string] => [String(i + 8), String(i + 8), ""])],
+  },
+]);
+const font = () => ({
+  fontFamily: terminalSettings.terminalFontFamily.trim() || editorSettings.fontFamily,
+  // The editor's default is 13; the terminal was 12 before it followed the editor, a size that reads the same.
+  fontSize: Number(terminalSettings.terminalFontSize) || editorSettings.fontSize,
+});
+onSettings(() => {
+  const f = font();
+  for (const s of [...sessions, ...docked]) {
+    if (!s.term || (s.term.options.fontFamily === f.fontFamily && s.term.options.fontSize === f.fontSize)) continue;
+    Object.assign(s.term.options, f);
+    if (s.el.offsetParent) s.fit?.fit();
+  }
+});
+
 // xterm.js loads with the first terminal, not with the app.
-const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/xterm/css/xterm.css")]);
+const loadXterm = () =>
+  Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/addon-search"), import("@xterm/addon-web-links"), import("@xterm/xterm/css/xterm.css")]);
+
+/** Where a file path in the output is, once looked up: the file, or null when there's no such file. */
+const found = new Map<string, Promise<string | null>>();
+async function existing(candidates: string[]) {
+  for (const path of candidates) {
+    if (!found.has(path)) found.set(path, invoke<boolean>("path_exists", { path }).then((yes) => (yes ? path : null), () => null));
+    if (await found.get(path)) return path;
+  }
+  return null;
+}
+
+/**
+ * Makes file references in the output, such as `app/Models/User.php:42` in a stack trace or a test failure, open in
+ * the editor at their line when clicked. Only references to files that exist are links. `cwd` is where the shell is.
+ */
+function linkFiles(term: Terminal, cwd: () => string) {
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      const refs = fileLinks(text);
+      if (!refs.length) return callback(undefined);
+      const root = editorHost.root();
+      Promise.all(refs.map(async (r) => ({ r, path: await existing(candidatePaths(r.path, cwd(), root, containerRoot)) }))).then((all) =>
+        callback(
+          all
+            .filter((a) => a.path)
+            .map(({ r, path }) => ({
+              range: { start: { x: r.start + 1, y }, end: { x: r.end, y } },
+              text: text.slice(r.start, r.end),
+              activate: () => editorHost.openAt(path!, r.line, r.column),
+            })),
+        ),
+      );
+    },
+  });
+}
 
 /**
  * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
@@ -63,13 +135,18 @@ const loadXterm = () => Promise.all([import("@xterm/xterm"), import("@xterm/addo
  */
 export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false, scrollback?: string): Promise<void> {
   showPanel(true);
-  const [{ Terminal }, { FitAddon }] = await loadXterm();
+  const [{ Terminal }, { FitAddon }, { SearchAddon }, { WebLinksAddon }] = await loadXterm();
   const el = document.createElement("div");
   el.className = "term";
   $("terminals").append(el);
-  const term = new Terminal({ theme: theme(), fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace", fontSize: 12, cursorBlink: true, minimumContrastRatio: 4.5 });
+  // The search addon's match highlights are a proposed API.
+  const term = new Terminal({ theme: theme(), ...font(), cursorBlink: true, minimumContrastRatio: 4.5, allowProposedApi: true });
   const fit = new FitAddon();
+  const search = new SearchAddon();
   term.loadAddon(fit);
+  term.loadAddon(search);
+  // URLs open in the browser; file references open in the editor.
+  term.loadAddon(new WebLinksAddon((_, url) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null }).catch(() => {})));
   term.open(el);
   fit.fit();
   if (scrollback) term.write(`${scrollback.replaceAll("\n", "\r\n")}\r\n\x1b[2m[Restored from the last session]\x1b[0m\r\n`);
@@ -95,7 +172,8 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
     return;
   }
   const restore = !command || restorable ? { title, cwd, command } : undefined;
-  const session: Session = { title, term, fit, el, exited: false, dispose: () => {}, restore };
+  const session: Session = { title, term, fit, search, el, exited: false, dispose: () => {}, restore };
+  linkFiles(term, () => restore?.cwd ?? cwd);
   // A shell's folder changes with `cd`, so after you press Enter, read where it is now.
   let cwdTimer: ReturnType<typeof setTimeout> | undefined;
   const followCwd = (data: string) => {
@@ -142,12 +220,12 @@ export function closeTerminals() {
   for (const s of sessions.filter((s) => s.term)) close(s);
 }
 
-function activate(session: Session | undefined) {
+function activate(session: Session | undefined, focus = true) {
   active = session;
   sessions.forEach((s) => (s.el.hidden = s !== session));
   renderTabs();
   session?.fit?.fit();
-  session?.term?.focus();
+  if (focus) session?.term?.focus();
 }
 
 /** Closes the active panel tab when you last used the panel, and says whether it did. */
@@ -247,14 +325,20 @@ function renderTabs() {
       const tab = document.createElement("div");
       tab.className = `tab${s === active ? " active" : ""}${s.exited ? " exited" : ""}`;
       tab.role = "tab";
+      tab.ariaSelected = String(s === active);
+      tab.tabIndex = s === active ? 0 : -1;
       const icon = document.createElement("span");
       icon.className = `codicon codicon-${tabIcon(s)}`;
-      tab.append(icon, s.title);
+      const label = h("span", { class: "tab-title" }, s.title);
+      tab.append(icon, label);
       tab.onclick = () => activate(s);
+      // Double-click a terminal's title to rename it.
+      if (s.term) tab.ondblclick = (e) => (e.stopPropagation(), rename(s, label));
       tab.onauxclick = (e) => e.button === 1 && close(s);
       tab.oncontextmenu = (e) => {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [
+          ...(s.term ? [{ label: "Rename…", run: () => rename(s, label) }] : []),
           { label: "Close", run: () => close(s) },
           { label: "Close Others", run: () => sessions.filter((o) => o !== s).forEach(close) },
           { label: "Close All", run: () => [...sessions].forEach(close) },
@@ -272,6 +356,49 @@ function renderTabs() {
     newTerminal,
   );
 }
+
+// ← and → move between tabs, Home and End go to the first and last, as in any tab list.
+bar.addEventListener("keydown", (e) => {
+  const tab = (e.target as HTMLElement).closest(".tab");
+  if (!tab || !active || (e.target as HTMLElement).tagName === "INPUT") return;
+  const i = sessions.indexOf(active);
+  const to = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: sessions.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  activate(sessions[(to + sessions.length) % sessions.length], false);
+  bar.querySelector<HTMLElement>(".tab.active")?.focus();
+});
+
+/** Renames a terminal tab in place: Enter keeps the name, Escape or an empty name cancels. */
+function rename(s: Session, label = bar.querySelector<HTMLElement>(".tab.active .tab-title")) {
+  if (!label) return;
+  const input = h("input", { class: "tab-rename", value: s.title, ariaLabel: "Tab name", spellcheck: false });
+  let done = false;
+  const finish = (keep: boolean) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (keep && name) {
+      s.title = name;
+      if (s.restore) s.restore.title = name;
+    }
+    renderTabs();
+    if (s === active) s.term?.focus();
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    if (e.key === "Escape") finish(false);
+  };
+  input.onblur = () => finish(true);
+  input.onclick = (e) => e.stopPropagation();
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+/** Renames the active terminal tab, from the action. */
+export const renameTerminal = () => active?.term && rename(active);
 
 const newTerminal = document.createElement("button");
 newTerminal.className = "icon-button new-terminal";
@@ -349,3 +476,79 @@ $("panel-resize").onmousedown = (down) => {
   window.addEventListener("mousemove", move);
   window.addEventListener("mouseup", up);
 };
+
+// ---- Find in the terminal ----
+
+/** The terminal that has focus, or the active one, while the panel shows. */
+const focusedSession = () => [...sessions, ...docked].find((s) => s.term && s.el.contains(document.activeElement)) ?? (panelVisible && active?.term ? active : undefined);
+/** Whether a terminal has focus, for ⌘F to find in it instead of in the editor. */
+export const terminalFocused = () => !!document.activeElement?.closest(".term");
+
+/**
+ * Opens the find bar over the terminal that has focus: matches highlight as you type, Enter and ⇧Enter go to the
+ * next and previous match, and Escape closes it. Returns false when no terminal shows.
+ */
+export function findInTerminal() {
+  const s = focusedSession();
+  if (!s?.term || !s.search) return false;
+  const existingBar = s.el.querySelector<HTMLElement>(".term-find");
+  if (existingBar) {
+    const input = existingBar.querySelector("input")!;
+    input.focus();
+    input.select();
+    return true;
+  }
+  const { term, search } = s;
+  const input = h("input", { type: "search", placeholder: "Find", ariaLabel: "Find in terminal", spellcheck: false });
+  const count = h("span", { class: "term-find-count", role: "status" });
+  const options = { caseSensitive: false, regex: false };
+  const toggle = (label: string, title: string, key: keyof typeof options) => {
+    const b = h("button", { class: "term-find-option", title, ariaPressed: "false" }, label);
+    b.onclick = () => ((options[key] = !options[key]), (b.ariaPressed = String(options[key])), find(true), input.focus());
+    return b;
+  };
+  const style = getComputedStyle(document.documentElement);
+  const accent = style.getPropertyValue("--accent").trim() || "#3574f0";
+  const decorations = { matchBackground: `${accent}40`, activeMatchBackground: `${accent}aa`, matchOverviewRuler: accent, activeMatchColorOverviewRuler: accent };
+  const find = (forward: boolean, incremental = false) => {
+    if (!input.value) return search.clearDecorations(), (count.textContent = "");
+    const opts = { ...options, incremental, decorations };
+    const hit = forward ? search.findNext(input.value, opts) : search.findPrevious(input.value, opts);
+    if (!hit) count.textContent = "No results";
+  };
+  const results = search.onDidChangeResults(({ resultIndex, resultCount }) => {
+    count.textContent = !input.value ? "" : resultCount ? `${resultIndex + 1} of ${resultCount}` : "No results";
+  });
+  const close = () => {
+    results.dispose();
+    search.clearDecorations();
+    bar.remove();
+    term.focus();
+  };
+  const bar = h(
+    "div",
+    { class: "term-find", role: "search" },
+    icon("search"),
+    input,
+    toggle("Aa", "Match case", "caseSensitive"),
+    toggle(".*", "Regular expression", "regex"),
+    count,
+    iconButton("arrow-up", "Previous match (⇧⏎)", () => find(false)),
+    iconButton("arrow-down", "Next match (⏎)", () => find(true)),
+    iconButton("close", "Close (Escape)", close),
+  );
+  input.oninput = () => find(true, true);
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") e.preventDefault(), find(!e.shiftKey);
+    if (e.key === "Escape") e.preventDefault(), close();
+  };
+  // The selection, when there's one on a line, is what you're looking for.
+  const selected = term.getSelection();
+  if (selected && !selected.includes("\n")) input.value = selected;
+  s.el.append(bar);
+  input.focus();
+  input.select();
+  if (input.value) find(true, true);
+  return true;
+}

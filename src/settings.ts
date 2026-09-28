@@ -200,6 +200,9 @@ function set(key: string, value: unknown) {
   persist();
 }
 
+/** A field for registerSettings: a Field without its group, which registerSettings sets. */
+export type FieldInput = Field extends infer F ? (F extends Field ? Omit<F, "group"> : never) : never;
+
 /**
  * Adds a group of settings from another module, such as the terminal's: their defaults and their fields in the
  * dialog, under `group`. Call it when the module loads. Returns the settings object, typed with the group's keys,
@@ -209,7 +212,7 @@ function set(key: string, value: unknown) {
  *     { key: "terminalFontSize", label: "Font size", type: "number", min: 0, max: 32, help: "0 uses the editor's." },
  *   ]);
  */
-export function registerSettings<T extends Record<string, Value>>(group: string, values: T, list: (Omit<Field, "group"> & { key: keyof T & string })[]): T {
+export function registerSettings<T extends Record<string, Value>>(group: string, values: T, list: (FieldInput & { key: keyof T & string })[]): T {
   Object.assign(registered, values);
   fields.push(...list.map((f) => ({ ...f, group }) as Field));
   // Settings may have loaded already; take the saved values for the new keys.

@@ -55,6 +55,8 @@ file to change when you add it.
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
+| Terminal | A file reference that wraps onto the next line isn't a link. |
+| Lists | The Redis key tree has ↑↓, →←, and Enter, but not yet Home, End, paging, or type-ahead, which the other lists have. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -268,6 +270,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘N | In a PHP file, generate code (constructor, getters and setters, `__toString()`, methods to implement or override); elsewhere, a new file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
+| ⌘F in a terminal | Find in the terminal's output |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |
@@ -298,7 +301,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, and Spelling. A setting that depends on another, such as the AI model,
+AI, Spelling, and Terminal. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -329,6 +332,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+| Terminal font and font size | Same as the editor's |
 
 ### Vim emulation
 
@@ -410,6 +414,20 @@ select all, or clear it. Click **+** at the end of the panel's tab bar for a
 new terminal. The terminal button shows the last shell you used, or opens
 one, even while another panel tab shows. It skips command tabs, such as
 `git pull`, and shells that have exited.
+
+In a terminal:
+
+- Press ⌘F to find in its output. Matches highlight as you type; ⏎ and ⇧⏎ go
+  to the next and previous match, **Aa** matches case, **.\*** takes a regular
+  expression, and Escape closes the bar.
+- URLs are links: click one to open it in your browser.
+- File references such as `app/Models/User.php:42`, `Foo.php(12)` in a PHP
+  stack trace, or `on line 7` open the file at that line when you click them,
+  from test failures, Mago, PHPStan, and PHP errors. Relative paths resolve
+  from the terminal's folder, then the project's, and Sail and Docker paths
+  under `/var/www/html` map to the project. Only files that exist are links.
+- Double-click a terminal's tab, or right-click it and choose **Rename…**, to
+  rename it. With a tab focused, ← and → move between tabs.
 
 Diffs, the merge tool, and problem pages open as editor tabs, so your other tabs
 stay in view. The Git Log opens in the bottom panel.

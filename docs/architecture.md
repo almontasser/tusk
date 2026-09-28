@@ -2088,6 +2088,21 @@ the rest arrives, so multibyte text never turns into replacement characters.
 pseudo-terminal whenever the panel changes size. You can drag the top edge of
 the panel to resize it.
 
+The terminal's font comes from the Terminal settings group, which
+`terminal.ts` adds with `registerSettings`: an empty font or size follows the
+editor's, and `onSettings` updates open terminals and refits them. The search
+add-on (`@xterm/addon-search`, which needs `allowProposedApi` for its match
+highlights) backs the find bar, which **Find in Terminal** (⌘F with a `when`
+of `terminalFocused`, so ⌘F still reaches Monaco in the editor) opens over the
+focused terminal. The web-links add-on opens URLs with `open`. A link provider
+finds file references in each line with `fileLinks` in `src/termlinks.ts`
+(tested), resolves them with `candidatePaths` (the container root from
+`src/sail.ts` maps to the project; a relative path tries the shell's folder,
+then the project's), checks that the file exists with `path_exists` (cached),
+and opens it through the docking host's `openAt`. Tabs are a `tablist` with a
+roving tabindex: ← and → move between them, and double-clicking a terminal's
+tab renames it in place.
+
 Panel tabs reorder with HTML drag and drop on the tab bar: `dragover` marks the
 tab under the pointer, and `drop` moves the dragged session before it in
 `sessions`, or last on the bar's empty end. The tab and terminal context menus
@@ -4856,3 +4871,12 @@ so a list that renders with `replaceChildren` needs only those attributes, and
 the same code serves flat lists, nested trees, and a table whose tree is a flat
 run of rows. It uses `aria-activedescendant` rather than a roving tabindex, so
 a redraw doesn't move the focus.
+
+### 2026-09-28: The terminal follows the editor's font, and its links open files
+
+The terminal had a fixed font list and size 12. It now uses the editor's font
+unless you set its own, so one change applies to both. File references in the
+output are found with one regex over each line rather than per-tool parsers,
+since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
+`path(line)`, and a reference becomes a link only when the file exists, which
+keeps false matches, such as version numbers, from turning into links.

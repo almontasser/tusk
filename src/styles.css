@@ -1551,3 +1551,13 @@ button.link:hover { text-decoration: underline; }
 .list-nav:focus { outline: none; }
 .list-nav [aria-selected="true"] { background: var(--selected-inactive); }
 .list-nav:focus [aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Terminal tabs you rename in place, keyboard focus on a tab, and the terminal's find bar. */
+#terminal-tabs .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#terminal-tabs .tab-rename { width: 140px; height: 22px; padding: 0 4px; font: inherit; }
+.term { position: relative; }
+.term-find { position: absolute; top: 4px; right: 16px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--panel); border: 1px solid var(--popover-border); border-radius: var(--radius); box-shadow: var(--shadow); font-family: var(--ui-family); font-size: 12px; }
+.term-find input { width: 200px; height: 24px; }
+.term-find-option { min-width: 24px; height: 22px; padding: 0 4px; border-radius: 4px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.term-find-option[aria-pressed="true"] { background: var(--selected); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.term-find-count { min-width: 64px; color: var(--muted); text-align: center; }

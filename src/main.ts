@@ -51,7 +51,7 @@ import { chooseService, composeService, composeServices, forgetComposeServices }
 import { setMenu } from "./menu";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
@@ -409,6 +409,7 @@ $("terminal-tabs").addEventListener("drop", (e) => {
 const viewPath = (tab: PanelTab) => [...views].find(([, t]) => t === tab)?.[0];
 initDocking({
   root: () => root || "/",
+  openAt: (path, line, column = 1) => openAt(path, { lineNumber: line, column }),
   reveal(tab) {
     const path = viewPath(tab);
     const pane = path && panes.find((p) => p.paths.includes(path));
@@ -1593,6 +1594,9 @@ const actions: Action[] = [
   { label: "Compare with File…", run: compareWithFile },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
+  // ⌘F finds in the terminal while one has focus, and in the editor otherwise.
+  { label: "Find in Terminal", keys: "Meta+F", run: () => findInTerminal() || toast("Open a terminal to find in it.", { kind: "info", timeout: 4000 }), when: terminalFocused },
+  { label: "Rename Terminal Tab…", run: () => renameTerminal() },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
