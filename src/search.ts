@@ -6,7 +6,9 @@ import { fileIcon } from "./icons";
 import { didSave } from "./lsp";
 import { commentMask, inComment } from "./comments";
 import { readText, writeText } from "./projectfiles";
-import { listNav } from "./listnav";
+import { type ListNav, listNav } from "./listnav";
+import { applyReplacements, type Replacement } from "./replacedata";
+import { initReplacePreview, showReplacePreview } from "./replacepreview";
 import { errorText, showError } from "./status";
 
 type Host = {
@@ -16,8 +18,8 @@ type Host = {
   status(text: string): void;
   showView(name: "search"): void;
 };
-type Match = { path: string; line: number; column: number; end: number; text: string };
-type Query = { text: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
+export type Match = { path: string; line: number; column: number; end: number; text: string };
+export type Query = { text: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
 
 const MAX_MATCHES = 20_000;
 /** Files start expanded until this many rows are shown; the rest render their matches when expanded. */
@@ -30,29 +32,66 @@ let generation = 0;
 const options = { caseSensitive: false, wholeWord: false, regex: false };
 const query = (): Query => ({ text: $<HTMLInputElement>("find-query").value, ...options });
 const include = () => $<HTMLInputElement>("find-include").value;
+const exclude = () => $<HTMLInputElement>("find-exclude").value;
 const replacement = () => $<HTMLInputElement>("replace-with").value;
+
+/** The search the backend is running, which a newer one cancels. */
+let running = "";
 
 async function search() {
   const current = ++generation;
   const q = query();
+  if (running) invoke("search_cancel", { id: running }).catch(() => {});
+  running = "";
   if (!host.root() || !q.text) {
     matches = [];
     return render("");
   }
+  const id = (running = `find-${current}`);
   // A search over a large project can take a while; say so, but don't flash it for quick ones.
   const slow = setTimeout(() => current === generation && ($("find-summary").textContent = "Searching…"), 300);
   try {
-    const found = await invoke<Match[]>("search_text", { root: host.root(), query: q, include: include() });
+    const found = await invoke<Match[]>("search_text", { root: host.root(), query: q, include: include(), exclude: exclude(), id });
     if (current !== generation) return; // A newer search already started.
     matches = found;
     render("");
   } catch (e) {
-    if (current !== generation) return;
+    if (current !== generation || errorText(e) === "Cancelled") return;
     matches = [];
     render(`${q.regex ? "Invalid search" : "Search failed"}: ${errorText(e)}`);
   } finally {
     clearTimeout(slow);
+    if (running === id) running = "";
   }
+}
+
+// ---- Search history: the last 20 of each field, offered as the fields' suggestions ----
+
+const HISTORY = { query: "find-query", include: "find-include", exclude: "find-exclude" } as const;
+function readHistory(): Record<keyof typeof HISTORY, string[]> {
+  try {
+    return { query: [], include: [], exclude: [], ...JSON.parse(localStorage.getItem("findHistory") ?? "{}") };
+  } catch {
+    return { query: [], include: [], exclude: [] };
+  }
+}
+function renderHistory() {
+  const saved = readHistory();
+  for (const [kind, id] of Object.entries(HISTORY) as [keyof typeof HISTORY, string][]) $(`${id}-history`).replaceChildren(...saved[kind].map((value) => Object.assign(document.createElement("option"), { value })));
+}
+/** Remembers the fields' values, newest first, once you've used them: Enter, opening a result, or replacing. */
+function rememberSearch() {
+  const saved = readHistory();
+  for (const [kind, id] of Object.entries(HISTORY) as [keyof typeof HISTORY, string][]) {
+    const value = $<HTMLInputElement>(id).value.trim();
+    if (value) saved[kind] = [value, ...saved[kind].filter((v) => v !== value)].slice(0, 20);
+  }
+  try {
+    localStorage.setItem("findHistory", JSON.stringify(saved));
+  } catch {
+    // History lasts until reload.
+  }
+  renderHistory();
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -92,7 +131,7 @@ function render(error: string) {
       const replace = document.createElement("button");
       replace.title = "Replace in this file";
       replace.textContent = "Replace";
-      replace.onclick = (e) => (e.stopPropagation(), replaceIn([path]));
+      replace.onclick = (e) => (e.stopPropagation(), replaceAll(path));
       const open = shown + list.length <= EXPANDED_ROWS;
       if (open) shown += list.length;
       return fileGroup(path, list, matchRow, open, replace);
@@ -152,8 +191,40 @@ function matchRow(m: Match) {
   replace.title = "Replace this match";
   replace.onclick = (e) => (e.stopPropagation(), replaceOne(m));
   li.append(line, preview(m), replace);
-  li.onclick = () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end));
+  li.onclick = () => (rememberSearch(), host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end)));
   return li;
+}
+
+/** The Find view's list, for moving through matches. */
+let results: ListNav;
+
+/**
+ * ⌘⌥↓ and ⌘⌥↑: selects the next or previous match in the results, opening its file's group if it's collapsed,
+ * and shows it in the editor, as PhpStorm's Next Occurrence does.
+ */
+export function nextMatch(direction: 1 | -1) {
+  if (!matches.length) return host.status("No search results. Find in Files (⇧⌘F) first.");
+  const groups = [...byFile()];
+  const flat = groups.flatMap(([path, list]) => list.map((_, i) => `${path}\n${i}`));
+  const at = flat.indexOf(results.selected());
+  // From a file's row, the next match is its first.
+  const fileAt = at < 0 ? flat.findIndex((k) => k.startsWith(`${results.selected()}\n`)) : -1;
+  const next = at >= 0 ? at + direction : fileAt >= 0 ? (direction > 0 ? fileAt : fileAt - 1) : direction > 0 ? 0 : flat.length - 1;
+  if (next < 0 || next >= flat.length) return host.status(direction > 0 ? "That was the last match." : "That was the first match.");
+  const key = flat[next];
+  const path = key.slice(0, key.lastIndexOf("\n"));
+  const header = $("find-results").querySelector<HTMLElement>(`[data-key="${CSS.escape(path)}"]`);
+  if (header?.ariaExpanded === "false") header.click();
+  results.select(key);
+  results.selectedRow()?.click();
+}
+
+/** Opens or closes every file's matches. */
+function expandAll(open: boolean) {
+  const selected = results.selected();
+  for (const header of $("find-results").querySelectorAll<HTMLElement>(".find-file")) if ((header.ariaExpanded === "true") !== open) header.click();
+  // Clicking the files selected them; the selection stays where it was, or on its file when that closed.
+  if (selected) results.select(open || !selected.includes("\n") ? selected : selected.slice(0, selected.lastIndexOf("\n")), { scroll: false });
 }
 
 /** Replaces one match: its text runs through the same replace as Replace All, so regex groups work. */
@@ -184,12 +255,65 @@ async function replaceOne(m: Match) {
   await search();
 }
 
-/** Replace All covers every matching file, including ones beyond the listed results. */
-async function replaceAll() {
+/**
+ * Replace All shows a preview of the listed matches, where you can leave out files and matches. When the results
+ * stopped at the limit, the preview can't show them all, and offers to replace in every matching file instead.
+ */
+async function replaceAll(path?: string) {
   const q = query();
   if (!q.text) return;
-  const paths = await invoke<string[]>("files_matching", { root: host.root(), query: q, include: include() }).catch(() => [...byFile().keys()]);
-  replaceIn(paths);
+  rememberSearch();
+  if (running) await search(); // Replace what the fields say now, not an older search's results.
+  const listed = path ? matches.filter((m) => m.path === path) : matches;
+  if (!listed.length) return host.status("No matches to replace.");
+  showReplacePreview({
+    query: q,
+    replacement: replacement(),
+    matches: listed,
+    truncated: !path && matches.length >= MAX_MATCHES,
+    replaceEverywhere: async () => {
+      const paths = await invoke<string[]>("files_matching", { root: host.root(), query: q, include: include(), exclude: exclude() }).catch((e) => (showError("Couldn't list the matching files", e), null));
+      if (paths) await replaceIn(paths);
+    },
+    apply: applyKept,
+  });
+}
+
+/**
+ * Applies the replacements the preview kept. Open files change through one undoable edit and are saved; others are
+ * rewritten on disk. Lines that changed since the search are left alone and reported.
+ */
+async function applyKept(files: [string, Replacement[]][]) {
+  let replaced = 0;
+  let stale = 0;
+  const failed: string[] = [];
+  for (const [path, list] of files) {
+    try {
+      const model = monaco.editor.getModel(monaco.Uri.file(path));
+      const result = applyReplacements(model ? model.getValue() : await readText(path), list);
+      stale += result.stale;
+      if (!result.applied) continue;
+      if (model) {
+        model.pushStackElement();
+        model.pushEditOperations([], [{ range: model.getFullModelRange(), text: result.text }], () => null);
+        model.pushStackElement();
+      }
+      await writeText(path, result.text);
+      if (model) {
+        host.markSaved(path);
+        didSave(model);
+      }
+      replaced += result.applied;
+    } catch (e) {
+      console.error(`Replace failed in ${path}`, e);
+      failed.push(`${path.slice(host.root().length + 1)} (${errorText(e)})`);
+    }
+  }
+  const done = `Replaced ${replaced} ${replaced === 1 ? "match" : "matches"}`;
+  const skipped = stale ? `, and left ${stale} out because their lines changed since the search` : "";
+  if (failed.length) showError(`${done}${skipped}, but couldn't replace in ${failed.length} ${failed.length === 1 ? "file" : "files"}: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? ", …" : ""}`);
+  else host.status(`${done}${skipped}.`);
+  await search();
 }
 
 /**
@@ -257,10 +381,20 @@ export function findInFolder(dir: string) {
 
 export function initSearch(h: Host) {
   host = h;
-  for (const id of ["find-results", "todo-results"]) {
-    $(id).role = "tree";
-    listNav($(id));
-  }
+  initReplacePreview(h);
+  $("todo-results").role = "tree";
+  listNav($("todo-results"));
+  $("find-results").role = "tree";
+  results = listNav($("find-results"));
+  // F4 shows the selected match in the editor and moves the focus there, as in PhpStorm.
+  $("find-results").addEventListener("keydown", (e) => {
+    if (e.key !== "F4" || e.target !== $("find-results")) return;
+    e.preventDefault();
+    results.selectedRow()?.click();
+  });
+  $("find-expand").onclick = () => expandAll(true);
+  $("find-collapse").onclick = () => expandAll(false);
+  renderHistory();
   // ↓ in the search box moves to the results.
   $("find-query").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowDown" || !$("find-results").childElementCount) return;
@@ -277,14 +411,19 @@ export function initSearch(h: Host) {
   }
   $("find-query").oninput = searchSoon;
   $("find-include").oninput = searchSoon;
+  $("find-exclude").oninput = searchSoon;
+  for (const id of ["find-include", "find-exclude"])
+    $(id).addEventListener("keydown", (e) => {
+      if (e.key === "Enter") rememberSearch(), search();
+    });
   // Braces, since a handler that returns false (the `&&` for any other key) cancels the keystroke.
   $("find-query").onkeydown = (e) => {
-    if (e.key === "Enter") search();
+    if (e.key === "Enter") rememberSearch(), search();
   };
   $("replace-with").onkeydown = (e) => {
     if (e.key === "Enter") replaceAll();
   };
-  $("replace-all").onclick = replaceAll;
+  $("replace-all").onclick = () => replaceAll();
 }
 
 /** True when every changed path is inside a `.git` folder, which searches skip, so results can't have changed. */

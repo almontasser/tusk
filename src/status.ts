@@ -7,7 +7,8 @@
 //   withProgress(label, task, o?)  Runs `task` with a spinner and `label` in the status bar, and shows a failure
 //                                  as an error. With `cancellable`, the status bar shows a Cancel button, which
 //                                  aborts the AbortSignal the task gets. Resolves to the task's result, or
-//                                  undefined when it failed or was canceled.
+//                                  undefined when it failed or was canceled. The task's second argument, report(text),
+//                                  replaces the label while it runs, such as with a count.
 //   installErrorHandlers()         Shows unhandled promise rejections and errors as toasts, once per message.
 import { toast } from "./dom.ts";
 
@@ -81,20 +82,22 @@ let tasks = 0;
  */
 export async function withProgress<T>(
   label: string,
-  task: (signal: AbortSignal) => Promise<T>,
+  task: (signal: AbortSignal, report: (text: string) => void) => Promise<T>,
   options: { cancellable?: boolean; error?: string } = {},
 ): Promise<T | undefined> {
   const source = `task${++tasks}:progress`;
   const controller = new AbortController();
+  let done = false;
   if (options.cancellable) cancels.set(source, controller);
   status(label, source);
   try {
-    return await task(controller.signal);
+    return await task(controller.signal, (text) => void (!done && status(text, source)));
   } catch (e) {
     if (controller.signal.aborted) status(`Canceled: ${label.replace(/…$/, "")}`, "app", "info");
     else showError(options.error ?? `${label.replace(/…$/, "")} failed`, e);
     return undefined;
   } finally {
+    done = true;
     cancels.delete(source);
     status("", source);
   }

@@ -130,10 +130,15 @@ async function load() {
   list.replaceChildren(h("li", { class: "muted lh-note" }, "Loading the history…"));
   showMessage("");
   diffLabel.textContent = "";
-  const read = async (signal: AbortSignal) => {
+  const read = async (signal: AbortSignal, report?: (text: string) => void) => {
     const count = h("span", {});
     if (target.folder) list.firstElementChild?.append(" ", count);
-    const found = target.folder ? await folderVersions(target.path, signal, (done, total) => (count.textContent = `${done} of ${total} files`)) : await fileVersions(target.path);
+    const found = target.folder
+      ? await folderVersions(target.path, signal, (done, total) => {
+          count.textContent = `${done} of ${total} files`;
+          report?.(`Reading the local history: ${done} of ${total} files…`);
+        })
+      : await fileVersions(target.path);
     return [found, await labels()] as const;
   };
   let result: readonly [FileVersion[], Label[]] | undefined;

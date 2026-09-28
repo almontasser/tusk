@@ -10,7 +10,7 @@ import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
 import { settings, onSettings } from "./settings";
 import { listNav } from "./listnav";
-import { errorText, showError } from "./status";
+import { errorText, showError, withProgress } from "./status";
 import { closeView, showEditorView, showPanelView } from "./terminal";
 
 type Host = {
@@ -65,7 +65,7 @@ function severityToggle(severity: monaco.MarkerSeverity, icon: string, name: str
   const update = (count: number) => {
     button.classList.toggle("on", shown.has(severity));
     button.setAttribute("aria-pressed", String(shown.has(severity)));
-    button.innerHTML = `<span class="codicon ${icon}"></span> ${count} ${name}`;
+    button.innerHTML = `<span class="codicon ${icon}"></span> ${count} ${count === 1 ? name.replace(/s$/, "") : name}`;
   };
   return { button, update };
 }
@@ -202,7 +202,7 @@ function render() {
   warningToggle.update(warnings);
   currentFile.classList.toggle("on", currentOnly);
   currentFile.setAttribute("aria-pressed", String(currentOnly));
-  summary.textContent = [scan.progress, scan.error, `${files.length} files`].filter(Boolean).join(" · ");
+  summary.textContent = [scan.progress, scan.error, `${files.length} ${files.length === 1 ? "file" : "files"}`].filter(Boolean).join(" · ");
   summary.classList.toggle("error", !!scan.error);
   rescan.disabled = scan.running;
   rows = [];
@@ -330,9 +330,37 @@ export async function scanProject(_useCache = false) {
   const current = () => run === scan.run;
   scan = { root, run, running: true, progress: "Checking the project…", error: "" };
   render();
+  // The status bar shows the count and Cancel, which stops the server's check; the panel shows the count too.
+  const results = await withProgress(
+    "Checking the project…",
+    async (signal, report) => {
+      await readModels(root);
+      signal.throwIfAborted();
+      const found = await tuskRequest<Record<string, Diagnostic[]>>("tusk/projectProblems", {}, {
+        signal,
+        onProgress: (message) => {
+          if (!current()) return;
+          const text = `Checking the project: ${message.replace("/", " of ")}…`;
+          report(text);
+          scan.progress = text;
+          renderSoon();
+        },
+      });
+      signal.throwIfAborted();
+      return found ?? {};
+    },
+    { cancellable: true, error: "Couldn't check the project" },
+  );
+  if (!current()) return;
+  if (!results) {
+    scan.progress = "";
+    scan.running = false;
+    scan.error = "The check was canceled or failed. Run Scan Project for Problems to try again.";
+    // A canceled scan leaves the last results; the next Problems view checks again.
+    scan.root = "";
+    return render();
+  }
   try {
-    await readModels(root);
-    const results = (await tuskRequest<Record<string, Diagnostic[]>>("tusk/projectProblems", {})) ?? {};
     if (!current()) return;
     const texts = new Map<string, string>();
     await Promise.all(Object.keys(results).map(async (rel) => texts.set(rel, await invoke<string>("read_file", { path: `${root}/${rel}` }).catch(() => ""))));
@@ -356,7 +384,7 @@ export async function scanProject(_useCache = false) {
     renderSoon();
   } catch (e) {
     if (!current()) return;
-    showError("Couldn't check the project", e, { label: "Try Again", run: () => scanProject() });
+    showError("Couldn't read the project's problems", e, { label: "Try Again", run: () => scanProject() });
     scan.error = `Couldn't check the project: ${errorText(e)}`;
     scan.progress = "";
   } finally {

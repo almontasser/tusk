@@ -388,7 +388,7 @@ const clientCapabilities: L.ClientCapabilities = {
 
 type Server = {
   name: string;
-  request<T>(method: string, params: unknown): Promise<T>;
+  request<T>(method: string, params: unknown, token?: monaco.CancellationToken): Promise<T>;
   stop(): void;
   didSave(model: monaco.editor.ITextModel): void;
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
@@ -470,6 +470,8 @@ async function startServer(
       host.status(`${name}: ${msg.params.message}`, name);
     } else if (onNotification && msg.method !== "$/progress") {
       onNotification(msg.method, msg.params, notify);
+    } else if (msg.method === "$/progress" && progressListeners.has(msg.params.token)) {
+      if (msg.params.value.message) progressListeners.get(msg.params.token)!(msg.params.value.message);
     } else if (msg.method === "$/progress") {
       const v = msg.params.value;
       const token = msg.params.token;
@@ -1249,10 +1251,26 @@ export async function updateReferences(renames: { from: string; to: string }[]):
 }
 
 /** Sends a request to Tusk's PHP server, or returns null when it isn't running. */
-export async function tuskRequest<T>(method: string, params: unknown): Promise<T | null> {
+export async function tuskRequest<T>(method: string, params: unknown, options: { signal?: AbortSignal; onProgress?: (message: string) => void } = {}): Promise<T | null> {
   const tusk = servers.find((s) => s.name === "tusk");
-  return tusk ? tusk.request<T>(method, params) : null;
+  if (!tusk) return null;
+  // Aborting the signal cancels the request on the server, which answers null.
+  const source = new monaco.CancellationTokenSource();
+  const abort = () => source.cancel();
+  options.signal?.addEventListener("abort", abort);
+  const token = options.onProgress && `tusk-${++progressIds}`;
+  if (token) progressListeners.set(token, options.onProgress!);
+  try {
+    return await tusk.request<T>(method, token ? { ...(params as object), workDoneToken: token } : params, source.token);
+  } finally {
+    options.signal?.removeEventListener("abort", abort);
+    if (token) progressListeners.delete(token);
+    source.dispose();
+  }
 }
+/** Callers' own `$/progress` tokens, whose messages go to them instead of the status bar. */
+const progressListeners = new Map<string | number, (message: string) => void>();
+let progressIds = 0;
 
 /** Runs a code action from Tusk's server: resolves its edit if needed, applies it, then runs its command. */
 export async function runTuskAction(action: L.CodeAction | L.Command) {

@@ -1125,6 +1125,9 @@ button.link:hover { text-decoration: underline; }
 .hierarchy-tree { flex: 1; overflow: auto; border-top: 1px solid var(--border-subtle); padding: 4px 0; }
 .hierarchy-row { height: var(--row); display: flex; align-items: center; gap: 5px; padding-right: 10px; white-space: nowrap; cursor: default; }
 .hierarchy-row:hover { background: var(--hover); }
+.replace-preview .hierarchy-row input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.replace-preview .hierarchy-row .count { color: var(--faint); margin-left: auto; }
+.replace-note { margin: 0; padding: 4px 10px; display: flex; gap: 6px; align-items: center; }
 .hierarchy-row .chevron { width: 16px; color: var(--faint); font-size: 14px !important; }
 .hierarchy-row .chevron.empty { visibility: hidden; }
 .hierarchy-row .namespace { color: var(--faint); overflow: hidden; text-overflow: ellipsis; }

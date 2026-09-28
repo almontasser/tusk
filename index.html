@@ -93,21 +93,33 @@
         </section>
 
         <section id="view-search" hidden>
-          <header class="view-header"><span>Find in Files</span></header>
+          <header class="view-header">
+            <span>Find in Files</span>
+            <div class="view-actions">
+              <button class="icon-button" id="find-expand" title="Expand All"><span class="codicon codicon-expand-all"></span></button>
+              <button class="icon-button" id="find-collapse" title="Collapse All"><span class="codicon codicon-collapse-all"></span></button>
+            </div>
+          </header>
           <div class="search-form">
             <div class="search-field">
-              <input id="find-query" placeholder="Search" aria-label="Find in files" spellcheck="false" />
+              <input id="find-query" placeholder="Search" aria-label="Find in files" spellcheck="false" list="find-query-history" autocomplete="off" />
               <button id="opt-case" title="Match case" aria-pressed="false"><span class="codicon codicon-case-sensitive"></span></button>
               <button id="opt-word" title="Whole words" aria-pressed="false"><span class="codicon codicon-whole-word"></span></button>
               <button id="opt-regex" title="Regular expression" aria-pressed="false"><span class="codicon codicon-regex"></span></button>
             </div>
             <div class="search-field">
               <input id="replace-with" placeholder="Replace ($1 in regex mode)" aria-label="Replace with" spellcheck="false" />
-              <button id="replace-all" title="Replace all matches"><span class="codicon codicon-replace-all"></span></button>
+              <button id="replace-all" title="Replace all matches, after a preview"><span class="codicon codicon-replace-all"></span></button>
             </div>
             <div class="search-field">
-              <input id="find-include" placeholder="Files to include, such as *.php, app/**" aria-label="Files to include" spellcheck="false" />
+              <input id="find-include" placeholder="Files to include, such as *.php, app/**" aria-label="Files to include" spellcheck="false" list="find-include-history" autocomplete="off" />
             </div>
+            <div class="search-field">
+              <input id="find-exclude" placeholder="Files to exclude, such as tests, *.min.js" aria-label="Files to exclude" spellcheck="false" list="find-exclude-history" autocomplete="off" />
+            </div>
+            <datalist id="find-query-history"></datalist>
+            <datalist id="find-include-history"></datalist>
+            <datalist id="find-exclude-history"></datalist>
           </div>
           <p id="find-summary"></p>
           <ul id="find-results"></ul>

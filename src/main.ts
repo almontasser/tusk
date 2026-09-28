@@ -41,7 +41,7 @@ import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
-import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
+import { initSearch, loadTodos, nextMatch, openSearch, refreshSearch, refreshTodos } from "./search";
 import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
 import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
@@ -1501,6 +1501,9 @@ const actions: Action[] = [
   editorAction("Duplicate Line", "Meta+D", "editor.action.copyLinesDownAction"),
   editorAction("Delete Line", "Meta+Backspace", "editor.action.deleteLines"),
   editorAction("Optimize Imports", "Ctrl+Alt+O", "editor.action.organizeImports"),
+  // Before the editor's ⌘⌥↓ (Add Caret Below), which it takes while the Find view shows, as in PhpStorm.
+  { label: "Next Occurrence in Files", keys: "Meta+Alt+ArrowDown", run: () => nextMatch(1), when: () => !$("view-search").hidden },
+  { label: "Previous Occurrence in Files", keys: "Meta+Alt+ArrowUp", run: () => nextMatch(-1), when: () => !$("view-search").hidden },
   ...EDITOR_COMMANDS.map(([label, id, keys]) => editorAction(label, keys, id)),
   { label: "Toggle Case", keys: "Meta+Shift+U", run: toggleCase, editorOnly: true },
   { label: "Save All", keys: "Meta+S", run: () => saveFocusedRequest() || saveAll() },

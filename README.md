@@ -38,7 +38,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
+| Find in files | Results stop at 20,000 matches, so the replace preview lists only those; **Replace in All Files…** changes every matching file without a preview. |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
 | Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
@@ -255,6 +255,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⌘O | Go to symbol in the project: classes, functions, constants, and methods (`User::save` narrows to a class's) |
 | ⌘E | Recent files |
 | ⌘⇧F | Find in files |
+| ⌘⌥↓, ⌘⌥↑ | Next and previous match in the Find view's results, while it shows |
 | ⌘⇧R | Replace in files |
 | ⌃H | Type hierarchy of the type under the cursor, or the one the cursor is in |
 | ⌃⌥H | Call hierarchy of the method or function under the cursor, or the one the cursor is in |
@@ -652,15 +653,29 @@ becomes the query.
 - Toggle **Aa** for a case-sensitive search, **W** for whole words, and **.\***
   for a regular expression.
 - To limit the search, list globs in the include field, such as
-  `*.php, *.blade.php` or `app/**`. Files ignored by `.gitignore` are never
-  searched.
+  `*.php, *.blade.php` or `app/**`, and files or folders to leave out in the
+  exclude field, such as `tests, *.min.js`. Files ignored by `.gitignore` are
+  never searched.
+- The query, include, and exclude fields remember your last 20 values, which
+  they offer as you type. A value is kept when you press ⏎, open a result, or
+  replace.
+- Typing starts a new search and stops the one still running.
 - Results are grouped by file, with each match highlighted. Click a match to
   open it. Files start expanded until about 2,000 matches show; click a file
-  to expand or collapse it.
-- **Replace All**, or ⏎ in the replace field, replaces every match in every
-  matching file after you confirm, including files beyond the listed results.
-  Hover over a file for **Replace** to change only that file, or over a match
-  for its replace button to change only that match. In regex mode, `$1` or
+  to expand or collapse it, or use **Expand All** and **Collapse All** in the
+  view's header.
+- In the results, ↑ and ↓ move, → and ← open and close a file, and Enter or F4
+  shows the match in the editor. While the Find view shows, ⌘⌥↓ and ⌘⌥↑ go to
+  the next and previous match from anywhere, opening each one; otherwise they
+  add carets in the editor.
+- **Replace All**, or ⏎ in the replace field, opens the **Replace Preview** tab:
+  every match by file, each line before and after. Clear a file's or a match's
+  checkbox (Space on the selected row) to leave it out, then click
+  **Replace N Matches** (⌘⏎). A line that changed since the search is left
+  alone, and the message says so. When the results stopped at 20,000 matches,
+  **Replace in All Files…** replaces in every matching file without a preview,
+  after you confirm. **Replace** on a file previews only that file, and a
+  match's replace button changes only that match. In regex mode, `$1` or
   `${name}` inserts a captured group.
 - Files open in the editor change through an undoable edit, including any
   unsaved text, and are saved. Other files are rewritten on disk.
@@ -2224,7 +2239,9 @@ of the bottom panel. Run these from ⌘⇧A:
   test with the profiler and opens its profile when the run ends.
 - **Profile URL…** asks for a path, such as `/posts?page=2`, requests it
   through the profiling server (starting the server if needed), and opens that
-  request's profile. The status bar shows the response code and time.
+  request's profile. The status bar shows the response code and time. While
+  it waits for the server to start or for Xdebug to finish the profile,
+  **Cancel** in the status bar stops waiting.
 - While the profiling server runs, pages you open in a browser, where you can
   sign in, are profiled too. They're listed in **Open Xdebug Profile…** by
   their URL.
@@ -2478,7 +2495,8 @@ while you type and comes back when you pause.
 The first time you open the Problems panel, it scans the project: the PHP
 server runs the checks it runs for open files (Mago's analyzer and linter, and
 its own, such as unused imports) over every project PHP file at once, in a few
-seconds. **Scan Project** rechecks every file, since a change in one file can
+seconds. The status bar and the panel count the files checked so far, and
+**Cancel** in the status bar stops the check. **Scan Project** rechecks every file, since a change in one file can
 change another's problems. Open files show their live problems as you type.
 Mago's notes and help show in the editor only, not in the panel. The status bar
 counts cover the project once it has been scanned. Laravel's, Filament's, and
@@ -2629,6 +2647,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |
+| `src/replacepreview.ts` | Replace Preview: the matches to replace, with checkboxes |
+| `src/replacedata.ts` | Applying the replacements you kept to a file's text |
 | `src/bookmarks.ts` | Bookmarks and the Bookmarks tab |
 | `src/bookmarksdata.ts` | Reading and reordering saved bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |

@@ -849,7 +849,8 @@ installErrorHandlers()
   an `Error`, a Tauri command's error string, or anything else, drops Git's
   `hint:` lines, and keeps it to one line.
 - `withProgress` runs a task under a spinner and reports its failure with
-  `showError`. With `cancellable: true`, the status bar shows **Cancel**, which
+  `showError`. The task gets `report(text)` too, which replaces the label while
+  it runs, such as with "12 of 40 files". With `cancellable: true`, the status bar shows **Cancel**, which
   aborts the signal the task gets; the task checks `signal.throwIfAborted()`
   between steps or passes the signal on. A canceled task shows "Canceled", not
   an error. It resolves to `undefined` when the task failed or was canceled, so
@@ -2108,6 +2109,23 @@ the file still holds the match where the search found it.
 
 `list_files` takes `all`, which turns off `.gitignore` for Go to File's second
 press.
+Searches cancel for real: each Find view search passes an `id` to
+`search_text`, and a newer one calls `search_cancel(id)`, which sets the
+search's flag in `RUNNING` (a map in `search.rs`); the walk checks it between
+files and fails with "Cancelled", which the view ignores. `exclude` adds
+negated globs to the same overrides as `include`. The field history is
+localStorage (`findHistory`), since it's per user, shown through each input's
+`<datalist>`.
+
+Replace All opens `src/replacepreview.ts`. `replacements` in `search.rs`
+works out each match's replacement against its line at its column
+(`captures_at`), so anchors and lookarounds see the same text the search did,
+in one call for every match. The preview's checkboxes pick which ones
+`applyKept` in `search.ts` applies, through `applyReplacements` in
+`src/replacedata.ts` (with tests), which leaves a line alone when it no
+longer reads as the search saw it. `nextMatch` walks the results by key
+(`<path>\n<index>`), opening a collapsed file first.
+
 ### Actions and shortcuts
 
 `main.ts` keeps one list of actions. Each action has a label, an optional
@@ -5281,3 +5299,13 @@ list, rather than a map from files to lines, with each file's bookmarks kept
 together. Bookmarks are personal, like PhpStorm's by default, so they stay in
 the local project state and don't go in `tusk.json`. The tab is a bottom panel
 view like Breakpoints, which it resembles, instead of another sidebar view.
+
+### 2026-09-28: Long checks report counts through `$/progress` tokens the caller owns
+
+The project problems scan runs as one request in Tusk's server. Rather than
+split it into per-file requests, the request takes a `workDoneToken`, and the
+server reports "done/total files" against it. `tuskRequest` routes a token's
+progress to the caller instead of the status bar's generic line, and cancels
+the request when the caller's `AbortSignal` aborts, which the server's
+`is_cancelled` check already honors between files. `withProgress` gained a
+`report` callback so the count shows next to **Cancel**.
