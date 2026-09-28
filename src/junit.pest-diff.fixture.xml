@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="CLI Arguments" tests="7" assertions="6" errors="1" failures="6" skipped="0" time="0.086757">
+    <testsuite name="Tests\Unit\DiffTest" file="Diff (Tests\Unit\Diff)" tests="4" assertions="3" errors="1" failures="3" skipped="0" time="0.004669">
+      <testcase name="Strings" file="Diff (Tests\Unit\Diff)::Strings" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.003550">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">StringsFailed asserting that two strings are identical.
+at tests/Unit/DiffTest.php:11</failure>
+      </testcase>
+      <testcase name="Arrays" file="Diff (Tests\Unit\Diff)::Arrays" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.000444">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">ArraysFailed asserting that two arrays are equal.
+at tests/Unit/DiffTest.php:16</failure>
+      </testcase>
+      <testcase name="Numbers" file="Diff (Tests\Unit\Diff)::Numbers" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.000381">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">NumbersFailed asserting that 2 is identical to 1.
+at tests/Unit/DiffTest.php:21</failure>
+      </testcase>
+      <testcase name="Error" file="Diff (Tests\Unit\Diff)::Error" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="0" time="0.000295">
+        <error type="RuntimeException">ErrorRuntimeException: boom
+at tests/Unit/DiffTest.php:26</error>
+      </testcase>
+    </testsuite>
+    <testsuite name="Tests\Feature\DiffPestTest" file="tests/Feature/DiffPestTest.php" tests="3" assertions="3" errors="0" failures="3" skipped="0" time="0.082088">
+      <testcase name="it compares strings" file="tests/Feature/DiffPestTest.php::it compares strings" class="Tests\Feature\DiffPestTest" classname="Tests.Feature.DiffPestTest" assertions="1" time="0.070619">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it compares stringsFailed asserting that two strings are identical.
+at tests/Feature/DiffPestTest.php:4</failure>
+      </testcase>
+      <testcase name="it compares arrays" file="tests/Feature/DiffPestTest.php::it compares arrays" class="Tests\Feature\DiffPestTest" classname="Tests.Feature.DiffPestTest" assertions="1" time="0.006095">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it compares arraysFailed asserting that two arrays are equal.
+at tests/Feature/DiffPestTest.php:8</failure>
+      </testcase>
+      <testcase name="it compares with assert" file="tests/Feature/DiffPestTest.php::it compares with assert" class="Tests\Feature\DiffPestTest" classname="Tests.Feature.DiffPestTest" assertions="1" time="0.005373">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">it compares with assertFailed asserting that two strings are identical.
+at tests/Feature/DiffPestTest.php:12</failure>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
