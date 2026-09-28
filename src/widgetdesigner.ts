@@ -2,7 +2,8 @@
 // the widget's code as you go (src/widgetgen.ts), with a preview beside them. A table widget opens in the resource
 // designer's table tab instead.
 import { h, icon, iconButton } from "./dom";
-import { editFiles } from "./codeapply";
+import { editFiles, type FileBuild } from "./codeapply";
+import { removeTraitEdits, traitsEdits } from "./usergen";
 import { renderEntryAccess } from "./filamentaccess";
 import * as fapp from "./filamentapp";
 import { type Catalog, humanize } from "./filamentcatalog";
@@ -10,7 +11,7 @@ import { host } from "./filamentdesigner";
 import { iconNameOf } from "./filamentinspector";
 import { COLOR_SWATCH, colorChooser, commitInput, heroicon, pickHeroicon, toggleSwitch } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
-import { type ArrayNode, type Edit, insertItem, methodNamed, moveItem, type OClass, type Outline, phpString, propertyNamed, removeItem, removeProperty, replaceNode, setProperty } from "./phpcode";
+import { addMember, type ArrayNode, type Edit, insertItem, methodNamed, removeMethod, moveItem, type OClass, type Outline, phpString, propertyNamed, removeItem, removeProperty, replaceNode, setProperty } from "./phpcode";
 import { showEditorView } from "./terminal";
 import {
   AGGS,
@@ -33,8 +34,12 @@ import {
   type StatRead,
   trendCode,
   valueCode,
+  TABLE,
   type Where,
 } from "./widgetgen";
+
+const PAGE_TABLE = "Filament\\Widgets\\Concerns\\InteractsWithPageTable";
+const EXPOSES_TABLE = "Filament\\Pages\\Concerns\\ExposesTableToWidgets";
 
 const open = new Map<string, WidgetDesigner>();
 /** The colors the designer gives a pie's parts (PART_COLORS in src/widgetgen.ts). */
@@ -58,6 +63,8 @@ class WidgetDesigner {
   private models: Record<string, fapp.ModelSummary> = {};
   private cat: Catalog | null = null;
   private listening = false;
+  /** The resource list page whose table the widget can follow, when it's a resource's widget. */
+  private listPage: { class: string; file: string; model: string } | null = null;
   /** What the widget shows now, read after each change; an error says why it can't. */
   private live: (Awaited<ReturnType<typeof fapp.widgetData>> & { error?: undefined }) | { error: string } | null = null;
   private liveTimer = 0;
@@ -76,10 +83,15 @@ class WidgetDesigner {
   }
 
   private async load() {
-    const [models, cat] = await Promise.all([fapp.models(this.root).catch(() => ({})), fapp.catalog(this.root).catch(() => null)]);
+    const [models, cat, app] = await Promise.all([fapp.models(this.root).catch(() => ({})), fapp.catalog(this.root).catch(() => null), fapp.app(this.root).catch(() => null)]);
     this.models = models;
     this.cat = cat;
     await this.read();
+    // A resource's widget, in its Widgets folder, can count what the resource's list page shows.
+    const ns = this.doc?.cls.fqn.replace(/\\Widgets\\[^\\]+$/, "");
+    const resource = !ns ? undefined : app?.panels.flatMap((p) => p.resources).find((r) => r.class.startsWith(`${ns}\\`) && r.class.slice(ns.length + 1).indexOf("\\") < 0);
+    const list = resource?.pages.find((p) => p.kind === "list" || p.kind === "manage");
+    this.listPage = resource && list?.file ? { class: list.class, file: `${this.root}/${list.file}`, model: resource.model } : null;
     this.render();
   }
 
@@ -119,6 +131,7 @@ class WidgetDesigner {
 
   /** A class name as written in the widget, resolved through its imports. */
   private resolve(name: string): string {
+    if (name === TABLE) return name;
     if (name.startsWith("\\")) return name.slice(1);
     const [first, ...rest] = name.split("\\");
     const use = this.doc?.outline.uses.find((u) => u.kind === "class" && u.alias.toLowerCase() === first.toLowerCase());
@@ -128,6 +141,7 @@ class WidgetDesigner {
 
   /** A metric with its model resolved, for writing back. */
   private full = (m: Metric): Metric => ({ ...m, model: this.resolve(m.model) });
+
 
   render() {
     const d = this.doc;
@@ -238,6 +252,10 @@ class WidgetDesigner {
     const pollSelect = h("select", {}, ...[["", this.kind === "stats" ? "Default (every 5s)" : "Default"], ["null", "Never"], ["10s", "Every 10 seconds"], ["30s", "Every 30 seconds"], ["60s", "Every minute"]].map(([v, l]) => h("option", { value: v, textContent: l, selected: (poll ? (poll.p.value?.kind === "null" ? "null" : poll.value) : "") === v })));
     pollSelect.onchange = () => void this.setProp("pollingInterval", "protected ?string $pollingInterval", pollSelect.value ? (pollSelect.value === "null" ? "null" : phpString(pollSelect.value)) : null, "Refresh changed");
     const rows = [text("heading", "Heading"), text("description", "Description"), row("Width", spanSelect, !!span), row("Refresh", pollSelect, !!poll, "How often the widget reads its numbers again")];
+    if (this.listPage && this.kind !== "other") {
+      const follows = this.follows(d);
+      rows.push(row("Follows the table", toggleSwitch(follows, (on) => void this.follow(on)), follows, `Counts the records ${shortClass(this.listPage.class)} shows, with its filters and search.`));
+    }
     if (this.kind === "chart") {
       const type = methodNamed(d.cls, "getType")?.returns[0];
       const current = type?.kind === "string" ? type.value : null;
@@ -254,6 +272,57 @@ class WidgetDesigner {
       rows.push(row("Max height", commitInput(height?.value ?? "", (x) => void this.setProp("maxHeight", "protected ?string $maxHeight", x.trim() ? phpString(x.trim()) : null, "Max height changed"), { placeholder: "300px" }), !!height));
     }
     return h("section", { class: "fd-settings-section fd-settings" }, h("h3", {}, icon("settings"), "Widget"), h("div", { class: "fd-rows" }, ...rows));
+  }
+
+  private follows = (d: Doc) => d.cls.traits.some((t) => /(^|\\)InteractsWithPageTable$/.test(t));
+
+  /**
+   * Makes the widget count the list page's records, with its filters and search, or the model's again: the trait
+   * and getTablePage() on the widget, ExposesTableToWidgets on the page, and each value the designer reads.
+   */
+  private async follow(on: boolean) {
+    const page = this.listPage;
+    if (!page) return;
+    const model = (m: Metric): Metric => ({ ...m, model: on ? TABLE : page.model });
+    const files: { path: string; build: FileBuild }[] = [
+      {
+        path: this.file,
+        build: (text, outline) => {
+          const cls = outline.classes.find((c) => c.name);
+          if (!cls) return null;
+          const edits: Edit[] = [];
+          const getter = methodNamed(cls, "getTablePage");
+          if (on) {
+            edits.push(...traitsEdits(text, cls, [PAGE_TABLE]));
+            if (!getter) edits.push(addMember(text, cls, `protected function getTablePage(): string\n{\n    return {{${page.class}}}::class;\n}`));
+          } else {
+            edits.push(...removeTraitEdits(text, cls, PAGE_TABLE));
+            if (getter) edits.push(removeMethod(text, getter));
+          }
+          const stats = methodNamed(cls, "getStats")?.returns[0];
+          if (stats?.kind === "array")
+            for (const st of readStats(stats, text)) {
+              const v = readValue(st.value ? text.slice(st.value.span[0], st.value.span[1]) : "");
+              if (!v) continue;
+              const m = model({ ...v.metric, model: v.metric.model === TABLE ? TABLE : this.resolve(v.metric.model) });
+              edits.push(...statArgEdit(text, st, 1, valueCode(m, v.format)));
+              if (st.trend === "designed") edits.push(...statCallEdit(text, st, "chart", trendCode(m)));
+            }
+          const data = methodNamed(cls, "getData")?.returns[0];
+          if (data?.kind === "array") {
+            const c = readChartData(data, text);
+            if (c.series && c.datasets <= 1) edits.push(...seriesEdits(text, c, c.label?.text ?? "Records", { ...c.series, metric: model({ ...c.series.metric, model: this.resolve(c.series.metric.model) }) }));
+          }
+          return edits;
+        },
+      },
+    ];
+    if (on)
+      files.push({ path: page.file, build: (text, outline) => {
+        const cls = outline.classes.find((c) => c.name);
+        return cls ? traitsEdits(text, cls, [EXPOSES_TABLE]) : null;
+      } });
+    await editFiles(files, on ? `Follows ${shortClass(page.class)}'s table` : "Counts the model's records");
   }
 
   // ---- Stats ----
@@ -357,11 +426,17 @@ class WidgetDesigner {
   /** Edits a metric: which records (a model and filters), and what number: a count, or a column's sum or average. */
   private metricEditor(m: Metric, set: (m: Metric) => void, withDays: boolean): HTMLElement {
     const fqn = this.resolve(m.model);
-    const info = this.models[fqn];
+    const info = this.models[fqn === TABLE ? (this.listPage?.model ?? "") : fqn];
     const columns = info ? Object.keys(info.columns) : [];
     const numeric = info ? columns.filter((c) => /int|dec|float|double|numeric|real|money/i.test(info.columns[c]?.type ?? "")) : [];
     const models = Object.keys(this.models);
-    const modelSelect = h("select", {}, ...models.map((c) => h("option", { value: c, textContent: shortClass(c), selected: c === fqn })), ...(models.includes(fqn) ? [] : [h("option", { value: fqn, textContent: shortClass(fqn), selected: true })]));
+    const modelSelect = h(
+      "select",
+      {},
+      ...(this.listPage ? [h("option", { value: TABLE, textContent: "the table's records", selected: fqn === TABLE })] : []),
+      ...models.map((c) => h("option", { value: c, textContent: shortClass(c), selected: c === fqn })),
+      ...(models.includes(fqn) || fqn === TABLE ? [] : [h("option", { value: fqn, textContent: shortClass(fqn), selected: true })]),
+    );
     modelSelect.onchange = () => set({ ...m, model: modelSelect.value, where: [], column: null, agg: "count" });
     const agg = h("select", {}, ...AGGS.map(([v, l]) => h("option", { value: v, textContent: l, selected: v === m.agg, disabled: v !== "count" && !numeric.length && m.column === null })));
     const column = h("select", {}, ...[...new Set([...(m.column ? [m.column] : []), ...numeric])].map((c) => h("option", { value: c, textContent: c, selected: c === m.column })));

@@ -4396,6 +4396,12 @@ has, as `methodsOf` reports them.
   strings; navigation groups are labels, or `NavigationGroup::make()` once
   they get an icon or start collapsed; plugins are `Plugin::make()` in
   `plugins([...])`.
+- **User model:** `src/usergen.ts` adds contracts to the class's `implements`
+  and traits beside its others. Two-factor sign-in uses Filament's own
+  `InteractsWith…Authentication` traits, and a migration adds only the
+  columns the table lacks. Tenancy writes `getTenants()` and
+  `canAccessTenant()` through the user's relationship to the tenant model, a
+  to-many one or a single one.
 - **Options:** `introspect.php panel-options` reads Filament's palettes (their
   500 shade, for swatches and the preview), the Filament plugins Composer
   installed (a `*Plugin` class in a package that requires Filament that
@@ -4465,6 +4471,11 @@ has, as `methodsOf` reports them.
   `src/widgetdesigner.ts` draws the view. New widgets are written by the
   designer, not `make:filament-widget`, which asks for a table widget's model
   and a chart's type interactively.
+- **Following the table:** a value on `@table` is written
+  `$this->getPageTableQuery()->reorder()`, the list page's filtered query
+  without its sort (databases refuse to sort a count). Following adds
+  `InteractsWithPageTable` and `getTablePage()` to the widget,
+  `ExposesTableToWidgets` to the page, and rewrites each value it reads.
 - **Live data:** `introspect.php widget-data <class>` runs the widget's
   `getStats()` or `getData()` as the first user, and the preview shows what it
   returns, or why it failed.

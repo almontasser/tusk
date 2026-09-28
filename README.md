@@ -49,7 +49,7 @@ file to change when you add it.
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
-| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods, and don't set up two-factor authentication or tenancy's user contract. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. Stats on a list page don't follow the table's filters. |
+| Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
@@ -960,7 +960,13 @@ the panel follows it.
   collapsed, with the groups resources use that aren't listed yet.
 - **Plugins:** the Filament plugins installed with Composer, added to the
   panel or removed from it.
-- **Tenancy:** the tenant model, and what the user model still needs for it.
+- **Two-factor sign-in:** codes from an authenticator app, with recovery
+  codes, or by email, and whether everyone must use it. **Set it up** gives
+  the user model Filament's contracts and traits, adds their columns with a
+  migration and runs it, and turns the profile page on, where people set it up.
+- **Tenancy:** the tenant model. **Set it up** makes the user model implement
+  `HasTenants` through its relationship to the tenant model, and the section
+  lists resources' models that don't belong to a tenant yet.
 
 Settings written as code the designer doesn't write, such as a logo from a
 closure, show as code and open it.
@@ -1023,6 +1029,8 @@ as each one is.
   heading, color, and height, and the data: a value over the last days, weeks,
   or months, or split by a column's values. Pies get a color per part.
 - **Table widgets** open in the designer's table tab.
+- **Following the table:** a resource's widget can count the records its list
+  page shows, with the table's filters and search, with **Follows the table**.
 - **Access:** who can see a widget, as for pages below.
 - **Resource pages:** the **Page actions** tab lists the widgets above the
   page, to add, reorder, and remove, and makes new ones for the resource.

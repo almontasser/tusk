@@ -1,0 +1,463 @@
+{
+  "errors": false,
+  "namespace": "App\\Models",
+  "uses": [
+    {
+      "alias": "UserFactory",
+      "name": "Database\\Factories\\UserFactory",
+      "kind": "class",
+      "span": [
+        30,
+        65
+      ]
+    },
+    {
+      "alias": "FilamentUser",
+      "name": "Filament\\Models\\Contracts\\FilamentUser",
+      "kind": "class",
+      "span": [
+        66,
+        109
+      ]
+    },
+    {
+      "alias": "HasTenants",
+      "name": "Filament\\Models\\Contracts\\HasTenants",
+      "kind": "class",
+      "span": [
+        110,
+        151
+      ]
+    },
+    {
+      "alias": "Panel",
+      "name": "Filament\\Panel",
+      "kind": "class",
+      "span": [
+        152,
+        171
+      ]
+    },
+    {
+      "alias": "MustVerifyEmail",
+      "name": "Illuminate\\Contracts\\Auth\\MustVerifyEmail",
+      "kind": "class",
+      "span": [
+        172,
+        218
+      ]
+    },
+    {
+      "alias": "HasFactory",
+      "name": "Illuminate\\Database\\Eloquent\\Factories\\HasFactory",
+      "kind": "class",
+      "span": [
+        219,
+        273
+      ]
+    },
+    {
+      "alias": "Model",
+      "name": "Illuminate\\Database\\Eloquent\\Model",
+      "kind": "class",
+      "span": [
+        274,
+        313
+      ]
+    },
+    {
+      "alias": "BelongsToMany",
+      "name": "Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany",
+      "kind": "class",
+      "span": [
+        314,
+        371
+      ]
+    },
+    {
+      "alias": "Authenticatable",
+      "name": "Illuminate\\Foundation\\Auth\\User",
+      "kind": "class",
+      "span": [
+        372,
+        427
+      ]
+    },
+    {
+      "alias": "Notifiable",
+      "name": "Illuminate\\Notifications\\Notifiable",
+      "kind": "class",
+      "span": [
+        428,
+        468
+      ]
+    },
+    {
+      "alias": "Collection",
+      "name": "Illuminate\\Support\\Collection",
+      "kind": "class",
+      "span": [
+        469,
+        503
+      ]
+    },
+    {
+      "alias": "HasApiTokens",
+      "name": "Laravel\\Sanctum\\HasApiTokens",
+      "kind": "class",
+      "span": [
+        504,
+        537
+      ]
+    }
+  ],
+  "useInsert": 538,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "User",
+      "fqn": "App\\Models\\User",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Foundation\\Auth\\User",
+      "implements": [
+        "Filament\\Models\\Contracts\\FilamentUser",
+        "Filament\\Models\\Contracts\\HasTenants",
+        "Illuminate\\Contracts\\Auth\\MustVerifyEmail"
+      ],
+      "attributes": [],
+      "span": [
+        539,
+        1451
+      ],
+      "bodyStart": 628,
+      "bodyEnd": 1450,
+      "traits": [
+        "Laravel\\Sanctum\\HasApiTokens",
+        "Illuminate\\Database\\Eloquent\\Factories\\HasFactory",
+        "Illuminate\\Notifications\\Notifiable"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "hidden",
+          "static": false,
+          "visibility": "protected",
+          "readonly": false,
+          "type": null,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "password",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    809,
+                    819
+                  ]
+                },
+                "span": [
+                  809,
+                  819
+                ],
+                "spread": false
+              },
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "remember_token",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    829,
+                    845
+                  ]
+                },
+                "span": [
+                  829,
+                  845
+                ],
+                "spread": false
+              }
+            ],
+            "open": 799,
+            "close": 851,
+            "legacy": false,
+            "span": [
+              799,
+              852
+            ]
+          },
+          "span": [
+            779,
+            853
+          ],
+          "attributes": []
+        },
+        {
+          "name": "casts",
+          "static": false,
+          "visibility": "protected",
+          "readonly": false,
+          "type": null,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "key": {
+                  "kind": "string",
+                  "value": "email_verified_at",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    938,
+                    957
+                  ]
+                },
+                "value": {
+                  "kind": "string",
+                  "value": "datetime",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    961,
+                    971
+                  ]
+                },
+                "span": [
+                  938,
+                  971
+                ],
+                "spread": false
+              }
+            ],
+            "open": 928,
+            "close": 977,
+            "legacy": false,
+            "span": [
+              928,
+              978
+            ]
+          },
+          "span": [
+            909,
+            979
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "canAccessPanel",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "panel",
+              "type": "Panel",
+              "default": null,
+              "span": [
+                1016,
+                1028
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            985,
+            1068
+          ],
+          "docStart": 859,
+          "body": [
+            1041,
+            1067
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": true,
+              "span": [
+                1057,
+                1061
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "canAccessTenant",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "tenant",
+              "type": "Model",
+              "default": null,
+              "span": [
+                1106,
+                1119
+              ]
+            }
+          ],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            1074,
+            1159
+          ],
+          "docStart": 859,
+          "body": [
+            1132,
+            1158
+          ],
+          "returns": [
+            {
+              "kind": "bool",
+              "value": true,
+              "span": [
+                1148,
+                1152
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "getTenants",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "panel",
+              "type": "Panel",
+              "default": null,
+              "span": [
+                1232,
+                1244
+              ]
+            }
+          ],
+          "returnType": "Collection",
+          "attributes": [],
+          "span": [
+            1205,
+            1297
+          ],
+          "docStart": 1165,
+          "body": [
+            1263,
+            1296
+          ],
+          "returns": [
+            {
+              "kind": "static",
+              "class": "App\\Models\\Team",
+              "classSpan": [
+                1279,
+                1283
+              ],
+              "method": "all",
+              "args": {
+                "open": 1288,
+                "close": 1289,
+                "items": []
+              },
+              "span": [
+                1279,
+                1290
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "teams",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "BelongsToMany",
+          "attributes": [],
+          "span": [
+            1349,
+            1449
+          ],
+          "docStart": 1303,
+          "body": [
+            1393,
+            1448
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "this",
+                "span": [
+                  1409,
+                  1414
+                ]
+              },
+              "calls": [
+                {
+                  "name": "belongsToMany",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1429,
+                    "close": 1441,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "classConst",
+                          "class": "App\\Models\\Team",
+                          "classSpan": [
+                            1430,
+                            1434
+                          ],
+                          "name": "class",
+                          "span": [
+                            1430,
+                            1441
+                          ]
+                        },
+                        "span": [
+                          1430,
+                          1441
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1414,
+                    1442
+                  ],
+                  "nameSpan": [
+                    1416,
+                    1429
+                  ]
+                }
+              ],
+              "span": [
+                1409,
+                1442
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

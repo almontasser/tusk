@@ -6,7 +6,9 @@ import {
   addPluginEdits,
   changeNavGroupEdits,
   colorEdits,
+  mfaEdits,
   moveNavGroupEdits,
+  readMfa,
   panelChains,
   readColors,
   readNavGroups,
@@ -87,4 +89,14 @@ test("plugins and tenancy", () => {
   assert.match(run(d.text, addPluginEdits(d.text, d.code, "Vendor\\Pkg\\BlogPlugin")), /->plugins\(\[\n {16}BlogPlugin::make\(\),\n {12}\]\);/);
   assert.deepEqual(readTenant(d.text, d.code), { model: null, code: null });
   assert.match(run(d.text, tenantEdits(d.text, d.code, "App\\Models\\Team")), /->tenant\(Team::class\)/);
+});
+
+test("two-factor sign-in", () => {
+  const { text, code } = load("DemoPanelProvider");
+  assert.equal(readMfa(text, code), null);
+  const on = run(text, mfaEdits(text, code, { app: true, recoverable: true, email: true, required: false }));
+  assert.match(on, /->multiFactorAuthentication\(\[\n {16}AppAuthentication::make\(\)->recoverable\(\),\n {16}EmailAuthentication::make\(\),\n {12}\]\);/);
+  const f = on.replace(/\{\{.*?\}\}/g, "");
+  assert.ok(f);
+  assert.equal(mfaEdits(text, code, { app: false, recoverable: false, email: false, required: false }).length, 0);
 });

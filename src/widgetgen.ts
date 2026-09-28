@@ -38,9 +38,16 @@ function literal(code: string): Literal {
 }
 export const literalCode = (v: Literal) => (typeof v === "string" ? phpString(v) : v === null ? "null" : String(v));
 
+/**
+ * A metric's model when it counts the records of the list page's table, as filtered there: the widget reads them
+ * with InteractsWithPageTable. The sort is dropped, since databases refuse to sort a count.
+ */
+export const TABLE = "@table";
+const TABLE_QUERY = "$this->getPageTableQuery()->reorder()";
+
 /** The query of a metric: the model's records that match, without the number. */
 export function queryCode(m: Metric): string {
-  let code = `{{${m.model}}}::query()`;
+  let code = m.model === TABLE ? TABLE_QUERY : `{{${m.model}}}::query()`;
   for (const w of m.where) {
     if (w.value === null) code += w.op === "!=" ? `->whereNotNull(${phpString(w.column)})` : `->whereNull(${phpString(w.column)})`;
     else code += w.op === "=" ? `->where(${phpString(w.column)}, ${literalCode(w.value)})` : `->where(${phpString(w.column)}, ${phpString(w.op)}, ${literalCode(w.value)})`;
@@ -54,7 +61,8 @@ export const metricCode = (m: Metric) => queryCode(m) + aggCode(m);
 
 /** Reads the query part of a metric, from `Model::query()` to where its filters end, and what comes after. */
 function readQuery(code: string): { m: Omit<Metric, "agg" | "column">; rest: string } | null {
-  const head = /^\\?([A-Za-z_][\w\\]*)::query\(\)/.exec(code);
+  const table = code.startsWith(TABLE_QUERY);
+  const head = table ? [TABLE_QUERY, TABLE] : /^\\?([A-Za-z_][\w\\]*)::query\(\)/.exec(code);
   if (!head) return null;
   const m: Omit<Metric, "agg" | "column"> = { model: head[1], where: [], days: null };
   let rest = code.slice(head[0].length);

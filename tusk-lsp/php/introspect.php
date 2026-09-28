@@ -1278,7 +1278,33 @@ function panelOptions(string $root): array
     try {
         $class = config('auth.providers.users.model');
         if (is_string($class) && class_exists($class)) {
-            $user = ['class' => $class, 'file' => relativeFile($class, $root), 'hasTenants' => is_subclass_of($class, 'Filament\\Models\\Contracts\\HasTenants'), 'filamentUser' => is_subclass_of($class, 'Filament\\Models\\Contracts\\FilamentUser')];
+            $table = (new $class())->getTable();
+            $has = function (string $column) use ($table): ?bool {
+                try {
+                    return Illuminate\Support\Facades\Schema::hasColumn($table, $column);
+                } catch (Throwable) {
+                    return null;
+                }
+            };
+            $user = [
+                'class' => $class,
+                'file' => relativeFile($class, $root),
+                'table' => $table,
+                'hasTenants' => is_subclass_of($class, 'Filament\\Models\\Contracts\\HasTenants'),
+                'filamentUser' => is_subclass_of($class, 'Filament\\Models\\Contracts\\FilamentUser'),
+                // What two-factor sign-in needs from the user model and its table.
+                'mfa' => [
+                    'app' => is_subclass_of($class, 'Filament\\Auth\\MultiFactor\\App\\Contracts\\HasAppAuthentication'),
+                    'recovery' => is_subclass_of($class, 'Filament\\Auth\\MultiFactor\\App\\Contracts\\HasAppAuthenticationRecovery'),
+                    'email' => is_subclass_of($class, 'Filament\\Auth\\MultiFactor\\Email\\Contracts\\HasEmailAuthentication'),
+                    'columns' => [
+                        'app_authentication_secret' => $has('app_authentication_secret'),
+                        'app_authentication_recovery_codes' => $has('app_authentication_recovery_codes'),
+                        'has_email_authentication' => $has('has_email_authentication'),
+                    ],
+                ],
+                'relations' => array_map(fn ($r) => ['name' => $r['name'], 'type' => $r['type'], 'related' => $r['related']], relations(new $class())),
+            ];
         }
     } catch (Throwable) {
     }

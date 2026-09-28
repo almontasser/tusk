@@ -7,15 +7,20 @@ import type { Catalog } from "./filamentcatalog";
 import { type Doc, host } from "./filamentdesigner";
 import { askName, commitInput, heroicon, pickHeroicon, toggleSwitch } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
+import { invoke } from "@tauri-apps/api/core";
 import { editFiles } from "./codeapply";
+import { addColumnsMigration, implementsEdits, migrationName, traitsEdits, userTenantEdits } from "./usergen";
 import {
   addNavGroupEdits,
   addPluginEdits,
   changeNavGroupEdits,
   COLOR_ROLES,
   colorEdits,
+  type Mfa,
+  mfaEdits,
   moveNavGroupEdits,
   panelChains,
+  readMfa,
   type PanelCode,
   readColors,
   readNavGroups,
@@ -31,9 +36,23 @@ import {
 } from "./panelgen";
 import { iconNameOf } from "./filamentinspector";
 import { type Edit, methodNamed, type PNode } from "./phpcode";
+import { showError } from "./status";
 import { showEditorView } from "./terminal";
 
-export type PanelOptions = { palettes: Record<string, string>; plugins: { class: string; package: string; description: string | null }[]; appName: string | null; user: { class: string; file: string | null; hasTenants: boolean; filamentUser: boolean } | null };
+export type PanelOptions = {
+  palettes: Record<string, string>;
+  plugins: { class: string; package: string; description: string | null }[];
+  appName: string | null;
+  user: {
+    class: string;
+    file: string | null;
+    table: string;
+    hasTenants: boolean;
+    filamentUser: boolean;
+    mfa: { app: boolean; recovery: boolean; email: boolean; columns: Record<string, boolean | null> };
+    relations: { name: string; type: string; related: string | null }[];
+  } | null;
+};
 
 const open = new Map<string, PanelSettings>();
 
@@ -53,6 +72,7 @@ class PanelSettings {
   private cat: Catalog | null = null;
   private app: fapp.AppInfo | null = null;
   private models: string[] = [];
+  private modelInfo: Record<string, fapp.ModelSummary> = {};
   private error = "";
   private listening = false;
   private darkPreview = false;
@@ -80,7 +100,7 @@ class PanelSettings {
         fapp.app(this.root).catch(() => null),
         fapp.models(this.root).catch(() => ({})),
       ]);
-      Object.assign(this, { options, cat, app, models: Object.keys(models) });
+      Object.assign(this, { options, cat, app, models: Object.keys(models), modelInfo: models });
       await this.read();
       this.error = "";
     } catch (e) {
@@ -145,6 +165,7 @@ class PanelSettings {
       ...groups.flatMap((g) => [this.section(g, text, code), ...(g === "Brand" ? [this.colors(text, code)] : [])]),
       this.navGroups(text, code),
       this.plugins(text, code),
+      this.twoFactor(text, code),
       this.tenancy(text, code),
     );
     this.el.replaceChildren(header, h("div", { class: "md-body" }, main, this.preview(text, code)));
@@ -295,24 +316,135 @@ class PanelSettings {
       ...this.models.map((m) => h("option", { value: m, textContent: shortClass(m), selected: !!t.model && shortClass(t.model) === shortClass(m) })),
     );
     select.onchange = () => void this.apply((tx, c) => tenantEdits(tx, c, select.value || null), select.value ? `Tenancy by ${shortClass(select.value)}` : "Removed tenancy");
-    const needs =
-      t.model && user && !user.hasTenants
-        ? h(
+    const needs: HTMLElement[] = [];
+    if (t.model && user && !user.hasTenants) {
+      // The user reaches its tenants through a relationship to the tenant model.
+      const rel = user.relations.find((r) => r.related === t.model);
+      needs.push(
+        h(
+          "div",
+          { class: "fd-helper-note fd-error-note" },
+          icon("warning"),
+          h("span", {}, `${shortClass(user.class)} must implement Filament's HasTenants: which ${shortClass(t.model)} records each user belongs to. `),
+          rel
+            ? h("button", { type: "button", class: "fd-chip-link", onclick: () => void this.setUpTenantUser(rel) }, `Set it up through ${rel.name}()`)
+            : h("span", {}, `${shortClass(user.class)} has no relationship to ${shortClass(t.model)} yet: add one, such as ${shortClass(t.model).toLowerCase()}s(), in the model designer. `),
+          !rel && user.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => void import("./modeldesigner").then((m) => m.openModelDesigner(`${this.root}/${user.file}`)) }, `Open ${shortClass(user.class)}`) : null,
+        ),
+      );
+    }
+    if (t.model) {
+      // Each resource's model belongs to a tenant through a relationship named after it, unless the panel names another.
+      const own = /ownershipRelationship:\s*['"](\w+)['"]/.exec(text)?.[1] ?? shortClass(t.model).charAt(0).toLowerCase() + shortClass(t.model).slice(1);
+      const panel = this.app?.panels.find((p) => p.id === this.panelId);
+      const missing = [...new Set((panel?.resources ?? []).map((r) => r.model))].filter((m) => m && m !== t.model && this.modelInfo[m] && !this.modelInfo[m].relations.some((r) => r.name === own));
+      if (missing.length)
+        needs.push(
+          h(
             "div",
-            { class: "fd-helper-note fd-error-note" },
-            icon("warning"),
-            h("span", {}, `${shortClass(user.class)} must implement Filament's HasTenants, with getTenants() and canAccessTenant(), and ${shortClass(t.model)} needs a relationship to its records. `),
-            user.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(`${this.root}/${user.file}`, 1) }, `Open ${shortClass(user.class)}`) : null,
-          )
-        : null;
+            { class: "fd-helper-note" },
+            icon("info"),
+            h("span", {}, `Filament finds each record's ${shortClass(t.model)} through ${own}(). These models don't have it yet: `),
+            ...missing.map((m) => h("button", { type: "button", class: "fd-chip-link", onclick: () => void fapp.fileOfClass(this.root, m).then((f) => { if (f) void import("./modeldesigner").then((x) => x.openModelDesigner(f)); }) }, shortClass(m))),
+          ),
+        );
+    }
     return h(
       "section",
       { class: "fd-settings-section fd-settings" },
       h("h3", {}, icon("organization"), "Tenancy"),
       h("p", { class: "fd-note" }, "Each user works inside a team, company, or other record, and sees only its data."),
       t.code ? h("button", { type: "button", class: "fd-code-chip", onclick: () => this.reveal(text.indexOf(t.code!)) }, icon("code"), t.code) : h("div", { class: "fd-rows" }, h("div", { class: `fd-row${t.model ? " set" : ""}` }, h("span", { class: "fd-row-label" }, "Tenant model"), h("div", { class: "fd-row-editor" }, select), h("span", { class: "fd-row-spacer" }))),
-      needs,
+      ...needs,
     );
+  }
+
+  /** Adds HasTenants to the user model, through its relationship to the tenant model. */
+  private async setUpTenantUser(rel: { name: string; type: string }) {
+    const user = this.options?.user;
+    if (!user?.file) return;
+    const ok = await editFiles([{ path: `${this.root}/${user.file}`, build: (text, outline) => {
+      const cls = outline.classes.find((c) => c.name);
+      return cls ? userTenantEdits(text, cls, rel) : null;
+    } }], `${shortClass(user.class)} implements HasTenants`);
+    if (ok) (fapp.forget(["panel-options"]), void this.load());
+  }
+
+  // ---- Two-factor sign-in ----
+
+  private twoFactor(text: string, code: PanelCode): HTMLElement {
+    const m = readMfa(text, code);
+    const section = (...children: (HTMLElement | null)[]) => h("section", { class: "fd-settings-section fd-settings" }, h("h3", {}, icon("lock"), "Two-factor sign-in"), h("p", { class: "fd-note" }, "After their password, people enter a code: from an authenticator app, or sent by email. They turn it on in their profile."), ...children);
+    if (m && "code" in m) return section(h("button", { type: "button", class: "fd-code-chip", onclick: () => this.reveal(text.indexOf(m.code)) }, icon("code"), h("span", {}, m.code.replace(/\s+/g, " ").slice(0, 70))));
+    const state: Mfa = m ?? { app: false, recoverable: true, email: false, required: false };
+    const set = (next: Mfa) => void this.apply((t, c) => mfaEdits(t, c, next), next.app || next.email ? "Two-factor sign-in changed" : "Two-factor sign-in off");
+    const row = (label: string, on: boolean, change: (on: boolean) => void, hint: string, disabled = false) => {
+      const sw = toggleSwitch(on, change, label);
+      if (disabled) sw.querySelector("input")!.disabled = true;
+      return h("div", { class: `fd-row${on ? " set" : ""}`, title: hint }, h("span", { class: "fd-row-label" }, label), h("div", { class: "fd-row-editor" }, sw), h("span", { class: "fd-row-spacer" }));
+    };
+    const any = state.app || state.email;
+    const rows = [
+      row("Authenticator app", state.app, (on) => set({ ...state, app: on }), "Codes from an app such as Google Authenticator or 1Password."),
+      row("Recovery codes", state.app && state.recoverable, (on) => set({ ...state, recoverable: on }), "One-time codes for when the phone is lost.", !state.app),
+      row("Codes by email", state.email, (on) => set({ ...state, email: on }), "A code sent to the user's email. Needs mail to be set up."),
+      row("Required for everyone", state.required, (on) => set({ ...state, required: on }), "People set it up before they can use the panel.", !any),
+    ];
+    // What the user model, its table, and the panel still need for the factors that are on.
+    const user = this.options?.user;
+    const needs: string[] = [];
+    const contracts: string[] = [];
+    const traits: string[] = [];
+    const columns: string[] = [];
+    if (user && any) {
+      const M = "Filament\\Auth\\MultiFactor\\";
+      if (state.app && !user.mfa.app) contracts.push(`${M}App\\Contracts\\HasAppAuthentication`), traits.push(`${M}App\\Concerns\\InteractsWithAppAuthentication`);
+      if (state.app && state.recoverable && !user.mfa.recovery) contracts.push(`${M}App\\Contracts\\HasAppAuthenticationRecovery`), traits.push(`${M}App\\Concerns\\InteractsWithAppAuthenticationRecovery`);
+      if (state.email && !user.mfa.email) contracts.push(`${M}Email\\Contracts\\HasEmailAuthentication`), traits.push(`${M}Email\\Concerns\\InteractsWithEmailAuthentication`);
+      if (state.app && user.mfa.columns.app_authentication_secret === false) columns.push("app_authentication_secret");
+      if (state.app && state.recoverable && user.mfa.columns.app_authentication_recovery_codes === false) columns.push("app_authentication_recovery_codes");
+      if (state.email && user.mfa.columns.has_email_authentication === false) columns.push("has_email_authentication");
+      if (contracts.length) needs.push(`${shortClass(user.class)} needs ${contracts.map(shortClass).join(" and ")}`);
+      if (columns.length) needs.push(`the ${user.table} table needs ${columns.join(", ")}`);
+    }
+    const profile = readSetting(text, code, SETTINGS.find((x) => x.call === "profile")!).value === true;
+    if (any && !profile) needs.push("people set it up on the profile page, which is off");
+    const note = needs.length
+      ? h(
+          "div",
+          { class: "fd-helper-note fd-error-note" },
+          icon("warning"),
+          h("span", {}, `Not ready: ${needs.join("; ")}. `),
+          h("button", { type: "button", class: "fd-chip-link", onclick: () => void this.setUpMfa(contracts, traits, columns, !profile) }, "Set it up"),
+        )
+      : any
+        ? h("p", { class: "fd-note" }, icon("check"), " Ready: people turn it on in their profile.")
+        : null;
+    return section(h("div", { class: "fd-rows" }, ...rows), note);
+  }
+
+  /** Gives the user model what two-factor sign-in needs, adds its columns with a migration, and turns the profile page on. */
+  private async setUpMfa(contracts: string[], traits: string[], columns: string[], profile: boolean) {
+    const user = this.options?.user;
+    if (!user?.file) return;
+    if (contracts.length)
+      await editFiles([{ path: `${this.root}/${user.file}`, build: (text, outline) => {
+        const cls = outline.classes.find((c) => c.name);
+        return cls ? [...implementsEdits(text, cls, contracts), ...traitsEdits(text, cls, traits)] : null;
+      } }], `${shortClass(user.class)} can use two-factor sign-in`);
+    if (profile) await this.apply((t, c) => settingEdits(t, c, SETTINGS.find((x) => x.call === "profile")!, true), "Profile page on");
+    if (columns.length) {
+      const path = `${this.root}/database/migrations/${migrationName("add_two_factor_columns_to_" + user.table + "_table")}`;
+      await invoke("create_file", { path, contents: addColumnsMigration(user.table, columns) });
+      try {
+        await fapp.artisan(this.root, ["migrate"]);
+        host.status("Added the two-factor columns.");
+      } catch (e) {
+        showError("The migration didn't run", e);
+      }
+    }
+    fapp.forget(["panel-options"]);
+    await this.load();
   }
 
   /** A small drawing of the panel: brand, navigation with its groups, and the colors. */
