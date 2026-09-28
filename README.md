@@ -302,6 +302,19 @@ AI, and Spelling. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
+- Type in the search box to filter settings in every group by name,
+  description, or key. Escape clears the search.
+- A setting you changed has a reset button beside it. **Reset All…** resets
+  every setting in the dialog after you confirm; your keymap stays.
+- **Open settings.json** opens the file in the editor. When you save it there,
+  Tusk applies it.
+- A number outside its range isn't applied; the dialog says which numbers it
+  takes.
+- If `settings.json` isn't valid JSON, Tusk uses the defaults, doesn't write the
+  file until you fix it, and offers to open it. A value of the wrong type, or a
+  number out of range, uses its default and stays in the file until you change
+  that setting. Keys Tusk doesn't know stay in the file.
+
 | Setting | Default |
 | --- | --- |
 | Theme: one of about 110 color themes, or match the system | Dark |

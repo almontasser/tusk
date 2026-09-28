@@ -38,7 +38,7 @@ import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPull
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
-import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
+import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
 import { attachTestRunner, initRunner, isTestFile, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
@@ -1159,6 +1159,7 @@ async function saveFile(path: string) {
   didSave(tab.model);
   afterSave(path, text);
   recordVersion(path, text);
+  settingsFileSaved(path);
 }
 
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
@@ -1644,6 +1645,7 @@ onSettings((s) => {
   if (JSON.stringify(s.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(s.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
 });
 setKeymapEditor(() => editKeymap());
+setFileOpener((path) => openFile(path));
 
 // Turning spell checking on or off starts or stops its language server.
 let spellCheck = settings.spellCheck;

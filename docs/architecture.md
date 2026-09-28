@@ -126,10 +126,45 @@ event saves every tab. ⌘S runs `saveAll`.
 
 ### Settings and themes
 
-`src/settings.ts` keeps one settings object, loads it from `settings.json` in
-the app's config folder (`appConfigDir`), and ignores unknown keys and values of
-the wrong type. The dialog is built from one list of fields. Each change applies
-at once (`apply`) and writes the file.
+`src/settings.ts` keeps one settings object and loads it from `settings.json`
+in the app's config folder (`appConfigDir`). The dialog is built from one list
+of fields. Each change applies at once (`apply`) and writes the file.
+
+Reading and writing never lose what's in the file (`src/settingsdata.ts`, with
+tests):
+
+- A file that isn't a JSON object blocks writes (`blocked`). The defaults apply,
+  a toast and a banner in the dialog offer **Open settings.json**, and saving
+  the file in the editor (`settingsFileSaved`, called from `saveFile`) reads it
+  again.
+- A value of the wrong type or out of its range is set aside (`invalid`): the
+  default applies, the dialog notes it under the setting, and the saved value
+  is written back unchanged until you change that setting.
+- The write starts from the file's own object (`raw`), so keys this version
+  doesn't know, such as those of a newer build, survive.
+- A failed write shows an error with **Retry**.
+
+To add a setting:
+
+- In `src/settings.ts`: add the key to `Settings` and `defaults`, and a `Field`
+  to `fields` with its `group`. A new group appears where its first field is.
+- From another module, without touching `settings.ts`: call
+  `registerSettings(group, defaults, fields)` when the module loads. It returns
+  the settings object typed with the group's keys, which always holds the
+  current values; use `onSettings` to react to changes.
+
+```ts
+type Field = { key; label; help?; group; shown?: () => boolean } &
+  ({ type: "checkbox" } | { type: "number"; min; max } | { type: "text"; placeholder? } | { type: "select"; options });
+registerSettings<T>(group: string, defaults: T, fields: Omit<Field, "group">[]): T
+onSettings(fn)          // now and after every change
+updateSetting(key, v)   // apply and save
+openSettings(query?)    // the dialog, optionally filtered
+openSettingsFile()      // settings.json in the editor
+```
+
+`shown` hides a field that doesn't apply; the search matches a field's group,
+label, help, and key.
 
 `apply` updates Monaco's editor options and calls `applyTheme` in
 `src/themes.ts` with the theme in use: `theme`, or `darkTheme` or `lightTheme`
@@ -4763,3 +4798,14 @@ handler for unhandled rejections. The regex stays as a fallback for the
 module's `Host` type at once. `withProgress` takes an `AbortSignal` so long
 operations added later (the debugger, git, database, HTTP) share one cancel
 button in the status bar rather than each drawing its own.
+
+### 2026-09-28: Settings never overwrite a file they can't read
+
+An invalid `settings.json` used to fall back to the defaults silently, and the
+next change wrote the defaults over it. Now Tusk refuses to write a file it
+can't parse, rather than backing it up and replacing it, because the file you
+wrote stays where you expect it, and fixing it in the editor applies it at
+once. Values of the wrong type and unknown keys are kept for the same reason.
+Other modules register their own settings groups (`registerSettings`), so the
+features added next (tools, formatters, the terminal, the debugger) don't all
+edit one list in `settings.ts`.
