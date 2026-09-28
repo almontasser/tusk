@@ -8,7 +8,8 @@ import { h, icon, iconButton } from "./dom";
 import type { monaco } from "./editor";
 import * as fapp from "./filamentapp";
 import { type CanvasCtx, currentDrag, type Drag, hideLine, labelOf, renderActionModal, renderPageActions, renderSchema, renderTable, setDragging, setTranslator, type SlotRef } from "./filamentcanvas";
-import { fileFor, isRtl, renameJsonKey, setJsonKey, setPhpValue, translate, type Translations } from "./translations";
+import { isRtl, translate, type Translations } from "./translations";
+import { renameTranslation, writeTranslation } from "./translationfiles";
 import type { Scope } from "./filamentactions";
 import { type Catalog, classInfo, humanize, look, majorVersion, methodsOf, PALETTE_KINDS, palette } from "./filamentcatalog";
 import { type Column, filterFor, formField, type Gen, infolistEntry, isSystemColumn, type ModelFacts, renderGen, tableColumn } from "./filamentgen";
@@ -785,32 +786,9 @@ export class Designer {
 
   /** Writes a translation to the app's lang files, or removes it when `value` is empty. */
   async writeTranslation(locale: string, key: string, value: string) {
-    const t = this.translations;
-    if (!t) return;
+    if (!this.translations) return;
     try {
-      const where = fileFor(t, locale, key);
-      let path = where.path;
-      let model = await host.ensureModel(path).catch(() => null);
-      let next: string | null = null;
-      if (where.kind === "php" && model) next = value ? setPhpValue(model.getValue(), where.inFile, value) : null;
-      if (next === null) {
-        // Not in a PHP file it can edit: the locale's JSON file, which Laravel reads first.
-        path = `${t.dir}/${locale}.json`;
-        model = await host.ensureModel(path).catch(() => null);
-        if (!model) {
-          if (!value) return;
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("create_file", { path, contents: "{}\n" });
-          model = await host.ensureModel(path);
-        }
-        next = setJsonKey(model.getValue(), key, value || null);
-        (t.json[locale] ??= {})[key] = value;
-        if (!value) delete t.json[locale][key];
-      } else (t.php[locale] ??= {})[key] = value;
-      if (!model) return;
-      const end = model.getPositionAt(model.getValue().length);
-      await applyWorkspaceEdit({ changes: { [model.uri.toString()]: [{ range: { start: { line: 0, character: 0 }, end: { line: end.lineNumber - 1, character: end.column - 1 } }, newText: next }] } });
-      if (!t.locales.includes(locale)) t.locales.push(locale);
+      await writeTranslation(this.translations, locale, key, value);
       this.message = `Translated to ${locale}`;
       this.render();
     } catch (e) {
@@ -819,18 +797,8 @@ export class Designer {
   }
 
   /** Renames a key in the locales' JSON files, so a label's text and its translations change together. */
-  async renameTranslation(from: string, to: string) {
-    const t = this.translations;
-    if (!t || from === to) return;
-    for (const locale of Object.keys(t.json)) {
-      if (!(from in t.json[locale])) continue;
-      const model = await host.ensureModel(`${t.dir}/${locale}.json`).catch(() => null);
-      const next = model && renameJsonKey(model.getValue(), from, to);
-      if (!model || !next) continue;
-      const end = model.getPositionAt(model.getValue().length);
-      await applyWorkspaceEdit({ changes: { [model.uri.toString()]: [{ range: { start: { line: 0, character: 0 }, end: { line: end.lineNumber - 1, character: end.column - 1 } }, newText: next }] } });
-      t.json[locale] = Object.fromEntries(Object.entries(t.json[locale]).map(([k, v]) => [k === from ? to : k, v]));
-    }
+  renameTranslation(from: string, to: string) {
+    return this.translations ? renameTranslation(this.translations, from, to) : Promise.resolve();
   }
 
   private openModel() {

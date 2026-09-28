@@ -4369,8 +4369,10 @@ has, as `methodsOf` reports them.
 - **Writing:** `src/translations.ts` edits the files as text. A key goes to the
   locale's JSON file, keeping its order, indentation, and `json_encode` escapes;
   a key a PHP file already has is changed there when the file has exactly one
-  entry for it. The designer writes through the editor's models, so open files
-  and local history stay in step.
+  entry for it. `src/translationfiles.ts` writes through the editor's models,
+  so open files and local history stay in step; the resource and enum
+  designers both use it. The enum designer stages translations and writes
+  them on Apply, after renaming the keys of labels that changed.
 
 ## Model designer
 
