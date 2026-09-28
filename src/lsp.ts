@@ -13,7 +13,8 @@ import { writeText } from "./projectfiles";
 import { aliasStubs, facts, introspect, onModelsRead, projectCache, readModels, rereadModels } from "./eloquent";
 import { isDeprecation, isLibrary, isUnused, magoConfigText, magoExpect, magoIssuesByFile, problemMarkdown, realProblems, ruleLabel, severityOf } from "./diagnostics";
 import { bladeProblems, bladeToPhp } from "./bladephp";
-import { covers, exclusionsFor, magoExcludes, saveExclusions } from "./indexexclude";
+import { covers, DEFAULT_EXCLUDES, magoExcludes } from "./indexexclude";
+import { onProjectValue, projectScope, projectValue, setProjectValue } from "./projectstate";
 import { editExclusions, type Folder } from "./indexexcludedialog";
 import { toast } from "./dom";
 
@@ -1259,6 +1260,21 @@ export async function runTuskAction(action: L.CodeAction | L.Command) {
 export function reindex() {
   tuskRequest("tusk/reindex", {}).catch((e) => host.status(`Can't reindex: ${e}`));
 }
+
+/** The project's list, whether it's shared in `tusk.json`, and whether anyone ever set it. */
+async function exclusionsFor(_root: string): Promise<{ list: string[]; shared: boolean; set: boolean }> {
+  const list = projectValue<unknown>("indexExclude");
+  const valid = Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : undefined;
+  return { list: valid ?? DEFAULT_EXCLUDES, shared: projectScope("indexExclude") === "shared", set: !!valid };
+}
+
+/** Saves the list to `tusk.json` when `shared`, otherwise on this Mac, and removes it from the other place. */
+async function saveExclusions(_root: string, list: string[], shared: boolean) {
+  await setProjectValue("indexExclude", list, shared ? "shared" : "local");
+}
+
+// A changed list in tusk.json, such as after git pull, restarts the servers with it.
+onProjectValue("indexExclude", () => void (projectRoot && startLsp(projectRoot, host).catch((e) => host.status(`Can't restart the language servers: ${e}`))));
 
 /** Saves the project's list of folders to skip, and restarts the servers with it. */
 export async function setExclusions(list: string[], shared: boolean) {

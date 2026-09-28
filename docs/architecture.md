@@ -407,9 +407,9 @@ The bridge doesn't parse messages. All protocol logic lives in `src/lsp.ts`.
 ### Index exclusions
 
 Each project has a list of vendor folders to skip, which
-`src/indexexclude.ts` reads: `tusk.json`'s `indexExclude` when the project has
-one, otherwise the editor's own copy (localStorage `indexExclude:<root>`), and
-`DEFAULT_EXCLUDES` when neither exists. The defaults are folders that declare no
+`exclusionsFor` in `src/lsp.ts` reads from the project state (see "Project
+state"): the `indexExclude` value, in `tusk.json` when shared or else on this
+Mac, and `DEFAULT_EXCLUDES` in `src/indexexclude.ts` when it isn't set. The defaults are folders that declare no
 classes, functions, or constants: AWS's API data, Carbon's and every package's
 translations, package Blade views, and `voku/portable-ascii`'s tables. The list
 goes to the PHP server as `exclude` in `initializationOptions`, on top of its
@@ -2674,6 +2674,55 @@ keeps its position, and any unsaved text carries over to the new path. When a
 file or folder goes to the Trash, `forget` closes its tabs and drops their
 models.
 
+## Project state
+
+`src/projectstate.ts` keeps per-project values in two scopes. **Shared** values
+live in the project's `tusk.json`, as top-level keys, so a team can commit
+them. **Local** values live in `<appDataDir>/projects/<folder>-<hash>.json`
+(`localFileName`, an FNV-1a hash of the project path), as
+`{ root, migrated, values }`. Neither is localStorage, so resetting the web view
+loses nothing. A value lives in one scope at a time; reads take `tusk.json`'s
+first.
+
+The API, for the rest of the app:
+
+| Function | What it does |
+| --- | --- |
+| `openProjectState(root)` | Reads both files when a folder opens, and the first time, moves older localStorage values into the local file. `openFolder` awaits it before anything reads a value. |
+| `projectValue<T>(key)` | The value, synchronously, or undefined. |
+| `projectScope(key)` | `"shared"`, `"local"`, or undefined when unset. |
+| `setProjectValue(key, value, scope?)` | Sets a value, or removes it with undefined. Without `scope`, it stays where it is; a new value is local. The other scope loses its copy. Rejects, without writing, when `tusk.json` is involved and invalid. |
+| `setProjectScope(key, scope)` | Moves a value as it is. |
+| `onProjectValue(key, f)` | Runs `f` when `tusk.json` changes the value on disk. Not for your own writes, and not when another project opens. |
+| `shareItem(keys, what)` | A palette row that shares keys in `tusk.json` or keeps them local, for pickers that set them. |
+| `SHAREABLE`, `chooseSharedState()` | The values a team may share, and **Share Project Settings in tusk.json…**, which lists them. |
+| `projectFilesChanged(paths)` | Called from `main.ts`'s file watcher batch; rereads `tusk.json` when it changed. |
+
+`src/projectstatedata.ts` holds the pure parts, with tests:
+`parseShared` (values, or why the text can't be read), `writeShared` (applies
+changes to the text, keeping unknown keys, their order, the indentation, and
+the final newline; "" when no key is left, so the file is removed; throws on
+an invalid file), `changedKeys`, and `migrate` with `LEGACY`, the table of
+localStorage keys earlier versions used.
+
+Writes go through one promise chain, so they land in order. The file watcher
+reports our own writes too; `projectFilesChanged` waits for pending writes and
+compares the text with the last text read or written, so only other programs'
+changes notify. An invalid `tusk.json` shows a toast with **Open tusk.json**,
+keeps the last values read, and refuses shared writes; local values still
+work. `src/schemas/tusk.json` is the file's JSON schema, registered in
+`src/jsonschemas.ts`.
+
+Who uses which key:
+
+| Key | Module | Default scope |
+| --- | --- | --- |
+| `indexExclude` | `lsp.ts` (`exclusionsFor`, `saveExclusions`); a change on disk restarts the servers | Local; the dialog's checkbox shares it |
+| `breakpoints`, `debugWatches`, `debugExceptions`, `debugPathMappings` | `debug.ts`; breakpoints are saved with paths relative to the project | Local |
+| `dockerService` | `sail.ts`, through `setServiceChoice` from `main.ts`, so `sail.ts` loads in tests without the app's modules | Local |
+| `databaseConnections`, `databaseSsh`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; the selection never shares |
+| `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
+
 ## Sessions
 
 Monaco keeps one editor and swaps models when you switch tabs, and swapping
@@ -3322,7 +3371,32 @@ the debugger.
 ### Layout
 
 `index.html` lays out a title bar, a workbench (the tool bar, the sidebar, and
-the editor area), and a status bar. The window has no native title bar
+the editor area), and a status bar. Inside the workbench, `#workarea` is a
+column that holds `#workrow` (the sidebar and `main`, the editor area) and,
+when the bottom panel spans the full width, the panel under both.
+`src/layout.ts` moves `#panel` between `main` and `#workarea`, and sets
+`panel-full-width` and `panel-maximized` on `#workbench`; CSS does the rest.
+Maximized, the panel fills its column: `main`, or with a full-width panel all
+of `#workarea`, since CSS hides `#workrow`. A `MutationObserver` on the panel's
+`hidden` attribute restores the size and moves focus back to the editor
+whenever the panel hides, so every way of hiding it (⇧⎋, the terminal toggle,
+closing the last tab) behaves the same. The full-width choice is in
+localStorage (`panelFullWidth`), since it's per user.
+
+`src/splitter.ts` makes every resizable split: the sidebar, the panel, and
+the splits inside the Debug, Tests, Git Log, and Profiler tabs.
+`splitter(handle, options)` sizes one pane (the target) in pixels, on the x or
+y axis, from a handle at the target's start or end edge. The handle gets
+`role="separator"`, focus, and the ARIA values; the arrow keys move it by
+10 px (Shift: 50 px), Home and End go to the limits, and a double-click or
+Enter removes the inline size, so the CSS default applies again. It clamps
+between `min` and the container's size minus `minRest`, and doesn't clamp by
+a container that isn't showing yet. With `save`, the size is kept in
+localStorage under `split:<window label>:<name>`, so each window keeps its
+own. Handles between panes (`.pane-splitter`) draw the border between them;
+the sidebar's and panel's handles are absolute strips over the edge. Panes with
+a saved width also have a CSS `max-width`, so a narrower window never pushes
+the pane beside them out of view. The window has no native title bar
 (`titleBarStyle: "Overlay"` in `tauri.conf.json`): macOS draws its window
 buttons over the left edge of `#titlebar`, which starts its content 80 px in.
 Empty parts of the title bar carry `data-tauri-drag-region`, so dragging them
@@ -3332,7 +3406,7 @@ As in a native app, the interface's text can't be selected: `body` has
 `user-select: none`, which WebKit reads only as `-webkit-user-select`, so every
 rule sets both. Text worth copying opts back in: fields, comment and message
 bodies, test failures, database cells, and hovers; Monaco and xterm.js handle
-their own selection. Drag handles call `preventDefault` on `mousedown`, so a
+their own selection. Drag handles call `preventDefault` on `pointerdown`, so a
 resize never starts a selection. Long paths in right-to-left boxes (which put
 the ellipsis at the start) begin with a left-to-right mark, or bidi rules move
 a leading dot to the end (`.env.example` showed as `env.example.`).
@@ -4714,6 +4788,39 @@ and ⌘Q is the **Quit Tusk** action instead of the native item. Both run
 on, otherwise Save, Don't Save, or Cancel. The window is then destroyed, which
 ends the app through the normal exit, so language servers still stop. This
 needs the `core:window:allow-destroy` permission.
+
+### 2026-09-28: Per-project state in tusk.json and a file per project, not localStorage
+
+Breakpoints, debugger options, database connections, and other per-project
+values were in localStorage, which a team can't share, backup tools don't see,
+and a reset of the web view wipes. They now live in `tusk.json` when shared, or
+in a file per project in the app's data folder. One module owns both, so each
+feature picks a key and a default scope instead of its own storage code, and
+sharing is a move between scopes rather than a feature of each tool.
+
+Values stay top-level keys in `tusk.json`, as `indexExclude` already was, so
+the file stays readable and each key can move on its own. `tusk.json` is
+rewritten from parsed JSON with the file's own indentation, not patched as
+text: it keeps unknown keys and their order, but not comments (the file is
+plain JSON, and an invalid file is never written) or custom spacing inside
+values. Migration copies localStorage values once and leaves them in place,
+so an earlier build still finds them. Local reads are synchronous from memory,
+since `debug.ts` and `database.ts` read their values while they render.
+
+### 2026-09-28: One splitter, and a panel that moves between two parents
+
+Each resizable split had its own `mousedown` handler, and the Debug, Tests,
+and Git Log splits had fixed percentages. `splitter.ts` now makes all of them,
+with the keyboard, reset, limits, and saved sizes in one place. Pixel sizes,
+not fractions, because PhpStorm keeps tool window sizes that way and because a
+list's useful width doesn't grow with the window.
+
+For the full-width bottom panel, the panel element moves between `main` and
+`#workarea` instead of the workbench becoming a CSS grid. A grid needs `main`
+to be `display: contents`, which puts the editor, diff, merge, and empty-state
+views in one cell, and drops `main` from the accessibility tree in WebKit.
+Moving the element keeps the terminals running: xterm.js and the
+`ResizeObserver` that fits them follow the element.
 
 ### 2026-09-27: Tusk's own PHP language server replaces Phpactor, Laravel LSP, and the Filament server
 

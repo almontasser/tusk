@@ -51,10 +51,11 @@ file to change when you add it.
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
-| Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
+| Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they edit it and type theirs. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
-| Split editors | Up to four panes. |
+| Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
+| Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
@@ -193,6 +194,21 @@ DMG that everyone installs by hand.
   Requests**, and **Find** views. Click the active icon to hide the sidebar,
   and drag the sidebar's edge to resize it. The icons at the bottom open the
   **Git Log**, the **Debug** panel, and the terminal.
+- **Bottom panel:** the terminals and tool windows such as **Problems**, **Git
+  Log**, **Debug**, and **Tests**. Drag its top edge to resize it. The buttons
+  at the right of its tab bar maximize it (⇧⌘'), open its options, and hide it
+  (⇧⎋ while you work in it). In the options, or in **View > Toggle Full-Width
+  Bottom Panel**, choose whether the panel sits under the editor, beside the
+  sidebar, or spans the full window width under both, as in PhpStorm.
+  Maximized, the panel fills the editor area, or with the full-width layout,
+  the whole window below the title bar. Hiding the panel restores its size and
+  puts focus back in the editor.
+- **Splits:** drag the edge between two parts to resize them: the sidebar, the
+  bottom panel, and the parts of the **Debug**, **Tests**, **Git Log**, and
+  **Profiler** tabs. Each handle takes focus with Tab; then the arrow keys move
+  it (with Shift, in bigger steps), and Home and End go to the limits.
+  Double-click a handle, or press Enter on it, to go back to the default size.
+  Each window remembers its sizes and the panel's layout.
 - **Status bar:** error and warning counts for open files (click them to list
   the problems), the file's path followed by breadcrumbs for the class and
   method at the cursor (click one to go to it), background work such as
@@ -272,6 +288,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘N | In a PHP file, generate code (constructor, getters and setters, `__toString()`, methods to implement or override); elsewhere, a new file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
+| ⇧⌘' | Maximize the bottom panel, or restore it |
+| ⇧⎋ | Hide the bottom panel, while you work in it |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |
@@ -449,6 +467,68 @@ server and **Start Debug Server**'s server start again if they were running.
 Other commands, tests, and git commands don't run again. Opening another
 project closes the terminals of the one before. Refactorings such as rename
 save every file they change.
+
+## Project settings and tusk.json
+
+Tusk keeps some settings per project: breakpoints, watches, and how the
+debugger pauses on exceptions; the server paths for debugging; the Docker
+service that runs commands; saved database connections and their SSH tunnels;
+the index exclusions; the last URL you profiled; and the stress test form. Each
+one lives in one of two places:
+
+- **On this Mac**, in a file per project in
+  `~/Library/Application Support/ly.almontasser.tusk/projects/`. It survives
+  restarts and updates. This is where a setting starts.
+- **Shared**, in `tusk.json` at the project's root, so your team gets the same
+  settings when you commit the file.
+
+To choose what to share, run **Tools > Share Project Settings in tusk.json…**:
+it lists each setting a team may want, where it's kept now, and moves the one
+you choose to `tusk.json` or back to this Mac. The places that set these
+settings offer the same choice: **Share with the project in tusk.json** in
+**Index Exclusions**, **Save and share in tusk.json** when you set the server
+paths, and a share row in **Choose Docker Service for Commands**, **Pause on
+Exceptions Options**, and **Database: Switch Connection**. Database passwords
+are never shared: connection URLs leave them out, and each person's password
+stays in their Keychain.
+
+Tusk edits `tusk.json` in place: it keeps keys it doesn't know, their order,
+the file's indentation, and its final newline. When you or `git pull` change
+the file, Tusk reads it again; changed index exclusions reindex the project,
+and changed breakpoints and exception options apply at once. If the file isn't
+valid JSON, Tusk says so, keeps the values it read last, and doesn't write to
+it until you fix it. The editor checks `tusk.json` against its schema
+(`src/schemas/tusk.json`), with completion and descriptions for each key.
+
+An example:
+
+```json
+{
+  "indexExclude": ["vendor/aws/aws-sdk-php/src/data", "vendor/**/resources/lang"],
+  "debugPathMappings": "/var/www/html",
+  "debugExceptions": { "pause": true, "classes": ["App\\Exceptions\\PaymentFailed"], "uncaughtOnly": false, "skip": ["vendor/**"] },
+  "dockerService": "laravel.test",
+  "databaseConnections": [{ "name": "reporting", "url": "pgsql://reader@db.internal:5432/reports" }],
+  "databaseSsh": { "reporting": "forge@203.0.113.5" }
+}
+```
+
+| Key | Contents |
+| --- | --- |
+| `indexExclude` | Folders the PHP index and Mago skip, relative to the project. `*` matches within a folder name, `**` any number of folders. |
+| `debugPathMappings` | Where the project is on the server: comma-separated `/server/path` (the project folder) or `/server/path=local/path` entries. Empty when PHP runs on this Mac. |
+| `debugExceptions` | `pause`, the exception `classes` to pause on (empty for all), `uncaughtOnly`, and `skip`, path patterns where a throw doesn't pause. |
+| `breakpoints` | Line breakpoints by file, relative to the project: `[line, options]` pairs, where options can have `condition`, `hitCondition`, `logMessage`, and `disabled`. |
+| `debugWatches` | The debugger's watch expressions. |
+| `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
+| `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
+| `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+
+The selected database connection, the last profiled URL, and the stress test
+form (`databaseConnection`, `profilerUrl`, and `httpLoadTest`) are personal,
+so they stay on this Mac. The first time you open a project in this version,
+Tusk moves these settings out of the web view's storage, where earlier
+versions kept them.
 
 ## Context menus
 
@@ -2193,7 +2273,8 @@ Exclusions…** from ⌘⇧A:
   `vendor/**/resources/lang`. **Restore Defaults** puts back the starting list.
 - **Share with the project in tusk.json** saves the list in the project's
   `tusk.json`, as `"indexExclude": [...]`, so your team can commit it.
-  Otherwise, the list is kept in the editor, for this Mac only.
+  Otherwise, the list is kept on this Mac only. See [Project settings and
+  tusk.json](#project-settings-and-tusk-json).
 
 You can also right-click a folder in the Project tree and choose **Exclude
 from Index** or **Include in Index**. When you open a project for the first
@@ -2292,6 +2373,9 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/diagnostics.ts` | Filters false problems out of the servers' diagnostics, and reads Mago's report |
 | `src/problems.ts` | Problems panel: the project's errors and warnings |
 | `src/terminal.ts` | Terminal panel |
+| `src/layout.ts` | The window's layout: the sidebar and panel sizes, the full-width bottom panel, and maximizing it |
+| `src/splitter.ts` | Resizable splits, with the keyboard, reset, limits, and saved sizes |
+| `src/projectstate.ts`, `src/projectstatedata.ts` | Per-project settings, in `tusk.json` when shared or else on this Mac |
 | `src/git.ts` | Commit view, diff view, partial staging, branches, and stash |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |

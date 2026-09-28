@@ -42,6 +42,9 @@
         <button data-panel="terminal" title="Terminal (⌥F12)"><span class="codicon codicon-terminal"></span></button>
       </nav>
 
+      <!-- The sidebar and the editor, and under them the bottom panel when it spans the window's full width (layout.ts). -->
+      <div id="workarea">
+      <div id="workrow">
       <aside id="sidebar">
         <section id="view-project">
           <header class="view-header">
@@ -196,7 +199,7 @@
           </div>
           <ul id="http-history" class="http-tree"></ul>
         </section>
-        <div id="sidebar-resize" aria-hidden="true"></div>
+        <div id="sidebar-resize"></div>
       </aside>
 
       <main>
@@ -222,6 +225,7 @@
               <ul id="history-list"></ul>
               <button id="history-more" hidden>Load More</button>
             </div>
+            <div class="pane-splitter" id="history-split"></div>
             <div id="history-detail"></div>
           </div>
         </div>
@@ -245,12 +249,21 @@
           <div class="merge-titles"><span>Yours</span><span>Result</span><span>Theirs</span></div>
           <div class="merge-panes"><div id="merge-ours-pane"></div><div id="merge-result"></div><div id="merge-theirs-pane"></div></div>
         </div>
-        <section id="panel" hidden>
+        <section id="panel" hidden aria-label="Bottom panel">
           <div id="panel-resize"></div>
-          <nav id="terminal-tabs" role="tablist"></nav>
+          <header id="panel-header">
+            <nav id="terminal-tabs" role="tablist"></nav>
+            <div class="panel-actions">
+              <button class="icon-button" id="panel-maximize" title="Maximize (⇧⌘')" aria-label="Maximize" aria-pressed="false"><span class="codicon codicon-screen-full"></span></button>
+              <button class="icon-button" id="panel-options" title="Options" aria-label="Panel options" aria-haspopup="menu"><span class="codicon codicon-kebab-vertical"></span></button>
+              <button class="icon-button" id="panel-hide" title="Hide (⇧⎋)" aria-label="Hide the panel"><span class="codicon codicon-chrome-minimize"></span></button>
+            </div>
+          </header>
           <div id="terminals"></div>
         </section>
       </main>
+      </div>
+      </div>
     </div>
 
     <footer id="status">

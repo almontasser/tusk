@@ -8,6 +8,9 @@ import { ensureTools } from "./lsp";
 import { pick } from "./palette";
 import { composeService, usesSail } from "./sail";
 import { handlerLines, thrownIn, uncaughtClass } from "./debugexceptions";
+import { splitter } from "./splitter";
+import { onProjectValue, projectScope, projectValue, type Scope, setProjectValue, shareItem } from "./projectstate";
+import { projectRelative } from "./projectstatedata";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -52,7 +55,6 @@ type Breakpoints = Map<number, BreakpointOptions>;
 const breakpoints = new Map<string, Breakpoints>();
 const decorations = new Map<string, Map<string, BreakpointOptions>>(); // path → decoration id → options
 const modelFor = (path: string) => monaco.editor.getModel(monaco.Uri.file(path));
-const storageKey = () => `breakpoints:${host.root()}`;
 
 function breakpointsOf(path: string): Breakpoints {
   const model = modelFor(path);
@@ -89,31 +91,30 @@ function renderBreakpoints(path: string) {
   decorations.set(path, new Map(ids.map((id, i) => [id, entries[i][1]])));
 }
 
+/** Breakpoints as the project state keeps them (`breakpoints`): by path relative to the project, [line, options] pairs. */
+type SavedBreakpoints = Record<string, [number, BreakpointOptions][]>;
+const saveError = (what: string) => (e: unknown) => host.status(`Can't save ${what}: ${e instanceof Error ? e.message : e}`);
+
 function persist() {
-  const data = Object.fromEntries([...breakpoints].filter(([, b]) => b.size).map(([p, b]) => [p, [...b]]));
-  try {
-    localStorage.setItem(storageKey(), JSON.stringify(data));
-  } catch {
-    // Breakpoints then last only for this session.
-  }
+  const root = host.root();
+  const data: SavedBreakpoints = Object.fromEntries([...breakpoints].filter(([, b]) => b.size).map(([p, b]) => [projectRelative(root, p), [...b]]));
+  setProjectValue("breakpoints", Object.keys(data).length ? data : undefined).catch(saveError("breakpoints"));
 }
 
 /** Loads the project's saved breakpoints. Call when a folder opens. */
 export function loadBreakpoints() {
+  const before = [...breakpoints.keys()];
   breakpoints.clear();
-  try {
-    // Older versions saved line numbers, then [line, condition] pairs.
-    type Saved = number | [number, string | BreakpointOptions];
-    for (const [path, list] of Object.entries<Saved[]>(JSON.parse(localStorage.getItem(storageKey()) ?? "{}")))
-      breakpoints.set(
-        path,
-        new Map(list.map((b): [number, BreakpointOptions] => (typeof b === "number" ? [b, {}] : [b[0], typeof b[1] === "string" ? (b[1] ? { condition: b[1] } : {}) : b[1]]))),
-      );
-  } catch {
-    // No saved breakpoints.
+  const root = host.root();
+  for (const [path, list] of Object.entries(projectValue<SavedBreakpoints>("breakpoints") ?? {}))
+    if (Array.isArray(list)) breakpoints.set(path.startsWith("/") ? path : `${root}/${path}`, new Map(list.filter((b) => Array.isArray(b) && typeof b[0] === "number").map(([line, o]) => [line, o ?? {}])));
+  for (const path of new Set([...before, ...breakpoints.keys()])) {
+    renderBreakpoints(path);
+    if (running) sendBreakpoints(path);
   }
-  for (const path of breakpoints.keys()) renderBreakpoints(path);
 }
+// Shared breakpoints that change in tusk.json, such as after git pull, show at once.
+onProjectValue("breakpoints", loadBreakpoints);
 
 function update(path: string, change: (b: Breakpoints) => void) {
   const b = breakpointsOf(path);
@@ -177,7 +178,7 @@ async function runToLine(path: string, line: number) {
 const sendBreakpoints = (path: string) => {
   const enabled = [...breakpointsOf(path)].filter(([, o]) => !o.disabled);
   if (runTo?.path === path && !enabled.some(([line]) => line === runTo!.line)) enabled.push([runTo.line, {}]);
-  if (handler?.path === path && pauseOnExceptions && uncaughtOnly())
+  if (handler?.path === path && pauseOnExceptions() && uncaughtOnly())
     for (const line of handler.lines) if (!enabled.some(([l]) => l === line)) enabled.push([line, { condition: exceptionClasses().map((c) => `$e instanceof \\${c}`).join(" || ") || undefined }]);
   return request("setBreakpoints", {
     source: { path },
@@ -237,33 +238,21 @@ monaco.editor.onDidCreateModel((model) => {
 
 // ---- Exceptions and path mappings ----
 
-const readSetting = (key: string) => {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-const writeSetting = (key: string, value: string | null) => {
-  try {
-    value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value);
-  } catch {
-    // Lasts for this session only.
-  }
-};
-
-let pauseOnExceptions = readSetting("debug:exceptions") === "1";
-/** The classes to pause on, per project. Empty means every exception and error. */
-const exceptionClasses = (): string[] => (readSetting(`debug:exceptionClasses:${host.root()}`) ?? "").split(",").filter(Boolean);
+/** How to pause on exceptions, per project (`debugExceptions` in the project state). */
+type ExceptionOptions = { pause?: boolean; classes?: string[]; uncaughtOnly?: boolean; skip?: string[] };
+const exceptionOptionsNow = () => projectValue<ExceptionOptions>("debugExceptions") ?? {};
+const pauseOnExceptions = () => !!exceptionOptionsNow().pause;
+/** The classes to pause on. Empty means every exception and error. */
+const exceptionClasses = (): string[] => exceptionOptionsNow().classes ?? [];
 /** Whether to pause only on exceptions nobody catches, per project. Otherwise every throw pauses, caught or not. */
-const uncaughtOnly = () => readSetting(`debug:exceptionUncaught:${host.root()}`) === "1";
+const uncaughtOnly = () => !!exceptionOptionsNow().uncaughtOnly;
 /** Path patterns, relative to the project, where a thrown exception doesn't pause, such as vendor/**. Per project. */
-const skippedPaths = (): string[] => (readSetting(`debug:exceptionSkip:${host.root()}`) ?? "").split(",").filter(Boolean);
+const skippedPaths = (): string[] => exceptionOptionsNow().skip ?? [];
 // The adapter makes each filter an Xdebug exception breakpoint on that class name, and Xdebug also matches
 // subclasses, so Exception and Error cover every Throwable. Xdebug pauses at the throw, before PHP looks for a
 // catch, so it can't tell caught from uncaught there. For uncaught only, the filter is PHP's "Fatal error"
 // instead, which an uncaught exception ends in; the adapter passes the name unquoted, so it carries its own quotes.
-const exceptionFilters = () => (!pauseOnExceptions ? [] : uncaughtOnly() ? ['"Fatal error"'] : exceptionClasses().length ? exceptionClasses() : ["Exception", "Error"]);
+const exceptionFilters = () => (!pauseOnExceptions() ? [] : uncaughtOnly() ? ['"Fatal error"'] : exceptionClasses().length ? exceptionClasses() : ["Exception", "Error"]);
 
 /**
  * Laravel's exception handler, and the lines where it starts rendering an exception the app didn't catch. Laravel
@@ -284,20 +273,16 @@ const sendExceptionFilters = () => {
 };
 
 export function togglePauseOnExceptions() {
-  pauseOnExceptions = !pauseOnExceptions;
-  writeSetting("debug:exceptions", pauseOnExceptions ? "1" : null);
-  sendExceptionFilters();
-  render();
+  setExceptionOption({ pause: !pauseOnExceptions() });
 }
 
-/** Saves an exception option and turns pausing on exceptions on. */
-function setExceptionOption(key: string, value: string | null) {
-  writeSetting(`${key}:${host.root()}`, value);
-  pauseOnExceptions = true;
-  writeSetting("debug:exceptions", "1");
+/** Saves exception options: any option turns pausing on exceptions on, unless it says otherwise. */
+function setExceptionOption(change: ExceptionOptions) {
+  setProjectValue("debugExceptions", { ...exceptionOptionsNow(), pause: true, ...change }).catch(saveError("the exception options"));
   sendExceptionFilters();
   render();
 }
+onProjectValue("debugExceptions", () => (sendExceptionFilters(), render()));
 
 /** Lists the options for pausing on exceptions: the classes, caught or only uncaught, and where they're thrown. */
 export function exceptionOptions() {
@@ -306,9 +291,10 @@ export function exceptionOptions() {
   pick("Pause on exceptions", () => [
     { label: `Classes: ${classes.length ? classes.join(", ") : "every exception and error"}`, run: setExceptionClasses },
     uncaughtOnly()
-      ? { label: "When: only uncaught", detail: "Choose to pause wherever one is thrown, caught or not", run: () => setExceptionOption("debug:exceptionUncaught", null) }
-      : { label: "When: wherever thrown, caught or not", detail: "Choose to pause only on exceptions nobody catches", run: () => setExceptionOption("debug:exceptionUncaught", "1") },
+      ? { label: "When: only uncaught", detail: "Choose to pause wherever one is thrown, caught or not", run: () => setExceptionOption({ uncaughtOnly: false }) }
+      : { label: "When: wherever thrown, caught or not", detail: "Choose to pause only on exceptions nobody catches", run: () => setExceptionOption({ uncaughtOnly: true }) },
     { label: `Skip exceptions thrown in: ${skipped.length ? skipped.join(", ") : "nothing"}`, run: setSkippedPaths },
+    shareItem("debugExceptions", "exception options"),
   ]);
 }
 
@@ -321,7 +307,7 @@ function setSkippedPaths() {
       return [
         {
           label: patterns.length ? `Skip exceptions thrown in ${patterns.join(", ")}` : "Pause on exceptions wherever they're thrown",
-          run: () => setExceptionOption("debug:exceptionSkip", patterns.length ? patterns.join(",") : null),
+          run: () => setExceptionOption({ skip: patterns }),
         },
       ];
     },
@@ -339,7 +325,7 @@ export function setExceptionClasses() {
       return [
         {
           label: classes.length ? `Pause on ${classes.join(", ")} and their subclasses` : "Pause on every exception and error",
-          run: () => setExceptionOption("debug:exceptionClasses", classes.length ? classes.join(",") : null),
+          run: () => setExceptionOption({ classes }),
         },
       ];
     },
@@ -354,8 +340,8 @@ export function setExceptionClasses() {
  * where Sail or the project's Compose service mounts the project.
  */
 async function serverPaths(): Promise<string> {
-  const saved = readSetting(`debug:serverRoot:${host.root()}`);
-  if (saved !== null) return saved;
+  const saved = projectValue<string>("debugPathMappings");
+  if (typeof saved === "string") return saved;
   if (await usesSail(host.root())) return "/var/www/html";
   return (await composeService(host.root()))?.workdir ?? "";
 }
@@ -378,11 +364,17 @@ export async function setServerRoot() {
     "Server paths, such as /var/www/html, or /server/path=/local/path for other folders, separated by commas (empty when PHP runs on this Mac)",
     (q) => {
       const mappings = Object.entries(parseMappings(q));
+      const shared = projectScope("debugPathMappings") === "shared";
+      const save = (scope?: Scope) => setProjectValue("debugPathMappings", q.trim(), scope).catch(saveError("the server paths"));
       return [
         {
           label: mappings.length ? mappings.map(([from, to]) => `${from} → ${to}`).join(", ") : "No mapping: PHP runs on this Mac",
-          run: () => writeSetting(`debug:serverRoot:${host.root()}`, q.trim()),
+          detail: shared ? "Saves in tusk.json, shared with the project" : "Saves on this Mac",
+          run: () => save(),
         },
+        shared
+          ? { label: "Save on this Mac only", detail: "Moves the paths out of tusk.json", run: () => save("local") }
+          : { label: "Save and share in tusk.json", detail: "Your team gets the same paths when you commit the file", run: () => save("shared") },
       ];
     },
     0,
@@ -469,7 +461,7 @@ async function onEvent(event: string, body: any) {
  * or PHP's fatal error, the top frame is where the exception was thrown. At the handler, the exception is `$e`.
  */
 async function exceptionPause(body: any, top: Frame | undefined): Promise<{ skip: boolean; reason?: string; text?: string } | null> {
-  if (!pauseOnExceptions) return null;
+  if (!pauseOnExceptions()) return null;
   const skipped = (path?: string) => !!path && thrownIn(path, host.root(), skippedPaths());
   if (body.reason === "exception") {
     // PHP's fatal error names the class, but the stack is gone by then, so only the class itself matches, not subclasses.
@@ -547,19 +539,25 @@ panel.innerHTML = `
   </div>
   <div class="debug-body">
     <ul class="debug-frames" aria-label="Call stack" data-empty="The call stack appears here when execution pauses."></ul>
+    <div class="pane-splitter" data-split="frames"></div>
     <div class="debug-side">
       <div class="debug-watches">
         <ul aria-label="Watches"></ul>
         <input placeholder="Add a watch, such as $request->all(), and press Enter" aria-label="Add a watch expression" spellcheck="false" />
       </div>
+      <div class="pane-splitter" data-split="watches"></div>
       <ul class="debug-vars" aria-label="Variables" data-empty="Variables appear here when execution pauses."></ul>
     </div>
   </div>
+  <div class="pane-splitter" data-split="console"></div>
   <div class="debug-console">
     <pre></pre>
     <input placeholder="Evaluate an expression in the current frame, such as $request->all()" aria-label="Evaluate expression" spellcheck="false" />
   </div>`;
 const q = <T extends HTMLElement>(sel: string) => panel.querySelector(sel) as T;
+splitter(q('[data-split="frames"]'), { target: q(".debug-frames"), axis: "x", edge: "end", label: "Resize the call stack", min: 120, minRest: 200, save: "debug.frames" });
+splitter(q('[data-split="watches"]'), { target: q(".debug-watches"), axis: "y", edge: "end", label: "Resize the watches", min: 40, minRest: 40, save: "debug.watches" });
+splitter(q('[data-split="console"]'), { target: q(".debug-console"), axis: "y", edge: "start", label: "Resize the debug console", min: 50, minRest: 80, save: "debug.console" });
 
 const runs: Record<string, () => unknown> = { exceptions: togglePauseOnExceptions, listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
 panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.onclick = () => runs[b.dataset.run!]()));
@@ -573,11 +571,11 @@ export const showDebugPanel = showPanel;
 function render() {
   q<HTMLElement>(".debug-state").textContent = !running ? "Not listening" : stoppedThread !== null ? "Paused" : "Listening";
   const exceptions = q<HTMLElement>('[data-run="exceptions"]');
-  exceptions.setAttribute("aria-pressed", String(pauseOnExceptions));
+  exceptions.setAttribute("aria-pressed", String(pauseOnExceptions()));
   const classes = host?.root() ? exceptionClasses() : [];
   const skipped = host?.root() ? skippedPaths() : [];
   exceptions.title = `Pause on ${host?.root() && uncaughtOnly() ? "uncaught " : ""}${classes.length ? classes.join(", ") : "exceptions"}${skipped.length ? ` not thrown in ${skipped.join(", ")}` : ""}. Right-click for options`;
-  exceptions.classList.toggle("on", pauseOnExceptions);
+  exceptions.classList.toggle("on", pauseOnExceptions());
   const enabled: Record<string, boolean> = { exceptions: true, listen: !running, resume: isPaused(), over: isPaused(), into: isPaused(), out: isPaused(), stop: running };
   panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.disabled = !enabled[b.dataset.run!]));
   q<HTMLElement>(".debug-frames").replaceChildren(
@@ -602,9 +600,8 @@ function render() {
 // ---- Watches ----
 // Expressions evaluated in the selected frame each time execution pauses, saved per project.
 
-const watchKey = () => `watches:${host.root()}`;
-const loadWatches = (): string[] => JSON.parse(readSetting(watchKey()) ?? "[]");
-const saveWatches = (list: string[]) => writeSetting(watchKey(), list.length ? JSON.stringify(list) : null);
+const loadWatches = (): string[] => projectValue<string[]>("debugWatches") ?? [];
+const saveWatches = (list: string[]) => void setProjectValue("debugWatches", list.length ? list : undefined).catch(saveError("the watches"));
 
 async function renderWatches() {
   const list = q<HTMLElement>(".debug-watches ul");

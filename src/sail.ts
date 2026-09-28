@@ -41,8 +41,12 @@ export function servicesMounting(root: string, config: ComposeConfig): Service[]
   return found.sort((a, b) => Number(b.php) - Number(a.php));
 }
 
-/** The chosen service for each project: set with Choose Docker Service, or "" to run on this Mac. */
-const choiceKey = (root: string) => `docker:service:${root}`;
+/**
+ * The open project's chosen service: set with Choose Docker Service, or "" to run on this Mac. main.ts keeps it in
+ * the project state (`dockerService`); it comes in from there so this file loads without the app's modules in tests.
+ */
+let choice = { get: (): string | undefined => undefined, set: (_name: string) => {} };
+export const setServiceChoice = (c: typeof choice) => (choice = c);
 const composeConfigs = new Map<string, Promise<Service[]>>();
 
 /** The Compose services that could run the project's commands. Empty without a compose file or Docker; that isn't kept, so a compose file added later is found. */
@@ -67,19 +71,14 @@ export const forgetComposeServices = (root: string) => composeConfigs.delete(roo
  */
 export async function composeService(root: string): Promise<Service | null> {
   const services = await composeServices(root);
-  let chosen: string | null = null;
-  try {
-    chosen = localStorage.getItem(choiceKey(root));
-  } catch {}
+  const chosen = choice.get();
   if (chosen === "") return null;
   return services.find((s) => s.name === chosen) ?? services.find((s) => s.php) ?? null;
 }
 
 export function chooseService(root: string, name: string) {
   composeConfigs.delete(root); // Read the compose files again, in case they changed.
-  try {
-    localStorage.setItem(choiceKey(root), name);
-  } catch {}
+  choice.set(name);
 }
 
 /** Where the project is in the container of the last run, so paths in reports map back to this Mac. */

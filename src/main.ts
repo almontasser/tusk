@@ -46,12 +46,14 @@ import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
-import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
+import { chooseService, composeService, composeServices, forgetComposeServices, setServiceChoice } from "./sail";
 import { setMenu } from "./menu";
 import { EDITOR_COMMANDS } from "./editorcommands";
 import { attachSuperMethods, goToSuperMethod, initSuperMethods } from "./supermethod";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
+import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
+import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -569,6 +571,8 @@ async function openFolder(dir: unknown = null) {
   rememberProject(dir);
   await Promise.all([renderDir($("tree") as HTMLUListElement, dir), invoke("watch", { path: dir })]);
   try { localStorage.setItem("lastFolder", dir); } catch {}
+  // Before anything reads the project's values, such as the breakpoints and the index exclusions.
+  await openProjectState(dir);
   refreshGit();
   detectFormatters();
   loadBreakpoints();
@@ -1348,6 +1352,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     // Files without a model weren't open, so the loop above kept no version of them.
     recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
+    projectFilesChanged(paths);
     aiFilesChanged([...paths]);
     const php = [...paths].filter((p) => p.endsWith(".php"));
     const exists = php.length ? await invoke<boolean[]>("paths_exist", { paths: php }) : [];
@@ -1569,6 +1574,7 @@ const actions: Action[] = [
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
+  { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
   { label: "Pull Requests", run: () => showView("prs") },
@@ -1641,6 +1647,10 @@ const actions: Action[] = [
   { label: "Compare with File…", run: compareWithFile },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
+  { label: "Toggle Full-Width Bottom Panel", run: togglePanelFullWidth },
+  { label: "Maximize Bottom Panel", keys: "Shift+Meta+Quote", run: togglePanelMaximized },
+  // ⇧⎋ hides the panel while you work in it, as PhpStorm's Hide Active Tool Window; elsewhere it's the editor's.
+  { label: "Hide Bottom Panel", keys: "Shift+Escape", run: hidePanel, when: () => panelShown() && !!document.activeElement?.closest("#panel") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
@@ -1669,6 +1679,7 @@ async function chooseDockerService() {
   pick("Run tests, Artisan, and Tinker in", () => [
     ...services.map((s) => ({ label: s.name, detail: `${s.workdir}${s.name === current ? " · current" : ""}`, icon: "codicon-vm", run: () => chooseService(root, s.name) })),
     { label: "This Mac", detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
+    shareItem("dockerService", "Docker service choice"),
   ]);
 }
 
@@ -1806,7 +1817,7 @@ function comboOf(e: KeyboardEvent) {
 window.addEventListener(
   "keydown",
   (e) => {
-    if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
+    if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code) || (e.shiftKey && e.code === "Escape"))) return;
     const combo = comboOf(e);
     // The first action for the keys that applies here, so an editor-only action can share its keys with another.
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo && !(a.editorOnly && !editor.hasTextFocus()) && !(a.when && !a.when()));
@@ -1868,6 +1879,11 @@ initProblems({
   changed: updateProblems,
 });
 initFiles({ root: () => root, active: activeFile, openFile, renamed, forget, status });
+initProjectState({ openFile: (path) => void openFile(path) });
+setServiceChoice({
+  get: () => projectValue<string>("dockerService"),
+  set: (name) => void setProjectValue("dockerService", name).catch((e) => status(`Can't save the Docker service: ${e instanceof Error ? e.message : e}`)),
+});
 
 /** Switches the sidebar between the project tree and the commit view. */
 function showView(name: string) {
@@ -1913,25 +1929,8 @@ $("tree-collapse").onclick = () => root && collapseAll();
 $("tree-locate").onclick = selectOpenedFile;
 $("todo-refresh").onclick = () => loadTodos();
 
-// Drag the sidebar's right edge to resize it; the width is remembered.
-try {
-  const width = localStorage.getItem("sidebarWidth");
-  if (width) $("sidebar").style.width = `${width}px`;
-} catch {}
-$("sidebar-resize").onmousedown = (down) => {
-  down.preventDefault(); // Otherwise the drag selects the text it passes over.
-  const start = $("sidebar").offsetWidth;
-  const move = (e: MouseEvent) => ($("sidebar").style.width = `${Math.max(180, start + e.clientX - down.clientX)}px`);
-  const up = () => {
-    removeEventListener("mousemove", move);
-    removeEventListener("mouseup", up);
-    try {
-      localStorage.setItem("sidebarWidth", String($("sidebar").offsetWidth));
-    } catch {}
-  };
-  addEventListener("mousemove", move);
-  addEventListener("mouseup", up);
-};
+// The sidebar and panel sizes, where the panel sits, and maximizing it.
+initLayout({ focusEditor: () => editor.focus(), status });
 initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });

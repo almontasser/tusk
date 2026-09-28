@@ -3,6 +3,7 @@ import { change, git, showDiff } from "./git";
 import { age, type ChangedFile, type Commit, LOG_FORMAT, parseLog, parseNameStatus } from "./gitparse";
 import { confirm, pick } from "./palette";
 import { interactiveRebase } from "./rebase";
+import { splitter } from "./splitter";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
@@ -170,4 +171,5 @@ export function initHistory(h: Host) {
   $("history-filter").oninput = () => (clearTimeout(filterTimer), (filterTimer = setTimeout(render, 150)));
   $("history-all").onchange = () => ((commits = []), load());
   $("history-more").onclick = load;
+  splitter($("history-split"), { target: document.querySelector<HTMLElement>(".history-commits")!, axis: "x", edge: "end", label: "Resize the commit list", min: 200, minRest: 200, save: "gitlog.commits" });
 }
