@@ -227,8 +227,11 @@ left out.
 The web view gets a key before the menu does, and the menu gets it only when
 the page doesn't call `preventDefault`. That's why ⌘W closes a tab and not the
 window. An editor-only action, or one with `when`, passes keys on in some cases,
-so the menu would run it anyway. Those items, and double taps such as ⇧⇧, get
-no accelerator (`accelerator()`, tested in `menu.test.ts`).
+and the menu would then run it anyway. So every item gets its accelerator
+(except double taps and chords), and `passedOn()` makes such an action's item
+do nothing within 500 ms of a key press: a key the page passed on is the only
+way the menu runs it that soon, since picking an item takes longer. Both are
+tested in `menu.test.ts`.
 
 ### Monaco's commands as actions
 
@@ -4771,3 +4774,11 @@ languages, so they're in Find Action and the keymap editor; their Monaco
 actions in `httpview.ts` and `database.ts` keep ⌘⏎ for the editors outside the
 panes, so rebinding them adds a key rather than moving ⌘⏎ there. A Markdown
 file's pane shows a preview button after its tabs.
+
+### 2026-09-28: Menus show editor-only shortcuts
+
+Editor-only actions and debugger steps had no accelerators, so the menus hid
+shortcuts such as ⌘D and F8. They now have them, and a menu item for such an
+action ignores a run that follows a key press by less than 500 ms, which is
+when the page passed the key on. The alternative, drawing the shortcut into the
+item's title, doesn't align with the native shortcut column.

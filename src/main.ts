@@ -1516,6 +1516,10 @@ const actions: Action[] = [
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
   { label: "Check for Updates…", run: () => invoke("check_update") },
   { label: "Keymap…", run: () => editKeymap() },
+  {
+    label: "Keyboard Shortcuts",
+    run: () => pick("Keyboard shortcuts: every action with a shortcut", (q) => rank(q, actionItems().filter((a) => a.detail))),
+  },
   { label: "Color Theme…", keys: "Ctrl+Backquote", run: pickTheme },
   { label: "Import Color Theme…", run: importTheme },
   { label: "Remove Imported Color Theme…", run: removeTheme },

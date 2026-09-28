@@ -45,19 +45,26 @@ const LAYOUT: [string, Entry[]][] = [
   ["Git", ["Commit…", "Push…", "Update Project", "-", "Branches…", "Worktrees…", "Stash Changes…", "Stashes…", "Interactive Rebase…", "Resolve Conflicts in Merge Tool", "Stage Selected Changes (in a diff)", "-",
     "Annotate with Git Blame", "Show File History", "Copy Remote URL", "-", "Create Pull Request…"]],
   ["Window", [native("Minimize"), native("Maximize")]],
-  ["Help", ["Find Action", "Keymap…"]],
+  ["Help", ["Find Action", "Keyboard Shortcuts", "Keymap…"]],
 ];
 
 /**
- * The menu shortcut for an action, in Tauri's accelerator format, or undefined when the menu shouldn't own it.
- * The web view sees a key first and the menu gets it only when the page doesn't handle it, so an action that
- * passes some keys on (editor-only actions outside the editor, debugger steps while running) gets none, or the
- * menu would run it anyway. Double taps such as ⇧⇧ have no menu equivalent.
+ * The menu shortcut for an action, in Tauri's accelerator format. Double taps such as ⇧⇧ and chords such as
+ * ⌘K ⌘X have no menu equivalent.
  */
-export function accelerator(a: Pick<Action, "keys" | "editorOnly" | "when">) {
-  if (!a.keys || a.editorOnly || a.when || a.keys.includes(" ")) return undefined;
+export function accelerator(a: Pick<Action, "keys">) {
+  if (!a.keys || a.keys.includes(" ")) return undefined;
   return a.keys.replace("Meta", "Cmd");
 }
+
+/**
+ * The web view sees a key first, and the menu gets it only when the page doesn't handle it. An action that passes
+ * some keys on (editor-only actions outside the editor, debugger steps while running) must not run then, so the
+ * menu ignores it right after a key press: a menu item picked with the pointer or the menu's own keys comes later.
+ */
+let lastKey = -Infinity;
+globalThis.addEventListener?.("keydown", () => (lastKey = performance.now()), true);
+export const passedOn = (a: Pick<Action, "editorOnly" | "when">, now = performance.now(), last = lastKey) => !!(a.editorOnly || a.when) && now - last < 500;
 
 let current: Menu | undefined;
 
@@ -73,7 +80,7 @@ export async function setMenu(actions: Action[]) {
     if (!action) return void console.error(`Menu: no action named "${entry}"`);
     // Inside the HTTP Client submenu, "HTTP Client: Import…" reads as "Import…".
     const text = entry.startsWith(`${parent}: `) ? entry.slice(parent.length + 2) : entry;
-    return MenuItem.new({ text, accelerator: accelerator(action), action: () => action.run() });
+    return MenuItem.new({ text, accelerator: accelerator(action), action: () => passedOn(action) || action.run() });
   };
   const submenu = async (text: string, entries: Entry[]) =>
     Submenu.new({ text, items: (await Promise.all(entries.map((e) => build(e, text)))).filter((i) => !!i) });

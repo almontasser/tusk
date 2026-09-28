@@ -55,6 +55,8 @@ file to change when you add it.
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Split editors | Up to four panes. |
+| Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
+| Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -208,10 +210,12 @@ Shortcuts follow PhpStorm's macOS keymap. To see every action and its
 shortcut, press ⌘⇧A (**Find Action**).
 
 The menu bar (File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
-Window, and Help) runs the same actions. It shows the shortcuts of actions that
-work everywhere. Editor-only actions, such as **Duplicate Line**, and debugger
-steps don't show their shortcuts there, so the keys still reach text fields and
-the terminal. To search the menus, use the search field in Help.
+Window, and Help) runs the same actions and shows each one's current shortcut,
+except double taps such as ⇧⇧ and two-key chords such as ⌘K ⌘X. An editor-only
+shortcut, such as ⌘D for **Duplicate Line**, still reaches text fields and the
+terminal when the editor doesn't have focus. To search the menus, use the
+search field in Help. **Help > Keyboard Shortcuts** lists every action that has
+a shortcut; pick one to run it.
 
 To change a shortcut, run **Keymap…** from ⌘⇧A (or click **Keymap…** in
 Settings), choose the action, and press the new shortcut, or tap ⇧, ⌃, ⌥, or ⌘
