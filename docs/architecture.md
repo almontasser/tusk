@@ -166,6 +166,33 @@ openSettingsFile()      // settings.json in the editor
 `shown` hides a field that doesn't apply; the search matches a field's group,
 label, help, and key.
 
+Two more kinds of entries, for what plain fields can't hold:
+
+```ts
+registerProjectSettings<T>(group, key, defaults: T, fields, onChange?): () => T
+registerSettingsSection({ group, keywords, shown?, render(): HTMLElement | Promise<HTMLElement> })
+listEditor({ label, items, placeholder, empty, add(v): Promise<string[]>, remove(v): Promise<string[]> })
+openPath(path)          // a file in the editor, such as a tool's configuration
+```
+
+- `registerProjectSettings` adds fields for the open project, kept as one
+  object under `key` in the project's state (`projectstate.ts`), not in
+  `settings.json`. Values equal to their defaults aren't saved, and a saved value
+  of the wrong type reads as its default. The group's heading says **This
+  project** and has a **Share in tusk.json** box (`setProjectScope`). The fields
+  show only while a project is open, and **Reset All** leaves them alone.
+  `onChange` runs after a change in the dialog and when `tusk.json` changes on
+  disk. Add the key to `SHAREABLE` and the tusk.json schema too.
+- `registerSettingsSection` adds a part the module draws itself under a
+  group's heading, such as the dictionaries or Mago's rules. `render` runs each
+  time the dialog opens; the dialog shows "Loading…" until it resolves, and
+  the error in place if it fails. The search matches its group and `keywords`,
+  and shows or hides the whole section.
+- `listEditor` is the list of strings such sections use: a box that adds an
+  entry on Enter or **Add**, and the entries with remove buttons. `add` and
+  `remove` save and return the new list; a failure shows with `showError` and
+  keeps the list.
+
 `apply` updates Monaco's editor options and calls `applyTheme` in
 `src/themes.ts` with the theme in use: `theme`, or `darkTheme` or `lightTheme`
 when `theme` is `system`, which follows `prefers-color-scheme` as it changes.
@@ -1571,12 +1598,46 @@ Spelling comes from `typos-lsp`, a language server for the `typos` checker,
 bundled per architecture like Mago. `typos` checks words against a list of
 known misspellings, not a dictionary, so it doesn't flag names, jargon, or
 abbreviations, and it understands `camelCase` and `snake_case`. The server
-reports misspellings as information, with a fix and an "ignore in the project"
-code action, which writes `typos.toml`. The editor underlines them with a
-green wave of their own (`typoDecorations` in `lsp.ts`), and next and previous
-problem skip them. It's a native binary, so the bridge
-runs it without a runtime (an empty runtime in `lsp.rs`). Changing the
-**Check spelling** setting restarts the servers, which starts or stops it.
+reports misspellings as information with their corrections. The editor
+underlines them with a green wave of their own (`typoDecorations` in
+`lsp.ts`), or shows them as warnings or errors when **Show misspellings as**
+says so (`spelling.severity`, applied in `toMarker`), and next and previous
+problem skip them. It's a native binary, so the bridge runs it without a
+runtime (an empty runtime in `lsp.rs`). Changing the **Check spelling**
+setting restarts the servers, which starts or stops it.
+
+`src/spelling.ts` owns the rest, and sets `spelling` in `lsp.ts` (the
+languages, the severity, and the user dictionary's path) rather than
+`lsp.ts` importing it:
+
+- A dictionary is `word = "word"` entries under `[default.extend-words]`. The
+  project's is the `typos.toml`, `_typos.toml`, or `.typos.toml` it has, else
+  `_typos.toml`. The user's is `spelling.toml` in the app's config folder,
+  passed as typos-lsp's `config` option, which it merges over the project's
+  file: `extend-words` from both apply. (Its `extend-ignore-re` replaces the
+  project's instead, so the user file holds only words; that rules out a
+  per-line suppression comment.) The file is created before the server starts,
+  since typos-lsp drops every configuration when its `config` file is missing.
+- Saving a word runs typos-lsp's own `ignore-in-project` command with the
+  chosen file: the server writes the file with `toml_edit` and checks every
+  open file again, without a restart. The command doesn't fail when it can't
+  write, so `addWord` reads the file back to confirm. With the server stopped,
+  the Tauri command `toml_edit` writes the word.
+- Removing a word, or **Don't check spelling in this file** (`[files]
+  extend-exclude`), edits the file with `toml_edit`, then `restartSpelling`
+  starts typos-lsp alone again, since it reads its files only as it starts.
+  Changing the file types does the same.
+- Monaco's code action provider for every language (`"*"`) offers the
+  dictionary actions for markers from `typos`; the generic provider drops
+  typos-lsp's own "Ignore in the project" actions.
+- **Settings > Spelling** adds a section (`registerSettingsSection`) with the
+  file types (`spellingSkip`, the languages you turned off) and a
+  `listEditor` for each dictionary.
+
+`toml_edit` and `toml_read` (`src-tauri/src/lsp.rs`) are the app's TOML
+access. `toml_edit` applies `{ path, value, inline? }` edits through
+`tusk_lsp::config_edit`, which keeps comments, key order, and keys it doesn't
+touch; a null value removes a key, and a table left empty goes with it.
 
 ### AI code completion
 
@@ -5120,3 +5181,12 @@ the paused one for `$names` rather than asking the language server for the
 variables in scope, which keeps them to one pass over at most 50 lines; a name
 from another scope can show a value it doesn't have there, which PhpStorm's
 own heuristic also allows.
+
+### 2026-09-28: Language tool settings
+
+Spelling, PHPStan, and Mago got settings pages. `settings.ts` grew project
+groups (`registerProjectSettings`) and module-drawn sections
+(`registerSettingsSection`, `listEditor`) instead of a second settings system,
+so every setting is in one dialog with one search. Tool settings that the tool
+reads itself stay in its file (`_typos.toml`, `mago.toml`), edited with
+`toml_edit` so hand-written comments survive; the rest is project state.

@@ -526,6 +526,22 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .setting input[type="number"] { width: 72px; }
 .setting input[aria-invalid="true"] { border-color: var(--red); }
 .setting-reset { width: 22px; height: 22px; }
+.setting-custom { display: block; }
+.settings-group h3 { display: flex; align-items: center; gap: 8px; }
+.settings-project-tag { font-size: 11px; font-weight: normal; padding: 0 6px; border-radius: var(--radius); background: var(--selected); color: var(--muted); }
+.settings-share { margin-left: auto; font-size: 12px; font-weight: normal; display: flex; align-items: center; gap: 4px; }
+.setting-list-editor { display: flex; flex-direction: column; gap: 6px; }
+.setting-list-editor input[type="text"] { flex: 1; }
+.setting-list { list-style: none; margin: 0; padding: 2px 0; max-height: 160px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
+.setting-list li { display: flex; align-items: center; justify-content: space-between; padding: 1px 4px 1px 8px; font-family: var(--mono, monospace); }
+.setting-list li.muted { font-family: inherit; padding: 4px 8px; }
+.setting-list li:hover { background: var(--hover); }
+.setting-list .icon-button { width: 20px; height: 20px; }
+.setting-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.setting-checks label { display: flex; align-items: center; gap: 4px; }
+.setting-list-editor > .setting-control > button, .setting-open { align-self: flex-start; margin-top: 4px; padding: 2px 10px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+.setting-list-editor > .setting-control > button:hover, .setting-open:hover { background: var(--hover); }
+.setting-subhead { margin: 8px 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px 16px; background: var(--panel); border-top: 1px solid var(--border-subtle); }
 .settings-actions .primary { margin-left: auto; padding: 3px 20px; }
 

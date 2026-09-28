@@ -300,3 +300,33 @@ mod tests {
         assert_eq!(read_message(&mut r).unwrap(), None);
     }
 }
+
+/// Edits a TOML file, such as `mago.toml` or `_typos.toml`, keeping its comments and the keys it doesn't touch
+/// (`tusk_lsp::config_edit`). A missing file starts from `create`, or empty.
+#[tauri::command]
+pub fn toml_edit(path: String, edits: Vec<tusk_lsp::config_edit::Edit>, create: Option<String>) -> Result<(), String> {
+    let name = std::path::Path::new(&path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());
+    let (text, exists) = match std::fs::read_to_string(&path) {
+        Ok(text) => (text, true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (create.unwrap_or_default(), false),
+        Err(e) => return Err(format!("Can't read {name}: {e}")),
+    };
+    let out = tusk_lsp::config_edit::edit(&text, &edits).map_err(|e| format!("Can't change {name}: {e}"))?;
+    if out != text || !exists {
+        std::fs::write(&path, out).map_err(|e| format!("Can't write {name}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// A TOML file as JSON, or null when it doesn't exist.
+#[tauri::command]
+pub fn toml_read(path: String) -> Result<serde_json::Value, String> {
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let value: toml::Value = toml::from_str(&text).map_err(|e| format!("Can't read {path}: {}", e.message()))?;
+            serde_json::to_value(value).map_err(|e| e.to_string())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::Value::Null),
+        Err(e) => Err(format!("Can't read {path}: {e}")),
+    }
+}

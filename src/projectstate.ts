@@ -98,6 +98,9 @@ export function projectValue<T>(key: string): T | undefined {
 /** Where a value is kept now, or undefined when it isn't set. */
 export const projectScope = (key: string): Scope | undefined => (key in shared ? "shared" : key in local ? "local" : undefined);
 
+/** Whether a project is open, so its values can be read and set. */
+export const projectOpen = () => !!root;
+
 /** Why tusk.json can't be read, or null. */
 export const sharedStateError = () => sharedError;
 

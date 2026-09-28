@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod capabilities;
+pub mod config_edit;
 pub mod diagnostics;
 pub mod documents;
 pub mod features;

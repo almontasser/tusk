@@ -353,7 +353,12 @@ shows only when it applies. Changes apply immediately and are saved in
 - Type in the search box to filter settings in every group by name,
   description, or key. Escape clears the search.
 - A setting you changed has a reset button beside it. **Reset All…** resets
-  every setting in the dialog after you confirm; your keymap stays.
+  every setting in the dialog after you confirm; your keymap and project
+  settings stay.
+- Groups marked **This project** apply to the open project only, and show
+  only while one is open. Their **Share in tusk.json** box keeps them in the
+  project's `tusk.json` so your team gets them; otherwise they stay on this
+  Mac (see "Project settings and tusk.json").
 - **Open settings.json** opens the file in the editor. When you save it there,
   Tusk applies it.
 - A number outside its range isn't applied; the dialog says which numbers it
@@ -376,6 +381,8 @@ shows only when it applies. Changes apply immediately and are saved in
 | Save files automatically | On |
 | Format files when saving | Off |
 | Check spelling | On |
+| Spelling: show misspellings as | Typos (a green wavy underline) |
+| Spelling: file types to check | All: PHP, Blade, JavaScript, TypeScript, Vue, Svelte, Astro, Markdown, HTML, CSS, SCSS, JSON, YAML, plain text |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
 | Debugger: Xdebug port | 9003 |
@@ -1465,10 +1472,24 @@ the list reloads when they finish.
 The editor marks misspellings in comments, strings, and names with a green
 wavy underline, in PHP, Blade, JavaScript, TypeScript, Vue, Markdown, and more. It
 splits names such as `$userAdress` and `get_adress` into words. Press ⌥⏎ on a
-misspelling to replace it with the suggestion, or to ignore the word in the
-project, which adds it to `typos.toml` in the project root. Commit that file
-so the rest of the team skips the word too. To turn spell checking off, clear
-**Check spelling** in Settings.
+misspelling (or use the light bulb, or **Quick Fix** in its hover) to:
+
+- Replace it with the suggestion.
+- **Save 'word' to project dictionary**: adds the word to the project's
+  `_typos.toml` (or the `typos.toml` or `.typos.toml` it already has), under
+  `[default.extend-words]`, keeping the rest of the file. Commit the file so
+  the rest of the team skips the word too.
+- **Save 'word' to user dictionary**: adds the word to your own dictionary,
+  `spelling.toml` in `~/Library/Application Support/ly.almontasser.tusk/`,
+  which applies to every project.
+- **Don't check spelling in this file**: adds the file to `[files]
+  extend-exclude` in the project's typos file.
+
+A saved word takes effect at once, in every open file. **Settings > Spelling**
+lists both dictionaries, where you can add and remove words, and sets how
+misspellings show (typos, warnings, or errors; warnings and errors count in
+the Problems panel) and which file types to check. To turn spell checking off,
+clear **Check spelling**.
 
 ## AI code completion
 

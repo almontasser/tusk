@@ -33,6 +33,7 @@ mago-syntax-core = "=1.50.0"
 mago-text-edit = "=1.50.0"
 mago-linter = { version = "=1.50.0", features = ["serde"] }
 toml = "0.9"
+toml_edit = "0.25"
 libc = "0.2.189"
 mago-formatter = { version = "=1.50.0", features = ["serde"] }
 

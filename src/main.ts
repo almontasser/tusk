@@ -55,6 +55,7 @@ import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
 import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
+import "./spelling";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };

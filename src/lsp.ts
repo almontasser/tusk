@@ -109,7 +109,9 @@ function setMarkers(model: monaco.editor.ITextModel, owner: string, list: L.Diag
 const toMarker = (d: L.Diagnostic, owner: string): monaco.editor.IMarkerData => ({
   ...toRange(d.range),
   message: typeof d.message === "string" ? d.message : d.message.value,
-  ...(owner === "lsp:typos"
+  ...(owner === "lsp:typos" && spelling.severity !== "typo"
+    ? { severity: spelling.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning }
+    : owner === "lsp:typos"
     ? // Monaco draws a hint with the deprecated tag without a squiggle; the typo decorations below draw spelling's own.
       { severity: monaco.MarkerSeverity.Hint, tags: [monaco.MarkerTag.Deprecated] }
     : {
@@ -130,7 +132,7 @@ monaco.editor.onDidChangeMarkers((uris) => {
   for (const uri of uris) {
     const model = monaco.editor.getModel(uri);
     const old = typoDecorations.get(uri.toString()) ?? [];
-    const typos = model ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
+    const typos = model && spelling.severity === "typo" ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
     if (!model || (!old.length && !typos.length)) continue;
     typoDecorations.set(uri.toString(), model.deltaDecorations(old, typos.map((range) => ({ range, options: { description: "typo", inlineClassName: "typo" } }))));
   }
@@ -787,7 +789,8 @@ async function startServer(
             context: { diagnostics: overlapping, only: context.only ? [context.only] : undefined },
           }, token);
           return {
-            actions: (res ?? []).map((a) => {
+            // typos-lsp's own "Ignore in the project" actions: spelling.ts offers the dictionaries instead.
+            actions: (res ?? []).filter((a) => (typeof a.command === "string" ? a.command : a.command?.command) !== "ignore-in-project").map((a) => {
               // A bare Command has no kind. The hover's Quick Fix link lists only `quickfix` actions, so a command
               // answering problems here counts as one.
               const action = typeof a.command === "string" ? { title: a.title, kind: overlapping.length ? "quickfix" : undefined, diagnostics: overlapping } : (a as L.CodeAction);
@@ -900,7 +903,8 @@ async function startServer(
   }
 }
 
-const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
+/** Every language the spell checker can check. */
+export const SPELLING_LANGUAGES = ["php", "blade", "javascript", "typescript", "vue", "svelte", "astro", "markdown", "html", "css", "scss", "json", "yaml", "plaintext"];
 
 /** Settings for the Tailwind server, which asks for the `editor` and `tailwindCSS` sections. */
 const tailwindSettings = {
@@ -1107,10 +1111,8 @@ export async function startLsp(root: string, h: Host) {
   const tailwind = packageJson.includes('"tailwindcss"')
     ? startServer("tailwind", root, ["blade", "php", "html", "css", "javascript", "typescript", "vue", "svelte", "astro"], {}, tailwindSettings)
     : null;
-  // Spelling in comments, strings, and names. Words the project uses on purpose go in _typos.toml.
-  const typos = settings.spellCheck
-    ? startServer("typos", root, SPELLING_LANGUAGES, { diagnosticSeverity: "Info" })
-    : null;
+  // Spelling in comments, strings, and names, set up by spelling.ts.
+  const typos = startSpelling(root);
   startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
   for (const s of await Promise.allSettled([tusk, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
@@ -1242,6 +1244,45 @@ export async function updateReferences(renames: { from: string; to: string }[]):
     if (edit) await applyWorkspaceEdit(edit);
   }
   return failure;
+}
+
+/**
+ * How spelling.ts sets up the spell checker: the languages it checks, how its problems show ("typo" is a green
+ * wavy underline of its own), and the user dictionary's file, which typos-lsp reads on top of the project's
+ * `_typos.toml`.
+ */
+export const spelling = {
+  languages: SPELLING_LANGUAGES,
+  severity: "typo" as "typo" | "warning" | "error",
+  userDictionary: async (): Promise<string | undefined> => undefined,
+};
+
+async function startSpelling(root: string) {
+  if (!settings.spellCheck || !spelling.languages.length) return null;
+  const config = await spelling.userDictionary().catch((e) => void host.status(`Spelling runs without your dictionary: ${e}`));
+  return startServer("typos", root, spelling.languages, { diagnosticSeverity: "Info", ...(config && { config }) });
+}
+
+/** The open project's folder, or "" before one opens. */
+export const spellingRoot = () => projectRoot;
+
+/** The spell checker, when it runs. */
+export const spellingServer = () => servers.find((s) => s.name === "typos");
+
+/** Starts the spell checker again, alone, such as after a word leaves a dictionary: typos-lsp reads its files as it starts. */
+export async function restartSpelling() {
+  const start = starts;
+  const old = spellingServer();
+  if (old) (servers.splice(servers.indexOf(old), 1), old.stop());
+  if (!projectRoot) return;
+  const s = await startSpelling(projectRoot);
+  if (s && start !== starts) return s.stop();
+  if (s) servers.push(s);
+}
+
+/** Shows the spell checker's problems again, as the severity setting says. */
+export function redrawSpelling() {
+  lastDiagnostics.forEach(({ model, owner, list }) => owner === "lsp:typos" && !model.isDisposed() && setMarkers(model, owner, list));
 }
 
 /** Sends a request to Tusk's PHP server, or returns null when it isn't running. */

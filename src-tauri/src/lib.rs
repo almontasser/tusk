@@ -221,6 +221,8 @@ pub fn run() {
             lsp::lsp_start,
             lsp::lsp_send,
             lsp::lsp_stop,
+            lsp::toml_edit,
+            lsp::toml_read,
             lsp::ai_start,
             lsp::ai_request,
             lsp::ai_cancel,
