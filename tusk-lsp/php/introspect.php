@@ -841,7 +841,7 @@ function filamentApp(string $root): array
 function appEnums(string $root): array
 {
     $out = [];
-    foreach (classesIn($root . '/app') as $class) {
+    foreach (enumsIn($root . '/app') as $class) {
         try {
             if (!enum_exists($class)) {
                 continue;
@@ -857,6 +857,25 @@ function appEnums(string $root): array
         }
     }
     return $out;
+}
+
+/** Enums declared in files under $dir, read from the source. */
+function enumsIn(string $dir): array
+{
+    $enums = [];
+    if (!is_dir($dir)) {
+        return [];
+    }
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+        if (!str_ends_with($file->getFilename(), '.php')) {
+            continue;
+        }
+        $source = (string) file_get_contents($file->getPathname());
+        if (preg_match('/^namespace\s+([^;]+);/m', $source, $ns) && preg_match('/^\s*enum\s+(\w+)/m', $source, $enum)) {
+            $enums[] = $ns[1] . '\\' . $enum[1];
+        }
+    }
+    return $enums;
 }
 
 /** The migration files, with whether each has run, and whether the database could be read. */

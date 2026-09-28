@@ -450,6 +450,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .welcome-sub { margin: 0 0 20px; color: var(--muted); }
 #welcome-open { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; }
 #welcome-open .codicon { font-size: 15px !important; }
+#welcome-new { display: inline-flex; align-items: center; gap: 6px; padding: 6px 16px; margin-top: 8px; border-radius: var(--radius); border: 1px solid var(--input-border); background: var(--panel); }
+#welcome-new:hover { background: var(--hover); }
 .welcome-card h2 { align-self: stretch; text-align: left; font-size: 12px; font-weight: 600; color: var(--faint); margin: 28px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
 #recent-projects { align-self: stretch; list-style: none; margin: 0; padding: 0; text-align: left; }
 #recent-projects li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; }
@@ -2481,3 +2483,26 @@ button.link:hover { text-decoration: underline; }
 .rw-code-title { padding: 6px 12px; background: var(--panel); font-size: 11px; font-weight: 600; color: var(--muted); }
 .rw-code pre { margin: 0; padding: 10px 14px; max-height: 220px; overflow: auto; font: 11.5px/1.5 var(--mono); -webkit-user-select: text; user-select: text; }
 .rw-field > .fd-segmented, .rw-field > .fd-switch { align-self: flex-start; }
+
+/* New Laravel Project (src/laravelnew.ts) and New Laravel Element (src/laravelelements.ts) */
+.nl-dialog { height: min(820px, calc(100vh - 48px)); width: min(860px, calc(100vw - 48px)); }
+.ne-dialog { height: auto; max-height: min(760px, calc(100vh - 48px)); width: min(760px, calc(100vw - 48px)); }
+.nl-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ne-dialog .nl-shell { max-height: min(760px, calc(100vh - 48px)); }
+.nl-heading { display: flex; align-items: center; gap: 14px; }
+.nl-logo { width: 42px; height: 42px; }
+.nl-browse { flex-shrink: 0; padding: 4px 10px; border-radius: var(--radius); border: 1px solid var(--input-border); background: var(--panel); }
+.nl-kits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.nl-kit { display: flex !important; flex-direction: column; align-items: flex-start !important; gap: 2px !important; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--panel); text-align: left; }
+.nl-kit:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.nl-kit.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ne-flags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.ne-flag { display: flex; align-items: flex-start; gap: 4px; }
+.ne-flag > span { display: flex; flex-direction: column; min-width: 0; }
+.ne-flag-name { font: 12px var(--mono); }
+.ne-flag input { margin-top: 3px; }
+.ne-preview { font: 11.5px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; -webkit-user-select: text; user-select: text; }
+.ne-problem:empty { display: none; }
+.ne-problem { white-space: pre-wrap; }
+.ne-dialog .rw-body { flex: 0 1 auto; }
+.rw-dialog.ne-dialog { height: fit-content; }

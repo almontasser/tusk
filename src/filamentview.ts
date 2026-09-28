@@ -8,7 +8,7 @@ import { majorVersion } from "./filamentcatalog";
 import { initDesigner, openDesigner, projectChanged, type DesignerHost } from "./filamentdesigner";
 import { heroicon } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
-import { pick, type Item } from "./palette";
+import { pick, rank, type Item } from "./palette";
 import { errorText } from "./status";
 import { toolPath } from "./lsp";
 import { composerCommand } from "./toolpaths";
@@ -158,7 +158,7 @@ export async function openResourcePicker() {
     p.resources.map((r) => ({ label: r.navigationLabel ?? r.pluralLabel ?? shortClass(r.class), detail: `${p.id} · ${shortClass(r.model ?? "")}`, icon: "codicon-symbol-structure", run: () => r.file && void openDesigner(`${root}/${r.file}`) })),
   );
   items.push({ label: "New Resource…", detail: "Create a resource with the wizard", icon: "codicon-add", run: () => void newResource() });
-  pick("Open a resource in the designer", () => items);
+  pick("Open a resource in the designer", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Picks a model to open in the model designer, or makes a new one. */
@@ -174,7 +174,7 @@ export async function openModelPicker() {
     } })),
   );
   items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
-  pick("Open a model in the designer", () => items);
+  pick("Open a model in the designer", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 export async function newResource(panel?: string) {

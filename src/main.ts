@@ -15,6 +15,8 @@ import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
+import { initLaravelElements, newLaravelElement } from "./laravelelements";
+import { initLaravelNew, newLaravelProject } from "./laravelnew";
 import { filamentFilesChanged, initFilament, installFilament, loadFilament, newResource, openFileInDesigner, openModelPicker, openResourcePicker } from "./filamentview";
 import { chooseRebaseBase, initRebase } from "./rebase";
 import { initStash, showStashes, stashChanges } from "./stash";
@@ -586,6 +588,9 @@ async function openFolder(dir: unknown = null) {
   $("project-name").textContent = nameOf(dir);
   $("project-badge").textContent = initials(nameOf(dir));
   $("welcome").hidden = true;
+  // The Filament tool window shows the project's panels, which a new project has its own of.
+  $("filament-list").replaceChildren();
+  if (currentView === "filament") void loadFilament();
   rememberProject(dir);
   await Promise.all([renderDir($("tree") as HTMLUListElement, dir), invoke("watch", { path: dir })]);
   try { localStorage.setItem("lastFolder", dir); } catch {}
@@ -1608,6 +1613,8 @@ const actions: Action[] = [
   { label: "Filament: New Resource…", run: () => root && newResource() },
   { label: "Filament: Install Filament", run: () => root && installFilament() },
   { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
+  { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
+  { label: "Laravel: New Project…", run: () => newLaravelProject() },
   { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },
   { label: "Open in Designer", run: () => active && openFileInDesigner(active), when: () => /(Resource|RelationManager|Form|Table|Infolist)\.php$/.test(active) },
   { label: "Composer: Require Package…", run: () => requirePackage() },
@@ -1973,6 +1980,7 @@ $("tb-settings").onclick = () => openSettings();
 $("tb-debug-server").onclick = () => actions.find((a) => a.label.startsWith("Start Debug Server"))?.run();
 $("project-menu").onclick = () => projectMenu();
 $("welcome-open").onclick = () => openFolder();
+$("welcome-new").onclick = () => newLaravelProject();
 $("tree-new-file").onclick = () => root && newFile(root);
 $("tree-new-folder").onclick = () => root && newFolder(root);
 $("tree-collapse").onclick = () => root && collapseAll();
@@ -2015,6 +2023,8 @@ initHttpClient({
   showDiff: (path, original, modified, label) => showDiff(path, original, modified, label),
 });
 initComposer({ root: () => root, status });
+initLaravelElements({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
+initLaravelNew({ openTerminal: (cwd, title, command, onExit) => void openTerminal(cwd, title, command, onExit), openFolder: (dir) => void openFolder(dir), status });
 initFilament({
   root: () => root,
   ensureModel,

@@ -883,6 +883,30 @@ the model's fillable attributes, casts, soft deletes, and relationships in
 place, and keeps everything else. Dropping a column asks first. **Run the
 migration** runs `php artisan migrate` afterwards, in Sail when it's up.
 
+## New Laravel projects and elements
+
+**New Laravel Project…** on the welcome screen or in the palette creates a
+project with Laravel's own installer. Tusk keeps a copy of `laravel/installer`
+in its tools folder and installs it with its bundled Composer the first time,
+so nothing is installed globally. The dialog chooses:
+
+- The folder and name.
+- The starter kit: none, Livewire, React, Vue, Svelte, or a community kit by its
+  package name, with Laravel's authentication, WorkOS, or none, and teams.
+- The database, the test framework (Pest or PHPUnit), the front-end package
+  manager, a Git repository, and Laravel Boost.
+- An admin panel: Filament with its first panel and, on SQLite, a first user.
+
+It runs in a terminal tab, where you can follow it, and the project opens when
+it succeeds.
+
+**Laravel: New Element…** lists every `make:` command the project's Artisan
+has, Laravel's and packages' alike, such as Filament's, Livewire's, or an MCP
+server's. Choosing one opens a form built from the command's own arguments and
+options, with the command line it will run, and opens the files it makes. The
+model and resource generators open the model designer and the resource wizard
+instead; their plain forms are listed too.
+
 ## Bookmarks
 
 Press F3 to bookmark the current line, and F3 again to remove the bookmark. A

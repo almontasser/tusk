@@ -4302,6 +4302,30 @@ that runs once, so it should hold the whole change.
 - **Names:** `tableFor`, `plural`, and `singular` follow Laravel's pluralizer for
   the common cases, so the designer's table name matches the one Eloquent uses.
 
+## New Laravel projects and elements
+
+`src/laravelnew.ts` uses `laravel/installer` rather than
+`composer create-project`, because starter kits, WorkOS, teams, Pest, and Boost
+are the installer's options, and it keeps up with Laravel's changes to them.
+The editor must not depend on global tools, so the installer lives in
+`<app data>/tools/laravel-installer`, made with the bundled Composer's
+`create-project` and updated before each use. The installer runs `composer`
+from `PATH`, so a `composer` shim that runs the bundled phar goes first on the
+terminal's `PATH`. `src/laravelnewdata.ts` turns the dialog's choices into the
+installer's flags (always `--no-interaction`, so it asks nothing) and the
+script the terminal runs: the installer, then `composer require
+filament/filament`, `filament:install --panels`, and, on SQLite,
+`make:filament-user` with the dialog's name, email, and password. Other
+databases need their server and credentials first, so the first user is left
+to you.
+
+`src/laravelelements.ts` reads `artisan list --format=json`, which describes
+each command's arguments and options (required, array, takes a value, repeats),
+and builds a form for any `make:` command from it. `commandLine` in
+`src/laravelnewdata.ts` writes the arguments. Some generators report failures,
+such as a class that exists, with an `ERROR` line and a success status, so a
+run that made no files and printed one counts as failed.
+
 ## Tusk's language server
 
 `tusk-lsp/` is the PHP language server the editor runs, written in Rust. It
@@ -5961,4 +5985,12 @@ for one sitting's work are noise in `database/migrations`. So the model designer
 keeps changes until Apply and writes one migration with all of them, shown in
 the preview first. It never edits a migration that exists, since one that has
 run won't run again.
+
+### 2026-09-28: New projects use Laravel's installer, kept in Tusk's tools
+
+`composer create-project laravel/laravel` would need no installer, but the
+starter kits and their options (authentication, teams, Pest, Boost) are the
+installer's, and they change with Laravel. So Tusk runs the installer itself,
+from its own tools folder, where the bundled Composer installs and updates it.
+Nothing is installed globally, as the editor promises.
 

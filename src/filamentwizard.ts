@@ -402,8 +402,10 @@ class Wizard {
           const methods = info ? methodsOf(this.cat!, info) : null;
           gen = { cls: x.cls, make: gen.make, calls: gen.calls.filter(([m]) => !methods || methods.has(m)) };
         }
-        gen = withCall(gen, "required", x.required ? "" : null);
-        gen = withCall(gen, "columnSpanFull", x.full ? "" : null);
+        // A setting the proposal already has, such as a password's required-on-create closure, stays as it is.
+        const has = (m: string) => gen.calls.some(([c]) => c === m);
+        if (x.required !== has("required")) gen = withCall(gen, "required", x.required ? "" : null);
+        if (x.full !== has("columnSpanFull")) gen = withCall(gen, "columnSpanFull", x.full ? "" : null);
         return renderGen(gen, name);
       });
     if (!this.section) return items;
