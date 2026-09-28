@@ -4343,7 +4343,12 @@ has, as `methodsOf` reports them.
 - **Reading:** `introspect.php policy <model>` asks the Gate for the model's
   policy and its file, and, with spatie/laravel-permission, lists the roles
   with their permissions, whether the user model has `HasRoles`, and whether
-  Filament Shield is installed. `introspect.php permission` creates a role or
+  Filament Shield is installed. With Shield and a resource, it asks
+  `FilamentShield::getDefaultPermissionKeys()` for the resource's permission
+  names, which follow Shield's config or the app's own key builder (the config
+  alone can be wrong: an app can replace the builder). Abilities Shield gives no
+  key get names in the same pattern, found from the keys it gave.
+  `introspect.php permission` creates a role or
   permission, or grants or revokes one, through Spatie's models.
 - **Rules:** `src/policygen.ts` reads each ability method whose body is one
   `return`: `true`, `false`, or conditions joined by `||` or `&&`, each

@@ -7,7 +7,7 @@ export type Ability = { name: string; label: string; record: boolean; more?: boo
 
 /** The abilities Filament checks, in the order the tab lists them; `more` ones sit under "More abilities". */
 export const ABILITIES: Ability[] = [
-  { name: "viewAny", label: "See the list", record: false, hint: "Whether the resource shows in the navigation, and its list page opens." },
+  { name: "viewAny", label: "See the list", record: false, hint: "Seeing the list of records, and the navigation item that leads to it." },
   { name: "view", label: "View a record", record: true, hint: "The View page and action." },
   { name: "create", label: "Create", record: false, hint: "The Create page and action." },
   { name: "update", label: "Edit", record: true, hint: "The Edit page and action." },
@@ -120,9 +120,52 @@ export function abilityMethod(a: Ability, code: string, v: Vars, userType: strin
   return `public function ${a.name}(${params}): bool\n{\n    return ${code};\n}`;
 }
 
-/** The permission name an ability suggests, as Filament Shield names them: `update_post`, `view_any_post`. */
-export const permissionName = (ability: string, modelShort: string) =>
-  `${ability.replace(/([A-Z])/g, "_$1").toLowerCase()}_${modelShort.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()}`;
+/** How Filament Shield names permissions: the keys it gives a resource, or its configured separator and case. */
+export type ShieldNaming = { keys?: Record<string, string> | null; format?: { separator: string; case: string } | null };
+
+const words = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[\s_\-:]+/).filter(Boolean).map((w) => w.toLowerCase());
+/** A value in one of Shield's cases, as its `format()` writes it. */
+export function shieldCase(value: string, kase: string): string {
+  const w = words(value);
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  switch (kase) {
+    case "kebab":
+      return w.join("-");
+    case "pascal":
+      return w.map(cap).join("");
+    case "camel":
+      return w.map((x, i) => (i ? cap(x) : x)).join("");
+    case "upper_snake":
+      return w.join("_").toUpperCase();
+    default:
+      return w.join("_");
+  }
+}
+
+const CASES = ["lower_snake", "pascal", "camel", "kebab", "upper_snake"];
+
+/** The case and separator that make a resource's keys from their abilities and the model's name. */
+function namingOf(keys: Record<string, string> | null | undefined, modelShort: string): { separator: string; case: string } | null {
+  for (const [ability, key] of Object.entries(keys ?? {}))
+    for (const kase of CASES) {
+      const a = shieldCase(ability, kase);
+      const m = shieldCase(modelShort, kase);
+      if (key.startsWith(a) && key.endsWith(m) && key.length >= a.length + m.length) return { separator: key.slice(a.length, key.length - m.length), case: kase };
+    }
+  return null;
+}
+
+/**
+ * The permission name an ability suggests: the key Shield gives it, or Shield's naming (`update_post` by
+ * default), which apps without Shield get too.
+ */
+export function permissionName(ability: string, modelShort: string, shield?: ShieldNaming): string {
+  const key = shield?.keys?.[ability];
+  if (key) return key;
+  // An ability Shield gave no key: named like the keys it gave, which follow the app's own builder when it has one.
+  const f = namingOf(shield?.keys, modelShort) ?? shield?.format ?? { separator: "_", case: "lower_snake" };
+  return `${shieldCase(ability, f.case)}${f.separator}${shieldCase(modelShort, f.case)}`;
+}
 
 /** The permissions a policy's rules name. */
 export const permissionsOf = (read: ReadAbility[]) => [...new Set(read.flatMap((r) => (r.rule?.kind === "when" ? r.rule.conds.filter((c) => c.kind === "permission").map((c) => (c as { name: string }).name) : [])))];

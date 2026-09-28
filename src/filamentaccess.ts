@@ -75,7 +75,7 @@ function abilityRow(d: AccessHost, r: ReadAbility, info: fapp.PolicyInfo, model:
   let editor: HTMLElement;
   if (rule?.kind === "custom") {
     const replace = h("select", {}, h("option", { value: "", textContent: "Replace with…" }), h("option", { value: "everyone", textContent: "Everyone" }), h("option", { value: "nobody", textContent: "Nobody" }), h("option", { value: "when", textContent: "Only users who…" }));
-    replace.onchange = () => replace.value && set(fresh(replace.value as Rule["kind"], r, model));
+    replace.onchange = () => replace.value && set(fresh(replace.value as Rule["kind"], r, model, info));
     editor = h("div", { class: "fd-access-rule" }, h("button", { type: "button", class: "fd-code-chip", title: "Written as code. Open it to change it, or replace it.", onclick: () => r.method && d.reveal(r.method, d.access!.doc!) }, icon("code"), h("span", {}, codeSummary(d, r))), replace);
   } else {
     const who = h(
@@ -86,7 +86,7 @@ function abilityRow(d: AccessHost, r: ReadAbility, info: fapp.PolicyInfo, model:
       h("option", { value: "nobody", textContent: "Nobody", selected: rule?.kind === "nobody" }),
       h("option", { value: "when", textContent: "Only users who…", selected: rule?.kind === "when" }),
     );
-    who.onchange = () => who.value && set(fresh(who.value as Rule["kind"], r, model));
+    who.onchange = () => who.value && set(fresh(who.value as Rule["kind"], r, model, info));
     editor = h("div", { class: "fd-access-rule" }, who, rule?.kind === "when" ? conditions(d, r, rule, info, model) : null);
   }
   return h("div", { class: `fd-access-row${!r.method ? " missing" : ""}` }, h("div", { class: "fd-access-label", title: r.ability.hint }, h("strong", {}, r.ability.label), h("span", { class: "fd-note" }, r.ability.hint)), editor);
@@ -100,8 +100,8 @@ function codeSummary(d: AccessHost, r: ReadAbility): string {
 }
 
 /** A new rule of a kind: "Only users who…" starts with the ability's permission. */
-function fresh(kind: Rule["kind"], r: ReadAbility, model: string): Rule {
-  if (kind === "when") return { kind, join: "any", conds: [{ kind: "permission", name: permissionName(r.ability.name, shortClass(model)) }] };
+function fresh(kind: Rule["kind"], r: ReadAbility, model: string, info: fapp.PolicyInfo): Rule {
+  if (kind === "when") return { kind, join: "any", conds: [{ kind: "permission", name: permissionName(r.ability.name, shortClass(model), { keys: info.shieldKeys, format: info.shieldFormat }) }] };
   return { kind } as Rule;
 }
 
@@ -114,7 +114,7 @@ function conditions(d: AccessHost, r: ReadAbility, rule: Extract<Rule, { kind: "
     const kind = h("select", {}, ...kinds.map(([k, l]) => h("option", { value: k, textContent: l, selected: k === c.kind })));
     kind.onchange = () => {
       const k = kind.value as Cond["kind"];
-      const next: Cond = k === "owner" ? { kind: k, column: columns[0] ?? "user_id" } : k === "role" ? { kind: k, name: info.roles[0]?.name ?? "admin" } : { kind: k, name: permissionName(r.ability.name, shortClass(model)) };
+      const next: Cond = k === "owner" ? { kind: k, column: columns[0] ?? "user_id" } : k === "role" ? { kind: k, name: info.roles[0]?.name ?? "admin" } : { kind: k, name: permissionName(r.ability.name, shortClass(model), { keys: info.shieldKeys, format: info.shieldFormat }) };
       set({ ...rule, conds: rule.conds.map((x, j) => (j === i ? next : x)) });
     };
     let value: HTMLElement;
@@ -195,7 +195,8 @@ function permissionsSection(d: AccessHost, info: fapp.PolicyInfo, used: string[]
   if (!info.spatie) return h("section", { class: "fd-access-perms" }, title, h("p", { class: "fd-note" }, "Rules can name roles and permissions when the app has spatie/laravel-permission, which stores them in the database and gives them to users. Without it, a permission is any Gate ability the app defines."));
   const notes: HTMLElement[] = [];
   if (!info.hasRoles) notes.push(h("p", { class: "fd-note" }, icon("warning"), ` ${shortClass(info.user ?? "User")} doesn't use Spatie's HasRoles trait, so users have no roles or permissions yet.`));
-  if (info.shield) notes.push(h("p", { class: "fd-note" }, icon("info"), " Filament Shield is installed: its Roles page edits the same permissions."));
+  if (info.shield) notes.push(h("p", { class: "fd-note" }, icon("info"), ` Filament Shield is installed: its Roles page edits the same permissions, and new rules use its names${info.shieldKeys ? " for this resource" : ""}.`));
+  if (info.superAdmin?.viaGate) notes.push(h("p", { class: "fd-note" }, icon("info"), ` Users with the ${info.superAdmin.name} role can do everything: Shield lets them past these rules.`));
   if (info.error) return h("section", { class: "fd-access-perms" }, title, ...notes, h("p", { class: "fd-note" }, icon("warning"), ` The designer can't read them from the database: ${info.error}`));
   const snake = shortClass(model).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
   const perms = [...new Set([...used, ...info.permissions.filter((p) => p.toLowerCase().includes(snake))])];

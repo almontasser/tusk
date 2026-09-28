@@ -86,6 +86,10 @@ export type PolicyInfo = {
   roles: { name: string; permissions: string[] }[];
   permissions: string[];
   error: string | null;
+  /** With Filament Shield: the resource's permission keys by ability, its naming, and its super admin role. */
+  shieldKeys?: Record<string, string> | null;
+  shieldFormat?: { separator: string; case: string } | null;
+  superAdmin?: { name: string; viaGate: boolean } | null;
 };
 export type Migrations = { database: boolean; files: { name: string; file: string; ran: boolean | null }[] };
 
@@ -132,7 +136,7 @@ export const enums = (root: string) => cached(root, "enums", () => introspect<En
 export const models = (root: string) => cached(root, "models", () => introspect<Record<string, ModelSummary>>(root, "models"));
 export const migrations = (root: string) => cached(root, "migrations", () => introspect<Migrations>(root, "migrations"));
 export const translations = (root: string) => cached(root, "translations", () => introspect<import("./translations").Translations>(root, "translations"));
-export const policy = (root: string, cls: string) => cached(root, `policy:${cls}`, () => introspect<PolicyInfo>(root, "policy", cls));
+export const policy = (root: string, cls: string, resource?: string) => cached(root, `policy:${cls}:${resource ?? ""}`, () => introspect<PolicyInfo>(root, "policy", cls, ...(resource ? [resource] : [])));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));

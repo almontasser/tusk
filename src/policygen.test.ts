@@ -44,4 +44,8 @@ test("readPolicy reads Shield's policies, and keeps helpers and statements", () 
 test("permissionName follows Shield", () => {
   assert.equal(permissionName("viewAny", "Project"), "view_any_project");
   assert.equal(permissionName("forceDelete", "OrderItem"), "force_delete_order_item");
+  assert.equal(permissionName("viewAny", "OrderItem", { format: { separator: ":", case: "pascal" } }), "ViewAny:OrderItem");
+  assert.equal(permissionName("viewAny", "Project", { keys: { viewAny: "view_any_project" }, format: { separator: ":", case: "pascal" } }), "view_any_project");
+  // An ability Shield has no key for follows the keys it has, over the config.
+  assert.equal(permissionName("deleteAny", "Project", { keys: { viewAny: "view_any_project" }, format: { separator: ":", case: "pascal" } }), "delete_any_project");
 });
