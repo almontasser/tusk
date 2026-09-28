@@ -343,3 +343,44 @@ export function readPanelWidgets(text: string, code: PanelCode): { class: string
     }
   return out;
 }
+
+// ---- Two-factor sign-in ----
+
+export const APP_AUTH = "Filament\\Auth\\MultiFactor\\App\\AppAuthentication";
+export const EMAIL_AUTH = "Filament\\Auth\\MultiFactor\\Email\\EmailAuthentication";
+
+/** Which second factors the panel offers: codes from an authenticator app (with recovery codes), or by email. */
+export type Mfa = { app: boolean; recoverable: boolean; email: boolean; required: boolean };
+
+/** The panel's `multiFactorAuthentication()`: null when it has none, or its code when it's more than the designer writes. */
+export function readMfa(text: string, code: PanelCode): Mfa | { code: string } | null {
+  const found = panelCall(code, "multiFactorAuthentication");
+  if (!found) return null;
+  const whole = { code: text.slice(found.call.span[0], found.call.span[1]) };
+  const providers = found.call.args.items.find((a) => !a.name || a.name === "providers")?.value;
+  const required = found.call.args.items.find((a) => a.name === "isRequired")?.value;
+  if (providers?.kind !== "array" || (required && required.kind !== "bool")) return whole;
+  const m: Mfa = { app: false, recoverable: false, email: false, required: required?.kind === "bool" && required.value };
+  for (const item of providers.items) {
+    const n = item.value;
+    const base = n.kind === "chain" ? n.base : n;
+    if (base.kind !== "static" || base.method !== "make") return whole;
+    const calls = n.kind === "chain" ? n.calls : [];
+    if (/(^|\\)AppAuthentication$/.test(base.class) && calls.every((c) => c.name === "recoverable")) {
+      m.app = true;
+      m.recoverable = calls.some((c) => c.args.items[0]?.value.kind !== "bool" || (c.args.items[0].value as { value: boolean }).value);
+    } else if (/(^|\\)EmailAuthentication$/.test(base.class) && !calls.length) m.email = true;
+    else return whole;
+  }
+  return m;
+}
+
+/** Sets the panel's second factors, or takes two-factor sign-in off when there are none. */
+export function mfaEdits(text: string, code: PanelCode, m: Mfa): Edit[] {
+  const found = panelCall(code, "multiFactorAuthentication");
+  const providers = [...(m.app ? [`{{${APP_AUTH}}}::make()${m.recoverable ? "->recoverable()" : ""}`] : []), ...(m.email ? [`{{${EMAIL_AUTH}}}::make()`] : [])];
+  if (!providers.length) return found ? allCalls(code, "multiFactorAuthentication").map(([chain, c]) => removeCall(chain, c)) : [];
+  const args = `[\n${providers.map((p) => `    ${p},`).join("\n")}\n]${m.required ? ", isRequired: true" : ""}`;
+  if (found) return [setArgs(text, found.call.args, args)];
+  return code.main ? [setCall(text, code.main, "multiFactorAuthentication", args)] : [];
+}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fixture } from "./designerfixture.ts";
 import { applyEdits, type ArrayNode, methodNamed } from "./phpcode.ts";
-import { partColorEdits, type Metric, metricCode, widgetFile, readChartData, readMetric, readSeries, readStats, readValue, type Series, seriesCode, seriesEdits, squash, trendCode, isTrend, valueCode } from "./widgetgen.ts";
+import { partColorEdits, TABLE, type Metric, metricCode, widgetFile, readChartData, readMetric, readSeries, readStats, readValue, type Series, seriesCode, seriesEdits, squash, trendCode, isTrend, valueCode } from "./widgetgen.ts";
 
 const plain = (code: string) => code.replace(/\{\{[\w\\]*?(\w+)\}\}/g, "$1");
 const metrics: Metric[] = [
@@ -16,6 +16,9 @@ test("metrics round-trip through their code", () => {
     assert.deepEqual(read, m);
   }
   assert.equal(readMetric("Order::query()->where('a', 1)->count() + 1"), null);
+  const table: Metric = { model: TABLE, agg: "sum", column: "total", where: [{ column: "status", op: "=", value: "new" }], days: 7 };
+  assert.equal(metricCode(table), "$this->getPageTableQuery()->reorder()->where('status', 'new')->where('created_at', '>=', now()->subDays(7))->sum('total')");
+  assert.deepEqual(readMetric(metricCode(table)), table);
   assert.equal(readMetric("Order::where('a', 1)->count()"), null);
   assert.equal(squash("Order::query()\n    ->where('a', 1,)\n    ->count()"), "Order::query()->where('a', 1)->count()");
 });
