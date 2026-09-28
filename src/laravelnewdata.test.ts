@@ -57,3 +57,14 @@ test("commandLine writes a generator's arguments and options", async () => {
   assert.deepEqual(commandLine(c, { args: { name: " OrderShipped " }, flags: new Set(["--force", "--help"]), options: { "--queue": "high", "--tag": "a, b" } }), ["make:event", "OrderShipped", "--force", "--queue=high", "--tag=a", "--tag=b"]);
   assert.equal(generatorLabel("make:filament-relation-manager"), "Filament relation manager");
 });
+
+test("commandError keeps the message of a failed command's output", async () => {
+  const { commandError } = await import("./laravelnewdata.ts");
+  assert.equal(commandError("\n   \x1b[41;1m ERROR \x1b[49;22m Enum already exists.  \n\n"), "Enum already exists.");
+  assert.equal(
+    commandError("\n   Illuminate\\Database\\QueryException \n\n  SQLSTATE[08006] [7] connection to server failed: Connection refused\n\n  at vendor/laravel/framework/src/Illuminate/Database/Connection.php:825\n    821▕ \n      +37 vendor frames \n"),
+    "QueryException: SQLSTATE[08006] [7] connection to server failed: Connection refused",
+  );
+  assert.equal(commandError("PHP Parse error:  syntax error, unexpected token \"}\" in /app/Models/Post.php on line 12\n"), "Parse error:  syntax error, unexpected token \"}\"");
+  assert.equal(commandError(""), "The command failed without saying why.");
+});

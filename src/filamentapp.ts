@@ -9,6 +9,7 @@ import { tuskRequest } from "./lsp";
 import type { Outline } from "./phpcode";
 import { pathsFor, psr4From } from "./psr4";
 import { runningContainer } from "./sail";
+import { commandError } from "./laravelnewdata";
 
 export type PageInfo = { name: string; class: string; file: string | null; kind: "list" | "create" | "edit" | "view" | "manage" | "related" | "custom" };
 export type RelationInfo = { class: string; file: string | null; relationship: string | null; title: string | null; group: string | null };
@@ -86,8 +87,8 @@ async function introspect<T>(root: string, mode: string, ...args: string[]): Pro
     json = JSON.parse(out);
   } catch {
     // PHP's own errors, such as a syntax error in a provider, come before any JSON.
-    const lines = out.replace(/\x1b\[[\d;]*m/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
-    throw new Error(lines.slice(0, 3).join(" ") || `introspect.php ${mode} printed nothing`);
+    console.error(`introspect.php ${mode} failed:\n${out}`);
+    throw new Error(out.trim() ? commandError(out) : `introspect.php ${mode} printed nothing`);
   }
   if (json && typeof json === "object" && "error" in json && Object.keys(json).length === 1) throw new Error(String((json as { error: string }).error));
   return json as T;
@@ -169,7 +170,12 @@ export async function artisan(root: string, args: string[]): Promise<string> {
   const container = await runningContainer(root);
   const command = container ? container.exec(["php", "artisan", ...args], [], false) : ["php", "artisan", ...args];
   const [program, ...rest] = command;
-  return invoke<string>("run_capture", { cwd: root, program, args: [...rest, "--no-interaction", "--no-ansi"], input: null, anyStatus: false });
+  return invoke<string>("run_capture", { cwd: root, program, args: [...rest, "--no-interaction", "--no-ansi"], input: null, anyStatus: false }).catch((e) => {
+    // The whole output, with its stack trace, goes to the console; the message says what went wrong.
+    const out = e instanceof Error ? e.message : String(e);
+    console.error(`php artisan ${args.join(" ")} failed:\n${out}`);
+    throw new Error(commandError(out));
+  });
 }
 
 /**

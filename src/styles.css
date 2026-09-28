@@ -2506,3 +2506,8 @@ button.link:hover { text-decoration: underline; }
 .ne-problem { white-space: pre-wrap; }
 .ne-dialog .rw-body { flex: 0 1 auto; }
 .rw-dialog.ne-dialog { height: fit-content; }
+.fd-helper-note { display: flex; align-items: center; gap: 8px; max-width: 1200px; margin: 0 auto 14px; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--blue) 10%, transparent); color: var(--muted); font-size: 12px; }
+.fd-helper-note > .codicon { color: var(--blue); }
+.fv-loading { display: flex; align-items: center; gap: 8px; }
+#filament-filter { width: 100%; }
+.fd-row-note { padding: 0 4px 4px; }

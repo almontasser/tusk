@@ -96,6 +96,12 @@ export type Root = {
   delegate?: { class: string; method: string };
   /** Set when the designer can't read the method: it returns something other than a chain on its parameter. */
   custom?: string;
+  /**
+   * Set when the chain starts from a helper that gets the parameter, as in
+   * `self::configureTable($table)->recordActions([...])`: the helper builds part of it, and the calls after it
+   * are the designer's to edit.
+   */
+  helper?: { class: string; method: string };
 };
 
 /** The class's form, infolist, or table method, read, or null when the class has none. */
@@ -109,7 +115,9 @@ export function readRoot(cls: OClass, kind: RootKind, methodName: string = kind 
   if (node.kind === "static" && node.args.items.some((a) => a.value.kind === "var" && a.value.name === param))
     return { ...root, delegate: { class: node.class, method: node.method } };
   const base = baseOf(node);
-  if (base.kind !== "var" || base.name !== param) return { ...root, custom: `It returns something other than $${param} with its calls.` };
+  const fromHelper = node.kind === "chain" && base.kind === "static" && base.args.items.some((a) => a.value.kind === "var" && a.value.name === param);
+  if (fromHelper && base.kind === "static") root.helper = { class: base.class, method: base.method };
+  else if (base.kind !== "var" || base.name !== param) return { ...root, custom: `It returns something other than $${param} with its calls.` };
   for (const call of callsOf(node)) {
     if (!ROOT_SLOTS[kind].flat().includes(call.name)) continue;
     const arg = call.args.items[0];

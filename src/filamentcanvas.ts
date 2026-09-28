@@ -5,7 +5,7 @@ import { h, icon } from "./dom";
 import { type Catalog, classInfo, humanize, isA, labelFromName, look } from "./filamentcatalog";
 import { childSlot, type Comp, type Entry, type Path, resolve, type Root, rootSlot, samePath, type Slot, shortClass, slotKey, within } from "./filamentschema";
 import { COLOR_SWATCH, heroicon } from "./filamentpickers";
-import { findCall, nodeValue, type PNode, textValue } from "./phpcode";
+import { findCall, mapValue, nodeValue, type PNode, textValue } from "./phpcode";
 
 /** Where components can go: a root's slot (owner null) or a component's. */
 export type SlotRef = { owner: Path | null; slot: string };
@@ -90,7 +90,11 @@ export function labelOf(c: Comp): string {
 
 /** How many columns a layout's grid has, from `columns()`: a number, or the widest breakpoint of a map. */
 function columnsOf(c: Comp | null, fallback: number): number {
-  const v = c ? nodeValue(arg(c, "columns")) : undefined;
+  return gridColumns(c ? nodeValue(arg(c, "columns")) : undefined, fallback);
+}
+
+/** A grid's columns from a `columns()` value: a number, or a map of breakpoints, read at the widest one given. */
+export function gridColumns(v: unknown, fallback: number): number {
   if (typeof v === "number") return Math.max(1, Math.min(v, 12));
   if (v && typeof v === "object" && !Array.isArray(v)) {
     const map = v as Record<string, unknown>;
@@ -236,13 +240,8 @@ function draggable(el: HTMLElement, path: Path) {
 /** The canvas for a form or infolist root. */
 export function renderSchema(ctx: CanvasCtx, slotName: string): HTMLElement {
   const slot = ctx.root.slots.get(slotName);
-  const columns = columnsOf(null, 2);
-  const rootColumns = (() => {
-    // `$schema->columns(3)` sets the root grid.
-    const c = findCall(ctx.root.node, "columns");
-    const v = c ? nodeValue(c.args.items[0]?.value) : undefined;
-    return typeof v === "number" ? v : columns;
-  })();
+  // `$schema->columns(3)` or `->columns(['lg' => 3])` sets the root grid, which Filament makes 2 columns by default.
+  const rootColumns = gridColumns(nodeValue(findCall(ctx.root.node, "columns")?.args.items[0]?.value), 2);
   const grid = renderSlot(ctx, slot ?? { via: slotName, arg: 0, array: null as never, entries: [] }, { owner: null, slot: slotName }, [], null, rootColumns);
   grid.classList.add("fd-root-grid");
   return grid;
@@ -341,9 +340,8 @@ const placeholder = (c: Comp, fallback = "") => h("span", { class: "fd-placehold
 
 /** The options a choice field shows: its literal options, an enum's name, or a relationship's. */
 function optionsOf(c: Comp): string[] {
-  const v = nodeValue(arg(c, "options"));
-  if (v && typeof v === "object" && !Array.isArray(v)) return Object.values(v as Record<string, unknown>).map(String).slice(0, 6);
-  if (Array.isArray(v)) return v.map(String).slice(0, 6);
+  const m = mapValue(arg(c, "options"));
+  if (m?.entries.length) return m.entries.map(([, label]) => label).slice(0, 6);
   const o = arg(c, "options");
   if (o?.kind === "classConst") return [`${shortClass(o.class)} cases`];
   if (call(c, "relationship")) return [`${text(c, "relationship") ?? "Related"} records`];

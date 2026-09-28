@@ -4,6 +4,7 @@
 import { h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize, majorVersion } from "./filamentcatalog";
+import { gridColumns } from "./filamentcanvas";
 import type { Designer, Doc } from "./filamentdesigner";
 import { titleAttribute } from "./filamentgen";
 import { askName, commitInput, heroicon, pickHeroicon, popover, segmented, toggleSwitch } from "./filamentpickers";
@@ -371,7 +372,8 @@ export function renderSettingsTab(d: Designer): HTMLElement {
       default:
         editor = commitInput(textValue(node)?.text ?? "", (x) => void setProp(s.name, x ? phpString(x) : null, `Changed the ${s.label.toLowerCase()}`), { placeholder: fallback[s.name] ?? "" });
     }
-    if (node && !["string", "number", "bool", "classConst", "null", "func"].includes(node.kind)) editor = h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(node, doc) }, icon("code"), "Set in code");
+    const readable = !node || (s.kind === "icon" ? node.kind === "classConst" || !!textValue(node) : s.kind === "number" ? node.kind === "number" : s.kind === "switch" ? node.kind === "bool" : s.kind === "cluster" ? node.kind === "classConst" || node.kind === "null" : !!textValue(node) || node.kind === "null");
+    if (!readable) editor = h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(node, doc) }, icon("code"), "Set in code");
     return h("div", { class: `fd-row${set ? " set" : ""}`, title: s.help ?? "" }, h("span", { class: "fd-row-label" }, s.label), h("div", { class: "fd-row-editor" }, editor), set ? iconButton("discard", "Use Filament's default", reset) : h("span", { class: "fd-row-spacer" }));
   };
 
@@ -454,39 +456,57 @@ export function renderRootSettings(d: Designer, ref: { kind: RootKind; doc: Doc;
     h("div", { class: `fd-row${isSet ? " set" : ""}`, title: help ?? "" }, h("span", { class: "fd-row-label" }, label), h("div", { class: "fd-row-editor" }, editor), isSet && reset ? iconButton("discard", "Remove this setting", reset) : h("span", { class: "fd-row-spacer" }));
   let count = 0;
   walk(root, () => count++);
+  // A setting written as code, such as a closure, shows as code, so an edit never replaces it with less.
+  const asCode = (name: string, label: string, help?: string) => {
+    const c = rootCall(name);
+    const node = c?.args.items[0]?.value;
+    return node ? line(label, h("button", { type: "button", class: "fd-code-chip", onclick: () => d.reveal(node, ref.doc) }, icon("code"), h("span", {}, ref.doc.text.slice(node.span[0], node.span[1]).replace(/\s+/g, " ").slice(0, 40))), true, () => set(name, null), help) : null;
+  };
+  const unreadable = (name: string, ok: (n: import("./phpcode").PNode) => boolean) => {
+    const c = rootCall(name);
+    return !!c && (c.args.items.length > (name === "defaultSort" ? 2 : 1) || c.args.items.some((a) => !ok(a.value)));
+  };
   if (ref.kind !== "table") {
     const v = nodeValue(rootCall("columns")?.args.items[0]?.value);
-    rows.push(line("Columns", segmented<string>([["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]], typeof v === "number" ? String(v) : "2", (x) => set("columns", x, `${x} columns`)), !!rootCall("columns"), () => set("columns", null), "How many columns the form's fields sit in."));
+    const n = gridColumns(v, 2);
+    if (rootCall("columns") && v === undefined) rows.push(asCode("columns", "Columns")!);
+    const byBreakpoint = !!v && typeof v === "object" && !Array.isArray(v);
+    const note = byBreakpoint ? `Set by screen size: ${Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k} ${x}`).join(", ")}. Choosing a number replaces that.` : "How many columns the form's fields sit in.";
+    if (!(rootCall("columns") && v === undefined)) rows.push(line("Columns", segmented<string>([["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]], String(n), (x) => set("columns", x, `${x} columns`)), !!rootCall("columns"), () => set("columns", null), note));
+    if (byBreakpoint) rows.push(h("p", { class: "fd-note fd-row-note" }, note));
   } else {
     const columns: string[] = [];
     walk(root, (c) => c.name && classFor(c.cls) === "column" && columns.push(c.name));
-    const sort = rootCall("defaultSort");
+    if (unreadable("defaultSort", (n) => !!textValue(n))) rows.push(asCode("defaultSort", "Default sort")!);
+    const sort = unreadable("defaultSort", (n) => !!textValue(n)) ? undefined : rootCall("defaultSort");
     const sortColumn = textValue(sort?.args.items[0]?.value)?.text ?? "";
     const sortDir = (textValue(sort?.args.items[1]?.value)?.text ?? "asc") as "asc" | "desc";
     const colSelect = h("select", {}, h("option", { value: "", textContent: "None" }), ...[...new Set([...columns, ...(d.facts?.columns ?? []).map((c) => c.name)])].map((c) => h("option", { value: c, textContent: c, selected: c === sortColumn })));
     const writeSort = (col: string, dir: string) => set("defaultSort", col ? `${phpString(col)}${dir === "desc" ? ", 'desc'" : ""}` : null, "Changed the default sort");
     colSelect.onchange = () => writeSort(colSelect.value, sortDir);
-    rows.push(line("Default sort", h("div", { class: "fd-inline-editor" }, colSelect, sortColumn ? segmented(SORT_DIRECTIONS, sortDir, (dir) => writeSort(sortColumn, dir)) : null), !!sort, () => set("defaultSort", null)));
+    if (!unreadable("defaultSort", (n) => !!textValue(n))) rows.push(line("Default sort", h("div", { class: "fd-inline-editor" }, colSelect, sortColumn ? segmented(SORT_DIRECTIONS, sortDir, (dir) => writeSort(sortColumn, dir)) : null), !!sort, () => set("defaultSort", null)));
     const flagRow = (name: string, label: string, help?: string) => {
+      if (unreadable(name, (n) => n.kind === "bool")) return asCode(name, label, help)!;
       const c = rootCall(name);
       const on = !!c && !(c.args.items[0]?.value.kind === "bool" && !(c.args.items[0].value as { value: boolean }).value);
       return line(label, toggleSwitch(on, (v) => set(name, v ? "" : null)), !!c, () => set(name, null), help);
     };
     const textRow = (name: string, label: string, placeholder = "", help?: string) => {
+      if (unreadable(name, (n) => !!textValue(n))) return asCode(name, label, help)!;
       const c = rootCall(name);
       return line(label, commitInput(textValue(c?.args.items[0]?.value)?.text ?? "", (v) => set(name, v ? phpString(v) : null), { placeholder }), !!c, () => set(name, null), help);
     };
     rows.push(
       flagRow("striped", "Striped rows"),
       textRow("poll", "Refresh every", "10s", "Reloads the table on a timer, such as 10s."),
-      (() => {
+      unreadable("reorderable", (n) => !!textValue(n)) ? asCode("reorderable", "Drag to reorder by")! : (() => {
         const c = rootCall("reorderable");
         const v = textValue(c?.args.items[0]?.value)?.text ?? "";
         const select = h("select", {}, h("option", { value: "", textContent: "Off" }), ...(d.facts?.columns ?? []).filter((x) => /int/.test(x.type) || /sort|order|position/.test(x.name)).map((x) => h("option", { value: x.name, textContent: x.name, selected: x.name === v })));
         select.onchange = () => set("reorderable", select.value ? phpString(select.value) : null, "Changed reordering");
         return line("Drag to reorder by", select, !!c, () => set("reorderable", null), "Lets people reorder records by dragging, saving the order in a column.");
       })(),
-      (() => {
+      unreadable("defaultPaginationPageOption", (n) => n.kind === "number") ? asCode("defaultPaginationPageOption", "Records per page")! : (() => {
         const c = rootCall("defaultPaginationPageOption");
         const v = nodeValue(c?.args.items[0]?.value);
         return line("Records per page", commitInput(typeof v === "number" ? String(v) : "", (x) => set("defaultPaginationPageOption", x ? String(Number(x) || 10) : null), { type: "number", placeholder: "10", className: "fd-number" }), !!c, () => set("defaultPaginationPageOption", null));

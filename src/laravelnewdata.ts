@@ -98,3 +98,27 @@ export const generatorLabel = (name: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
+
+// ---- Errors ----
+
+/**
+ * The message in a failed command's output, for a toast: Laravel's `ERROR` line, an exception's message under its
+ * class name, a PHP fatal error, or the first line that says something. Boxes, stack frames, and paths go.
+ */
+export function commandError(output: string): string {
+  const lines = output
+    .replace(/\x1b\[[\d;]*m/g, "")
+    .split("\n")
+    .map((l) => l.replace(/[│┃║╭╮╰╯─━═┌┐└┘]/g, "").trim())
+    .filter(Boolean);
+  const pick = (s: string) => (s.length > 240 ? `${s.slice(0, 240)}…` : s);
+  const error = lines.find((l) => /^ERROR\s+/.test(l));
+  if (error) return pick(error.replace(/^ERROR\s+/, ""));
+  const fatal = lines.find((l) => /^(PHP )?(Fatal error|Parse error|Warning): /.test(l));
+  if (fatal) return pick(fatal.replace(/^PHP /, "").replace(/ in \/\S+ on line \d+$/, ""));
+  // Laravel renders an exception as its class on one line and its message on the next.
+  const cls = lines.findIndex((l) => /^[A-Z][\w\\]*\\\w*(Exception|Error)\b/.test(l) && !l.includes(" "));
+  if (cls >= 0 && lines[cls + 1]) return pick(`${lines[cls].split("\\").pop()}: ${lines[cls + 1]}`);
+  const first = lines.find((l) => !/^(at |#\d+ |\d+▕|➜|Stack trace|Exception trace|INFO\s)/.test(l) && !/^\/\S+:\d+$/.test(l));
+  return pick(first ?? "The command failed without saying why.");
+}

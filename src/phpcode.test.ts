@@ -153,3 +153,18 @@ test("mergeEdits joins inserts at one offset in order and refuses overlaps", asy
   assert.deepEqual(mergeEdits([{ start: 5, end: 5, text: "a" }, { start: 1, end: 2, text: "x" }, { start: 5, end: 5, text: "b" }]), [{ start: 1, end: 2, text: "x" }, { start: 5, end: 5, text: "ab" }]);
   assert.throws(() => mergeEdits([{ start: 1, end: 4, text: "" }, { start: 2, end: 3, text: "" }]));
 });
+
+test("mapValue reads options with translated labels, and refuses other code", async () => {
+  const { mapValue, mapCode } = await import("./phpcode.ts");
+  const text = "<?php return ['SenderId' => __('SenderId'), 'short' => 'Short', 3 => 'Three'];";
+  const arr = { kind: "array", span: [0, 0], open: 0, close: 0, legacy: false, items: [
+    { key: { kind: "string", value: "SenderId", quote: "single", interpolated: false, span: [0, 0] }, value: { kind: "func", name: "__", nameSpan: [0, 0], span: [0, 0], args: { open: 0, close: 0, items: [{ name: null, spread: false, span: [0, 0], value: { kind: "string", value: "SenderId", quote: "single", interpolated: false, span: [0, 0] } }] } }, span: [0, 0], spread: false },
+    { key: { kind: "string", value: "short", quote: "single", interpolated: false, span: [0, 0] }, value: { kind: "string", value: "Short", quote: "single", interpolated: false, span: [0, 0] }, span: [0, 0], spread: false },
+    { key: { kind: "number", value: 3, raw: "3", span: [0, 0] }, value: { kind: "string", value: "Three", quote: "single", interpolated: false, span: [0, 0] }, span: [0, 0], spread: false },
+  ] } as const;
+  void text;
+  assert.deepEqual(mapValue(arr as never), { entries: [["SenderId", "SenderId"], ["short", "Short"], ["3", "Three"]], translated: true });
+  const withCode = { ...arr, items: [...arr.items, { key: null, value: { kind: "other", span: [0, 0] }, span: [0, 0], spread: false }] };
+  assert.equal(mapValue(withCode as never), undefined);
+  assert.equal(mapCode([["draft", "Draft"], ["2", "Two"]], true), "[\n    'draft' => __('Draft'),\n    2 => __('Two'),\n]");
+});

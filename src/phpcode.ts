@@ -175,6 +175,39 @@ export function textValue(node: PNode | null | undefined): { text: string; trans
   return undefined;
 }
 
+/**
+ * An array of options read for editing: each key with its label, where a label can be a plain string or a
+ * translated one (`__('Draft')`). A list without keys uses each value as its key. Undefined when anything in the
+ * array is other code, so an editor never writes back less than the code held.
+ */
+export function mapValue(node: PNode | null | undefined): { entries: [string, string][]; translated: boolean } | undefined {
+  if (!node || node.kind !== "array") return undefined;
+  const entries: [string, string][] = [];
+  let translated = false;
+  for (const item of node.items) {
+    if (item.spread) return undefined;
+    const label = textValue(item.value) ?? (item.value.kind === "number" ? { text: String(item.value.value), translated: false } : undefined);
+    if (!label) return undefined;
+    translated ||= label.translated;
+    let key = label.text;
+    if (item.key) {
+      const k = nodeValue(item.key);
+      if (typeof k !== "string" && typeof k !== "number") return undefined;
+      key = String(k);
+    }
+    entries.push([key, label.text]);
+  }
+  return { entries, translated };
+}
+
+/** Options as PHP: keys to labels, with the labels in `__()` when `translated`. */
+export function mapCode(entries: [string, string][], translated: boolean): string {
+  if (!entries.length) return "[]";
+  const label = (s: string) => (translated ? `__(${phpString(s)})` : phpString(s));
+  const key = (k: string) => (/^(0|[1-9]\d*)$/.test(k) ? k : phpString(k));
+  return `[\n${entries.map(([k, v]) => `    ${key(k)} => ${label(v)},`).join("\n")}\n]`;
+}
+
 // ---- Layout of the text ----
 
 /** The whitespace at the start of the line that holds `offset`. */

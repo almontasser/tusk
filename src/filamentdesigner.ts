@@ -121,6 +121,8 @@ export class Designer {
     this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the resource and Filament's components…"));
     try {
       const root = this.root;
+      // The models are needed for relationships' titles later; reading them now overlaps the waits.
+      void fapp.models(root).catch(() => {});
       const [cat, app, enums] = await Promise.all([fapp.catalog(root), fapp.app(root).catch(() => null), fapp.enums(root).catch(() => [])]);
       this.cat = cat;
       this.enums = enums;
@@ -744,6 +746,20 @@ export class Designer {
     canvas.onclick = () => this.select(null);
     canvas.append(ref.kind === "table" ? renderTable(ctx, { pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
+    const helper = ref.root.helper;
+    if (helper) {
+      const where = helper.class === "self" || helper.class === "static" ? "" : `${shortClass(helper.class)}::`;
+      const method = (helper.class === "self" || helper.class === "static" ? this.cls : null)?.methods.find((m) => m.name === helper.method);
+      canvas.prepend(
+        h(
+          "div",
+          { class: "fd-helper-note" },
+          icon("info"),
+          h("span", {}, `Part of this ${ref.kind} comes from ${where}${helper.method}(), which the designer doesn't show. What it shows here, you can change.`),
+          method ? h("button", { type: "button", class: "fd-chip-link", onclick: (e: MouseEvent) => (e.stopPropagation(), this.reveal(method, ref.doc)) }, "Open it") : null,
+        ),
+      );
+    }
     return h("div", { class: "fd-work" }, this.palette(ref, ctx), canvas, h("aside", { class: "fd-inspector" }, this.inspector(ref, ctx)));
   }
 
