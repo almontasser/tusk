@@ -250,6 +250,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
 | ⌃⇧B | Go to type declaration |
+| ⌘U | Go to super method: what the method at or around the caret overrides or implements, or the class's parent class and interfaces |
 | ⌥F7 | Find usages |
 | ⇧F6 | Rename (also renames the file for a class) |
 | F2 and ⇧F2 | Next and previous problem in the file |
@@ -801,6 +802,21 @@ enum that the cursor is in.
 
 Click a type to open it. PHP's own types, such as `Countable`, are listed
 without a file.
+
+## Go to super method
+
+Press ⌘U (**Navigate > Go to Super Method**) in a PHP file to go to the method
+that the method at or around the caret overrides or implements, such as
+`Model::casts()` from a model's `casts()` or `Resource::form()` from a
+Filament resource. The caret can be on the method's name or anywhere in its
+body. Outside a method, ⌘U goes to the class's parent class. When there's
+more than one target, such as a parent's method and an interface's, pick one
+from the list.
+
+The gutter shows an arrow beside methods that override (blue) or implement
+(green) another, and beside classes and methods that subclasses extend or
+override. Hover over an arrow to see what it points to, and click it to go
+there.
 
 ## Generate code
 

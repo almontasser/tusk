@@ -52,6 +52,7 @@ pub fn find(method: &str) -> Option<Handler> {
         TypeHierarchySubtypes::METHOD => typed!(TypeHierarchySubtypes, hierarchy::subtypes),
         Formatting::METHOD => typed!(Formatting, format::formatting),
         "tusk/memberReferences" => custom::member_references,
+        "tusk/overrides" => navigation::overrides,
         "tusk/projectProblems" => custom::project_problems,
         _ => return None,
     };
@@ -95,6 +96,7 @@ mod tests {
             }
             run("textDocument/documentSymbol", json!({ "textDocument": doc }));
             run("textDocument/foldingRange", json!({ "textDocument": doc }));
+            run("tusk/overrides", json!({ "textDocument": doc }));
             run("textDocument/inlayHint", json!({ "textDocument": doc, "range": whole }));
             for range in [json!({ "start": end, "end": end }), whole] {
                 let actions = run("textDocument/codeAction", json!({ "textDocument": doc, "range": range, "context": { "diagnostics": [] } }));

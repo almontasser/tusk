@@ -18,7 +18,7 @@ const LAYOUT: [string, Entry[]][] = [
   ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-", native("Fullscreen")]],
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "-",
-    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],
+    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files"]],
   ["Code", ["Generate…", "Show Context Actions", "Parameter Info", "Quick Documentation", "-", "Reformat Code", "Optimize Imports", "Fix All Safe Problems in File", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],
   ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]],
   ["Run", ["Run Anything", "Rerun", "-", "Run Test at Cursor", "Debug Test at Cursor", "Run Test at Cursor with Coverage", "Run All Tests", "Run All Tests with Coverage", "-",

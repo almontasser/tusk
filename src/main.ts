@@ -48,6 +48,7 @@ import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
 import { setMenu } from "./menu";
+import { attachSuperMethods, goToSuperMethod, initSuperMethods } from "./supermethod";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
@@ -85,6 +86,7 @@ function addPane(): Pane {
   decorateConflicts(ed);
   attachDebugger(ed);
   attachTestRunner(ed);
+  attachSuperMethods(ed);
   ed.onContextMenu((e) => gutterMenu(ed, e) || codeMenu(ed, e));
   showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());
@@ -1457,6 +1459,7 @@ const actions: Action[] = [
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
   editorAction("Go to Type Declaration", "Ctrl+Shift+B", "editor.action.goToTypeDefinition"),
+  { label: "Go to Super Method", keys: "Meta+U", run: () => goToSuperMethod(editor), editorOnly: true },
   editorAction("Find Usages", "Alt+F7", "editor.action.goToReferences"),
   { label: "Safe Delete…", keys: "Meta+Delete", run: () => safeDelete(editor), editorOnly: true },
   { label: "Inline…", keys: "Alt+Meta+N", run: () => inline(editor), editorOnly: true },
@@ -1917,6 +1920,7 @@ initClassRefactor({ root: () => root, status, openAt: (path, line) => openAt(pat
 initSafeDelete({ root: () => root, forget, status, openAt: (path, target) => openAt(path, target) });
 initHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initGenerate({ status });
+initSuperMethods({ status, openAt });
 initExtract({ status });
 initRefactorPreview({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initCallHierarchy({ root: () => root, ensureModel, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });

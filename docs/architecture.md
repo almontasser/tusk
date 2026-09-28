@@ -1135,6 +1135,20 @@ expands, so a large hierarchy, such as `Model`'s, costs nothing until you open
 it. See "Type and call hierarchy" under "Tusk's language server" for how the
 server answers.
 
+### Super methods
+
+`src/supermethod.ts` asks Tusk's server for `tusk/overrides`, a request of its
+own: each class, interface, enum, and method the document declares, with its
+whole range and name range from the document's text, and from the index what
+it overrides or implements (Mago's `overridden_method_ids`, or the parent class
+and interfaces), whether that is abstract, and whether a descendant overrides
+it. One answer serves both Go to Super Method (⌘U), which picks the innermost
+member around the caret, and the gutter arrows, which ask again when the
+server publishes the file's problems (it does after indexing an edit) or two
+seconds after an edit. The arrows use the glyph margin's right lane, as the
+test run buttons do; the debugger's click handler skips them. Clicking a
+"down" arrow runs Monaco's Go to Implementation at the member's name.
+
 ### Generate
 
 `src/generate.ts` is PhpStorm's ⌘N menu for PHP. It lists the code actions
@@ -4711,3 +4725,13 @@ it `vendor`'s symbols (370 MB since the index loads only the library code the
 project reaches); Mago's crates are
 pinned to `=1.50.0`, because their API changes between minor versions, and
 upgrading them is deliberate work.
+
+### 2026-09-28: Super methods from one request per file
+
+Go to Super Method and the gutter's override arrows share one custom request,
+`tusk/overrides`, rather than using `textDocument/declaration` and the type
+hierarchy. The standard requests work at a position, so the gutter would need
+one per method and ⌘U inside a method body would first need the enclosing
+method from document symbols. The custom request walks the parsed document
+once and reads the rest from the index. `textDocument/declaration` still
+answers ⌘B-style requests for a method's parent declaration.

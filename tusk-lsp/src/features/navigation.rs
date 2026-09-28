@@ -78,6 +78,115 @@ fn overridden(codebase: &CodebaseMetadata, class: &str, method: &str) -> Vec<Pla
         .collect()
 }
 
+#[derive(serde::Serialize)]
+pub struct Super {
+    /// `Class::method`, or a class's short name.
+    label: String,
+    location: Location,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Member {
+    /// `method` or `class`.
+    kind: &'static str,
+    name: String,
+    /// The whole declaration and its name.
+    range: lsp_types::Range,
+    selection: lsp_types::Range,
+    /// A method: what it overrides or implements. A class: its parent class and the interfaces it names.
+    supers: Vec<Super>,
+    /// Whether every super is abstract or an interface's, so the method implements rather than overrides.
+    implements: bool,
+    /// Whether it's an interface or an abstract method, so its descendants implement rather than override it.
+    #[serde(rename = "abstract")]
+    is_abstract: bool,
+    /// Whether a descendant overrides the method, or extends or implements the class.
+    overridden: bool,
+}
+
+/// `tusk/overrides`: each class and method the document declares, with what it overrides and whether it's
+/// overridden, for Go to Super Method and the gutter icons. Positions come from the document, names from the index.
+pub fn overrides(snap: &Snapshot, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    let uri: lsp_types::Uri = params
+        .pointer("/textDocument/uri")
+        .and_then(|u| u.as_str())
+        .and_then(|u| u.parse().ok())
+        .ok_or("tusk/overrides needs textDocument.uri")?;
+    let members = with_ctx(snap, &uri, |ctx| {
+        use mago_codex::symbol::SymbolKind;
+        use mago_syntax::cst::Node;
+        let codebase = &ctx.index.codebase;
+        let resolver = crate::symbol::Resolver::new(&ctx.parsed, None, codebase);
+        let mut out = vec![];
+        crate::locate::walk(&ctx.parsed, |node, path| {
+            let (name, span, name_span, class, method) = match node {
+                Node::Method(m) => {
+                    let Some(class) = resolver.enclosing_class(path) else { return };
+                    (String::from_utf8_lossy(m.name.value).into_owned(), m.span(), m.name.span, class, true)
+                }
+                Node::Class(_) | Node::Interface(_) | Node::Enum(_) => {
+                    let name = match node {
+                        Node::Class(c) => &c.name,
+                        Node::Interface(c) => &c.name,
+                        Node::Enum(c) => &c.name,
+                        _ => unreachable!(),
+                    };
+                    let Some(class) = resolver.enclosing_class(&[node]) else { return };
+                    (String::from_utf8_lossy(name.value).into_owned(), node.span(), name.span, class, false)
+                }
+                _ => return,
+            };
+            let Some(meta) = codebase.get_class_like(class.as_bytes()) else { return };
+            let short = |fqn: &str| display_class(fqn, codebase).rsplit('\\').next().unwrap_or_default().to_string();
+            let interface = meta.kind == SymbolKind::Interface;
+            let (supers, implements, is_abstract, overridden): (Vec<(String, Place)>, bool, bool, bool) = if method {
+                let lower = name.to_ascii_lowercase();
+                let ids = meta.overridden_method_ids.iter().find(|(k, _)| k.as_str_lossy() == lower).map(|(_, v)| v);
+                let ids: Vec<_> = ids.into_iter().flat_map(|ids| ids.values()).collect();
+                // Interface methods aren't flagged abstract.
+                let implements = !ids.is_empty()
+                    && ids.iter().all(|id| {
+                        codebase.get_class_like(id.get_class_name().as_bytes()).is_some_and(|c| c.kind == SymbolKind::Interface)
+                            || codebase.get_method_by_id(id).is_some_and(|m| m.flags.is_abstract())
+                    });
+                let overridden = codebase.get_all_descendants(class.as_bytes()).iter().any(|d| {
+                    codebase.get_class_like(d.as_bytes()).is_some_and(|c| c.methods.iter().any(|m| m.as_str_lossy() == lower))
+                });
+                let supers = ids
+                    .iter()
+                    .filter_map(|id| codebase.get_method_by_id(id).map(|m| (id, m)))
+                    .map(|(id, m)| (format!("{}::{}", short(&id.get_class_name().as_str_lossy()), m.original_name.as_str_lossy()), m.name_span.unwrap_or(m.span).into()))
+                    .collect();
+                let is_abstract = interface || codebase.get_method(class.as_bytes(), name.as_bytes()).is_some_and(|m| m.flags.is_abstract());
+                (supers, implements, is_abstract, overridden)
+            } else {
+                let parents = meta.direct_parent_class.iter().chain(meta.direct_parent_interfaces.iter());
+                let supers = parents
+                    .filter_map(|p| declaration(&Symbol::Class(p.as_str_lossy().into_owned()), codebase).map(|at| (short(&p.as_str_lossy()), at)))
+                    .collect();
+                (supers, false, interface, !codebase.get_all_descendants(class.as_bytes()).is_empty())
+            };
+            out.push(Member {
+                kind: if method { "method" } else { "class" },
+                name,
+                range: ctx.doc.range(span.start.offset, span.end.offset),
+                selection: ctx.doc.range(name_span.start.offset, name_span.end.offset),
+                supers: supers
+                    .into_iter()
+                    .filter_map(|(label, at)| Some(Super { label, location: ctx.snap.locations(&ctx.index, [at]).pop()? }))
+                    .collect(),
+                implements,
+                is_abstract,
+                overridden,
+            });
+        });
+        out
+    })
+    .unwrap_or_default();
+    serde_json::to_value(members).map_err(|e| e.to_string())
+}
+
 pub fn type_definition(snap: &Snapshot, params: GotoTypeDefinitionParams) -> Result<Option<GotoDefinitionResponse>, String> {
     let at = params.text_document_position_params;
     Ok(with_ctx(snap, &at.text_document.uri, |ctx| {
@@ -277,5 +386,61 @@ mod tests {
         })
         .unwrap();
         assert_eq!(locations(decl), vec![("Models.php".into(), range(9, 34, 9, 38))]);
+    }
+
+    fn declarations(files: &[(&str, &str)]) -> Vec<(String, u32)> {
+        let fx = Fixture::new(files);
+        let decl = declaration_request(&fx.snap, GotoDeclarationParams {
+            text_document_position_params: fx.at(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap();
+        locations(decl).into_iter().map(|(f, r)| (f, r.start.line)).collect()
+    }
+
+    #[test]
+    fn finds_super_methods_the_way_laravel_code_overrides_them() {
+        let vendor = "<?php\nnamespace V;\ninterface Contract { public function handle(): void; }\nabstract class Model {\n    protected function casts(): array { return []; }\n}\nabstract class Resource {\n    public static function form($s) { return $s; }\n}\nabstract class Job implements Contract {}\ntrait HasName { abstract public function name(): string; }\nclass Middle extends Model {}\n";
+        let with = |text| [("vendor/V.php", vendor), ("app/A.php", text)];
+        // A protected method overriding a parent's.
+        assert_eq!(declarations(&with("<?php\nclass U extends \\V\\Model {\n    protected function cas<|>ts(): array { return []; }\n}\n")), vec![("V.php".into(), 4)]);
+        // A static method.
+        assert_eq!(declarations(&with("<?php\nclass R extends \\V\\Resource {\n    public static function fo<|>rm($s) { return $s; }\n}\n")), vec![("V.php".into(), 7)]);
+        // An interface method, implemented through an abstract parent.
+        assert_eq!(declarations(&with("<?php\nclass J extends \\V\\Job {\n    public function han<|>dle(): void {}\n}\n")), vec![("V.php".into(), 2)]);
+        // A grandparent's method, which the parent doesn't declare.
+        assert_eq!(declarations(&with("<?php\nclass G extends \\V\\Middle {\n    protected function cas<|>ts(): array { return []; }\n}\n")), vec![("V.php".into(), 4)]);
+        // A trait's abstract method.
+        assert_eq!(declarations(&with("<?php\nclass T { use \\V\\HasName;\n    public function na<|>me(): string { return ''; }\n}\n")), vec![("V.php".into(), 10)]);
+    }
+
+    #[test]
+    fn lists_members_with_their_supers_and_overrides() {
+        let fx = Fixture::new(&[("app/Models.php", MODELS)]);
+        let v = overrides(&fx.snap, serde_json::json!({ "textDocument": { "uri": uri("app/Models.php") } })).unwrap();
+        let summary: Vec<String> = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                let lines: Vec<String> = m["supers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| format!("{}@{}", s["label"].as_str().unwrap(), s["location"]["range"]["start"]["line"]))
+                    .collect();
+                format!("{} {:?} implements={} abstract={} overridden={}", m["name"].as_str().unwrap(), lines, m["implements"], m["abstract"], m["overridden"])
+            })
+            .collect();
+        assert_eq!(summary, vec![
+            "Base [] implements=false abstract=false overridden=true",
+            "save [] implements=false abstract=false overridden=false",
+            "User [\"Base@2\"] implements=false abstract=false overridden=true",
+            "Named [] implements=false abstract=true overridden=true",
+            "name [] implements=false abstract=true overridden=true",
+            "Admin [\"User@5\", \"Named@9\"] implements=false abstract=false overridden=false",
+            "name [\"Named::name@9\"] implements=true abstract=false overridden=false",
+        ]);
     }
 }
