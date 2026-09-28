@@ -58,6 +58,8 @@ file to change when you add it.
 | Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
+| Terminal | A file reference that wraps onto the next line isn't a link. |
+| Lists | The Redis key tree has ↑↓, →←, and Enter, but not yet Home, End, paging, or type-ahead, which the other lists have. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -218,7 +220,10 @@ DMG that everyone installs by hand.
   projects. Tab and Enter open one; right-click one to remove it from the list.
 
 Errors, such as a failed git command, also appear briefly in the lower-right
-corner.
+corner. Any failure the app doesn't otherwise handle shows there too, once
+while its message is on screen, so nothing fails silently. Long tasks, such as
+merging a pull request or counting Redis keys, show a spinner in the status
+bar, and a **Cancel** button when you can stop them.
 
 ## Keyboard shortcuts
 
@@ -290,6 +295,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥F12 | Show or hide the terminal |
 | ⇧⌘' | Maximize the bottom panel, or restore it |
 | ⇧⎋ | Hide the bottom panel, while you work in it |
+| ⌘F in a terminal | Find in the terminal's output |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |
@@ -340,9 +346,22 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, and Spelling. A setting that depends on another, such as the AI model,
+AI, Spelling, and Terminal. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
+
+- Type in the search box to filter settings in every group by name,
+  description, or key. Escape clears the search.
+- A setting you changed has a reset button beside it. **Reset All…** resets
+  every setting in the dialog after you confirm; your keymap stays.
+- **Open settings.json** opens the file in the editor. When you save it there,
+  Tusk applies it.
+- A number outside its range isn't applied; the dialog says which numbers it
+  takes.
+- If `settings.json` isn't valid JSON, Tusk uses the defaults, doesn't write the
+  file until you fix it, and offers to open it. A value of the wrong type, or a
+  number out of range, uses its default and stays in the file until you change
+  that setting. Keys Tusk doesn't know stay in the file.
 
 | Setting | Default |
 | --- | --- |
@@ -358,6 +377,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Format files when saving | Off |
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
+| Terminal font and font size | Same as the editor's |
 
 ### Vim emulation
 
@@ -439,6 +459,20 @@ select all, or clear it. Click **+** at the end of the panel's tab bar for a
 new terminal. The terminal button shows the last shell you used, or opens
 one, even while another panel tab shows. It skips command tabs, such as
 `git pull`, and shells that have exited.
+
+In a terminal:
+
+- Press ⌘F to find in its output. Matches highlight as you type; ⏎ and ⇧⏎ go
+  to the next and previous match, **Aa** matches case, **.\*** takes a regular
+  expression, and Escape closes the bar.
+- URLs are links: click one to open it in your browser.
+- File references such as `app/Models/User.php:42`, `Foo.php(12)` in a PHP
+  stack trace, or `on line 7` open the file at that line when you click them,
+  from test failures, Mago, PHPStan, and PHP errors. Relative paths resolve
+  from the terminal's folder, then the project's, and Sail and Docker paths
+  under `/var/www/html` map to the project. Only files that exist are links.
+- Double-click a terminal's tab, or right-click it and choose **Rename…**, to
+  rename it. With a tab focused, ← and → move between tabs.
 
 Diffs, the merge tool, and problem pages open as editor tabs, so your other tabs
 stay in view. The Git Log opens in the bottom panel.
@@ -529,6 +563,23 @@ form (`databaseConnection`, `profilerUrl`, and `httpLoadTest`) are personal,
 so they stay on this Mac. The first time you open a project in this version,
 Tusk moves these settings out of the web view's storage, where earlier
 versions kept them.
+
+## Lists and trees
+
+Tool window lists and trees work from the keyboard: the Problems, Search,
+TODO, Coverage, Composer, and Pull Requests lists, and the Profiler's table.
+Click a list or press Tab to focus it, then:
+
+| Key | Action |
+| --- | --- |
+| ↑ ↓ | Previous or next row |
+| Home, End | First or last row |
+| Page Up, Page Down | A page up or down |
+| Enter | Open the row, or expand or collapse a folder |
+| → ← | Expand or collapse a tree node; ← on a child goes to its parent |
+| Letters | Jump to the next row that starts with what you type |
+
+In a search box above a list, ↓ moves to the list.
 
 ## Context menus
 
@@ -1390,14 +1441,16 @@ An update shows in green when it fits the version constraint in
   constraints. Choose one of them to see why that one is installed, up to
   `composer.json`.
 - `composer audit` checks installed packages for security advisories. A package
-  with one is marked **advisory**; click it to open the advisory.
+  with one is marked **advisory**, and the advisory's title, CVE, and severity
+  show under its name; click it to open the advisory.
+- Type in the filter to narrow the list by name or description.
 - A direct dependency is marked **unused?** when no PHP file in the project
   names its namespace. It may still be used through Laravel's package
   discovery, a helper function, or configuration, so check before you remove
   it. Plugins and command-line tools, such as Pint, aren't checked.
 - Click **+** to search Packagist and require a package, as a dependency or a
   dev dependency.
-- Click the arrow to run `composer update` for everything.
+- Click the arrow to run `composer update` for everything, after you confirm.
 
 Commands run in terminal tabs with the Composer that ships with the editor, and
 the list reloads when they finish.
@@ -1683,8 +1736,10 @@ code; undo the change and its mark comes back. ⌃R reruns with coverage too.
 
 The **Coverage** tab in the bottom panel starts with each folder's coverage,
 nested, such as `app/Models 45% · 9/20`. Click a folder to list only its
-files, and click it again to list them all. Below, it lists every file with
-uncovered lines, least covered first, with each file's percentage. Under each file, a row shows
+files, and click it again to list them all; click its chevron, or press → and
+←, to expand and collapse it. Below, it lists every file with
+uncovered lines, least covered first, with each file's percentage. The menu in
+the toolbar sorts folders and files by name instead. Under each file, a row shows
 a run of uncovered lines, such as `15–17`, and the code on its first line.
 Click a row to open it there. The tab follows your edits: its line numbers and
 code are the lines as they are now, and lines you changed count as neither
@@ -1839,8 +1894,11 @@ again reuses its tab once the last run has finished.
 
 The **Pull Requests** tab lists the repository's pull requests through the
 GitHub CLI. Filter by open pull requests, ones you created, or ones waiting for
-your review. Each row shows check status (✓ passed, ✗ failed, ● running) and
-the review decision.
+your review, and type in the search box to search them with GitHub's search
+syntax, such as `fix label:bug`. Each row shows check status (✓ passed, ✗
+failed, ● running) and the review decision. The list shows 50 at a time;
+**Load More** at the end shows 50 more. If the GitHub CLI isn't installed, or
+you aren't logged in, the tab says so and offers to fix it.
 
 Click a pull request to see its checks, changed files, description, reviews,
 and comments. Descriptions and comments render as GitHub Markdown, and their
@@ -2016,7 +2074,8 @@ memory freed before a call returns doesn't count.
 
 Click **Call tree** to see each function under the function that called it,
 with its calls and time on that path. The tree opens along the busiest path,
-and → and ← open and close a node.
+and → and ← open and close a node. Click a column heading to order each node's
+callees by time, calls, or name.
 
 Click **Flame graph** to see the same tree as bars: each function's bar sits
 under its caller's and is as wide as its time there, busiest first. Blue bars
@@ -2030,7 +2089,10 @@ own time inside the zoomed bar: where that part of the run is slow.
 In a Laravel app, profiled runs also record the database queries. Click
 **Queries**, or the **Database** total, to list them: queries with the same SQL
 are grouped, slowest first, and a group opens to each run with its bindings
-and time. Two flags point at common problems:
+and time. Click a column heading to sort by SQL, runs, or time. The side pane
+lists a query's first 200 runs, and a function's 100 slowest callers and
+callees, and says when there are more. While another profile loads, the open
+one dims. Two flags point at common problems:
 
 - **Duplicate**: the same SQL with the same bindings ran more than once, so
   its result could be reused.

@@ -4,6 +4,8 @@ import type { monaco } from "./editor";
 import { diffCursor, git, showDiff } from "./git";
 import { age, type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
+import { listNav } from "./listnav";
+import { errorText, showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
 
 type Author = { login: string };
@@ -97,25 +99,69 @@ function markdown(text: string, repo: string): HTMLElement {
 
 // ---- List ----
 
+/** How many pull requests the list asks for; Load More asks for 50 more. */
+let limit = 50;
+
 export async function loadPullRequests() {
   if (!host.root()) return;
   const filter = ($("pr-filter") as HTMLSelectElement).value;
-  const args = { open: [], mine: ["--author", "@me"], review: ["--search", "review-requested:@me"] }[filter] ?? [];
+  const text = ($("pr-search") as HTMLInputElement).value.trim();
+  // GitHub's search syntax, such as "label:bug" or "author:someone", works in the search box too.
+  const search = [filter === "review" ? "review-requested:@me" : "", text].filter(Boolean).join(" ");
+  const args = [...(filter === "mine" ? ["--author", "@me"] : []), ...(search ? ["--search", search] : [])];
   $("pr-detail").hidden = true;
   $("pr-list-view").hidden = false;
-  // Switching back to the view keeps the last list while it refreshes; a new project or filter starts over.
-  const key = `${host.root()}\0${filter}`;
-  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
+  // Switching back to the view keeps the last list while it refreshes; a new project, filter, or search starts over.
+  const key = `${host.root()}\0${filter}\0${text}`;
+  if ($("pr-list").dataset.key !== key) ($("pr-list").dataset.key = key), (limit = 50), $("pr-list").replaceChildren(el("li", "muted", "Loading…"));
   try {
-    const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", "50", "--json", FIELDS, ...args));
-    $("pr-list").replaceChildren(...(prs.length ? prs.map(prRow) : [el("li", "muted", "No pull requests.")]));
+    const prs: PullRequest[] = JSON.parse(await gh("pr", "list", "--limit", String(limit), "--json", FIELDS, ...args));
+    if ($("pr-list").dataset.key !== key) return; // A newer search replaced this one.
+    const more = el("li", "pr-more");
+    const button = el("button", "", "Load More");
+    button.onclick = () => ((limit += 50), (button.disabled = true), (button.textContent = "Loading…"), loadPullRequests());
+    more.append(button);
+    $("pr-list").replaceChildren(
+      ...(prs.length ? prs.map(prRow) : [el("li", "muted", text ? "No pull requests match the search." : "No pull requests.")]),
+      // gh has no offset, so Load More asks for a longer list; a full page means there may be more.
+      ...(prs.length === limit ? [more] : []),
+    );
   } catch (e) {
-    $("pr-list").replaceChildren(el("li", "muted", `Can't list pull requests: ${String(e).trim()}`));
+    $("pr-list").replaceChildren(problemItem("Can't list pull requests", e));
   }
+}
+
+/**
+ * A list item for a failed `gh` command: how to install the GitHub CLI or log in when that's the problem, with a
+ * button that does it, or else the error and a Retry button.
+ */
+function problemItem(what: string, e: unknown, retry: () => unknown = loadPullRequests) {
+  const text = errorText(e);
+  const li = el("li", "muted pr-problem");
+  const button = (label: string, run: () => unknown) => {
+    const b = el("button", "", label);
+    b.onclick = run;
+    li.append(el("br"), b);
+  };
+  if (/os error 2|No such file/i.test(text)) {
+    li.textContent = "Pull requests need the GitHub CLI (gh). Install it, such as with brew install gh, then log in to GitHub with it.";
+    button("Get the GitHub CLI", () => openUrl("https://cli.github.com"));
+  } else if (/gh auth login|not logged in|authenticat/i.test(text)) {
+    li.textContent = "Log in to GitHub with the GitHub CLI to see pull requests.";
+    button("Log In…", () => openTerminal(host.root(), "gh auth login", ["gh", "auth", "login"], () => retry()));
+  } else if (/no git remotes|known GitHub host|not a git repository/i.test(text)) li.textContent = "This project has no GitHub remote.";
+  else {
+    li.textContent = `${what}: ${text}`;
+    button("Retry", retry);
+  }
+  return li;
 }
 
 function prRow(pr: PullRequest) {
   const li = el("li", "pr");
+  li.role = "option";
+  li.dataset.key = String(pr.number);
+  li.dataset.label = pr.title;
   const title = el("div", "pr-title", `#${pr.number} ${pr.title}`);
   if (pr.isDraft) title.prepend(el("span", "badge", "Draft"));
   const checks = checksSummary(pr.statusCheckRollup);
@@ -151,7 +197,11 @@ export async function showPullRequest(number: number) {
       loadPending(number).catch(() => null),
     ]);
   } catch (e) {
-    detail.replaceChildren(el("p", "muted", `Can't load #${number}: ${String(e).trim()}`));
+    const back = el("button", "link", "← All pull requests");
+    back.onclick = loadPullRequests;
+    const list = el("ul", "pr-checks");
+    list.append(problemItem(`Can't load #${number}`, e, () => showPullRequest(number)));
+    detail.replaceChildren(back, list);
     return;
   }
   await libraries;
@@ -170,9 +220,14 @@ export async function showPullRequest(number: number) {
   if (pr.state === "OPEN") action("Merge…", () => merge(pr));
 
   const checks = el("ul", "pr-checks");
+  checks.role = "listbox";
+  checks.ariaLabel = "Checks";
+  listNav(checks);
   for (const c of pr.statusCheckRollup ?? []) {
     const state = checkState(c);
     const li = el("li");
+    li.role = "option";
+    li.dataset.key = c.name ?? c.context ?? "";
     li.append(el("span", `checks-${state}`, icons[state]), ` ${c.name ?? c.context}`);
     const url = c.detailsUrl ?? c.targetUrl;
     if (url) li.onclick = () => openUrl(url);
@@ -180,8 +235,14 @@ export async function showPullRequest(number: number) {
   }
 
   const files = el("ul", "pr-files");
+  files.role = "listbox";
+  files.ariaLabel = "Files";
+  listNav(files);
   for (const f of pr.files) {
     const li = el("li");
+    li.role = "option";
+    li.dataset.key = f.path;
+    li.dataset.label = f.path.split("/").pop()!;
     li.append(el("span", "name", ltr(f.path)), el("span", "added", `+${f.additions}`), el("span", "deleted", `−${f.deletions}`));
     const count = threads.filter((t) => t.path === f.path).length;
     if (count) li.append(el("span", "codicon codicon-comment", ` ${count}`));
@@ -238,7 +299,7 @@ export async function showPullRequest(number: number) {
     remove.title = "Delete this pending comment";
     remove.onclick = (e) => {
       e.stopPropagation();
-      deletePending(number, c).then(() => showPullRequest(number), (err) => host.status(`Can't delete the pending comment: ${String(err).trim()}`));
+      deletePending(number, c).then(() => showPullRequest(number), (err) => showError(`Can't delete the pending comment`, err));
     };
     li.append(remove);
     pendingList.append(li);
@@ -263,7 +324,7 @@ export async function showPullRequest(number: number) {
         host.status(done);
         showPullRequest(number);
       } catch (e) {
-        host.status(`Can't ${label.toLowerCase()}: ${String(e).trim()}`);
+        showError(`Can't ${label.toLowerCase()}`, e);
         buttons.querySelectorAll("button").forEach((x) => (x.disabled = false));
       }
     };
@@ -368,7 +429,7 @@ function commentBlock(user: string, body: string, api: string, repo: string, red
       editing = deleting = "";
       await reload();
     } catch (e) {
-      host.status(`Can't ${what} the comment: ${String(e).trim()}`);
+      showError(`Can't ${what} the comment`, e);
     }
   };
   if (editing === api) {
@@ -409,7 +470,7 @@ async function setResolved(t: Thread, resolved: boolean) {
     shown!.threads = await lineComments(shown!.pr.number);
     drawZones();
   } catch (e) {
-    host.status(`Can't ${resolved ? "resolve" : "reopen"} the thread: ${String(e).trim()}`);
+    showError(`Can't ${resolved ? "resolve" : "reopen"} the thread`, e);
   }
 }
 
@@ -432,13 +493,8 @@ function merge(pr: Details) {
           {
             label: `${m.label} on GitHub`,
             run: async () => {
-              try {
-                host.status(`Merging #${pr.number}…`);
-                await gh("pr", "merge", String(pr.number), m.flag);
-                host.status(`Merged #${pr.number}`);
-              } catch (e) {
-                host.status(`Can't merge #${pr.number}: ${String(e).trim()}`);
-              }
+              const merged = await withProgress(`Merging #${pr.number}…`, () => gh("pr", "merge", String(pr.number), m.flag), { error: `Can't merge #${pr.number}` });
+              if (merged !== undefined) host.status(`Merged #${pr.number}`);
               showPullRequest(pr.number);
             },
           },
@@ -478,15 +534,14 @@ function prepareDiff(pr: Details): Promise<string> {
 async function showFileDiff(pr: Details, path: string, threads: Thread[], at?: { line: number | null; side: "LEFT" | "RIGHT" }) {
   let diff: monaco.editor.IStandaloneDiffEditor;
   try {
-    const slow = setTimeout(() => host.status(`Fetching #${pr.number}…`), 300);
-    const [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => clearTimeout(slow)), loadMarkdown(), me()]);
+    const slow = setTimeout(() => status(`Fetching #${pr.number}…`, "prs:progress"), 300);
+    const [mergeBase] = await Promise.all([prepareDiff(pr).finally(() => (clearTimeout(slow), status("", "prs:progress"))), loadMarkdown(), me()]);
     const show = (spec: string) => git("show", spec).catch(() => "");
     const [original, modified] = await Promise.all([show(`${mergeBase}:${path}`), show(`${pr.headRefOid}:${path}`)]);
     const action = { label: "Comment on Line", title: "Comment on the selected lines, or reply to the comments on the cursor's line", run: () => commentAtCursor() };
     diff = showDiff(path, original, modified, `#${pr.number}: ${pr.baseRefName} ↔ ${pr.headRefName}`, action);
-    host.status("");
   } catch (e) {
-    return host.status(`Can't show the diff: ${String(e).trim()}`);
+    return showError(`Can't show the diff`, e);
   }
   diff.layout(); // The diff was hidden until now, so its editors have no width yet.
   shown = { pr, path, threads, diff, zones: [], model: diff.getModel()?.modified };
@@ -636,7 +691,7 @@ function drawZones() {
     const draft = el("div", "pr-thread pending");
     const remove = el("button", "link", "Delete");
     remove.onclick = () =>
-      deletePending(pr.number, c).then(drawZones, (e) => host.status(`Can't delete the pending comment: ${String(e).trim()}`));
+      deletePending(pr.number, c).then(drawZones, (e) => showError(`Can't delete the pending comment`, e));
     const meta = el("div", "pr-meta", `Pending · ${lines(c.start_line, c.line)} · `);
     meta.append(remove);
     draft.append(meta, markdown(c.body, repo));
@@ -670,7 +725,7 @@ function commentForm() {
     button("Add Reply to Review", async (body) => {
       await gh("api", "graphql", "-f", "query=mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }", "-f", `review=${pending!.node}`, "-f", `thread=${thread}`, "-f", `body=${body}`).then(
         async () => (host.status("Added the reply to your pending review."), (form = undefined), await loadPending(pr.number), drawZones()),
-        (e) => host.status(`Can't add the reply: ${String(e).trim()}`),
+        (e) => showError(`Can't add the reply`, e),
       );
     }, true);
   } else if (f.reply) button("Reply", (body) => post([`repos/{owner}/{repo}/pulls/${pr.number}/comments/${f.reply!.id}/replies`, "-f", `body=${body}`]), true);
@@ -683,7 +738,7 @@ function commentForm() {
         close();
       } catch (e) {
         // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
-        host.status(`Can't add the comment to your review: ${String(e).trim()}`);
+        showError(`Can't add the comment to your review`, e);
         buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
       }
     }, true);
@@ -702,18 +757,13 @@ function commentForm() {
   // Posts a comment or a reply at once, then reloads the threads.
   const post = async (args: string[]) => {
     buttons.querySelectorAll("button").forEach((b) => (b.disabled = true));
-    try {
-      host.status("Posting the comment…");
-      await gh("api", "--method", "POST", ...args);
-      host.status(`Commented on ${path}:${f.line}`);
-      form = undefined;
-      shown!.threads = await lineComments(pr.number);
-      drawZones();
-    } catch (e) {
-      // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
-      host.status(`Can't comment: ${String(e).trim()}`);
-      buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
-    }
+    // GitHub accepts comments only on lines inside the diff's changes and the lines around them.
+    const posted = await withProgress("Posting the comment…", () => gh("api", "--method", "POST", ...args), { error: "Can't comment" });
+    if (posted === undefined) return buttons.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    host.status(`Commented on ${path}:${f.line}`);
+    form = undefined;
+    shown!.threads = await lineComments(pr.number).catch((e) => (showError("Can't reload the comments", e), shown!.threads));
+    drawZones();
   };
   box.append(text, buttons);
   requestAnimationFrame(() => text.focus());
@@ -765,6 +815,13 @@ export const createPullRequest = () => openTerminal(host.root(), "gh pr create",
 export function initPullRequests(h: Host) {
   host = h;
   $("pr-filter").onchange = loadPullRequests;
+  let typing: ReturnType<typeof setTimeout> | undefined;
+  $("pr-search").oninput = () => (clearTimeout(typing), (typing = setTimeout(loadPullRequests, 400)));
+  $("pr-search").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") e.preventDefault(), $("pr-list").focus();
+  });
+  // Enter or a click opens a pull request.
+  listNav($("pr-list"));
   $("pr-refresh").onclick = loadPullRequests;
   $("pr-create").onclick = createPullRequest;
 }

@@ -126,10 +126,45 @@ event saves every tab. ⌘S runs `saveAll`.
 
 ### Settings and themes
 
-`src/settings.ts` keeps one settings object, loads it from `settings.json` in
-the app's config folder (`appConfigDir`), and ignores unknown keys and values of
-the wrong type. The dialog is built from one list of fields. Each change applies
-at once (`apply`) and writes the file.
+`src/settings.ts` keeps one settings object and loads it from `settings.json`
+in the app's config folder (`appConfigDir`). The dialog is built from one list
+of fields. Each change applies at once (`apply`) and writes the file.
+
+Reading and writing never lose what's in the file (`src/settingsdata.ts`, with
+tests):
+
+- A file that isn't a JSON object blocks writes (`blocked`). The defaults apply,
+  a toast and a banner in the dialog offer **Open settings.json**, and saving
+  the file in the editor (`settingsFileSaved`, called from `saveFile`) reads it
+  again.
+- A value of the wrong type or out of its range is set aside (`invalid`): the
+  default applies, the dialog notes it under the setting, and the saved value
+  is written back unchanged until you change that setting.
+- The write starts from the file's own object (`raw`), so keys this version
+  doesn't know, such as those of a newer build, survive.
+- A failed write shows an error with **Retry**.
+
+To add a setting:
+
+- In `src/settings.ts`: add the key to `Settings` and `defaults`, and a `Field`
+  to `fields` with its `group`. A new group appears where its first field is.
+- From another module, without touching `settings.ts`: call
+  `registerSettings(group, defaults, fields)` when the module loads. It returns
+  the settings object typed with the group's keys, which always holds the
+  current values; use `onSettings` to react to changes.
+
+```ts
+type Field = { key; label; help?; group; shown?: () => boolean } &
+  ({ type: "checkbox" } | { type: "number"; min; max } | { type: "text"; placeholder? } | { type: "select"; options });
+registerSettings<T>(group: string, defaults: T, fields: Omit<Field, "group">[]): T
+onSettings(fn)          // now and after every change
+updateSetting(key, v)   // apply and save
+openSettings(query?)    // the dialog, optionally filtered
+openSettingsFile()      // settings.json in the editor
+```
+
+`shown` hides a field that doesn't apply; the search matches a field's group,
+label, help, and key.
 
 `apply` updates Monaco's editor options and calls `applyTheme` in
 `src/themes.ts` with the theme in use: `theme`, or `darkTheme` or `lightTheme`
@@ -790,6 +825,83 @@ Servers** action restarts every server.
 Each language server has its own status slot, and the status bar shows the
 most recent message that is still set. Otherwise one server finishing a task
 would clear another server's indexing progress.
+
+### Errors and progress
+
+`src/status.ts` is the one place the app reports what's happening. Use it
+instead of writing to the status bar or `toast()` directly:
+
+```ts
+status(text, source = "app", kind?: "error" | "info")
+showError(message, error?, action?: { label, run })
+errorText(error): string
+withProgress<T>(label, task: (signal: AbortSignal) => Promise<T>, { cancellable?, error? }): Promise<T | undefined>
+installErrorHandlers()
+```
+
+- `status` sets a message per source. A source ending in `:progress` shows a
+  spinner until you clear it; any other message clears after 8 seconds. Pass
+  `"error"` to toast it too. Without a kind, a message that reads like a
+  failure ("failed", "can't") still toasts, for the modules whose `Host.status`
+  predates `kind`.
+- `showError("Can't merge #12", e)` shows "Can't merge #12: <reason>" as a
+  toast and in the status bar, and logs `e` with its stack. `errorText` reads
+  an `Error`, a Tauri command's error string, or anything else, drops Git's
+  `hint:` lines, and keeps it to one line.
+- `withProgress` runs a task under a spinner and reports its failure with
+  `showError`. With `cancellable: true`, the status bar shows **Cancel**, which
+  aborts the signal the task gets; the task checks `signal.throwIfAborted()`
+  between steps or passes the signal on. A canceled task shows "Canceled", not
+  an error. It resolves to `undefined` when the task failed or was canceled, so
+  callers that need to stop check for that. Tauri commands can't be aborted,
+  so a task that waits on a slow command stops at its next step.
+- `installErrorHandlers` (called once in `main.ts`) turns unhandled promise
+  rejections and uncaught errors into a toast. Monaco's `Canceled` errors,
+  `AbortError`, and `ResizeObserver` loop warnings are dropped. `toast()`
+  shows a message once while an identical one is on screen.
+- The palette shows a failing source's error as a row, rather than an empty
+  list that reads as "no results".
+
+A search that a destructive action depends on, such as Safe Delete's usages or
+Inline Constant's uses, fails rather than falling back to "none found", so the
+action stops instead of working on incomplete results.
+
+### Lists and trees
+
+`src/listnav.ts` gives a list or tree PhpStorm's keyboard: ↑↓, Home and End,
+Page Up and Page Down, Enter, → and ← for tree nodes, and type-ahead. Use it for
+every new list rather than writing another keydown handler.
+
+```ts
+const nav = listNav(container, {
+  rows?: string,                                // default "[data-key]"
+  open?(row, e),                                // Enter; default row.click()
+  toggle?(row, expand),                         // → ← on a row with aria-expanded; default row.click()
+  onSelect?(row),                               // the selection moved
+  label?(row),                                  // type-ahead text; default data-label or text
+});
+nav.select(key, { scroll? }); nav.selected(); nav.selectedRow(); nav.refresh();
+```
+
+- Give each row a `data-key` that names it across redraws. The helper keeps
+  the selection by key and reapplies it after the list renders again (a
+  `MutationObserver`), so callers just replace their rows.
+- The container keeps the focus and points at the row with
+  `aria-activedescendant`, so the rows need no tabindex. Set the container's
+  role (`listbox`, `tree`) and the rows' (`option`, `treeitem`).
+- A tree is `aria-expanded` on rows that open and `aria-level` on every row;
+  ← goes to the nearest row above with a lower level, so the rows can be a flat
+  list, as in the Profiler's table.
+- The helper sets `selected`, `aria-selected`, and the `list-nav` class, whose
+  CSS in `styles.css` draws the selection with theme variables
+  (`--selected`, `--accent`), so it shows in every theme. Keys with ⌘, ⌃, or ⌥
+  pass through for the caller's own handler, such as ⌘C in Problems.
+
+It replaced the Problems panel's handler and the Profiler table's. `fileGroup`
+in `src/search.ts` marks its file and item rows as a tree, so Search, TODO,
+and Coverage's file list use it too. The Redis key tree still has its own
+handler: `src/redis.ts` belongs to the database work in progress, and moving it
+is a small follow-up.
 
 ### Language server client
 
@@ -2006,6 +2118,21 @@ the rest arrives, so multibyte text never turns into replacement characters.
 `xterm.js`, which loads with the first terminal rather than with the app. Keystrokes go to `pty_write`, and the fit add-on resizes the
 pseudo-terminal whenever the panel changes size. You can drag the top edge of
 the panel to resize it.
+
+The terminal's font comes from the Terminal settings group, which
+`terminal.ts` adds with `registerSettings`: an empty font or size follows the
+editor's, and `onSettings` updates open terminals and refits them. The search
+add-on (`@xterm/addon-search`, which needs `allowProposedApi` for its match
+highlights) backs the find bar, which **Find in Terminal** (⌘F with a `when`
+of `terminalFocused`, so ⌘F still reaches Monaco in the editor) opens over the
+focused terminal. The web-links add-on opens URLs with `open`. A link provider
+finds file references in each line with `fileLinks` in `src/termlinks.ts`
+(tested), resolves them with `candidatePaths` (the container root from
+`src/sail.ts` maps to the project; a relative path tries the shell's folder,
+then the project's), checks that the file exists with `path_exists` (cached),
+and opens it through the docking host's `openAt`. Tabs are a `tablist` with a
+roving tabindex: ← and → move between them, and double-clicking a terminal's
+tab renames it in place.
 
 Panel tabs reorder with HTML drag and drop on the tab bar: `dragover` marks the
 tab under the pointer, and `drop` moves the dragged session before it in
@@ -4889,3 +5016,45 @@ shortcuts such as ⌘D and F8. They now have them, and a menu item for such an
 action ignores a run that follows a key press by less than 500 ms, which is
 when the page passed the key on. The alternative, drawing the shortcut into the
 item's title, doesn't align with the native shortcut column.
+
+### 2026-09-28: One module for errors and progress
+
+Failures were reported three ways: `status()` toasted any message that matched
+a regex for failure words, modules wrote their own "Loading…" and error text,
+and many `invoke` calls had no catch at all, so they failed silently.
+`src/status.ts` now holds `status`, `showError`, `withProgress`, and a global
+handler for unhandled rejections. The regex stays as a fallback for the
+`Host.status` callers that don't pass a kind, rather than changing every
+module's `Host` type at once. `withProgress` takes an `AbortSignal` so long
+operations added later (the debugger, git, database, HTTP) share one cancel
+button in the status bar rather than each drawing its own.
+
+### 2026-09-28: Settings never overwrite a file they can't read
+
+An invalid `settings.json` used to fall back to the defaults silently, and the
+next change wrote the defaults over it. Now Tusk refuses to write a file it
+can't parse, rather than backing it up and replacing it, because the file you
+wrote stays where you expect it, and fixing it in the editor applies it at
+once. Values of the wrong type and unknown keys are kept for the same reason.
+Other modules register their own settings groups (`registerSettings`), so the
+features added next (tools, formatters, the terminal, the debugger) don't all
+edit one list in `settings.ts`.
+
+### 2026-09-28: One keyboard helper for lists, driven by the DOM
+
+The Problems panel, the Redis tree, and the Profiler each had their own arrow
+key handler, and most lists had none. `listNav` reads the rows from the DOM by
+`data-key`, `aria-expanded`, and `aria-level` instead of taking a data model,
+so a list that renders with `replaceChildren` needs only those attributes, and
+the same code serves flat lists, nested trees, and a table whose tree is a flat
+run of rows. It uses `aria-activedescendant` rather than a roving tabindex, so
+a redraw doesn't move the focus.
+
+### 2026-09-28: The terminal follows the editor's font, and its links open files
+
+The terminal had a fixed font list and size 12. It now uses the editor's font
+unless you set its own, so one change applies to both. File references in the
+output are found with one regex over each line rather than per-tool parsers,
+since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
+`path(line)`, and a reference becomes a link only when the file exists, which
+keeps false matches, such as version numbers, from turning into links.

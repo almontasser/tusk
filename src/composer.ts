@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Advisory, advisories, dependents, namespaceChecks, packages, type Package, requiredBy } from "./composerdata";
 import { toolPath } from "./lsp";
 import { confirm, pick } from "./palette";
+import { listNav } from "./listnav";
+import { errorText, showError } from "./status";
 import { openTerminal } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
@@ -101,10 +103,19 @@ async function unreferenced(lock: string, json: string) {
   return unused;
 }
 
+/** The last list drawn, so the filter can narrow it without running Composer again. */
+let drawn: { list: Package[]; info: Info } | undefined;
+
 function render(list: Package[], info: Info) {
+  drawn = { list, info };
+  const words = ($("composer-search") as HTMLInputElement).value.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = list.filter((p) => words.every((w) => `${p.name} ${p.description ?? ""}`.toLowerCase().includes(w)));
+  if (!shown.length) return $("composer-list").replaceChildren(el("li", "muted", list.length ? "No packages match the filter." : "No packages are installed. Run composer install."));
   $("composer-list").replaceChildren(
-    ...list.map((p) => {
+    ...shown.map((p) => {
       const li = el("li", "composer-package");
+      li.role = "option";
+      li.dataset.key = p.name;
       const found = info.advisories.get(p.name) ?? [];
       const via = info.via.get(p.name) ?? [];
       li.title = [
@@ -124,6 +135,9 @@ function render(list: Package[], info: Info) {
       const version = el("span", "version", p.version);
       if (p.latest) version.append(el("span", p.status === "semver-safe-update" ? "update safe" : "update major", ` → ${p.latest}`));
       li.append(name, version);
+      // Advisories show in the list, not only on hover: they're the reason to act.
+      for (const a of found.slice(0, 2)) li.append(el("span", "advisory", `⚠ ${a.title}${a.cve ? ` (${a.cve})` : ""}${a.severity ? ` · ${a.severity}` : ""}`));
+      if (found.length > 2) li.append(el("span", "advisory", `and ${found.length - 2} more advisories`));
       // Why an indirect package is installed: the packages that require it.
       if (!p.direct && via.length) li.append(el("span", "via", `via ${via.slice(0, 3).join(", ")}${via.length > 3 ? ` and ${via.length - 3} more` : ""}`));
       li.onclick = () => packageActions(p, found);
@@ -138,7 +152,7 @@ function render(list: Package[], info: Info) {
  * up to composer.json, so you can follow the chain from a package to the requirement that brought it in.
  */
 async function why(name: string) {
-  const out = await capture("why", name).catch((e) => (host.status(`Can't tell why ${name} is installed: ${String(e).trim()}`), null));
+  const out = await capture("why", name).catch((e) => (showError(`Can't tell why ${name} is installed`, e), null));
   if (out === null) return;
   const project = JSON.parse(await invoke<string>("read_file", { path: `${host.root()}/composer.json` }).catch(() => "{}")).name;
   const list = dependents(out);
@@ -195,15 +209,21 @@ function packageActions(p: Package, found: Advisory[]) {
 type SearchResult = { name: string; description: string; downloads: number };
 
 /** Searches Packagist and requires the chosen package, as a dependency or a dev dependency. */
-export function requirePackage() {
+export function requirePackage(query = "") {
   if (!host.root()) return;
   pick(
     "Require a package: search Packagist",
     async (q) => {
       if (q.trim().length < 2) return [];
       const url = `https://packagist.org/search.json?per_page=20&q=${encodeURIComponent(q.trim())}`;
-      const out = await invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["-fsSL", "--max-time", "10", url], input: null }).catch(() => "{}");
-      const results: SearchResult[] = JSON.parse(out).results ?? [];
+      let results: SearchResult[];
+      try {
+        results = JSON.parse(await invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["-fsSL", "--max-time", "10", url], input: null })).results ?? [];
+      } catch (e) {
+        // Choosing the row searches again.
+        return [{ label: "Can't search Packagist. Choose to try again.", detail: errorText(e), icon: "codicon-error icon-error", run: () => requirePackage(q) }];
+      }
+      if (!results.length) return [{ label: `No packages match "${q.trim()}"`, icon: "codicon-info", run: () => requirePackage(q) }];
       return results.map((r) => ({
         label: r.name,
         detail: `${r.downloads.toLocaleString()} downloads · ${r.description}`,
@@ -215,15 +235,26 @@ export function requirePackage() {
       }));
     },
     300,
+    { value: query },
   );
 }
 
-export const updateAll = () => run("composer update", ["update"]);
+/** Runs composer update for every package, after you confirm, since it can change many versions at once. */
+export async function updateAll() {
+  if (!host.root()) return;
+  if (await confirm("Update every package to the newest version its constraint in composer.json allows? This rewrites composer.lock.", "Update All")) run("composer update", ["update"]);
+}
 
 export function initComposer(h: Host) {
   host = h;
   $("composer-refresh").onclick = loadPackages;
   $("composer-filter").onchange = loadPackages;
-  $("composer-require").onclick = requirePackage;
+  $("composer-require").onclick = () => requirePackage();
   $("composer-update").onclick = updateAll;
+  $("composer-search").oninput = () => drawn && render(drawn.list, drawn.info);
+  // Enter or a click opens a package's actions; ↓ in the filter moves to the list.
+  listNav($("composer-list"), { open: (row) => row.click() });
+  $("composer-search").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") e.preventDefault(), $("composer-list").focus();
+  });
 }

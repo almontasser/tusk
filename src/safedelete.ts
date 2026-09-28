@@ -1,6 +1,7 @@
 // Safe Delete (⌘⌦): deletes the class, method, or function under the cursor only after checking
 // that nothing uses it. Usages come from Tusk's server; for classes, a text search also finds the full
 // class name in strings, as Laravel's config files use them.
+import { withProgress } from "./status";
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
@@ -38,7 +39,8 @@ export function symbolAt(symbols: L.DocumentSymbol[], line: number, character: n
 
 async function usagesOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, fqn: string | null, container?: L.DocumentSymbol): Promise<Usage[]> {
   const uri = model.uri.toString();
-  const refs = await callsOf(model, symbol, container).catch(() => []);
+  // A failed search throws rather than reading as "no usages", so nothing is deleted on incomplete results.
+  const refs = await callsOf(model, symbol, container);
   const usages: Usage[] = refs
     // Recursive calls inside the declaration itself don't keep it alive.
     .filter((r) => !(r.uri === uri && contains(symbol.range, r.range.start.line, r.range.start.character)))
@@ -47,7 +49,7 @@ async function usagesOf(model: monaco.editor.ITextModel, symbol: L.DocumentSymbo
   // relationship('author') or $post->author, scopes as ->published(), accessors as ->full_name.
   const names = fqn ? [fqn.replace(/\\/g, "\\\\{1,2}")] : laravelNames(symbol.name).map(escapeRegex);
   for (const pattern of names) {
-    const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: pattern, regex: true, caseSensitive: true, wholeWord: true }, include: "*.php" }).catch(() => []);
+    const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: pattern, regex: true, caseSensitive: true, wholeWord: true }, include: "*.php" });
     for (const m of matches) {
       const inDeclaration = m.path === model.uri.fsPath && (fqn || (m.line - 1 >= symbol.range.start.line && m.line - 1 <= symbol.range.end.line));
       if (inDeclaration || usages.some((u) => u.path === m.path && u.line === m.line)) continue;
@@ -86,9 +88,10 @@ async function check(editor: monaco.editor.ICodeEditor) {
   const label = `${kind} ${found.container && !isClass ? `${found.container.name}::` : ""}${symbol.name}`;
   const version = model.getVersionId();
 
-  host.status(`Looking for usages of ${label}…`);
-  const usages = await usagesOf(model, symbol, fqn, found.container);
-  host.status("");
+  const usages = await withProgress(`Looking for usages of ${label}…`, () => usagesOf(model, symbol, fqn, found.container), {
+    error: `Couldn't look for usages of ${label}, so it wasn't deleted`,
+  });
+  if (!usages) return;
   if (usages.length) {
     const rel = (p: string) => (p.startsWith(host.root() + "/") ? p.slice(host.root().length + 1) : p);
     return pick(`${usages.length} ${usages.length === 1 ? "usage" : "usages"} of ${label}. Choose one to open it`, () => [

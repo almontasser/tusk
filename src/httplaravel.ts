@@ -1,6 +1,7 @@
 // The HTTP client's Laravel tools: feature tests from requests, the Logs and Queries response tabs, and finding the
 // app's address. laraveltools.ts has the parts Node tests. This module only defines functions, so importing
 // httpview, which imports it back, is safe.
+import { withProgress } from "./status";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { groupQueries, withBindings } from "./cachegrind";
@@ -176,9 +177,9 @@ export async function appAddresses(): Promise<Address[]> {
 /** Lists where the app might answer and sets the one you choose as `host` in the selected environment. */
 export async function detectAppAddress(path = "") {
   if (!host.root()) return;
-  host.status("Looking for the app's address…");
-  const [list, envs] = await Promise.all([appAddresses(), environments(path)]);
-  host.status("");
+  const found = await withProgress("Looking for the app's address…", () => Promise.all([appAddresses(), environments(path)]), { error: "Can't look for the app's address" });
+  if (!found) return;
+  const [list, envs] = found;
   const env = selectedEnvironment(envs) ?? "local";
   pick(`Set host in the ${env} environment`, () =>
     list.map((a) => ({ label: a.url, detail: `${a.source}${envs[env]?.host === a.url ? " · Current" : ""}`, icon: "codicon-globe", run: () => saveHost(path, env, a.url) })),

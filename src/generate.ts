@@ -1,6 +1,7 @@
 // Generate (⌘N in a PHP file), as in PhpStorm: a constructor, getters, setters, __toString(), and methods to
 // implement or override. Tusk's server offers them as code actions for the class at the cursor: `source.generate.*`
 // for all but the fixes (Implement Methods and the constructor and property fixes), which are quick fixes.
+import { showError } from "./status";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { runTuskAction, tuskRequest } from "./lsp";
@@ -26,12 +27,13 @@ export async function generate(editor: monaco.editor.ICodeEditor) {
   const pos = editor.getPosition();
   if (!model || !pos || model.getLanguageId() !== "php") return host.status("Generate works in PHP files.");
   const at = { line: pos.lineNumber - 1, character: pos.column - 1 };
-  const actions =
-    (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
-      textDocument: { uri: model.uri.toString() },
-      range: { start: at, end: at },
-      context: { diagnostics: [], only: ["source.generate", "quickfix"] },
-    }).catch(() => null)) ?? [];
+  const found = await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
+    textDocument: { uri: model.uri.toString() },
+    range: { start: at, end: at },
+    context: { diagnostics: [], only: ["source.generate", "quickfix"] },
+  }).catch((e) => (showError("Can't list what to generate", e), undefined));
+  if (found === undefined) return;
+  const actions = found ?? [];
   const items: (Item & { order: number })[] = [];
   for (const a of actions) {
     const kind = "kind" in a ? (a.kind ?? "") : "";

@@ -25,6 +25,9 @@ export function toast(text: string, { kind = "error", action, timeout }: { kind?
   const close = () => el.remove();
   // Git's "hint:" lines repeat advice; the first lines carry the error.
   const message = text.split("\n").filter((l) => l.trim() && !l.startsWith("hint:")).join(" ");
+  // The same message twice, such as from a failure that repeats, shows once while its toast is up.
+  const shown = [...document.querySelectorAll<HTMLElement>(`#toasts .toast.${kind} p`)].some((p) => p.textContent === message);
+  if (shown) return;
   const el = h(
     "div",
     { class: `toast ${kind}` },

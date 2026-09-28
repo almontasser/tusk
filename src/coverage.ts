@@ -10,6 +10,8 @@ import { pick } from "./palette";
 import { openTest } from "./testresults";
 import { fileGroup } from "./search";
 import { containerRoot } from "./sail";
+import { h, icon } from "./dom";
+import { listNav } from "./listnav";
 import { showPanelView } from "./terminal";
 
 type Host = { openAt(path: string, line: number): unknown; rerun(): unknown; status(text: string): void };
@@ -152,13 +154,34 @@ panel.innerHTML = `
   <div class="tests-toolbar">
     <button data-run="rerun" title="Rerun with coverage (⌃R)"><span class="codicon codicon-debug-rerun"></span></button>
     <button data-run="hide" title="Hide coverage"><span class="codicon codicon-eye-closed"></span></button>
+    <select class="coverage-sort" aria-label="Sort folders and files">
+      <option value="coverage">Least covered first</option>
+      <option value="name">By name</option>
+    </select>
     <span class="tests-summary"></span>
   </div>
-  <ul class="coverage-folders" aria-label="Coverage by folder"></ul>
-  <ul class="coverage-list" aria-label="Uncovered lines"></ul>`;
+  <ul class="coverage-folders" role="tree" aria-label="Coverage by folder"></ul>
+  <ul class="coverage-list" role="tree" aria-label="Uncovered lines"></ul>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
 q('[data-run="rerun"]').onclick = () => host.rerun();
 q('[data-run="hide"]').onclick = hideCoverage;
+
+/** Folders you collapsed in the folder tree. */
+const collapsedFolders = new Set<string>();
+const sortSelect = q(".coverage-sort") as HTMLSelectElement;
+try {
+  sortSelect.value = localStorage.getItem("coverageSort") ?? "coverage";
+} catch {}
+sortSelect.onchange = () => {
+  try {
+    localStorage.setItem("coverageSort", sortSelect.value);
+  } catch {}
+  renderPanel();
+};
+const toggleFolder = (name: string, open: boolean) => (open ? collapsedFolders.delete(name) : collapsedFolders.add(name), renderPanel());
+// Enter shows only a folder's files; → and ← expand and collapse it.
+listNav(q(".coverage-folders"), { toggle: (row, open) => toggleFolder(row.dataset.key!, open) });
+listNav(q(".coverage-list"));
 
 const percent = (covered: number, total: number) => (total ? Math.floor((covered / total) * 100) : 100);
 
@@ -192,22 +215,38 @@ function renderPanel() {
       totals.total += f.total;
     }
   if (!folders.has(folder)) folder = "";
-  q(".coverage-folders").replaceChildren(
-    ...[...folders].sort(([a], [b]) => a.localeCompare(b)).map(([name, totals]) => {
-      const li = document.createElement("li");
-      li.className = `coverage-folder${name === folder ? " active" : ""}`;
-      li.style.paddingLeft = `${8 + (name.split("/").length - 1) * 14}px`;
-      li.title = folder === name ? "Show the files of every folder" : `Show only the files in ${name}`;
-      li.innerHTML = `<span class="codicon codicon-folder"></span><span class="name"></span><span class="percent"></span>`;
-      li.querySelector(".name")!.textContent = name.slice(name.lastIndexOf("/") + 1);
-      li.querySelector(".percent")!.textContent = `${percent(totals.covered, totals.total)}% · ${totals.covered}/${totals.total}`;
+  const byName = sortSelect.value === "name";
+  const order = (a: [string, { covered: number; total: number }], b: [string, { covered: number; total: number }]) =>
+    (byName ? 0 : percent(a[1].covered, a[1].total) - percent(b[1].covered, b[1].total)) || a[0].localeCompare(b[0]);
+  const parentOf = (name: string) => name.slice(0, Math.max(0, name.lastIndexOf("/")));
+  const children = new Map<string, [string, { covered: number; total: number }][]>();
+  for (const entry of folders) (children.get(parentOf(entry[0])) ?? children.set(parentOf(entry[0]), []).get(parentOf(entry[0]))!).push(entry);
+  // Depth first, siblings in the chosen order; a collapsed folder's subfolders aren't listed.
+  const rows: HTMLElement[] = [];
+  const walk = (parent: string, depth: number) => {
+    for (const [name, totals] of (children.get(parent) ?? []).sort(order)) {
+      const hasChildren = children.has(name);
+      const open = !collapsedFolders.has(name);
+      const li = h(
+        "li",
+        { class: `coverage-folder${name === folder ? " active" : ""}`, role: "treeitem", style: `padding-left: ${4 + depth * 14}px`, title: folder === name ? "Show the files of every folder" : `Show only the files in ${name}`, data: { key: name, label: name.slice(name.lastIndexOf("/") + 1) } },
+        h("span", { class: `chevron codicon ${hasChildren ? `codicon-chevron-${open ? "down" : "right"}` : ""}`, onclick: (e: MouseEvent) => (e.stopPropagation(), hasChildren && toggleFolder(name, !open)) }),
+        icon(open && hasChildren ? "folder-opened" : "folder"),
+        h("span", { class: "name" }, name.slice(name.lastIndexOf("/") + 1)),
+        h("span", { class: "percent" }, `${percent(totals.covered, totals.total)}% · ${totals.covered}/${totals.total}`),
+      );
+      li.ariaLevel = String(depth + 1);
+      if (hasChildren) li.ariaExpanded = String(open);
       li.onclick = () => ((folder = folder === name ? "" : name), renderPanel());
-      return li;
-    }),
-  );
+      rows.push(li);
+      if (hasChildren && open) walk(name, depth + 1);
+    }
+  };
+  walk("", 0);
+  q(".coverage-folders").replaceChildren(...rows);
   const files = all
     .filter((f) => f.ranges.length && (!folder || f.rel.startsWith(folder + "/")))
-    .sort((a, b) => a.covered / a.total - b.covered / b.total || a.path.localeCompare(b.path));
+    .sort((a, b) => (byName ? 0 : a.covered / a.total - b.covered / b.total) || a.path.localeCompare(b.path));
   const full = all.filter((f) => !f.ranges.length && (!folder || f.rel.startsWith(folder + "/"))).length;
   const sum = (key: "covered" | "total" | "changed") => all.reduce((n, f) => n + f[key], 0);
   const [covered, total, changed] = [sum("covered"), sum("total"), sum("changed")];

@@ -1,6 +1,7 @@
 // Type hierarchy (⌃H): a type's parents, interfaces, and traits, or the types that extend, implement, or use it.
 // Tusk's server answers from its index (`textDocument/prepareTypeHierarchy`, `typeHierarchy/supertypes` and
 // `typeHierarchy/subtypes`).
+import { showError } from "./status";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { tuskRequest } from "./lsp";
@@ -97,7 +98,8 @@ export async function showTypeHierarchy(editor: monaco.editor.ICodeEditor) {
   const items = await tuskRequest<L.TypeHierarchyItem[] | null>("textDocument/prepareTypeHierarchy", {
     textDocument: { uri: model.uri.toString() },
     position: { line: pos.lineNumber - 1, character: pos.column - 1 },
-  }).catch(() => null);
+  }).catch((e) => (showError("Can't show the type hierarchy", e), undefined));
+  if (items === undefined) return;
   if (!items?.length) return host.status("Put the cursor in or on a class, interface, trait, or enum.");
   current = items[0];
   render();

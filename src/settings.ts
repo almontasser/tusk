@@ -3,7 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { monaco } from "./editor";
-import { choose, pick, rank } from "./palette";
+import { h, icon, toast } from "./dom";
+import { choose, confirm, pick, rank } from "./palette";
+import { parseSettingsFile, type Ranges, readSaved, settingsToWrite, type Value } from "./settingsdata";
+import { errorText, showError } from "./status";
 import { applyTheme, importThemeFile, loadImportedThemes, removeImportedTheme, themeList } from "./themes";
 import { setVim } from "./vim";
 
@@ -53,31 +56,36 @@ const defaults: Settings = {
   keymap: {},
 };
 
-/** `section` starts a new group of settings under that heading. `shown` hides a setting that doesn't apply. */
-type Field = { key: keyof Settings; label: string; help?: string; section?: string; shown?: () => boolean } & (
+/**
+ * A setting in the dialog, under the heading `group`. `shown` hides a setting that doesn't apply, such as the dark
+ * mode theme while the theme doesn't follow the system. `key` is a key of Settings, or of a group another module
+ * adds with registerSettings.
+ */
+export type Field = { key: string; label: string; help?: string; group: string; shown?: () => boolean } & (
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
-  | { type: "text" }
+  | { type: "text"; placeholder?: string }
   | { type: "select"; options: [string, string][] | (() => [value: string, text: string, group: string][]) }
 );
 
-/** The settings form, in order. */
+/** The settings dialog's fields, in order; groups show in the order their first field appears. */
 const fields: Field[] = [
-  { section: "Appearance", key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
-  { key: "darkTheme", label: "Theme in dark mode", type: "select", options: () => themeOptions(true), shown: () => settings.theme === "system" },
-  { key: "lightTheme", label: "Theme in light mode", type: "select", options: () => themeOptions(false), shown: () => settings.theme === "system" },
-  { key: "fontFamily", label: "Editor font", type: "text", help: "A CSS font list; the first installed font is used." },
-  { key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
-  { section: "Editor", key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
-  { key: "minimap", label: "Show the minimap", type: "checkbox" },
-  { key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
-  { key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
-  { key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
-  { key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
-  { key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
-  { key: "vim", label: "Vim emulation", type: "checkbox", help: "The status bar shows the mode. ⌃ keys go to Vim while you type in the editor." },
-  { section: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
+  { group: "Appearance", key: "theme", label: "Theme", type: "select", options: () => [["system", "Match the system", ""], ...themeOptions()] },
+  { group: "Appearance", key: "darkTheme", label: "Theme in dark mode", type: "select", options: () => themeOptions(true), shown: () => settings.theme === "system" },
+  { group: "Appearance", key: "lightTheme", label: "Theme in light mode", type: "select", options: () => themeOptions(false), shown: () => settings.theme === "system" },
+  { group: "Appearance", key: "fontFamily", label: "Editor font", type: "text", help: "A CSS font list; the first installed font is used." },
+  { group: "Appearance", key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
+  { group: "Editor", key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
+  { group: "Editor", key: "minimap", label: "Show the minimap", type: "checkbox" },
+  { group: "Editor", key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
+  { group: "Editor", key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
+  { group: "Editor", key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
+  { group: "Editor", key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Uses the project's Prettier or Pint, or Mago." },
+  { group: "Editor", key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
+  { group: "Editor", key: "vim", label: "Vim emulation", type: "checkbox", help: "The status bar shows the mode. ⌃ keys go to Vim while you type in the editor." },
+  { group: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
   {
+    group: "AI",
     key: "aiModel",
     label: "AI completion model",
     type: "select",
@@ -88,8 +96,13 @@ const fields: Field[] = [
       ["qwen2.5-coder-7b", "Qwen2.5-Coder 7B: best (8.1 GB, needs 16 GB of memory)"],
     ],
   },
-  { section: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
+  { group: "Spelling", key: "spellCheck", label: "Check spelling", type: "checkbox", help: "In comments, strings, and names. Add a project's own words to _typos.toml." },
 ];
+
+/** Defaults of the settings other modules add with registerSettings. */
+const registered: Record<string, Value> = {};
+const allDefaults = (): Record<string, Value> => ({ ...defaults, ...registered });
+const ranges = (): Ranges => Object.fromEntries(fields.flatMap((f) => (f.type === "number" ? [[f.key, { min: f.min, max: f.max }]] : [])));
 
 export const settings: Settings = { ...defaults };
 const listeners: ((s: Settings) => void)[] = [];
@@ -153,22 +166,75 @@ function apply() {
 }
 systemDark.addEventListener("change", () => settings.theme === "system" && apply());
 
+/** The file as last read or written, so keys this version doesn't know survive a save. */
+let raw: Record<string, unknown> = {};
+/** Saved values that can't be used, and why. The file keeps them until you change the setting. */
+let invalid = new Map<string, string>();
+/** Why settings.json can't be saved, such as a JSON error in it. Changes still apply; the file stays as it is until you fix it. */
+let blocked = "";
+
+const openFileAction = { label: "Open settings.json", run: () => openSettingsFile() };
+
 async function persist() {
-  const path = await file();
-  await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
-  await invoke("write_file", { path, contents: JSON.stringify(settings, null, 2) + "\n" });
+  if (blocked) return toast(`${blocked}. Your changes apply, but aren't saved until you fix the file.`, { action: openFileAction });
+  const out = settingsToWrite(raw, settings, invalid);
+  try {
+    const path = await file();
+    await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
+    await invoke("write_file", { path, contents: JSON.stringify(out, null, 2) + "\n" });
+    raw = out;
+  } catch (e) {
+    showError("Couldn't save your settings", e, { label: "Retry", run: persist });
+  }
 }
 
 /** Changes one setting, applies it, and saves. */
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-  settings[key] = value;
+  set(key, value);
+}
+
+function set(key: string, value: unknown) {
+  (settings as Record<string, unknown>)[key] = value;
+  invalid.delete(key);
   apply();
   persist();
+}
+
+/** A field for registerSettings: a Field without its group, which registerSettings sets. */
+export type FieldInput = Field extends infer F ? (F extends Field ? Omit<F, "group"> : never) : never;
+
+/**
+ * Adds a group of settings from another module, such as the terminal's: their defaults and their fields in the
+ * dialog, under `group`. Call it when the module loads. Returns the settings object, typed with the group's keys,
+ * which always holds the current values; onSettings tells you when they change.
+ *
+ *   const terminal = registerSettings("Terminal", { terminalFontSize: 0 }, [
+ *     { key: "terminalFontSize", label: "Font size", type: "number", min: 0, max: 32, help: "0 uses the editor's." },
+ *   ]);
+ */
+export function registerSettings<T extends Record<string, Value>>(group: string, values: T, list: (FieldInput & { key: keyof T & string })[]): T {
+  Object.assign(registered, values);
+  fields.push(...list.map((f) => ({ ...f, group }) as Field));
+  // Settings may have loaded already; take the saved values for the new keys.
+  const read = readSaved(raw, values, ranges());
+  Object.assign(settings, read.values);
+  for (const [k, why] of read.invalid) invalid.set(k, why);
+  return settings as unknown as T;
 }
 
 let keymapEditor = () => {};
 /** Sets what the Keymap button in the dialog opens. */
 export const setKeymapEditor = (open: () => void) => (keymapEditor = open);
+let openFile: (path: string) => unknown = () => {};
+/** Sets how the dialog opens settings.json in the editor. */
+export const setFileOpener = (open: (path: string) => unknown) => (openFile = open);
+
+/** Opens settings.json in the editor, writing it first when there's none yet. */
+export async function openSettingsFile() {
+  const path = await file();
+  if (!(await invoke<boolean>("path_exists", { path }).catch(() => false))) await persist();
+  openFile(path);
+}
 
 /** Applies the settings to an editor now and after every change. */
 export function addEditor(ed: monaco.editor.ICodeEditor) {
@@ -182,99 +248,176 @@ export function removeEditor(ed: monaco.editor.ICodeEditor) {
   setVim(ed, false);
 }
 
-/** Loads settings from disk and applies them. Unknown or invalid values fall back to defaults. */
+/**
+ * Reads settings.json. A file that isn't valid JSON is left as it is: the defaults apply, nothing is written until
+ * you fix it, and a toast offers to open it. A value of the wrong type, or a number out of range, uses its default
+ * and stays in the file until you change that setting.
+ */
+async function load() {
+  const path = await file();
+  let text: string;
+  try {
+    text = await invoke<string>("read_file", { path });
+  } catch (e) {
+    // No settings file yet: use the defaults.
+    if (!(await invoke<boolean>("path_exists", { path }).catch(() => true))) return;
+    blocked = `Can't read settings.json: ${errorText(e)}`;
+    return toast(`${blocked}. Tusk uses the default settings and won't change the file.`, { action: openFileAction });
+  }
+  const parsed = parseSettingsFile(text);
+  if ("error" in parsed) {
+    blocked = parsed.error;
+    return toast(`${blocked}. Tusk uses the default settings and won't change the file until you fix it.`, { action: openFileAction });
+  }
+  blocked = "";
+  raw = parsed.raw;
+  const read = readSaved(raw, allDefaults(), ranges());
+  Object.assign(settings, read.values);
+  invalid = read.invalid;
+  // The file keeps every value, so the default font list from before the Nerd Font names came along stays in it.
+  if (settings.fontFamily === "JetBrains Mono, SF Mono, Menlo, monospace") settings.fontFamily = defaults.fontFamily;
+  if (invalid.size)
+    toast(`Some values in settings.json can't be used, so their defaults apply: ${[...invalid].map(([k, why]) => `${k} ${why}`).join("; ")}.`, { action: openFileAction });
+}
+
+/** Loads settings from disk and applies them. */
 export async function initSettings() {
   await loadImportedThemes();
-  try {
-    const saved = JSON.parse(await invoke<string>("read_file", { path: await file() }));
-    for (const key of Object.keys(defaults) as (keyof Settings)[]) {
-      if (typeof saved[key] === typeof defaults[key] && saved[key] !== null) (settings as Record<string, unknown>)[key] = saved[key];
-    }
-    // The file keeps every value, so the default font list from before the Nerd Font names came along stays in it.
-    if (settings.fontFamily === "JetBrains Mono, SF Mono, Menlo, monospace") settings.fontFamily = defaults.fontFamily;
-  } catch {
-    // No settings file yet: use the defaults.
-  }
+  await load();
   apply();
 }
 
-/** Opens the settings dialog. Changes apply and save immediately. */
-export function openSettings() {
-  document.getElementById("settings")?.remove();
-  const dialog = document.createElement("dialog");
-  dialog.id = "settings";
-  const form = document.createElement("form");
-  form.method = "dialog";
-  const heading = document.createElement("h2");
-  heading.textContent = "Settings";
-  form.append(heading);
+/** Reads settings.json again after you save it in the editor, and applies it. */
+export async function settingsFileSaved(path: string) {
+  if (path !== (await file())) return;
+  const wasBlocked = blocked;
+  await load();
+  apply();
+  // The toasts about the old file's problems no longer apply.
+  if (!blocked) document.querySelectorAll("#toasts .toast").forEach((t) => t.textContent?.includes("settings.json") && t.remove());
+  if (!blocked) toast(wasBlocked ? "Fixed settings.json. Changes save again." : "Applied settings.json.", { kind: "info", timeout: 4000 });
+}
 
-  const conditional: [HTMLElement, () => boolean][] = [];
-  const showApplicable = () => conditional.forEach(([row, shown]) => (row.hidden = !shown()));
-  for (const f of fields) {
-    if (f.section) form.append(Object.assign(document.createElement("h3"), { textContent: f.section }));
-    const row = document.createElement("label");
-    row.className = `setting setting-${f.type}`;
-    const name = document.createElement("span");
-    name.textContent = f.label;
+const valueText = (v: unknown) => (typeof v === "boolean" ? (v ? "on" : "off") : String(v));
+
+/**
+ * Opens the settings dialog. Changes apply and save immediately. The search box filters settings in every group by
+ * label, description, group, and key; each changed setting has a reset button.
+ */
+export function openSettings(query = "") {
+  document.getElementById("settings")?.remove();
+  const dialog = h("dialog", { id: "settings", ariaLabel: "Settings" });
+  const search = h("input", { type: "search", className: "settings-search", placeholder: "Search settings", ariaLabel: "Search settings", spellcheck: false, value: query });
+  const body = h("div", { class: "settings-body" });
+  const empty = h("p", { class: "muted settings-empty", hidden: true }, "No settings match.");
+  const banner = blocked
+    ? h("div", { class: "settings-banner", role: "alert" }, icon("warning"), h("span", {}, `${blocked}. Changes here apply, but aren't saved until you fix the file.`), h("button", { type: "button", onclick: () => (dialog.close(), openSettingsFile()) }, "Open settings.json"))
+    : null;
+
+  type Row = { f: Field; row: HTMLElement; section: HTMLElement; text: string; sync(): void };
+  const rows: Row[] = [];
+  const sections = new Map<string, HTMLElement>();
+  const current = (key: string) => (settings as Record<string, unknown>)[key];
+  fields.forEach((f, n) => {
+    if (!sections.has(f.group)) sections.set(f.group, body.appendChild(h("section", { class: "settings-group" }, h("h3", {}, f.group))));
+    const section = sections.get(f.group)!;
+    const id = `setting-${n}`;
+    const error = h("small", { class: "setting-error", role: "alert" });
     let input: HTMLInputElement | HTMLSelectElement;
     if (f.type === "select") {
-      input = document.createElement("select");
+      input = h("select", { id });
       const groups = new Map<string, HTMLElement>();
       for (const [value, text, group] of typeof f.options === "function" ? f.options() : f.options) {
         let parent: HTMLElement = input;
-        if (group) {
-          if (!groups.has(group)) groups.set(group, input.appendChild(Object.assign(document.createElement("optgroup"), { label: group })));
-          parent = groups.get(group)!;
-        }
-        parent.append(new Option(text, value, false, settings[f.key] === value));
+        if (group) parent = groups.get(group) ?? groups.set(group, input.appendChild(h("optgroup", { label: group }))).get(group)!;
+        parent.append(new Option(text, value));
       }
-    } else {
-      input = document.createElement("input");
-      input.type = f.type;
-      if (f.type === "checkbox") input.checked = settings[f.key] as boolean;
-      else input.value = String(settings[f.key]);
-      if (f.type === "number") Object.assign(input, { min: f.min, max: f.max });
-    }
+    } else input = h("input", { id, type: f.type, ...(f.type === "number" ? { min: String(f.min), max: String(f.max) } : {}), ...(f.type === "text" ? { placeholder: f.placeholder ?? "", spellcheck: false } : {}) });
+    const fallback = allDefaults()[f.key];
+    const reset = h("button", { type: "button", class: "icon-button setting-reset", title: `Reset to the default (${valueText(fallback) || "empty"})`, ariaLabel: `Reset ${f.label} to the default` }, icon("discard"));
+    reset.onclick = () => (set(f.key, fallback), refresh(), input.focus());
+    const label = h("label", { htmlFor: id }, f.label);
+    const row = h("div", { class: `setting setting-${f.type}` });
+    if (f.type === "checkbox") row.append(input, label, reset);
+    else row.append(label, h("span", { class: "setting-control" }, input, reset));
+    if (f.help) row.append(h("small", {}, f.help));
+    row.append(error);
+    const invalidNote = () => (invalid.has(f.key) ? `The value in settings.json ${invalid.get(f.key)}, so the default is used.` : "");
+    const sync = () => {
+      const v = current(f.key);
+      if (input instanceof HTMLInputElement && f.type === "checkbox") input.checked = v as boolean;
+      else if (document.activeElement !== input || f.type === "select") input.value = String(v);
+      reset.style.visibility = v === fallback ? "hidden" : "";
+      if (!input.ariaInvalid) error.textContent = invalidNote();
+    };
     input.onchange = () => {
       const el = input as HTMLInputElement;
-      const value = f.type === "checkbox" ? el.checked : f.type === "number" ? Math.min(f.max, Math.max(f.min, Number(el.value) || (defaults[f.key] as number))) : el.value;
-      (settings as Record<string, unknown>)[f.key] = value;
-      apply();
-      persist();
-      showApplicable();
+      if (f.type === "number") {
+        const n = Number(el.value);
+        if (!el.value.trim() || !Number.isFinite(n) || n < f.min || n > f.max) {
+          el.ariaInvalid = "true";
+          error.textContent = `Enter a number from ${f.min} to ${f.max}.`;
+          return;
+        }
+        el.ariaInvalid = null;
+        return set(f.key, n), refresh();
+      }
+      set(f.key, f.type === "checkbox" ? el.checked : el.value);
+      refresh();
     };
-    if (f.type === "checkbox") row.append(input, name);
-    else row.append(name, input);
-    if (f.help) {
-      const help = document.createElement("small");
-      help.textContent = f.help;
-      row.append(help);
-    }
-    form.append(row);
-    if (f.shown) conditional.push([row, f.shown]);
-  }
-  showApplicable();
+    section.append(row);
+    rows.push({ f, row, section, text: [f.group, f.label, f.help, f.key].join(" ").toLowerCase(), sync });
+  });
 
-  const button = (text: string, run: () => void) =>
-    Object.assign(document.createElement("button"), { type: "button", textContent: text, onclick: () => (dialog.close(), run()) });
-  const themes = button("Browse Themes…", pickTheme);
-  const importButton = button("Import Theme…", importTheme);
-  const keymap = document.createElement("button");
-  keymap.type = "button";
-  keymap.textContent = "Keymap…";
-  keymap.onclick = () => (dialog.close(), keymapEditor());
-  const done = document.createElement("button");
-  done.className = "primary";
-  done.textContent = "Done";
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
-  actions.append(themes, importButton, keymap, done);
-  form.append(actions);
+  /** Shows the settings that apply and match the search, and each one's value and reset button. */
+  const refresh = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    for (const r of rows) {
+      r.row.hidden = !(r.f.shown?.() ?? true) || !words.every((w) => r.text.includes(w));
+      r.sync();
+    }
+    for (const section of sections.values()) section.hidden = rows.every((r) => r.section !== section || r.row.hidden);
+    empty.hidden = rows.some((r) => !r.row.hidden);
+  };
+  search.oninput = refresh;
+  refresh();
+
+  const button = (text: string, run: () => unknown) => h("button", { type: "button", onclick: () => (dialog.close(), run()) }, text);
+  const resetAll = h("button", { type: "button" }, "Reset All…");
+  resetAll.onclick = async () => {
+    const changed = fields.filter((f) => current(f.key) !== allDefaults()[f.key]);
+    if (!changed.length) return toast("Every setting already has its default value.", { kind: "info", timeout: 4000 });
+    dialog.close();
+    if (!(await confirm(`Reset ${changed.length} ${changed.length === 1 ? "setting" : "settings"} to the defaults? Your keymap stays as it is.`, "Reset All"))) return openSettings(search.value);
+    for (const f of changed) {
+      (settings as Record<string, unknown>)[f.key] = allDefaults()[f.key];
+      invalid.delete(f.key);
+    }
+    apply();
+    await persist();
+    openSettings(search.value);
+  };
+  const done = h("button", { class: "primary", type: "submit" }, "Done");
+  const actions = h(
+    "div",
+    { class: "settings-actions" },
+    button("Browse Themes…", pickTheme),
+    button("Import Theme…", importTheme),
+    button("Keymap…", keymapEditor),
+    button("Open settings.json", openSettingsFile),
+    resetAll,
+    done,
+  );
+  const form = h("form", { method: "dialog" }, h("header", { class: "settings-header" }, h("h2", {}, "Settings"), search), banner, body, empty, actions);
   dialog.append(form);
   document.body.append(dialog);
   dialog.addEventListener("close", () => dialog.remove());
+  // Escape clears the search first, then closes.
+  dialog.addEventListener("cancel", (e) => {
+    if (search.value && document.activeElement === search) e.preventDefault(), (search.value = ""), refresh();
+  });
   dialog.showModal();
+  search.focus();
 }
 
 /** Opens a picker of color themes that previews each one as you move through the list. Escape restores the theme. */

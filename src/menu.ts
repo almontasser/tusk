@@ -20,7 +20,7 @@ const LAYOUT: [string, Entry[]][] = [
     "Extend Selection", "Shrink Selection", "-", "Duplicate Line", "Delete Line", "Join Lines", "Toggle Case",
     ["Change Case", commandsIn("case")], ["Lines", commandsIn("lines").filter((l) => l !== "Join Lines")], ["Indentation", [...commandsIn("indent").slice(0, 2), "-", ...commandsIn("indent").slice(2)]], "-",
     "Toggle Bookmark", "Show Bookmarks", "Edit Snippets (Live Templates)"]],
-  ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
+  ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Find in Terminal", "Rename Terminal Tab…", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
     "Maximize Bottom Panel", "Hide Bottom Panel", "Toggle Full-Width Bottom Panel", "-",
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Markdown Preview", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-", native("Fullscreen")]],
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "Select Opened File in Project", "-",

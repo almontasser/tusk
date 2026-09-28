@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
+import { installErrorHandlers, showError, status } from "./status";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
@@ -37,7 +38,7 @@ import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPull
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, initFormatting } from "./format";
-import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setKeymapEditor, settings, updateSetting } from "./settings";
+import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
 import { attachTestRunner, initRunner, isTestFile, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
@@ -54,12 +55,13 @@ import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
 import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 type Tab = { model: monaco.editor.ITextModel; saved: number };
 
 const $ = (id: string) => document.getElementById(id)!;
+installErrorHandlers();
 // ---- Editor panes ----
 // Each pane has its own tabs (`Pane.paths`); `tabs` holds every open file's model, shared by
 // panes that show it. `editor` and `active` are the focused pane's editor and file. Panes nest in
@@ -426,6 +428,7 @@ $("terminal-tabs").addEventListener("drop", (e) => {
 const viewPath = (tab: PanelTab) => [...views].find(([, t]) => t === tab)?.[0];
 initDocking({
   root: () => root || "/",
+  openAt: (path, line, column = 1) => openAt(path, { lineNumber: line, column }),
   reveal(tab) {
     const path = viewPath(tab);
     const pane = path && panes.find((p) => p.paths.includes(path));
@@ -777,29 +780,6 @@ function forget(path: string) {
   markActiveInTree();
 }
 
-/**
- * Status messages by source, so one language server finishing a task doesn't clear another's
- * progress. The status bar shows the most recent message that is still set.
- */
-const statuses = new Map<string, string>();
-const statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-/**
- * Shows a status message. Sources ending in ":progress" are background work and show a
- * spinner until cleared; other messages clear themselves after 8 seconds.
- */
-function status(text: string, source = "app") {
-  statuses.delete(source);
-  if (text) statuses.set(source, text);
-  clearTimeout(statusTimers.get(source));
-  if (text && !source.endsWith(":progress")) statusTimers.set(source, setTimeout(() => status("", source), 8000));
-  const [latestSource, latest] = [...statuses].at(-1) ?? ["", ""];
-  $("lsp-status").textContent = latest;
-  $("lsp-status").classList.toggle("busy", latestSource.endsWith(":progress"));
-  // Failures also show as a toast, so they aren't missed in the status bar.
-  if (/\b(failed|error|fatal|can't|couldn't|invalid)\b/i.test(text)) toast(text);
-}
-
 // ---- Status bar items for the focused editor ----
 
 function updateStatusItems() {
@@ -1138,7 +1118,7 @@ function changeEncoding() {
           } else if (how === "Reopen") {
             if (isDirty(tab) && !(await confirm(`Reopen ${nameOf(path)}? Its unsaved changes are lost.`, "Reopen"))) return;
             setCharset(path, charset);
-            const text = await readText(path).catch((e) => (setCharset(path, undefined), status(`Couldn't reopen ${relative(path)}: ${e}`), null));
+            const text = await readText(path).catch((e) => (setCharset(path, undefined), showError(`Couldn't reopen ${relative(path)}`, e), null));
             if (text === null) return;
             tab.model.setValue(text);
             tab.saved = tab.model.getAlternativeVersionId();
@@ -1195,12 +1175,13 @@ async function saveFile(path: string) {
   try {
     await writeText(path, text);
   } catch (e) {
-    return status(`Couldn't save ${relative(path)}: ${e}`);
+    return showError(`Couldn't save ${relative(path)}`, e);
   }
   markSaved(path);
   didSave(tab.model);
   afterSave(path, text);
   recordVersion(path, text);
+  settingsFileSaved(path);
 }
 
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
@@ -1434,7 +1415,8 @@ const goToSymbol = () => pick("Go to symbol", (q) => symbolItems(q, false), 150)
 /** Shows the current file against the clipboard, or against another file, in the diff view. */
 async function compareWithClipboard() {
   if (!active) return;
-  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch(() => "");
+  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch((e) => (showError("Can't read the clipboard", e), null));
+  if (clipboard === null) return;
   showDiff(relative(active), clipboard, editor.getValue(), "Clipboard ↔ Current file");
 }
 
@@ -1651,6 +1633,9 @@ const actions: Action[] = [
   { label: "Maximize Bottom Panel", keys: "Shift+Meta+Quote", run: togglePanelMaximized },
   // ⇧⎋ hides the panel while you work in it, as PhpStorm's Hide Active Tool Window; elsewhere it's the editor's.
   { label: "Hide Bottom Panel", keys: "Shift+Escape", run: hidePanel, when: () => panelShown() && !!document.activeElement?.closest("#panel") },
+  // ⌘F finds in the terminal while one has focus, and in the editor otherwise.
+  { label: "Find in Terminal", keys: "Meta+F", run: () => findInTerminal() || toast("Open a terminal to find in it.", { kind: "info", timeout: 4000 }), when: terminalFocused },
+  { label: "Rename Terminal Tab…", run: () => renameTerminal() },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
@@ -1723,6 +1708,7 @@ onSettings((s) => {
   if (JSON.stringify(s.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(s.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
 });
 setKeymapEditor(() => editKeymap());
+setFileOpener((path) => openFile(path));
 
 // Turning spell checking on or off starts or stops its language server.
 let spellCheck = settings.spellCheck;

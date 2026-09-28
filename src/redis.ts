@@ -36,6 +36,7 @@ import {
   valueKind,
   visibleRows,
 } from "./redisdata";
+import { withProgress } from "./status";
 import { showPanelView } from "./terminal";
 
 export type RedisHost = {
@@ -375,15 +376,22 @@ function forget(keys: string[]) {
 
 /** Deletes every key under a folder, all of them rather than only those loaded, after counting and asking. */
 async function deleteFolder(prefix: string) {
-  host.status(`Counting the keys under ${prefix}…`);
-  const keys = new Set<string>();
-  let cursor = "0";
-  do {
-    const [c, batch] = (await one("SCAN", cursor, "MATCH", `${globEscape(prefix)}*`, "COUNT", "1000")) as [string, Reply[]];
-    cursor = c;
-    for (const k of batch) if (typeof k === "string") keys.add(k);
-  } while (cursor !== "0");
-  host.status("");
+  const keys = await withProgress(
+    `Counting the keys under ${prefix}…`,
+    async (signal) => {
+      const keys = new Set<string>();
+      let cursor = "0";
+      do {
+        signal.throwIfAborted();
+        const [c, batch] = (await one("SCAN", cursor, "MATCH", `${globEscape(prefix)}*`, "COUNT", "1000")) as [string, Reply[]];
+        cursor = c;
+        for (const k of batch) if (typeof k === "string") keys.add(k);
+      } while (cursor !== "0");
+      return keys;
+    },
+    { cancellable: true, error: `Can't count the keys under ${prefix}` },
+  );
+  if (!keys) return;
   if (!keys.size) return toast(`No keys are under ${prefix}.`, { kind: "info" });
   const n = keys.size.toLocaleString();
   if (!(await confirm(`Delete ${n} ${keys.size === 1 ? "key" : "keys"} under ${prefix}? This can't be undone.`, `Delete ${n} ${keys.size === 1 ? "Key" : "Keys"}`))) return;
