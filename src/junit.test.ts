@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf, parseTeamcity, moveMarks } from "./junit.ts";
+import { filterFor, parseClover, parseEvents, parseJUnit, sameTest, uncoveredRanges, coverageIndex, coveringTests, testOf, parseTeamcity, moveMarks, parseFailure, withDetails, testKey, localPath } from "./junit.ts";
 
 const results = parseJUnit(readFileSync(new URL("./junit.fixture.xml", import.meta.url), "utf8"));
 
@@ -127,7 +127,7 @@ test("reads live results from a TeamCity log", () => {
   ].join("\n");
   const { total, tests } = parseTeamcity(log);
   assert.equal(total, 2);
-  assert.deepEqual(tests[0], { className: "Tests\\Unit\\ATest", name: "test_fails", status: "failed", file: "/app/tests/Unit/ATest.php", message: "it's [bad]\nFailed", line: 11 });
+  assert.deepEqual(tests[0], { className: "Tests\\Unit\\ATest", name: "test_fails", status: "failed", file: "/app/tests/Unit/ATest.php", message: "it's [bad]\nFailed", line: 11, trace: "/app/tests/Unit/ATest.php:11" });
   assert.equal(tests[1].status, "running");
 });
 
@@ -139,4 +139,63 @@ test("moves coverage marks with their lines and marks changed lines stale", () =
   const edited = ["<?php", "$b = 2;", "$c = 30;"];
   const moved = moveMarks([[2, marks.get(2)!], [2, marks.get(3)!], [3, marks.get(4)!]], (l) => edited[l - 1]);
   assert.deepEqual([...moved].map(([l, m]) => [l, m.at, m.stale]), [[2, 3, false], [3, 4, true]]);
+});
+
+const fixture = (name: string) => readFileSync(new URL(name, import.meta.url), "utf8");
+
+test("reads PHPUnit's expected/actual diff and stack from a failure", () => {
+  const [strings, arrays, numbers, error] = parseJUnit(fixture("./junit.phpunit-diff.fixture.xml"));
+  assert.deepEqual(parseFailure(strings.message), {
+    text: "Failed asserting that two strings are identical.",
+    expected: "'hello\nworld'",
+    actual: "'hello\nthere'",
+    frames: [{ file: "/app/tests/Unit/DiffTest.php", line: 11 }],
+  });
+  const a = parseFailure(arrays.message);
+  assert.equal(a.expected, "Array (\n    'a' => 1\n    'b' => 2\n)");
+  assert.equal(a.actual, "Array (\n    'a' => 1\n    'b' => 3\n)");
+  assert.deepEqual(parseFailure(numbers.message), { text: "Failed asserting that 2 is identical to 1.", frames: [{ file: "/app/tests/Unit/DiffTest.php", line: 21 }] });
+  assert.equal(parseFailure(error.message).text, "RuntimeException: boom");
+});
+
+test("takes Pest's expected and actual values from the TeamCity log", () => {
+  const live = parseTeamcity(fixture("./teamcity.pest-diff.fixture.txt")).tests;
+  const pest = live.find((t) => t.name === "it compares strings")!;
+  assert.deepEqual([pest.className, pest.file, pest.line, pest.expected, pest.actual], ["Tests\\Feature\\DiffPestTest", "/app/tests/Feature/DiffPestTest.php", 4, "'hello\nthere'", "'hello\nworld'"]);
+  // Pest's JUnit report has no diff; the log fills it in, for Pest tests and for PHPUnit classes that Pest runs.
+  const results = withDetails(parseJUnit(fixture("./junit.pest-diff.fixture.xml")), live);
+  const by = (name: string) => parseFailure(results.find((r) => r.name === name)!.message, results.find((r) => r.name === name));
+  assert.deepEqual(by("it compares with assert"), { text: "Failed asserting that two strings are identical.", expected: "'x'", actual: "'y'", frames: [{ file: "/app/tests/Feature/DiffPestTest.php", line: 12 }] });
+  assert.equal(by("Arrays").actual, "Array (\n    'a' => 1\n    'b' => 3\n)");
+  assert.deepEqual(by("Numbers").expected, undefined);
+  assert.deepEqual(by("Error").frames, [{ file: "/app/tests/Unit/DiffTest.php", line: 26 }]);
+});
+
+test("reads every frame of a stack, in Pest's and PHP's formats", () => {
+  const message = "BadMethodCallException: Call to undefined method App\\Models\\Post::nope()\nat vendor/laravel/framework/src/Illuminate/Support/Traits/ForwardsCalls.php:67\nat tests/Feature/DeepTest.php:3\n#1 /var/www/html/app/Models/Post.php(12): App\\Models\\Post->x()";
+  assert.deepEqual(parseFailure(message), {
+    text: "BadMethodCallException: Call to undefined method App\\Models\\Post::nope()",
+    frames: [
+      { file: "vendor/laravel/framework/src/Illuminate/Support/Traits/ForwardsCalls.php", line: 67 },
+      { file: "tests/Feature/DeepTest.php", line: 3 },
+      { file: "/var/www/html/app/Models/Post.php", line: 12 },
+    ],
+  });
+});
+
+test("matches a test across report formats", () => {
+  assert.equal(testKey("Tests\\Unit\\A", "Strings"), testKey("Tests\\Unit\\A", "test_strings"));
+  assert.equal(testKey("Tests\\A", "`home page` → it loads"), testKey("P\\Tests\\A", "__pest_evaluable__home_page__→_it_loads"));
+  assert.notEqual(testKey("Tests\\A", 'it adds with data set "(1)"'), testKey("Tests\\A", 'it adds with data set "(2)"'));
+});
+
+test("reads a test's printed output", () => {
+  const [r] = parseJUnit('<testcase name="t" class="A" file="/a.php" line="3" time="0.1"><system-out>hello &amp; bye\n</system-out></testcase>');
+  assert.equal(r.output, "hello & bye\n");
+});
+
+test("maps report paths to the project", () => {
+  assert.equal(localPath("/var/www/html/tests/A.php", "/p", "/var/www/html"), "/p/tests/A.php");
+  assert.equal(localPath("tests/A.php", "/p", "/var/www/html"), "/p/tests/A.php");
+  assert.equal(localPath("/p/tests/A.php", "/p", "/var/www/html"), "/p/tests/A.php");
 });

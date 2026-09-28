@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Unit\DiffTest" file="/app/tests/Unit/DiffTest.php" tests="4" assertions="3" errors="1" failures="3" skipped="0" time="0.004369">
+    <testcase name="test_strings" file="/app/tests/Unit/DiffTest.php" line="9" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.003607">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\DiffTest::test_strings
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+ 'hello
+-world'
++there'
+
+/app/tests/Unit/DiffTest.php:11</failure>
+    </testcase>
+    <testcase name="test_arrays" file="/app/tests/Unit/DiffTest.php" line="14" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.000325">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\DiffTest::test_arrays
+Failed asserting that two arrays are equal.
+--- Expected
++++ Actual
+@@ @@
+ Array (
+     'a' =&gt; 1
+-    'b' =&gt; 2
++    'b' =&gt; 3
+ )
+
+/app/tests/Unit/DiffTest.php:16</failure>
+    </testcase>
+    <testcase name="test_numbers" file="/app/tests/Unit/DiffTest.php" line="19" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="1" time="0.000262">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\DiffTest::test_numbers
+Failed asserting that 2 is identical to 1.
+
+/app/tests/Unit/DiffTest.php:21</failure>
+    </testcase>
+    <testcase name="test_error" file="/app/tests/Unit/DiffTest.php" line="24" class="Tests\Unit\DiffTest" classname="Tests.Unit.DiffTest" assertions="0" time="0.000175">
+      <error type="RuntimeException">Tests\Unit\DiffTest::test_error
+RuntimeException: boom
+
+/app/tests/Unit/DiffTest.php:26</error>
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -152,7 +152,7 @@ const panel = document.createElement("div");
 panel.className = "tests coverage";
 panel.innerHTML = `
   <div class="tests-toolbar">
-    <button data-run="rerun" title="Rerun with coverage (⌃R)"><span class="codicon codicon-debug-rerun"></span></button>
+    <button data-run="rerun" title="Rerun with coverage"><span class="codicon codicon-debug-rerun"></span></button>
     <button data-run="hide" title="Hide coverage"><span class="codicon codicon-eye-closed"></span></button>
     <select class="coverage-sort" aria-label="Sort folders and files">
       <option value="coverage">Least covered first</option>

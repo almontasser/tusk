@@ -76,6 +76,44 @@
         "additionalProperties": false
       }
     },
+    "runConfigurations": {
+      "type": "array",
+      "description": "Run configurations shared with the team. Each has a name, a type, and that type's fields; configurations you don't share stay on your Mac.",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string", "description": "The configuration's name, unique in the project." },
+          "type": { "enum": ["test", "artisan", "php", "composer", "npm", "shell", "server"], "description": "What it runs: PHPUnit or Pest tests, an Artisan command, a PHP script, a Composer script, an npm script, a shell command, or a PHP web server." },
+          "cwd": { "type": "string", "description": "The folder to run in, relative to the project. Empty for the project folder." },
+          "env": { "type": "object", "additionalProperties": { "type": "string" }, "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }, "description": "Environment variables." },
+          "docker": { "type": "boolean", "description": "Run in the project's container (Sail, or the chosen Compose service) when it's up. Tests, Artisan commands, and PHP scripts do by default." },
+          "before": {
+            "type": "array",
+            "description": "Steps to run first, in order. A step that fails stops the launch.",
+            "items": {
+              "oneOf": [
+                { "type": "object", "required": ["config"], "properties": { "config": { "type": "string", "description": "Another configuration's name." } }, "additionalProperties": false },
+                { "type": "object", "required": ["command"], "properties": { "command": { "type": "string", "description": "A shell command line." } }, "additionalProperties": false }
+              ]
+            }
+          },
+          "multiple": { "type": "boolean", "description": "Allow running it again while it runs, instead of stopping it first." },
+          "runner": { "enum": ["auto", "artisan", "pest", "phpunit"], "description": "Tests: the test runner. auto tries php artisan test, then Pest, then PHPUnit." },
+          "scope": { "enum": ["all", "directory", "file", "class", "method", "filter"], "description": "Tests: what to run." },
+          "path": { "type": "string", "description": "Tests: the directory or file. PHP script: the script. Server: the document root." },
+          "filter": { "type": "string", "description": "Tests: the class, the method or Pest description, or a --filter pattern." },
+          "configFile": { "type": "string", "description": "Tests: the PHPUnit configuration file, such as phpunit.xml." },
+          "coverage": { "type": "boolean", "description": "Tests: collect code coverage." },
+          "command": { "type": "string", "description": "The Artisan command, the Composer or npm script, or the shell command line." },
+          "args": { "type": "string", "description": "More arguments, as you'd type them in a shell." },
+          "server": { "enum": ["artisan", "php"], "description": "Server: php artisan serve, or PHP's built-in server." },
+          "host": { "type": "string", "description": "Server: the host to listen on." },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Server: the port." }
+        },
+        "additionalProperties": false
+      }
+    },
     "databaseSsh": {
       "type": "object",
       "description": "The SSH destination each database connection goes through, by connection name. The empty name is .env's connection.",

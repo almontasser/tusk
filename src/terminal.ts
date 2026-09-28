@@ -20,7 +20,7 @@ import { onTheme } from "./themes";
  */
 export type Restore = { title: string; cwd: string; command?: string[]; scrollback?: string };
 /** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; search?: SearchAddon; restore?: Restore; icon?: string; editorOnly?: boolean };
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; search?: SearchAddon; restore?: Restore; icon?: string; editorOnly?: boolean; stop?(): void };
 /** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
 export type PanelTab = Session;
 
@@ -127,13 +127,24 @@ function linkFiles(term: Terminal, cwd: () => string) {
   });
 }
 
+/** A command running in a terminal tab. `stop` interrupts it (⌃C), and kills it when it's still running 3 seconds later or on a second call. */
+export type TerminalRun = { stop(): void; exited(): boolean; reveal(): void };
+
 /**
  * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
- * ends; `onClose` runs when its tab closes, even while the process still runs. Shells, and commands
+ * ends, with its exit code when known; `onClose` runs when its tab closes, even while the process still runs. Shells, and commands
  * opened with `restorable` (such as a dev server), reopen with the project while they still run. `scrollback` is
- * output from the last session to show first.
+ * output from the last session to show first. Resolves to the running command, or undefined when it couldn't start.
  */
-export async function openTerminal(cwd: string, title = "Terminal", command?: string[], onExit?: () => void, onClose?: () => void, restorable = false, scrollback?: string): Promise<void> {
+export async function openTerminal(
+  cwd: string,
+  title = "Terminal",
+  command?: string[],
+  onExit?: (code: number | null) => void,
+  onClose?: () => void,
+  restorable = false,
+  scrollback?: string,
+): Promise<TerminalRun | undefined> {
   showPanel(true);
   const [{ Terminal }, { FitAddon }, { SearchAddon }, { WebLinksAddon }] = await loadXterm();
   const el = document.createElement("div");
@@ -184,15 +195,26 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
       if (now) restore!.cwd = now;
     }, 500);
   };
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
   const unlisteners = await Promise.all([
     listen<string>(`pty:${id}`, (e) => (term.write(e.payload), changed())),
-    listen(`pty-exit:${id}`, () => {
+    listen<number | null>(`pty-exit:${id}`, (e) => {
       session.exited = true;
-      term.write("\r\n\x1b[2m[Process exited]\x1b[0m\r\n");
+      clearTimeout(killTimer);
+      const code = typeof e.payload === "number" ? e.payload : null;
+      term.write(`\r\n\x1b[2m[Process exited${code === null ? "" : ` with code ${code}`}]\x1b[0m\r\n`);
       renderTabs();
-      onExit?.();
+      onExit?.(code);
     }),
   ]);
+  const kill = () => invoke("pty_kill", { id });
+  if (command)
+    session.stop = () => {
+      if (session.exited) return;
+      if (killTimer) return clearTimeout(killTimer), kill();
+      invoke("pty_write", { id, data: "\x03" }).catch(kill);
+      killTimer = setTimeout(kill, 3000);
+    };
   const input = term.onData((data) => (followCwd(data), invoke("pty_write", { id, data }).catch(() => {})));
   const resize = term.onResize(({ rows, cols }) => invoke("pty_resize", { id, rows, cols }).catch(() => {}));
   const observer = new ResizeObserver(() => el.offsetParent && fit.fit());
@@ -213,6 +235,11 @@ export async function openTerminal(cwd: string, title = "Terminal", command?: st
   if (finished) finished.dispose(), sessions.splice(sessions.indexOf(finished), 1, session);
   else sessions.push(session);
   activate(session);
+  return {
+    stop: () => session.stop?.(),
+    exited: () => session.exited,
+    reveal: () => (docked.includes(session) ? editorHost.reveal(session) : sessions.includes(session) && (showPanel(true), activate(session))),
+  };
 }
 
 /** Closes every terminal tab, stopping its process, as when another project opens. Other panel views stay. */
@@ -323,7 +350,8 @@ function renderTabs() {
   $("terminal-tabs").replaceChildren(
     ...sessions.map((s) => {
       const tab = document.createElement("div");
-      tab.className = `tab${s === active ? " active" : ""}${s.exited ? " exited" : ""}`;
+      const running = !!s.stop && !s.exited;
+      tab.className = `tab${s === active ? " active" : ""}${s.exited ? " exited" : ""}${running ? " running" : ""}`;
       tab.role = "tab";
       tab.ariaSelected = String(s === active);
       tab.tabIndex = s === active ? 0 : -1;
@@ -331,6 +359,11 @@ function renderTabs() {
       icon.className = `codicon codicon-${tabIcon(s)}`;
       const label = h("span", { class: "tab-title" }, s.title);
       tab.append(icon, label);
+      // A running command's tab has a running mark and a Stop button, as PhpStorm's Run tabs do.
+      if (running) {
+        tab.title = `${s.title}: running`;
+        tab.append(h("button", { class: "tab-stop codicon codicon-debug-stop", title: "Stop", ariaLabel: `Stop ${s.title}`, onclick: (e: MouseEvent) => (e.stopPropagation(), s.stop!()) }));
+      }
       tab.onclick = () => activate(s);
       // Double-click a terminal's title to rename it.
       if (s.term) tab.ondblclick = (e) => (e.stopPropagation(), rename(s, label));
@@ -339,6 +372,7 @@ function renderTabs() {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [
           ...(s.term ? [{ label: "Rename…", run: () => rename(s, label) }] : []),
+          ...(s.stop && !s.exited ? [{ label: "Stop", run: () => s.stop!() }] : []),
           { label: "Close", run: () => close(s) },
           { label: "Close Others", run: () => sessions.filter((o) => o !== s).forEach(close) },
           { label: "Close All", run: () => [...sessions].forEach(close) },

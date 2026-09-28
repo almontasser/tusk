@@ -39,7 +39,8 @@ file to change when you add it.
 | Area | Gap |
 | --- | --- |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
-| Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
+| Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
+| Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
 | Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at 20,000 matches, counted before those outside comments are dropped. |
@@ -298,13 +299,15 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘F in a terminal | Find in the terminal's output |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
-| ⌃R | Rerun the last test or command |
+| ⌃R | Run the selected run configuration |
+| ⌃D | Debug the selected run configuration |
+| ⌃⌥R, ⌃⌥D | Choose a run configuration to run or debug |
+| ⌘F2 | Stop the running configuration (while one runs; otherwise, stop debugging) |
 | ⌃⇧D | Debug the test at the cursor |
 | ⌘F8 | Toggle a breakpoint on the current line |
 | ⇧⌘F8 | View breakpoints, with the current line's breakpoint selected to edit its condition, hit count, or log message |
 | F9 | Resume (while debugging) |
 | F8, F7, ⇧F8 | Step over, step into, step out (when not paused, F8 and ⇧F8 go to the next and previous problem across files) |
-| ⌘F2 | Stop debugging |
 | ⌘K | Commit |
 | ⌘⇧K | Push |
 | ⌘T | Update the project (`git pull`) |
@@ -512,7 +515,7 @@ save every file they change.
 Tusk keeps some settings per project: breakpoints, watches, and how the
 debugger pauses on exceptions; the server paths for debugging; the Docker
 service that runs commands; saved database connections and their SSH tunnels;
-the index exclusions; the last URL you profiled; and the stress test form. Each
+the index exclusions; run configurations; the last URL you profiled; and the stress test form. Each
 one lives in one of two places:
 
 - **On this Mac**, in a file per project in
@@ -548,7 +551,11 @@ An example:
   "debugExceptions": { "pause": true, "classes": ["App\\Exceptions\\PaymentFailed"], "uncaughtOnly": false, "skip": ["vendor/**"] },
   "dockerService": "laravel.test",
   "databaseConnections": [{ "name": "reporting", "url": "pgsql://reader@db.internal:5432/reports" }],
-  "databaseSsh": { "reporting": "forge@203.0.113.5" }
+  "databaseSsh": { "reporting": "forge@203.0.113.5" },
+  "runConfigurations": [
+    { "name": "Unit tests", "type": "test", "scope": "directory", "path": "tests/Unit", "args": "--stop-on-failure" },
+    { "name": "Fresh database", "type": "artisan", "command": "migrate:fresh --seed", "before": [{ "command": "npm run build" }] }
+  ]
 }
 ```
 
@@ -562,9 +569,12 @@ An example:
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
 | `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `runConfigurations` | Shared run configurations: each a `name`, a `type` (`test`, `artisan`, `php`, `composer`, `npm`, `shell`, or `server`), and that type's fields. Configurations you don't share stay on this Mac. |
 
-The selected database connection, the last profiled URL, and the stress test
-form (`databaseConnection`, `profilerUrl`, and `httpLoadTest`) are personal,
+The selected database connection, the last profiled URL, the stress test
+form, and your own, temporary, and selected run configurations
+(`databaseConnection`, `profilerUrl`, `httpLoadTest`, `localRunConfigurations`,
+`temporaryRunConfigurations`, and `selectedRunConfiguration`) are personal,
 so they stay on this Mac. The first time you open a project in this version,
 Tusk moves these settings out of the web view's storage, where earlier
 versions kept them.
@@ -1713,17 +1723,71 @@ tests in the gutter** in Settings. Tests run through
 `vendor/bin/phpunit` otherwise. To run the whole suite, run **Run All Tests**
 from ⌘⇧A.
 
-While tests run, the **Tests** tab shows progress: how many tests have run,
-how many failed, and a spinner on the test in progress. A test that fails
-shows at once; click it to read why and open it, while the rest keep running.
-This works on every PHPUnit and Pest version. When the run ends, the tab shows the results as a tree of test classes and
-files. Classes with failures start expanded.
+### Run configurations
 
-- Click a test to see its failure message and open it at the failing line, or
-  at its declaration when it passed.
-- Click **Rerun failed tests** (next to **Rerun**) to run only the tests that
-  failed. A test whose name contains a failed test's name doesn't run with
-  them.
+A run configuration is a named, saved way to run something, as in PhpStorm.
+The title bar shows the selected one, with **Run** (⌃R), **Debug** (⌃D),
+**Run with Coverage**, and **Stop** (⌘F2) buttons beside it. A green dot on it
+means it's running. Click its name to choose another configuration, to add,
+edit, save, or delete one, or to open **Edit Configurations…**. ⌃⌥R and ⌃⌥D
+pick a configuration in the palette and run or debug it.
+
+The types are:
+
+| Type | Runs |
+| --- | --- |
+| PHPUnit / Pest | All tests, a directory, a file, a class, a method or Pest test, or a `--filter` pattern, with the runner you choose (detected by default: `php artisan test`, then Pest, then PHPUnit), a configuration file such as `phpunit.xml`, extra options, and coverage on or off |
+| Artisan command | `php artisan` with a command and arguments |
+| PHP script | `php script.php` with arguments |
+| Composer script | A script from `composer.json`, with the bundled Composer |
+| npm script | A script from `package.json` |
+| Shell command | A command line through `/bin/sh` |
+| PHP web server | `php artisan serve`, or PHP's built-in server with a document root, on a host and port |
+
+Every type also has a working directory, environment variables, whether it
+runs in Docker when the containers are up (Sail, or the service you chose with
+**Choose Docker Service for Commands**), steps to run before launch (another
+configuration, or a shell command such as `npm run build`; a step that fails
+stops the launch), and **Allow multiple instances**. Without it, running a
+configuration that's still running asks to stop it first.
+
+In **Run > Edit Configurations…**, the list on the left groups the
+configurations by type. Click **+** to add one from a type's template,
+and use the buttons to duplicate or remove the selected one (⌘D and ⌫ in the
+list). The form shows each problem, such as a missing test file or a duplicate
+name, and the command the configuration runs. **Store in tusk.json (share)**
+keeps a configuration in the project's `tusk.json`, so your team gets it when
+you commit the file; others stay on this Mac.
+
+Running a test from the gutter, **Run Test at Cursor**, **Run All Tests**, or
+Run Anything makes a temporary configuration and selects it, so ⌃R runs it
+again. Tusk keeps the five newest; save one from the widget's menu or with
+**Save Temporary Configuration**. A running command's terminal tab has a
+green icon and a **Stop** button. **Stop** interrupts the command with ⌃C, and
+kills it if it's still running 3 seconds later. **Rerun** runs the last run
+again; before any run, it asks which configuration to run.
+
+### The Tests tab
+
+While tests run, the **Tests** tab shows progress: a bar, how many tests have
+run of how many, how many failed, and a spinner on the test in progress. A
+test that fails shows at once, while the rest keep running. This works on
+every PHPUnit and Pest version. When the run ends, the header shows the counts
+and the total time, and the tree shows every test class and its tests. Classes
+with failures start expanded, and the first failure is selected.
+
+- Select a test, with the mouse or ↑ and ↓, to see its output: the failure
+  message, **<Click to see difference>** for an assertion that compares two
+  values (it opens the expected and actual values side by side), the stack
+  frames, which open their file at the line, and anything the test printed.
+  Paths inside a container, such as `/var/www/html`, open in the project.
+- Double-click a test, or press Enter, to open its source. → and ← expand and
+  collapse a class.
+- The toolbar has **Rerun**, **Rerun Failed Tests** (a test whose name contains
+  a failed test's name doesn't run with them), **Stop**, and toggles to show
+  passed tests, show ignored tests, sort by duration, and track the running
+  test. **Expand All**, **Collapse All**, **Export Test Results…** (the JUnit
+  report), and a filter box follow.
 
 The terminal tab keeps the runner's full output.
 
@@ -1737,7 +1801,7 @@ To list those tests, put the cursor on the line and run **Show Tests Covering
 Line** from ⌘⇧A; choose one to open it. Marks follow their lines as you edit
 and stay until the next coverage run, or until you run **Hide Coverage**. A line
 you change gets a dashed gray mark instead, since the run didn't see its new
-code; undo the change and its mark comes back. ⌃R reruns with coverage too.
+code; undo the change and its mark comes back. **Rerun** reruns with coverage too.
 
 The **Coverage** tab in the bottom panel starts with each folder's coverage,
 nested, such as `app/Models 45% · 9/20`. Click a folder to list only its
@@ -1762,8 +1826,10 @@ lines.
 
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
-works. To run any other command, choose the last item. Tests and commands run
-in terminal tabs, and ⌃R reruns the last one.
+works. Run configurations match by name too. To run any other command, choose
+the last item. What you run becomes a temporary configuration, so ⌃R runs it
+again. When `php artisan list` fails, such as when the app can't boot, Run
+Anything says so and offers to run it in a terminal to see the whole error.
 
 ## Git
 
@@ -2490,9 +2556,11 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/rebase.ts` | Interactive rebase |
 | `src/gitparse.ts` | Parsers for git output, line diffs, partial staging, merge alignment, and rebase todo lists |
 | `src/prs.ts` | Pull requests through the GitHub CLI |
-| `src/runner.ts` | Test runner, run links, Run Anything, routes, and Tinker |
-| `src/testresults.ts` | The Tests tab: live progress and the results tree |
-| `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, and Clover coverage reports, and builds rerun filters |
+| `src/runner.ts` | Runs run configurations, the run widget, test run links, Run Anything, routes, and Tinker |
+| `src/runconfig.ts` | Run configuration types, their forms, validation, and the commands they build |
+| `src/runconfigdialog.ts` | The Run/Debug Configurations dialog |
+| `src/testresults.ts` | The Tests tab: live progress, the results tree, and failure details |
+| `src/junit.ts` | Reads JUnit reports, PHPUnit's event stream, TeamCity logs, failure diffs and stacks, and Clover coverage reports, and builds rerun filters |
 | `src/coverage.ts` | Code coverage marks in the gutter and the Coverage tab |
 | `src/profiler.ts` | Profiling runs, the profile list, and the Profiler tab |
 | `src/cachegrind.ts` | Xdebug's profiles as the Profiler tab uses them, and the queries from its traces |

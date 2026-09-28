@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 struct Session {
     /// Input goes through a thread, so pasting into a program that isn't reading can't block the app.
@@ -92,9 +92,26 @@ pub fn pty_spawn(
                 let _ = app.emit(&event, text);
             }
         }
-        let _ = app.emit(&format!("pty-exit:{name}"), ());
+        let _ = app.emit(&format!("pty-exit:{name}"), exit_code(&app, id));
     });
     Ok(id)
+}
+
+/// The exit code of a session's process once its output has ended, or None when it was killed or takes over a
+/// second to exit. The output ends when the process closes the terminal, which is usually as it exits.
+fn exit_code(app: &AppHandle, id: u32) -> Option<u32> {
+    for _ in 0..50 {
+        let state = app.state::<PtyState>();
+        let mut sessions = state.0.lock().unwrap();
+        match sessions.get_mut(&id)?.child.try_wait() {
+            Ok(Some(status)) => return Some(status.exit_code()),
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        drop(sessions);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
 }
 
 #[tauri::command]

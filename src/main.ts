@@ -41,7 +41,7 @@ import { detectFormatters, formatModel, initFormatting } from "./format";
 import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
-import { attachTestRunner, initRunner, isTestFile, rerun, runAllTests, runAnything, runTestAtCursor, showRoutes, testMenu, tinker } from "./runner";
+import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
 import { hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
@@ -579,6 +579,7 @@ async function openFolder(dir: unknown = null) {
   refreshGit();
   detectFormatters();
   loadBreakpoints();
+  loadRunConfigurations();
   loadBookmarks();
   if (session) await restoreSession(session);
   restartServers();
@@ -1583,6 +1584,15 @@ const actions: Action[] = [
   { label: "Open Query Console", keys: "Meta+Shift+F10", run: () => root && openConsole() },
   { label: "Create Pull Request…", run: () => root && createPullRequest() },
   { label: "Show Project", keys: "Meta+1", run: () => showView("project") },
+  { label: "Run", keys: "Ctrl+R", run: () => root && runSelected() },
+  { label: "Debug", keys: "Ctrl+D", run: () => root && runSelected("debug") },
+  { label: "Run with Coverage", run: () => root && runSelected("coverage") },
+  { label: "Run…", keys: "Ctrl+Alt+R", run: () => root && chooseAndRun() },
+  { label: "Debug…", keys: "Ctrl+Alt+D", run: () => root && chooseAndRun("debug") },
+  { label: "Edit Configurations…", run: () => root && editConfigurations() },
+  { label: "Save Temporary Configuration", run: () => root && saveTemporary() },
+  // ⌘F2 stops a run while one runs, and otherwise the debugger.
+  { label: "Stop", keys: "Meta+F2", run: () => stopRun(), when: isRunning },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },
   { label: "Run All Tests", run: () => root && runAllTests() },
   { label: "Run All Tests with Coverage", run: () => root && runAllTests(true) },
@@ -1619,7 +1629,7 @@ const actions: Action[] = [
       openTerminal(root, "Debug server", ["/usr/bin/env", ...xdebugEnv(), "php", "artisan", "serve"], undefined, undefined, true);
     },
   },
-  { label: "Rerun", keys: "Ctrl+R", run: () => rerun() },
+  { label: "Rerun", run: () => root && rerun() },
   { label: "TODO", run: () => showView("todo") },
   { label: "Toggle Bookmark", keys: "F3", run: () => active && toggleBookmark(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
@@ -1846,7 +1856,7 @@ window.addEventListener(
 let profiler: typeof import("./profiler") | undefined;
 const loadProfiler = () =>
   import("./profiler").then((p) => (p.initProfiler({ root: () => root, status, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) }), (profiler = p)));
-initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status, loadProfiler);
+initRunner(() => root, (path, line) => openAt(path, { lineNumber: line, column: 1 }), status, loadProfiler, (path, a, b, label) => showDiff(path, a, b, label));
 initDebugger({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
 initAi({ status, root: () => root });
 const settingsLoaded = initSettings();

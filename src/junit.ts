@@ -11,6 +11,13 @@ export type TestResult = {
   time: number;
   status: "passed" | "failed" | "skipped";
   message: string;
+  /** What the test printed (`<system-out>`), when it printed anything. */
+  output?: string;
+  /** An assertion's expected and actual values, from the TeamCity log (see `withDetails`). */
+  expected?: string;
+  actual?: string;
+  /** The failure's stack, one `path:line` per line, from the TeamCity log. */
+  trace?: string;
 };
 
 const unescape = (s: string) =>
@@ -29,6 +36,7 @@ export function parseJUnit(xml: string): TestResult[] {
   const results: TestResult[] = [];
   for (const [, attrs, body = ""] of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
     const a = attributes(attrs);
+    const output = body.match(/<system-out>([\s\S]*?)<\/system-out>/)?.[1];
     const problem = body.match(/<(failure|error)\b[^>]*>([\s\S]*?)<\/\1>/);
     const name = a.name ?? "";
     const className = a.class ?? a.classname ?? "";
@@ -50,10 +58,74 @@ export function parseJUnit(xml: string): TestResult[] {
       time: Number(a.time) || 0,
       status: problem ? "failed" : /<skipped\b/.test(body) ? "skipped" : "passed",
       message,
+      ...(output?.trim() ? { output: unescape(output) } : {}),
     });
   }
   return results;
 }
+
+/** A stack frame in a failure: the file as the report names it (absolute, or relative to the project) and its line. */
+export type Frame = { file: string; line: number };
+/** A failure message read for display: its text, an expected/actual comparison when it has one, and its stack. */
+export type Failure = { text: string; expected?: string; actual?: string; frames: Frame[] };
+
+/** A stack frame line: PHPUnit's `/path/File.php:17`, Pest's `at tests/X.php:8`, or PHP's `#0 /path/File.php(12): call()`. */
+const FRAME = /^\s*(?:at\s+|#\d+\s+)?(\S+?\.php)(?::(\d+)|\((\d+)\)(?::.*)?)\s*$/;
+
+/**
+ * Splits a failure message into its text, its comparison, and its stack frames. PHPUnit prints a comparison as a
+ * unified diff after `--- Expected` and `+++ Actual`; context lines belong to both sides. `trace` (from the TeamCity
+ * log) and `expected`/`actual` (also from it, and complete where the diff only has the lines around changes) win.
+ */
+export function parseFailure(message: string, extra: Pick<TestResult, "expected" | "actual" | "trace"> = {}): Failure {
+  const lines = message.split("\n");
+  const frames: Frame[] = [];
+  const text: string[] = [];
+  let expected: string[] | undefined;
+  let actual: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === "--- Expected" && lines[i + 1] === "+++ Actual") {
+      expected = [];
+      actual = [];
+      for (i += 2; i < lines.length && lines[i] !== "" && !FRAME.test(lines[i]); i++) {
+        const [mark, rest] = [lines[i][0], lines[i].slice(1)];
+        if (lines[i].startsWith("@@")) continue;
+        if (mark !== "+") expected.push(rest);
+        if (mark !== "-") actual.push(rest);
+      }
+      i--;
+      continue;
+    }
+    const frame = line.match(FRAME);
+    if (frame) frames.push({ file: frame[1], line: Number(frame[2] ?? frame[3]) });
+    else text.push(line);
+  }
+  const traced = extra.trace ? parseFailure(extra.trace).frames : [];
+  const comparison = extra.expected !== undefined && extra.actual !== undefined ? { expected: extra.expected, actual: extra.actual } : expected ? { expected: expected.join("\n"), actual: actual.join("\n") } : {};
+  return { text: text.join("\n").trim(), ...comparison, frames: traced.length ? traced : frames };
+}
+
+/**
+ * A key that matches a test across reports: JUnit's name (a readable label or description under Pest), the event
+ * stream's and TeamCity's method names (`test_fails`, `__pest_evaluable__group__→_it_works`), without case,
+ * punctuation, or a `test` prefix.
+ */
+export const testKey = (className: string, name: string) =>
+  `${className.replace(/^\\?P\\/, "")}::${name.replace(/^__pest_evaluable_/, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^test/, "")}`;
+
+/** The report's results with the comparison and stack each failure has in the TeamCity log, which JUnit reports leave out under Pest. */
+export function withDetails(results: TestResult[], live: LiveTest[]): TestResult[] {
+  const byKey = new Map(live.map((t) => [testKey(t.className, t.name), t]));
+  return results.map((r) => {
+    const t = r.status === "failed" ? byKey.get(testKey(r.className, r.name)) : undefined;
+    return t ? { ...r, ...(t.expected !== undefined ? { expected: t.expected, actual: t.actual } : {}), ...(t.trace ? { trace: t.trace } : {}) } : r;
+  });
+}
+
+/** A file a report names, on this Mac: under `containerRoot` it maps to the project, and a relative one is inside the project. */
+export const localPath = (file: string, root: string, containerRoot: string) =>
+  file.startsWith(`${containerRoot}/`) ? root + file.slice(containerRoot.length) : file.startsWith("/") ? file : `${root}/${file}`;
 
 // ponytail: assumes Laravel's autoload-dev mapping of Tests\ to tests/.
 export const classFile = (className: string) => `${className.replace(/^(P\\)?Tests\\/, "tests/").replace(/\\/g, "/")}.php`;
@@ -84,7 +156,18 @@ export function sameTest(reported: string, name: string): boolean {
 }
 
 /** A test in a running suite. A failed one has its `message`; `file` and `line` are known from TeamCity logs. */
-export type LiveTest = { className: string; name: string; status: "running" | TestResult["status"]; message?: string; file?: string; line?: number };
+export type LiveTest = {
+  className: string;
+  name: string;
+  status: "running" | TestResult["status"];
+  message?: string;
+  file?: string;
+  line?: number;
+  /** From TeamCity logs: an assertion's values, and the failure's stack. */
+  expected?: string;
+  actual?: string;
+  trace?: string;
+};
 
 /**
  * Reads PHPUnit's --log-events-text stream (PHPUnit 10 and later), written as tests run, for progress before the
@@ -114,6 +197,9 @@ export function parseEvents(text: string): { total: number; tests: LiveTest[] } 
   return { total, tests: [...tests.values()] };
 }
 
+/** Pest's generated method names, such as `__pest_evaluable__group__→_it_works`, made readable. */
+const pestName = (name: string) => (name.startsWith("__pest_evaluable_") ? name.replace(/^__pest_evaluable_/, "").replace(/__/g, " ").replace(/_/g, " ").trim() : name);
+
 const teamcityValue = (s: string) => s.replace(/\|(.)/g, (_, c) => ({ n: "\n", r: "\r", "'": "'", "|": "|", "[": "[", "]": "]" })[c as string] ?? c);
 
 /**
@@ -132,11 +218,18 @@ export function parseTeamcity(text: string): { total: number; tests: LiveTest[] 
     const test = tests.get(key);
     if (kind === "testStarted") {
       const [file, className = ""] = (a.locationHint ?? "").replace(/^php_qn:\/\//, "").split("::");
-      tests.set(key, { className: className.replace(/^\\/, "").replace(/^P\\/, ""), name: a.name, status: "running", file: file || undefined });
+      // Pest's tests are eval()'d code, so their hint names Pest's own file.
+      tests.set(key, { className: className.replace(/^\\/, "").replace(/^P\\/, ""), name: pestName(a.name), status: "running", file: /\.php$/.test(file) ? file : undefined });
     } else if (test && kind === "testFailed") {
       test.status = "failed";
       test.message = a.message;
-      test.line = Number(a.details?.match(/:(\d+)\s*$/m)?.[1]) || undefined;
+      // The failing line is the last frame in the test's file, or in a tests/ file when the file isn't known.
+      const frames = parseFailure(a.details ?? "").frames;
+      const at = frames.filter((f) => (test.file ? f.file === test.file : /(^|\/)tests\//.test(f.file))).at(-1) ?? frames[0];
+      test.file ??= at?.file;
+      test.line = at?.line;
+      if (a.type === "comparisonFailure" && "expected" in a) Object.assign(test, { expected: a.expected, actual: a.actual ?? "" });
+      if (a.details?.trim()) test.trace = a.details.trim();
     } else if (test && kind === "testIgnored") test.status = "skipped";
     else if (test && kind === "testFinished" && test.status === "running") test.status = "passed";
   }
