@@ -546,7 +546,7 @@ export function renderInspector(ctx: InspectorCtx): HTMLElement {
       essentialRows.push(specialRow(ctx, methods.get(name)!) ?? methodRow(ctx, methods.get(name)!));
     }
   }
-  ["visible", "hidden", "visibleOn", "hiddenOn", "required", "disabled", "live"].forEach((m) => m !== "required" && m !== "disabled" && shown.add(m));
+  ["visible", "hidden", "visibleOn", "hiddenOn"].forEach((m) => shown.add(m));
 
   // Every other setting, grouped by the trait or class that declares it; searching opens the groups that match.
   const search = h("input", { type: "search", class: "fd-search-settings", placeholder: `Search ${methods.size} settings`, spellcheck: false });

@@ -262,7 +262,11 @@ function arrayLayout(text: string, arr: ArrayNode, unit: string) {
   const first = arr.items[0];
   const multiline = first ? breaks(text, openEnd, first.span[0]) : false;
   const itemIndent = first && multiline ? lineIndent(text, first.span[0]) : outer + unit;
-  return { openEnd, outer, multiline, itemIndent };
+  // Some code sets items apart with blank lines; new items follow the habit of most of the array.
+  let gaps = 0;
+  for (let i = 1; i < arr.items.length; i++) if (/\n[ \t]*\n/.test(text.slice(arr.items[i - 1].span[1], arr.items[i].span[0]))) gaps++;
+  const blank = arr.items.length > 1 && gaps * 2 >= arr.items.length - 1 ? "\n" : "";
+  return { openEnd, outer, multiline, itemIndent, blank };
 }
 
 /** Whether a comma follows the item, skipping space: PHP allows one after the last item. */
@@ -276,7 +280,7 @@ function commaAfter(text: string, end: number): number | null {
  * An empty array opens onto lines of its own; one written on a single line stays on one.
  */
 export function insertItem(text: string, arr: ArrayNode, index: number, code: string, unit = indentUnit(text)): Edit {
-  const { openEnd, outer, multiline, itemIndent } = arrayLayout(text, arr, unit);
+  const { openEnd, outer, multiline, itemIndent, blank } = arrayLayout(text, arr, unit);
   const items = arr.items;
   if (!items.length) {
     const close = arr.close;
@@ -292,12 +296,12 @@ export function insertItem(text: string, arr: ArrayNode, index: number, code: st
   const body = indentCode(code, itemIndent);
   if (index < items.length) {
     const at = items[index].span[0];
-    return { start: at, end: at, text: `${body},\n${lineIndent(text, at)}` };
+    return { start: at, end: at, text: `${body},\n${blank}${lineIndent(text, at)}` };
   }
   const last = items[items.length - 1];
   const comma = commaAfter(text, last.span[1]);
   // Keep the file's habit: a trailing comma after the last item stays, and none is added where there was none.
-  return comma !== null ? { start: comma + 1, end: comma + 1, text: `\n${itemIndent}${body},` } : { start: last.span[1], end: last.span[1], text: `,\n${itemIndent}${body}` };
+  return comma !== null ? { start: comma + 1, end: comma + 1, text: `\n${blank}${itemIndent}${body},` } : { start: last.span[1], end: last.span[1], text: `,\n${blank}${itemIndent}${body}` };
 }
 
 /** Removes item `index` from an array, with its comma and the line it was on. */

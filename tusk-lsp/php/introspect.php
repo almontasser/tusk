@@ -38,6 +38,10 @@
 
 declare(strict_types=1);
 
+// Notices, such as deprecations an older package raises on a newer PHP, go to stderr, so the JSON on stdout stays
+// readable.
+ini_set('display_errors', 'stderr');
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 

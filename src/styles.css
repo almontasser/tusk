@@ -2522,3 +2522,5 @@ button.link:hover { text-decoration: underline; }
 .fd-error-note { background: color-mix(in srgb, var(--yellow) 12%, transparent); }
 .fd-error-note > .codicon { color: var(--yellow); }
 .fv-name { flex-shrink: 0; max-width: 72%; }
+.fd-label-row.hidden-label .fd-label { opacity: 0.4; font-style: italic; font-weight: 400; font-size: 11px; }
+.fd-palette-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

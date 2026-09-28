@@ -617,7 +617,7 @@ export class Designer {
     const used = new Set<string>();
     walk(live.root, (c) => c.name && used.add(c.name.split(".")[0]));
     const relUsed = (col: Column) => this.facts!.relations.some((r) => used.has(r.name) && col.name === `${r.name.replace(/([A-Z])/g, "_$1").toLowerCase()}_id`);
-    const columns = this.facts.columns.filter((c) => !used.has(c.name) && !relUsed(c) && (this.tab === "table" ? c.name !== "id" && !/password|token|secret/.test(c.name) : !isSystemColumn(c)));
+    const columns = this.facts.columns.filter((c) => !used.has(c.name) && !relUsed(c) && !/password|token|secret/.test(c.name) && (this.tab === "table" ? c.name !== "id" : !isSystemColumn(c)));
     if (!columns.length) return host.status("Every column is already there.");
     const slotName = live.kind === "table" ? "columns" : (live.root.slots.has("schema") ? "schema" : "components");
     const slot = live.kind === "table" ? live.root.slots.get("columns") : rootSlot(live.root, ["components", "schema"]);
@@ -791,7 +791,7 @@ export class Designer {
     const ctx = this.canvasCtx(ref);
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
-    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.navigationLabel ?? (this.info?.pluralLabel ? this.info.pluralLabel.replace(/^./, (c) => c.toUpperCase()) : undefined) ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
     if (ref.doc.outline.errors)
       canvas.prepend(
@@ -937,7 +937,8 @@ export class Designer {
       this.paletteQuery = search.value;
       const groups = palette(this.cat!, kinds, q);
       const columns = (this.facts?.columns ?? []).filter((c) => (ref.kind === "table" ? c.name !== "id" : !isSystemColumn(c)) && (!q || c.name.toLowerCase().includes(q)));
-      const missing = columns.filter((c) => !used.has(c.name));
+      // The same columns Add N adds: secrets never go in a form or table on their own.
+      const missing = columns.filter((c) => !used.has(c.name) && !/password|token|secret/.test(c.name));
       const colItem = (c: Column) => {
         const el = h("div", { class: `fd-palette-item fd-column-item${used.has(c.name) ? " used" : ""}`, draggable: true, title: `${c.name}: ${c.fullType ?? c.type}${c.nullable ? ", nullable" : ""}${used.has(c.name) ? " (already used)" : ""}` }, icon(used.has(c.name) ? "pass" : "database"), h("span", {}, c.name), h("span", { class: "fd-palette-detail" }, c.type));
         el.ondragstart = (e) => (setDragging({ kind: "column", name: c.name }), e.dataTransfer!.setData("text/plain", c.name));
@@ -954,7 +955,7 @@ export class Designer {
               h(
                 "details",
                 { class: "fd-palette-group", open: true },
-                h("summary", {}, icon("database"), `${shortClass(this.facts.class)} columns`, missing.length ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
+                h("summary", {}, icon("database"), h("span", { class: "fd-palette-title", title: `${shortClass(this.facts.class)} columns` }, `${shortClass(this.facts.class)} columns`), missing.length ? h("button", { type: "button", class: "fd-palette-all", title: "Add every column that isn't there yet", onclick: (e: MouseEvent) => (e.preventDefault(), void this.addMissing()) }, `Add ${missing.length}`) : null),
                 ...columns.map(colItem),
                 !columns.length ? h("p", { class: "fd-note" }, this.facts.details.tableExists === false ? "The table doesn't exist yet. Run the migrations." : "No columns.") : null,
               ),
