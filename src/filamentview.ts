@@ -41,6 +41,13 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(modelClass.index + modelClass[0].length - modelClass[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openModelDesigner", title: "Open in Model Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      // A policy: `class PostPolicy` with a model import, opened as that model's Access view.
+      const policy = !found && !modelClass && /^\s*(?:final\s+)?class\s+(\w+)Policy\b/m.exec(text);
+      const policyModel = policy && new RegExp(`^use\\s+([\\w\\\\]+\\\\${policy[1]})\\s*;`, "m").exec(text);
+      if (policy && policyModel) {
+        const line = model.getPositionAt(policy.index + policy[0].length - policy[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openAccess", title: "Open in Access", arguments: [policyModel[1]] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -52,6 +59,7 @@ export function initFilament(h_: typeof host) {
     },
   });
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
+  monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
 }
@@ -255,6 +263,16 @@ export async function openModelPicker() {
   );
   items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
   pick("Open a model in the designer", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Picks a model and opens its Access view: who can do what with its records. */
+export async function openAccessPicker() {
+  const root = host.root();
+  const models = await fapp.models(root).catch((e) => (host.status(`Can't read the models: ${errorText(e)}`), null));
+  if (!models) return;
+  const { openAccess } = await import("./accessview");
+  const items: Item[] = Object.values(models).map((m) => ({ label: shortClass(m.class), detail: m.class, icon: "codicon-shield", run: () => openAccess(m.class) }));
+  pick("Access: pick a model", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 export async function newResource(panel?: string) {

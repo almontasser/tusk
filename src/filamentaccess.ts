@@ -4,12 +4,26 @@
 import { h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
-import type { Designer } from "./filamentdesigner";
+import type { Doc } from "./filamentdesigner";
+import type { Edit, Imports } from "./phpcode";
 import { askName } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
 import { addMember } from "./phpcode";
 import { abilityMethod, type Cond, permissionName, permissionsOf, readPolicy, type ReadAbility, type Rule, ruleCode } from "./policygen";
 import { showError } from "./status";
+
+/** What the Access tab needs from the view it's in: the resource designer, or a model's own Access view. */
+export type AccessHost = {
+  root: string;
+  facts: { class: string; columns: { name: string }[] } | null;
+  info: { model: string; pluralLabel: string | null } | null;
+  access: { info: fapp.PolicyInfo; doc: Doc | null } | null;
+  accessError: string;
+  loadAccess(): Promise<void>;
+  host: { openAt(path: string, line: number, column?: number): void; status(text: string): void };
+  reveal(node: { span: [number, number] }, doc: Doc): void;
+  apply(doc: Doc, build: (imports: Imports, fill: (code: string) => string) => Edit[] | null, message: string): Promise<unknown>;
+};
 
 const COND_KINDS: [Cond["kind"], string][] = [
   ["permission", "has the permission"],
@@ -17,7 +31,7 @@ const COND_KINDS: [Cond["kind"], string][] = [
   ["owner", "owns the record, by"],
 ];
 
-export function renderAccessTab(d: Designer): HTMLElement {
+export function renderAccessTab(d: AccessHost): HTMLElement {
   const model = d.facts?.class ?? d.info?.model ?? null;
   const plural = (d.info?.pluralLabel ?? (model ? `${humanize(shortClass(model)).toLowerCase()}s` : "records")).toLowerCase();
   if (!model) return h("div", { class: "fd-page-tab" }, h("p", { class: "fd-note fd-center" }, "The designer can't tell the resource's model, so it can't find its policy."));
@@ -55,7 +69,7 @@ export function renderAccessTab(d: Designer): HTMLElement {
 }
 
 /** One ability: what it covers, and who may. */
-function abilityRow(d: Designer, r: ReadAbility, info: fapp.PolicyInfo, model: string): HTMLElement {
+function abilityRow(d: AccessHost, r: ReadAbility, info: fapp.PolicyInfo, model: string): HTMLElement {
   const set = (rule: Rule) => void setRule(d, r, rule, model);
   const rule = r.rule;
   let editor: HTMLElement;
@@ -79,7 +93,7 @@ function abilityRow(d: Designer, r: ReadAbility, info: fapp.PolicyInfo, model: s
 }
 
 /** What a method written as code returns, shortened, or "Code" when it does more than return. */
-function codeSummary(d: Designer, r: ReadAbility): string {
+function codeSummary(d: AccessHost, r: ReadAbility): string {
   const ret = r.method?.returns.length === 1 ? r.method.returns[0] : null;
   const text = ret ? d.access!.doc!.text.slice(ret.span[0], ret.span[1]).replace(/\s+/g, " ") : "Code";
   return text.length > 70 ? `${text.slice(0, 69)}…` : text;
@@ -91,7 +105,7 @@ function fresh(kind: Rule["kind"], r: ReadAbility, model: string): Rule {
   return { kind } as Rule;
 }
 
-function conditions(d: Designer, r: ReadAbility, rule: Extract<Rule, { kind: "when" }>, info: fapp.PolicyInfo, model: string): HTMLElement {
+function conditions(d: AccessHost, r: ReadAbility, rule: Extract<Rule, { kind: "when" }>, info: fapp.PolicyInfo, model: string): HTMLElement {
   const set = (next: Rule) => void setRule(d, r, next, model);
   const columns = (d.facts?.columns ?? []).map((c) => c.name).filter((c) => /(^|_)(user|owner|author|created_by|creator)(_id)?$|_by$/.test(c) || c === "user_id");
   const list = h("div", { class: "fd-access-conds" });
@@ -135,7 +149,7 @@ function conditions(d: Designer, r: ReadAbility, rule: Extract<Rule, { kind: "wh
 const joinToggle = (rule: Extract<Rule, { kind: "when" }>, set: (r: Rule) => void) => h("button", { type: "button", class: "fd-access-join", title: "Whether any condition is enough, or all must hold. Click to switch.", onclick: () => set({ ...rule, join: rule.join === "any" ? "all" : "any" }) }, rule.join === "any" ? "or" : "and");
 
 /** Writes a rule: replaces the method's return, or adds the method. */
-async function setRule(d: Designer, r: ReadAbility, rule: Rule, model: string) {
+async function setRule(d: AccessHost, r: ReadAbility, rule: Rule, model: string) {
   const doc = d.access?.doc;
   const code = ruleCode(rule, r.vars);
   if (!doc || !code) return;
@@ -153,7 +167,7 @@ async function setRule(d: Designer, r: ReadAbility, rule: Rule, model: string) {
   );
 }
 
-async function createPolicy(d: Designer, model: string, button: HTMLButtonElement) {
+async function createPolicy(d: AccessHost, model: string, button: HTMLButtonElement) {
   button.disabled = true;
   const name = `${shortClass(model)}Policy`;
   try {
@@ -176,7 +190,7 @@ async function createPolicy(d: Designer, model: string, button: HTMLButtonElemen
 // ---- Roles and permissions ----
 
 /** Which roles have the permissions the rules name, with spatie/laravel-permission. */
-function permissionsSection(d: Designer, info: fapp.PolicyInfo, used: string[], model: string): HTMLElement | null {
+function permissionsSection(d: AccessHost, info: fapp.PolicyInfo, used: string[], model: string): HTMLElement | null {
   const title = h("h3", {}, icon("key"), "Roles and permissions");
   if (!info.spatie) return h("section", { class: "fd-access-perms" }, title, h("p", { class: "fd-note" }, "Rules can name roles and permissions when the app has spatie/laravel-permission, which stores them in the database and gives them to users. Without it, a permission is any Gate ability the app defines."));
   const notes: HTMLElement[] = [];

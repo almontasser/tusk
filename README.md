@@ -861,6 +861,10 @@ Filament hides what someone can't do. An ability the policy doesn't have is
 allowed. A rule written as other code, such as a call to a helper, shows as
 code, which you can open or replace.
 
+The same view opens for any model, with or without a resource: click
+**Access** in the model designer, **Open in Access** above a policy's class, or
+run **Laravel: Model Access…**.
+
 A model without a policy gets one with **Create a policy**, which runs
 `make:policy` and starts with everything allowed, so no one is locked out.
 New permissions are named as Filament Shield names them, such as `update_post`.

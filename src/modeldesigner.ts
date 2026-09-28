@@ -242,6 +242,7 @@ class ModelDesigner {
           existing?.tableExists === false ? h("span", { class: "fd-chip-warn", title: "Run the migrations to create it." }, icon("warning"), "The table doesn't exist yet") : null,
           existing && existing.columns === null ? h("span", { class: "fd-chip-warn", title: "The database can't be reached, so columns come from the model." }, icon("warning"), "Database not reachable") : null,
           this.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => designerHost.openAt(this.file!, 1) }, icon("go-to-file"), "Open the code") : null,
+          existing ? h("button", { type: "button", class: "fd-chip-link", title: "Who can see, create, edit, and delete these records", onclick: () => void import("./accessview").then((m) => m.openAccess(existing.class)) }, icon("shield"), "Access") : null,
         ),
       ),
       h("span", { class: "fd-spacer" }),
