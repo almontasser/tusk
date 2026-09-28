@@ -528,8 +528,8 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .setting-reset { width: 22px; height: 22px; }
 .setting-custom { display: block; }
 .settings-group h3 { display: flex; align-items: center; gap: 8px; }
-.settings-project-tag { font-size: 11px; font-weight: normal; padding: 0 6px; border-radius: var(--radius); background: var(--selected); color: var(--muted); }
-.settings-share { margin-left: auto; font-size: 12px; font-weight: normal; display: flex; align-items: center; gap: 4px; }
+.settings-project-tag { font-size: 11px; font-weight: normal; text-transform: none; letter-spacing: normal; padding: 0 6px; border-radius: var(--radius); background: var(--selected); color: var(--muted); }
+.settings-share { margin-left: auto; font-size: 12px; font-weight: normal; text-transform: none; letter-spacing: normal; color: var(--text); display: flex; align-items: center; gap: 4px; }
 .setting-list-editor { display: flex; flex-direction: column; gap: 6px; }
 .setting-list-editor input[type="text"] { flex: 1; }
 .setting-list { list-style: none; margin: 0; padding: 2px 0; max-height: 160px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
@@ -1081,6 +1081,7 @@ button.link:hover { text-decoration: underline; }
 .problems-toolbar .problems-toggle.on { background: var(--selected); border-color: var(--accent); }
 .problems-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .problems-summary.error { color: var(--red); }
+.problems-toolbar .problems-phpstan { margin-left: auto; flex-shrink: 0; }
 .problems-tree, .problems-tree ul { list-style: none; margin: 0; padding: 0; }
 .problems-tree { flex: 1; overflow: auto; border-top: 1px solid var(--border-subtle); padding: 4px 0; }
 .problems-row { height: var(--row); display: flex; align-items: center; gap: 5px; padding: 0 10px 0 6px; white-space: nowrap; cursor: default; }

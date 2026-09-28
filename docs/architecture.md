@@ -1993,13 +1993,42 @@ the file again with corrected vendor copies.
 
 ### PHPStan and Larastan
 
-When the project has `vendor/bin/phpstan`, the server (`phpstan.rs`) runs
-`php vendor/bin/phpstan analyse --error-format=json` on a PHP file when it
-opens and each time it's saved, one run at a time on a thread of its own,
-with the project's own configuration. PHPStan reads files from disk, so its
-problems (source `phpstan`, severity Error, the identifier as the code) cover
-their line and keep it until the next run. A run that fails or passes its
-3-minute limit keeps the last results.
+The server (`phpstan.rs`) runs `php vendor/bin/phpstan analyse
+--error-format=json` on a PHP file when it opens and each time it's saved, one
+run at a time on a thread of its own, with the project's own configuration.
+PHPStan reads files from disk, so its problems (source `phpstan`, severity
+Error, the identifier as the code) cover their line and keep it until the next
+run. A run that fails keeps the last results.
+
+The `phpstan` option (`phpstan::Settings`: `enabled`, `config`, `level`,
+`memoryLimit`, `timeout`, `run`) comes from `src/phpstan.ts`, which registers
+it as project settings (`registerProjectSettings`, key `phpstan`, shareable)
+and as one of `tuskOptions` in `lsp.ts`. A change sends every option again
+with `workspace/didChangeConfiguration` (`configureTusk`). The server gives
+PHPStan's part to `PhpStan::configure`, which drops the problems found with
+the old settings and checks the open files again; any other option that
+changed rebuilds the index. PHPStan's arguments are `arguments()`:
+`--configuration`, `--level`, and `--memory-limit` only when set.
+
+Each run reports its state with a `tusk/phpstan` notification (`off`,
+`missing`, `idle`, `running`, `failed`, and a message). `parse_report` reads
+the reason for a failure: out of memory (PHP's "Allowed memory size" or
+"Failed to set memory limit"), the report's first general error when no file
+has problems (such as a path that doesn't exist), or the first line PHPStan
+printed instead of a report, without PHP's `in phar://…` location. PHP writes
+an empty `files` as `[]`, so the report is read as JSON first. A run past the
+timeout is killed. `phpstan.ts` shows a running check as a status bar spinner,
+toasts a failure once per new reason, and hands the state to the Problems
+panel's **PHPStan** button (`setPhpStanState`), which is hidden while the
+project has no PHPStan and nobody turned it on.
+
+`tusk/phpstanProject` runs PHPStan with no paths, so it checks the
+configuration's `paths`, on the PHPStan thread after any file run, and answers
+with the problems by relative path. It waits on a thread of its own, not the
+request pool, since it takes minutes on a large project. Its results replace
+every file's PHPStan problems, so open files show them too, and
+`runPhpStan` in `problems.ts` keeps them in `phpstanFound`, beside the Mago
+scan's `scanned`, so each scan leaves the other's results alone.
 
 ### Blade
 
@@ -2909,6 +2938,7 @@ Who uses which key:
 | `breakpoints`, `debugWatches`, `debugExceptions`, `debugPathMappings` | `debug.ts`; breakpoints are saved with paths relative to the project | Local |
 | `dockerService` | `sail.ts`, through `setServiceChoice` from `main.ts`, so `sail.ts` loads in tests without the app's modules | Local |
 | `databaseConnections`, `databaseSsh`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; the selection never shares |
+| `phpstan` | `phpstan.ts`, through `registerProjectSettings`; sent to Tusk's server as the `phpstan` option | Local; the settings group's box shares it |
 | `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
 
 ## Sessions

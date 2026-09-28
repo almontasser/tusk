@@ -392,6 +392,7 @@ type Server = {
   symbols(query: string): Promise<(L.SymbolInformation | L.WorkspaceSymbol)[]>;
   willRename(files: L.FileRename[]): Promise<L.WorkspaceEdit | null>;
   executeCommand(command: string, args: unknown[]): Promise<any>;
+  notify(method: string, params: unknown): void;
   /** Runs a code action or command: its edit (resolved first if the server resolves them), then its command. */
   codeAction(action: L.CodeAction | L.Command): Promise<void>;
   filesChanged(changes: L.FileEvent[]): void;
@@ -613,6 +614,7 @@ async function startServer(
       if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
     },
     executeCommand: (command, args) => request("workspace/executeCommand", { command, arguments: args }),
+    notify: (method, params) => void ready.then(() => notify(method, params)),
     codeAction: runCodeAction,
     async willRename(files) {
       if (!c.workspace?.fileOperations?.willRename) return null;
@@ -1098,14 +1100,15 @@ export async function startLsp(root: string, h: Host) {
   // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, in about a
   // second, so nothing is kept between starts.
   // `.env` files too, for the server's quick fix that turns their variables into Vite ones.
-  const tusk = startServer("tusk", root, ["php", "blade", "dotenv"], {
+  tuskInit = {
     // The project's folders to skip (indexexclude.ts), on top of the server's defaults.
     exclude: excluded.list,
     // Laravel's root aliases (`use DB;`).
     stubs: aliasDir ? [aliasDir.dir] : [],
     // Without a project mago.toml, defaults tuned for Laravel (src-tauri/resources/mago.toml).
     ...(!hasMagoToml && { magoConfig: (magoConfigPath = await projectMagoConfig(root, magoConfig, aliasDir?.dir, magoExcludes(excluded.list))) }),
-  });
+  };
+  const tusk = startServer("tusk", root, ["php", "blade", "dotenv"], tuskSettings(), {}, (method, params) => tuskNotifications[method]?.(params));
   bladeReady = true;
   monaco.editor.getModels().forEach(checkBlade);
   const tailwind = packageJson.includes('"tailwindcss"')
@@ -1283,6 +1286,29 @@ export async function restartSpelling() {
 /** Shows the spell checker's problems again, as the severity setting says. */
 export function redrawSpelling() {
   lastDiagnostics.forEach(({ model, owner, list }) => owner === "lsp:typos" && !model.isDisposed() && setMarkers(model, owner, list));
+}
+
+/** The options startLsp gives Tusk's server; tuskOptions adds the other modules'. */
+let tuskInit: Record<string, unknown> = {};
+
+/**
+ * Options other modules add to Tusk's server, by name, such as `phpstan` (phpstan.ts). The server reads them as it
+ * starts, and configureTusk sends them again after a change, so they apply without a restart.
+ */
+export const tuskOptions: Record<string, () => unknown> = {};
+/** Handlers for Tusk's server's own notifications, such as `tusk/phpstan`. */
+export const tuskNotifications: Record<string, (params: any) => void> = {};
+
+const tuskSettings = () => ({ ...tuskInit, ...Object.fromEntries(Object.entries(tuskOptions).map(([k, f]) => [k, f()])) });
+
+/**
+ * Sends Tusk's server its options again (`workspace/didChangeConfiguration`), with `change` applied to the
+ * editor's own, such as no `magoConfig` once the project has a mago.toml. The server applies PHPStan's at once and
+ * reindexes when the others changed.
+ */
+export function configureTusk(change: Record<string, unknown> = {}) {
+  tuskInit = { ...tuskInit, ...change };
+  servers.find((s) => s.name === "tusk")?.notify("workspace/didChangeConfiguration", { settings: tuskSettings() });
 }
 
 /** Sends a request to Tusk's PHP server, or returns null when it isn't running. */

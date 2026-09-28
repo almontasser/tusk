@@ -31,7 +31,7 @@ import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
 import { initRefactorPreview } from "./refactorpreview";
 import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings } from "./extract";
-import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, showInlineProblems, showProblems } from "./problems";
+import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, runPhpStan, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { chooseConnection, connectOverSsh, initDatabase, loadTables, openConsole } from "./database";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
@@ -56,6 +56,7 @@ import { initJsonSchemas } from "./jsonschemas";
 import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import "./spelling";
+import "./phpstan";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1551,6 +1552,7 @@ const actions: Action[] = [
   { label: "Git Log", keys: "Meta+9", run: () => showLog() },
   { label: "Problems", keys: "Meta+6", run: () => root && showProblems() },
   { label: "Scan Project for Problems", run: () => root && (showProblems(), scanProject()) },
+  { label: "Run PHPStan on Project", run: () => root && runPhpStan() },
   { label: "Show File History", run: () => active && showFileHistory(active) },
   { label: "Show Local History", run: () => active && showLocalHistory(active) },
   { label: "Local History: Deleted Files…", run: showDeletedFiles },

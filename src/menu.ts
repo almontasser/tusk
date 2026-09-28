@@ -30,7 +30,7 @@ const LAYOUT: [string, Entry[]][] = [
     ...commandsIn("comment"), "Reformat Code", "Auto-Indent Lines", "Optimize Imports", "Fix All Safe Problems in File", "-",
     ["Folding", ["Expand", "Collapse", "Toggle Fold", "Expand Recursively", "Collapse Recursively", "-", "Expand All", "Collapse All", ["Collapse to Level", commandsIn("fold-level")], "-",
       "Collapse Doc Comments", "Collapse Regions", "Expand Regions", "-", "Fold Selection"]], "-",
-    "Move Line Up", "Move Line Down", "-", "Scan Project for Problems", "Hide Coverage", "Show Tests Covering Line"]],
+    "Move Line Up", "Move Line Down", "-", "Scan Project for Problems", "Run PHPStan on Project", "Hide Coverage", "Show Tests Covering Line"]],
   ["Refactor", ["Refactor This…", "-", "Rename", "Change Signature…", "-", "Extract Variable…", "Extract Constant…", "Extract Method…", "Introduce Field…", "Introduce Parameter…", "Inline…", "-", "Pull Members Up…", "Extract Interface…", "Move Class…", "Safe Delete…"]],
   ["Run", ["Run Anything", "Rerun", "-", "Run Test at Cursor", "Debug Test at Cursor", "Run Test at Cursor with Coverage", "Run All Tests", "Run All Tests with Coverage", "-",
     "Start Listening for PHP Debug Connections", "Start Debug Server (php artisan serve with Xdebug)", "Stop Debugging", "Resume Program", "Step Over", "Step Into", "Step Out", "-",

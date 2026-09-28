@@ -47,7 +47,7 @@ file to change when you add it.
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. |
-| PHPStan | When the project has `vendor/bin/phpstan`, it checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. |
+| PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
@@ -69,7 +69,7 @@ file to change when you add it.
 | Debugger | With Sail, `sail debug` uses Sail's own Xdebug settings, so a port other than 9003 needs `SAIL_XDEBUG_CONFIG="client_host=host.docker.internal client_port=<port>"` in `.env`. A request to Xdebug that never answers, such as while PHP is stopped in another debugger, leaves the tab running until you stop it. Values in the editor come from the lines' `$names`, so a name from another scope, such as a closure's, can show the outer value. Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
 | Refactoring | Rename, Extract Method, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read expressions with their own parser, which treats ternaries (`? :`) as boundaries, so a whole ternary isn't offered, and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
-| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
+| Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. There's no comment that turns spelling off for one line: typos-lsp lets the project's ignore patterns replace a user-wide one. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
 | Deployment | There's no remote deployment or sync over SFTP or FTP. |
@@ -519,7 +519,8 @@ save every file they change.
 Tusk keeps some settings per project: breakpoints, watches, and how the
 debugger pauses on exceptions; the server paths for debugging; the Docker
 service that runs commands; saved database connections and their SSH tunnels;
-the index exclusions; the last URL you profiled; and the stress test form. Each
+the index exclusions; PHPStan's settings; the last URL you profiled; and the
+stress test form. Each
 one lives in one of two places:
 
 - **On this Mac**, in a file per project in
@@ -569,6 +570,7 @@ An example:
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
 | `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `phpstan` | PHPStan's settings: `enabled` (`auto`, `on`, `off`), `config`, `level`, `memoryLimit`, `timeout`, and `run` (`save` or `demand`). |
 
 The selected database connection, the last profiled URL, and the stress test
 form (`databaseConnection`, `profilerUrl`, and `httpLoadTest`) are personal,
@@ -2463,6 +2465,33 @@ applies the safe fixes without the menu. **Suppress *rule* for this line**
 adds a `// @mago-expect lint:rule` comment (`analysis:` for the analyzer)
 above the line, or adds the rule to one already there. Mago reports the
 comment once the problem is gone, and its fix removes the comment.
+
+### PHPStan
+
+When the project has `vendor/bin/phpstan`, Tusk runs it on each PHP file as
+it opens and each time you save it, with the project's own configuration, and
+shows its problems with source `phpstan`. **Settings > PHPStan** (a **This
+project** group) sets:
+
+| Setting | Default |
+| --- | --- |
+| Run PHPStan: when the project has it, always, or never | When the project has `vendor/bin/phpstan` |
+| Check files: as they open and on save, or only when you run it | As they open and on save |
+| Configuration file: found by PHPStan, or one of the `.neon` files in the project's root | Found by PHPStan (`phpstan.neon`, `phpstan.neon.dist`, `phpstan.dist.neon`) |
+| Rule level: the configuration's, or 0 to 10 or max | The configuration's |
+| Memory limit | `2G` |
+| Timeout | 180 seconds |
+
+Changes apply at once: the open files are checked again with the new
+settings, and turning PHPStan off clears its problems. Check **Share in
+tusk.json** to give your team the same settings (the `phpstan` key).
+
+**Code > Run PHPStan on Project** checks every file in the configuration's
+`paths` and lists the problems in the Problems panel. The **PHPStan** button in
+the Problems panel's toolbar shows its state: running, off, or failed, with
+the reason in its tooltip, such as a timeout or running out of memory. A
+failure also shows once as a notification. Click the button to run PHPStan on
+the project or open its settings.
 
 ## Test app
 
