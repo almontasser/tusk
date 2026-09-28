@@ -526,6 +526,10 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .setting input[type="number"] { width: 72px; }
 .setting input[aria-invalid="true"] { border-color: var(--red); }
 .setting-reset { width: 22px; height: 22px; }
+.setting-path { grid-template-columns: 1fr; }
+.setting-path .setting-control input { flex: 1; width: auto; min-width: 0; }
+.setting small.setting-note { color: var(--muted); overflow-wrap: anywhere; }
+.setting small.setting-note.setting-error { color: var(--red); }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px 16px; background: var(--panel); border-top: 1px solid var(--border-subtle); }
 .settings-actions .primary { margin-left: auto; padding: 3px 20px; }
 

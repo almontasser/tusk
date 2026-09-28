@@ -30,10 +30,11 @@ pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input:
 }
 
 fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>, any_status: bool) -> Result<String, String> {
-    crate::login_path();
+    crate::toolpaths::check(&[&[program.clone()], &args[..]].concat())?;
     let mut child = Command::new(program)
         .args(args)
         .current_dir(cwd)
+        .env("PATH", crate::toolpaths::path_env())
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -119,7 +120,9 @@ pub async fn tools_ensure(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     drop(lock);
-    tauri::async_runtime::spawn(check_tools(app));
+    if crate::toolpaths::auto_checks(&app) {
+        tauri::async_runtime::spawn(check_tools(app));
+    }
     Ok(())
 }
 

@@ -420,10 +420,52 @@ and run `npm install --package-lock-only` in that folder.
 
 Apps opened from Finder get a minimal `PATH`. At startup, `lib.rs` runs your
 login shell (`$SHELL -ilc`) once and adopts its `PATH`, so every tool the app
-starts later (`php`, and in later milestones `git` and `gh`) resolves the same
-way as in your terminal. It runs on a thread, because a shell with plugins can
-take a second or more, and the window shouldn't wait for it. Commands that start
-a program call `login_path()` first, which waits for that thread.
+starts later (`php`, `git`, `gh`) resolves the same way as in your terminal. It
+runs on a thread, because a shell with plugins can take a second or more, and
+the window shouldn't wait for it. Commands that start a program call
+`login_path()` first, which waits for that thread.
+
+### Tool paths
+
+**Settings > Tools** (`src/toolpaths.ts`) sets the paths of PHP, Composer,
+Node.js, Git, `gh`, and Docker, and a project can set its own PHP
+(`phpInterpreter`, shareable in `tusk.json`). Call sites don't read these
+settings: they keep running `php` or `git` by name, and the backend resolves
+the name.
+
+- `toolpaths.rs` keeps a folder of shims (`bin/` in the app's local data
+  folder). For each tool with a path, `tools_configure` writes a two-line
+  script named after the tool that `exec`s the path, and removes the scripts of
+  tools without one. The folder is emptied at launch.
+- `path_env()` is the shims' folder followed by the login `PATH`. `run_capture`,
+  `pty_spawn`, and `lsp_start` start every program with it, so a set path
+  reaches commands, terminal tabs, `/usr/bin/env php …`, the language servers,
+  and what they start in turn, such as the PHP server's own `php`. A shim is a
+  script rather than a symlink so that version managers that read the name they
+  were run as, such as mise, see their own path.
+- `check(command)` runs before a program starts. It finds the tool, looking
+  past `/usr/bin/env VAR=value`, and fails when a set path isn't an executable
+  file or, without one, when the tool isn't on `PATH`. The error names the fix
+  ("PHP wasn't found at /x. Set its path in Settings > Tools."), and the
+  `tool-missing` event carries it to a toast with **Open Settings**, so callers
+  that stay quiet on failure, such as the model introspection, still tell you.
+- The frontend sends the paths with `configureTools` after each settings
+  change, when a project opens (before its servers start), and when `tusk.json`
+  changes the project's PHP. A change of PHP or Node.js offers to restart the
+  language servers.
+- Composer runs as `composer` when you set its path, and as `php` with the
+  bundled `composer.phar` otherwise (`composerCommand`).
+- The terminal's shell and arguments come with the same call; `pty_spawn` runs
+  them when it gets no command.
+- Settings' `path` field type (`src/settings.ts`) draws the text box with
+  **Browse…**, **Test**, a note from the field's `describe`, and a datalist of
+  `suggest`ed values. `describe` runs `--version` on the set path, or says what
+  `tool_which` finds on the login `PATH` ("Detected: …").
+- `FIND_INTERPRETERS` (`src/toolpathsdata.ts`, with tests) is a shell loop over
+  the usual PHP locations; `parseInterpreters` keeps each real binary once.
+- `auto_checks` reads `checkForUpdates` from `settings.json` in Rust, so the
+  six-hour update and tool checks and the launch tool check honor it before the
+  frontend has loaded. **Check for Updates…** also checks the tools.
 
 ### Language server bridge
 
@@ -5120,3 +5162,16 @@ the paused one for `$names` rather than asking the language server for the
 variables in scope, which keeps them to one pass over at most 50 lines; a name
 from another scope can show a value it doesn't have there, which PhpStorm's
 own heuristic also allows.
+
+### 2026-09-28: Tool paths through shims on PATH, not at each call site
+
+Settings > Tools could have replaced each `"php"` in the frontend with a lookup,
+but PHP also runs from places the frontend doesn't see: `/usr/bin/env php` in
+terminal commands, Sail's scripts, and the PHP server's own helpers. A folder of
+shim scripts first on every child's `PATH` covers all of them with no call-site
+changes, applies to the next program without a restart, and keeps merges with
+the modules that run tools trivial. The backend checks the tool before it
+starts a program, so a missing one fails with an error that names the setting,
+not a raw spawn error. The tools manifest's URL stays fixed: packages are
+signed with the updater's key, so a mirror would need Tusk's key anyway.
+

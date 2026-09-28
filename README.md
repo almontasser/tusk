@@ -58,7 +58,8 @@ file to change when you add it.
 | Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
-| Terminal | A file reference that wraps onto the next line isn't a link. |
+| Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
+| Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Lists | The Redis key tree has ↑↓, →←, and Enter, but not yet Home, End, paging, or type-ahead, which the other lists have. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
@@ -80,8 +81,9 @@ file to change when you add it.
 To use the app, you need:
 
 - macOS
-- PHP 8.1 or later on your `PATH`. The app finds PHP through your login shell,
-  so installs from Homebrew and Laravel Herd work.
+- PHP 8.1 or later. The app finds PHP through your login shell's `PATH`, so
+  installs from Homebrew and Laravel Herd work, or you set its path in
+  **Settings > Tools**.
 - Git, and optionally the GitHub CLI (`gh`) for pull requests.
 - Node.js, for Tailwind CSS, JavaScript, TypeScript, and Vue support. Laravel
   projects that use Vite already need it.
@@ -96,12 +98,13 @@ the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, Type
 servers), and compiles in the database drivers, so you don't install them
 yourself. The first launch downloads the tools for your Mac's chip (about
 90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
-checks for newer versions at launch and every six hours. Sail support needs
+checks for newer versions at launch and every six hours, unless you turn off
+**Check for app and tool updates automatically** in **Settings > Tools**. Sail support needs
 Docker, which Sail itself needs. The PHP language server is the app's own
 binary, started with `lsp`, so there's nothing to download for it. It runs
 Laravel's and Filament's PHP scripts with the project's PHP: Herd's or Valet's
-PHP for the site, Sail's, Lando's, or DDEV's container, else the `php` on your
-`PATH`. A language server that crashes restarts on its own; if it keeps
+PHP for the site, Sail's, Lando's, or DDEV's container, else the PHP from
+**Settings > Tools**. A language server that crashes restarts on its own; if it keeps
 crashing, the status bar asks you to reopen the project.
 
 ## Run in development
@@ -346,7 +349,7 @@ Folder…** action.
 ## Settings
 
 Press ⌘, to open **Settings**. Settings are grouped under Appearance, Editor,
-AI, Spelling, Terminal, and Debugger. A setting that depends on another, such as the AI model,
+AI, Spelling, Terminal, Debugger, and Tools. A setting that depends on another, such as the AI model,
 shows only when it applies. Changes apply immediately and are saved in
 `~/Library/Application Support/ly.almontasser.tusk/settings.json`.
 
@@ -378,11 +381,42 @@ shows only when it applies. Changes apply immediately and are saved in
 | Check spelling | On |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
+| Terminal shell and its arguments | Your login shell (`$SHELL`), `-l` |
+| Tools: paths of PHP, Composer, Node.js, Git, the GitHub CLI, and Docker | Empty: found on your `PATH`; Composer is the bundled `composer.phar` |
+| Tools: check for app and tool updates automatically | On |
 | Debugger: Xdebug port | 9003 |
 | Debugger: items to load per array or object, and the longest string to load | 128, 2048 bytes |
 | Debugger: pause at the first line of each script | Off |
 | Debugger: show variable values in the editor while paused | On |
 | Debugger: IDE key (`XDEBUG_SESSION`) and the host PHP in Docker connects to | `1`, `host.docker.internal` |
+
+### Tools
+
+**Settings > Tools** sets the programs Tusk runs: PHP, Composer, Node.js, Git,
+the GitHub CLI (`gh`), and Docker. Leave a path empty to use the one on your
+login shell's `PATH`.
+
+- Each path has **Browse…** and **Test**. Under it, Tusk shows what it finds,
+  such as "Detected: /opt/homebrew/bin/php (PHP 8.4.2)", or the version of
+  the path you set, or why it can't run.
+- The PHP box offers the interpreters on this Mac: Homebrew's versions, Herd,
+  Herd Lite, MAMP, `/usr/bin/php`, and the shims and installs of asdf, phpenv,
+  and mise.
+- A change applies to the next command you run, without a restart. The
+  language servers started with the old PHP or Node.js, so Tusk offers to
+  restart them.
+- When a tool is missing, Tusk says so, such as "PHP wasn't found. Install it,
+  or set its path in Settings > Tools.", with **Open Settings**.
+- **Check for app and tool updates automatically** checks at launch and every
+  six hours. Turn it off on an offline or locked-down Mac; **Tusk > Check for
+  Updates…** still checks for both.
+
+A project can use another PHP: **Tools > Choose PHP Interpreter…** lists the
+interpreters on this Mac, a file you choose, and the default from Settings. The
+choice is a project setting, which you can share in `tusk.json`.
+
+**Settings > Terminal** sets the shell for new terminal tabs and its arguments
+(`-l` by default, for a login shell).
 
 ### Vim emulation
 
@@ -512,7 +546,7 @@ save every file they change.
 Tusk keeps some settings per project: breakpoints, watches, and how the
 debugger pauses on exceptions; the server paths for debugging; the Docker
 service that runs commands; saved database connections and their SSH tunnels;
-the index exclusions; the last URL you profiled; and the stress test form. Each
+the index exclusions; the PHP interpreter; the last URL you profiled; and the stress test form. Each
 one lives in one of two places:
 
 - **On this Mac**, in a file per project in
@@ -562,6 +596,7 @@ An example:
 | `dockerService` | The Compose service that runs tests, Artisan, and Tinker; empty for this Mac. |
 | `databaseConnections` | Saved connections, each a `name` and a `url` without a password. |
 | `databaseSsh` | The SSH destination for each connection, by name; the empty name is `.env`'s connection. |
+| `phpInterpreter` | The PHP program this project uses instead of the one in **Settings > Tools**, such as `/opt/homebrew/opt/php@8.3/bin/php`. |
 
 The selected database connection, the last profiled URL, and the stress test
 form (`databaseConnection`, `profilerUrl`, and `httpLoadTest`) are personal,

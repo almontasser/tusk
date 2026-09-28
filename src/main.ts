@@ -55,6 +55,7 @@ import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
 import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
+import { choosePhpInterpreter, configureTools, initToolPaths } from "./toolpaths";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -576,6 +577,7 @@ async function openFolder(dir: unknown = null) {
   try { localStorage.setItem("lastFolder", dir); } catch {}
   // Before anything reads the project's values, such as the breakpoints and the index exclusions.
   await openProjectState(dir);
+  await configureTools(true);
   refreshGit();
   detectFormatters();
   loadBreakpoints();
@@ -1556,6 +1558,7 @@ const actions: Action[] = [
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
+  { label: "Choose PHP Interpreter…", run: () => root && choosePhpInterpreter() },
   { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
@@ -1853,6 +1856,7 @@ const settingsLoaded = initSettings();
 initSnippets();
 initBookmarks({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }) });
 initFormatting({ root: () => root, status });
+initToolPaths({ restartServers });
 initJsonSchemas();
 initConflicts();
 initHistory({ root: () => root, status });

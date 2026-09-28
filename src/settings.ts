@@ -65,6 +65,12 @@ export type Field = { key: string; label: string; help?: string; group: string; 
   | { type: "checkbox" }
   | { type: "number"; min: number; max: number }
   | { type: "text"; placeholder?: string }
+  /**
+   * A program or file: a text box with Browse and Test. `describe` says what the value finds, such as "Detected:
+   * /opt/homebrew/bin/php (PHP 8.4.2)", or throws why it doesn't work; it runs when the dialog opens, on Test, and
+   * after a change. `suggest` lists values to offer under the box, with a note for each.
+   */
+  | { type: "path"; placeholder?: string; describe?: (value: string) => Promise<string>; suggest?: () => Promise<[value: string, note: string][]> }
   | { type: "select"; options: [string, string][] | (() => [value: string, text: string, group: string][]) }
 );
 
@@ -332,16 +338,48 @@ export function openSettings(query = "") {
         if (group) parent = groups.get(group) ?? groups.set(group, input.appendChild(h("optgroup", { label: group }))).get(group)!;
         parent.append(new Option(text, value));
       }
-    } else input = h("input", { id, type: f.type, ...(f.type === "number" ? { min: String(f.min), max: String(f.max) } : {}), ...(f.type === "text" ? { placeholder: f.placeholder ?? "", spellcheck: false } : {}) });
+    } else input = h("input", { id, type: f.type === "path" ? "text" : f.type, ...(f.type === "number" ? { min: String(f.min), max: String(f.max) } : {}), ...(f.type === "text" || f.type === "path" ? { placeholder: f.placeholder ?? "", spellcheck: false } : {}) });
     const fallback = allDefaults()[f.key];
     const reset = h("button", { type: "button", class: "icon-button setting-reset", title: `Reset to the default (${valueText(fallback) || "empty"})`, ariaLabel: `Reset ${f.label} to the default` }, icon("discard"));
-    reset.onclick = () => (set(f.key, fallback), refresh(), input.focus());
+    reset.onclick = () => (set(f.key, fallback), refresh(), input.focus(), void check());
     const label = h("label", { htmlFor: id }, f.label);
     const row = h("div", { class: `setting setting-${f.type}` });
+    const note = h("small", { class: "setting-note", ariaLive: "polite" });
+    /** Runs a path field's check and shows what it found or why it fails. */
+    const check = async () => {
+      if (f.type !== "path" || !f.describe) return;
+      const value = input.value.trim();
+      note.textContent = "Checking…";
+      note.classList.remove("setting-error");
+      try {
+        const text = await f.describe(value);
+        if (input.value.trim() === value) note.textContent = text;
+      } catch (e) {
+        if (input.value.trim() !== value) return;
+        note.textContent = errorText(e);
+        note.classList.add("setting-error");
+      }
+    };
+    const extra: HTMLElement[] = [];
+    if (f.type === "path") {
+      const browse = h("button", { type: "button", ariaLabel: `Browse for ${f.label}` }, "Browse…");
+      browse.onclick = async () => {
+        const path = await open({ title: f.label, defaultPath: input.value.trim() || undefined }).catch((e) => (showError("Can't open the file chooser", e), null));
+        if (typeof path === "string") (input.value = path), input.onchange?.(new Event("change"));
+      };
+      extra.push(browse, h("button", { type: "button", ariaLabel: `Test ${f.label}`, onclick: check }, "Test"));
+      if (f.suggest) {
+        const list = h("datalist", { id: `${id}-list` });
+        input.setAttribute("list", list.id);
+        extra.push(list);
+        f.suggest().then((found) => list.replaceChildren(...found.map(([value, text]) => new Option(text, value))), (e) => console.warn("No suggestions for", f.key, e));
+      }
+      void check();
+    }
     if (f.type === "checkbox") row.append(input, label, reset);
-    else row.append(label, h("span", { class: "setting-control" }, input, reset));
+    else row.append(label, h("span", { class: "setting-control" }, input, ...extra, reset));
     if (f.help) row.append(h("small", {}, f.help));
-    row.append(error);
+    row.append(note, error);
     const invalidNote = () => (invalid.has(f.key) ? `The value in settings.json ${invalid.get(f.key)}, so the default is used.` : "");
     const sync = () => {
       const v = current(f.key);
@@ -362,8 +400,9 @@ export function openSettings(query = "") {
         el.ariaInvalid = null;
         return set(f.key, n), refresh();
       }
-      set(f.key, f.type === "checkbox" ? el.checked : el.value);
+      set(f.key, f.type === "checkbox" ? el.checked : f.type === "path" ? el.value.trim() : el.value);
       refresh();
+      void check();
     };
     section.append(row);
     rows.push({ f, row, section, text: [f.group, f.label, f.help, f.key].join(" ").toLowerCase(), sync });

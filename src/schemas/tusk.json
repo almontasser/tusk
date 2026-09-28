@@ -76,6 +76,11 @@
         "additionalProperties": false
       }
     },
+    "phpInterpreter": {
+      "type": "string",
+      "description": "The PHP program this project uses instead of the one in Settings > Tools, such as /opt/homebrew/opt/php@8.3/bin/php.",
+      "examples": ["/opt/homebrew/opt/php@8.3/bin/php"]
+    },
     "databaseSsh": {
       "type": "object",
       "description": "The SSH destination each database connection goes through, by connection name. The empty name is .env's connection.",
