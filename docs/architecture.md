@@ -3291,7 +3291,32 @@ the debugger.
 ### Layout
 
 `index.html` lays out a title bar, a workbench (the tool bar, the sidebar, and
-the editor area), and a status bar. The window has no native title bar
+the editor area), and a status bar. Inside the workbench, `#workarea` is a
+column that holds `#workrow` (the sidebar and `main`, the editor area) and,
+when the bottom panel spans the full width, the panel under both.
+`src/layout.ts` moves `#panel` between `main` and `#workarea`, and sets
+`panel-full-width` and `panel-maximized` on `#workbench`; CSS does the rest.
+Maximized, the panel fills its column: `main`, or with a full-width panel all
+of `#workarea`, since CSS hides `#workrow`. A `MutationObserver` on the panel's
+`hidden` attribute restores the size and moves focus back to the editor
+whenever the panel hides, so every way of hiding it (⇧⎋, the terminal toggle,
+closing the last tab) behaves the same. The full-width choice is in
+localStorage (`panelFullWidth`), since it's per user.
+
+`src/splitter.ts` makes every resizable split: the sidebar, the panel, and
+the splits inside the Debug, Tests, Git Log, and Profiler tabs.
+`splitter(handle, options)` sizes one pane (the target) in pixels, on the x or
+y axis, from a handle at the target's start or end edge. The handle gets
+`role="separator"`, focus, and the ARIA values; the arrow keys move it by
+10 px (Shift: 50 px), Home and End go to the limits, and a double-click or
+Enter removes the inline size, so the CSS default applies again. It clamps
+between `min` and the container's size minus `minRest`, and doesn't clamp by
+a container that isn't showing yet. With `save`, the size is kept in
+localStorage under `split:<window label>:<name>`, so each window keeps its
+own. Handles between panes (`.pane-splitter`) draw the border between them;
+the sidebar's and panel's handles are absolute strips over the edge. Panes with
+a saved width also have a CSS `max-width`, so a narrower window never pushes
+the pane beside them out of view. The window has no native title bar
 (`titleBarStyle: "Overlay"` in `tauri.conf.json`): macOS draws its window
 buttons over the left edge of `#titlebar`, which starts its content 80 px in.
 Empty parts of the title bar carry `data-tauri-drag-region`, so dragging them
@@ -3301,7 +3326,7 @@ As in a native app, the interface's text can't be selected: `body` has
 `user-select: none`, which WebKit reads only as `-webkit-user-select`, so every
 rule sets both. Text worth copying opts back in: fields, comment and message
 bodies, test failures, database cells, and hovers; Monaco and xterm.js handle
-their own selection. Drag handles call `preventDefault` on `mousedown`, so a
+their own selection. Drag handles call `preventDefault` on `pointerdown`, so a
 resize never starts a selection. Long paths in right-to-left boxes (which put
 the ellipsis at the start) begin with a left-to-right mark, or bidi rules move
 a leading dot to the end (`.env.example` showed as `env.example.`).
@@ -4683,6 +4708,21 @@ and ⌘Q is the **Quit Tusk** action instead of the native item. Both run
 on, otherwise Save, Don't Save, or Cancel. The window is then destroyed, which
 ends the app through the normal exit, so language servers still stop. This
 needs the `core:window:allow-destroy` permission.
+
+### 2026-09-28: One splitter, and a panel that moves between two parents
+
+Each resizable split had its own `mousedown` handler, and the Debug, Tests,
+and Git Log splits had fixed percentages. `splitter.ts` now makes all of them,
+with the keyboard, reset, limits, and saved sizes in one place. Pixel sizes,
+not fractions, because PhpStorm keeps tool window sizes that way and because a
+list's useful width doesn't grow with the window.
+
+For the full-width bottom panel, the panel element moves between `main` and
+`#workarea` instead of the workbench becoming a CSS grid. A grid needs `main`
+to be `display: contents`, which puts the editor, diff, merge, and empty-state
+views in one cell, and drops `main` from the accessibility tree in WebKit.
+Moving the element keeps the terminals running: xterm.js and the
+`ResizeObserver` that fits them follow the element.
 
 ### 2026-09-27: Tusk's own PHP language server replaces Phpactor, Laravel LSP, and the Filament server
 

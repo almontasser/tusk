@@ -8,6 +8,7 @@ import { ensureTools } from "./lsp";
 import { pick } from "./palette";
 import { composeService, usesSail } from "./sail";
 import { handlerLines, thrownIn, uncaughtClass } from "./debugexceptions";
+import { splitter } from "./splitter";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
@@ -547,19 +548,25 @@ panel.innerHTML = `
   </div>
   <div class="debug-body">
     <ul class="debug-frames" aria-label="Call stack" data-empty="The call stack appears here when execution pauses."></ul>
+    <div class="pane-splitter" data-split="frames"></div>
     <div class="debug-side">
       <div class="debug-watches">
         <ul aria-label="Watches"></ul>
         <input placeholder="Add a watch, such as $request->all(), and press Enter" aria-label="Add a watch expression" spellcheck="false" />
       </div>
+      <div class="pane-splitter" data-split="watches"></div>
       <ul class="debug-vars" aria-label="Variables" data-empty="Variables appear here when execution pauses."></ul>
     </div>
   </div>
+  <div class="pane-splitter" data-split="console"></div>
   <div class="debug-console">
     <pre></pre>
     <input placeholder="Evaluate an expression in the current frame, such as $request->all()" aria-label="Evaluate expression" spellcheck="false" />
   </div>`;
 const q = <T extends HTMLElement>(sel: string) => panel.querySelector(sel) as T;
+splitter(q('[data-split="frames"]'), { target: q(".debug-frames"), axis: "x", edge: "end", label: "Resize the call stack", min: 120, minRest: 200, save: "debug.frames" });
+splitter(q('[data-split="watches"]'), { target: q(".debug-watches"), axis: "y", edge: "end", label: "Resize the watches", min: 40, minRest: 40, save: "debug.watches" });
+splitter(q('[data-split="console"]'), { target: q(".debug-console"), axis: "y", edge: "start", label: "Resize the debug console", min: 50, minRest: 80, save: "debug.console" });
 
 const runs: Record<string, () => unknown> = { exceptions: togglePauseOnExceptions, listen: startDebugging, resume, over: stepOver, into: stepInto, out: stepOut, stop: stopDebugging };
 panel.querySelectorAll<HTMLButtonElement>("[data-run]").forEach((b) => (b.onclick = () => runs[b.dataset.run!]()));

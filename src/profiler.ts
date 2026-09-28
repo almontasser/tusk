@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
+import { splitter } from "./splitter";
 import { openTerminal, showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): unknown; status(text: string, source?: string): void };
@@ -476,7 +477,7 @@ panel.innerHTML = `
       </table>
     </div>
     <div class="profiler-flame" tabindex="0" aria-label="Flame graph" hidden></div>
-    <div class="profiler-resize" title="Drag to resize"></div>
+    <div class="profiler-resize pane-splitter"></div>
     <div class="profiler-detail"></div>
   </div>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
@@ -504,22 +505,7 @@ q('[data-action="open"]').onclick = () => chooseProfile();
 
 // Drag the side pane's left edge to resize it; the width is remembered.
 const detailPane = q(".profiler-detail");
-const savedWidth = Number(readSetting("profilerDetailWidth"));
-if (savedWidth) detailPane.style.width = `${savedWidth}px`;
-q(".profiler-resize").onmousedown = (down) => {
-  down.preventDefault(); // Otherwise the drag selects the text it passes over.
-  const start = detailPane.offsetWidth;
-  const move = (e: MouseEvent) => (detailPane.style.width = `${Math.max(200, Math.min(panel.offsetWidth - 300, start + down.clientX - e.clientX))}px`);
-  const up = () => {
-    removeEventListener("mousemove", move);
-    removeEventListener("mouseup", up);
-    try {
-      localStorage.setItem("profilerDetailWidth", String(detailPane.offsetWidth));
-    } catch {}
-  };
-  addEventListener("mousemove", move);
-  addEventListener("mouseup", up);
-};
+splitter(q(".profiler-resize"), { target: detailPane, axis: "x", edge: "start", label: "Resize the details", min: 200, minRest: 300, save: "profiler.detail", legacyKey: "profilerDetailWidth" });
 q('[data-action="compare"]').onclick = () => compareWith();
 q('[data-action="reveal"]').onclick = () => currentPath && invoke("run_capture", { cwd: "/", program: "/usr/bin/open", args: ["-R", currentPath], input: null }).catch(() => {});
 panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(

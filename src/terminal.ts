@@ -275,6 +275,15 @@ function showPanel(visible: boolean) {
   renderTabs();
 }
 
+/** Shows the panel with its current tab, and focuses it. False when the panel has no tabs. */
+export function revealPanel() {
+  const tab = active ?? sessions.at(-1);
+  if (!tab) return false;
+  showPanel(true);
+  activate(tab);
+  return true;
+}
+
 /** A shell that still runs, as opposed to a command's tab (such as git pull) or an exited shell. */
 const isShell = (s: Session | undefined) => !!s?.term && !s.exited && !!s.restore && !s.restore.command;
 
@@ -327,14 +336,3 @@ export function showPanelView(title: string, el: HTMLElement, onClose: () => voi
   session.title = title;
   activate(session);
 }
-
-// Drag the top edge of the panel to resize it.
-$("panel-resize").onmousedown = (down) => {
-  down.preventDefault(); // Otherwise the drag selects the text it passes over.
-  const panel = $("panel");
-  const start = panel.offsetHeight;
-  const move = (e: MouseEvent) => (panel.style.height = `${Math.max(80, start + down.clientY - e.clientY)}px`);
-  const up = () => (window.removeEventListener("mousemove", move), window.removeEventListener("mouseup", up));
-  window.addEventListener("mousemove", move);
-  window.addEventListener("mouseup", up);
-};

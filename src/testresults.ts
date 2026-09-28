@@ -4,6 +4,7 @@ import { findTests } from "./phptests";
 import { classFile, type LiveTest, parseEvents, parseJUnit, parseTeamcity, sameTest, type TestResult } from "./junit";
 import { pathsFor, psr4From, type Psr4 } from "./psr4";
 import { containerRoot } from "./sail";
+import { splitter } from "./splitter";
 import { showPanelView } from "./terminal";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; rerun(): unknown; rerunFailed(failed: TestResult[]): unknown };
@@ -30,9 +31,11 @@ panel.innerHTML = `
   </div>
   <div class="tests-body">
     <ul class="tests-tree" aria-label="Test results"></ul>
+    <div class="pane-splitter"></div>
     <pre class="tests-detail"></pre>
   </div>`;
 const q = (sel: string) => panel.querySelector(sel) as HTMLElement;
+splitter(q(".tests-body > .pane-splitter"), { target: q(".tests-tree"), axis: "x", edge: "end", label: "Resize the test tree", min: 180, minRest: 200, save: "tests.tree" });
 let failed: TestResult[] = [];
 q('[data-run="rerun"]').onclick = () => host.rerun();
 q('[data-run="failed"]').onclick = () => failed.length && host.rerunFailed(failed);

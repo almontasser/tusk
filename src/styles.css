@@ -209,6 +209,31 @@ kbd {
    ========================================================================== */
 
 #workbench { flex: 1; min-height: 0; display: flex; }
+/* The sidebar and the editor side by side, and the bottom panel under them when it spans the full width. */
+#workarea { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#workrow { flex: 1; min-height: 0; display: flex; }
+/* Maximized, the panel fills its column: the editor area, or with a full-width panel, the sidebar's too. */
+#workbench.panel-maximized main > :not(#panel), #workbench.panel-maximized.panel-full-width #workrow { display: none !important; }
+#workbench.panel-maximized #panel { flex: 1; height: auto !important; max-height: none; }
+#workbench.panel-maximized #panel-resize { display: none; }
+
+/* A pane with a saved width leaves the pane beside it some room when the panel gets narrower. */
+.debug-frames, .tests-tree, .history-commits, .profiler-detail { max-width: calc(100% - 160px); }
+
+/* Splitters (splitter.ts): a thin handle that shows the accent color while you hover, drag, or focus it. */
+.splitter { flex-shrink: 0; position: relative; z-index: 3; outline: none; }
+.splitter-x { cursor: col-resize; }
+.splitter-y { cursor: row-resize; }
+.splitter::after { content: ""; position: absolute; background: transparent; transition: background 0.1s 0.15s; }
+.splitter-x::after { top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; }
+.splitter-y::after { left: 0; right: 0; top: calc(50% - 1px); height: 2px; }
+.splitter:hover::after, .splitter.dragging::after, .splitter:focus-visible::after { background: var(--accent); }
+/* An in-flow splitter between two panes draws the border between them. */
+.pane-splitter.splitter-x { width: 5px; margin: 0 -2px; border-left: 2px solid transparent; border-right: 2px solid transparent; background: var(--border) content-box; }
+.pane-splitter.splitter-y { height: 5px; margin: -2px 0; border-top: 2px solid transparent; border-bottom: 2px solid transparent; background: var(--border) content-box; }
+/* While you drag, the cursor keeps its shape over whatever it passes. */
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; }
 
 #activitybar {
   width: 44px;
@@ -220,7 +245,12 @@ kbd {
   padding: 6px 0;
   background: var(--chrome);
   border-right: 1px solid var(--border);
+  /* In a short window, the buttons scroll rather than drop off the bottom. */
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+#activitybar::-webkit-scrollbar { display: none; }
+#activitybar > * { flex-shrink: 0; }
 #activitybar .spacer { flex: 1; }
 #activitybar button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: var(--muted); }
 #activitybar button:hover { background: var(--hover); color: var(--text); }
@@ -237,7 +267,7 @@ kbd {
 #sidebar > section { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 /* The view scrolls as a whole, so its parts keep their height instead of squeezing under the list. */
 #sidebar > section > * { flex-shrink: 0; }
-#sidebar-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
+#sidebar-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; }
 .view-header { height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 0 12px; font-weight: 600; position: sticky; top: 0; background: var(--panel); z-index: 1; }
 .view-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .view-actions { display: flex; gap: 2px; opacity: 0.8; }
@@ -495,8 +525,12 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
    Bottom panel: terminals and the debugger
    ========================================================================== */
 
-#panel { height: 280px; display: flex; flex-direction: column; border-top: 1px solid var(--border); position: relative; flex-shrink: 0; }
-#panel-resize { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; z-index: 3; }
+/* The panel never takes the whole column, so the editor keeps some room when the window gets smaller. */
+#panel { height: 280px; max-height: calc(100% - 100px); min-height: 80px; display: flex; flex-direction: column; border-top: 1px solid var(--border); position: relative; flex-shrink: 0; }
+#panel-resize { position: absolute; top: -3px; left: 0; right: 0; height: 6px; }
+#panel-header { display: flex; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+#panel-header #terminal-tabs { flex: 1; min-width: 0; border-bottom: 0; }
+.panel-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; flex-shrink: 0; }
 #terminals { flex: 1; min-height: 0; padding: 6px 0 0 10px; background: var(--bg); }
 #terminals .term, #terminals .panel-view { height: 100%; }
 /* A panel tab moved into an editor pane covers the pane's editor, under the drop marks. */
@@ -633,10 +667,11 @@ button.link:hover { text-decoration: underline; }
 #diff-label { margin-right: auto; }
 #diff-editor { flex: 1; min-height: 0; }
 #history-title { font-weight: 600; white-space: nowrap; }
-#history-filter { flex: 1; max-width: 380px; height: 26px; }
+#history-filter { flex: 1; min-width: 80px; max-width: 380px; height: 26px; }
+#history header { overflow: hidden; }
 #history header label { color: var(--muted); white-space: nowrap; }
 .history-body { flex: 1; min-height: 0; display: flex; }
-.history-commits { width: 50%; overflow: auto; border-right: 1px solid var(--border); }
+.history-commits { width: 50%; min-width: 0; overflow: auto; }
 #history-list { list-style: none; margin: 0; padding: 0; }
 #history-list li { padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); }
 #history-list li:hover { background: var(--hover); }
@@ -698,13 +733,13 @@ button.link:hover { text-decoration: underline; }
 .debug-state { margin-left: 8px; color: var(--faint); }
 .debug-body { flex: 1; min-height: 0; display: flex; gap: 0; }
 .debug-frames, .debug-vars, .debug-vars ul { list-style: none; margin: 0; padding: 0; }
-.debug-frames { width: 40%; overflow: auto; border-right: 1px solid var(--border); }
+.debug-frames { width: 40%; min-width: 0; overflow: auto; }
 .debug-frames li { display: flex; justify-content: space-between; gap: 8px; height: 22px; align-items: center; padding: 0 8px; white-space: nowrap; }
 .debug-frames li:hover { background: var(--hover); }
 .debug-frames li.selected { background: var(--selected); }
 .debug-frames .loc { color: var(--faint); overflow: hidden; text-overflow: ellipsis; direction: rtl; }
 .debug-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.debug-watches { flex-shrink: 0; max-height: 45%; overflow: auto; border-bottom: 1px solid var(--border); font-family: var(--mono); padding-left: 6px; }
+.debug-watches { flex-shrink: 0; max-height: calc(100% - 40px); overflow: auto; font-family: var(--mono); padding-left: 6px; }
 .debug-watches ul { list-style: none; margin: 0; padding: 0; }
 .debug-watches ul ul { padding-left: 14px; }
 .debug-watches input { width: 100%; border: 0; border-radius: 0; background: transparent; font: 12px var(--mono); box-shadow: none !important; padding: 3px 4px; }
@@ -727,7 +762,7 @@ button.link:hover { text-decoration: underline; }
 .debug-vars .name { color: var(--purple); }
 .debug-vars .value { -webkit-user-select: text; user-select: text; }
 .debug-vars .type { color: var(--faint); margin-left: 4px; }
-.debug-console { display: flex; flex-direction: column; border-top: 1px solid var(--border); max-height: 40%; flex-shrink: 0; }
+.debug-console { display: flex; flex-direction: column; height: 30%; max-height: calc(100% - 80px); min-height: 50px; flex-shrink: 0; }
 .debug-console pre { margin: 0; padding: 4px 8px; overflow: auto; flex: 1; min-height: 20px; font-family: var(--mono); -webkit-user-select: text; user-select: text; }
 .debug-console input { border: 0; border-top: 1px solid var(--border); border-radius: 0; font: 12px var(--mono); box-shadow: none !important; }
 
@@ -842,8 +877,6 @@ button.link:hover { text-decoration: underline; }
 /* Below this, the table scrolls sideways rather than squeezing function names to nothing. */
 .profiler-table table { min-width: 640px; }
 .profiler-detail { width: 32%; min-width: 200px; overflow: auto; padding: 6px 0; flex-shrink: 0; }
-.profiler-resize { width: 5px; margin-left: -2px; cursor: col-resize; flex-shrink: 0; border-right: 1px solid var(--border); }
-.profiler-resize:hover { border-right-color: var(--accent); }
 .profiler table { width: 100%; border-collapse: collapse; font: 12px var(--mono); table-layout: fixed; }
 .profiler th { position: sticky; top: 0; background: var(--panel); text-align: left; font: 600 12px var(--ui-family); padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 .profiler th:hover { color: var(--text); background: var(--hover); }
@@ -915,7 +948,7 @@ button.link:hover { text-decoration: underline; }
 .profiler-detail p.muted { padding: 2px 12px; }
 .tests-body { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border-subtle); }
 .tests-tree, .tests-tree ul { list-style: none; margin: 0; padding: 0; }
-.tests-tree { width: 45%; min-width: 220px; overflow: auto; border-right: 1px solid var(--border-subtle); padding: 4px 0; }
+.tests-tree { width: 45%; min-width: 0; overflow: auto; padding: 4px 0; }
 .test-row { height: var(--row); display: flex; align-items: center; gap: 6px; padding: 0 10px; white-space: nowrap; cursor: default; }
 .test-row:hover { background: var(--hover); }
 .test-row.selected { background: var(--selected); }

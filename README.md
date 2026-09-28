@@ -54,7 +54,7 @@ file to change when you add it.
 | Database | Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed, and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Running another query drops pending changes. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and show a streaming response once the call ends. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Response bodies in the history aren't redacted. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
-| Split editors | Up to four panes. |
+| Split editors | Up to four panes. The dividers between editor panes, and between an HTTP request and its response, resize with the mouse only, not the keyboard (`src/splitter.ts` makes the others). |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -191,6 +191,21 @@ DMG that everyone installs by hand.
   Requests**, and **Find** views. Click the active icon to hide the sidebar,
   and drag the sidebar's edge to resize it. The icons at the bottom open the
   **Git Log**, the **Debug** panel, and the terminal.
+- **Bottom panel:** the terminals and tool windows such as **Problems**, **Git
+  Log**, **Debug**, and **Tests**. Drag its top edge to resize it. The buttons
+  at the right of its tab bar maximize it (⇧⌘'), open its options, and hide it
+  (⇧⎋ while you work in it). In the options, or in **View > Toggle Full-Width
+  Bottom Panel**, choose whether the panel sits under the editor, beside the
+  sidebar, or spans the full window width under both, as in PhpStorm.
+  Maximized, the panel fills the editor area, or with the full-width layout,
+  the whole window below the title bar. Hiding the panel restores its size and
+  puts focus back in the editor.
+- **Splits:** drag the edge between two parts to resize them: the sidebar, the
+  bottom panel, and the parts of the **Debug**, **Tests**, **Git Log**, and
+  **Profiler** tabs. Each handle takes focus with Tab; then the arrow keys move
+  it (with Shift, in bigger steps), and Home and End go to the limits.
+  Double-click a handle, or press Enter on it, to go back to the default size.
+  Each window remembers its sizes and the panel's layout.
 - **Status bar:** error and warning counts for open files (click them to list
   the problems), the file's path followed by breadcrumbs for the class and
   method at the cursor (click one to go to it), background work such as
@@ -265,6 +280,8 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘N | In a PHP file, generate code (constructor, getters and setters, `__toString()`, methods to implement or override); elsewhere, a new file in the selected folder |
 | ⇧⌘C | Copy the path of the selected or active file |
 | ⌥F12 | Show or hide the terminal |
+| ⇧⌘' | Maximize the bottom panel, or restore it |
+| ⇧⎋ | Hide the bottom panel, while you work in it |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Rerun the last test or command |

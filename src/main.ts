@@ -50,6 +50,7 @@ import { chooseService, composeService, composeServices, forgetComposeServices }
 import { setMenu } from "./menu";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
+import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -1612,6 +1613,10 @@ const actions: Action[] = [
   { label: "Compare with File…", run: compareWithFile },
   { label: "Terminal", keys: "Alt+F12", run: () => toggleTerminal(root || "/") },
   { label: "New Terminal", run: () => openTerminal(root || "/") },
+  { label: "Toggle Full-Width Bottom Panel", run: togglePanelFullWidth },
+  { label: "Maximize Bottom Panel", keys: "Shift+Meta+Quote", run: togglePanelMaximized },
+  // ⇧⎋ hides the panel while you work in it, as PhpStorm's Hide Active Tool Window; elsewhere it's the editor's.
+  { label: "Hide Bottom Panel", keys: "Shift+Escape", run: hidePanel, when: () => panelShown() && !!document.activeElement?.closest("#panel") },
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
 ];
 
@@ -1628,7 +1633,7 @@ async function chooseDockerService() {
 }
 
 // Keys shown as the Mac draws them.
-const KEY_SYMBOLS: Record<string, string> = { Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space" };
+const KEY_SYMBOLS: Record<string, string> = { Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space", Quote: "'" };
 const symbolsFor = (keys?: string) =>
   keys
     ?.replace(/^(\w+) \1$/, "$1+$1+")
@@ -1758,7 +1763,7 @@ function comboOf(e: KeyboardEvent) {
 window.addEventListener(
   "keydown",
   (e) => {
-    if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code))) return;
+    if (recording || !(e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.code) || (e.shiftKey && e.code === "Escape"))) return;
     const combo = comboOf(e);
     // The first action for the keys that applies here, so an editor-only action can share its keys with another.
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo && !(a.editorOnly && !editor.hasTextFocus()) && !(a.when && !a.when()));
@@ -1865,25 +1870,8 @@ $("tree-collapse").onclick = () => root && collapseAll();
 $("tree-locate").onclick = selectOpenedFile;
 $("todo-refresh").onclick = () => loadTodos();
 
-// Drag the sidebar's right edge to resize it; the width is remembered.
-try {
-  const width = localStorage.getItem("sidebarWidth");
-  if (width) $("sidebar").style.width = `${width}px`;
-} catch {}
-$("sidebar-resize").onmousedown = (down) => {
-  down.preventDefault(); // Otherwise the drag selects the text it passes over.
-  const start = $("sidebar").offsetWidth;
-  const move = (e: MouseEvent) => ($("sidebar").style.width = `${Math.max(180, start + e.clientX - down.clientX)}px`);
-  const up = () => {
-    removeEventListener("mousemove", move);
-    removeEventListener("mouseup", up);
-    try {
-      localStorage.setItem("sidebarWidth", String($("sidebar").offsetWidth));
-    } catch {}
-  };
-  addEventListener("mousemove", move);
-  addEventListener("mouseup", up);
-};
+// The sidebar and panel sizes, where the panel sits, and maximizing it.
+initLayout({ focusEditor: () => editor.focus(), status });
 initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
