@@ -1831,11 +1831,25 @@ last changed it, when, and the commit message. To show the commit, age, and
 author of every line in place of line numbers, run **Annotate with Git Blame**
 from ⌘⇧A. Run it again to hide them.
 
-Press ⌘9 for the **Git Log** in the bottom panel: the commits of the current branch, or of every
-branch, with branch and tag labels. Filter them by message, author, hash, or
-branch name. Select a commit to see its message and changed files, and click a
-file to see its diff against the previous commit. From a commit, you can copy
-its hash, check it out, create a branch at it, cherry-pick it onto the current
+Clicking an annotation shows its commit in a popup: the message, author,
+date, and changed files, with **Show in Git Log**, **Show Diff**, and **Copy
+Hash**. Click a file in the popup for its diff in that commit. Right-click an
+annotation for the same actions.
+
+Press ⌘9 for the **Git Log** in the bottom panel: the commits of the current
+branch, with branch and tag labels and a graph of branches and merges. The
+header's filters search through git, not just the loaded commits: type in the
+search box to find commits by message or hash, choose a branch or **All
+branches**, and filter by author or by path. When nothing matches, the log
+says so, with **Clear filters**. The log loads 300 commits at a time; **Load
+More** at the end loads more. The graph shows when no filter is set.
+
+Use ↑ and ↓ to move through the commits; the details follow the selection.
+Press ⏎ for the commit's diff, → to move to its changed files, and ⌘C to copy
+its hash. In the details, click a file, or press ⏎ on it, to see its diff
+against the previous commit, and move to the commit's other files with the
+arrows in the diff's header. From a commit, you can show its diff, copy its
+hash, check it out, create a branch at it, cherry-pick it onto the current
 branch, or revert it. To see the commits that changed one file, run **Show File
 History**, or right-click the file in the tree and choose **Show History**. File
 history follows renames.

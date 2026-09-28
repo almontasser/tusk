@@ -4,6 +4,7 @@ import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
 import { h, icon, iconButton } from "./dom";
+import { copyHash, showCommitDiff, showCommitPopup, showInLog } from "./history";
 import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
 import { age, ago, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
@@ -537,6 +538,29 @@ function blameOf(model: monaco.editor.ITextModel, rel: string): Promise<BlameLin
 }
 
 const annotated = new Set<string>();
+/** The blame each annotated editor shows, by line. */
+const annotations = new WeakMap<monaco.editor.ICodeEditor, BlameLine[]>();
+
+/** The committed blame line an annotated editor shows at a line, if any. */
+function blameAt(editor: monaco.editor.ICodeEditor, line: number) {
+  if (!isAnnotated(editor)) return undefined;
+  const b = annotations.get(editor)?.[line - 1];
+  return b && !/^0+$/.test(b.hash) ? b : undefined;
+}
+
+/** The gutter's context menu items for a blame annotation: the commit's details, its diff, and its hash. */
+export function blameMenu(editor: monaco.editor.ICodeEditor, line: number, x: number, y: number): MenuItem[] {
+  const b = blameAt(editor, line);
+  const model = editor.getModel();
+  if (!b || !model) return [];
+  const rel = model.uri.fsPath.slice(host.root().length + 1);
+  return [
+    { label: `Show Commit ${b.hash.slice(0, 7)}`, run: () => showCommitPopup(b.hash, x, y, rel) },
+    { label: "Show Diff", run: () => showCommitDiff(b.hash, rel) },
+    { label: "Show in Git Log", run: () => showInLog(b.hash) },
+    { label: "Copy Hash", run: () => copyHash(b.hash) },
+  ];
+}
 const togglers = new WeakMap<monaco.editor.ICodeEditor, () => void>();
 
 /** Toggles blame annotations (commit, age, and author) in place of line numbers. */
@@ -597,6 +621,7 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     const rel = model && relOf(model);
     if (!rel || !annotated.has(rel)) return editor.updateOptions({ lineNumbers: "on", lineNumbersMinChars: 5 });
     const lines = await blameLines();
+    annotations.set(editor, lines);
     const label = (n: number) => {
       const b = lines[n - 1];
       if (!b || /^0+$/.test(b.hash)) return "";
@@ -615,6 +640,14 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const updateAnnotations = debounce(applyAnnotations, 300);
   editor.onDidChangeModel(() => (closePeek(editor), updateMarkers(), updateInline(), applyAnnotations()));
   editor.onDidChangeModelContent(() => (closePeek(editor), updateMarkers(), updateInline(), updateAnnotations()));
+  // Clicking a blame annotation shows its commit.
+  editor.onMouseDown((e) => {
+    const b = e.event.leftButton && e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS && blameAt(editor, e.target.position?.lineNumber ?? 0);
+    const model = editor.getModel();
+    if (!b || !model) return;
+    e.event.preventDefault();
+    showCommitPopup(b.hash, e.event.posx, e.event.posy + 12, relOf(model));
+  });
   // Clicking a change marker shows what the lines were at HEAD.
   editor.onMouseDown((e) => {
     const line = e.target.position?.lineNumber;

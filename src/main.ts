@@ -10,7 +10,7 @@ import { choose, confirm, type Item, pick, rank } from "./palette";
 import { EXCLUDED_FOLDERS, fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, XDEBUG_ENV } from "./debug";
-import { afterSave, annotate, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
+import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, closeDiff, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -185,6 +185,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...changes,
     ...(changes.length ? menuActions("Next Change", "Previous Change") : []),
     "-",
+    ...blameMenu(ed, line, e.event.posx, e.event.posy),
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
     { label: "Copy Reference", keys: symbolsFor(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },

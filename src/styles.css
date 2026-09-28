@@ -725,13 +725,37 @@ button.link:hover { text-decoration: underline; }
 #diff-label { margin-right: auto; }
 #diff-editor { flex: 1; min-height: 0; }
 #history-title { font-weight: 600; white-space: nowrap; }
-#history-filter { flex: 1; min-width: 80px; max-width: 380px; height: 26px; }
+#history-filter { flex: 1; min-width: 80px; max-width: 320px; height: 26px; }
+#history header .history-small { width: 110px; min-width: 60px; height: 26px; }
+#history header select { height: 26px; max-width: 180px; }
+#history header [hidden] { display: none; }
 #history header { overflow: hidden; }
 #history header label { color: var(--muted); white-space: nowrap; }
 .history-body { flex: 1; min-height: 0; display: flex; }
 .history-commits { width: 50%; min-width: 0; overflow: auto; }
 #history-list { list-style: none; margin: 0; padding: 0; }
-#history-list li { padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); }
+#history-list li { padding: 0 12px 0 6px; height: 40px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+#history-list li.muted { display: block; padding: 10px 12px; height: auto; }
+#history-list .text { min-width: 0; flex: 1; padding: 4px 0; }
+#history-list .graph { flex-shrink: 0; overflow: visible; }
+#history-list .graph path { fill: none; stroke-width: 1.6; }
+#history-list .graph circle { stroke: var(--panel); stroke-width: 1.5; }
+#history-list .graph circle.merge { fill: var(--panel) !important; stroke-width: 2; }
+.graph .lane-0 { stroke: var(--blue); fill: var(--blue); }
+.graph .lane-1 { stroke: var(--green); fill: var(--green); }
+.graph .lane-2 { stroke: var(--orange); fill: var(--orange); }
+.graph .lane-3 { stroke: var(--purple); fill: var(--purple); }
+.graph .lane-4 { stroke: var(--red); fill: var(--red); }
+.graph .lane-5 { stroke: var(--yellow); fill: var(--yellow); }
+.graph circle.merge.lane-0 { stroke: var(--blue); } .graph circle.merge.lane-1 { stroke: var(--green); } .graph circle.merge.lane-2 { stroke: var(--orange); }
+.graph circle.merge.lane-3 { stroke: var(--purple); } .graph circle.merge.lane-4 { stroke: var(--red); } .graph circle.merge.lane-5 { stroke: var(--yellow); }
+button.link { border: 0; background: none; padding: 0; color: var(--blue); cursor: pointer; }
+button.link:hover { text-decoration: underline; }
+.commit-popup { position: fixed; z-index: 1000; width: 420px; max-height: 60vh; overflow: auto; padding: 10px 12px; background: var(--panel); border: 1px solid var(--popover-border); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.commit-popup-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.commit-popup-head .icon-button { margin-left: auto; }
+.commit-popup .message { margin: 0; white-space: pre-wrap; font: 12px var(--mono); max-height: 160px; overflow: auto; -webkit-user-select: text; user-select: text; }
+.commit-popup .history-actions button { display: inline-flex; align-items: center; gap: 4px; }
 #history-list li:hover { background: var(--hover); }
 #history-list li.selected { background: var(--selected); }
 #history-list .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

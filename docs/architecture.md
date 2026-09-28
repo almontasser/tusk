@@ -2447,7 +2447,25 @@ stops read-only commands from writing the index and breaks the loop.
 `src/history.ts` shows the log as a bottom panel tab (`showPanelView`), as
 PhpStorm does, so the editor tabs stay in view. It
 reads `git log` in pages of 300 with a format of unit-separated fields
-(`LOG_FORMAT`), parsed by `parseLog`. File history adds `--follow` to track
+(`LOG_FORMAT`), parsed by `parseLog`. The header's filters become `git log`
+arguments, so they search the whole history: `--grep` with
+`--fixed-strings --regexp-ignore-case` for the text, `--author`, a branch or
+`--all`, and a path after `--`. Text that looks like a hash also runs
+`git log -1 <text>^{commit}`, and that commit goes first. A counter drops the
+results of a search that a newer one replaced.
+
+Without filters, the list has a branch graph. `graphRows` in `gitparse.ts`
+lays it out from each commit's parents: every lane waits for a commit, a
+commit takes the lane that waits for it and hands it to its first parent, and
+merged parents join a lane that waits for them or take a free one. Lanes don't
+shift, so lines that pass a row are straight, and each row is its own small
+SVG. The graph needs children before parents, so the log runs with
+`--date-order` while it shows; the default order breaks that when commits share
+a timestamp. Filters leave gaps in the parents, so the graph hides then.
+
+Clicking a blame annotation (a `GUTTER_LINE_NUMBERS` mouse target while the
+editor is annotated) opens `showCommitPopup` with the commit's message and
+files. `blameMenu` gives the gutter's context menu the same actions. File history adds `--follow` to track
 renames; `--follow` accepts only one file, so a folder's history runs without
 it.
 
@@ -5151,3 +5169,9 @@ rejected push or a conflicting pull never reached the UI. Most setups
 authenticate without a prompt (the macOS keychain helper, an SSH agent), so
 they now run in the background with `GIT_TERMINAL_PROMPT=0`, and only a failure
 that needed a prompt falls back to a terminal tab.
+
+### 2026-09-28: The log searches through git
+
+The log's filter used to match the loaded page of commits only, so an older
+commit never matched. Each filter now maps to a `git log` option and runs a new
+query, as PhpStorm's does, with pages of 300 still loading on demand.

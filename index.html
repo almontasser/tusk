@@ -229,12 +229,14 @@
         <div id="history" hidden>
           <header>
             <span id="history-title">Git Log</span>
-            <input id="history-filter" placeholder="Filter by message, author, hash, or branch" aria-label="Filter commits" spellcheck="false" />
-            <label><input type="checkbox" id="history-all" /> All branches</label>
+            <input id="history-filter" placeholder="Search messages or a hash" aria-label="Search commit messages or a hash" spellcheck="false" />
+            <select id="history-branch" aria-label="Branch"><option value="HEAD">Current branch</option></select>
+            <input id="history-author" class="history-small" placeholder="Author" aria-label="Author" spellcheck="false" />
+            <input id="history-path" class="history-small" placeholder="Path" aria-label="Path" spellcheck="false" />
           </header>
           <div class="history-body">
             <div class="history-commits">
-              <ul id="history-list"></ul>
+              <ul id="history-list" role="listbox" aria-label="Commits"></ul>
               <button id="history-more" hidden>Load More</button>
             </div>
             <div class="pane-splitter" id="history-split"></div>

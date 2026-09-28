@@ -552,3 +552,48 @@ export function parseRefs(out: string): Ref[] {
     })
     .filter((r) => !(r.remote && r.name.endsWith("/HEAD")));
 }
+
+/** A line in a row of the commit graph, from lane `from` at `y1` to lane `to` at `y2`, colored by `lane`. */
+export type GraphLine = { from: number; to: number; y1: "top" | "mid"; y2: "mid" | "bottom"; lane: number };
+export type GraphRow = { col: number; lines: GraphLine[]; width: number };
+
+/**
+ * Lays out the commit graph, one row per commit, newest first, as PhpStorm's log draws it. Each lane holds the
+ * commit it waits for; a commit takes the lane waiting for it (the first, if several branches meet there), hands
+ * that lane to its first parent, and opens lanes for merged parents (or joins a lane already waiting for one). Free lanes are reused, and lanes never shift,
+ * so lines that pass a row are straight.
+ * Expects children before parents, as `git log --date-order` gives.
+ */
+export function graphRows(commits: { hash: string; parents: string[] }[]): GraphRow[] {
+  const lanes: (string | null)[] = [];
+  return commits.map(({ hash, parents }) => {
+    const lines: GraphLine[] = [];
+    let col = lanes.indexOf(hash);
+    if (col < 0) {
+      col = lanes.indexOf(null);
+      if (col < 0) col = lanes.push(null) - 1;
+    }
+    // Lines into this row: lanes waiting for this commit end at its node; the others pass through.
+    const through: number[] = [];
+    lanes.forEach((h, i) => {
+      if (h === hash) lines.push({ from: i, to: col, y1: "top", y2: "mid", lane: i });
+      else if (h) through.push(i);
+    });
+    for (let i = 0; i < lanes.length; i++) if (lanes[i] === hash) lanes[i] = null;
+    // Lines out: the first parent continues in this lane, merged parents join their lane or open one.
+    parents.forEach((p, n) => {
+      // The first parent keeps this lane even when another lane waits for it too; the lanes meet at the parent.
+      let j = n === 0 ? col : lanes.indexOf(p);
+      if (j < 0) {
+        j = lanes.indexOf(null);
+        if (j < 0 || j === col) j = lanes.findIndex((h, i) => h === null && i !== col);
+        if (j < 0) j = lanes.push(null) - 1;
+      }
+      lanes[j] = p;
+      lines.push({ from: col, to: j, y1: "mid", y2: "bottom", lane: j === col ? col : j });
+    });
+    for (const i of through) lines.push({ from: i, to: i, y1: "top", y2: "bottom", lane: i });
+    while (lanes.length && lanes.at(-1) === null) lanes.pop();
+    return { col, lines, width: Math.max(lanes.length, col + 1, ...lines.map((l) => Math.max(l.from, l.to) + 1)) };
+  });
+}

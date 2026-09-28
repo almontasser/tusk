@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -240,4 +240,22 @@ test("parses local and remote branches with tracking", () => {
   const refs = parseRefs(out);
   assert.deepEqual(refs.map((r) => [r.name, r.remote, r.current]), [["main", false, true], ["origin/x", false, false], ["old", false, false], ["origin/main", true, false]]);
   assert.deepEqual([refs[0].upstream, refs[0].ahead, refs[0].behind, refs[2].gone, refs[1].upstream], ["origin/main", 2, 1, true, undefined]);
+});
+
+test("lays out a commit graph with a branch and a merge", () => {
+  // m merges f into c; f and c both come from a.
+  const rows = graphRows([
+    { hash: "m", parents: ["c", "f"] },
+    { hash: "f", parents: ["a"] },
+    { hash: "c", parents: ["a"] },
+    { hash: "a", parents: [] },
+  ]);
+  assert.deepEqual(rows.map((r) => r.col), [0, 1, 0, 0]);
+  // The merge opens lane 1 for f.
+  assert.deepEqual(rows[0].lines.filter((l) => l.y1 === "mid").map((l) => l.to), [0, 1]);
+  // c's row passes lane 1 (waiting for a) straight through.
+  assert.ok(rows[2].lines.some((l) => l.from === 1 && l.to === 1 && l.y1 === "top" && l.y2 === "bottom"));
+  // a ends both lanes: two lines come in, none go out.
+  assert.deepEqual(rows[3].lines.map((l) => [l.from, l.to, l.y1]), [[0, 0, "top"], [1, 0, "top"]]);
+  assert.equal(rows[3].width, 2);
 });
