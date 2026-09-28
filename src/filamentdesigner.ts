@@ -247,7 +247,7 @@ export class Designer {
       const model = this.facts?.class ?? this.info?.model;
       try {
         if (!model) throw new Error("The resource's model isn't known.");
-        const info = await fapp.policy(this.root, model);
+        const info = await fapp.policy(this.root, model, this.info?.class);
         this.access = { info, doc: info.file ? await this.doc(info.file.startsWith("/") ? info.file : `${this.root}/${info.file}`) : null };
         this.accessError = "";
       } catch (e) {

@@ -16,7 +16,7 @@
  *   php introspect.php <project root> enums
  *   php introspect.php <project root> migrations
  *   php introspect.php <project root> model <Model class>
- *   php introspect.php <project root> policy <Model class>
+ *   php introspect.php <project root> policy <Model class> [<Resource class>]
  *   php introspect.php <project root> translations
  *   php introspect.php <project root> permission <create-permission|create-role|grant|revoke> <name> [<permission>]
  *
@@ -992,7 +992,7 @@ function modelDetails(string $class, string $root): array
 }
 
 /** A model's policy, and spatie/laravel-permission's roles and permissions, for the designer's Access tab. */
-function policyInfo(string $model, string $root): array
+function policyInfo(string $model, string $root, ?string $resource = null): array
 {
     $policy = null;
     try {
@@ -1013,6 +1013,22 @@ function policyInfo(string $model, string $root): array
         'permissions' => [],
         'error' => null,
     ];
+    // Filament Shield names permissions by its config, or the app's own key builder: ask it for the resource's.
+    if ($out['shield']) {
+        $config = (array) config('filament-shield.permissions', []);
+        $superAdmin = (array) config('filament-shield.super_admin', []);
+        $out['shieldFormat'] = ['separator' => (string) ($config['separator'] ?? '_'), 'case' => (string) ($config['case'] ?? 'lower_snake')];
+        $out['superAdmin'] = ($superAdmin['enabled'] ?? false) ? ['name' => (string) ($superAdmin['name'] ?? 'super_admin'), 'viaGate' => (bool) ($superAdmin['define_via_gate'] ?? false)] : null;
+        $out['shieldKeys'] = null;
+        if ($resource && class_exists($resource)) {
+            try {
+                $methods = (array) config('filament-shield.policies.methods', ['viewAny', 'view', 'create', 'update', 'delete', 'restore', 'forceDelete', 'forceDeleteAny', 'restoreAny', 'replicate', 'reorder']);
+                $keys = BezhanSalleh\FilamentShield\Facades\FilamentShield::getDefaultPermissionKeys($resource, $methods);
+                $out['shieldKeys'] = array_map(fn ($k) => $k['key'], $keys);
+            } catch (Throwable) {
+            }
+        }
+    }
     if ($spatie) {
         try {
             $out['permissions'] = Spatie\Permission\Models\Permission::query()->orderBy('name')->pluck('name')->all();
@@ -1112,7 +1128,7 @@ try {
         'enums' => appEnums($root),
         'migrations' => migrationStatus($root),
         'model' => modelDetails($argv[3], $root),
-        'policy' => policyInfo($argv[3], $root),
+        'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
         'translations' => appTranslations($root),
         'permission' => changePermission($argv[3], $argv[4], $argv[5] ?? null),
         'mago-stubs' => magoStubs($root, $argv[3]),

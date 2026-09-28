@@ -868,6 +868,10 @@ run **Laravel: Model Access…**.
 A model without a policy gets one with **Create a policy**, which runs
 `make:policy` and starts with everything allowed, so no one is locked out.
 New permissions are named as Filament Shield names them, such as `update_post`.
+With Shield installed, the Access tab asks Shield for the resource's permission
+names, so they match what Shield generates, including the app's own naming
+when it has one. When Shield lets its super admin role past every rule, the tab
+says so.
 
 With spatie/laravel-permission, **Roles and permissions** shows which roles
 have the permissions the rules name. Check a box to grant one, creating the
