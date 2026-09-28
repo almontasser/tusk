@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -226,4 +226,18 @@ test("parses stashes with and without a message", () => {
     { ref: "stash@{0}", hash: "a1", time: 100, branch: "main", message: "half-done login" },
     { ref: "stash@{1}", hash: "b2", time: 90, branch: "feature/x", message: "WIP: Add Post model" },
   ]);
+});
+
+test("parses local and remote branches with tracking", () => {
+  const out = [
+    "refs/heads/main\t*\torigin/main\tahead 2, behind 1\t200",
+    "refs/heads/origin/x\t \t\t\t150",
+    "refs/heads/old\t \torigin/old\tgone\t100",
+    "refs/remotes/origin/HEAD\t \t\t\t200",
+    "refs/remotes/origin/main\t \t\t\t190",
+    "",
+  ].join("\n");
+  const refs = parseRefs(out);
+  assert.deepEqual(refs.map((r) => [r.name, r.remote, r.current]), [["main", false, true], ["origin/x", false, false], ["old", false, false], ["origin/main", true, false]]);
+  assert.deepEqual([refs[0].upstream, refs[0].ahead, refs[0].behind, refs[2].gone, refs[1].upstream], ["origin/main", 2, 1, true, undefined]);
 });

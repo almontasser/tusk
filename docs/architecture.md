@@ -2606,11 +2606,25 @@ never reaches the buttons; `onMouseDown` reports a view-zone target with its
 id, and the button under the pointer is found by position.
 ### Branches
 
-The branch picker reads `git for-each-ref` with full ref names, which tell
-local branches (`refs/heads/`) from remote ones (`refs/remotes/`) even when a
-local name contains a slash. It sorts by `-committerdate`, then puts the
-current branch first and local branches before remote ones. Checking out a
-remote branch runs `git checkout --track`.
+`src/branches.ts` draws the branches popup with the palette, anchored below
+the title bar's branch name or above the status bar's. It reads
+`git for-each-ref` in `REF_FORMAT` (`parseRefs` in `gitparse.ts`), with full
+ref names, which tell local branches (`refs/heads/`) from remote ones
+(`refs/remotes/`) even when a local name contains a slash, and
+`%(upstream:track)` for the ahead and behind counts. It sorts by
+`-committerdate`, then puts local branches before remote ones and the current
+branch first. A branch's actions open as a second, numbered popup, as
+PhpStorm's submenu does; the palette has no submenus.
+
+Actions that change the repository run through `gitTask` in `git.ts`:
+`gitOutput` under `withProgress`, then a refresh. A failure shows git's
+message, with **Show Details** for output longer than a line; a failure that
+left conflicted files offers the merge tool instead. Checking out a remote
+branch runs `git checkout --track`, or checks out the local branch of the same
+name. When checkout fails, `git checkout --dry-run` tells whether local changes
+were in the way, and only then offers Smart Checkout (stash, check out, pop).
+Delete tries `git branch -d` and asks before `-D` when git says the branch
+isn't fully merged; the hash it had goes into a **Restore** action.
 
 ### Pull requests
 
@@ -5095,3 +5109,10 @@ rather than the palette pickers it had: a list shows each stash's branch and
 age, and its files and diffs, at a glance. `stash@{n}` names shift, so rows
 are keyed by the stash's commit hash, and actions use the ref only when they
 run.
+
+### 2026-09-28: Branch actions in a second popup
+
+PhpStorm's branches popup opens a submenu per branch. The palette has no
+submenus, and a custom popup would need its own search, keyboard, and
+placement, so choosing a branch opens a numbered popup of its actions at the
+same place. It keeps the popup's search and keys, and a number picks an action.

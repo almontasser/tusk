@@ -510,3 +510,45 @@ export function parseStashList(out: string): Stash[] {
       return { ref, hash, time: Number(time), branch: m?.[2] ?? "", message };
     });
 }
+
+export type Ref = {
+  /** Short name, such as `main` or `origin/main`. */
+  name: string;
+  remote: boolean;
+  current: boolean;
+  /** The upstream branch of a local branch, such as `origin/main`. */
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  /** The upstream branch is gone from the remote. */
+  gone: boolean;
+  /** Commit time, in Unix seconds. */
+  time: number;
+};
+
+/** The `git for-each-ref` format that `parseRefs` reads. */
+export const REF_FORMAT = "--format=%(refname)%09%(HEAD)%09%(upstream:short)%09%(upstream:track,nobracket)%09%(committerdate:unix)";
+
+/**
+ * Parses `git for-each-ref` output in REF_FORMAT for refs/heads and refs/remotes, leaving out remotes' HEAD
+ * aliases. Full ref names tell a local branch named `origin/x` from a remote one.
+ */
+export function parseRefs(out: string): Ref[] {
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [ref, head, upstream, track = "", time] = line.split("\t");
+      return {
+        name: ref.replace(/^refs\/(heads|remotes)\//, ""),
+        remote: ref.startsWith("refs/remotes/"),
+        current: head === "*",
+        upstream: upstream || undefined,
+        ahead: Number(track.match(/ahead (\d+)/)?.[1] ?? 0),
+        behind: Number(track.match(/behind (\d+)/)?.[1] ?? 0),
+        gone: track === "gone",
+        time: Number(time),
+      };
+    })
+    .filter((r) => !(r.remote && r.name.endsWith("/HEAD")));
+}

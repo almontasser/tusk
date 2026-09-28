@@ -1,15 +1,15 @@
 // Stashes: a tab of the Commit tool window, as PhpStorm's Stash tab. It lists each stash with its branch and age,
 // its changed files under it, and diffs of a file or the whole stash, with apply, pop, drop, and unstash as a branch.
-import { type DiffFile, git, gitOutput, gitStatus, refreshGit, refreshListeners, showDiffs } from "./git";
+import { type DiffFile, git, gitStatus, gitTask, refreshListeners, showDiffs } from "./git";
 import { h, icon, iconButton } from "./dom";
 import { showMenu, type MenuItem } from "./files";
-import { ago, type ChangedFile, isConflict, parseNameStatus, parseStashList, type Stash } from "./gitparse";
+import { ago, type ChangedFile, parseNameStatus, parseStashList, type Stash } from "./gitparse";
 import { fileIcon } from "./icons";
 import { listNav } from "./listnav";
 import { confirm, pick } from "./palette";
-import { errorText, showError, status, withProgress } from "./status";
+import { errorText, showError, status } from "./status";
 
-type Host = { showView(name: "commit"): void; openMerge(rel: string): unknown };
+type Host = { showView(name: "commit"): void };
 let host: Host;
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -169,15 +169,9 @@ function stashMenu(s: Stash): MenuItem[] {
 
 /** Applies a stash, or pops it. Conflicts leave the stash in place and offer the merge tool. */
 async function apply(s: Stash, pop: boolean) {
-  const result = await withProgress(`${pop ? "Popping" : "Applying"} ${s.message}…`, () => gitOutput(["stash", pop ? "pop" : "apply", s.ref]));
-  await refreshGit();
+  const out = await gitTask(`${pop ? "Popping" : "Applying"} ${s.message}…`, ["stash", pop ? "pop" : "apply", s.ref], `Can't ${pop ? "pop" : "apply"} "${s.message}"`);
   loadStashes();
-  if (!result) return;
-  if (!result.code) return status(`${pop ? "Popped" : "Applied"} "${s.message}".`, "app", "info");
-  const conflicted = gitStatus()?.files.find(isConflict);
-  if (/CONFLICT/.test(result.output) && conflicted)
-    return showError(`The stash applied with conflicts${pop ? " and was kept" : ""}. Resolve them, then commit or stage the files`, undefined, { label: "Resolve", run: () => host.openMerge(conflicted.path) });
-  showError(`Can't ${pop ? "pop" : "apply"} ${s.ref}`, result.output);
+  if (out !== undefined) status(`${pop ? "Popped" : "Applied"} "${s.message}".`, "app", "info");
 }
 
 async function drop(s: Stash) {
@@ -201,11 +195,9 @@ function unstashAsBranch(s: Stash) {
         label: `Unstash on a new branch "${name}"`,
         detail: "git stash branch",
         run: async () => {
-          const result = await withProgress(`Unstashing on ${name}…`, () => gitOutput(["stash", "branch", name, s.ref]));
-          await refreshGit();
+          const out = await gitTask(`Unstashing on ${name}…`, ["stash", "branch", name, s.ref], `Can't unstash on ${name}`);
           loadStashes();
-          if (result && result.code) showError(`Can't unstash on ${name}`, result.output);
-          else if (result) status(`Checked out ${name} with "${s.message}".`, "app", "info");
+          if (out !== undefined) status(`Checked out ${name} with "${s.message}".`, "app", "info");
         },
       },
     ];
@@ -225,11 +217,9 @@ export function stashChanges() {
   const submit = async () => {
     dialog.close();
     const args = ["stash", "push", ...(keepIndex.checked ? ["--keep-index"] : []), ...(untracked.checked ? ["--include-untracked"] : []), ...(message.value.trim() ? ["-m", message.value.trim()] : [])];
-    const result = await withProgress("Stashing changes…", () => gitOutput(args));
-    await refreshGit();
-    if (!result) return;
-    if (result.code) return showError("Can't stash the changes", result.output);
-    status(/No local changes/.test(result.output) ? "There are no changes to stash." : "Stashed the changes.", "app", "info");
+    const out = await gitTask("Stashing changes…", args, "Can't stash the changes");
+    if (out === undefined) return;
+    status(/No local changes/.test(out) ? "There are no changes to stash." : "Stashed the changes.", "app", "info");
     loadStashes();
   };
   const changed = st.files.length;

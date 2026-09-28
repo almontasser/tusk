@@ -15,6 +15,8 @@ let commits: Commit[] = [];
 let selected: Commit | undefined;
 /** Set when showing one file's history; paths follow the file through renames. */
 let file: string | undefined;
+/** Set when showing a range of commits, such as a comparison of two branches, with its title. */
+let range: { revs: string[]; title: string } | undefined;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = "") {
   const e = document.createElement(tag);
@@ -28,6 +30,14 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
 /** Shows the log of the current branch, or of every branch, in the bottom panel. */
 export function showLog() {
   file = undefined;
+  range = undefined;
+  return open();
+}
+
+/** Shows the commits of a revision range, such as `main..feature`, under a title. */
+export function showCommits(revs: string[], title: string) {
+  file = undefined;
+  range = { revs, title };
   return open();
 }
 
@@ -35,13 +45,14 @@ export function showLog() {
 export function showFileHistory(path: string) {
   if (!path.startsWith(host.root() + "/")) return;
   file = path.slice(host.root().length + 1);
+  range = undefined;
   return open();
 }
 
 async function open() {
   if (!host.root()) return;
-  $("history-title").textContent = file ? `History of ${file}` : "Git Log";
-  $("history-all").parentElement!.hidden = !!file;
+  $("history-title").textContent = range?.title ?? (file ? `History of ${file}` : "Git Log");
+  $("history-all").parentElement!.hidden = !!file || !!range;
   $("history").hidden = false;
   showPanelView(file ? `History of ${file.split("/").pop()}` : "Git Log", $("history"));
   commits = [];
@@ -54,7 +65,7 @@ async function open() {
 
 async function load() {
   const all = !file && ($<HTMLInputElement>("history-all")).checked;
-  const args = ["log", LOG_FORMAT, `-n${PAGE}`, `--skip=${commits.length}`, ...(all ? ["--all"] : [])];
+  const args = ["log", LOG_FORMAT, `-n${PAGE}`, `--skip=${commits.length}`, ...(range?.revs ?? (all ? ["--all"] : []))];
   try {
     // --follow tracks renames but accepts only a single file, so a folder's history goes without it.
     const out = await (file ? git(...args, "--follow", "--", file).catch(() => git(...args, "--", file!)) : git(...args));

@@ -1894,13 +1894,39 @@ open in a tab, and saving it with no conflicts left also marks it resolved.
 For a merge, the commit message is filled in, so you can click **Commit** to
 finish.
 
-The branch name in the title bar shows commits ahead (↑) and behind (↓) the
-upstream branch. Click it for a dropdown with pull, push, and fetch at the top,
-then the current branch, local branches, and remote branches, most recently
-committed first. Choose a branch to check it out, or type a name to create one.
-The **Commit** view's header also has fetch, pull, and push buttons. Pull, push,
-and fetch run in a terminal tab, so you can answer credential prompts. Running one
-again reuses its tab once the last run has finished.
+### Branches
+
+The branch name in the title bar, and again at the right of the status bar,
+shows commits ahead (↑) and behind (↓) the upstream branch. Click either, or
+run **Branches…** from ⌘⇧A, for the branches popup. Type to search. At the top
+are **Update Project…**, **Commit…**, **Push…**, **Fetch**, **New Branch…**,
+**Checkout Tag or Revision…**, the stash actions, and **Worktrees…**. Below them
+are the local branches, current first, then the remote branches, each with its
+ahead and behind counts, its upstream branch, and the age of its last commit.
+Type a name that isn't a branch to create it.
+
+Choose a branch for its actions. Press a number to pick one:
+
+- **Checkout.** A remote branch gets a local branch that tracks it. If your
+  changes would be overwritten, the message offers **Smart Checkout**, which
+  stashes them, checks out, and brings them back.
+- **New Branch from…** creates a branch at that branch and checks it out.
+- **Checkout and Rebase onto** the current branch.
+- **Compare with** the current branch lists the commits on either side in the
+  Git Log. **Show Diff with** the current branch lists the files that differ,
+  as a diff you can step through.
+- **Rebase** the current branch onto it, or **Merge** it into the current
+  branch. If that stops for conflicts, the message offers the merge tool.
+- **Push…**, **Rename…**, **Set Upstream Branch…** (or **Track Another
+  Branch…**), and **Stop Tracking**.
+- **Delete…**. A branch with commits that aren't merged asks before a force
+  delete, and the message after deleting offers **Restore**. Deleting a remote
+  branch deletes it on the remote, after asking.
+
+**Fetch** (the popup, the **Git** menu, or the Commit view's header) fetches
+every remote, prunes branches deleted there, and says how many branches
+changed. Long operations show progress in the status bar, with **Cancel** for
+the ones that talk to a remote.
 
 ## Pull requests
 
@@ -2452,6 +2478,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/projectstate.ts`, `src/projectstatedata.ts` | Per-project settings, in `tusk.json` when shared or else on this Mac |
 | `src/git.ts` | Commit view, diff view, partial staging, and branches |
 | `src/stash.ts` | The Stashes tab and the Stash Changes dialog |
+| `src/branches.ts` | The branches popup, branch actions, and fetch |
 | `src/history.ts` | Git log, file history, and commit actions |
 | `src/conflicts.ts` | Inline merge conflict resolution |
 | `src/merge.ts` | The three-pane merge tool |

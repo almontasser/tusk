@@ -3,13 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
-import { h, iconButton } from "./dom";
+import { h, icon, iconButton } from "./dom";
 import { fileIcon } from "./icons";
 import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
 import { age, ago, applyBlocks, applyLines, type BlameLine, type Block, type FileStatus, isConflict, type LineChange, lineChanges, mirror, parseBlame, parseStatus, parseWorktrees, remoteLineUrl, type Status } from "./gitparse";
 import { confirm, type Item, pick, rank } from "./palette";
-import { showStashes, stashChanges } from "./stash";
 import { showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
 
@@ -84,6 +83,51 @@ export async function gitOutput(args: string[], signal?: AbortSignal): Promise<{
   }
 }
 
+/**
+ * Runs a git command that changes the repository, with progress in the status bar, then refreshes. A failure shows
+ * git's message, with its full output a click away; one that left conflicts offers the merge tool instead.
+ * Resolves to git's output when it worked, or undefined.
+ */
+export async function gitTask(label: string, args: string[], failure: string, options: { cancellable?: boolean } = {}): Promise<string | undefined> {
+  const result = await withProgress(label, (signal) => gitOutput(args, signal), { ...options, error: failure });
+  await refreshGit();
+  if (!result) return;
+  if (!result.code) return result.output;
+  const conflicted = current?.files.filter(isConflict) ?? [];
+  if (conflicted.length)
+    showError(`${failure}: ${conflicted.length} ${conflicted.length === 1 ? "file has" : "files have"} conflicts. Resolve them, then continue`, undefined, { label: "Resolve", run: () => openMerge(conflicted[0].path) });
+  else gitFailure(failure, result.output);
+}
+
+/** Shows a git failure. When git said more than one line, such as a hook's output, the toast offers all of it. */
+export function gitFailure(message: string, output: string) {
+  const lines = output.split("\n").filter((l) => l.trim() && !l.startsWith("hint:"));
+  showError(message, output || "git exited with an error", lines.length > 1 ? { label: "Show Details", run: () => showOutput(message, output) } : undefined);
+}
+
+/** Shows a command's full output in a dialog, such as the messages of a failed commit hook. */
+export function showOutput(title: string, text: string) {
+  document.getElementById("output-dialog")?.remove();
+  const dialog = h("dialog", { id: "output-dialog", class: "refactor-dialog" });
+  dialog.append(
+    h(
+      "form",
+      { method: "dialog" },
+      h("h2", {}, title),
+      h("pre", { class: "output-text", tabIndex: 0 }, text),
+      h(
+        "div",
+        { class: "buttons" },
+        h("button", { type: "button", onclick: () => navigator.clipboard.writeText(text).then(() => host.status("Copied the output.")) }, "Copy"),
+        h("button", { type: "submit", class: "primary" }, "Close"),
+      ),
+    ),
+  );
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 // ---- Status ----
 
 let refreshing: Promise<void> | undefined;
@@ -128,14 +172,16 @@ async function loadStatus() {
   refreshListeners.forEach((f) => f());
 }
 
+/** The branch name in the title bar and the status bar, with commits ahead (↑) and behind (↓) its upstream. */
 function renderBranch() {
-  const el = $("branch");
-  el.hidden = !current;
-  if (!current) return;
-  const sync = [current.ahead && `↑${current.ahead}`, current.behind && `↓${current.behind}`].filter(Boolean).join(" ");
-  el.innerHTML = `<span class="codicon codicon-git-branch"></span><span class="label"></span><span class="codicon codicon-chevron-down"></span>`;
-  el.querySelector(".label")!.textContent = `${current.branch}${sync ? ` ${sync}` : ""}`;
-  el.title = current.upstream ? `Tracking ${current.upstream}` : "No upstream branch";
+  for (const el of [$("branch"), $("status-branch")]) {
+    el.hidden = !current;
+    if (!current) continue;
+    const sync = [current.ahead && `↑${current.ahead}`, current.behind && `↓${current.behind}`].filter(Boolean).join(" ");
+    el.replaceChildren(icon("git-branch"), h("span", { class: "label" }, `${current.branch}${sync ? ` ${sync}` : ""}`), ...(el.id === "branch" ? [icon("chevron-down")] : []));
+    el.title = `${current.upstream ? `${current.branch}, tracking ${current.upstream}` : `${current.branch}, with no upstream branch`}. Click for branches.`;
+    el.setAttribute("aria-label", `Git branch ${current.branch}${sync ? `, ${current.ahead} ahead, ${current.behind} behind` : ""}`);
+  }
 }
 
 const staged = (f: FileStatus) => !isConflict(f) && f.index !== " " && f.index !== "?";
@@ -517,52 +563,6 @@ function clearDiff() {
 export const pushBranch = () =>
   openTerminal(host.root(), "git push", current?.upstream ? ["git", "push"] : ["git", "push", "-u", "origin", "HEAD"]);
 export const updateProject = () => openTerminal(host.root(), "git pull", ["git", "pull"]);
-export const fetchAll = () => openTerminal(host.root(), "git fetch", ["git", "fetch", "--all", "--prune"]);
-
-/**
- * Lists branches to check out below the branch button, plus fetch, pull, push, and creating a branch
- * from the typed name. The current branch comes first, then local and remote branches, newest first.
- */
-export async function branches() {
-  if (!current) return host.status("This folder isn't a git repository.");
-  const out = await git("for-each-ref", "--sort=-committerdate", "--format=%(refname)\t%(HEAD)\t%(committerdate:relative)", "refs/heads", "refs/remotes");
-  const refs = out
-    .split("\n")
-    .filter((l) => l && !l.includes("/HEAD\t"))
-    .map((l) => {
-      const [ref, head, date] = l.split("\t");
-      const remote = ref.startsWith("refs/remotes/");
-      return { name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote, current: head === "*", date };
-    })
-    .sort((a, b) => Number(b.current) - Number(a.current) || Number(a.remote) - Number(b.remote));
-  const names = new Set(refs.map((r) => r.name));
-  const fixed: Item[] = [
-    { label: "Update Project (git pull)", detail: "⌘T", icon: "codicon-arrow-down", run: updateProject },
-    { label: "Push (git push)", detail: "⌘⇧K", icon: "codicon-arrow-up", run: pushBranch },
-    { label: "Fetch (git fetch)", icon: "codicon-sync", run: fetchAll },
-    { label: "Stash Changes…", icon: "codicon-archive", run: stashChanges },
-    { label: "Stashes…", icon: "codicon-list-unordered", run: showStashes },
-    { label: "Worktrees…", icon: "codicon-folder-library", run: worktrees },
-  ];
-  // Checking out a remote branch such as origin/feature creates a local tracking branch.
-  const branchItems: Item[] = refs.map((r) => ({
-    label: r.name,
-    detail: r.current ? "current" : `${r.remote ? "remote" : "local"} · ${r.date}`,
-    icon: r.current ? "codicon-check" : r.remote ? "codicon-cloud" : "codicon-git-branch",
-    run: () => (r.remote ? change("checkout", "--track", r.name) : change("checkout", r.name)),
-  }));
-  pick(
-    `Branches (on ${current.branch}). Type a name to create a branch.`,
-    (q) => {
-      if (!q.trim()) return [...fixed, ...branchItems];
-      const name = q.trim().replace(/\s+/g, "-");
-      const create: Item[] = !names.has(name) ? [{ label: `New branch "${name}"`, detail: "from HEAD", icon: "codicon-add", run: () => change("checkout", "-b", name) }] : [];
-      return [...create, ...rank(q, branchItems), ...rank(q, fixed)];
-    },
-    0,
-    { value: "", anchor: $("branch") },
-  );
-}
 
 // ---- Worktrees ----
 
@@ -895,8 +895,6 @@ export function changeMenu(editor: monaco.editor.ICodeEditor, line: number): Men
 
 export function initGit(h: Host) {
   host = h;
-  $("branch").onclick = () => branches();
-  $("git-fetch").onclick = fetchAll;
   $("git-pull").onclick = updateProject;
   $("git-push").onclick = pushBranch;
   $("commit").onclick = () => commit(false);
