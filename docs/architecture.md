@@ -3094,6 +3094,12 @@ program on the port (`lsof -Fcp`) and offers **Choose Another Port**, which
 saves the setting and listens again; the adapter's own dump of Node's error is
 dropped while starting.
 
+A restart for new settings, or any stop, bumps `generation` and clears
+`adapterUp` first, so the old adapter's late events and the failures of its
+pending requests don't reach the new session's log. A `continued` event for
+the paused thread, which the adapter sends only when the connection closes,
+logs that PHP disconnected.
+
 The panel tracks Xdebug connections from the adapter's `thread` events, so its
 state reads Not listening, Listening on port N (with how to trigger a
 connection), Running, or Paused at a file and line.

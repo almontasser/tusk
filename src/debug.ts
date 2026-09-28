@@ -68,13 +68,23 @@ function request<T = any>(command: string, args: object = {}): Promise<T> {
   return result;
 }
 
+/** Whether this listener's adapter runs, so a stopped adapter's last events, such as during a restart, are dropped. */
+let adapterUp = false;
+/** Starts and stops of the listener, so a request that fails because the listener stopped doesn't report it. */
+let generation = 0;
+/** Logs a failed request, unless the listener stopped or restarted since it was sent. */
+function failed(what: string) {
+  const at = generation;
+  return (e: unknown) => void (at === generation && running && log(`${what}: ${errorText(e)}`));
+}
+
 listen<string>("lsp:xdebug", ({ payload }) => {
   const msg = JSON.parse(payload);
   if (msg.type === "response") {
     const p = pending.get(msg.request_seq);
     pending.delete(msg.request_seq);
     msg.success ? p?.resolve(msg.body ?? {}) : p?.reject(new Error(msg.message || msg.body?.error?.format || `${msg.command} failed`));
-  } else if (msg.type === "event") onEvent(msg.event, msg.body ?? {});
+  } else if (msg.type === "event" && adapterUp) onEvent(msg.event, msg.body ?? {});
   else if (msg.type === "request") send({ type: "response", request_seq: msg.seq, command: msg.command, success: true }); // e.g. runInTerminal, not used here
 });
 
@@ -222,7 +232,7 @@ const sendBreakpoints = (path: string) => {
     breakpoints: enabled
       .sort(([a], [b]) => a - b)
       .map(([line, { disabled, ...o }]) => Object.fromEntries(Object.entries({ line, ...o }).filter(([, v]) => v !== undefined && v !== ""))),
-  }).catch((e) => log(`Can't set the breakpoints in ${projectRelative(host.root(), path)}: ${errorText(e)}`));
+  }).catch(failed(`Can't set the breakpoints in ${projectRelative(host.root(), path)}`));
 };
 
 /** The breakpoint items of the gutter's context menu for a line. */
@@ -309,7 +319,7 @@ async function findHandler() {
 
 const sendExceptionFilters = () => {
   if (!running) return;
-  request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch((e) => log(`Can't set the exception breakpoints: ${errorText(e)}`));
+  request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(failed("Can't set the exception breakpoints"));
   if (handler) sendBreakpoints(handler.path);
 };
 
@@ -460,9 +470,11 @@ export async function startDebugging() {
   starting = true;
   render();
   const port = debugSettings.debugPort;
+  const key = launchKey();
   try {
     await ensureTools();
     await invoke("lsp_start", { name: "xdebug", root: host.root() });
+    adapterUp = true;
     await request("initialize", { adapterID: "php", clientID: "tusk", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     await findHandler();
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
@@ -474,8 +486,10 @@ export async function startDebugging() {
       pathMappings,
       xdebugSettings: { max_children: debugSettings.debugMaxChildren, max_depth: 1, max_data: debugSettings.debugMaxData },
     });
-    launched = launchKey();
     starting = false;
+    launched = key;
+    // Settings that changed while the listener started apply now.
+    if (key !== launchKey()) queueMicrotask(() => onLaunchSettings());
     log(`Listening for Xdebug on port ${port}.`);
     for (const [from, to] of Object.entries(mappings)) log(`Mapping ${from} on the server to ${to}.`);
   } catch (e) {
@@ -526,6 +540,8 @@ export function choosePort() {
 /** Stops listening. `quiet` skips the log line, for a start that failed. */
 export async function stopDebugging(quiet = false) {
   if (!running) return;
+  generation++;
+  adapterUp = false;
   await Promise.race([request("disconnect", {}).catch(() => {}), new Promise((r) => setTimeout(r, 1000))]);
   await invoke("lsp_stop", { name: "xdebug" }).catch(() => {});
   for (const p of pending.values()) p.reject(new Error("The debugger stopped"));
@@ -543,17 +559,22 @@ export async function stopDebugging(quiet = false) {
 }
 
 // Settings the listener started with apply by listening again, unless something is being debugged.
-onSettings(() => {
+function onLaunchSettings() {
   if (!running || !launched || launched === launchKey()) return;
   if (threads.size) return log("The new debugger settings apply when you stop and start listening again.");
   log("Listening again with the new debugger settings.");
+  launched = ""; // One restart at a time; startDebugging checks the settings again when it's done.
   stopDebugging(true).then(startDebugging);
-});
+}
+onSettings(onLaunchSettings);
 
 async function onEvent(event: string, body: any) {
   if (event === "initialized") {
-    for (const path of new Set([...breakpoints.keys(), ...(handler ? [handler.path] : [])])) await sendBreakpoints(path);
-    await request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch((e) => log(`Can't set the exception breakpoints: ${errorText(e)}`));
+    // A restart while these go out, such as for a new port, ends this listener's setup.
+    const at = generation;
+    for (const path of new Set([...breakpoints.keys(), ...(handler ? [handler.path] : [])])) if (at === generation) await sendBreakpoints(path);
+    if (at !== generation) return;
+    await request("setExceptionBreakpoints", { filters: exceptionFilters() }).catch(failed("Can't set the exception breakpoints"));
     await request("configurationDone").catch(() => {});
   } else if (event === "stopped") {
     stoppedThread = body.threadId;
@@ -570,15 +591,14 @@ async function onEvent(event: string, body: any) {
     log(`Paused (${exception?.reason ?? body.reason ?? "breakpoint"})${exception?.text ? `: ${exception.text}` : body.text ? `: ${body.text}` : "."}`);
     await selectFrame(frames[0]);
   } else if (event === "continued") {
+    // The adapter continues a paused thread on its own only when its connection closes.
+    if (body.threadId === stoppedThread) log("PHP disconnected while paused.");
     clearPause();
   } else if (event === "thread") {
     if (body.reason === "started") threads.add(body.threadId);
     else if (body.reason === "exited") {
       threads.delete(body.threadId);
-      if (body.threadId === stoppedThread) {
-        log("PHP disconnected while paused.");
-        clearPause();
-      }
+      if (body.threadId === stoppedThread) clearPause();
     }
     render();
   } else if (event === "output" && body.output?.trim()) {
