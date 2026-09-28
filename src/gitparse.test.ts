@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -258,4 +258,17 @@ test("lays out a commit graph with a branch and a merge", () => {
   // a ends both lanes: two lines come in, none go out.
   assert.deepEqual(rows[3].lines.map((l) => [l.from, l.to, l.y1]), [[0, 0, "top"], [1, 0, "top"]]);
   assert.equal(rows[3].width, 2);
+});
+
+test("merges conflicts whose sides changed different lines", () => {
+  const base = ["a", "b", "c", "d"];
+  assert.deepEqual(resolveSimple(base, ["A", "b", "c", "d"], ["a", "b", "c", "D"]), ["A", "b", "c", "D"]);
+  // Neighboring lines merge.
+  assert.deepEqual(resolveSimple(base, ["a", "B", "c", "d"], ["a", "b", "C", "d"]), ["a", "B", "C", "d"]);
+  // One side unchanged, or both the same, takes the other.
+  assert.deepEqual(resolveSimple(base, base, ["x"]), ["x"]);
+  assert.deepEqual(resolveSimple(base, ["x"], ["x"]), ["x"]);
+  // The same line changed two ways, or two insertions at one place, stay conflicts.
+  assert.equal(resolveSimple(base, ["a", "B1", "c", "d"], ["a", "B2", "c", "d"]), null);
+  assert.equal(resolveSimple(base, ["a", "x", "b", "c", "d"], ["a", "y", "b", "c", "d"]), null);
 });

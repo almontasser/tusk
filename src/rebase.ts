@@ -5,7 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { git, refreshGit } from "./git";
 import { parseRebaseTodo, type RebaseAction, type RebaseStep, rebaseTodo } from "./gitparse";
-import { pick } from "./palette";
+import { listNav } from "./listnav";
+import { pick, rank } from "./palette";
+import { showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
 
 type Host = { root(): string; status(text: string): void };
@@ -67,25 +69,53 @@ export async function interactiveRebase(base: string) {
     if (merges) {
       // git's list rebuilds the merges; the commits from the log give each pick its full message.
       const commits = steps;
-      steps = parseRebaseTodo(await mergesTodo(base)).map((s) => (s.line ? s : { ...s, message: commits.find((c) => c.hash.startsWith(s.hash))?.message }));
+      const todo = await withProgress("Preparing the rebase list (checking out a temporary worktree)…", () => mergesTodo(base), { error: "Can't prepare the rebase list" });
+      if (todo === undefined) return;
+      steps = parseRebaseTodo(todo).map((s) => (s.line ? s : { ...s, message: commits.find((c) => c.hash.startsWith(s.hash))?.message }));
     }
   } catch (e) {
-    return host.status(`Can't list commits: ${String(e).trim()}`);
+    return showError("Can't list the commits to rebase", e);
   }
-  if (!steps.some((s) => !s.line)) return host.status("There are no commits after that one on this branch.");
+  if (!steps.some((s) => !s.line)) return status("There are no commits after that one on this branch.", "app", "info");
   // A squash or fixup joins the commit before it, so it can't follow the start, a reset, or a label.
   const canSquash = (i: number) => i > 0 && (!steps[i - 1].line || steps[i - 1].line!.startsWith("merge"));
 
   document.getElementById("rebase")?.remove();
   const dialog = document.createElement("dialog");
   dialog.id = "rebase";
-  dialog.innerHTML = `<form method="dialog"><h2>Interactive rebase</h2><p class="muted">Oldest first. Commits are replayed on ${base.slice(0, 7)} in this order.${merges ? " Merges are rebuilt too: Label names a point, Reset goes back to one, and Merge merges it again." : ""}</p><ol class="rebase-steps"></ol><div class="buttons"><button type="button" data-cancel>Cancel</button><button type="button" class="primary" data-start>Start Rebase</button></div></form>`;
+  dialog.innerHTML = `<form method="dialog"><h2>Interactive rebase</h2><p class="muted">Oldest first. Commits are replayed on ${base.slice(0, 7)} in this order.${merges ? " Merges are rebuilt too: Label names a point, Reset goes back to one, and Merge merges it again." : ""}</p><ol class="rebase-steps" tabindex="0" aria-label="Rebase steps"></ol><div class="buttons"><span class="dialog-hint">Drag to reorder, or ⌥↑ ⌥↓ · P R E S F D set the action</span><button type="button" data-cancel>Cancel</button><button type="button" class="primary" data-start>Start Rebase</button></div></form>`;
   const list = dialog.querySelector("ol")!;
 
+  /** A key per step that follows it when it moves. */
+  const ids = new WeakMap<RebaseStep, string>();
+  steps.forEach((st, i) => ids.set(st, String(i)));
+  const keyOf = (st: RebaseStep) => ids.get(st)!;
+  const movable = (i: number) => i >= 0 && i < steps.length && !steps[i].line;
+
+  /** Moves a step to another index, if both are commits (a merge's label, reset, and merge lines stay put). */
+  const move = (from: number, to: number) => {
+    if (!movable(from) || !movable(to) || from === to) return;
+    const [st] = steps.splice(from, 1);
+    steps.splice(to, 0, st);
+    render();
+    nav.select(keyOf(st));
+  };
+  const setAction = (st: RebaseStep, action: RebaseAction) => {
+    const i = steps.indexOf(st);
+    if (st.line) return;
+    if ((action === "squash" || action === "fixup") && !canSquash(i)) return status("A squash or fixup needs a commit right before it to join.", "app", "error");
+    st.action = action;
+    render();
+  };
+
+  let dragged: RebaseStep | undefined;
   const render = () =>
     list.replaceChildren(
       ...steps.map((s, i) => {
         const li = document.createElement("li");
+        li.dataset.key = keyOf(s);
+        li.dataset.label = s.subject;
+        li.setAttribute("role", "option");
         if (s.line) {
           // A command that rebuilds a merge, shown as it is and kept in place.
           li.className = "rebase-step command";
@@ -103,10 +133,33 @@ export async function interactiveRebase(base: string) {
           return li;
         }
         li.className = `rebase-step action-${s.action}`;
+        li.draggable = true;
+        li.ondragstart = (e) => ((dragged = s), e.dataTransfer?.setData("text/plain", s.hash), li.classList.add("dragging"));
+        li.ondragend = () => ((dragged = undefined), render());
+        li.ondragover = (e) => {
+          if (!dragged || dragged === s) return;
+          e.preventDefault();
+          const r = li.getBoundingClientRect();
+          li.classList.toggle("drop-before", e.clientY < r.top + r.height / 2);
+          li.classList.toggle("drop-after", e.clientY >= r.top + r.height / 2);
+        };
+        li.ondragleave = () => li.classList.remove("drop-before", "drop-after");
+        li.ondrop = (e) => {
+          e.preventDefault();
+          if (!dragged) return;
+          const from = steps.indexOf(dragged);
+          let to = steps.indexOf(s) + (li.classList.contains("drop-after") ? 1 : 0);
+          if (from < to) to--;
+          move(from, to);
+        };
         const select = document.createElement("select");
+        select.setAttribute("aria-label", `Action for ${s.subject}`);
         for (const [value, label] of ACTIONS) select.append(new Option(label, value, false, s.action === value));
         for (const o of select.options) if (!canSquash(i) && (o.value === "squash" || o.value === "fixup")) o.disabled = true;
-        select.onchange = () => ((s.action = select.value as RebaseAction), render());
+        select.onchange = () => setAction(s, select.value as RebaseAction);
+        const grip = document.createElement("span");
+        grip.className = "codicon codicon-gripper grip";
+        grip.title = "Drag to reorder";
         const hash = document.createElement("code");
         hash.textContent = s.hash.slice(0, 7);
         const text = document.createElement(s.action === "reword" ? "textarea" : "span");
@@ -116,22 +169,39 @@ export async function interactiveRebase(base: string) {
           text.rows = Math.min(6, text.value.split("\n").length + 1);
           text.oninput = () => (s.message = text.value);
         } else text.textContent = s.subject;
-        const move = (by: number, label: string, icon: string) => {
+        const arrow = (by: number, label: string, icon: string) => {
           const b = document.createElement("button");
           b.type = "button";
           b.className = `icon-button codicon codicon-${icon}`;
           b.title = label;
-          b.disabled = i + by < 0 || i + by >= steps.length;
-          b.onclick = () => {
-            [steps[i], steps[i + by]] = [steps[i + by], steps[i]];
-            render();
-          };
+          b.setAttribute("aria-label", label);
+          b.disabled = !movable(i + by);
+          b.onclick = () => move(i, i + by);
           return b;
         };
-        li.append(select, hash, text, move(-1, "Move up", "arrow-up"), move(1, "Move down", "arrow-down"));
+        li.append(grip, select, hash, text, arrow(-1, "Move up (⌥↑)", "arrow-up"), arrow(1, "Move down (⌥↓)", "arrow-down"));
         return li;
       }),
     );
+  const nav = listNav(list, { open: () => {} });
+  // ⌥↑ and ⌥↓ move the selected step; a letter sets its action, as in git's todo list. These run before listNav's
+  // type-ahead.
+  const letters: Record<string, RebaseAction> = { p: "pick", r: "reword", e: "edit", s: "squash", f: "fixup", d: "drop" };
+  list.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.target !== list) return;
+      const st = steps.find((x) => keyOf(x) === nav.selected());
+      if (!st) return;
+      const i = steps.indexOf(st);
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) move(i, i + (e.key === "ArrowUp" ? -1 : 1));
+      else if (!e.metaKey && !e.ctrlKey && !e.altKey && letters[e.key.toLowerCase()]) setAction(st, letters[e.key.toLowerCase()]);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
   render();
   dialog.querySelector<HTMLElement>("[data-cancel]")!.onclick = () => dialog.close();
   dialog.querySelector<HTMLElement>("[data-start]")!.onclick = async () => {
@@ -147,24 +217,30 @@ export async function interactiveRebase(base: string) {
 
 async function start(base: string, steps: RebaseStep[], merges: boolean) {
   const dir = `${await appCacheDir()}/rebase`;
-  await invoke("create_dir", { path: dir });
   const file = (i: number) => `${dir}/message-${i}.txt`;
-  for (const [i, s] of steps.entries()) if (s.action === "reword") await invoke("write_file", { path: file(i), contents: (s.message ?? s.subject).trim() + "\n" });
   const todo = `${dir}/todo.txt`;
-  await invoke("write_file", { path: todo, contents: rebaseTodo(steps, file) });
+  try {
+    await invoke("create_dir", { path: dir });
+    for (const [i, s] of steps.entries()) if (s.action === "reword") await invoke("write_file", { path: file(i), contents: (s.message ?? s.subject).trim() + "\n" });
+    await invoke("write_file", { path: todo, contents: rebaseTodo(steps, file) });
+  } catch (e) {
+    return showError("Can't start the rebase: the todo list couldn't be written", e);
+  }
   // git runs the sequence editor with the todo file's path, so cp puts ours in its place.
   // GIT_EDITOR=true keeps squash's combined message without opening an editor.
   const line = `GIT_SEQUENCE_EDITOR=${q(`cp ${q(todo)}`)} GIT_EDITOR=true git rebase -i --autostash${merges ? " --rebase-merges" : ""} ${q(base)}`;
-  openTerminal(host.root(), "Interactive rebase", ["/bin/sh", "-c", line], () => refreshGit());
+  openTerminal(host.root(), "Interactive rebase", ["/bin/sh", "-c", line], () => refreshGit()).catch((e) => showError("Can't start the rebase", e));
 }
 
 /** Asks for the base commit from the branch's recent history, then opens the editor. */
-export async function chooseRebaseBase() {
-  const out = await git("log", "-50", "--format=%H%x1f%h%x1f%s%x1f%cr").catch(() => "");
-  const commits = out.split("\n").filter(Boolean).map((l) => l.split("\x1f"));
-  pick("Rebase the commits after…", () =>
-    commits.slice(1).map(([hash, short, subject, when]) => ({ label: `${short} ${subject}`, detail: when, run: () => interactiveRebase(hash) })),
-  );
+export function chooseRebaseBase() {
+  // A failure shows as a row in the picker, rather than an empty list.
+  const commits = git("log", "-50", "--format=%H%x1f%h%x1f%s%x1f%cr").then((out) => out.split("\n").filter(Boolean).map((l) => l.split("\x1f")));
+  pick("Rebase the commits after…", async (q) => {
+    const list = (await commits).slice(1);
+    if (!list.length) return [{ label: "There are no earlier commits to rebase onto.", icon: "codicon-info", run: () => {} }];
+    return rank(q, list.map(([hash, short, subject, when]) => ({ label: `${short} ${subject}`, detail: when, run: () => interactiveRebase(hash) })));
+  });
 }
 
 export function initRebase(h: Host) {

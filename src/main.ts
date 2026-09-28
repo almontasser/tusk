@@ -1932,7 +1932,7 @@ initStash({ showView });
 initBranches({ commit: focusCommit, push, update: updateProject });
 initSync({ root: () => root });
 initCommitView({ root: () => root, openFile, push, showHistory: showFileHistory });
-initMerge({ root: () => root, ensureModel, status, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel) => change("add", "--", rel) });
+initMerge({ root: () => root, ensureModel, status, openFile, saveFile: (path) => (tabs.has(path) ? saveFile(path) : writeModel(path)), resolved: (rel, remove) => (remove ? change("rm", "--quiet", "--", rel) : change("add", "--", rel)) });
 initHttpClient({
   root: () => root,
   status,

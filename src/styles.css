@@ -1347,6 +1347,25 @@ button.link:hover { text-decoration: underline; }
 .merge-titles { display: grid; grid-template-columns: 1fr 1.2fr 1fr; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border-subtle); color: var(--muted); font-size: 12px; }
 .merge-titles span { padding: 4px 12px; }
 .merge-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr 1fr; }
+.merge-body { flex: 1; min-height: 0; display: flex; }
+.merge-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.merge-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); color: var(--muted); z-index: 2; }
+.merge-loading[hidden] { display: none; }
+#merge-files { width: 220px; flex-shrink: 0; overflow: auto; list-style: none; margin: 0; padding: 4px 0; border-right: 1px solid var(--border); background: var(--panel); }
+#merge-files[hidden] { display: none; }
+#merge-files li { display: flex; align-items: center; gap: 6px; height: var(--row); padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+#merge-files li:hover { background: var(--hover); }
+#merge-files li.current { font-weight: 600; }
+#merge-files li .codicon-check { color: var(--green); }
+#merge-files li .codicon-warning { color: var(--red); }
+#merge-files li.done .name { color: var(--muted); }
+#merge-deleted { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #e5c07b1f; border-bottom: 1px solid var(--border-subtle); }
+#merge-deleted[hidden] { display: none; }
+#merge-deleted span { margin-right: auto; }
+#merge-deleted button { padding: 3px 10px; border: 1px solid var(--input-border); border-radius: var(--radius); }
+#merge-deleted button:hover { background: var(--hover); }
+#merge header button:disabled { opacity: 0.5; }
+.merge-current-conflict { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .merge-panes > div { min-width: 0; min-height: 0; }
 .merge-panes > div + div { border-left: 1px solid var(--border); }
 .merge-ours { background: #3574f026; }
@@ -1378,6 +1397,11 @@ button.link:hover { text-decoration: underline; }
 .rebase-step.action-drop .subject { text-decoration: line-through; color: var(--faint); }
 .rebase-step.action-squash .subject, .rebase-step.action-fixup .subject { color: var(--muted); padding-left: 16px; }
 .rebase-step.command { color: var(--muted); }
+.rebase-step .grip { padding-top: 5px; color: var(--faint); cursor: grab; }
+.rebase-step.dragging { opacity: 0.5; }
+.rebase-step.drop-before { box-shadow: inset 0 2px var(--accent); }
+.rebase-step.drop-after { box-shadow: inset 0 -2px var(--accent); }
+#rebase .buttons .dialog-hint { margin-right: auto; font-size: 11.5px; color: var(--faint); align-self: center; }
 .rebase-step .command-name { width: 170px; flex-shrink: 0; padding: 3px 0 0 8px; }
 #rebase .buttons { display: flex; justify-content: flex-end; gap: 8px; }
 #rebase .buttons button { padding: 4px 16px; }

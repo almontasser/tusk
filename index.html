@@ -255,14 +255,26 @@
         </div>
         <div id="merge" hidden>
           <header>
-            <span class="codicon codicon-git-merge"></span><span id="merge-path"></span><span id="merge-count"></span>
-            <button id="merge-accept-ours" title="Resolve every remaining conflict with your side">Accept All Yours</button>
-            <button id="merge-accept-theirs" title="Resolve every remaining conflict with their side">Accept All Theirs</button>
+            <span class="codicon codicon-git-merge"></span><span id="merge-path"></span><span id="merge-count" role="status"></span>
+            <button class="icon-button" id="merge-prev" title="Previous conflict (⇧F7)" aria-label="Previous conflict"><span class="codicon codicon-arrow-up"></span></button>
+            <button class="icon-button" id="merge-next" title="Next conflict (F7)" aria-label="Next conflict"><span class="codicon codicon-arrow-down"></span></button>
+            <button id="merge-accept-left" title="Resolve the conflict at the cursor with your side (⌥⇧←)">Accept Left</button>
+            <button id="merge-accept-right" title="Resolve the conflict at the cursor with their side (⌥⇧→)">Accept Right</button>
+            <button id="merge-accept-both" title="Keep both sides of the conflict at the cursor, yours first">Accept Both</button>
+            <button id="merge-simple" title="Merge each conflict whose sides changed different lines, and leave the rest">Apply Non-Conflicting Changes</button>
+            <button class="icon-button" id="merge-more" title="More" aria-label="More merge actions" aria-haspopup="menu"><span class="codicon codicon-kebab-vertical"></span></button>
             <button id="merge-resolved" class="primary" title="Save the file and stage it (git add)">Mark Resolved</button>
             <button class="icon-button" id="merge-close" aria-label="Close merge" title="Close"><span class="codicon codicon-close"></span></button>
           </header>
-          <div class="merge-titles"><span>Yours</span><span>Result</span><span>Theirs</span></div>
-          <div class="merge-panes"><div id="merge-ours-pane"></div><div id="merge-result"></div><div id="merge-theirs-pane"></div></div>
+          <div id="merge-deleted" hidden><span></span><button id="merge-keep-file">Keep File</button><button id="merge-delete-file">Delete File</button></div>
+          <div class="merge-body">
+            <ul id="merge-files" role="listbox" aria-label="Conflicted files" hidden></ul>
+            <div class="merge-main">
+              <div class="merge-titles"><span id="merge-ours-title">Yours</span><span>Result</span><span id="merge-theirs-title">Theirs</span></div>
+              <div class="merge-panes"><div id="merge-ours-pane"></div><div id="merge-result"></div><div id="merge-theirs-pane"></div></div>
+              <div id="merge-loading" class="merge-loading" hidden>Loading the three versions…</div>
+            </div>
+          </div>
         </div>
         <section id="panel" hidden aria-label="Bottom panel">
           <div id="panel-resize"></div>

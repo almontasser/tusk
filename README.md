@@ -38,6 +38,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
+| Git | Push, update, and fetch can't answer a password or passphrase prompt; when one is needed, the message offers to run the command in a terminal tab (`src/sync.ts`). The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
 | Find in files | Results stop at 20,000 matches (Replace All still changes every matching file). |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
@@ -1881,7 +1882,9 @@ To rewrite recent commits, open a commit in the Git Log and choose
 choose the commit to rebase onto. The commits after it are listed, oldest
 first. For each, choose **Pick**, **Reword** (and edit its message), **Edit**
 (stop at it to change its files), **Squash into previous**, **Fixup** (squash
-and discard its message), or **Drop**, and use the arrows to reorder them.
+and discard its message), or **Drop**. Reorder them by dragging, with the
+arrows, or with ⌥↑ and ⌥↓. As in git's own list, P, R, E, S, F, and D set the
+selected commit's action.
 If the commits include merges, the merges are kept: the list also shows git's
 **Label**, **Reset**, and **Merge** steps, which rebuild each merged branch and
 merge it again, and they stay where they are.
@@ -1938,10 +1941,24 @@ and theirs on the right, each with the lines it changed from the common base
 highlighted. The middle pane is the file itself: above each conflict, choose
 **Accept Yours**, **Accept Theirs**, or **Accept Both**, or edit it directly.
 Where one version has lines the others don't, the others show striped blank
-space, so the lines all three share stay side by side. **Accept All Yours** and **Accept All Theirs** resolve every
-remaining conflict at once, and **Mark Resolved** saves and stages the file
-when no conflicts are left. The panes scroll together. The same links appear when a conflicted file is
-open in a tab, and saving it with no conflicts left also marks it resolved.
+space, so the lines all three share stay side by side. The panes scroll
+together.
+
+The header counts the conflicts left and marks the one at the cursor. Move
+between conflicts with the arrows or F7 and ⇧F7. **Accept Left** (⌥⇧←),
+**Accept Right** (⌥⇧→), and **Accept Both** resolve the conflict at the cursor
+and move to the next. **Apply Non-Conflicting Changes** merges every conflict
+whose two sides changed different lines, even neighboring ones, and says how
+many are left for you. The **⋯** menu has **Accept All Yours** and **Accept All
+Theirs**. **Mark Resolved** saves and stages the file when no conflicts are
+left, then opens the next conflicted file. When several files conflict, a list
+on the left shows each one, with a check mark once it's resolved.
+
+If one side deleted the file and the other changed it, the pane titles say
+which, and a bar offers **Keep File** or **Delete File**.
+
+The same links appear when a conflicted file is open in a tab, and saving it
+with no conflicts left also marks it resolved.
 For a merge, the commit message is filled in, so you can click **Commit** to
 finish.
 

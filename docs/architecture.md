@@ -2538,6 +2538,14 @@ working tree doesn't stop it. Hooks are off for both commands.
 `rebaseTodo` writes back unchanged. Those rows can't move, and a squash or
 fixup must follow a commit or a merge, not a label or reset.
 
+The dialog's list uses `listNav`. Each step keeps a key as it moves, so the
+selection follows it. ⌥↑ and ⌥↓ move a commit, and a letter sets its action,
+in a capturing listener that runs before `listNav`'s type-ahead. Drag and drop
+uses the HTML drag events, dropping before or after a row by which half the
+pointer is over. Merge commands (label, reset, merge) never move, and no commit
+moves past one. Building the merges list runs under `withProgress`, since it
+checks out a temporary worktree.
+
 An `edit` step stops the rebase with the commit applied. git then writes
 `rebase-merge/amend` with the commit's hash, which `detectOperation` reads to
 tell an edit stop from a conflict. git refuses `--continue` while changes are
@@ -2643,6 +2651,24 @@ view zone for the difference. Every pane is then the same height, so scrolling
 copies one position to the others, with `ScrollType.Immediate` (a smooth scroll
 fires its events after the `syncing` guard is released and would scroll the
 panes back). The zones are recomputed 150 ms after the result changes.
+
+The view first shows a loading cover and a spinner while the three `git show`
+calls and `git ls-files -u` run. A missing stage 2 or 3 in `ls-files -u` means
+that side deleted the file, which the titles and a bar with **Keep File**
+(`git add`) and **Delete File** (`git rm`) show.
+
+**Apply Non-Conflicting Changes** runs `resolveSimple` in `gitparse.ts` on each
+conflict: it diffs each side against the base and applies both sets of changes
+when no two overlap or insert at the same place. The base comes from the
+block's diff3 section, or, for the default conflict style, from
+`git merge-file -p --diff3` run on the three stages in the app cache, matched
+to the file's conflicts by the text of both sides. All the merges go in as one
+undoable edit.
+
+The list of conflicted files on the left is the files `git status` still
+reports as conflicted, plus those resolved in the tool since, until none are
+left. **Mark Resolved** reports a failed save or `git add` and keeps the file
+open; otherwise it moves to the next conflicted file.
 
 The result pane turns off CodeLens and draws its own **Accept** buttons as
 one-line view zones above each conflict, because a CodeLens takes height the
@@ -5175,3 +5201,11 @@ that needed a prompt falls back to a terminal tab.
 The log's filter used to match the loaded page of commits only, so an older
 commit never matched. Each filter now maps to a `git log` option and runs a new
 query, as PhpStorm's does, with pages of 300 still loading on demand.
+
+### 2026-09-28: Resolve simple conflicts in the app, not with git's options
+
+git's `merge-file` and `-X` strategies resolve a conflict for a whole side, not
+by merging two sides that changed different lines of one block. The merge tool
+therefore merges such blocks itself (`resolveSimple`), on request, as
+PhpStorm's magic wand does, and leaves blocks where both sides changed the same
+lines.

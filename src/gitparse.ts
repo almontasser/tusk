@@ -597,3 +597,30 @@ export function graphRows(commits: { hash: string; parents: string[] }[]): Graph
     return { col, lines, width: Math.max(lanes.length, col + 1, ...lines.map((l) => Math.max(l.from, l.to) + 1)) };
   });
 }
+
+/**
+ * Merges one conflict's two sides line by line against their base, as PhpStorm's "resolve simple conflicts" does:
+ * returns the merged lines when the sides changed different lines of the base, or null when their changes overlap
+ * or insert at the same place. Changes on neighboring lines merge.
+ */
+export function resolveSimple(base: string[], ours: string[], theirs: string[]): string[] | null {
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((l, i) => l === b[i]);
+  if (same(ours, theirs) || same(theirs, base)) return ours;
+  if (same(ours, base)) return theirs;
+  // Each side's changes as hunks of the base: replace base[start, end) with lines.
+  const hunks = (side: string[]) =>
+    lineChanges(base, side).map(({ block: b }) => ({
+      start: b!.originalEndLineNumber ? b!.originalStartLineNumber - 1 : b!.originalStartLineNumber,
+      end: b!.originalEndLineNumber || b!.originalStartLineNumber,
+      lines: b!.modifiedEndLineNumber ? side.slice(b!.modifiedStartLineNumber - 1, b!.modifiedEndLineNumber) : [],
+    }));
+  const all = [...hunks(ours), ...hunks(theirs)].sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < all.length; i++) if (all[i].start < all[i - 1].end || all[i].start === all[i - 1].start) return null;
+  const out: string[] = [];
+  let at = 0;
+  for (const hk of all) {
+    out.push(...base.slice(at, hk.start), ...hk.lines);
+    at = hk.end;
+  }
+  return [...out, ...base.slice(at)];
+}
