@@ -1,71 +1,302 @@
-// Runs tests, Artisan commands, and other commands in terminal tabs.
+// Runs run configurations (tests, Artisan, scripts, and servers) in terminal tabs, keeps them in the project
+// state, and holds the ways to start them: the title bar's run widget, the gutter's run buttons, and Run Anything.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
-import { pick, rank } from "./palette";
+import { h, icon } from "./dom";
+import { confirm, type Item, pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
 import { startDebugging, XDEBUG_ENV } from "./debug";
 import { filterFor, type TestResult } from "./junit";
 import { type Container, runningContainer } from "./sail";
-import { openTerminal } from "./terminal";
-import { initTestResults, showLive, showResults } from "./testresults";
-import { TYPE_KINDS, workspaceSymbols } from "./lsp";
+import { openTerminal, type TerminalRun } from "./terminal";
+import { initTestResults, showLive, showResults, startTestRun } from "./testresults";
+import { toolPath, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { initCoverage, loadCoverage } from "./coverage";
 import { formRequestParameter, methodBody, methodLine, routeTarget, validationRules } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 import { type MenuItem, showMenu } from "./files";
 import { onSettings, settings } from "./settings";
+import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
+import { errorText, showError } from "./status";
+import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
 let status: (text: string) => void;
 let loadProfiler: () => Promise<typeof import("./profiler")>;
-/** How a test run goes: plainly, in the debugger, with code coverage, or with Xdebug's profiler. */
-type Mode = "run" | "debug" | "coverage" | "profile";
-let last: { title: string; command: string[]; tests: boolean; mode: Mode } | undefined;
+let showDiff: (path: string, original: string, modified: string, label: string) => unknown;
 
 const exists = (path: string) => invoke<boolean>("path_exists", { path: `${getRoot()}/${path}` });
 export const isTestFile = (path: string) => path.includes("/tests/") || path.endsWith("Test.php");
+const projectInfo = async (): Promise<Project> => ({ artisan: await exists("artisan"), pest: await exists("vendor/bin/pest") });
+
+// ---- Configurations in the project state ----
+
+/** Shared configurations, in tusk.json; this Mac's own; the temporary ones runs create; and the one selected. */
+const SHARED = "runConfigurations";
+const LOCAL = "localRunConfigurations";
+const TEMPORARY = "temporaryRunConfigurations";
+const SELECTED = "selectedRunConfiguration";
+
+export type Where = "shared" | "local" | "temporary";
+export type Entry = { config: RunConfig; where: Where };
+
+/** Every configuration of the open project: shared, then local, then temporary. */
+export const configurations = (): Entry[] =>
+  (
+    [
+      [SHARED, "shared"],
+      [LOCAL, "local"],
+      [TEMPORARY, "temporary"],
+    ] as const
+  ).flatMap(([key, where]) => readConfigs(projectValue(key)).map((config) => ({ config, where })));
+
+const byName = (name: string | undefined) => configurations().find((e) => e.config.name === name);
+
+/** The selected configuration: the one you chose last, or the first. */
+export const selected = (): Entry | undefined => byName(projectValue<string>(SELECTED)) ?? configurations()[0];
+
+async function select(name: string) {
+  await setProjectValue(SELECTED, name, "local").catch((e) => showError("Can't save the selected run configuration", e));
+  renderWidget();
+}
+
+/** Saves all configurations, each where its entry says, and selects `select` when given. */
+export async function saveConfigurations(entries: Entry[], selectName?: string) {
+  const list = (where: Where) => entries.filter((e) => e.where === where).map((e) => clean(e.config));
+  try {
+    for (const [key, where] of [
+      [SHARED, "shared"],
+      [LOCAL, "local"],
+      [TEMPORARY, "temporary"],
+    ] as const) {
+      const value = list(where);
+      // Unchanged lists aren't written, so tusk.json isn't touched when nothing shared changed.
+      if (JSON.stringify(value) === JSON.stringify(readConfigs(projectValue(key)))) continue;
+      await setProjectValue(key, value.length ? value : undefined, where === "shared" ? "shared" : "local");
+    }
+    if (selectName !== undefined) await setProjectValue(SELECTED, selectName, "local");
+  } catch (e) {
+    showError("Can't save the run configurations", e);
+  }
+  renderWidget();
+}
 
 /**
- * Runs a command in a terminal tab. For a test run, the Tests tab shows the results when it ends. With
- * coverage, PHPUnit also writes a Clover report, and the editor shows it in the gutter. With the profiler,
- * the Profiler tab shows the run's profile.
+ * Runs a configuration made on the fly, such as from a gutter run button, as a temporary configuration: it's
+ * selected, so ⌃R runs it again, and it stays among the five newest until you save it. A saved configuration
+ * with the same settings runs instead of a copy.
  */
-async function run(title: string, command: string[], tests = false, mode: Mode = "run") {
-  last = { title, command, tests, mode };
+async function runTemporary(c: RunConfig, mode: Mode = "run") {
+  const same = configurations().find((e) => e.where !== "temporary" && JSON.stringify(clean({ ...e.config, name: "" })) === JSON.stringify(clean({ ...c, name: "" })));
+  if (same) return select(same.config.name).then(() => runConfig(same.config, mode));
+  const saved = configurations().filter((e) => e.where !== "temporary").map((e) => e.config.name);
+  const config = { ...c, name: uniqueName(c.name, saved) };
+  const temporary = addTemporary(readConfigs(projectValue(TEMPORARY)), config);
+  await setProjectValue(TEMPORARY, temporary.map(clean), "local").catch((e) => showError("Can't save the temporary run configuration", e));
+  await select(config.name);
+  return runConfig(config, mode);
+}
+
+/** Saves a temporary configuration, so it stays. */
+export async function saveTemporary(name = selected()?.config.name) {
+  const entries = configurations();
+  const entry = entries.find((e) => e.config.name === name && e.where === "temporary");
+  if (!entry) return status("The selected run configuration is already saved.");
+  entry.where = "local";
+  await saveConfigurations(entries, entry.config.name);
+  status(`Saved the run configuration “${entry.config.name}”.`);
+}
+
+/** Reads the configurations again, when a project opens, or when tusk.json changes them. */
+export const loadRunConfigurations = () => renderWidget();
+onProjectValue(SHARED, () => renderWidget());
+
+// ---- Running ----
+
+type Run = { config: RunConfig; mode: Mode; title: string; terminal: TerminalRun };
+/** The runs that are still going. */
+const runs: Run[] = [];
+/** The last run, for Rerun. */
+let last: { config: RunConfig; mode: Mode } | undefined;
+/** The test run the Tests tab shows. */
+let testRun: Run | undefined;
+let runCounter = 0;
+
+export const isRunning = () => runs.length > 0;
+const runsOf = (name: string) => runs.filter((r) => r.config.name === name);
+
+/** Xdebug's trigger for PHP in a container, which reaches the editor on this Mac through Docker's host name. */
+const CONTAINER_XDEBUG = [...XDEBUG_ENV, "XDEBUG_CONFIG=client_host=host.docker.internal"];
+
+/** A command for this Mac: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in PATH. */
+const onMac = (command: string[]) => (command[0].startsWith("vendor/") ? [`${getRoot()}/${command[0]}`, ...command.slice(1)] : command);
+
+/** A PHP command in the project's running container (Sail or a Compose service), or else on this Mac, with `env` set. */
+async function php(command: string[], debug = false, env: string[] = [], docker = true): Promise<{ command: string[]; container: Container | null }> {
+  const container = docker ? await runningContainer(getRoot()) : null;
+  if (container) return { command: container.exec(command, [...env, ...(debug ? CONTAINER_XDEBUG : [])]), container };
+  const vars = [...env, ...(debug ? XDEBUG_ENV : [])];
+  return { command: vars.length ? ["/usr/bin/env", ...vars, ...onMac(command)] : onMac(command), container };
+}
+
+const prefixes: Record<Mode, string> = { run: "", debug: "Debug: ", coverage: "Coverage: ", profile: "Profile: " };
+
+/**
+ * Runs a configuration: checks it, stops its earlier run unless it allows more than one, runs its before-launch
+ * steps, and then runs it in a terminal tab. Resolves to the run's exit code, or null when it didn't run or end.
+ */
+export async function runConfig(c: RunConfig, mode: Mode = "run", chain: string[] = []): Promise<number | null> {
+  const root = getRoot();
+  if (!root) return null;
+  const others = configurations().filter((e) => e.config.name !== c.name).map((e) => e.config);
+  const errors = validate(c, [...others, c]);
+  if (errors.length) return showError(`Can't run “${c.name}”: ${errors[0]}`, undefined, { label: "Edit Configuration…", run: () => editConfigurations(c.name) }), null;
+  if (chain.includes(c.name)) return showError(`Before launch runs in a circle: ${[...chain, c.name].join(" → ")}.`), null;
+  const info = TYPES[c.type];
+  if (mode === "debug" && !info.php) return showError(`${info.label}s don't run PHP, so they can't run in the debugger. Use Run instead.`), null;
+  if ((mode === "coverage" || mode === "profile") && c.type !== "test") return showError(`Only test configurations run with ${mode === "coverage" ? "coverage" : "the profiler"}.`), null;
+  if (mode === "run" && c.type === "test" && c.coverage) mode = "coverage";
+
+  const earlier = runsOf(c.name);
+  if (earlier.length && !c.multiple) {
+    if (!(await confirm(`“${c.name}” is still running. Stop it and run it again?`, "Stop and Rerun"))) return null;
+    earlier.forEach((r) => r.terminal.stop());
+    // It stops within 3 seconds: ⌃C, and then a kill.
+    for (let i = 0; i < 40 && earlier.some((r) => !r.terminal.exited()); i++) await new Promise((r) => setTimeout(r, 100));
+  }
+
+  for (const step of c.before ?? []) {
+    const before = "config" in step ? byName(step.config)?.config : ({ name: `Before “${c.name}”: ${step.command}`, type: "shell", command: step.command } satisfies RunConfig);
+    if (!before) return showError(`Can't run “${c.name}”: its before-launch configuration “${"config" in step ? step.config : ""}” doesn't exist.`), null;
+    const code = await runConfig(before, "run", [...chain, c.name]);
+    if (code !== 0) {
+      showError(`“${c.name}” didn't run: its before-launch step “${before.name}” ${code === null ? "didn't finish" : `failed with exit code ${code}`}.`);
+      return null;
+    }
+  }
+  if (!chain.length) last = { config: c, mode };
+  try {
+    return await launch(c, mode);
+  } catch (e) {
+    showError(`Can't run “${c.name}”`, e);
+    return null;
+  }
+}
+
+/** Starts a configuration in a terminal tab and resolves when it ends, with its exit code (null when it was killed or its tab closed). */
+async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
+  const root = getRoot();
+  const info = TYPES[c.type];
+  const tests = c.type === "test";
   const coverage = mode === "coverage";
-  // Servers and watchers from Run Anything, such as `npm run dev`, reopen with the project while they still run.
-  // Other commands, such as a migration waiting at a prompt, don't run again on their own.
-  if (!tests) return openTerminal(getRoot(), title, command, undefined, undefined, LONG_RUNNING.test(command.join(" ")));
-  // In a container, the report has to be somewhere it can write: storage/logs, which git ignores.
-  const inContainer = command[0] === `${getRoot()}/vendor/bin/sail` || (command[0] === "docker" && command[1] === "compose");
-  const report = inContainer ? `${getRoot()}/storage/logs/editor-junit.xml` : await reportPath();
-  await invoke("remove_path", { path: report }).catch(() => {}); // So a run that fails early doesn't show the last results.
-  const reportArg = inContainer ? "storage/logs/editor-junit.xml" : report;
-  // Results show as tests run: PHPUnit 10 and later (and Pest 2 and later) stream events to a file, and earlier
-  // versions write a TeamCity log.
-  const format = (await exists("vendor/phpunit/phpunit/src/Event")) ? "events" : "teamcity";
-  const events = inContainer ? `${getRoot()}/storage/logs/editor-events.txt` : report.replace(/junit\.xml$/, "events.txt");
-  const liveArgs = [format === "events" ? "--log-events-text" : "--log-teamcity", inContainer ? "storage/logs/editor-events.txt" : events];
-  await invoke("remove_path", { path: events }).catch(() => {});
-  const timer = setInterval(() => showLive(events, true, format), 500);
-  const clover = inContainer ? `${getRoot()}/storage/logs/editor-clover.xml` : report.replace(/junit\.xml$/, "clover.xml");
-  // PHPUnit's XML coverage also records which tests ran each line.
-  const perTest = inContainer ? `${getRoot()}/storage/logs/editor-coverage-xml` : report.replace(/junit\.xml$/, "coverage-xml");
-  if (coverage) await Promise.all([clover, perTest].map((path) => invoke("remove_path", { path }).catch(() => {})));
-  // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In a container, its own settings apply.
+  const debug = mode === "debug";
+  const docker = info.php && (c.docker ?? info.defaults.docker ?? false);
+  const env = Object.entries(c.env ?? {}).map(([k, v]) => `${k}=${v}`);
+  let argv = commandFor(c, await projectInfo());
+  const container = docker ? await runningContainer(root) : null;
+  // On this Mac, Composer is the bundled composer.phar; in a container, the container's own.
+  if (c.type === "composer" && !container) argv = ["php", await toolPath("composer/composer.phar"), ...argv.slice(1)];
+  // The profile would be written inside the container, where the editor can't find it.
+  if (mode === "profile" && container) return showError(`Profiling runs tests on this Mac, not in a container. Stop the ${container.label} containers, or turn off Docker in “${c.name}”, to profile.`), null;
+  const title = `${prefixes[mode]}${c.name}${container ? ` (${container.label})` : ""}`;
+  if (debug) await startDebugging();
+
+  let reports: Awaited<ReturnType<typeof testReports>> | undefined;
+  const extraEnv: string[] = [];
+  if (tests) {
+    reports = await testReports(!!container, coverage);
+    argv = [...argv, ...reports.args];
+    // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In a container, its own settings apply.
+    if (coverage && !container) extraEnv.push("XDEBUG_MODE=coverage");
+  }
   const profiler = mode === "profile" ? await loadProfiler() : null;
   const profiles = profiler ? await profiler.profileDir() : "";
+  if (profiler) extraEnv.push(...(await profiler.profileEnv(profiles, root)));
   const started = Math.floor(Date.now() / 1000);
-  const env = coverage && !inContainer ? ["/usr/bin/env", "XDEBUG_MODE=coverage"] : profiler ? ["/usr/bin/env", ...(await profiler.profileEnv(profiles, getRoot()))] : [];
-  const coverageArgs = coverage ? ["--coverage-clover", inContainer ? "storage/logs/editor-clover.xml" : clover, "--coverage-xml", inContainer ? "storage/logs/editor-coverage-xml" : perTest] : [];
-  return openTerminal(getRoot(), title, [...env, ...command, "--log-junit", reportArg, ...liveArgs, ...coverageArgs], async () => {
+  const command = info.php ? (await php(argv, debug, [...env, ...extraEnv], docker)).command : env.length ? ["/usr/bin/env", ...env, ...argv] : argv;
+  const cwd = c.cwd ? `${root}/${c.cwd.replace(/^\/+|\/+$/g, "")}` : root;
+
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let run: Run | undefined;
+  let resolve: (code: number | null) => void = () => {};
+  const done = new Promise<number | null>((r) => (resolve = r));
+  const finish = () => {
     clearInterval(timer);
-    if (!(await showResults(report))) showLive(events, false, format);
-    if (coverage) showCoverage(clover, perTest);
-    if (profiler) profiler.openNewestProfile(profiles, started, title);
-  }, () => clearInterval(timer));
+    if (run && runs.includes(run)) runs.splice(runs.indexOf(run), 1);
+    renderWidget();
+  };
+  const terminal = await openTerminal(
+    cwd,
+    title,
+    command,
+    async (code) => {
+      finish();
+      if (reports) {
+        const shown = await showResults(reports.junit, reports.details, code);
+        if (!shown) await showLive(reports.live, false, reports.format);
+        reports.cleanUp();
+      }
+      if (coverage && reports) showCoverage(reports.clover, reports.perTest);
+      if (profiler) profiler.openNewestProfile(profiles, started, title);
+      resolve(code);
+    },
+    () => (finish(), resolve(null)),
+    longRunning(c),
+  );
+  if (!terminal) return clearInterval(timer), null; // openTerminal said why.
+  run = { config: c, mode, title, terminal };
+  runs.push(run);
+  if (reports) {
+    testRun = run;
+    startTestRun(title);
+    const r = reports;
+    timer = setInterval(() => showLive(r.live, true, r.format), 500);
+  }
+  renderWidget();
+  return done;
+}
+
+/**
+ * Where a test run writes its reports, and the options that ask for them: the JUnit report, a live log (PHPUnit's
+ * event stream from version 10, else a TeamCity log), a TeamCity log for failures' expected and actual values and
+ * stacks, and coverage. In a container, the reports go to storage/logs, which the container can write and git ignores.
+ */
+async function testReports(inContainer: boolean, coverage: boolean) {
+  const root = getRoot();
+  const n = ++runCounter;
+  const dir = inContainer ? `${root}/storage/logs` : await cacheDir();
+  const local = (name: string) => `${dir}/${inContainer ? "editor-" : ""}${name}`;
+  const arg = (name: string) => (inContainer ? `storage/logs/editor-${name}` : local(name));
+  const [junit, events, teamcity] = [`junit-${n}.xml`, `events-${n}.txt`, `teamcity-${n}.txt`];
+  const format = (await exists("vendor/phpunit/phpunit/src/Event")) ? ("events" as const) : ("teamcity" as const);
+  // PHPUnit's XML coverage also records which tests ran each line.
+  const [clover, perTest] = ["clover.xml", "coverage-xml"];
+  const remove = (path: string) => invoke("remove_path", { path }).catch(() => {});
+  // So a run that fails early doesn't show the last results.
+  await Promise.all([junit, events, teamcity, ...(coverage ? [clover, perTest] : [])].map((f) => remove(local(f))));
+  return {
+    junit: local(junit),
+    live: local(format === "events" ? events : teamcity),
+    details: local(teamcity),
+    format,
+    clover: local(clover),
+    perTest: local(perTest),
+    args: [
+      "--log-junit", arg(junit),
+      ...(format === "events" ? ["--log-events-text", arg(events)] : []),
+      "--log-teamcity", arg(teamcity),
+      ...(coverage ? ["--coverage-clover", arg(clover), "--coverage-xml", arg(perTest)] : []),
+    ],
+    cleanUp: () => [junit, events, teamcity].forEach((f) => remove(local(f))),
+  };
+}
+
+async function cacheDir() {
+  const dir = await appCacheDir();
+  await invoke("create_dir", { path: dir });
+  return dir;
 }
 
 async function showCoverage(clover: string, perTest: string) {
@@ -75,120 +306,201 @@ async function showCoverage(clover: string, perTest: string) {
   status(`Coverage: ${percent}% of lines (${result.covered} of ${result.total}) in ${result.files} files`);
 }
 
-async function reportPath() {
-  const dir = await appCacheDir();
-  await invoke("create_dir", { path: dir });
-  return `${dir}/junit.xml`;
+/** Stops a run: the selected configuration's, or the only one, or the one you choose when several run. */
+export function stopRun(x?: number, y?: number) {
+  const mine = runsOf(selected()?.config.name ?? "");
+  const targets = mine.length ? mine : runs;
+  if (!targets.length) return status("Nothing is running.");
+  if (targets.length === 1) return targets[0].terminal.stop();
+  const at = x === undefined ? $widget().getBoundingClientRect() : { left: x, bottom: y! };
+  showMenu(at.left, at.bottom, [...targets.map((r) => ({ label: r.title, run: () => r.terminal.stop() })), "-", { label: "Stop All", run: () => [...runs].forEach((r) => r.terminal.stop()) }]);
 }
 
-/** A command for this Mac: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in PATH. */
-const onMac = (command: string[]) => (command[0].startsWith("vendor/") ? [`${getRoot()}/${command[0]}`, ...command.slice(1)] : command);
+/** Stops the test run the Tests tab shows. */
+const stopTests = () => (testRun && !testRun.terminal.exited() ? testRun.terminal.stop() : status("No tests are running."));
 
-/** Xdebug's trigger for PHP in a container, which reaches the editor on this Mac through Docker's host name. */
-const CONTAINER_XDEBUG = [...XDEBUG_ENV, "XDEBUG_CONFIG=client_host=host.docker.internal"];
-
-/** A PHP command in the project's running container (Sail or a Compose service), or else on this Mac. */
-async function php(command: string[], debug = false): Promise<{ command: string[]; container: Container | null }> {
-  const container = await runningContainer(getRoot());
-  if (container) return { command: container.exec(command, debug ? CONTAINER_XDEBUG : []), container };
-  return { command: debug ? ["/usr/bin/env", ...XDEBUG_ENV, ...onMac(command)] : onMac(command), container };
+/** Runs the selected configuration, or asks for one when there's none. */
+export function runSelected(mode: Mode = "run") {
+  const entry = selected();
+  if (!entry) return chooseAndRun(mode, "No run configurations yet. Choose what to run, or add a configuration");
+  return runConfig(entry.config, mode);
 }
 
-/**
- * `php artisan test`, which runs Pest when it's installed, or else the test binary, in the project's
- * container when it's up. With `debug`, Xdebug's trigger is set (in Sail, through `sail debug`).
- */
-async function testRunner(debug = false) {
-  const local = (await exists("artisan")) ? ["php", "artisan", "test"] : [(await exists("vendor/bin/pest")) ? "vendor/bin/pest" : "vendor/bin/phpunit"];
-  const { command, container } = await php(local, debug);
-  return { command, where: container ? ` (${container.label})` : "" };
-}
-
-/** Commands that keep running until stopped: dev servers, watchers, queue workers, and containers. */
-const LONG_RUNNING =
-  /\b(?:artisan\s+(?:serve|queue:work|queue:listen|horizon|reverb:start|schedule:work|pail|octane:start)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|watch|serve|start)|vite(?!\s+build)(?:\s|$)|sail\s+up|(?:docker[-\s]compose)\s+up)\b/;
-
-/** Runs a shell command line, so quoting and pipes work as in a terminal. */
-const runLine = (title: string, line: string) => run(title, ["/bin/sh", "-c", line]);
-
-const titles: Record<Mode, string> = { run: "Test", debug: "Debug", coverage: "Test with coverage", profile: "Profile" };
-
-/**
- * Runs one test, or the whole file when the test has no filter, through `php artisan test` or
- * the test binary. In debug mode, it starts the debugger and runs the test with Xdebug enabled.
- */
-export async function runTest(path: string, test: TestCase, mode: Mode = "run") {
-  const file = path.slice(getRoot().length + 1);
-  const runner = await testRunner(mode === "debug");
-  // The profile would be written inside the container, where the editor can't find it.
-  if (mode === "profile" && runner.where) return status(`Profiling runs tests on this Mac, not in a container. Stop the${runner.where} containers to profile.`);
-  const filter = test.filter ? ["--filter", test.filter] : [];
-  const title = `${titles[mode]}: ${test.filter ? test.name : file.split("/").pop()}${runner.where}`;
-  if (mode === "debug") await startDebugging();
-  return run(title, [...runner.command, file, ...filter], true, mode);
-}
-
-export const runAllTests = async (coverage = false) => {
-  const runner = await testRunner();
-  return run(`${coverage ? "Tests with coverage" : "Tests"}${runner.where}`, runner.command, true, coverage ? "coverage" : "run");
-};
+/** Runs the last run again, or asks what to run when nothing ran yet. */
+export const rerun = () => (last ? runConfig(last.config, last.mode) : chooseAndRun("run", "Nothing to rerun yet. Choose a configuration to run"));
 
 async function rerunFailed(failed: TestResult[]) {
+  const base: RunConfig = last?.config.type === "test" ? last.config : { name: "All Tests", type: "test", scope: "all" };
   const filter = filterFor(failed, await exists("vendor/bin/pest"));
-  return run(`Tests: ${failed.length} failed`, [...(await testRunner()).command, "--filter", filter], true);
+  // A run of its own, not a configuration to keep: Rerun repeats it, as in PhpStorm.
+  return runConfig({ ...base, name: `${base.name.replace(/ \(failed tests\)$/, "")} (failed tests)`, scope: "filter", path: undefined, filter }, last?.mode === "debug" ? "debug" : "run");
 }
+
+const modeLabels: Record<Mode, string> = { run: "Run", debug: "Debug", coverage: "Run with Coverage", profile: "Profile" };
+
+/** Picks a configuration in the palette and runs it; the palette also offers to edit them. */
+export function chooseAndRun(mode: Mode = "run", placeholder = `${modeLabels[mode]}: choose a configuration`) {
+  if (!getRoot()) return;
+  const items = (): Item[] =>
+    configurations().map(({ config, where }) => ({
+      label: config.name,
+      detail: `${TYPES[config.type].label}${where === "shared" ? " · shared" : where === "temporary" ? " · temporary" : ""} · ${summary(config)}`,
+      icon: `codicon-${TYPES[config.type].icon}`,
+      run: () => select(config.name).then(() => runConfig(config, mode)),
+    }));
+  pick(placeholder, (q) => [...(q.trim() ? rank(q, items()) : items()), { label: "Edit Configurations…", detail: "Add, change, or remove run configurations", icon: "codicon-settings-gear", run: () => editConfigurations() }]);
+}
+
+/** Opens the Edit Configurations dialog, at `name` or the selected configuration. */
+export async function editConfigurations(name = selected()?.config.name, add?: RunConfig["type"]) {
+  if (!getRoot()) return;
+  const { openConfigurationsDialog } = await import("./runconfigdialog");
+  const mode = await openConfigurationsDialog({ entries: configurations(), selected: name, add, root: getRoot(), project: await projectInfo(), save: saveConfigurations });
+  const entry = selected();
+  if (mode && entry) runConfig(entry.config, mode);
+}
+
+// ---- The run widget in the title bar ----
+
+const $widget = () => document.getElementById("run-widget")!;
+
+/** The configuration menu under the widget: pick one, or edit, add, save, and remove them. */
+function widgetMenu() {
+  const entries = configurations();
+  const current = selected();
+  const item = ({ config }: Entry): MenuItem => ({ label: `${config.name === current?.config.name ? "✓ " : "   "}${config.name}${runsOf(config.name).length ? " (running)" : ""}`, run: () => select(config.name) });
+  const saved = entries.filter((e) => e.where !== "temporary");
+  const temporary = entries.filter((e) => e.where === "temporary");
+  const r = $widget().querySelector(".run-config")!.getBoundingClientRect();
+  showMenu(r.left, r.bottom + 2, [
+    ...saved.map(item),
+    ...(temporary.length ? ["-" as const, ...temporary.map(item)] : []),
+    "-",
+    { label: "Edit Configurations…", run: () => editConfigurations() },
+    { label: "Add Configuration", items: (Object.keys(TYPES) as RunConfig["type"][]).map((t) => ({ label: TYPES[t].label, run: () => editConfigurations(undefined, t) })) },
+    ...(current?.where === "temporary" ? [{ label: `Save “${current.config.name}”`, run: () => saveTemporary() }] : []),
+    ...(current ? [{ label: `Delete “${current.config.name}”…`, run: () => deleteConfiguration(current.config.name) }] : []),
+  ]);
+}
+
+async function deleteConfiguration(name: string) {
+  if (!(await confirm(`Delete the run configuration “${name}”?`, "Delete"))) return;
+  const entries = configurations().filter((e) => e.config.name !== name);
+  await saveConfigurations(entries, entries[0]?.config.name ?? "");
+}
+
+/** Draws the widget: the selected configuration, whether it runs, and its Run, Debug, Run with Coverage, and Stop buttons. */
+function renderWidget() {
+  const el = document.getElementById("run-widget");
+  if (!el) return;
+  const current = getRoot?.() ? selected() : undefined;
+  const c = current?.config;
+  const running = c ? runsOf(c.name).length : 0;
+  const button = (name: string, title: string, onclick: () => unknown, disabled = false, cls = "") =>
+    h("button", { class: `tb-icon ${cls}`, title, ariaLabel: title, disabled, onclick }, icon(name));
+  el.hidden = !getRoot?.();
+  el.replaceChildren(
+    h(
+      "button",
+      { class: `tb-button run-config${running ? " running" : ""}${current?.where === "temporary" ? " temporary" : ""}`, title: c ? `${c.name}: ${summary(c)}${running ? " (running)" : ""}` : "Add a run configuration", ariaLabel: "Run configuration", ariaHasPopup: "menu", onclick: () => (c ? widgetMenu() : editConfigurations()) },
+      icon(c ? TYPES[c.type].icon : "add"),
+      running ? h("span", { class: "run-dot", ariaHidden: "true" }) : null,
+      h("span", { class: "run-config-name" }, c?.name ?? "Add Configuration…"),
+      icon("chevron-down"),
+    ),
+    button("play", c ? `Run “${c.name}” (⌃R)` : "Run… (⌃R)", () => runSelected(), false, "run-play"),
+    button("debug-alt-small", c ? `Debug “${c.name}” (⌃D)` : "Debug… (⌃D)", () => runSelected("debug"), !!c && !TYPES[c.type].php, "run-debug"),
+    button("run-coverage", c ? `Run “${c.name}” with Coverage` : "Run with Coverage…", () => runSelected("coverage"), !!c && c.type !== "test"),
+    button("debug-stop", running ? `Stop “${c!.name}” (⌘F2)` : runs.length ? "Stop… (⌘F2)" : "Nothing is running", () => stopRun(), !runs.length, "run-stop"),
+  );
+}
+
+// ---- Tests ----
+
+/**
+ * Runs one test, or the whole file when the test has no filter, as a temporary configuration: through
+ * `php artisan test` or the test binary. In debug mode, it starts the debugger and runs the test with Xdebug enabled.
+ */
+export function runTest(path: string, test: TestCase, mode: Mode = "run") {
+  const file = path.slice(getRoot().length + 1);
+  const stem = file.split("/").pop()!.replace(/\.php$/, "");
+  const config: RunConfig = test.filter
+    ? { name: `${stem}::${test.name}`, type: "test", scope: "method", path: file, filter: test.name, docker: true }
+    : { name: stem, type: "test", scope: "file", path: file, docker: true };
+  return runTemporary(config, mode);
+}
+
+export const runAllTests = (coverage = false) => runTemporary({ name: "All Tests", type: "test", scope: "all", docker: true }, coverage ? "coverage" : "run");
 
 /** Runs the test around the cursor, or all tests in the file. */
 export function runTestAtCursor(editor: monaco.editor.ICodeEditor, mode: Mode = "run") {
   const model = editor.getModel();
-  if (!model || !isTestFile(model.uri.fsPath)) return;
+  if (!model || !isTestFile(model.uri.fsPath)) return status("Open a test file, and put the cursor in a test, to run it.");
   const test = testAt(findTests(model.getValue()), editor.getPosition()?.lineNumber ?? 1);
-  if (test) runTest(model.uri.fsPath, test, mode);
+  if (!test) return status("This file has no tests to run.");
+  return runTest(model.uri.fsPath, test, mode);
 }
 
-export const rerun = () => last && run(last.title, last.command, last.tests, last.mode);
+// ---- Run Anything ----
 
 type ArtisanList = { commands: { name: string; description: string; hidden?: boolean }[] };
 let artisanCache: { root: string; items: { name: string; description: string }[] } | undefined;
 
+/** The app's Artisan commands. When artisan fails, throws its first lines, such as a fatal error while the app boots. */
 async function artisanCommands() {
   const root = getRoot();
   if (artisanCache?.root !== root) {
-    const json = await invoke<string>("run_capture", { cwd: root, program: "php", args: ["artisan", "list", "--format=json"] });
-    const list: ArtisanList = JSON.parse(json);
+    const out = await invoke<string>("run_capture", { cwd: root, program: "php", args: ["artisan", "list", "--format=json"], input: null, anyStatus: true });
+    let list: ArtisanList;
+    try {
+      list = JSON.parse(out);
+    } catch {
+      const lines = out.replace(/\x1b\[[\d;]*m/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
+      throw new Error(lines.slice(0, 2).join(": ") || "php artisan list printed nothing");
+    }
     artisanCache = { root, items: list.commands.filter((c) => !c.hidden) };
   }
   return artisanCache.items;
 }
 
 /**
- * Run Anything: type an Artisan command with its arguments, such as `make:model Post -m`,
- * or any shell command line.
+ * Run Anything: type an Artisan command with its arguments, such as `make:model Post -m`, a run configuration's
+ * name, or any shell command line. What you run becomes a temporary configuration.
  */
 export async function runAnything() {
-  const artisan = (await exists("artisan")) ? await artisanCommands().catch(() => []) : [];
-  // Artisan commands run in the project's container when it's up; other command lines run on this Mac.
-  const artisanLine = (await php(["php", "artisan"])).command.map(shellQuote).join(" ");
-  pick("Run anything: an Artisan command with arguments, or a shell command", (query) => {
+  let artisanError = "";
+  const artisan = (await exists("artisan")) ? await artisanCommands().catch((e) => ((artisanError = errorText(e)), [])) : [];
+  pick("Run anything: an Artisan command with arguments, a run configuration, or a shell command", (query) => {
     const line = query.trim().replace(/^(php\s+)?artisan\s+/, "");
-    if (!line) return [];
+    // Say why there are no Artisan commands, and offer to run artisan list to see the whole error.
+    const problem: Item[] = artisanError
+      ? [{ label: "Artisan commands aren't available", detail: `php artisan list failed: ${artisanError}`, icon: "codicon-warning", run: () => ((artisanCache = undefined), runTemporary({ name: "artisan list", type: "artisan", command: "list", docker: false })) }]
+      : [];
+    if (!line) return problem;
     const [word, ...args] = line.split(/\s+/);
     const suffix = args.length ? ` ${args.join(" ")}` : "";
     const items = artisan.map((c) => ({
       label: c.name,
       detail: c.description,
-      run: () => runLine(`artisan ${c.name}`, `${artisanLine} ${c.name}${suffix}`),
+      run: () => runTemporary({ name: `artisan ${c.name}${suffix}`, type: "artisan", command: `${c.name}${suffix}`, docker: true }),
     }));
     const ranked = rank(word, items).map((i) => ({ ...i, label: `artisan ${i.label}${suffix}` }));
-    return [...ranked.slice(0, 50), { label: query.trim(), detail: "Run in terminal", run: () => runLine(word, query.trim()) }];
+    const configs = rank(
+      query.trim(),
+      configurations().map(({ config }) => ({ label: config.name, detail: `Run configuration · ${TYPES[config.type].label}`, icon: `codicon-${TYPES[config.type].icon}`, run: () => select(config.name).then(() => runConfig(config)) })),
+    ).slice(0, 5);
+    const shell = query.trim();
+    return [
+      ...configs,
+      ...ranked.slice(0, 50),
+      { label: shell, detail: "Run in terminal", icon: "codicon-terminal", run: () => runTemporary({ name: shell.length > 40 ? `${shell.slice(0, 39)}…` : shell, type: "shell", command: shell }) },
+      ...problem,
+    ];
   });
 }
 
 /** Opens Laravel Tinker in a terminal tab, in the project's container when it's up. */
 export const tinker = async () => openTerminal(getRoot(), "Tinker", (await php(["php", "artisan", "tinker"])).command, undefined, undefined, true);
-
-/** Quotes a word for `/bin/sh` when it needs it. */
-const shellQuote = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
 
 type Route = { method: string; uri: string; name: string | null; action: string };
 
@@ -283,6 +595,7 @@ export async function openRoute(action: string) {
   openAt(path, methodLine(source, target.method) || 1);
 }
 
+
 /** The ways to run the test at a line, for the gutter's menus. Empty when no test starts there. */
 export function testMenu(model: monaco.editor.ITextModel, line: number): MenuItem[] {
   const path = model.uri.fsPath;
@@ -333,12 +646,21 @@ export function initRunner(
   open: (path: string, line: number) => Promise<unknown>,
   showStatus: (text: string) => void,
   profiler: () => Promise<typeof import("./profiler")>,
+  diff: typeof showDiff,
 ) {
+  showDiff = diff;
   loadProfiler = profiler;
   getRoot = root;
   openAt = open;
   status = showStatus;
-  initTestResults({ root, openAt: open, rerun, rerunFailed });
+  initTestResults({
+    root,
+    openAt: open,
+    rerun: () => (testRun ? runConfig(testRun.config, testRun.mode) : rerun()),
+    rerunFailed,
+    stop: stopTests,
+    showDiff: (path, expected, actual, label) => showDiff(path, expected, actual, label),
+  });
   initCoverage({ openAt: open, rerun, status: showStatus });
   monaco.editor.registerCommand("tests.run", (_, path: string, test: TestCase, mode?: Mode) => runTest(path, test, mode));
   // The links above tests show when the gutter buttons don't.
@@ -372,4 +694,5 @@ export function initRunner(
     lensesChanged.fire(provider);
     monaco.editor.getModels().forEach(decorateTests);
   });
+  renderWidget();
 }

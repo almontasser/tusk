@@ -183,7 +183,8 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
       }
     }
     el.onmouseleave = () => levels.length === depth + 1 && focus(level, -1);
-    document.body.append(el);
+    // In a modal dialog, the menu goes in the dialog, since the page under it is inert.
+    (document.querySelector("dialog[open]") ?? document.body).append(el);
     levels.push(level);
     // Keep the menu on screen: a submenu that doesn't fit on the right opens on the left.
     const left = beside && x + el.offsetWidth > innerWidth - 4 ? beside.left - el.offsetWidth : Math.min(x, innerWidth - el.offsetWidth - 4);

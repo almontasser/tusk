@@ -2203,21 +2203,84 @@ glyph-margin decorations in the right lane, with the class `test-run`, updated
 300 ms after an edit. `attachTestRunner` opens the run menu on a click, and
 the breakpoint click handler skips that class. With the **Show run buttons for
 tests in the gutter** setting off, the decorations go and a code lens provider
-shows the links instead; its `onDidChange` fires on every settings change. It and runs tests and commands in terminal tabs through
-`openTerminal`. It remembers the last run for ⌃R.
+shows the links instead; its `onDidChange` fires on every settings change.
 
 Run Anything loads `php artisan list --format=json` once per project through
 the `run_capture` command, and ranks command names against the first word you
-type. The rest of the line becomes the command's arguments. Commands run
-through `/bin/sh -c`, so quoting and pipes work.
+type. The rest of the line becomes the command's arguments. When artisan
+prints something that isn't JSON, its first two lines become a row that says
+why, which runs `artisan list` in a terminal. Shell lines run through
+`/bin/sh -c`, so quoting and pipes work.
+
+### Run configurations
+
+`src/runconfig.ts` holds the model, free of editor imports so Node tests it:
+the `RunConfig` type (one flat object; each type reads the fields it needs),
+`TYPES` (each type's label, icon, whether it runs PHP, defaults, and form
+fields), `commandFor` (the argv a configuration runs, relative to the project,
+before the container and reports), `validate`, `shellWords` for the arguments
+fields, and `addTemporary`, which keeps the five newest temporary
+configurations. The dialog (`src/runconfigdialog.ts`) builds its form from
+`TYPES[type].fields` plus the common fields, so a new type is an entry in
+`TYPES` and a case in `commandFor`.
+
+`src/runner.ts` keeps configurations in the project state under four keys:
+`runConfigurations` (shared, in `tusk.json`), `localRunConfigurations`,
+`temporaryRunConfigurations`, and `selectedRunConfiguration` (all local). A
+configuration's place is its list, so **Store in tusk.json (share)** moves it
+between the first two. Names identify configurations, so before-launch steps
+refer to them by name, and a rename in the dialog updates those steps.
+
+`runConfig` validates, asks to stop an earlier run unless the configuration
+allows several, runs before-launch steps one after another (each waits for
+its exit code, and anything but 0 stops the launch), and then `launch` builds
+the command: `commandFor`, then the test reports, then the container
+(`runningContainer`, when the configuration runs in Docker) or `/usr/bin/env`
+with the environment and Xdebug's variables on this Mac. Composer runs through
+the bundled `composer.phar` on the Mac. Runs are tracked while their terminal
+runs, for the widget's running dot and Stop. `pty-exit` events carry the exit
+code: after the output ends, `pty.rs` polls `try_wait` for up to a second.
+`openTerminal` returns a `TerminalRun` whose `stop` writes ⌃C to the terminal
+and kills the process 3 seconds later, or at once on a second call.
+
+The gutter's run buttons, **Run Test at Cursor**, **Run All Tests**, and Run
+Anything make temporary configurations through `runTemporary`, which selects
+the new one; when a saved configuration has the same settings, it runs that
+one instead. **Rerun** repeats the last run with its mode, and **Rerun Failed
+Tests** runs the last test configuration with a `filter` scope built by
+`filterFor`, without saving it.
 
 ### Test results
 
-Every test run adds `--log-junit <app cache>/junit.xml`, which PHPUnit, Pest,
-and `php artisan test` all accept. The report is deleted before the run, so a
-run that fails to start doesn't show old results. `openTerminal` takes an
+Every test run adds `--log-junit <app cache>/junit-<n>.xml`, which PHPUnit, Pest,
+and `php artisan test` all accept, numbered per run so two test runs don't
+share files. The reports are deleted before the run, so a run that fails to
+start doesn't show old results, and after it, once read. `openTerminal` takes an
 `onExit` callback, and when the process ends, `src/testresults.ts` reads the
 report and shows the **Tests** tab.
+
+Every run also writes a TeamCity log (`--log-teamcity`). Pest's JUnit report
+leaves out assertion diffs, and PHPUnit's has only a unified diff of the lines
+around changes, but the log's `testFailed` lines carry `expected` and `actual`
+in full (`type='comparisonFailure'`) and the whole stack in `details`, for
+Pest and PHPUnit alike. `withDetails` joins them to the report's results by
+`testKey`, the class and the name without case, punctuation, or a `test`
+prefix, which matches JUnit's readable labels to the log's method names.
+`parseFailure` splits a message into its text, the comparison (the log's, or
+else PHPUnit's `--- Expected`/`+++ Actual` diff, where context lines go to both
+sides), and the stack frames (`path:line`, Pest's `at path:line`, and PHP's
+`#0 path(line)`). `localPath` maps a container's paths to the project, and a
+frame from another container root is tried by its `app/`, `tests/`, or
+`vendor/` part under the project.
+
+The tab keeps one list of rows for the live and the final views, keyed by
+`testKey`, so the selection survives the switch to the report. It draws a flat
+list of `treeitem` rows with `aria-level` and `aria-expanded` for `listNav`:
+selecting a row shows its detail, Enter or a double-click opens the source,
+and → and ← expand and collapse a class. The view options (show passed, show
+ignored, sort by duration, track the running test) are per user, in
+localStorage. The diff link opens the Git diff view with the expected and
+actual values.
 
 For progress during the run, the command also gets `--log-events-text`, which
 PHPUnit 10 and later write as events happen (`Test Prepared`, `Test Passed`,
@@ -5058,3 +5121,24 @@ output are found with one regex over each line rather than per-tool parsers,
 since PHPUnit, Pest, Mago, PHPStan, and PHP errors all print `path:line` or
 `path(line)`, and a reference becomes a link only when the file exists, which
 keeps false matches, such as version numbers, from turning into links.
+
+### 2026-09-28: Run configurations are flat objects keyed by name
+
+PhpStorm keeps run configurations as typed XML with a template per type.
+Tusk keeps one flat `RunConfig` object whose fields each type reads as it
+needs, since the types share most fields (working directory, environment,
+Docker, before launch) and a flat object reads well in `tusk.json`. Names are
+the keys, as in PhpStorm, so before-launch steps and the selection are
+readable in the files. Shared and local configurations are two project-state
+keys rather than one key with a flag, because a value lives in one place in
+`projectstate.ts`; for the same reason they aren't in `SHAREABLE`, whose
+toggle moves a whole key.
+
+### 2026-09-28: Test failures read the TeamCity log too
+
+Pest's JUnit report has no expected and actual values, and PHPUnit's has a
+diff of the changed lines only. Rather than parse the runner's terminal
+output, whose format changes with Collision's versions, every test run also
+writes a TeamCity log, which PHPUnit 9 through 11 and Pest 1 through 3 write
+the same way, with full values and stacks. The JUnit report stays the source
+of the results and times, since the log has no data sets' names in Pest.
