@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/almontasser/tusk/main/src/schemas/tusk.json",
+  "title": "Tusk project settings",
+  "description": "Project settings for the Tusk editor that a team shares by committing this file. Tusk keeps keys it doesn't know as they are.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string", "description": "The JSON schema for this file." },
+    "indexExclude": {
+      "type": "array",
+      "description": "Folders the PHP index and Mago skip, relative to the project. `*` matches within a folder name, and `**` any number of folders.",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "examples": [["vendor/aws/aws-sdk-php/src/data", "vendor/**/resources/lang"]]
+    },
+    "debugPathMappings": {
+      "type": "string",
+      "description": "Where the project is on the server, for code that runs in Docker or on another machine: comma-separated entries, each `/server/path` (the project folder) or `/server/path=local/path`. A local path without a leading / is inside the project. Empty when PHP runs on this Mac.",
+      "examples": ["/var/www/html", "/var/www/html,/opt/shared=packages/shared"]
+    },
+    "debugExceptions": {
+      "type": "object",
+      "description": "When the debugger pauses on exceptions.",
+      "properties": {
+        "pause": { "type": "boolean", "description": "Whether to pause on exceptions at all." },
+        "classes": { "type": "array", "items": { "type": "string" }, "description": "Exception classes to pause on, with their subclasses. Empty pauses on every exception and error." },
+        "uncaughtOnly": { "type": "boolean", "description": "Pause only on exceptions that nothing catches." },
+        "skip": { "type": "array", "items": { "type": "string" }, "description": "Path patterns, relative to the project, where a thrown exception doesn't pause, such as vendor/**." }
+      },
+      "additionalProperties": false
+    },
+    "debugWatches": {
+      "type": "array",
+      "description": "Watch expressions the debugger evaluates each time it pauses.",
+      "items": { "type": "string" }
+    },
+    "breakpoints": {
+      "type": "object",
+      "description": "Line breakpoints by file, relative to the project: pairs of a line number and the breakpoint's options.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": [
+            { "type": "integer", "minimum": 1, "description": "The line." },
+            {
+              "type": "object",
+              "properties": {
+                "condition": { "type": "string", "description": "A PHP expression; the breakpoint pauses only when it's true." },
+                "hitCondition": { "type": "string", "description": "Pause on a hit count, such as `>= 3` or `% 2`." },
+                "logMessage": { "type": "string", "description": "Log this message instead of pausing. `{$expression}` inserts a value." },
+                "disabled": { "type": "boolean", "description": "Whether the breakpoint is off." }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "minItems": 1,
+          "maxItems": 2
+        }
+      }
+    },
+    "dockerService": {
+      "type": "string",
+      "description": "The Docker Compose service that runs tests, Artisan, and Tinker. Empty runs them on the host."
+    },
+    "databaseConnections": {
+      "type": "array",
+      "description": "Saved database connections. URLs never hold passwords here: each person's password stays in their Keychain.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "The connection's name." },
+          "url": { "type": "string", "description": "The connection URL without a password, such as mysql://user@host:3306/database, pgsql://…, sqlite:database/other.sqlite, or redis://host:6379/0.", "not": { "pattern": "^[a-z]+://[^/@]*:[^/@]*@" } }
+        },
+        "required": ["name", "url"],
+        "additionalProperties": false
+      }
+    },
+    "databaseSsh": {
+      "type": "object",
+      "description": "The SSH destination each database connection goes through, by connection name. The empty name is .env's connection.",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 // Checks common JSON config files against schemas bundled with the app (src/schemas, from schemastore.org and
-// getcomposer.org), and a file against a local schema it names in `$schema`. Nothing is downloaded.
+// getcomposer.org, and Tusk's own tusk.json), and a file against a local schema it names in `$schema`. Nothing is downloaded.
 import { invoke } from "@tauri-apps/api/core";
 import * as monaco from "monaco-editor";
 import { localSchemaPath } from "./links";
@@ -19,6 +19,8 @@ const BUNDLED: [string, string[], () => Promise<{ default: unknown }>][] = [
   ["https://www.schemastore.org/prettierrc.json", [".prettierrc.json"], () => import("./schemas/prettierrc.json")],
   ["https://json.schemastore.org/babelrc.json", [".babelrc.json", "babel.config.json"], () => import("./schemas/babelrc.json")],
   ["https://www.schemastore.org/quikrun.json", [], () => import("./schemas/quikrun.json")],
+  // Tusk's own: the project settings a team shares (projectstate.ts).
+  ["https://raw.githubusercontent.com/almontasser/tusk/main/src/schemas/tusk.json", ["tusk.json"], () => import("./schemas/tusk.json")],
 ];
 
 let bundled: Promise<Schema[]> | undefined;

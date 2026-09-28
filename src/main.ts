@@ -46,10 +46,11 @@ import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
 import { withFolders } from "./diagnostics";
-import { chooseService, composeService, composeServices, forgetComposeServices } from "./sail";
+import { chooseService, composeService, composeServices, forgetComposeServices, setServiceChoice } from "./sail";
 import { setMenu } from "./menu";
 import { hasMarkdownPreview, showMarkdownPreview } from "./markdownpreview";
 import { initJsonSchemas } from "./jsonschemas";
+import { chooseSharedState, initProjectState, openProjectState, projectFilesChanged, projectValue, setProjectValue, shareItem } from "./projectstate";
 import { initLayout, togglePanelFullWidth, togglePanelMaximized } from "./layout";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, focusTab, hidePanel, initDocking, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
@@ -553,6 +554,8 @@ async function openFolder(dir: unknown = null) {
   rememberProject(dir);
   await Promise.all([renderDir($("tree") as HTMLUListElement, dir), invoke("watch", { path: dir })]);
   try { localStorage.setItem("lastFolder", dir); } catch {}
+  // Before anything reads the project's values, such as the breakpoints and the index exclusions.
+  await openProjectState(dir);
   refreshGit();
   detectFormatters();
   loadBreakpoints();
@@ -1329,6 +1332,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     // Files without a model weren't open, so the loop above kept no version of them.
     recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
+    projectFilesChanged(paths);
     aiFilesChanged([...paths]);
     const php = [...paths].filter((p) => p.endsWith(".php"));
     const exists = php.length ? await invoke<boolean[]>("paths_exist", { paths: php }) : [];
@@ -1542,6 +1546,7 @@ const actions: Action[] = [
   { label: "Restart Language Servers", run: restartServers },
   { label: "Reindex Project", run: () => reindex() },
   { label: "Index Exclusions…", run: () => root && manageExclusions(root) },
+  { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
   { label: "Pull Requests", run: () => showView("prs") },
@@ -1629,6 +1634,7 @@ async function chooseDockerService() {
   pick("Run tests, Artisan, and Tinker in", () => [
     ...services.map((s) => ({ label: s.name, detail: `${s.workdir}${s.name === current ? " · current" : ""}`, icon: "codicon-vm", run: () => chooseService(root, s.name) })),
     { label: "This Mac", detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
+    shareItem("dockerService", "Docker service choice"),
   ]);
 }
 
@@ -1825,6 +1831,11 @@ initProblems({
   changed: updateProblems,
 });
 initFiles({ root: () => root, active: activeFile, openFile, renamed, forget, status });
+initProjectState({ openFile: (path) => void openFile(path) });
+setServiceChoice({
+  get: () => projectValue<string>("dockerService"),
+  set: (name) => void setProjectValue("dockerService", name).catch((e) => status(`Can't save the Docker service: ${e instanceof Error ? e.message : e}`)),
+});
 
 /** Switches the sidebar between the project tree and the commit view. */
 function showView(name: string) {

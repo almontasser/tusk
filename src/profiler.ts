@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
+import { projectValue, setProjectValue } from "./projectstate";
 import { splitter } from "./splitter";
 import { openTerminal, showPanelView } from "./terminal";
 
@@ -116,7 +117,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Asks for a path, requests it through the profiling server (starting it if needed), and opens that request's profile. */
 export function profileUrl() {
-  const last = readSetting(`profilerUrl:${host.root()}`) ?? "/";
+  const last = projectValue<string>("profilerUrl") ?? "/";
   pick(
     "Profile a URL: type the path to request, such as /posts?page=2",
     (query) => {
@@ -155,10 +156,7 @@ export async function openProfileSince(since: number, label: string) {
 }
 
 async function requestAndProfile(path: string) {
-  const root = host.root();
-  try {
-    localStorage.setItem(`profilerUrl:${root}`, path);
-  } catch {}
+  setProjectValue("profilerUrl", path).catch((e) => host.status(`Can't save the URL: ${e instanceof Error ? e.message : e}`));
   const origin = await profilingOrigin();
   if (!origin) return;
   const since = Math.floor(Date.now() / 1000);

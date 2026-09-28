@@ -5,6 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
 import { histogram, type HttpRequest, loadArgs, overBudget, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
 import { junitReport, type ReportCase } from "./httpimport";
+import { projectValue, setProjectValue } from "./projectstate";
 import { bytes, h, httpFiles, icon, openExchange, setRunners, showHttpPanel } from "./httpview";
 
 const ms = (s: number) => (s < 1 ? `${(s * 1000).toFixed(s < 0.01 ? 1 : 0)} ms` : `${s.toFixed(2)} s`);
@@ -114,13 +115,8 @@ const tile = (label: string, value: string, className = "") => h("div", { class:
 
 async function loadTest(path: string, request: HttpRequest) {
   const title = `${request.method} ${request.title || request.url}`;
-  const saved = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("httpLoad") ?? "null") as { mode: string; count: number; seconds: number; step?: number; concurrency: number } | null;
-    } catch {
-      return null;
-    }
-  })() ?? { mode: "count", count: 200, seconds: 10, concurrency: 10 };
+  type Saved = { mode: string; count: number; seconds: number; step?: number; concurrency: number };
+  const saved: Saved = { mode: "count", count: 200, seconds: 10, concurrency: 10, ...projectValue<Saved>("httpLoadTest") };
   saved.step ??= 5;
   const mode = h("select", { title: "Send a number of requests, send for a number of seconds, or ramp concurrency up step by step" }, h("option", { value: "count", textContent: "Requests" }), h("option", { value: "seconds", textContent: "Seconds" }), h("option", { value: "ramp", textContent: "Ramp up, seconds per step" }));
   mode.value = saved.mode;
@@ -143,9 +139,7 @@ async function loadTest(path: string, request: HttpRequest) {
     const n = Math.max(1, Math.floor(Number(amount.value) || 1));
     const c = Math.max(1, Math.min(500, Math.floor(Number(concurrency.value) || 1)));
     Object.assign(saved, { mode: mode.value, concurrency: c, [mode.value === "count" ? "count" : mode.value === "seconds" ? "seconds" : "step"]: n });
-    try {
-      localStorage.setItem("httpLoad", JSON.stringify(saved));
-    } catch {}
+    setProjectValue("httpLoadTest", { ...saved }).catch((e) => host.status(`Can't save the stress test settings: ${e instanceof Error ? e.message : e}`));
     const fresh = parseHttp((await host.ensureModel(path)).getValue()).requests.find((q) => q.line === request.line) ?? request;
     start.disabled = true;
     stop.disabled = false;

@@ -30,6 +30,7 @@ import { confirmCommands, initRedis, loadKeys, runLines, showRedisSidebar } from
 import { splitCommand } from "./redisdata";
 import { type Item, pick, rank } from "./palette";
 import { usesSail } from "./sail";
+import { projectValue, setProjectValue, shareItem } from "./projectstate";
 import { showPanelView } from "./terminal";
 
 type Result = { columns: string[]; rows: (string | null)[][]; affected: number; truncated: boolean; total: number };
@@ -46,35 +47,30 @@ const query = (sql: string, offset = 0) => invoke<Result>("db_query", { connecti
 /** Rows per page, as db.rs's MAX_ROWS. */
 const PAGE = 1000;
 
-function getItem(key: string) {
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-function setItem(key: string, value: string) {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch {}
-}
+/** Saves a project value (projectstate.ts), or removes it when empty, and says so when that fails. */
+const save = (key: string, value: unknown) =>
+  void setProjectValue(key, value === "" || (Array.isArray(value) && !value.length) ? undefined : value).catch((e) => host.status(`Can't save the connection: ${e instanceof Error ? e.message : e}`));
 
 /**
- * Connections saved in the editor, per project, by name and URL without the password, which is in the Keychain.
- * The selected one is "" for .env's.
+ * Connections saved per project (`databaseConnections`, which you can share in tusk.json), by name and URL without
+ * the password, which is in the Keychain. The selected one (`databaseConnection`, on this Mac) is "" for .env's.
  */
 type Saved = { name: string; url: string };
-const savedKey = () => `db:connections:${host.root()}`;
-const selectedKey = () => `db:connection:${host.root()}`;
 const account = (name: string) => `${host.root()}#${name}`;
-const savedConnections = (): Saved[] => JSON.parse(getItem(savedKey()) || "[]");
-const selectedName = () => getItem(selectedKey());
+const savedConnections = (): Saved[] => (projectValue<Saved[]>("databaseConnections") ?? []).filter((s) => s && typeof s.name === "string" && typeof s.url === "string");
+const selectedName = () => projectValue<string>("databaseConnection") ?? "";
+const select = (name: string) => save("databaseConnection", name);
 const password = async (name: string) => (await invoke<string | null>("db_password", { account: account(name) })) ?? "";
 
-/** The SSH destination a connection is reached through, or "" to connect directly. */
-const sshKey = (name = selectedName()) => `db:ssh:${host.root()}${name ? `#${name}` : ""}`;
-const sshDestination = () => getItem(sshKey());
+/** The SSH destination each connection is reached through, by name ("" for .env's), in `databaseSsh`. */
+const sshDestinations = () => projectValue<Record<string, string>>("databaseSsh") ?? {};
+const sshDestination = (name = selectedName()) => sshDestinations()[name] ?? "";
+function setSsh(name: string, destination: string) {
+  const all = { ...sshDestinations() };
+  if (destination) all[name] = destination;
+  else delete all[name];
+  save("databaseSsh", Object.keys(all).length ? all : undefined);
+}
 
 const readEnv = async () => parseEnv(await invoke<string>("read_file", { path: `${host.root()}/.env` }).catch(() => ""));
 const envConnection = async () => connectionFromEnv(await readEnv(), host.root(), await usesSail(host.root()));
@@ -115,7 +111,7 @@ async function namedConnection(name: string): Promise<Connection | null> {
 async function loadConnection() {
   let name = selectedName();
   let c = name ? await namedConnection(name) : null;
-  if (!c) (name = ""), setItem(selectedKey(), ""), (c = await envConnection());
+  if (!c) (name = ""), select(""), (c = await envConnection());
   schema = null;
   showRedisSidebar(c.driver === "redis");
   const ssh = c.driver === "sqlite" ? "" : sshDestination();
@@ -131,19 +127,20 @@ export async function chooseConnection() {
   if (!root) return;
   const current = selectedName();
   const saved = savedConnections();
-  const select = (name: string) => () => (setItem(selectedKey(), name), loadTables());
+  const choose = (name: string) => () => (select(name), loadTables());
   const mark = (name: string) => (name === current ? "codicon-check" : "codicon-database");
   const items: Item[] = [
-    { label: ".env", detail: describe(await envConnection(), root), icon: mark(""), run: select("") },
-    ...saved.map((s) => ({ label: s.name, detail: s.url, icon: mark(s.name), run: select(s.name) })),
+    { label: ".env", detail: describe(await envConnection(), root), icon: mark(""), run: choose("") },
+    ...saved.map((s) => ({ label: s.name, detail: s.url, icon: mark(s.name), run: choose(s.name) })),
     ...[...(await configConnections())]
       .filter(([n]) => !saved.some((s) => s.name === n))
-      .map(([n, c]) => ({ label: n, detail: `config/database.php · ${describe(c, root)}`, icon: mark(n), run: select(n) })),
+      .map(([n, c]) => ({ label: n, detail: `config/database.php · ${describe(c, root)}`, icon: mark(n), run: choose(n) })),
     ...Object.entries(await envRedis())
       .filter(([n]) => !saved.some((s) => s.name === n))
-      .map(([n, c]) => ({ label: n, detail: `.env · ${describe(c, root)}`, icon: mark(n), run: select(n) })),
+      .map(([n, c]) => ({ label: n, detail: `.env · ${describe(c, root)}`, icon: mark(n), run: choose(n) })),
     { label: "Add Connection…", icon: "codicon-add", run: () => editConnection() },
   ];
+  if (saved.length) items.push(shareItem(["databaseConnections", "databaseSsh"], "saved connections, without passwords,"));
   const active = saved.find((s) => s.name === current);
   if (active)
     items.push(
@@ -185,18 +182,19 @@ async function saveConnection(name: string, c: Connection, existing?: Saved) {
     host.status(`Can't save the password in the Keychain: ${String(e)}`);
     return;
   }
-  if (existing && existing.name !== name) setItem(sshKey(name), getItem(sshKey(existing.name))), setItem(sshKey(existing.name), "");
+  if (existing && existing.name !== name) setSsh(name, sshDestination(existing.name)), setSsh(existing.name, "");
   const others = savedConnections().filter((s) => s.name !== name && s.name !== existing?.name);
-  setItem(savedKey(), JSON.stringify([...others, { name, url: connectionUrl(c, host.root()) }]));
-  setItem(selectedKey(), name);
+  // connectionUrl leaves the password out, so nothing secret reaches tusk.json when the connections are shared.
+  save("databaseConnections", [...others, { name, url: connectionUrl(c, host.root()) }]);
+  select(name);
   loadTables();
 }
 
 async function removeConnection(s: Saved) {
   await invoke("db_set_password", { account: account(s.name), password: "" }).catch(() => {});
-  setItem(sshKey(s.name), "");
-  setItem(savedKey(), JSON.stringify(savedConnections().filter((x) => x.name !== s.name)));
-  setItem(selectedKey(), "");
+  setSsh(s.name, "");
+  save("databaseConnections", savedConnections().filter((x) => x.name !== s.name));
+  select("");
   loadTables();
 }
 
@@ -209,7 +207,7 @@ export function connectOverSsh() {
       {
         label: q.trim() ? `Connect through ${q.trim()}` : "Connect directly, without SSH",
         detail: q.trim() ? "Uses your SSH keys or agent; the connection's host and port are as the server sees them" : "",
-        run: () => (setItem(sshKey(), q.trim()), loadTables()),
+        run: () => (setSsh(selectedName(), q.trim()), loadTables()),
       },
     ],
     0,
