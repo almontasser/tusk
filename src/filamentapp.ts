@@ -127,9 +127,12 @@ export async function modelFacts(root: string, cls: string): Promise<ModelFacts 
       .filter((c, i, list) => list.indexOf(c) === i)
       .map((name) => ({ name, type: guessType(name, details.casts[name]), nullable: true, autoIncrement: name === details.keyName && details.incrementing }));
   const titles: Record<string, string> = {};
-  for (const r of details.relations) if (r.related && all[r.related]) titles[r.related] = titleAttribute(Object.keys(all[r.related].columns));
+  for (const r of details.relations) if (r.related && all[r.related]) titles[r.related] = titleAttribute(Object.keys(all[r.related].columns), typesOf(all[r.related]));
   return { class: cls, columns, casts: details.casts, relations: details.relations, enums: appEnums.map((e) => e.class), softDeletes: details.softDeletes, titles, details };
 }
+
+/** A model summary's column types, by name. */
+export const typesOf = (m: ModelSummary) => Object.fromEntries(Object.entries(m.columns).map(([k, v]) => [k, v?.type]));
 
 /** A column's type from its cast, for a model whose table can't be read. */
 function guessType(name: string, cast?: string): string {

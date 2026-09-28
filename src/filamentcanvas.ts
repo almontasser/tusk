@@ -262,7 +262,7 @@ function renderSlot(ctx: CanvasCtx, slot: Slot, ref: SlotRef, prefix: Path, owne
         "button",
         { type: "button", class: "fd-empty-slot", onclick: (ev: MouseEvent) => (ev.stopPropagation(), ctx.add(ref, ev.currentTarget as HTMLElement)) },
         icon("add"),
-        owner ? "Drop components here, or click to add" : "Drag fields here from the left, or click to add",
+        h("span", {}, owner ? "Drop or click to add" : "Drag fields here from the left, or click to add"),
       ),
     );
   dropTarget(grid, ctx, ref, slot, owner);
@@ -541,6 +541,8 @@ function renderEntryComp(c: Comp): HTMLElement {
 // ---- Tables ----
 
 const SAMPLES: [RegExp, string[]][] = [
+  [/^(id|key)$/, ["1", "2", "3"]],
+  [/(^|_)(uuid|ulid)$/, ["9d4c2f1e…", "9d4c3a7b…", "9d4c41c0…"]],
   [/email/, ["jane@example.com", "omar@example.com", "li@example.com"]],
   [/first_name|^name$|full_name|author|user|customer|owner/, ["Jane Cooper", "Omar Haddad", "Li Wei"]],
   [/title|subject|headline/, ["Getting started", "Release notes", "Quarterly report"]],
@@ -629,7 +631,7 @@ function actionButton(ctx: CanvasCtx, c: Comp | null, compact = false): HTMLElem
 }
 
 /** The table's canvas: the toolbar, the header with its columns, three sample rows, and lanes for filters and actions. */
-export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; createPage: boolean }): HTMLElement {
+export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; label?: string; createPage: boolean }): HTMLElement {
   const root = ctx.root;
   const columns = root.slots.get("columns");
   const filters = root.slots.get("filters");
@@ -733,7 +735,7 @@ export function renderTable(ctx: CanvasCtx, o: { pluralLabel: string; createPage
   return h(
     "div",
     { class: "fd-table-canvas" },
-    h("div", { class: "fd-page-head" }, h("h2", {}, o.pluralLabel), h("span", { class: "fd-spacer" }), ...(header?.entries ?? []).map((e) => actionButton(ctx, e.comp)), o.createPage ? h("span", { class: "fd-action button", style: `--action:${COLOR_SWATCH.primary}` }, `New ${o.pluralLabel.replace(/s$/, "").toLowerCase()}`) : null),
+    h("div", { class: "fd-page-head" }, h("h2", {}, o.pluralLabel), h("span", { class: "fd-spacer" }), ...(header?.entries ?? []).map((e) => actionButton(ctx, e.comp)), o.createPage ? h("span", { class: "fd-action button", style: `--action:${COLOR_SWATCH.primary}` }, `New ${o.label ?? o.pluralLabel.replace(/s$/, "").toLowerCase()}`) : null),
     table,
     h(
       "div",

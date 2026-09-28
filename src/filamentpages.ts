@@ -140,7 +140,10 @@ function addRelationManager(d: Designer, anchor: HTMLElement, preset?: string) {
     attachLabel.textContent = many ? "Attach and detach existing records" : "Associate and dissociate existing records";
     const all = await fapp.models(d.root).catch(() => ({}) as Record<string, fapp.ModelSummary>);
     const cols = r?.related ? Object.keys(all[r.related]?.columns ?? {}) : [];
-    titleSelect.replaceChildren(...(cols.length ? cols : ["name"]).map((c) => h("option", { value: c, textContent: c, selected: c === titleAttribute(cols) })));
+    const title = titleAttribute(cols, r?.related && all[r.related] ? fapp.typesOf(all[r.related]) : {});
+    titleSelect.replaceChildren(...(cols.length ? cols : ["name"]).map((c) => h("option", { value: c, textContent: c, selected: c === title })));
+    // Many-to-many relationships usually attach records that exist; has-many usually creates them.
+    attach.checked = !!many;
     softDeletes.checked = !!r?.related && !!all[r.related] && "deleted_at" in (all[r.related].columns ?? {});
   };
   relSelect.onchange = () => void update();
@@ -185,6 +188,8 @@ function addRelationManager(d: Designer, anchor: HTMLElement, preset?: string) {
     const outline = await fapp.outlineOf(await (await d.host.ensureModel(manager)).getValue(), manager);
     const fqn = outline.classes[0]?.fqn;
     if (fqn) await registerRelation(d, fqn);
+    // The app was read again while the files changed, before the resource registered the manager.
+    fapp.forget(["app", "models", "model:"]);
     await d.load();
     d.message = `Created ${shortClass(fqn ?? "the relation manager")}`;
     d.render();
@@ -484,7 +489,7 @@ export function renderRootSettings(d: Designer, ref: { kind: RootKind; doc: Doc;
     const colSelect = h("select", {}, h("option", { value: "", textContent: "None" }), ...[...new Set([...columns, ...(d.facts?.columns ?? []).map((c) => c.name)])].map((c) => h("option", { value: c, textContent: c, selected: c === sortColumn })));
     const writeSort = (col: string, dir: string) => set("defaultSort", col ? `${phpString(col)}${dir === "desc" ? ", 'desc'" : ""}` : null, "Changed the default sort");
     colSelect.onchange = () => writeSort(colSelect.value, sortDir);
-    if (!unreadable("defaultSort", (n) => !!textValue(n))) rows.push(line("Default sort", h("div", { class: "fd-inline-editor" }, colSelect, sortColumn ? segmented(SORT_DIRECTIONS, sortDir, (dir) => writeSort(sortColumn, dir)) : null), !!sort, () => set("defaultSort", null)));
+    if (!unreadable("defaultSort", (n) => !!textValue(n))) rows.push(line("Default sort", h("div", { class: "fd-stack-editor" }, colSelect, sortColumn ? segmented(SORT_DIRECTIONS, sortDir, (dir) => writeSort(sortColumn, dir)) : null), !!sort, () => set("defaultSort", null)));
     const flagRow = (name: string, label: string, help?: string) => {
       if (unreadable(name, (n) => n.kind === "bool")) return asCode(name, label, help)!;
       const c = rootCall(name);

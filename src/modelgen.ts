@@ -516,6 +516,26 @@ export function migrationFileName(name: string, now = new Date()): string {
   return `${now.getFullYear()}_${p(now.getMonth() + 1)}_${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}_${name}.php`;
 }
 
+/**
+ * A model's list of attributes, such as `$fillable`, after the designer's changes, in the model's own order: renamed
+ * columns keep their place, unticked and dropped ones go, new ones go at the end, and entries that aren't
+ * columns of the table stay.
+ */
+export function mergeList(list: string[], before: ColumnSpec[], designed: ColumnSpec[], wanted: (c: ColumnSpec) => boolean): string[] {
+  const out: string[] = [];
+  for (const name of list) {
+    const was = before.find((b) => b.name === name);
+    if (!was) {
+      out.push(name);
+      continue;
+    }
+    const now = designed.find((c) => c.original === was || c.original?.name === name);
+    if (now && wanted(now)) out.push(now.name);
+  }
+  for (const c of designed) if (wanted(c) && !out.includes(c.name)) out.push(c.name);
+  return out;
+}
+
 // ---- Reading a table ----
 
 /** A designer column from a database column, as `introspect.php model` reports it. */
@@ -526,7 +546,8 @@ export function columnFromDatabase(col: { name: string; type: string; fullType?:
   const length = Number(/\((\d+)\)/.exec(full)?.[1] ?? 0) || undefined;
   const [precision, scale] = (/\((\d+),\s*(\d+)\)/.exec(full) ?? []).slice(1).map(Number);
   let type = "string";
-  if (o.foreign) type = "foreignId";
+  // A foreign key's type follows the key it points to: UUIDs and ULIDs have their own.
+  if (o.foreign) type = t === "uuid" ? "foreignUuid" : (t === "char" || t === "bpchar") && /\(26\)/.test(full) ? "foreignUlid" : "foreignId";
   else if (/^(varchar|string|nvarchar)$/.test(t)) type = "string";
   else if (t === "char" || t === "bpchar") type = "char";
   else if (t === "text" || t === "tinytext") type = "text";
@@ -550,15 +571,22 @@ export function columnFromDatabase(col: { name: string; type: string; fullType?:
   else if (/blob|binary|bytea/.test(t)) type = "binary";
   // SQLite reports a boolean column as integer; its cast says what it holds.
   if (o.cast === "boolean" || o.cast === "bool") type = "boolean";
+  // Postgres writes defaults with a cast, such as 'draft'::character varying or '0'::bigint.
+  if (c.default !== null && c.default !== undefined) c = { ...c, default: c.default.replace(/::[\w\s"]+(\[\])?$/, "") };
+  // A computed default, such as now() or nextval('…'), isn't a value the designer can write back.
+  if (c.default && /^[\w.]+\(.*\)$|^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|LOCALTIMESTAMP)$/i.test(c.default)) c = { ...c, default: null };
   const raw = c.default?.replace(/^'(.*)'$/, "$1");
   // Booleans come back as 0 and 1, sometimes quoted.
   if (type === "boolean" && raw !== undefined && /^(0|1|true|false)$/i.test(raw)) c = { ...c, default: /^(1|true)$/i.test(raw) ? "true" : "false" };
+  // A number quoted in the database is a number to a numeric column.
+  if (type !== "boolean" && raw !== undefined && /^-?\d+(\.\d+)?$/.test(raw) && /int|decimal|numeric|float|double|real|serial/.test(t)) c = { ...c, default: raw };
   const def = c.default === null || c.default === undefined ? undefined : /^'.*'$/.test(c.default) || /^-?\d+(\.\d+)?$/.test(c.default) ? c.default : /^(true|false|null)$/i.test(c.default) ? c.default.toLowerCase() : phpString(c.default);
   return {
     id: o.id,
     name: c.name,
     type,
-    length: type === "string" || type === "char" ? length : undefined,
+    // 255 is Blueprint's default length, so it isn't written.
+    length: (type === "string" || type === "char") && length !== 255 ? length : undefined,
     precision: type === "decimal" ? precision : undefined,
     scale: type === "decimal" ? scale : undefined,
     nullable: c.nullable,

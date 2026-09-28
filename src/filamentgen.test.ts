@@ -72,3 +72,8 @@ test("conditions round-trip through their closure", () => {
   assert.equal(readConditions("fn (Get $get): bool => $get('a') === $get('b')"), null);
   assert.equal(readConditions("fn () => true"), null);
 });
+
+test("titleAttribute falls back to the first text column", () => {
+  assert.equal(titleAttribute(["id", "company_id", "sender", "status"], { id: "uuid", company_id: "uuid", sender: "varchar", status: "varchar" }), "sender");
+  assert.equal(titleAttribute(["id", "count"], { id: "int8", count: "int4" }), "id");
+});

@@ -15,7 +15,7 @@ import { renderPagesTab, renderRelationsTab, renderRootSettings, renderSettingsT
 import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
-import { classNamed, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, moveCode, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
 
@@ -229,8 +229,28 @@ export class Designer {
    * `imports`, which adds the `use` lines. Saves the file and reads it again.
    */
   async apply(doc: Doc, build: (imports: Imports, fill: (code: string) => string) => Edit[] | null, message: string, select?: Path | null) {
-    if (doc.model.getValue() !== doc.text) await this.refresh();
-    const fresh = this.docs.get(doc.path) ?? doc;
+    const run = this.pending.then(() => this.applyNow(doc, build, message, select));
+    this.pending = run.catch(() => {});
+    return run;
+  }
+
+  /** The last change in flight; each change waits for it, so none computes its edits from code about to change. */
+  private pending: Promise<unknown> = Promise.resolve();
+  settled() {
+    return this.pending;
+  }
+
+  private async applyNow(doc: Doc, build: (imports: Imports, fill: (code: string) => string) => Edit[] | null, message: string, select?: Path | null) {
+    // Edits are computed against the text they were read from. If the code changed since, in the editor or by
+    // another change, applying them would land in the wrong places, so the change is dropped and the view
+    // catches up instead.
+    if (doc.model.getValue() !== doc.text) {
+      await this.refresh();
+      this.message = "The code changed as you edited. Try again.";
+      this.render();
+      return;
+    }
+    const fresh = doc;
     const imports = new Imports(fresh.text, fresh.outline);
     const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
     let edits: Edit[] | null;
@@ -240,7 +260,8 @@ export class Designer {
       return showError("Can't change the code", e);
     }
     if (!edits?.length) return;
-    const all = mergeEdits([...edits, ...imports.edits()]);
+    const added = [...edits, ...imports.edits()];
+    const all = mergeEdits([...added, ...droppedImports(fresh.text, fresh.outline, added)]);
     const model = fresh.model;
     const pos = (offset: number) => {
       const p = model.getPositionAt(offset);
@@ -323,12 +344,14 @@ export class Designer {
   }
 
   async insert(to: SlotRef, index: number, gen: Gen | string, message: string) {
+    await this.settled();
     const live = this.live();
     if (!live) return;
     await this.apply(live.doc, (imports, fill) => this.insertEdits(live.doc.text, live.root, to, index, typeof gen === "string" ? fill(gen) : renderGen(gen, (f) => imports.name(f))), message, this.pathIn(to, index));
   }
 
   async move(from: Path, to: SlotRef, index: number) {
+    await this.settled();
     const live = this.live();
     if (!live) return;
     const found = resolve(live.root, from);
@@ -350,6 +373,7 @@ export class Designer {
   }
 
   async remove(path: Path) {
+    await this.settled();
     const live = this.live();
     const found = live && resolve(live.root, path);
     if (!live || !found) return;
@@ -361,6 +385,7 @@ export class Designer {
   }
 
   async duplicate(path: Path) {
+    await this.settled();
     const live = this.live();
     const found = live && resolve(live.root, path);
     if (!live || !found) return;
@@ -383,6 +408,7 @@ export class Designer {
   }
 
   async wrap(path: Path, layout: string) {
+    await this.settled();
     const live = this.live();
     const found = live && resolve(live.root, path);
     if (!live || !found) return;
@@ -395,6 +421,7 @@ export class Designer {
 
   /** Sets, changes, or removes calls on components (the selected one when a change names no path). */
   async setCalls(changes: CallChange[], message = "Changed") {
+    await this.settled();
     const live = this.live();
     if (!live || !this.selection) return;
     const text = live.doc.text;
@@ -414,6 +441,7 @@ export class Designer {
 
   /** Sets calls on the root itself, such as a table's default sort. */
   async setRootCalls(changes: { name: string; args: string | null }[], message = "Changed") {
+    await this.settled();
     const live = this.live();
     if (!live) return;
     const text = live.doc.text;
@@ -427,6 +455,7 @@ export class Designer {
   }
 
   async setMake(path: Path, args: string) {
+    await this.settled();
     const live = this.live();
     const comp = live && resolve(live.root, path)?.entry.comp;
     if (!live || !comp) return;
@@ -434,6 +463,7 @@ export class Designer {
   }
 
   async changeType(path: Path, cls: string) {
+    await this.settled();
     const live = this.live();
     const comp = live && resolve(live.root, path)?.entry.comp;
     if (!live || !comp || !this.cat) return;
@@ -568,6 +598,7 @@ export class Designer {
 
   /** Adds every model column the form, table, or infolist doesn't show yet. */
   async addMissing() {
+    await this.settled();
     const live = this.live();
     if (!live || !this.facts) return;
     const used = new Set<string>();
@@ -714,6 +745,7 @@ export class Designer {
 
   /** Adds a form, table, or infolist method, filled from the model's columns. */
   async addRoot(kind: RootKind) {
+    await this.settled();
     const doc = this.docs.get(this.file);
     if (!doc || !this.cls) return;
     const cls = this.cls;
@@ -744,7 +776,7 @@ export class Designer {
     const ctx = this.canvasCtx(ref);
     const canvas = h("div", { class: `fd-canvas fd-canvas-${ref.kind}` });
     canvas.onclick = () => this.select(null);
-    canvas.append(ref.kind === "table" ? renderTable(ctx, { pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
+    canvas.append(ref.kind === "table" ? renderTable(ctx, { label: this.info?.label ?? undefined, pluralLabel: this.info?.pluralLabel ?? humanize(this.cls?.name.replace(/(Resource|RelationManager)$/, "") ?? "Records"), createPage: !!this.info?.pages.some((p) => p.kind === "create" || p.kind === "manage") }) : h("div", { class: "fd-form-page" }, renderSchema(ctx, ref.root.slots.has("schema") ? "schema" : "components")));
     canvas.addEventListener("dragleave", (e) => !canvas.contains(e.relatedTarget as Node) && hideLine());
     const helper = ref.root.helper;
     if (helper) {

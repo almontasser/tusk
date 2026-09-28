@@ -168,3 +168,19 @@ test("mapValue reads options with translated labels, and refuses other code", as
   assert.equal(mapValue(withCode as never), undefined);
   assert.equal(mapCode([["draft", "Draft"], ["2", "Two"]], true), "[\n    'draft' => __('Draft'),\n    2 => __('Two'),\n]");
 });
+
+test("droppedImports removes imports an edit leaves unused, and only those", async () => {
+  const { droppedImports } = await import("./phpcode.ts");
+  const text = post.text;
+  const cls = post.outline.classes[0];
+  const form = cls.methods.find((m) => m.name === "form")!.returns[0];
+  if (form.kind !== "chain") throw new Error();
+  const arr = form.calls.find((c) => c.name === "components")!.args.items[0].value as ArrayNode;
+  // Removing the only Toggle leaves its import unused.
+  const edits = [removeItem(text, arr, 1)];
+  const dropped = droppedImports(text, post.outline, edits);
+  const out = applyEdits(text, [...edits, ...dropped]);
+  assert.doesNotMatch(out, /use Filament\\Forms\\Components\\Toggle;/);
+  assert.match(out, /use Filament\\Forms\\Components\\TextInput;/);
+  assert.deepEqual(droppedImports(text, post.outline, []), []);
+});

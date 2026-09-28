@@ -440,6 +440,30 @@ export class Imports {
   }
 }
 
+/**
+ * Edits that remove the imports `edits` leave unused: those the code named before and doesn't after. Imports that
+ * were already unused are the file's business and stay. Group imports (`use A\{B, C}`) stay too.
+ */
+export function droppedImports(text: string, outline: Outline, edits: Edit[]): Edit[] {
+  const after = applyEdits(text, edits);
+  const codeStart = (t: string) => {
+    const m = /^\s*(?:(?:abstract|final|readonly)\s+)*(?:class|interface|trait|enum)\s/m.exec(t);
+    return m ? m.index : t.length;
+  };
+  const used = (t: string, alias: string) => new RegExp(`(?<![\\w$\\\\])${alias.replace(/[$]/g, "\\$&")}(?![\\w])`).test(t.slice(codeStart(t)));
+  const out: Edit[] = [];
+  for (const u of outline.uses) {
+    if (u.kind !== "class" || outline.uses.filter((o) => o.span[0] === u.span[0]).length > 1) continue;
+    if (!used(text, u.alias) || used(after, u.alias)) continue;
+    const start = text.lastIndexOf("\n", u.span[0] - 1) + 1;
+    const nl = text.indexOf("\n", u.span[1]);
+    const end = nl < 0 ? u.span[1] : nl + 1;
+    if (edits.some((e) => e.start < end && start < e.end)) continue;
+    out.push({ start, end, text: "" });
+  }
+  return out;
+}
+
 // ---- Classes ----
 
 export const classNamed = (outline: Outline, fqn: string) => outline.classes.find((c) => c.fqn.toLowerCase() === fqn.replace(/^\\/, "").toLowerCase());

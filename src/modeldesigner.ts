@@ -20,6 +20,7 @@ import {
   diffColumns,
   factoryFile,
   foreignKeyFor,
+  mergeList,
   migrationFileName,
   modelFile,
   type ModelSpec,
@@ -718,12 +719,10 @@ class ModelDesigner {
     const ex = s.existing!;
     // Fillable: in the property, in Laravel 13's #[Fillable] attribute, or a new property. A model with
     // `$guarded = []` takes everything already.
-    const fillable = spec.columns.filter((c) => c.fillable).map((c) => c.name);
-    const keep = ex.fillable.filter((f) => !s.before.some((b) => b.name === f));
-    const nextFillable = [...keep, ...fillable];
+    const nextFillable = mergeList(ex.fillable, s.before, spec.columns, (c) => c.fillable);
     const unguarded = ex.guarded.length === 0 && !ex.fillable.length;
     if (!unguarded && JSON.stringify(nextFillable) !== JSON.stringify(ex.fillable)) edits.push(...this.listEdit(text, cls, "fillable", "Illuminate\\Database\\Eloquent\\Attributes\\Fillable", nextFillable, "protected $fillable", imports));
-    const hidden = [...ex.hidden.filter((f) => !s.before.some((b) => b.name === f)), ...spec.columns.filter((c) => c.hidden).map((c) => c.name)];
+    const hidden = mergeList(ex.hidden, s.before, spec.columns, (c) => !!c.hidden);
     if (JSON.stringify(hidden) !== JSON.stringify(ex.hidden)) edits.push(...this.listEdit(text, cls, "hidden", "Illuminate\\Database\\Eloquent\\Attributes\\Hidden", hidden, "protected $hidden", imports));
     // Casts: new ones go into casts() or $casts; the ones already there stay.
     const newCasts = spec.columns.map((c) => [c.name, castFor(c)] as const).filter(([n, c]) => c && !ex.casts[n] && !ex.casts[s.before.find((b) => b.name === n)?.name ?? ""]) as [string, string][];
