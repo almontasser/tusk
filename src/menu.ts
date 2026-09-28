@@ -19,7 +19,7 @@ const LAYOUT: [string, Entry[]][] = [
     ["Multiple Carets", ["Add Caret Above", "Add Caret Below", "Add Carets to Line Ends"]], "-",
     "Extend Selection", "Shrink Selection", "-", "Duplicate Line", "Delete Line", "Join Lines", "Toggle Case",
     ["Change Case", commandsIn("case")], ["Lines", commandsIn("lines").filter((l) => l !== "Join Lines")], ["Indentation", [...commandsIn("indent").slice(0, 2), "-", ...commandsIn("indent").slice(2)]], "-",
-    "Toggle Bookmark", "Show Bookmarks", "Edit Snippets (Live Templates)"]],
+    ["Bookmarks", ["Toggle Bookmark", "Toggle Bookmark with Mnemonic…", "Show Bookmarks", "-", ...[..."123456789"].map((n) => `Go to Bookmark ${n}`)]], "Edit Snippets (Live Templates)"]],
   ["View", ["Show Project", "Problems", "Git Log", "Terminal", "New Terminal", "Find in Terminal", "Rename Terminal Tab…", "Debug Panel", "TODO", "Database", "Composer", "HTTP Client", "Pull Requests", "-",
     "Maximize Bottom Panel", "Hide Bottom Panel", "Toggle Full-Width Bottom Panel", "-",
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Markdown Preview", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-", native("Fullscreen")]],

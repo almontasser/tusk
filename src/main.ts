@@ -43,7 +43,7 @@ import { addEditor, importTheme, initSettings, onSettings, openSettings, pickThe
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, openSearch, refreshSearch, refreshTodos } from "./search";
 import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
-import { hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark } from "./bookmarks";
+import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
 import { showBreadcrumbs } from "./breadcrumbs";
@@ -177,7 +177,8 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     ...(tests.length ? ["-" as const] : []),
     ...breakpointMenu(path, line),
     "-",
-    { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", run: () => toggleBookmark(path, line) },
+    { label: hasBookmark(path, line) ? "Remove Bookmark" : "Add Bookmark", keys: "F3", run: () => toggleBookmark(path, line) },
+    { label: "Bookmark with Mnemonic…", keys: "⌥F3", run: () => toggleMnemonic(path, line) },
     ...(hasCoverage(path) ? [{ label: "Show Tests Covering Line", run: () => (ed.setPosition({ lineNumber: line, column: 1 }), showTestsCoveringLine(ed)) }] : []),
     ...changes,
     ...(changes.length ? menuActions("Next Change", "Previous Change") : []),
@@ -1636,7 +1637,9 @@ const actions: Action[] = [
   { label: "Rerun", run: () => root && rerun() },
   { label: "TODO", run: () => showView("todo") },
   { label: "Toggle Bookmark", keys: "F3", run: () => active && toggleBookmark(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
+  { label: "Toggle Bookmark with Mnemonic…", keys: "Alt+F3", run: () => active && toggleMnemonic(active, editor.getPosition()?.lineNumber ?? 1), editorOnly: true },
   { label: "Show Bookmarks", keys: "Meta+F3", run: showBookmarks },
+  ...[..."123456789"].map((n) => ({ label: `Go to Bookmark ${n}`, keys: `Ctrl+${n}`, run: () => goToMnemonic(n) })),
   { label: "Edit Snippets (Live Templates)", run: () => editSnippets(openFile) },
   { label: "Laravel Tinker", run: () => root && tinker() },
   { label: "Choose Docker Service for Commands…", run: () => root && chooseDockerService() },

@@ -2950,6 +2950,7 @@ Who uses which key:
 | `dockerService` | `sail.ts`, through `setServiceChoice` from `main.ts`, so `sail.ts` loads in tests without the app's modules | Local |
 | `databaseConnections`, `databaseSsh`, `databaseConnection` | `database.ts`; URLs come from `connectionUrl`, which leaves the password out | Local; the selection never shares |
 | `profilerUrl`, `httpLoadTest` | `profiler.ts`, `httpload.ts` | Local only |
+| `bookmarks` | `bookmarks.ts` | Local only |
 
 ## Sessions
 
@@ -3611,11 +3612,20 @@ the debugger.
 
 ## Bookmarks, snippets, and other small tools
 
-- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: lines per file,
-  saved in `localStorage` under `bookmarks:<project>`, and drawn as decorations
-  on open models so they follow edits. They sit in the glyph margin's left lane,
-  so a line can show a bookmark and a breakpoint together. Line changes from
-  edits are saved on each change.
+- **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: one ordered list
+  of `{ path, line, mnemonic?, description? }`, saved as the local project
+  value `bookmarks` with paths relative to the project, and drawn as
+  decorations on open models so they follow edits. `syncLines` reads the lines
+  back from the decorations (kept in the same order as the file's bookmarks)
+  before any change to the list, and edits that move lines save them. They
+  sit in the glyph margin's left lane, so a line can show a bookmark and a
+  breakpoint together. A mnemonic shows through one generated CSS class per
+  character (`bookmark-m-<char>`), since Monaco's glyph margin takes only class
+  names. `loadBookmarks` moves the old `bookmarks:<project>` localStorage
+  value into project state once. `src/bookmarksdata.ts` (with tests) reads the
+  saved list, keeping each file's bookmarks together, and reorders it for
+  drag and drop. The **Bookmarks** tab is a panel view with a `listNav` tree;
+  closed files' lines are read once each time it opens.
 - **Snippets** (`src/snippets.ts`) come from `snippets.json` in the app's
   config folder, in VS Code's format. One completion provider for every
   language (`"*"`) filters them by `scope`. While the file is open in a tab, the
@@ -5263,3 +5273,11 @@ Other programs' changes can't say who made them, so the editor sets a short-live
 activity (a git command, a revert) that the watcher's versions pick up. The
 tab has its own diff editor rather than the git diff view, so the list and
 the diff show side by side, as in PhpStorm.
+
+### 2026-09-28: Bookmarks are one ordered list in local project state
+
+The Bookmarks tab can be reordered by dragging, so the order is data: one
+list, rather than a map from files to lines, with each file's bookmarks kept
+together. Bookmarks are personal, like PhpStorm's by default, so they stay in
+the local project state and don't go in `tusk.json`. The tab is a bottom panel
+view like Breakpoints, which it resembles, instead of another sidebar view.

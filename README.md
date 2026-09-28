@@ -274,7 +274,9 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌃⌥⇧↓ and ⌃⌥⇧↑ | Next and previous change |
 | ⌘F12 | File structure |
 | F3 | Toggle a bookmark on the current line |
-| ⌘F3 | Show bookmarks |
+| ⌥F3 | Toggle a bookmark with a mnemonic (a digit or letter) |
+| ⌘F3 | Show the Bookmarks tab |
+| ⌃1 … ⌃9 | Go to the bookmark with that digit |
 | ⌘B or ⌘-click | Go to declaration |
 | ⌥⌘B | Go to implementation |
 | ⌃⇧B | Go to type declaration |
@@ -677,8 +679,29 @@ excludes, such as `vendor`, aren't searched.
 Press F3 to bookmark the current line, and F3 again to remove the bookmark. A
 bookmark shows as a blue marker in the gutter and moves with its line as you
 edit. You can also right-click the gutter at a line and choose **Add
-Bookmark**. Press ⌘F3 to list bookmarks and jump to one. Bookmarks are saved
-per project.
+Bookmark**.
+
+Press ⌥F3 to give the line's bookmark a mnemonic, a digit or a letter, which
+the gutter shows instead of the marker. Type the character and press Enter.
+⌃1 to ⌃9 jump to the bookmark with that digit. Choosing a mnemonic another
+bookmark has moves it to this line.
+
+⌘F3 opens the **Bookmarks** tab in the bottom panel. It groups bookmarks by
+file and shows each line's code, even for files that aren't open, with its
+mnemonic and description.
+
+- Enter or a double-click goes to the bookmark; ↑ and ↓ move, → and ← open and
+  close a file, and typing jumps to a bookmark by its code or description.
+- F2 (or the pencil) edits the description in place: Enter keeps it, Escape
+  cancels.
+- Delete removes the selected bookmark, or a file's bookmarks when a file is
+  selected. **Remove all** asks first.
+- Drag a bookmark within its file, or a file among the others, to reorder
+  them.
+
+Bookmarks are saved in the project's local state, not in `tusk.json`, and
+bookmarks from earlier versions move there the first time you open the
+project.
 
 ## Snippets
 
@@ -2606,7 +2629,8 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `src/files.ts` | File operations and the tree's context menu |
 | `src/psr4.ts` | Namespaces from `composer.json` for new PHP files |
 | `src/search.ts` | The Find view: find and replace in files, and TODO comments |
-| `src/bookmarks.ts` | Bookmarks |
+| `src/bookmarks.ts` | Bookmarks and the Bookmarks tab |
+| `src/bookmarksdata.ts` | Reading and reordering saved bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Tusk's server (Mago's formatter) |
 | `src/markdownpreview.ts` | The Markdown preview tab |
