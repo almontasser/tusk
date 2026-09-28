@@ -1613,6 +1613,8 @@ const actions: Action[] = [
   { label: "Filament: New Resource…", run: () => root && newResource() },
   { label: "Filament: Install Filament", run: () => root && installFilament() },
   { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
+  { label: "Laravel: New Enum…", run: () => root && void import("./enumdesigner").then((m) => m.openNewEnum()) },
+  { label: "Open in Enum Designer", run: () => active && void import("./enumdesigner").then((m) => m.openEnumDesigner(active)), when: () => /\/app\/.*Enums?\/\w+\.php$|Enum\.php$/.test(active) },
   { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
   { label: "Laravel: New Project…", run: () => newLaravelProject() },
   { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },

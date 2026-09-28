@@ -2524,3 +2524,24 @@ button.link:hover { text-decoration: underline; }
 .fv-name { flex-shrink: 0; max-width: 72%; }
 .fd-label-row.hidden-label .fd-label { opacity: 0.4; font-style: italic; font-weight: 400; font-size: 11px; }
 .fd-palette-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* The enum designer (src/enumdesigner.ts) */
+.ed-cases { display: flex; flex-direction: column; gap: 2px; margin: 0 2px; }
+.ed-row { display: grid; grid-template-columns: var(--grid); gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; }
+.ed-row:hover { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
+.ed-head { font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.ed-head .codicon { font-size: 11px; margin-left: 4px; }
+.ed-row.new { box-shadow: inset 2px 0 0 var(--green); }
+.ed-row.renamed { box-shadow: inset 2px 0 0 var(--yellow); }
+.ed-row input:not([type="checkbox"]), .ed-row select { min-width: 0; width: 100%; padding: 3px 6px; font-size: 12px; }
+.ed-row > .icon-button { opacity: 0.5; }
+.ed-row:hover > .icon-button { opacity: 1; }
+.ed-color { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ed-color .fd-color { flex-shrink: 0; width: 14px; height: 14px; }
+.ed-locked { font-size: 11.5px; font-style: italic; }
+.ed-quick-row { margin: 10px 4px 4px; }
+.ed-quick { width: 100%; }
+.ed-note { display: flex; align-items: center; gap: 4px; margin: 6px 4px 2px; }
+.fd-options-enum { display: flex; gap: 4px; align-items: center; }
+.fd-options-enum select { flex: 1; min-width: 0; }
+.fd-options-enumify { align-self: flex-start; margin-top: 6px; }

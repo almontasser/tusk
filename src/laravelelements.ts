@@ -40,6 +40,7 @@ export async function newLaravelElement() {
   }
   const special: Record<string, () => void> = {
     "make:model": () => void import("./modeldesigner").then((m) => m.openNewModel()),
+    "make:enum": () => void import("./enumdesigner").then((m) => m.openNewEnum()),
     "make:filament-resource": () => void import("./filamentwizard").then((m) => m.openResourceWizard({ onCreated() {} })),
   };
   const items: Item[] = commands.map((c) => ({

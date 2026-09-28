@@ -234,7 +234,7 @@ const skipSpace = (text: string, offset: number) => {
 const breaks = (text: string, from: number, to: number) => text.slice(from, to).includes("\n");
 
 /** Re-indents code written at indentation "" so its lines after the first start at `indent`. */
-export const indentCode = (code: string, indent: string) => code.replace(/\n/g, `\n${indent}`);
+export const indentCode = (code: string, indent: string) => code.replace(/\n(?=[^\n])/g, `\n${indent}`);
 
 /** Code whose lines after the first are indented by `from`, re-indented to start at `to` instead. */
 export const reindent = (code: string, from: string, to: string) =>

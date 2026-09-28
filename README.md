@@ -892,6 +892,28 @@ the model's fillable attributes, casts, soft deletes, and relationships in
 place, and keeps everything else. Dropping a column asks first. **Run the
 migration** runs `php artisan migrate` afterwards, in Sail when it's up.
 
+## Enum designer
+
+The enum designer creates a PHP enum or changes one: its cases, their values,
+and the labels, colors, icons, and descriptions Filament shows in selects,
+badges, and filters. To open it, click **Open in Enum Designer** above an enum,
+run **Laravel: New Enum…**, pick **New enum…** as a column's cast in the model
+designer, or use the Enum options of a select in the Filament designer, where
+**Make an enum of these** turns a list of options into an enum.
+
+- **Cases:** name, value, label, color, and icon for each case. Type several
+  values at once, such as `draft, published, archived`. Drag rows to reorder
+  them.
+- **Filament shows:** turns `HasLabel`, `HasColor`, `HasIcon`, and
+  `HasDescription` on or off, which adds or removes the method.
+- **Translated:** labels and descriptions go through `__()`.
+
+Changes are staged until you click **Create enum** or **Apply changes**, with
+the code previewed. A method the designer can't read, such as an icon that
+comes from a helper, shows as **In code** and is kept. A renamed case is renamed
+there too. When a new case is missing from such a method, the designer says so
+and opens the method after applying.
+
 ## New Laravel projects and elements
 
 **New Laravel Project…** on the welcome screen or in the palette creates a

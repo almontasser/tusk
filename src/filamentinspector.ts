@@ -34,6 +34,10 @@ export type InspectorCtx = {
   remove(): void;
   duplicate(): void;
   wrap(cls: string): void;
+  /** Opens the enum designer for a new enum, seeded with `values`, and makes it the field's options once it's made. */
+  newEnum(options: [value: string, label: string][]): void;
+  /** Opens the enum designer for an enum of the app's. */
+  openEnum(cls: string): void;
 };
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
@@ -296,7 +300,7 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
       if (source === "code" && !(await confirm("Replace the options written in code?", "Replace"))) return;
       if (v === "list") ctx.set([...clearOthers("options"), { name: "options", args: phpValue({ option: "Option" }) }]);
       if (v === "enum" && ctx.enums[0]) ctx.set([...clearOthers("options"), { name: "options", args: `{{${ctx.enums[0].class}}}::class` }]);
-      if (v === "enum" && !ctx.enums[0]) wrap.append(h("p", { class: "fd-note" }, "The app has no enums under app/. Create one, then pick it here.") as HTMLElement);
+      if (v === "enum" && !ctx.enums[0]) ctx.newEnum(list?.entries ?? []);
       if (v === "relationship") {
         const r = ctx.relations.find((x) => /BelongsTo|BelongsToMany|MorphToMany/.test(x.type));
         ctx.set([...clearOthers("relationship"), { name: "relationship", args: `${phpString(r?.name ?? "relation")}, 'name'` }, ...(r && /Many/.test(r.type) && !call(c, "multiple") && shortClass(c.cls) === "Select" ? [{ name: "multiple", args: "" }] : [])]);
@@ -306,6 +310,7 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
   wrap.append(tabs);
   if (source === "code" && options) wrap.append(codeChip(ctx, options));
   if (source === "list") {
+    if (list?.entries.length) wrap.append(h("button", { type: "button", class: "fd-chip-link fd-options-enumify", title: "Move these options into a PHP enum, which the model can cast to", onclick: () => ctx.newEnum(list.entries) }, icon("symbol-enum"), "Make an enum of these"));
     const translated = list?.translated ?? false;
     wrap.append(mapEditor(list?.entries ?? [], (entries) => ctx.set([{ name: "options", args: entries.length ? mapCode(entries, translated) : null }])));
   }
@@ -315,7 +320,15 @@ function optionsEditor(ctx: InspectorCtx): HTMLElement {
     if (current && !ctx.enums.some((e) => e.class === current)) select.prepend(h("option", { value: current, textContent: shortClass(current), selected: true }));
     select.onchange = () => ctx.set([{ name: "options", args: `{{${select.value}}}::class` }]);
     const e = ctx.enums.find((x) => x.class === current);
-    wrap.append(select);
+    wrap.append(
+      h(
+        "div",
+        { class: "fd-options-enum" },
+        select,
+        current ? iconButton("edit", "Edit the enum's cases, labels, and colors", () => ctx.openEnum(current)) : null,
+        iconButton("add", "New enum…", () => ctx.newEnum([])),
+      ),
+    );
     if (e) wrap.append(h("p", { class: "fd-note" }, `${e.cases.length} cases${e.contracts.includes("HasLabel") ? ", with labels" : ""}: ${e.cases.slice(0, 5).map((x) => x.name).join(", ")}${e.cases.length > 5 ? "…" : ""}`));
   }
   if (source === "relationship" && rel) {

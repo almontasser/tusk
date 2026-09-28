@@ -1013,6 +1013,21 @@ export class Designer {
       remove: () => void this.remove(path),
       duplicate: () => void this.duplicate(path),
       wrap: (cls) => void this.wrap(path, cls),
+      newEnum: (options) =>
+        void import("./enumdesigner").then((m) =>
+          m.openNewEnum({
+            options,
+            then: async (cls) => {
+              this.enums = await fapp.enums(this.root).catch(() => this.enums);
+              await this.setCalls([{ path, name: "options", args: `{{${cls}}}::class` }], "Used the enum");
+            },
+          }),
+        ),
+      openEnum: async (cls) => {
+        const known = this.enums.find((e) => e.class === cls)?.file;
+        const file = known ? `${this.root}/${known}` : await fapp.fileOfClass(this.root, cls);
+        if (file) (await import("./enumdesigner")).openEnumDesigner(file);
+      },
     });
   }
 

@@ -4347,6 +4347,24 @@ that runs once, so it should hold the whole change.
 - **Names:** `tableFor`, `plural`, and `singular` follow Laravel's pluralizer for
   the common cases, so the designer's table name matches the one Eloquent uses.
 
+## Enum designer
+
+`src/enumdesigner.ts` stages changes to an enum, as the model designer does, and
+`src/enumgen.ts` turns them into code.
+
+- **Reading:** `readEnum` takes the cases from the outline, and each Filament
+  contract's method (`getLabel()`, `getColor()`, and so on) when it returns a
+  `match ($this)` whose arms are `self::Case` to a string, a translated string,
+  or a Heroicon case. `readMatch` reads shared arms (`self::A, self::B =>`) and
+  `default`. A method written otherwise is not readable, and the designer shows
+  its column as code.
+- **Writing:** `enumEdits` rewrites the case block and the readable matches,
+  adds and removes methods and their contracts in `implements`, and renames a
+  renamed case's other `self::` references. Cases with the same value share an
+  arm. A `default => null` arm makes the method's return type nullable.
+- **New enums** are written whole by `enumFile`, into the namespace's PSR-4
+  folder. `make:enum` would make an empty class that Tusk would then replace.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6030,6 +6048,14 @@ for one sitting's work are noise in `database/migrations`. So the model designer
 keeps changes until Apply and writes one migration with all of them, shown in
 the preview first. It never edits a migration that exists, since one that has
 run won't run again.
+
+### 2026-09-28: The enum designer keeps methods it can't read
+
+An enum's `getIcon()` can resolve icons through a helper, as Filament's demo
+does. The designer could rewrite such a method from its table, but that would
+lose the helper. So a method that isn't a plain `match` stays as it is, its
+column shows as code, and a new case that such a method would throw for is
+called out, with the method opened after Apply.
 
 ### 2026-09-28: New projects use Laravel's installer, kept in Tusk's tools
 

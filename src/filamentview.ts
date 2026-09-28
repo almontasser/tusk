@@ -30,6 +30,8 @@ export function initFilament(h_: typeof host) {
   $("filament-list").addEventListener("keydown", moveFocus);
   monaco.languages.registerCodeLensProvider("php", {
     provideCodeLenses(model) {
+      // Not in previews, such as the designers' code panes.
+      if (model.uri.scheme !== "file") return { lenses: [], dispose() {} };
       const text = model.getValue();
       const m = /^\s*(?:final\s+|abstract\s+)*class\s+(\w+)\s+extends\s+(\w*(?:Resource|RelationManager))\b/m.exec(text);
       const schema = !m && /^\s*(?:final\s+)?class\s+\w+(Form|Table|Infolist)\s*\{/m.exec(text) && /public static function configure\((Schema|Table) \$/.test(text) ? /^\s*(?:final\s+)?class/m.exec(text) : null;
@@ -39,12 +41,18 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(modelClass.index + modelClass[0].length - modelClass[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openModelDesigner", title: "Open in Model Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
+      if (enumDecl) {
+        const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openEnumDesigner", title: "Open in Enum Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       if (!found || !/Filament\\/.test(text)) return { lenses: [], dispose() {} };
       const line = model.getPositionAt(found.index + found[0].length - found[0].trimStart().length).lineNumber;
       return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openDesigner", title: "Open in Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
     },
   });
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
+  monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
 }
 
