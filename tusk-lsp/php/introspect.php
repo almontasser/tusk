@@ -1105,6 +1105,60 @@ function changePermission(string $action, string $name, ?string $permission): ar
     return ['ok' => true];
 }
 
+/**
+ * What the panel settings offer: Filament's color palettes (each one's 500 shade, for previews), the Filament
+ * plugins installed with Composer, the app's name (the default brand name), and the user model with the contracts
+ * a panel's features need.
+ */
+function panelOptions(string $root): array
+{
+    $palettes = [];
+    if (class_exists('Filament\\Support\\Colors\\Color')) {
+        foreach ((new ReflectionClass('Filament\\Support\\Colors\\Color'))->getConstants() as $name => $value) {
+            if (is_array($value) && isset($value[500])) {
+                $palettes[$name] = $value[500];
+            }
+        }
+    }
+    // A package's plugin: a class named *Plugin in its PSR-4 folders that implements Filament's Plugin contract.
+    $plugins = [];
+    $installed = json_decode((string) @file_get_contents($root . '/vendor/composer/installed.json'), true);
+    foreach ($installed['packages'] ?? $installed ?? [] as $package) {
+        $name = $package['name'] ?? '';
+        if (str_starts_with($name, 'filament/') || !preg_grep('#^filament/#', array_keys($package['require'] ?? []))) {
+            continue;
+        }
+        $dir = $root . '/vendor/' . $name;
+        foreach ($package['autoload']['psr-4'] ?? [] as $namespace => $paths) {
+            foreach ((array) $paths as $path) {
+                $base = rtrim($dir . '/' . $path, '/');
+                if (!is_dir($base)) {
+                    continue;
+                }
+                $files = new RegexIterator(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS)), '/Plugin\.php$/');
+                foreach ($files as $file) {
+                    $class = $namespace . str_replace(['/', '.php'], ['\\', ''], substr($file->getPathname(), strlen($base) + 1));
+                    try {
+                        if (class_exists($class) && is_subclass_of($class, 'Filament\\Contracts\\Plugin') && !(new ReflectionClass($class))->isAbstract()) {
+                            $plugins[] = ['class' => $class, 'package' => $name, 'description' => $package['description'] ?? null];
+                        }
+                    } catch (Throwable) {
+                    }
+                }
+            }
+        }
+    }
+    $user = null;
+    try {
+        $class = config('auth.providers.users.model');
+        if (is_string($class) && class_exists($class)) {
+            $user = ['class' => $class, 'file' => relativeFile($class, $root), 'hasTenants' => is_subclass_of($class, 'Filament\\Models\\Contracts\\HasTenants'), 'filamentUser' => is_subclass_of($class, 'Filament\\Models\\Contracts\\FilamentUser')];
+        }
+    } catch (Throwable) {
+    }
+    return ['palettes' => $palettes, 'plugins' => $plugins, 'appName' => config('app.name'), 'user' => $user];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1130,6 +1184,7 @@ try {
         'model' => modelDetails($argv[3], $root),
         'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
         'translations' => appTranslations($root),
+        'panel-options' => panelOptions($root),
         'permission' => changePermission($argv[3], $argv[4], $argv[5] ?? null),
         'mago-stubs' => magoStubs($root, $argv[3]),
         'views' => viewNames($root),

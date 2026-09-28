@@ -1,0 +1,1268 @@
+{
+  "errors": false,
+  "namespace": "App\\Providers\\Filament",
+  "uses": [
+    {
+      "alias": "Login",
+      "name": "App\\Filament\\Pages\\Auth\\Login",
+      "kind": "class",
+      "span": [
+        42,
+        76
+      ]
+    },
+    {
+      "alias": "FilamentUserSettings",
+      "name": "App\\Http\\Middleware\\FilamentUserSettings",
+      "kind": "class",
+      "span": [
+        77,
+        122
+      ]
+    },
+    {
+      "alias": "FilamentShieldPlugin",
+      "name": "BezhanSalleh\\FilamentShield\\FilamentShieldPlugin",
+      "kind": "class",
+      "span": [
+        123,
+        176
+      ]
+    },
+    {
+      "alias": "Authenticate",
+      "name": "Filament\\Http\\Middleware\\Authenticate",
+      "kind": "class",
+      "span": [
+        177,
+        219
+      ]
+    },
+    {
+      "alias": "AuthenticateSession",
+      "name": "Filament\\Http\\Middleware\\AuthenticateSession",
+      "kind": "class",
+      "span": [
+        220,
+        269
+      ]
+    },
+    {
+      "alias": "DisableBladeIconComponents",
+      "name": "Filament\\Http\\Middleware\\DisableBladeIconComponents",
+      "kind": "class",
+      "span": [
+        270,
+        326
+      ]
+    },
+    {
+      "alias": "DispatchServingFilamentEvent",
+      "name": "Filament\\Http\\Middleware\\DispatchServingFilamentEvent",
+      "kind": "class",
+      "span": [
+        327,
+        385
+      ]
+    },
+    {
+      "alias": "Dashboard",
+      "name": "Filament\\Pages\\Dashboard",
+      "kind": "class",
+      "span": [
+        386,
+        415
+      ]
+    },
+    {
+      "alias": "Panel",
+      "name": "Filament\\Panel",
+      "kind": "class",
+      "span": [
+        416,
+        435
+      ]
+    },
+    {
+      "alias": "PanelProvider",
+      "name": "Filament\\PanelProvider",
+      "kind": "class",
+      "span": [
+        436,
+        463
+      ]
+    },
+    {
+      "alias": "Color",
+      "name": "Filament\\Support\\Colors\\Color",
+      "kind": "class",
+      "span": [
+        464,
+        498
+      ]
+    },
+    {
+      "alias": "AddQueuedCookiesToResponse",
+      "name": "Illuminate\\Cookie\\Middleware\\AddQueuedCookiesToResponse",
+      "kind": "class",
+      "span": [
+        499,
+        559
+      ]
+    },
+    {
+      "alias": "EncryptCookies",
+      "name": "Illuminate\\Cookie\\Middleware\\EncryptCookies",
+      "kind": "class",
+      "span": [
+        560,
+        608
+      ]
+    },
+    {
+      "alias": "VerifyCsrfToken",
+      "name": "Illuminate\\Foundation\\Http\\Middleware\\VerifyCsrfToken",
+      "kind": "class",
+      "span": [
+        609,
+        667
+      ]
+    },
+    {
+      "alias": "SubstituteBindings",
+      "name": "Illuminate\\Routing\\Middleware\\SubstituteBindings",
+      "kind": "class",
+      "span": [
+        668,
+        721
+      ]
+    },
+    {
+      "alias": "StartSession",
+      "name": "Illuminate\\Session\\Middleware\\StartSession",
+      "kind": "class",
+      "span": [
+        722,
+        769
+      ]
+    },
+    {
+      "alias": "ShareErrorsFromSession",
+      "name": "Illuminate\\View\\Middleware\\ShareErrorsFromSession",
+      "kind": "class",
+      "span": [
+        770,
+        824
+      ]
+    }
+  ],
+  "useInsert": 825,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "AdminPanelProvider",
+      "fqn": "App\\Providers\\Filament\\AdminPanelProvider",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\PanelProvider",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        826,
+        2429
+      ],
+      "bodyStart": 874,
+      "bodyEnd": 2428,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "panel",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "panel",
+              "type": "Panel",
+              "default": null,
+              "span": [
+                901,
+                913
+              ]
+            }
+          ],
+          "returnType": "Panel",
+          "attributes": [],
+          "span": [
+            879,
+            2427
+          ],
+          "docStart": null,
+          "body": [
+            927,
+            2426
+          ],
+          "returns": [
+            {
+              "kind": "var",
+              "name": "panel",
+              "span": [
+                2414,
+                2420
+              ]
+            }
+          ],
+          "statements": [
+            {
+              "assigns": "panel",
+              "value": {
+                "kind": "chain",
+                "base": {
+                  "kind": "var",
+                  "name": "panel",
+                  "span": [
+                    945,
+                    951
+                  ]
+                },
+                "calls": [
+                  {
+                    "name": "spa",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 969,
+                      "close": 970,
+                      "items": []
+                    },
+                    "span": [
+                      964,
+                      971
+                    ],
+                    "nameSpan": [
+                      966,
+                      969
+                    ]
+                  },
+                  {
+                    "name": "databaseTransactions",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1006,
+                      "close": 1007,
+                      "items": []
+                    },
+                    "span": [
+                      984,
+                      1008
+                    ],
+                    "nameSpan": [
+                      986,
+                      1006
+                    ]
+                  },
+                  {
+                    "name": "default",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1030,
+                      "close": 1031,
+                      "items": []
+                    },
+                    "span": [
+                      1021,
+                      1032
+                    ],
+                    "nameSpan": [
+                      1023,
+                      1030
+                    ]
+                  },
+                  {
+                    "name": "id",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1049,
+                      "close": 1057,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "admin",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1050,
+                              1057
+                            ]
+                          },
+                          "span": [
+                            1050,
+                            1057
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1045,
+                      1058
+                    ],
+                    "nameSpan": [
+                      1047,
+                      1049
+                    ]
+                  },
+                  {
+                    "name": "path",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1077,
+                      "close": 1085,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "admin",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1078,
+                              1085
+                            ]
+                          },
+                          "span": [
+                            1078,
+                            1085
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1071,
+                      1086
+                    ],
+                    "nameSpan": [
+                      1073,
+                      1077
+                    ]
+                  },
+                  {
+                    "name": "login",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1106,
+                      "close": 1119,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "classConst",
+                            "class": "App\\Filament\\Pages\\Auth\\Login",
+                            "classSpan": [
+                              1107,
+                              1112
+                            ],
+                            "name": "class",
+                            "span": [
+                              1107,
+                              1119
+                            ]
+                          },
+                          "span": [
+                            1107,
+                            1119
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1099,
+                      1120
+                    ],
+                    "nameSpan": [
+                      1101,
+                      1106
+                    ]
+                  },
+                  {
+                    "name": "colors",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1141,
+                      "close": 1199,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": {
+                                  "kind": "string",
+                                  "value": "primary",
+                                  "quote": "single",
+                                  "interpolated": false,
+                                  "span": [
+                                    1160,
+                                    1169
+                                  ]
+                                },
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Support\\Colors\\Color",
+                                  "classSpan": [
+                                    1173,
+                                    1178
+                                  ],
+                                  "name": "Blue",
+                                  "span": [
+                                    1173,
+                                    1184
+                                  ]
+                                },
+                                "span": [
+                                  1160,
+                                  1184
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 1142,
+                            "close": 1198,
+                            "legacy": false,
+                            "span": [
+                              1142,
+                              1199
+                            ]
+                          },
+                          "span": [
+                            1142,
+                            1199
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1133,
+                      1200
+                    ],
+                    "nameSpan": [
+                      1135,
+                      1141
+                    ]
+                  },
+                  {
+                    "name": "discoverResources",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1232,
+                      "close": 1300,
+                      "items": [
+                        {
+                          "name": "in",
+                          "value": {
+                            "kind": "func",
+                            "name": "app_path",
+                            "nameSpan": [
+                              1237,
+                              1245
+                            ],
+                            "args": {
+                              "open": 1245,
+                              "close": 1266,
+                              "items": [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Filament/Resources",
+                                    "quote": "single",
+                                    "interpolated": false,
+                                    "span": [
+                                      1246,
+                                      1266
+                                    ]
+                                  },
+                                  "span": [
+                                    1246,
+                                    1266
+                                  ],
+                                  "spread": false
+                                }
+                              ]
+                            },
+                            "span": [
+                              1237,
+                              1267
+                            ]
+                          },
+                          "span": [
+                            1233,
+                            1267
+                          ],
+                          "spread": false
+                        },
+                        {
+                          "name": "for",
+                          "value": {
+                            "kind": "string",
+                            "value": "App\\Filament\\Resources",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1274,
+                              1300
+                            ]
+                          },
+                          "span": [
+                            1269,
+                            1300
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1213,
+                      1301
+                    ],
+                    "nameSpan": [
+                      1215,
+                      1232
+                    ]
+                  },
+                  {
+                    "name": "discoverPages",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1329,
+                      "close": 1389,
+                      "items": [
+                        {
+                          "name": "in",
+                          "value": {
+                            "kind": "func",
+                            "name": "app_path",
+                            "nameSpan": [
+                              1334,
+                              1342
+                            ],
+                            "args": {
+                              "open": 1342,
+                              "close": 1359,
+                              "items": [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Filament/Pages",
+                                    "quote": "single",
+                                    "interpolated": false,
+                                    "span": [
+                                      1343,
+                                      1359
+                                    ]
+                                  },
+                                  "span": [
+                                    1343,
+                                    1359
+                                  ],
+                                  "spread": false
+                                }
+                              ]
+                            },
+                            "span": [
+                              1334,
+                              1360
+                            ]
+                          },
+                          "span": [
+                            1330,
+                            1360
+                          ],
+                          "spread": false
+                        },
+                        {
+                          "name": "for",
+                          "value": {
+                            "kind": "string",
+                            "value": "App\\Filament\\Pages",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1367,
+                              1389
+                            ]
+                          },
+                          "span": [
+                            1362,
+                            1389
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1314,
+                      1390
+                    ],
+                    "nameSpan": [
+                      1316,
+                      1329
+                    ]
+                  },
+                  {
+                    "name": "pages",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1410,
+                      "close": 1460,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Pages\\Dashboard",
+                                  "classSpan": [
+                                    1429,
+                                    1438
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1429,
+                                    1445
+                                  ]
+                                },
+                                "span": [
+                                  1429,
+                                  1445
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 1411,
+                            "close": 1459,
+                            "legacy": false,
+                            "span": [
+                              1411,
+                              1460
+                            ]
+                          },
+                          "span": [
+                            1411,
+                            1460
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1403,
+                      1461
+                    ],
+                    "nameSpan": [
+                      1405,
+                      1410
+                    ]
+                  },
+                  {
+                    "name": "discoverWidgets",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1491,
+                      "close": 1555,
+                      "items": [
+                        {
+                          "name": "in",
+                          "value": {
+                            "kind": "func",
+                            "name": "app_path",
+                            "nameSpan": [
+                              1496,
+                              1504
+                            ],
+                            "args": {
+                              "open": 1504,
+                              "close": 1523,
+                              "items": [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Filament/Widgets",
+                                    "quote": "single",
+                                    "interpolated": false,
+                                    "span": [
+                                      1505,
+                                      1523
+                                    ]
+                                  },
+                                  "span": [
+                                    1505,
+                                    1523
+                                  ],
+                                  "spread": false
+                                }
+                              ]
+                            },
+                            "span": [
+                              1496,
+                              1524
+                            ]
+                          },
+                          "span": [
+                            1492,
+                            1524
+                          ],
+                          "spread": false
+                        },
+                        {
+                          "name": "for",
+                          "value": {
+                            "kind": "string",
+                            "value": "App\\Filament\\Widgets",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              1531,
+                              1555
+                            ]
+                          },
+                          "span": [
+                            1526,
+                            1555
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1474,
+                      1556
+                    ],
+                    "nameSpan": [
+                      1476,
+                      1491
+                    ]
+                  },
+                  {
+                    "name": "widgets",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1578,
+                      "close": 1581,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [],
+                            "open": 1579,
+                            "close": 1580,
+                            "legacy": false,
+                            "span": [
+                              1579,
+                              1581
+                            ]
+                          },
+                          "span": [
+                            1579,
+                            1581
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1569,
+                      1582
+                    ],
+                    "nameSpan": [
+                      1571,
+                      1578
+                    ]
+                  },
+                  {
+                    "name": "middleware",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 1607,
+                      "close": 2073,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\Cookie\\Middleware\\EncryptCookies",
+                                  "classSpan": [
+                                    1626,
+                                    1640
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1626,
+                                    1647
+                                  ]
+                                },
+                                "span": [
+                                  1626,
+                                  1647
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\Cookie\\Middleware\\AddQueuedCookiesToResponse",
+                                  "classSpan": [
+                                    1665,
+                                    1691
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1665,
+                                    1698
+                                  ]
+                                },
+                                "span": [
+                                  1665,
+                                  1698
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\Session\\Middleware\\StartSession",
+                                  "classSpan": [
+                                    1716,
+                                    1728
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1716,
+                                    1735
+                                  ]
+                                },
+                                "span": [
+                                  1716,
+                                  1735
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Http\\Middleware\\AuthenticateSession",
+                                  "classSpan": [
+                                    1753,
+                                    1772
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1753,
+                                    1779
+                                  ]
+                                },
+                                "span": [
+                                  1753,
+                                  1779
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\View\\Middleware\\ShareErrorsFromSession",
+                                  "classSpan": [
+                                    1797,
+                                    1819
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1797,
+                                    1826
+                                  ]
+                                },
+                                "span": [
+                                  1797,
+                                  1826
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\Foundation\\Http\\Middleware\\VerifyCsrfToken",
+                                  "classSpan": [
+                                    1844,
+                                    1859
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1844,
+                                    1866
+                                  ]
+                                },
+                                "span": [
+                                  1844,
+                                  1866
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Illuminate\\Routing\\Middleware\\SubstituteBindings",
+                                  "classSpan": [
+                                    1884,
+                                    1902
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1884,
+                                    1909
+                                  ]
+                                },
+                                "span": [
+                                  1884,
+                                  1909
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Http\\Middleware\\DisableBladeIconComponents",
+                                  "classSpan": [
+                                    1927,
+                                    1953
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1927,
+                                    1960
+                                  ]
+                                },
+                                "span": [
+                                  1927,
+                                  1960
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Http\\Middleware\\DispatchServingFilamentEvent",
+                                  "classSpan": [
+                                    1978,
+                                    2006
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    1978,
+                                    2013
+                                  ]
+                                },
+                                "span": [
+                                  1978,
+                                  2013
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "App\\Http\\Middleware\\FilamentUserSettings",
+                                  "classSpan": [
+                                    2031,
+                                    2051
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    2031,
+                                    2058
+                                  ]
+                                },
+                                "span": [
+                                  2031,
+                                  2058
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 1608,
+                            "close": 2072,
+                            "legacy": false,
+                            "span": [
+                              1608,
+                              2073
+                            ]
+                          },
+                          "span": [
+                            1608,
+                            2073
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      1595,
+                      2074
+                    ],
+                    "nameSpan": [
+                      1597,
+                      1607
+                    ]
+                  },
+                  {
+                    "name": "plugins",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2096,
+                      "close": 2158,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "static",
+                                  "class": "BezhanSalleh\\FilamentShield\\FilamentShieldPlugin",
+                                  "classSpan": [
+                                    2115,
+                                    2135
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 2141,
+                                    "close": 2142,
+                                    "items": []
+                                  },
+                                  "span": [
+                                    2115,
+                                    2143
+                                  ]
+                                },
+                                "span": [
+                                  2115,
+                                  2143
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 2097,
+                            "close": 2157,
+                            "legacy": false,
+                            "span": [
+                              2097,
+                              2158
+                            ]
+                          },
+                          "span": [
+                            2097,
+                            2158
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      2087,
+                      2159
+                    ],
+                    "nameSpan": [
+                      2089,
+                      2096
+                    ]
+                  },
+                  {
+                    "name": "authMiddleware",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2188,
+                      "close": 2241,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "classConst",
+                                  "class": "Filament\\Http\\Middleware\\Authenticate",
+                                  "classSpan": [
+                                    2207,
+                                    2219
+                                  ],
+                                  "name": "class",
+                                  "span": [
+                                    2207,
+                                    2226
+                                  ]
+                                },
+                                "span": [
+                                  2207,
+                                  2226
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 2189,
+                            "close": 2240,
+                            "legacy": false,
+                            "span": [
+                              2189,
+                              2241
+                            ]
+                          },
+                          "span": [
+                            2189,
+                            2241
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      2172,
+                      2242
+                    ],
+                    "nameSpan": [
+                      2174,
+                      2188
+                    ]
+                  },
+                  {
+                    "name": "passwordReset",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2270,
+                      "close": 2271,
+                      "items": []
+                    },
+                    "span": [
+                      2255,
+                      2272
+                    ],
+                    "nameSpan": [
+                      2257,
+                      2270
+                    ]
+                  },
+                  {
+                    "name": "emailVerification",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2304,
+                      "close": 2305,
+                      "items": []
+                    },
+                    "span": [
+                      2285,
+                      2306
+                    ],
+                    "nameSpan": [
+                      2287,
+                      2304
+                    ]
+                  },
+                  {
+                    "name": "profile",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2328,
+                      "close": 2329,
+                      "items": []
+                    },
+                    "span": [
+                      2319,
+                      2330
+                    ],
+                    "nameSpan": [
+                      2321,
+                      2328
+                    ]
+                  },
+                  {
+                    "name": "viteTheme",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 2354,
+                      "close": 2395,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "resources/css/filament/admin/theme.css",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              2355,
+                              2395
+                            ]
+                          },
+                          "span": [
+                            2355,
+                            2395
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      2343,
+                      2396
+                    ],
+                    "nameSpan": [
+                      2345,
+                      2354
+                    ]
+                  }
+                ],
+                "span": [
+                  945,
+                  2396
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

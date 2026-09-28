@@ -283,8 +283,8 @@ impl<'p, 'a> Outliner<'p, 'a> {
 
     fn method(&self, m: &Method<'_>) -> Value {
         let span = m.span();
-        let (body, returns) = match &m.body {
-            MethodBody::Abstract(_) => (Value::Null, vec![]),
+        let (body, returns, statements) = match &m.body {
+            MethodBody::Abstract(_) => (Value::Null, vec![], vec![]),
             MethodBody::Concrete(b) => {
                 let mut found = vec![];
                 let mut stack = vec![Node::Block(b)];
@@ -297,7 +297,22 @@ impl<'p, 'a> Outliner<'p, 'a> {
                     node.visit_children(|child| stack.push(child));
                 }
                 found.sort_by_key(|e| e.span().start.offset);
-                (self.range(b.left_brace.end.offset, b.right_brace.start.offset), found.into_iter().map(|e| self.node(e)).collect())
+                // The body's own expression statements, such as `$panel->login();` or `$panel = $panel->…;`.
+                let statements = b
+                    .statements
+                    .iter()
+                    .filter_map(|s| match s {
+                        Statement::Expression(es) => Some(match es.expression {
+                            Expression::Assignment(a) if matches!(a.operator, AssignmentOperator::Assign(_)) => match a.lhs {
+                                Expression::Variable(Variable::Direct(v)) => json!({ "assigns": var_name(v), "value": self.node(a.rhs) }),
+                                _ => json!({ "assigns": null, "value": self.node(es.expression) }),
+                            },
+                            e => json!({ "assigns": null, "value": self.node(e) }),
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                (self.range(b.left_brace.end.offset, b.right_brace.start.offset), found.into_iter().map(|e| self.node(e)).collect(), statements)
             }
         };
         let params: Vec<Value> = m
@@ -325,6 +340,7 @@ impl<'p, 'a> Outliner<'p, 'a> {
             "docStart": self.doc_start(span.start.offset),
             "body": body,
             "returns": returns,
+            "statements": statements,
         })
     }
 

@@ -4381,6 +4381,27 @@ has, as `methodsOf` reports them.
   designers both use it. The enum designer stages translations and writes
   them on Apply, after renaming the keys of labels that changed.
 
+### Panel settings
+
+- **Reading:** `src/panelgen.ts` reads the calls on `$panel` in the provider's
+  `panel()`: the returned chain, and chains in the body's own statements,
+  such as `$panel = $panel->…;` or `$panel->path(…);`. The outline gives a
+  method's top-level expression statements in `statements` for this. A setting
+  is read from the last call that sets it; new calls go on the longest chain.
+  A value the settings don't write, such as `brandLogo(fn () => …)`, shows as
+  code.
+- **Writing:** flags go back to Filament's default by removing the call, so a
+  provider only says what differs. Turning on a call that's there keeps its
+  arguments, such as a custom login page. Colors are `Color::` palettes or hex
+  strings; navigation groups are labels, or `NavigationGroup::make()` once
+  they get an icon or start collapsed; plugins are `Plugin::make()` in
+  `plugins([...])`.
+- **Options:** `introspect.php panel-options` reads Filament's palettes (their
+  500 shade, for swatches and the preview), the Filament plugins Composer
+  installed (a `*Plugin` class in a package that requires Filament that
+  implements its Plugin contract), the app's name, and the user model with the
+  contracts tenancy needs. `src/panelsettings.ts` draws the view.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,

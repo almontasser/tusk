@@ -48,6 +48,13 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(policy.index + policy[0].length - policy[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openAccess", title: "Open in Access", arguments: [policyModel[1]] } }], dispose() {} };
       }
+      // A panel provider: opened as the panel's settings.
+      const provider = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+PanelProvider\b/m.exec(text);
+      if (provider) {
+        const line = model.getPositionAt(provider.index + provider[0].length - provider[0].trimStart().length).lineNumber;
+        const id = /->id\(\s*['"]([^'"]+)['"]/.exec(text)?.[1] ?? "admin";
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPanelSettings", title: "Open Panel Settings", arguments: [model.uri.fsPath, id] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -60,6 +67,7 @@ export function initFilament(h_: typeof host) {
   });
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
   monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
+  monaco.editor.registerCommand("tusk.openPanelSettings", (_, path: string, id: string) => void import("./panelsettings").then((m) => m.openPanelSettings(path, id)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
 }
@@ -132,7 +140,11 @@ export async function loadFilament() {
       icon("window"),
       h("span", { class: "fv-name" }, panel.id),
       h("span", { class: "fv-detail" }, `/${panel.path}`),
-      h("span", { class: "fv-actions" }, iconButton("add", "New resource in this panel", () => void newResource(panel.id)), ...(panel.url ? [iconButton("link-external", "Open the panel in the browser", () => host.openUrl(panel.url!))] : [])),
+      h(
+        "span",
+        { class: "fv-actions" },
+        ...(panel.provider?.file ? [iconButton("settings-gear", "Panel settings", () => openPanel(panel))] : []),
+        iconButton("add", "New resource in this panel", () => void newResource(panel.id)), ...(panel.url ? [iconButton("link-external", "Open the panel in the browser", () => host.openUrl(panel.url!))] : [])),
     );
     head.onclick = (e) => {
       if ((e.target as HTMLElement).closest("button")) return;
@@ -263,6 +275,21 @@ export async function openModelPicker() {
   );
   items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
   pick("Open a model in the designer", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Opens a panel's settings. */
+function openPanel(panel: fapp.PanelInfo) {
+  const file = panel.provider?.file;
+  if (file) void import("./panelsettings").then((m) => m.openPanelSettings(file.startsWith("/") ? file : `${host.root()}/${file}`, panel.id));
+}
+
+/** Picks a panel and opens its settings. */
+export async function openPanelPicker() {
+  const app = await fapp.app(host.root()).catch((e) => (host.status(`Can't read the app: ${errorText(e)}`), null));
+  const panels = app?.panels.filter((p) => p.provider?.file) ?? [];
+  if (panels.length === 1) return openPanel(panels[0]);
+  const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-window", run: () => openPanel(p) }));
+  pick("Panel settings: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Picks a model and opens its Access view: who can do what with its records. */

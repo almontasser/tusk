@@ -45,6 +45,8 @@ export type OMethod = {
   docStart: number | null;
   body: Span | null;
   returns: PNode[];
+  /** The body's own expression statements; an assignment to a variable names it in `assigns`. */
+  statements?: { assigns: string | null; value: PNode }[];
 };
 export type OClass = {
   kind: "class" | "enum" | "trait" | "interface";

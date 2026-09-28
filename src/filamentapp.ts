@@ -136,6 +136,7 @@ export const enums = (root: string) => cached(root, "enums", () => introspect<En
 export const models = (root: string) => cached(root, "models", () => introspect<Record<string, ModelSummary>>(root, "models"));
 export const migrations = (root: string) => cached(root, "migrations", () => introspect<Migrations>(root, "migrations"));
 export const translations = (root: string) => cached(root, "translations", () => introspect<import("./translations").Translations>(root, "translations"));
+export const panelOptions = (root: string) => cached(root, "panel-options", () => introspect<import("./panelsettings").PanelOptions>(root, "panel-options"));
 export const policy = (root: string, cls: string, resource?: string) => cached(root, `policy:${cls}:${resource ?? ""}`, () => introspect<PolicyInfo>(root, "policy", cls, ...(resource ? [resource] : [])));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);

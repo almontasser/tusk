@@ -2614,3 +2614,44 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .fd-translate-all .fd-note { flex: 1; margin: 0; }
 .ed-tr-key { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fd-access-view { flex: 1; min-height: 0; overflow: auto; }
+
+/* Panel settings (src/panelsettings.ts) */
+.ps-designer .md-body { grid-template-columns: minmax(0, 1fr) clamp(320px, 38%, 520px); }
+.ps-color { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 340px; }
+.ps-color select { flex: 1; min-width: 0; padding: 3px 7px; font-size: 12px; }
+.ps-color input[type="color"] { width: 30px; height: 24px; padding: 0; border: 0; background: none; }
+.ps-swatch { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px #0002; }
+.ps-group { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; }
+.ps-group:hover { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
+.ps-group > input { flex: 1; min-width: 0; max-width: 280px; padding: 3px 7px; font-size: 12px; }
+.ps-group > .fd-note { min-width: 70px; }
+.ps-group .icon-button { opacity: 0.6; }
+.ps-group:hover .icon-button { opacity: 1; }
+.ps-group-icon .fd-heroicon svg { width: 16px; height: 16px; }
+.ps-check { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.ps-preview { border-left: 1px solid var(--border-subtle); padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; background: var(--panel); }
+.ps-preview-head { display: flex; align-items: center; }
+.ps-preview > button { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+.ps-screen { --bg1: #fafafa; --bg2: #fff; --fg: #18181b; --line: #e4e4e7; display: grid; grid-template-columns: 38% 1fr; min-height: 340px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-subtle); background: var(--bg1); color: var(--fg); font-size: 11px; }
+.ps-screen.dark { --bg1: #09090b; --bg2: #18181b; --fg: #f4f4f5; --line: #27272a; }
+.ps-screen.top { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+.ps-sidebar { background: var(--bg2); border-inline-end: 1px solid var(--line); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.ps-topbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--line); overflow: hidden; white-space: nowrap; }
+.ps-brand { display: flex; align-items: center; gap: 5px; padding: 2px 6px 8px; font-size: 13px; }
+.ps-topbar .ps-brand { padding: 0 8px 0 0; }
+.ps-top-item { display: inline-flex; align-items: center; gap: 2px; opacity: 0.75; }
+.ps-nav-group { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
+.ps-nav-label { padding: 2px 6px; font-size: 10px; font-weight: 600; opacity: 0.55; }
+.ps-nav-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps-nav-item .fd-heroicon svg { width: 14px; height: 14px; opacity: 0.6; }
+.ps-nav-item.active { background: color-mix(in srgb, var(--ps-primary) 12%, transparent); color: var(--ps-primary); font-weight: 600; }
+.ps-content { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.ps-heading { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.ps-button { padding: 4px 10px; border-radius: 6px; background: var(--ps-primary); color: #fff; font-size: 11px; font-weight: 600; }
+.ps-card { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border-radius: 8px; background: var(--bg2); box-shadow: 0 0 0 1px var(--line); }
+.ps-badge { padding: 1px 7px; border-radius: 6px; font-size: 10px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent); }
+.ps-lines { flex-direction: column; }
+.ps-lines i { display: block; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--ps-gray) 25%, transparent); }
+.ps-lines i:nth-child(2) { width: 70%; }
+.ps-lines i:nth-child(3) { width: 45%; }
+.ps-warn { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--yellow); }
