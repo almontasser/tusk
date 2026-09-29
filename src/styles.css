@@ -2592,7 +2592,7 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .fd-access-empty p { margin: 4px 0 0; }
 .fd-access-perms { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
 .fd-access-perms h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
-.fd-access-perms-head { display: flex; align-items: center; }
+.fd-access-perms-head { display: flex; align-items: center; gap: 8px; }
 .fd-access-perms .fd-note { display: flex; align-items: center; gap: 4px; margin: 0; }
 .fd-access-matrix { display: grid; grid-template-columns: minmax(200px, 1fr) repeat(var(--roles), minmax(70px, auto)); gap: 0; border-radius: 12px; background: var(--fi-card); box-shadow: 0 0 0 1px var(--fi-ring); overflow: hidden; }
 .fd-access-matrix > * { padding: 8px 12px; border-top: 1px solid var(--fi-ring); display: flex; align-items: center; gap: 8px; }
@@ -2712,6 +2712,8 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .db-kind { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--border-subtle); font-size: 11.5px; }
 .db-kind.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .wd-live-error { display: flex; gap: 6px; color: var(--yellow); }
+/* The Access tab's page layout, sitting inside a settings card here. */
+.wd-access > .fd-page-tab { padding: 4px 6px 8px; max-width: none; overflow: visible; }
 
 /* Widgets on a resource page (src/pagewidgets.ts) */
 .pw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--border-subtle); }

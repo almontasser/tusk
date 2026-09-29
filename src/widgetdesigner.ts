@@ -175,7 +175,8 @@ class WidgetDesigner {
   private liveNote(): HTMLElement {
     const l = this.live;
     if (!l) return h("p", { class: "fd-note" }, "Reading the numbers…");
-    if (l.error !== undefined) return h("p", { class: "fd-note wd-live-error" }, icon("warning"), `Showing examples: the widget fails when it runs: ${l.error}`);
+    // Query exceptions carry the connection and the whole SQL; the first line says what went wrong.
+    if (l.error !== undefined) return h("p", { class: "fd-note wd-live-error", title: l.error }, icon("warning"), `Showing examples: the widget fails when it runs: ${l.error.split("\n")[0].replace(/ \(Connection: .*$/s, "")}`);
     if (l.chart && !l.chart.datasets?.[0]?.data?.length) return h("p", { class: "fd-note" }, "There are no records yet, so the preview shows examples.");
     return h("p", { class: "fd-note" }, l.as ? `Real numbers, as ${l.as} sees them.` : "Real numbers from the database.");
   }
