@@ -272,6 +272,8 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; }
 /* The Problems button's error count. */
 #activitybar button[data-count] { position: relative; }
 #activitybar button[data-count]:not([data-count=""])::after { content: attr(data-count); position: absolute; right: -3px; bottom: -2px; min-width: 14px; padding: 0 3px; border-radius: 7px; background: var(--red); color: #fff; font-size: 9px; font-weight: 600; line-height: 14px; text-align: center; }
+/* Changed files aren't a problem, so their count is quieter than the errors'. */
+#activitybar button[data-view="commit"][data-count]::after { background: var(--muted); color: var(--bg); }
 
 #sidebar { width: 280px; min-width: 180px; max-width: 60vw; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); }
 #sidebar.collapsed { display: none; }
