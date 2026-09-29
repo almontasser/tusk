@@ -78,7 +78,9 @@ class WidgetDesigner {
 
   show() {
     showEditorView(`${this.file.split("/").pop()!.replace(/\.php$/, "")} · Widget`, this.el, "graph", () => open.delete(this.file));
+    // The database may have changed since, as after a migration.
     if (!this.doc) void this.load();
+    else this.readLive();
     this.render();
   }
 
@@ -106,14 +108,20 @@ class WidgetDesigner {
     const cls = outline.classes.find((c) => c.name);
     this.doc = cls ? { text, outline, cls } : null;
     // The file is saved just after it changes, and the widget runs from the saved file.
+    this.readLive(700);
+  }
+
+  /** Runs the widget again for the preview's numbers, `delay` ms from now. */
+  private readLive(delay = 0) {
     clearTimeout(this.liveTimer);
-    if (cls && !outline.errors)
+    const d = this.doc;
+    if (d && !d.outline.errors)
       this.liveTimer = window.setTimeout(() => {
-        fapp.widgetData(this.root, cls.fqn).then(
+        fapp.widgetData(this.root, d.cls.fqn).then(
           (live) => (this.live = live),
           (e) => (this.live = { error: e instanceof Error ? e.message : String(e) }),
         ).then(() => this.el.isConnected && this.render());
-      }, 700);
+      }, delay);
   }
 
   /** Applies edits computed from the widget's current code. */
@@ -176,7 +184,7 @@ class WidgetDesigner {
     const l = this.live;
     if (!l) return h("p", { class: "fd-note" }, "Reading the numbers…");
     // Query exceptions carry the connection and the whole SQL; the first line says what went wrong.
-    if (l.error !== undefined) return h("p", { class: "fd-note wd-live-error", title: l.error }, icon("warning"), `Showing examples: the widget fails when it runs: ${l.error.split("\n")[0].replace(/ \(Connection: .*$/s, "")}`);
+    if (l.error !== undefined) return h("p", { class: "fd-note wd-live-error", title: l.error }, icon("warning"), h("span", {}, `Showing examples: the widget fails when it runs: ${l.error.split("\n")[0].replace(/ \(Connection: .*$/s, "")} `, h("button", { type: "button", class: "fd-chip-link", onclick: () => ((this.live = null), this.render(), this.readLive()) }, "Try again")));
     if (l.chart && !l.chart.datasets?.[0]?.data?.length) return h("p", { class: "fd-note" }, "There are no records yet, so the preview shows examples.");
     return h("p", { class: "fd-note" }, l.as ? `Real numbers, as ${l.as} sees them.` : "Real numbers from the database.");
   }
