@@ -6,7 +6,7 @@ import { monaco } from "./editor";
 import { h, icon } from "./dom";
 import { confirm, type Item, pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
-import { containerXdebugEnv, startDebugging, xdebugEnv } from "./debug";
+import { containerXdebugEnv, herdXdebug, iniDirsEnv, startDebugging, xdebugEnv } from "./debug";
 import { filterFor, type TestResult } from "./junit";
 import { type Container, runningContainer } from "./sail";
 import { openTerminal, type TerminalRun } from "./terminal";
@@ -208,6 +208,7 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
     // PHPUnit uses PCOV when it's loaded, and otherwise Xdebug, which needs coverage mode. In a container, its own settings apply.
     if (coverage && !container) extraEnv.push("XDEBUG_MODE=coverage");
   }
+  if ((debug || coverage) && !container) extraEnv.push(...(await iniDirsEnv([await herdXdebug()])));
   const profiler = mode === "profile" ? await loadProfiler() : null;
   const profiles = profiler ? await profiler.profileDir() : "";
   if (profiler) extraEnv.push(...(await profiler.profileEnv(profiles, root)));

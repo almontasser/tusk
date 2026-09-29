@@ -3665,6 +3665,14 @@ of `artisan serve` itself, because `serve` passes only some variables to the
 server it starts and `XDEBUG_TRIGGER` isn't one of them. `server.php` finds
 `public` from the working directory, so the server runs there.
 
+Herd's `php` loads Xdebug only under `herd debug` and `herd coverage`. When
+`php` hasn't loaded Xdebug, `herdXdebug` in `src/debug.ts` finds Herd's copy
+for its version and architecture
+(`/Applications/Herd.app/Contents/Resources/xdebug/xdebug-<84>-<arm64>.so`) and
+writes an `.ini` that loads it. Debug, coverage, and profiled runs add that
+folder to `PHP_INI_SCAN_DIR`, after PHP's own scan folder, so child processes
+load it too. `-d zend_extension=` wouldn't reach them.
+
 The parser also sums each caller-to-callee pair's calls and time from the
 `calls=` lines, and inverts them for callers. That's one entry per pair of
 functions that called each other, not per call, so it stays small even for

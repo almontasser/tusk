@@ -1,6 +1,7 @@
 // PHP debugging with Xdebug, through the bundled adapter from VS Code's PHP Debug extension.
 // The adapter speaks the Debug Adapter Protocol (DAP) over the same bridge as the language servers.
 import { invoke } from "@tauri-apps/api/core";
+import { appCacheDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { breakpointsView } from "./breakpointsview";
 import { h } from "./dom";
@@ -40,6 +41,43 @@ const debugSettings = registerSettings(
 export const xdebugEnv = (clientHost?: string) => xdebugEnvFor(debugSettings.debugPort, debugSettings.debugIdeKey, clientHost);
 /** The Xdebug environment for PHP in a container, which reaches this Mac through the container host setting. */
 export const containerXdebugEnv = () => xdebugEnv(debugSettings.debugContainerHost.trim() || "host.docker.internal");
+
+let herd: Promise<string> | undefined;
+/**
+ * Herd's PHP loads Xdebug only under `herd debug` and `herd coverage`, so the editor's debug, coverage, and profiled
+ * runs load Herd's copy from a folder PHP_INI_SCAN_DIR adds. "" when PHP has Xdebug already, or Herd has no copy for
+ * its version.
+ */
+export const herdXdebug = () =>
+  (herd ??= (async () => {
+    const out = await invoke<string>("run_capture", { cwd: "/", program: "php", args: ["-r", 'echo extension_loaded("xdebug") ? "" : PHP_MAJOR_VERSION . PHP_MINOR_VERSION . " " . php_uname("m");'], input: null }).catch(() => "");
+    const [version, arch] = out.trim().split("\n").pop()!.split(" ");
+    if (!/^\d+$/.test(version ?? "")) return "";
+    // ponytail: only Herd's default install location; look in ~/Applications too if someone installs it there.
+    const lib = "/Applications/Herd.app/Contents/Resources/xdebug";
+    const found = (await invoke<string>("run_capture", { cwd: "/", program: "/bin/sh", args: ["-c", `ls "${lib}"/xdebug-${version}-*.so 2>/dev/null; true`], input: null }).catch(() => "")).split("\n").filter(Boolean);
+    const so = found.find((f) => f.includes(arch)) ?? found[0];
+    if (!so) return "";
+    const dir = `${await appCacheDir()}/herd-xdebug`;
+    await invoke("create_dir", { path: dir });
+    await invoke("write_file", { path: `${dir}/xdebug.ini`, contents: `; Written by the editor for debug, coverage, and profiled runs: Herd's Xdebug.\nzend_extension="${so}"\n` });
+    return dir;
+  })());
+
+let scanned: Promise<string> | undefined;
+/** PHP's own folders of extra .ini files, which setting PHP_INI_SCAN_DIR would otherwise replace. */
+const scanDir = () =>
+  (scanned ??= invoke<string>("run_capture", { cwd: "/", program: "php", args: ["--ini"], input: null })
+    .then((out) => out.match(/^Scan for additional \.ini files in: (.*)$/m)?.[1].trim() ?? "")
+    .then((dir) => (dir === "(none)" ? "" : dir))
+    .catch(() => ""));
+
+/** PHP_INI_SCAN_DIR adding the folders in `dirs` ("" is none) to PHP's own, or nothing when there are none. */
+export async function iniDirsEnv(dirs: string[]): Promise<string[]> {
+  dirs = dirs.filter(Boolean);
+  return dirs.length ? [`PHP_INI_SCAN_DIR=${[await scanDir(), ...dirs].join(":")}`] : [];
+}
+
 /** The trigger value for a request's XDEBUG_SESSION. */
 export const debugIdeKey = () => debugSettings.debugIdeKey.trim() || "1";
 

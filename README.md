@@ -2648,7 +2648,9 @@ Pull requests need the GitHub CLI (`gh`), signed in with `gh auth login`.
 
 The editor debugs PHP with Xdebug, which must be installed in your PHP
 (`php -m` lists it). You don't need to change your `php.ini`: the editor turns
-debugging on for the processes it starts.
+debugging on for the processes it starts. Herd's PHP loads Xdebug only under
+`herd debug` and `herd coverage`, so the editor's debug, coverage, and profiled
+runs load Herd's copy themselves.
 
 1. Click the gutter to the left of a line number, or press ⌘F8, to set a
    breakpoint. Breakpoints are saved with the project.

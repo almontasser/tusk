@@ -10,6 +10,7 @@ import { monaco } from "./editor";
 import { projectValue, setProjectValue } from "./projectstate";
 import { splitter } from "./splitter";
 import { listNav } from "./listnav";
+import { herdXdebug, iniDirsEnv } from "./debug";
 import { showError, withProgress } from "./status";
 import { openTerminal, showPanelView } from "./terminal";
 
@@ -33,8 +34,13 @@ export async function profileEnv(dir: string, root: string): Promise<string[]> {
   // In a Laravel app, also trace the database connection, to list the queries with their SQL. The trace's name is
   // set in the .ini file: XDEBUG_CONFIG doesn't take trace_output_name.
   const connection = `${root}/vendor/laravel/framework/src/Illuminate/Database/Connection.php`;
-  if (!(await invoke<boolean>("path_exists", { path: connection }))) return ["XDEBUG_MODE=profile", ...env];
-  return ["XDEBUG_MODE=profile,trace", ...env, `PHP_INI_SCAN_DIR=${await scanDir()}:${await traceSettings()}`, `PHP_EDITOR_SQL_TRACE=${connection}`];
+  const laravel = await invoke<boolean>("path_exists", { path: connection });
+  return [
+    `XDEBUG_MODE=${laravel ? "profile,trace" : "profile"}`,
+    ...env,
+    ...(await iniDirsEnv([await herdXdebug(), laravel ? await traceSettings() : ""])),
+    ...(laravel ? [`PHP_EDITOR_SQL_TRACE=${connection}`] : []),
+  ];
 }
 
 /**
@@ -61,14 +67,6 @@ if (($file = getenv('PHP_EDITOR_SQL_TRACE')) && function_exists('xdebug_set_filt
   });
   return `${dir}/ini`;
 }
-
-let scanned: Promise<string> | undefined;
-/** PHP's own folders of extra .ini files, which setting PHP_INI_SCAN_DIR would otherwise replace. */
-const scanDir = () =>
-  (scanned ??= invoke<string>("run_capture", { cwd: "/", program: "php", args: ["--ini"], input: null })
-    .then((out) => out.match(/^Scan for additional \.ini files in: (.*)$/m)?.[1].trim() ?? "")
-    .then((dir) => (dir === "(none)" ? "" : dir))
-    .catch(() => ""));
 
 /** The query trace written with a profile: the same name, starting with "trace." and ending in ".xt". */
 const traceFor = (profile: string) => profile.replace(/\/cachegrind\.out\.([^/]*?)(\.gz)?$/, "/trace.$1.xt$2");
