@@ -271,5 +271,12 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 app.state::<lsp::LspState>().stop_all();
             }
+            // A restart after an update starts the app itself, not through the Dock or Finder, so macOS leaves
+            // it behind the app that was in front.
+            if let tauri::RunEvent::Ready = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    _ = window.set_focus();
+                }
+            }
         });
 }
