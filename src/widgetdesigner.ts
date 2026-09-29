@@ -545,6 +545,10 @@ class WidgetDesigner {
   private statsPreview(d: Doc, arr: ArrayNode | null): HTMLElement {
     const stats = arr ? readStats(arr, d.text) : [];
     const sample = [128, 42, 1234, 9, 560];
+    // Code the designer can't read still shows what it returns when it runs.
+    const ran = this.live && this.live.error === undefined ? this.live.stats : undefined;
+    if (!arr && ran)
+      return h("div", { class: "wd-stats" }, ...ran.map((s, i) => h("div", { class: "wd-stat-card" }, h("span", { class: "wd-stat-card-label" }, s.label ?? "Stat"), h("strong", {}, s.value ?? "…"), s.chart ? sparkline("#888", i, s.chart) : null)));
     return h(
       "div",
       { class: "wd-stats" },
