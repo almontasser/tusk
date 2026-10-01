@@ -28,10 +28,10 @@ const messageOf = (d: Diagnostic) => (typeof d.message === "string" ? d.message 
 export const isLibrary = (path: string) => /\/(vendor|node_modules)\//.test(path);
 
 /**
- * Pest's test closures run as methods of the project's test case, which the PHP server reads from tests/Pest.php, so
- * `$this->get()` checks. They can also set properties the class doesn't declare (`$this->user = …` in
- * `beforeEach()`), which Mago reports and then reads as `mixed`. PHPStan doesn't know the binding, so its problems
- * about `$this` lines are dropped.
+ * Pest's test closures run as methods of the project's test case and traits, which the PHP server reads from
+ * tests/Pest.php and the file's `uses()`, so `$this->get()` checks. The server also types the properties tests set on
+ * `$this` and doesn't report setting them. PHPStan doesn't know the binding, so its problems about `$this` lines are
+ * dropped.
  */
 const isPestFile = (path: string, text: string) => /\/tests\//.test(path) && /^\s*(it|test|describe|arch)\(/m.test(text);
 
@@ -48,9 +48,7 @@ function pestFalsePositive(text: string, lines: string[], lineStarts: number[], 
   const line = lines[d.range.start.line];
   if (line === undefined || !line.includes("$this")) return false;
   // PHPStan doesn't know the binding.
-  if (!/^mago/.test(d.source ?? "")) return /\$this|TestCase|`mixed`/.test(message);
-  const property = d.code === "non-existent-property" && message.match(/^Property `\$(\w+)`/);
-  return (!!property && new RegExp(`\\$this->${property[1]}\\b`).test(line)) || /`mixed`/.test(message);
+  return !/^mago/.test(d.source ?? "") && /\$this|TestCase|`mixed`/.test(message);
 }
 
 /**

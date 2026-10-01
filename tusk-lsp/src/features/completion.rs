@@ -223,7 +223,8 @@ fn members(ctx: &Ctx<'_>, word_start: u32, _word: &str, range: Range, is_static:
     for class in &classes {
         let Some(meta) = codebase.get_class_like(class.as_bytes()) else { continue };
         for (key, id) in meta.appearing_method_ids.iter() {
-            let Some(m) = codebase.get_method_by_id(id) else { continue };
+            // A trait's method appears as the using class's, and is declared by the trait.
+            let Some(m) = codebase.get_method_by_id(&codebase.get_declaring_method_identifier(id)) else { continue };
             let Some(mm) = m.method_metadata.as_ref() else { continue };
             // `->` lists every method (static ones can be called through an instance); `::` lists static
             // methods, and inside the class all of them, since `parent::method()` and `self::method()` work.
@@ -690,6 +691,10 @@ mod tests {
         let mut files = crate::testing::PEST.to_vec();
         files.push(("tests/Feature/HomeTest.php", "<?php\nit('loads', function () {\n    $this-><|>\n});\n"));
         assert_eq!(labels(&complete_at(&files)), vec!["assertTrue", "get"]);
+        // With the traits the file's `uses()` adds.
+        files.pop();
+        files.extend([("vendor/refresh.php", crate::testing::REFRESH_DATABASE), ("tests/Feature/HomeTest.php", "<?php\nuses(Illuminate\\Foundation\\Testing\\RefreshDatabase::class);\nit('loads', function () {\n    $this-><|>\n});\n")]);
+        assert_eq!(labels(&complete_at(&files)), vec!["assertTrue", "get", "refreshDatabase"]);
     }
 
     #[test]

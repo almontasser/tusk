@@ -395,17 +395,71 @@ mod tests {
     }
 
     #[test]
-    fn types_properties_pest_tests_set_on_this() {
+    fn binds_the_traits_pest_adds_to_this() {
+        let problems = |pest: &str, test: &str, name: &str| {
+            let mut files = crate::testing::PEST.to_vec();
+            files.retain(|(name, _)| *name != "tests/Pest.php");
+            files.extend([("tests/Pest.php", pest), (name, test), ("vendor/refresh.php", crate::testing::REFRESH_DATABASE)]);
+            let fx = Fixture::new(&files);
+            mago_codes(&fx, name)
+        };
+        let test = "<?php\nit('loads', function () {\n    $this->get('/');\n    $this->refreshDatabase();\n    $this->refreshDatabse();\n});\n";
+        let bound = vec![("non-existent-method".into(), 4)];
+        // Added by a Pest.php chain, Pest 1's `uses()`, or the file's own `uses()`: only the misspelled call is reported.
+        let chain = "<?php\npest()->extend(Tests\\TestCase::class)->use(Illuminate\\Foundation\\Testing\\RefreshDatabase::class)->in('Feature');\n";
+        assert_eq!(problems(chain, test, "tests/Feature/HomeTest.php"), bound);
+        let uses = "<?php\nuses(Tests\\TestCase::class, Illuminate\\Foundation\\Testing\\RefreshDatabase::class)->in('Feature');\n";
+        assert_eq!(problems(uses, test, "tests/Feature/HomeTest.php"), bound);
+        let own = test.replace("<?php\n", "<?php\nuses(Illuminate\\Foundation\\Testing\\RefreshDatabase::class);\n");
+        let own_bound = vec![("non-existent-method".into(), 5)];
+        assert_eq!(problems(crate::testing::PEST[2].1, &own, "tests/Feature/HomeTest.php"), own_bound);
+        // A trait without a test case runs in PHPUnit's, which has no `get()`.
+        let unbound = problems("<?php\n", &own, "tests/Feature/HomeTest.php");
+        assert_eq!(unbound.iter().map(|(_, l)| *l).collect::<Vec<_>>(), vec![3, 5], "{unbound:?}");
+        // Another folder doesn't get them.
+        assert_eq!(problems(chain, test, "tests/Unit/HomeTest.php").len(), 3);
+        // Editing Pest.php binds again.
+        let unit = chain.replace("'Feature'", "'Unit'");
         let mut files = crate::testing::PEST.to_vec();
-        let test = "<?php\nclass User { public function posts(): void {} }\nbeforeEach(function () {\n    $this->user = new User;\n});\nit('loads', function () {\n    $this->user->posts();\n    $this->user->psts();\n});\n";
-        files.push(("tests/Feature/HomeTest.php", test));
+        files.retain(|(name, _)| *name != "tests/Pest.php");
+        files.extend([("tests/Pest.php", unit.as_str()), ("tests/Feature/HomeTest.php", test), ("vendor/refresh.php", crate::testing::REFRESH_DATABASE)]);
         let fx = Fixture::new(&files);
-        let codes: Vec<(String, u32)> = php_problems(&fx.snap.index, &fx.doc("tests/Feature/HomeTest.php"))
+        assert_eq!(mago_codes(&fx, "tests/Feature/HomeTest.php").len(), 3);
+        fx.snap.index.write().update(&crate::testing::path("tests/Pest.php"), Some(chain.as_bytes().to_vec()));
+        assert_eq!(mago_codes(&fx, "tests/Feature/HomeTest.php"), bound);
+        fx.snap.index.write().update(&crate::testing::path("tests/Pest.php"), Some(unit.into_bytes()));
+        assert_eq!(mago_codes(&fx, "tests/Feature/HomeTest.php").len(), 3);
+    }
+
+    fn mago_codes(fx: &Fixture, name: &str) -> Vec<(String, u32)> {
+        php_problems(&fx.snap.index, &fx.doc(name))
             .into_iter()
             .filter_map(|d| match d.code { Some(NumberOrString::String(c)) if d.source.as_deref() == Some("mago") => Some((c, d.range.start.line)), _ => None })
-            .collect();
-        // Setting the property is still reported, and the editor hides it; reading it gives a `User`.
-        assert_eq!(codes, vec![("non-existent-property".into(), 3), ("non-existent-method".into(), 7)]);
+            .collect()
+    }
+
+    #[test]
+    fn types_properties_pest_tests_set_on_this() {
+        let codes = |pest: &str, test: &str| {
+            let mut files = crate::testing::PEST.to_vec();
+            files.retain(|(name, _)| *name != "tests/Pest.php");
+            files.extend([("tests/Pest.php", pest), ("tests/Feature/HomeTest.php", test)]);
+            mago_codes(&Fixture::new(&files), "tests/Feature/HomeTest.php")
+        };
+        let pest = crate::testing::PEST[2].1;
+        let user = "class User { public function posts(): void {} }\n";
+        let set = "beforeEach(function () {\n    $this->user = new User;\n});\n";
+        let read = "it('loads', function () {\n    $this->user->posts();\n    $this->user->psts();\n});\n";
+        // Setting the property isn't reported, as Pest allows it; reading it gives a `User`.
+        assert_eq!(codes(pest, &format!("<?php\n{user}{set}{read}")), vec![("non-existent-method".into(), 7)]);
+        // Whatever the order.
+        assert_eq!(codes(pest, &format!("<?php\n{user}{read}{set}")), vec![("non-existent-method".into(), 4)]);
+        // Set by a Pest.php chain's `beforeEach()` for the files it covers.
+        let chained = format!("<?php\n{user}pest()->extend(Tests\\TestCase::class)->beforeEach(function () {{\n    $this->user = new User;\n}})->in('Feature');\n");
+        assert_eq!(codes(&chained, &format!("<?php\n{read}")), vec![("non-existent-method".into(), 3)]);
+        // Never set: reading it is reported.
+        let unset = codes(pest, &format!("<?php\n{user}{read}"));
+        assert!(unset.contains(&("non-existent-property".into(), 3)), "{unset:?}");
     }
 
     #[test]

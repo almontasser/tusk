@@ -150,7 +150,7 @@ pub fn subtypes(snap: &Snapshot, params: TypeHierarchySubtypesParams) -> Result<
     let Target::Type { fqn } = target_of(&params.item.data)? else { return Ok(None) };
     let index = snap.index.read();
     let mut names = direct_subtypes(&index.codebase, &fqn);
-    names.retain(|n| !is_anonymous(n));
+    names.retain(|n| !is_anonymous(n) && !crate::index::is_pest_class(n));
     Ok(Some(names.iter().map(|n| type_item(snap, &index, n)).collect()))
 }
 

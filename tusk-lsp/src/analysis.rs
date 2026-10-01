@@ -2,7 +2,6 @@
 //! arena, so a request parses the file it needs, answers, and drops everything together.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -11,6 +10,7 @@ use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
 use mago_analyzer::artifacts::AnalysisArtifacts;
+use mago_analyzer::code::IssueCode;
 use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, HookContext, HookResult, PluginRegistry, Provider, ProviderMeta};
 use mago_analyzer::settings::Settings;
 use mago_codex::reference::SymbolReferences;
@@ -19,13 +19,13 @@ use mago_database::file::{File, FileType};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
-use mago_reporting::IssueCollection;
+use mago_reporting::{AnnotationKind, IssueCollection};
 use mago_span::HasSpan;
 use mago_syntax::cst::{Access, ClassLikeMemberSelector, Expression, Node, Program, Variable};
 use mago_syntax::parser::parse_file;
 use mago_word::Word;
 
-use crate::index::{Index, PHPUNIT_TEST_CASE, source_file};
+use crate::index::{Index, PHPUNIT_TEST_CASE, PestProps, source_file};
 
 /// Parses a file. If brackets are left open at its end, as when a class is being written at the end of a file,
 /// they're closed first, so the parser keeps the unfinished declaration. The index and every request parse the
@@ -49,13 +49,27 @@ static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
 });
 
 thread_local! {
-    /// While a Pest test file is analyzed: its test case, and the type of each property its tests set on `$this`.
-    static PEST: RefCell<Option<(Word, HashMap<Vec<u8>, TUnion>)>> = const { RefCell::new(None) };
+    /// While a file is analyzed for Pest, what the hook knows and learns.
+    static PEST: RefCell<Option<Pest>> = const { RefCell::new(None) };
+}
+
+#[derive(Default)]
+struct Pest {
+    /// The class the file's test closures run in, or `None` to leave closures as they are.
+    case: Option<Word>,
+    /// The type of each property tests set on `$this` that the test case doesn't declare.
+    props: PestProps,
+    /// Every `$this->name = …`: where it starts, the name, and the value's type.
+    sets: Vec<(u32, Vec<u8>, TUnion)>,
+    /// Properties the test case doesn't declare, read before anything above set them.
+    unset_reads: Vec<Vec<u8>>,
+    /// Where tests set a property the test case doesn't declare, which Pest allows and Mago reports.
+    dynamic: Vec<(u32, u32)>,
 }
 
 /// Binds a Pest test file's closures to the file's test case rather than PHPUnit's, and types the properties its
 /// tests set on `$this` that the test case doesn't declare from the values they're given. The analyzer reaches a
-/// file's closures in order, so what `beforeEach()` sets types the tests after it.
+/// file's closures in order, so what a closure sets types the closures after it; [`analyze_with`] covers the rest.
 struct PestHook;
 
 impl Provider for PestHook {
@@ -67,33 +81,57 @@ impl Provider for PestHook {
 
 impl ExpressionHook for PestHook {
     fn before_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<ExpressionHookResult> {
-        PEST.with_borrow(|pest| {
-            let Some((case, props)) = pest else { return Ok(ExpressionHookResult::Continue) };
+        PEST.with_borrow_mut(|pest| {
+            let Some(Pest { case: Some(case), props, unset_reads, .. }) = pest else { return Ok(ExpressionHookResult::Continue) };
             if let Expression::Closure(_) | Expression::ArrowFunction(_) = expr
                 && let Some(scope) = &mut context.artifacts_mut().closure_bind_scope
                 && scope.class_name.is_some_and(|c| c.as_str_lossy().eq_ignore_ascii_case(PHPUNIT_TEST_CASE))
             {
                 scope.class_name = Some(*case);
             }
-            match this_property(expr).and_then(|name| props.get(name)) {
-                Some(t) if in_class(context, *case) => Ok(ExpressionHookResult::SkipWithType(t.clone())),
-                _ => Ok(ExpressionHookResult::Continue),
+            let Some(name) = this_property(expr).filter(|_| in_class(context, *case)) else { return Ok(ExpressionHookResult::Continue) };
+            match props.get(name) {
+                Some(t) => Ok(ExpressionHookResult::SkipWithType(t.clone())),
+                None => {
+                    if !context.codebase().property_exists(case.as_bytes(), &[b"$", name].concat()) {
+                        unset_reads.push(name.to_vec());
+                    }
+                    Ok(ExpressionHookResult::Continue)
+                }
             }
         })
     }
 
     fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
         let Expression::Assignment(a) = expr else { return Ok(()) };
-        let Some(name) = this_property(a.lhs).filter(|_| a.operator.is_assign()) else { return Ok(()) };
+        let Some(name) = this_property(a.lhs) else { return Ok(()) };
         PEST.with_borrow_mut(|pest| {
-            let Some((case, props)) = pest else { return };
-            let declared = context.codebase().property_exists(case.as_bytes(), &[b"$", name].concat());
-            if let (true, false, Some(t)) = (in_class(context, *case), declared, context.get_expression_type(a.rhs)) {
-                props.insert(name.to_vec(), t.clone());
+            let Some(pest) = pest else { return };
+            let t = context.get_expression_type(a.rhs).filter(|_| a.operator.is_assign());
+            if let Some(t) = t {
+                pest.sets.push((a.span().start.offset, name.to_vec(), t.clone()));
+            }
+            let Some(case) = pest.case.filter(|c| in_class(context, *c)) else { return };
+            if !context.codebase().property_exists(case.as_bytes(), &[b"$", name].concat()) {
+                pest.dynamic.push((a.lhs.span().start.offset, a.lhs.span().end.offset));
+                if let Some(t) = t {
+                    pest.props.insert(name.to_vec(), t.clone());
+                }
             }
         });
         Ok(())
     }
+}
+
+/// Every `$this->name = …` in `parsed`: where it starts, the name, and the value's type. Pest's `tests/Pest.php` is
+/// analyzed with this for what its `beforeEach()` hooks set.
+pub fn this_assignments(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index) -> Vec<(u32, Vec<u8>, TUnion)> {
+    if too_complex(parsed.program) {
+        return vec![];
+    }
+    PEST.set(Some(Pest::default()));
+    run(parsed, arena, index, settings(index.config.php_version));
+    PEST.take().map(|p| p.sets).unwrap_or_default()
 }
 
 fn in_class(context: &HookContext<'_, '_>, class: Word) -> bool {
@@ -238,13 +276,48 @@ pub fn analyze(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index) -> Analys
 }
 
 pub fn analyze_with(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings) -> Analysis {
-    let mut result = AnalysisResult::new(SymbolReferences::new());
     if too_complex(parsed.program) {
-        return Analysis { artifacts: Default::default(), issues: result.issues };
+        return Analysis { artifacts: Default::default(), issues: Default::default() };
     }
-    PEST.set(index.pest_case(parsed).map(|case| (case, HashMap::new())));
+    match index.pest_binding(parsed) {
+        Some(binding) => analyze_pest(parsed, arena, index, settings, binding),
+        None => {
+            PEST.set(None);
+            run(parsed, arena, index, settings)
+        }
+    }
+}
+
+fn run(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings) -> Analysis {
+    let mut result = AnalysisResult::new(SymbolReferences::new());
     let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, &index.codebase, &PLUGINS, settings);
     let artifacts = analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default();
-    PEST.set(None);
     Analysis { artifacts, issues: result.issues }
+}
+
+fn analyze_pest(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings, (case, seed, hooks): (Word, PestProps, Vec<(u32, u32)>)) -> Analysis {
+    let start = |props| PEST.set(Some(Pest { case: Some(case), props, ..Default::default() }));
+    start(seed.clone());
+    let mut analysis = run(parsed, arena, index, settings.clone());
+    let mut pest = PEST.take().unwrap_or_default();
+    // A test that reads a property before the file's `beforeEach()` sets it, as when the hook comes later or the
+    // property is read in a hook above it: analyzed again with what the file's hooks set.
+    let late: PestProps = pest
+        .sets
+        .into_iter()
+        .filter(|(at, name, _)| hooks.iter().any(|(s, e)| s <= at && at < e) && pest.unset_reads.contains(name))
+        .map(|(_, name, t)| (name, t))
+        .collect();
+    if !late.is_empty() {
+        start(seed.into_iter().chain(late).collect());
+        analysis = run(parsed, arena, index, settings);
+        pest = PEST.take().unwrap_or_default();
+    }
+    // Setting a property the test case doesn't declare is how Pest tests share values.
+    let issues = analysis.issues.into_iter().filter(|i| {
+        let dynamic = i.code.as_deref() == Some(IssueCode::NonExistentProperty.as_str());
+        let at = i.annotations.iter().find(|a| a.kind == AnnotationKind::Primary).map(|a| a.span.start.offset);
+        !(dynamic && at.is_some_and(|at| pest.dynamic.iter().any(|(s, e)| *s <= at && at < *e)))
+    });
+    Analysis { artifacts: analysis.artifacts, issues: issues.collect() }
 }

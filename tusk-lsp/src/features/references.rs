@@ -247,6 +247,17 @@ mod tests {
     }
 
     #[test]
+    fn finds_trait_methods_pest_tests_call_on_this() {
+        let mut files = crate::testing::PEST.to_vec();
+        files.retain(|(name, _)| *name != "tests/Pest.php");
+        let pest = "<?php\npest()->extend(Tests\\TestCase::class)->use(Illuminate\\Foundation\\Testing\\RefreshDatabase::class)->in('Feature');\n";
+        let refresh = crate::testing::REFRESH_DATABASE.replace("function refreshDatabase", "function refresh<|>Database");
+        files.extend([("tests/Pest.php", pest), ("vendor/refresh.php", &refresh), ("tests/Feature/HomeTest.php", "<?php\nit('loads', function () {\n    $this->refreshDatabase();\n});\n")]);
+        let fx = Fixture::new(&files);
+        assert_eq!(refs(&fx, false), vec![("HomeTest.php".into(), 2, 11)]);
+    }
+
+    #[test]
     fn finds_classes_through_aliases_and_hints() {
         let fx = Fixture::new(&[
             ("app/Models.php", MODELS),

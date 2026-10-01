@@ -7,6 +7,7 @@ use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 
 use super::{Ctx, with_ctx};
+use crate::index::is_pest_class;
 use crate::locate::{Place, declaration, variable_spans};
 use crate::server::Snapshot;
 use crate::symbol::{Found, Symbol};
@@ -154,7 +155,7 @@ pub fn overrides(snap: &Snapshot, params: serde_json::Value) -> Result<serde_jso
                         codebase.get_class_like(id.get_class_name().as_bytes()).is_some_and(|c| c.kind == SymbolKind::Interface)
                             || codebase.get_method_by_id(id).is_some_and(|m| m.flags.is_abstract())
                     });
-                let overridden = codebase.get_all_descendants(class.as_bytes()).iter().any(|d| {
+                let overridden = descendants(codebase, &class).iter().any(|d| {
                     codebase.get_class_like(d.as_bytes()).is_some_and(|c| c.methods.iter().any(|m| m.as_str_lossy() == lower))
                 });
                 let supers = ids
@@ -169,7 +170,7 @@ pub fn overrides(snap: &Snapshot, params: serde_json::Value) -> Result<serde_jso
                 let supers = parents
                     .filter_map(|p| declaration(&Symbol::Class(p.as_str_lossy().into_owned()), codebase).map(|at| (short(&p.as_str_lossy()), at)))
                     .collect();
-                (supers, false, interface, !codebase.get_all_descendants(class.as_bytes()).is_empty())
+                (supers, false, interface, !descendants(codebase, &class).is_empty())
             };
             out.push(Member {
                 kind: if method { "method" } else { "class" },
@@ -278,7 +279,7 @@ pub fn implementation(snap: &Snapshot, params: GotoImplementationParams) -> Resu
 
 pub fn descendants(codebase: &CodebaseMetadata, class: &str) -> Vec<String> {
     let mut out: Vec<String> =
-        codebase.get_all_descendants(class.as_bytes()).iter().map(|d| display_class(&d.as_str_lossy(), codebase)).collect();
+        codebase.get_all_descendants(class.as_bytes()).iter().map(|d| display_class(&d.as_str_lossy(), codebase)).filter(|d| !is_pest_class(d)).collect();
     out.sort();
     out
 }
@@ -319,6 +320,15 @@ mod tests {
     }
 
     const MODELS: &str = "<?php\nnamespace App;\nclass Base {\n    public function save(): static { return $this; }\n}\nclass User extends Base {\n    public string $name = '';\n    const ROLE = 'x';\n}\ninterface Named { public function name(): string; }\nclass Admin extends User implements Named { public function name(): string { return ''; } }\n";
+
+    #[test]
+    fn goes_to_trait_methods_pest_tests_call_on_this() {
+        let mut files = crate::testing::PEST.to_vec();
+        files.retain(|(name, _)| *name != "tests/Pest.php");
+        let pest = "<?php\npest()->extend(Tests\\TestCase::class)->use(Illuminate\\Foundation\\Testing\\RefreshDatabase::class)->in('Feature');\n";
+        files.extend([("tests/Pest.php", pest), ("vendor/refresh.php", crate::testing::REFRESH_DATABASE), ("tests/Feature/HomeTest.php", "<?php\nit('loads', function () {\n    $this->refresh<|>Database();\n});\n")]);
+        assert_eq!(goto(&files), vec![("refresh.php".into(), range(2, 40, 2, 55))]);
+    }
 
     #[test]
     fn goes_to_classes_members_and_functions_in_other_files() {

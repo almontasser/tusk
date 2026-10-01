@@ -21,6 +21,9 @@ pub const PEST: &[(&str, &str)] = &[
     ("tests/Pest.php", "<?php\nuse Tests\\TestCase;\npest()->extend(TestCase::class)->in('Feature');\n"),
 ];
 
+/// Laravel's trait for tests that use the database, as a library file.
+pub const REFRESH_DATABASE: &str = "<?php\nnamespace Illuminate\\Foundation\\Testing;\ntrait RefreshDatabase { public function refreshDatabase(): void {} }\n";
+
 pub struct Fixture {
     pub snap: Snapshot,
     /// The file and position of the cursor marker, if a file had one.

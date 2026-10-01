@@ -883,43 +883,70 @@ and `afterEach()` declare PHPUnit's `TestCase` as the closure's `$this`
 index (`bind_pest_closures` in `tusk-lsp/src/index.rs`) sets those parameters'
 closure type to PHPUnit's `TestCase`, for every Pest version.
 
-The index reads Pest.php's chains when it's built and again when Pest.php
-changes (`pest_bindings`): the classes and traits each chain names, with their
-imports resolved, and its `in()` targets as globs relative to `tests/`.
-`__DIR__` covers all of `tests/`. `Index::pest_case` picks a test file's test
-case: the first class that extends PHPUnit's `TestCase` among those its own
-`uses()` names and those of the chains whose targets match the file or a
-folder above it. A file nothing binds keeps PHPUnit's `TestCase`, as in Pest.
+The index reads Pest.php's chains after it populates the codebase, when it's
+built and again when Pest.php changes (`pest_bindings`): the classes and traits
+each chain names, with their imports resolved, its `in()` targets as globs
+relative to `tests/`, and the types of the properties its `beforeEach()` hooks
+set on `$this`. `__DIR__` covers all of `tests/`. When it scans a file under
+`tests/`, the index also keeps the classes and traits that the file's own
+`uses()` names (`pest_own`). `Index::pest_combo` picks a test file's test case
+and traits: the first class that extends PHPUnit's `TestCase`, and every trait,
+among those its own `uses()` names and those of the chains whose targets match
+the file or a folder above it. A file nothing binds keeps PHPUnit's `TestCase`,
+as in Pest; a file bound to traits alone gets PHPUnit's `TestCase` with them.
+
+Traits need a class that uses them. After each build and update,
+`Index::sync_pest_classes` collects the pairs of test case and traits that the
+project's test files have. When they change, it scans one generated source with
+a class per pair, such as `namespace Tests { class TestCase＆RefreshDatabase
+extends \Tests\TestCase { use \Illuminate\Foundation\Testing\RefreshDatabase; } }`,
+replaces the previous ones in the codebase, and populates them. A class that
+uses a trait is among the trait's descendants, so editing the test case or a
+trait repopulates them like any subclass. The name joins the parts with `＆`
+(U+FF06), which PHP allows in a name and no project declares, so Mago's
+messages read `Tests\TestCase＆RefreshDatabase`. The classes belong to no
+indexed file, so names, symbols, and the project's files leave them out, and
+`is_pest_class` drops them from subclasses in navigation and the type
+hierarchy. A `uses()` typed in a test file binds its traits once the index has
+the edit; until then, the analysis binds the test case alone.
 
 Mago reads Pest's functions from the one codebase every file shares, so the
-analysis binds each file itself. Before it analyzes a file, `analyze_with` in
-`tusk-lsp/src/analysis.rs` puts the file's test case in a thread-local. An
-expression hook (`PestHook`, registered with Mago's analyzer plugins) runs
-before each closure and replaces a `$this` bound to PHPUnit's `TestCase` with
-it. So `$this->get()` completes, hovers, and checks in a Feature test,
-`$this->gte()` is reported, and a Unit test bound to PHPUnit's `TestCase`
-can't call the Feature test case's methods.
+analysis binds each file itself. Before it analyzes a test file, `analyze_with`
+in `tusk-lsp/src/analysis.rs` takes the file's binding from
+`Index::pest_binding` and puts it in a thread-local: the class its closures run
+in (the class made for its traits, or its test case), and the property types
+of the Pest.php hooks that cover it. An expression hook (`PestHook`, registered
+with Mago's analyzer plugins) runs before each closure and replaces a `$this`
+bound to PHPUnit's `TestCase` with that class. So `$this->get()` and
+`$this->refreshDatabase()` complete, hover, go to their declaration, and check
+in a Feature test, `$this->gte()` is reported, and a Unit test bound to
+PHPUnit's `TestCase` can't call the Feature test case's methods. Completion
+looks up a trait's method by its declaring trait, since it appears as the
+using class's.
 
 The same hook types the properties a test sets on `$this`. After an
 assignment to `$this->name` in a bound closure, it records the assigned value's
 type, unless the test case declares the property. Before a read of
 `$this->name`, it gives the expression that type. The analyzer reaches the
-file's closures in order, so what `beforeEach()` sets types the tests after it.
-A property set in another file, or read before the line that sets it, stays
-`mixed`. The hook doesn't bind traits that a chain adds, such as
-`RefreshDatabase`: that needs a class for each combination of test case and
-traits in the codebase.
+file's closures in order, so what a closure sets types the closures after it.
+Reads start from what Pest.php's hooks set for the file. When a read comes
+before the line that sets it and the file's own `beforeEach()` sets the
+property, as when the hook comes after the tests, the file is analyzed a second
+time with the hooks' types from the start. Pest.php's hooks are analyzed once,
+when Pest.php is read (`this_assignments`): `UsesCall::beforeEach()` doesn't
+bind `$this`, so only the assigned values' types are kept, by where each
+assignment is. They're read again only when Pest.php changes, so a type that
+depends on another file can be stale until then.
 
-Mago still reports setting a property the class doesn't declare
-(`$this->user = …` in `beforeEach()`). In files under `tests/` that call
-`it()`, `test()`, `describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop Mago's
-`non-existent-property` for such a property on `$this`, and issues about
-`mixed` on lines that use `$this`. PHPStan doesn't know the binding, so its
-problems mentioning `$this`, `TestCase`, or `mixed` on those lines are
-dropped too. The filters also drop Mago's issues about Pest's own classes,
-which answer through magic (`->not`, higher-order expectations such as
-`->name->toBe()`), and calls on null along an `expect()` chain: `expect()`
-returns an `Expectation<TValue|null>`.
+Pest lets tests set properties the test case doesn't declare, so `analyze_with`
+drops Mago's `non-existent-property` at each such assignment the hook saw. A
+read of a property that nothing sets is still reported. PHPStan doesn't know
+the binding, so in files under `tests/` that call `it()`, `test()`,
+`describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop its problems
+mentioning `$this`, `TestCase`, or `mixed` on lines that use `$this`. The filters
+also drop Mago's issues about Pest's own classes, which answer through magic
+(`->not`, higher-order expectations such as `->name->toBe()`), and calls on null
+along an `expect()` chain: `expect()` returns an `Expectation<TValue|null>`.
 
 ### Questions from servers
 
@@ -7044,6 +7071,21 @@ gives its folder, or its own `uses()` names. The same hook records the types of
 properties a test assigns on `$this` and gives them to later reads in the file.
 Traits stay unbound: binding them means adding a class per combination of test
 case and traits to the codebase.
+
+### 2026-10-01: Pest's traits are bound through a class made per test case and traits
+
+Traits that Pest.php or a file's `uses()` adds, such as `RefreshDatabase`,
+weren't bound, so their methods on `$this` were reported. Resolving `$this`'s
+members against the traits in the analysis hook would leave completion, hover,
+and navigation, which read the codebase, without them. The index instead adds a
+class for each pair of test case and traits that the test files have, and the
+hook binds a file's closures to it, so every feature sees the trait's methods
+and goes to the trait. Only the pairs in use are made, and only when they
+change. Pest.php's `beforeEach()` hooks are analyzed with the index for the
+types they assign, and a file whose tests read a property before its own
+`beforeEach()` sets it is analyzed again with those types. With properties
+typed, the server stops reporting a test setting one, and the editor's filters
+that hid `mixed` problems and property problems on `$this` lines are gone.
 
 ### 2026-10-01: Includes type a view's variables, and `@if` narrows
 

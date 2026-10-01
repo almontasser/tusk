@@ -141,8 +141,13 @@ pub struct Index {
     /// What each file declares, for every project and library file.
     declared: HashMap<FileId, Vec<Declared>>,
     excluded: GlobSet,
-    /// What `tests/Pest.php` binds with `in()`: each chain's classes and traits, and the files and folders it covers.
-    pest_uses: Vec<(Vec<String>, GlobSet)>,
+    /// What `tests/Pest.php` binds with `in()`: each chain's classes and traits, the files and folders it covers,
+    /// and the type of each property its `beforeEach()` hooks set on `$this`.
+    pest_uses: Vec<(Vec<String>, GlobSet, PestProps)>,
+    /// The classes and traits each test file binds itself to with its own `uses()`.
+    pest_own: HashMap<FileId, Vec<String>>,
+    /// The classes made for the test files bound to traits, by test case and traits; see [`Index::sync_pest_classes`].
+    pest_classes: Vec<((String, Vec<String>), Word)>,
     /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
     /// what's found with the index can be kept until it changes.
     pub generation: u64,
@@ -182,10 +187,14 @@ pub fn scan_pool() -> &'static rayon::ThreadPool {
     POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("tusk-scan-{i}")).stack_size(64 << 20).build().expect("the scan pool starts"))
 }
 
-fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>) {
+/// With `uses`, a test file's own Pest bindings too: the classes and traits its `uses()` names.
+fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>, Vec<String>) {
     let (file, program) = crate::analysis::parse_balanced(arena, path, file_type, contents);
     let names = NameResolver::new(arena).resolve(program);
     let meta = scan_program(arena, &file, program, &names, php_version);
+    let parsed = Parsed { file, program, names };
+    let names = &parsed.names;
+    let pest = if uses && path.components().any(|c| c.as_os_str() == "tests") { own_pest_uses(&parsed) } else { vec![] };
     let mut used = vec![];
     if uses {
         for (_, _, name, _) in names.iter() {
@@ -203,24 +212,38 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
             }
         }
     }
-    (meta, used)
+    (meta, used, pest)
 }
 
 /// Pest's configuration file, relative to the project.
 const PEST_FILE: &str = "tests/Pest.php";
 
+/// The type of each property Pest tests set on `$this` that their test case doesn't declare, by name.
+pub type PestProps = HashMap<Vec<u8>, TUnion>;
+
+/// Whether a class is one the index made for Pest tests bound to traits, which no file declares, so navigation
+/// leaves it out of a class's subclasses.
+pub fn is_pest_class(name: &str) -> bool {
+    name.contains(PEST_CLASS_JOIN)
+}
+
+/// What joins the test case and traits in the name of a class made for Pest tests.
+const PEST_CLASS_JOIN: &str = "＆";
+
 /// The test case Pest runs a file's tests in when nothing binds the file to another.
 pub const PHPUNIT_TEST_CASE: &str = "PHPUnit\\Framework\\TestCase";
 
-/// What each `uses()` or `pest()->extend()` chain in a Pest file binds: the classes and traits it names, fully
-/// qualified, and the targets its `in()` gives, relative to `tests/`. A chain without `in()` binds its own file.
-fn pest_uses(parsed: &Parsed<'_>) -> Vec<(Vec<String>, Vec<String>)> {
+/// What each `uses()`, `pest()->extend()`, or `beforeEach()` chain in a Pest file binds: the classes and traits it
+/// names, fully qualified, the targets its `in()` gives, relative to `tests/`, and the spans of its `beforeEach()`
+/// hooks. A chain without `in()` binds its own file.
+#[allow(clippy::type_complexity)]
+fn pest_uses(parsed: &Parsed<'_>) -> Vec<(Vec<String>, Vec<String>, Vec<(u32, u32)>)> {
     use mago_span::HasSpan;
     use mago_syntax::cst::{Access, Argument, Call, ClassLikeConstantSelector, ClassLikeMemberSelector, Expression, Literal, MagicConstant, Node};
     let mut out = vec![];
     crate::locate::walk(parsed, |node, _| {
         let Node::ExpressionStatement(s) = node else { return };
-        let (mut names, mut targets) = (vec![], vec![]);
+        let (mut names, mut targets, mut hooks) = (vec![], vec![], vec![]);
         let mut e = s.expression;
         loop {
             let (name, args, object) = match e {
@@ -244,31 +267,41 @@ fn pest_uses(parsed: &Parsed<'_>) -> Vec<(Vec<String>, Vec<String>)> {
                     }
                     (b"in", Expression::Literal(Literal::String(s))) => targets.extend(s.value.map(|v| String::from_utf8_lossy(v).into_owned())),
                     (b"in", Expression::MagicConstant(MagicConstant::Directory(_))) => targets.push(".".into()),
+                    (b"beforeeach", _) => hooks.push((arg.span().start.offset, arg.span().end.offset)),
                     _ => {}
                 }
             }
             match object {
                 Some(object) => e = object,
-                None if matches!(name.as_slice(), b"uses" | b"pest") => break,
+                None if matches!(name.as_slice(), b"uses" | b"pest" | b"beforeeach") => break,
                 None => return,
             }
         }
-        if !names.is_empty() {
-            out.push((names, targets));
+        if !names.is_empty() || !hooks.is_empty() {
+            out.push((names, targets, hooks));
         }
     });
     out
 }
 
+/// The classes and traits a test file binds itself to: those of its chains without `in()`.
+fn own_pest_uses(parsed: &Parsed<'_>) -> Vec<String> {
+    pest_uses(parsed).into_iter().filter(|(_, targets, _)| targets.is_empty()).flat_map(|(names, ..)| names).collect()
+}
+
 /// Pest.php's chains that have `in()`, with their targets as globs: Pest expands them with PHP's `glob()` from
-/// `tests/`, and a folder covers the files under it.
-fn pest_bindings(contents: &[u8]) -> Vec<(Vec<String>, GlobSet)> {
+/// `tests/`, and a folder covers the files under it. Each comes with the type of each property its `beforeEach()`
+/// hooks set on `$this`, which needs the populated index.
+fn pest_bindings(index: &Index, contents: &[u8]) -> Vec<(Vec<String>, GlobSet, PestProps)> {
     let arena = LocalArena::new();
-    let parsed = Parsed::new(&arena, Path::new(PEST_FILE), &String::from_utf8_lossy(contents));
-    pest_uses(&parsed)
+    let parsed = Parsed::new(&arena, &index.config.root.join(PEST_FILE), &String::from_utf8_lossy(contents));
+    let chains = pest_uses(&parsed);
+    let sets = if chains.iter().any(|(_, _, hooks)| !hooks.is_empty()) { crate::analysis::this_assignments(&parsed, &arena, index) } else { vec![] };
+    chains
         .into_iter()
-        .filter(|(_, targets)| !targets.is_empty())
-        .map(|(names, targets)| {
+        .filter(|(_, targets, _)| !targets.is_empty())
+        .map(|(names, targets, hooks)| {
+            let props = sets.iter().filter(|(at, ..)| hooks.iter().any(|(s, e)| s <= at && at < e)).map(|(_, n, t)| (n.clone(), t.clone())).collect();
             let mut set = GlobSetBuilder::new();
             for target in &targets {
                 let target = target.trim_start_matches("./").trim_matches('/');
@@ -276,7 +309,7 @@ fn pest_bindings(contents: &[u8]) -> Vec<(Vec<String>, GlobSet)> {
                     set.add(glob);
                 }
             }
-            (names, set.build().unwrap_or_else(|_| GlobSet::empty()))
+            (names, set.build().unwrap_or_else(|_| GlobSet::empty()), props)
         })
         .collect()
 }
@@ -394,6 +427,8 @@ impl Index {
             declared: HashMap::new(),
             excluded,
             pest_uses: vec![],
+            pest_own: HashMap::new(),
+            pest_classes: vec![],
             generation: next_generation(),
         }
     }
@@ -487,7 +522,7 @@ impl Index {
                         return Some((path.clone(), file_type, declared.clone(), stamp));
                     }
                     let contents = read(path)?;
-                    let (meta, _) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
+                    let (meta, ..) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
                     tick();
                     Some((path.clone(), file_type, declarations_of(&meta), stamp))
                 })
@@ -512,17 +547,20 @@ impl Index {
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
-            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>)> = scan_pool().install(|| chunk
+            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>, Vec<String>)> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
-                    let (meta, used) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
+                    let (meta, used, pest) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
                     tick();
-                    Some((path.clone(), meta, used))
+                    Some((path.clone(), meta, used, pest))
                 })
                 .collect());
-            for (path, meta, used) in scans {
+            for (path, meta, used, pest) in scans {
                 wanted.extend(used);
+                if !pest.is_empty() {
+                    self.pest_own.insert(file_id(&path), pest);
+                }
                 wanted.extend(dependencies(&meta));
                 self.merge(path, FileType::Host, meta);
             }
@@ -530,13 +568,14 @@ impl Index {
         if self.config.load_all {
             wanted.extend(self.library_names.keys().cloned());
         }
-        self.pest_uses = read(&self.config.root.join(PEST_FILE)).map(|c| pest_bindings(&c)).unwrap_or_default();
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
         break_inheritance_cycles(&mut self.codebase, None);
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
         self.bind_pest_closures();
+        self.pest_uses = read(&self.config.root.join(PEST_FILE)).map(|c| pest_bindings(self, &c)).unwrap_or_default();
+        self.sync_pest_classes();
         self.generation = next_generation();
         progress(total, total);
     }
@@ -594,7 +633,7 @@ impl Index {
                 .into_par_iter()
                 .filter_map(|(path, file_type)| {
                     let contents = read(&path)?;
-                    let (meta, _) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
+                    let (meta, ..) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
                     Some((path, file_type, meta))
                 })
                 .collect());
@@ -620,6 +659,7 @@ impl Index {
         let mut dirty = WordSet::default();
         let mut scans = vec![];
         let mut wanted: Vec<String> = vec![];
+        let mut pest_file = None;
         for (path, contents) in changes {
             let id = file_id(&path);
             if let Some(old) = self.files.remove(&id) {
@@ -634,8 +674,9 @@ impl Index {
                 self.forget_library_file(id);
             }
             self.declared.remove(&id);
+            self.pest_own.remove(&id);
             if path == self.config.root.join(PEST_FILE) {
-                self.pest_uses = contents.as_deref().map(pest_bindings).unwrap_or_default();
+                pest_file = Some(contents.clone());
             }
             let Some(contents) = contents else { continue };
             if !self.includes(&path) {
@@ -643,7 +684,10 @@ impl Index {
             }
             let file_type = self.file_type(&path);
             let project = file_type == FileType::Host;
-            let (meta, used) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
+            let (meta, used, pest) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
+            if !pest.is_empty() {
+                self.pest_own.insert(id, pest);
+            }
             // A library file that changes is one the editor has open, or one changed on disk while loaded; both
             // are loaded in full, so navigating inside an open library file works.
             if !project {
@@ -661,6 +705,13 @@ impl Index {
         // Names the edit started to use, from the disk: library files an editor has open are loaded already.
         self.ensure_loaded(wanted, &|p: &Path| std::fs::read(p).ok());
         self.repopulate(dirty);
+        // Pest.php's hooks are typed against the updated index.
+        // ponytail: only when Pest.php changes, so a hook's type that depends on another file can go stale; type them
+        // after every update if that bites.
+        if let Some(contents) = pest_file {
+            self.pest_uses = contents.map(|c| pest_bindings(self, &c)).unwrap_or_default();
+        }
+        self.sync_pest_classes();
     }
 
     /// Moves a file's scan into the index, remembering what it declared.
@@ -723,7 +774,7 @@ impl Index {
 
     /// Pest runs each test closure as a method of a test case. Its functions declare PHPUnit's `TestCase` as the
     /// closures' `$this` (Pest 2 declares `TestCall`), so this sets PHPUnit's `TestCase` for every version. The
-    /// analysis then binds a test file's closures to its own test case, from [`Index::pest_case`].
+    /// analysis then binds a test file's closures to its own test case, from [`Index::pest_binding`].
     fn bind_pest_closures(&mut self) {
         let Some(case) = self.codebase.get_class_like(PHPUNIT_TEST_CASE.as_bytes()).map(|c| c.original_name) else { return };
         // Pest's functions whose closure Pest binds; `describe()` and `beforeAll()` closures run unbound.
@@ -735,17 +786,88 @@ impl Index {
         }
     }
 
-    /// The test case Pest runs a test file's closures in: the first class that extends PHPUnit's `TestCase` among
-    /// those the file's own `uses()` names and those of the `tests/Pest.php` chains whose `in()` covers the file.
-    /// `None` for PHPUnit's own, which Pest uses when nothing binds the file.
-    // ponytail: traits the chains add, such as `RefreshDatabase`, aren't bound, so calling their methods on `$this`
-    // is reported. Binding them needs a class per combination of test case and traits added to the codebase.
-    pub fn pest_case(&self, parsed: &Parsed<'_>) -> Option<Word> {
-        let rel = parsed.file.path.as_deref()?.strip_prefix(self.config.root.join("tests")).ok()?;
-        let own = pest_uses(parsed).into_iter().filter(|(_, targets)| targets.is_empty()).flat_map(|(names, _)| names);
-        let bound = self.pest_uses.iter().filter(|(_, set)| rel.ancestors().any(|a| set.is_match(a))).flat_map(|(names, _)| names.iter().cloned());
-        let case = own.chain(bound).find(|n| self.codebase.class_extends(n.as_bytes(), PHPUNIT_TEST_CASE.as_bytes()))?;
-        self.codebase.get_class_like(case.as_bytes()).map(|c| c.original_name)
+    /// The test case and traits Pest runs a test file's closures with: the first class that extends PHPUnit's
+    /// `TestCase` and every trait, among those the file's own `uses()` names (`own`) and those of the
+    /// `tests/Pest.php` chains whose `in()` covers the file. PHPUnit's `TestCase` when only traits are named, and
+    /// `None` when nothing binds the file or it isn't under `tests/`.
+    fn pest_combo(&self, path: &Path, own: &[String]) -> Option<(String, Vec<String>)> {
+        let rel = path.strip_prefix(self.config.root.join("tests")).ok()?;
+        let bound = self.pest_uses.iter().filter(|(_, set, _)| rel.ancestors().any(|a| set.is_match(a))).flat_map(|(names, ..)| names);
+        let names: Vec<&String> = own.iter().chain(bound).collect();
+        let original = |n: &str| self.codebase.get_class_like(n.as_bytes()).map(|c| c.original_name.as_str_lossy().into_owned());
+        let case = names.iter().find(|n| self.codebase.class_extends(n.as_bytes(), PHPUNIT_TEST_CASE.as_bytes())).and_then(|n| original(n));
+        let mut traits: Vec<String> = names.iter().filter(|n| self.codebase.trait_exists(n.as_bytes())).filter_map(|n| original(n)).collect();
+        traits.sort();
+        traits.dedup();
+        match case {
+            Some(case) => Some((case, traits)),
+            None if !traits.is_empty() => Some((original(PHPUNIT_TEST_CASE)?, traits)),
+            None => None,
+        }
+    }
+
+    /// How the analysis binds a Pest test file: the class its closures run in, the type of each property the
+    /// `beforeEach()` hooks of the Pest.php chains that cover it set on `$this`, and the spans of its own hooks.
+    /// `None` for a file nothing binds, which runs in PHPUnit's `TestCase`.
+    #[allow(clippy::type_complexity)]
+    pub fn pest_binding(&self, parsed: &Parsed<'_>) -> Option<(Word, PestProps, Vec<(u32, u32)>)> {
+        let path = parsed.file.path.as_deref()?;
+        let rel = path.strip_prefix(self.config.root.join("tests")).ok()?;
+        let chains = pest_uses(parsed);
+        let own: Vec<String> = chains.iter().filter(|(_, targets, _)| targets.is_empty()).flat_map(|(names, ..)| names.iter().cloned()).collect();
+        let combo = self.pest_combo(path, &own)?;
+        // A class made for the traits, or until the index catches up with a new `uses()`, the test case alone.
+        let made = self.pest_classes.iter().find(|(k, _)| *k == combo).map(|(_, name)| *name);
+        let case = made.or_else(|| self.codebase.get_class_like(combo.0.as_bytes()).map(|c| c.original_name))?;
+        let props = self.pest_uses.iter().filter(|(_, set, _)| rel.ancestors().any(|a| set.is_match(a))).flat_map(|(.., props)| props.clone()).collect();
+        let hooks = chains.into_iter().filter(|(_, targets, _)| targets.is_empty()).flat_map(|(.., hooks)| hooks).collect();
+        Some((case, props, hooks))
+    }
+
+    /// Pest runs a test file's closures in a class that extends its test case and uses the traits Pest.php or the
+    /// file's `uses()` add, such as `RefreshDatabase`. For each such pair of test case and traits the project's test
+    /// files have, this adds a class that does the same, named for what it combines, such as
+    /// `Tests\TestCase＆RefreshDatabase`, so `$this` has the traits' methods. The classes come from no file the
+    /// index lists, so names, symbols, and the project's files leave them out.
+    fn sync_pest_classes(&mut self) {
+        let tests = self.config.root.join("tests");
+        let mut wanted: Vec<(String, Vec<String>)> = self
+            .files
+            .iter()
+            .filter(|(_, f)| f.file_type == FileType::Host && f.path.starts_with(&tests))
+            .filter_map(|(id, f)| self.pest_combo(&f.path, self.pest_own.get(id).map_or(&[], Vec::as_slice)))
+            .filter(|(_, traits)| !traits.is_empty())
+            .collect();
+        wanted.sort();
+        wanted.dedup();
+        if wanted.iter().eq(self.pest_classes.iter().map(|(k, _)| k)) {
+            return;
+        }
+        let mut dirty = WordSet::default();
+        dirty.extend(self.pest_classes.drain(..).map(|(_, name)| mago_word::ascii_lowercase_word(name.as_bytes())));
+        let class_like_names = dirty.iter().copied().collect();
+        self.codebase.remove_entries_by_keys(&CodebaseEntryKeys { class_like_names, class_like_aliases: vec![], function_like_keys: vec![], constant_names: vec![], file_ids: vec![] });
+        let mut source = String::from("<?php\n");
+        let mut names: Vec<String> = vec![];
+        for (case, traits) in &wanted {
+            let (namespace, short) = case.rsplit_once('\\').unwrap_or(("", case));
+            let mut class = std::iter::once(short).chain(traits.iter().map(|t| t.rsplit('\\').next().unwrap_or(t))).collect::<Vec<_>>().join(PEST_CLASS_JOIN);
+            // Traits of the same name from different namespaces.
+            if names.iter().any(|n| n.eq_ignore_ascii_case(&format!("{namespace}\\{class}"))) {
+                class = format!("{class}{}", names.len());
+            }
+            source.push_str(&format!("namespace {namespace} {{ class {class} extends \\{case} {{ use \\{}; }} }}\n", traits.join(", \\")));
+            names.push(format!("{namespace}\\{class}"));
+        }
+        let path = tests.join(".pest-classes.php");
+        let (meta, ..) = scan(&path, FileType::Host, source.into_bytes(), self.config.php_version, &LocalArena::new(), false);
+        for (combo, name) in wanted.into_iter().zip(names) {
+            let Some(class) = meta.get_class_like(name.trim_start_matches('\\').as_bytes()) else { continue };
+            dirty.insert(mago_word::ascii_lowercase_word(class.original_name.as_bytes()));
+            self.pest_classes.push((combo, class.original_name));
+        }
+        self.codebase.extend_ref(&meta);
+        self.repopulate(dirty);
     }
 
     pub fn path_of(&self, id: FileId) -> Option<&Path> {
