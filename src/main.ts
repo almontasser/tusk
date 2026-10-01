@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { isMac, open } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
@@ -1744,12 +1744,13 @@ async function chooseDockerService() {
   ]);
 }
 
-// Keys shown as the Mac draws them.
+// Keys shown as the Mac draws them; elsewhere as words, such as `Ctrl+Shift+F`.
 const KEY_SYMBOLS: Record<string, string> = {
   Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
   Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
 };
-const symbolsFor = (keys?: string) =>
+const symbolsFor = (keys?: string) => (isMac ? macSymbols(keys) : keys?.replace(/\bCtrl\b/g, "Win").replace(/\bMeta\b/g, "Ctrl").replace(/\+(Key|Digit)?([A-Z0-9])$/, "+$2"));
+const macSymbols = (keys?: string) =>
   keys
     ?.replace(/^(\w+) \1$/, "$1+$1+")
     .replace(/Ctrl\+/g, "⌃")
@@ -1840,7 +1841,7 @@ function recordShortcut(action: Action) {
     if (plain && e.key === "Escape") return finish();
     if (plain && e.key === "Backspace") return save(""), finish();
     if (plain && !/^F\d+$/.test(e.code)) {
-      overlay.querySelector(".combo")!.textContent = "Add ⌘, ⌃, or ⌥";
+      overlay.querySelector(".combo")!.textContent = isMac ? "Add ⌘, ⌃, or ⌥" : "Add Ctrl or Alt";
       return;
     }
     save(comboOf(e));
@@ -1870,8 +1871,9 @@ function canonical(keys: string) {
   return [...modifiers.filter((m) => parts.includes(m)), key].join("+");
 }
 
+/** The keys of an event, as the keymap writes them. Off a Mac, Ctrl plays ⌘'s part (`Meta`) and the Windows key ⌃'s. */
 function comboOf(e: KeyboardEvent) {
-  const held = [e.ctrlKey, e.altKey, e.shiftKey, e.metaKey];
+  const held = isMac ? [e.ctrlKey, e.altKey, e.shiftKey, e.metaKey] : [e.metaKey, e.altKey, e.shiftKey, e.ctrlKey];
   return [...modifiers.filter((_, i) => held[i]), e.code.replace(/^(Key|Digit)/, "")].join("+");
 }
 
@@ -2038,7 +2040,7 @@ initFilament({
   ensureModel,
   openAt: (path, line, column) => openAt(path, { lineNumber: line, column: column ?? 1 }),
   status,
-  openUrl: (url) => void invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null }),
+  openUrl: (url) => void invoke("open_url", { url: url }),
   showView,
   openTerminal: (title, command, done) => void openTerminal(root, title, command, done && (() => done())),
 });

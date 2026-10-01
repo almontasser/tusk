@@ -3,7 +3,7 @@
 // Editing waits: changed cells, added rows, and deleted rows are marked in the grid until Submit applies them
 // together. SQL tables and Redis keys each turn the changes into their own commands.
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, mod } from "./platform.ts";
 import { bytesOf, type Cell, FORMATS, type Format, formatRows, hexDump, sortOrder, tsv, viewerMode } from "./dbgriddata";
 import { h } from "./dom";
 import { type MenuItem, showMenu } from "./files";
@@ -402,7 +402,7 @@ export function dataGrid(o: GridOptions): Grid {
     };
     input.onkeydown = (k) => {
       k.stopPropagation();
-      if (k.key === "Enter" && k.metaKey) return k.preventDefault(), finish(true, submit);
+      if (k.key === "Enter" && mod(k)) return k.preventDefault(), finish(true, submit);
       if (k.key === "Enter") return k.preventDefault(), finish(true);
       if (k.key === "Escape") return k.preventDefault(), finish(false);
       if (k.key === "Tab") return k.preventDefault(), finish(true, () => step(k.shiftKey ? -1 : 1));
@@ -536,7 +536,7 @@ export function dataGrid(o: GridOptions): Grid {
     const { r, c } = active;
     const page = Math.max(1, Math.floor(scroll.clientHeight / ROW) - 2);
     const last = view.length - 1;
-    const meta = k.metaKey;
+    const meta = mod(k);
     const extend = k.shiftKey;
     switch (k.key) {
       case "ArrowDown":
@@ -647,7 +647,7 @@ export function dataGrid(o: GridOptions): Grid {
   };
   area.onkeydown = (k) => {
     if (k.key === "Escape") k.preventDefault(), toggleViewer(false);
-    if (k.key === "Enter" && k.metaKey) k.preventDefault(), submit();
+    if (k.key === "Enter" && mod(k)) k.preventDefault(), submit();
     k.stopPropagation();
   };
 

@@ -13,6 +13,7 @@ import { errorText } from "./status";
 import { toolPath } from "./lsp";
 import { composerCommand } from "./toolpaths";
 import { shellQuote } from "./runconfig";
+import { isAbsolute } from "./platform.ts";
 
 let host: DesignerHost & { showView(name: string): void; openTerminal(title: string, command: string[], done?: () => void): void };
 const $ = (id: string) => document.getElementById(id)!;
@@ -413,7 +414,7 @@ export async function openEnumPicker() {
   const enums = await fapp.enums(root).catch((e) => (host.status(`Can't read the enums: ${errorText(e)}`), null));
   if (!enums) return;
   const { openEnumDesigner, openNewEnum } = await import("./enumdesigner");
-  const items: Item[] = enums.filter((e) => e.file).map((e) => ({ label: shortClass(e.class), detail: `${e.cases.length} cases · ${e.class}`, icon: "codicon-symbol-enum", run: () => openEnumDesigner(e.file!.startsWith("/") ? e.file! : `${root}/${e.file}`) }));
+  const items: Item[] = enums.filter((e) => e.file).map((e) => ({ label: shortClass(e.class), detail: `${e.cases.length} cases · ${e.class}`, icon: "codicon-symbol-enum", run: () => openEnumDesigner(isAbsolute(e.file!) ? e.file! : `${root}/${e.file}`) }));
   items.push({ label: "New Enum…", detail: "Cases with labels, colors, and icons", icon: "codicon-add", run: () => openNewEnum() });
   pick("Open an enum in the designer", (query) => (query.trim() ? rank(query, items) : items));
 }
@@ -436,7 +437,7 @@ export async function newPagePicker() {
 /** Opens a panel's settings. */
 function openPanel(panel: fapp.PanelInfo) {
   const file = panel.provider?.file;
-  if (file) void import("./panelsettings").then((m) => m.openPanelSettings(file.startsWith("/") ? file : `${host.root()}/${file}`, panel.id));
+  if (file) void import("./panelsettings").then((m) => m.openPanelSettings(isAbsolute(file) ? file : `${host.root()}/${file}`, panel.id));
 }
 
 /** Picks a panel and opens its settings. */

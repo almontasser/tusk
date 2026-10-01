@@ -499,6 +499,56 @@ the name.
   six-hour update and tool checks and the launch tool check honor it before the
   frontend has loaded. **Check for Updates…** also checks the tools.
 
+### Windows and Linux
+
+The app runs on macOS, Windows, and Linux. Differences stay in a few places, so
+the rest of the code doesn't ask which system it's on.
+
+- **Starting programs.** Every program the backend starts goes through
+  `toolpaths::command()`, which sets `path_env()` as its `PATH`. On Windows it
+  also finds the program as a shell would (PATHEXT, so `composer` is
+  `composer.bat`), runs `/bin/sh` and `/usr/bin/env` from Git for Windows
+  (found from where `git` is), and passes `CREATE_NO_WINDOW` so no console
+  window flashes. The frontend's shell scripts therefore run unchanged. Windows
+  has no shims, since a program that starts `php` looks only for `php.exe`;
+  `path_env()` puts each set tool's folder first instead. tusk-lsp's own
+  `command()` passes `CREATE_NO_WINDOW` too, since PHP started by a process
+  without a console would open one.
+- **Servers die with the app.** On Unix the watchdog script does this. On
+  Windows, `lsp::spawn_watched` puts each server, SSH tunnel, and
+  `llama-server` in a job object that ends its processes when the app's handle
+  closes, which happens however the app exits.
+- **Paths.** The frontend writes paths with `/` and, on Windows, a lowercase
+  drive letter (`c:/Users/me/app`), as Monaco's URIs do. The backend's
+  `slash()` writes the paths it returns that way, `platform.ts` normalizes the
+  file dialogs' paths, and `editor.ts` makes Monaco's `fsPath` use `/`.
+  Windows takes either separator, so paths built with `/` work as they are.
+  `isAbsolute()` replaces `startsWith("/")`. tusk-lsp turns URIs into
+  `C:\Users\me\app` paths with an uppercase drive letter, one spelling for each
+  file, so paths from the editor match those the index finds on disk.
+- **Keys.** Off a Mac, `comboOf` reads Ctrl as the keymap's `Meta` and the
+  Windows key as its `Ctrl`, so one keymap serves every system, and
+  `symbolsFor` shows keys as words (`Ctrl+Shift+F`). Handlers that check ⌘ use
+  `mod(e)`. The menu bar gets no accelerators there: the page handles every
+  shortcut, and an accelerator could run an action twice. macOS-only menu
+  items are left out.
+- **The rest.** Database passwords go through the `keyring` crate: the
+  Keychain, Windows' Credential Manager, or Linux's Secret Service. The askpass
+  helper talks to the app over a local TCP port with a 128-bit secret, since
+  Rust has no Unix sockets on Windows. `open_url` and `reveal_path` use `open`,
+  `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux;
+  on Windows a restored terminal starts in its first folder. The terminal's
+  default shell is PowerShell on Windows. The title bar leaves room for the
+  window buttons only on a Mac (`.mac` on the root element), since Windows and
+  Linux keep their own title bars.
+- **Tools.** `fetch-tools.sh` takes a target triple: `aarch64`/`x86_64` Apple,
+  `aarch64`/`x86_64` Linux (gnu), or `x86_64` Windows (msvc). Linux and Windows
+  get llama.cpp's Vulkan build, which falls back to the CPU. Windows packages
+  have no symbolic links, which Windows unpacks only in Developer Mode. In
+  `tools.json`, Mac packages keep their chip-only `arch` (`aarch64`), so older
+  Macs still find theirs, and other packages say their system too
+  (`linux-x86_64`, `windows-x86_64`).
+
 ### Language server bridge
 
 `src-tauri/src/lsp.rs` starts each language server in the project folder. For
@@ -7204,3 +7254,15 @@ only what the unknown binding causes: `Undefined variable: $this`, missing
 members of PHPUnit's `TestCase` or a `Pest\PendingCalls` class, and problems
 about `mixed`. On three projects it keeps every other PHPStan problem on those
 lines, such as an undefined property on a model.
+
+### 2026-10-02: Windows and Linux
+
+Tusk now builds and runs on Windows and Linux. Instead of rewriting the
+frontend's thirty-odd shell scripts for Windows, the backend runs them with Git
+for Windows' `sh`, which a PHP developer on Windows nearly always has, since the
+editor needs Git anyway. Paths stay `/`-separated in the frontend, with the
+backend and the dialogs normalizing what they hand over, because 65,000 lines
+of TypeScript build paths with `/` and Windows accepts them. Keys map Ctrl to
+the keymap's `Meta` rather than adding a second keymap. A proper
+Windows and Linux keymap, like PhpStorm's, can come later.
+

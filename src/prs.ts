@@ -7,6 +7,7 @@ import { pick } from "./palette";
 import { listNav } from "./listnav";
 import { errorText, showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Author = { login: string };
 type PullRequest = {
@@ -44,7 +45,7 @@ const reviews: Record<string, string> = { APPROVED: "Approved", CHANGES_REQUESTE
 let host: Host;
 
 const gh = (...args: string[]) => invoke<string>("run_capture", { cwd: host.root(), program: "gh", args, input: null });
-const openUrl = (url: string) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null });
+const openUrl = (url: string) => invoke("open_url", { url: url });
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = "") {
   const e = document.createElement(tag);
@@ -444,7 +445,7 @@ function commentBlock(user: string, body: string, api: string, repo: string, red
     const cancel = el("button", "", "Cancel");
     cancel.onclick = () => ((editing = ""), redraw());
     text.onkeydown = (e) => {
-      if (e.key === "Enter" && e.metaKey) save.click();
+      if (e.key === "Enter" && mod(e)) save.click();
       if (e.key === "Escape") cancel.click();
     };
     buttons.append(save, cancel);
@@ -755,7 +756,7 @@ function commentForm() {
   cancel.onclick = close;
   buttons.append(cancel);
   text.onkeydown = (e) => {
-    if (e.key === "Enter" && e.metaKey) buttons.querySelector("button")!.click();
+    if (e.key === "Enter" && mod(e)) buttons.querySelector("button")!.click();
     if (e.key === "Escape") close();
   };
   // Posts a comment or a reply at once, then reloads the threads.

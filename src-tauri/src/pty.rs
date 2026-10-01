@@ -38,7 +38,7 @@ pub fn pty_spawn(
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
-    let mut cmd = CommandBuilder::new(&command[0]);
+    let mut cmd = CommandBuilder::new(crate::toolpaths::resolve(&command[0]));
     cmd.args(&command[1..]);
     cmd.cwd(cwd);
     cmd.env("PATH", crate::toolpaths::path_env());
@@ -131,6 +131,11 @@ pub fn pty_kill(state: State<PtyState>, id: u32) {
 #[tauri::command]
 pub fn pty_cwd(state: State<PtyState>, id: u32) -> Option<String> {
     let pid = state.0.lock().unwrap().get(&id)?.child.process_id()?;
+    process_cwd(pid).map(crate::slash)
+}
+
+#[cfg(target_os = "macos")]
+fn process_cwd(pid: u32) -> Option<String> {
     let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
     let read = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDVNODEPATHINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
@@ -139,6 +144,17 @@ pub fn pty_cwd(state: State<PtyState>, id: u32) -> Option<String> {
     }
     let path = unsafe { std::ffi::CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const libc::c_char) };
     Some(path.to_string_lossy().into_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn process_cwd(pid: u32) -> Option<String> {
+    Some(std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?.to_string_lossy().into_owned())
+}
+
+/// Windows doesn't let one process read another's folder simply, so a restored shell starts where it first did.
+#[cfg(windows)]
+fn process_cwd(_pid: u32) -> Option<String> {
+    None
 }
 
 /// Takes the longest valid UTF-8 prefix from `buf`, leaving a character that was split

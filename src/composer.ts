@@ -177,7 +177,7 @@ async function why(name: string) {
   );
 }
 
-const open = (url: string) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null });
+const open = (url: string) => invoke("open_url", { url: url });
 
 function packageActions(p: Package, found: Advisory[]) {
   pick(p.name, () => [

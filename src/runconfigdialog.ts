@@ -7,6 +7,7 @@ import { showMenu } from "./files";
 import { listNav } from "./listnav";
 import { type ConfigType, type Field, type Mode, newConfig, type Project, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
 import type { Entry } from "./runner";
+import { isAbsolute, mod } from "./platform.ts";
 
 type Options = {
   entries: Entry[];
@@ -49,7 +50,7 @@ export function openConfigurationsDialog({ entries: initial, selected, add, root
   });
   list.addEventListener("keydown", (e) => {
     if (e.key === "Backspace" || e.key === "Delete") e.preventDefault(), remove();
-    if (e.key === "d" && e.metaKey) e.preventDefault(), duplicate();
+    if (e.key === "d" && mod(e)) e.preventDefault(), duplicate();
   });
 
   const others = () => items.filter((i) => i !== current).map((i) => i.config);
@@ -114,7 +115,7 @@ export function openConfigurationsDialog({ entries: initial, selected, add, root
     const want = path?.trim();
     note.textContent = "";
     if (!want) return;
-    const full = want.startsWith("/") ? want : `${root}/${want}`;
+    const full = isAbsolute(want) ? want : `${root}/${want}`;
     const found = await invoke<boolean>("path_exists", { path: full }).catch(() => false);
     if ((path ?? "").trim() === want) note.textContent = found ? "" : `No such ${kind === "dir" ? "folder" : "file"} in the project.`;
   }

@@ -11,6 +11,7 @@ import { applyWorkspaceEdit } from "./lsp";
 import { droppedImports, type Edit, Imports, mergeEdits } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
+import { isAbsolute } from "./platform.ts";
 
 const open = new Map<string, AccessView>();
 
@@ -57,7 +58,7 @@ class AccessView implements AccessHost {
     try {
       const [info, details] = await Promise.all([fapp.policy(this.root, this.model), fapp.model(this.root, this.model).catch(() => null)]);
       this.facts = { class: this.model, columns: details?.columns ?? details?.fillable.map((name) => ({ name })) ?? [] };
-      this.access = { info, doc: info.file ? await this.doc(info.file.startsWith("/") ? info.file : `${this.root}/${info.file}`) : null };
+      this.access = { info, doc: info.file ? await this.doc(isAbsolute(info.file) ? info.file : `${this.root}/${info.file}`) : null };
       this.accessError = "";
     } catch (e) {
       this.accessError = e instanceof Error ? e.message : String(e);

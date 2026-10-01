@@ -1,7 +1,7 @@
 // The HTTP client's collection runner, which sends every request in a file in order; its stress test, which sends
 // one request many times at once with curl's parallel mode and shows live statistics; and its monitor.
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save } from "./platform.ts";
 import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
 import { histogram, type HttpRequest, loadArgs, overBudget, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
 import { junitReport, type ReportCase } from "./httpimport";

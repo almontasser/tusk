@@ -48,6 +48,7 @@ import { panelChains, SETTINGS, settingEdits } from "./panelgen";
 import { methodNamed, type Edit, type OClass, type Outline, type PCall, type PNode, replaceNode } from "./phpcode";
 import { errorText, showError } from "./status";
 import { showEditorView } from "./terminal";
+import { isAbsolute } from "./platform.ts";
 
 const open = new Map<string, NotificationDesigner>();
 /** Mailers that don't deliver: `log` writes emails to the log, and `array` keeps them in memory. */
@@ -317,7 +318,7 @@ class NotificationDesigner {
   /** Adds `->databaseNotifications()` to a panel's provider, as Panel settings writes it. */
   private async turnOnBell(panel: fapp.PanelInfo) {
     const file = panel.provider!.file!;
-    const path = file.startsWith("/") ? file : `${this.root}/${file}`;
+    const path = isAbsolute(file) ? file : `${this.root}/${file}`;
     const setting = SETTINGS.find((x) => x.call === "databaseNotifications")!;
     const changed = await editFiles([{ path, build: (text, outline) => {
       const method = outline.classes.flatMap((c) => c.methods).find((m) => m.name === "panel");

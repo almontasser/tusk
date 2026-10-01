@@ -1,11 +1,12 @@
 // Answers git's and ssh's prompts, such as a password or a key's passphrase, in a dialog. Git commands that may
 // prompt (`gitOutput` in src/git.ts) run with GIT_ASKPASS and SSH_ASKPASS set to this app's binary and
-// TUSK_ASKPASS set to a socket the app listens on. The binary started that way (see main.rs) sends the prompt
-// over the socket, the app shows it, and the answer comes back on standard output. Answers are never stored.
+// TUSK_ASKPASS set to a local port the app listens on and a secret only the app's commands get. The binary
+// started that way (see main.rs) sends the prompt and the secret to the port, the app shows the prompt, and the answer
+// comes back on standard output. Answers are never stored.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::net::{TcpListener, TcpStream};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Emitter;
@@ -37,22 +38,26 @@ pub fn client(socket: &str) -> ! {
     }
 }
 
+/// `socket` is the app's address and secret, as in TUSK_ASKPASS: `127.0.0.1:port secret`.
 fn request(socket: &str, confirm: bool, prompt: &str) -> Option<String> {
-    let mut stream = UnixStream::connect(socket).ok()?;
-    write!(stream, "{}\n{prompt}", if confirm { "confirm" } else { "" }).ok()?;
+    let (address, secret) = socket.split_once(' ')?;
+    let mut stream = TcpStream::connect(address).ok()?;
+    write!(stream, "{secret}\n{}\n{prompt}", if confirm { "confirm" } else { "" }).ok()?;
     stream.shutdown(std::net::Shutdown::Write).ok()?;
     let mut reply = String::new();
     stream.read_to_string(&mut reply).ok()?;
     reply.strip_prefix('1').map(str::to_string)
 }
 
-/// Reads one prompt from `stream`, asks `ask`, and writes the answer back.
-fn handle(mut stream: UnixStream, ask: impl FnOnce(bool, String) -> Option<String>) {
+/// Reads one prompt from `stream`, asks `ask`, and writes the answer back. A prompt without `secret` is
+/// ignored: any program on the computer can reach the port.
+fn handle(mut stream: TcpStream, secret: &str, ask: impl FnOnce(bool, String) -> Option<String>) {
     let mut text = String::new();
     if stream.read_to_string(&mut text).is_err() {
         return;
     }
-    let (flag, prompt) = text.split_once('\n').unwrap_or(("", &text));
+    let Some(text) = text.strip_prefix(secret).and_then(|t| t.strip_prefix('\n')) else { return };
+    let (flag, prompt) = text.split_once('\n').unwrap_or(("", text));
     let reply = match ask(flag == "confirm", prompt.to_string()) {
         Some(answer) => format!("1{answer}"),
         None => "0".into(),
@@ -62,19 +67,17 @@ fn handle(mut stream: UnixStream, ask: impl FnOnce(bool, String) -> Option<Strin
 
 /// Listens for prompts and shows each one in the window, as the `askpass` event.
 pub fn start(app: tauri::AppHandle) {
-    let path = std::env::temp_dir().join(format!("tusk-askpass-{}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&path);
-    let Ok(listener) = UnixListener::bind(&path) else { return };
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    let _ = SOCKET.set(path.to_string_lossy().into());
+    let Ok(listener) = TcpListener::bind("127.0.0.1:0") else { return };
+    let Ok(address) = listener.local_addr() else { return };
+    let secret = secret();
+    let _ = SOCKET.set(format!("{address} {secret}"));
     std::thread::spawn(move || {
         let mut next = 0u64;
         for stream in listener.incoming().flatten() {
             next += 1;
-            let (id, app) = (next, app.clone());
+            let (id, app, secret) = (next, app.clone(), secret.clone());
             std::thread::spawn(move || {
-                handle(stream, |confirm, prompt| {
+                handle(stream, &secret, |confirm, prompt| {
                     let (tx, rx) = mpsc::channel();
                     WAITING.lock().unwrap().get_or_insert_default().insert(id, tx);
                     let _ = app.emit("askpass", Prompt { id, prompt, confirm });
@@ -86,6 +89,13 @@ pub fn start(app: tauri::AppHandle) {
             });
         }
     });
+}
+
+/// 128 random bits as hex, from the keys the standard library seeds from the system's random source.
+fn secret() -> String {
+    use std::hash::BuildHasher;
+    let keys = std::hash::RandomState::new();
+    format!("{:016x}{:016x}", keys.hash_one(1u8), keys.hash_one(2u8))
 }
 
 /// The askpass program and socket for `gitOutput`, or None when the socket couldn't be opened.
@@ -108,24 +118,23 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let path = std::env::temp_dir().join(format!("tusk-askpass-test-{}.sock", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket = format!("{} s3cr3t", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            for answer in [Some("s3cret"), None] {
+            for answer in [Some("s3cret"), None, Some("never")] {
                 let (stream, _) = listener.accept().unwrap();
-                handle(stream, |confirm, prompt| {
+                handle(stream, "s3cr3t", |confirm, prompt| {
                     assert!(!confirm);
                     assert_eq!(prompt, "Password for 'https://me@github.com': ");
                     answer.map(str::to_string)
                 });
             }
         });
-        let socket = path.to_str().unwrap();
-        assert_eq!(request(socket, false, "Password for 'https://me@github.com': ").as_deref(), Some("s3cret"));
-        assert_eq!(request(socket, false, "Password for 'https://me@github.com': "), None);
+        assert_eq!(request(&socket, false, "Password for 'https://me@github.com': ").as_deref(), Some("s3cret"));
+        assert_eq!(request(&socket, false, "Password for 'https://me@github.com': "), None);
+        assert_eq!(request(&socket.replace("s3cr3t", "guess"), false, "x"), None, "a wrong secret gets no answer");
         server.join().unwrap();
-        assert_eq!(request(socket, false, "x"), None, "no listener counts as canceled");
-        let _ = std::fs::remove_file(&path);
+        assert_eq!(request(&socket, false, "x"), None, "no listener counts as canceled");
+        assert_ne!(secret(), secret());
     }
 }

@@ -81,8 +81,11 @@ const PATH: &AsciiSet = &CONTROLS
     .add(b'^')
     .add(b'|');
 
+/// `file:///C:/Users/me/a.php` for a Windows path, which has `\\` between folders.
 pub fn path_to_uri(path: &Path) -> Uri {
-    let encoded = utf8_percent_encode(&path.to_string_lossy(), PATH).to_string();
+    let path = path.to_string_lossy();
+    let path = if cfg!(windows) { format!("/{}", path.replace('\\', "/")) } else { path.into_owned() };
+    let encoded = utf8_percent_encode(&path, PATH).to_string();
     Uri::from_str(&format!("file://{encoded}")).expect("a percent-encoded file path is a valid URI")
 }
 
@@ -90,7 +93,20 @@ pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     let s = uri.as_str().strip_prefix("file://")?;
     // `file://localhost/path` and `file:///path` both mean `/path`.
     let s = s.strip_prefix("localhost").unwrap_or(s);
-    Some(PathBuf::from(percent_decode_str(s).decode_utf8().ok()?.into_owned()))
+    let path = percent_decode_str(s).decode_utf8().ok()?.into_owned();
+    Some(PathBuf::from(if cfg!(windows) { windows_path(&path) } else { path }))
+}
+
+/// `/c:/Users/me/a.php`, from a URI, as Windows writes it: `C:\\Users\\me\\a.php`. One spelling for each file
+/// keeps paths that came from a URI equal to those the index found on disk.
+fn windows_path(path: &str) -> String {
+    let path = path.replace('/', "\\");
+    let path = path.strip_prefix('\\').filter(|p| p.as_bytes().get(1) == Some(&b':')).unwrap_or(&path);
+    let mut path = path.to_string();
+    if path.as_bytes().get(1) == Some(&b':') {
+        path[..1].make_ascii_uppercase();
+    }
+    path
 }
 
 #[cfg(test)]
@@ -120,6 +136,14 @@ mod tests {
         assert_eq!(idx.offset(text, Position { line: 9, character: 0 }), text.len() as u32);
     }
 
+    #[test]
+    fn spells_windows_paths_one_way() {
+        assert_eq!(windows_path("/c:/Users/me/a.php"), r"C:\Users\me\a.php");
+        assert_eq!(windows_path("/C:/x"), r"C:\x");
+        assert_eq!(windows_path("//server/share/a.php"), r"\\server\share\a.php");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn round_trips_paths_through_uris() {
         let path = Path::new("/Users/me/My Project/a#b.php");

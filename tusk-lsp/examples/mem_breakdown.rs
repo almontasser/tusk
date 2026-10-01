@@ -25,9 +25,13 @@ fn main() {
     let paths = idx.discover();
     idx.build(paths, |p| std::fs::read(p).ok(), |_, _| {});
     println!("built: {} MB rss, {} MB live", rss(), live());
-    unsafe extern "C" { fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize; }
-    let freed = unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
-    println!("pressure relief freed {} MB -> {} MB rss", freed / 1_000_000, rss());
+    // macOS's allocator keeps freed pages until asked to return them.
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" { fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize; }
+        let freed = unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+        println!("pressure relief freed {} MB -> {} MB rss", freed / 1_000_000, rss());
+    }
     let before = live();
     let issues: usize = idx.codebase.class_likes.values().map(|c| c.issues.len()).sum::<usize>() + idx.codebase.function_likes.values().map(|f| f.issues.len()).sum::<usize>();
     println!("issues kept in metadata: {issues}");

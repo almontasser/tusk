@@ -1,7 +1,7 @@
 // Moves requests between the HTTP client and other tools: imports Postman collections, Insomnia exports, and OpenAPI
 // or Swagger documents into .http files in http/, and exports the project's requests to OpenAPI.
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "./platform.ts";
 import { ENV_FILE, environments, host, ignorePrivateFile, parentOf, PRIVATE_ENV_FILE, selectedEnvironment } from "./httpclient";
 import { isSecretName, parseHttp } from "./httpfile";
 import { type Environments, type Imported, importCollection, toOpenApi } from "./httpimport";

@@ -14,6 +14,7 @@ import { confirm } from "./palette";
 import { splitter } from "./splitter";
 import { errorText, showError, withProgress } from "./status";
 import { showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; openFile(path: string): unknown };
 let host: Host;
@@ -62,14 +63,14 @@ const nav = listNav(list, {
 list.addEventListener("keydown", (e) => {
   if (e.target !== list) return;
   if (e.key === " ") mark(nav.selected());
-  else if (e.key === "Backspace" && e.metaKey) revert();
+  else if (e.key === "Backspace" && mod(e)) revert();
   else return;
   e.preventDefault();
   e.stopPropagation();
 });
 list.addEventListener("click", (e) => {
   const row = (e.target as HTMLElement).closest<HTMLElement>("[data-key]");
-  if (row && (e.metaKey || e.shiftKey)) mark(row.dataset.key!);
+  if (row && (mod(e) || e.shiftKey)) mark(row.dataset.key!);
 });
 filterInput.oninput = () => render();
 filterInput.onkeydown = (e) => {
@@ -91,7 +92,7 @@ function setDiff(path: string, original: string, modified: string) {
     readOnly: true,
     originalEditable: false,
     fontSize: 12,
-    fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
+    fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
     minimap: { enabled: false },
   });
   const old = diffEditor.getModel();

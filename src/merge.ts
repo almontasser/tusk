@@ -13,6 +13,7 @@ import { confirm } from "./palette";
 import { showError, status, withProgress } from "./status";
 import { addEditor } from "./settings";
 import { closeView, showEditorView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -361,7 +362,7 @@ export function initMerge(h: Host) {
   $("merge").addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "F7" && !e.metaKey && !e.altKey) goToConflict(e.shiftKey ? -1 : 1);
+      if (e.key === "F7" && !mod(e) && !e.altKey) goToConflict(e.shiftKey ? -1 : 1);
       else if (e.altKey && e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) acceptCurrent(e.key === "ArrowLeft" ? "current" : "incoming");
       else return;
       e.preventDefault();

@@ -696,23 +696,28 @@ fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String
     Ok(result)
 }
 
-/// Database passwords for connections saved in the editor live in the login Keychain, by project and name.
+/// Database passwords for connections saved in the editor live in the system's password store (the login Keychain
+/// on macOS), by project and name.
 const KEYCHAIN_SERVICE: &str = "Tusk database";
+
+fn keychain(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, account).map_err(|e| e.to_string())
+}
 
 #[tauri::command(async)]
 pub fn db_password(account: String) -> Option<String> {
-    security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &account).ok().map(|p| String::from_utf8_lossy(&p).into())
+    keychain(&account).ok()?.get_password().ok()
 }
 
 /// Saves a password, or deletes it when it's empty.
 #[tauri::command(async)]
 pub fn db_set_password(account: String, password: String) -> Result<(), String> {
-    use security_framework::passwords::{delete_generic_password, set_generic_password};
+    let entry = keychain(&account)?;
     if password.is_empty() {
-        let _ = delete_generic_password(KEYCHAIN_SERVICE, &account);
+        let _ = entry.delete_credential();
         return Ok(());
     }
-    set_generic_password(KEYCHAIN_SERVICE, &account, password.as_bytes()).map_err(|e| e.to_string())
+    entry.set_password(&password).map_err(|e| e.to_string())
 }
 
 /// SSH tunnels by destination and database address, with the local port each listens on.
@@ -725,7 +730,7 @@ pub struct Tunnels(std::sync::Mutex<std::collections::HashMap<String, (std::proc
 /// so it needs key or agent authentication. A running tunnel is reused, and every tunnel ends with the app.
 #[tauri::command(async)]
 pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: String, port: u16, identity: Option<String>) -> Result<u16, String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let identity = identity.filter(|i| !i.is_empty());
     let key = format!("{destination}|{host}|{port}|{}", identity.as_deref().unwrap_or(""));
     let mut tunnels = state.0.lock().unwrap();
@@ -736,9 +741,10 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
     }
     crate::login_path();
     let local = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
-    let mut child = Command::new("/bin/sh")
+    let mut child = crate::lsp::watched("ssh");
+    let child = child
         // ServerAlive ends a tunnel whose connection died, such as after sleep, so the next query opens a new one.
-        .args(["-c", crate::lsp::WATCHDOG, "sh", "ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
+        .args(["-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         // A key file is the only key ssh offers, as with `ssh -i`; without one, the agent and ~/.ssh/config choose.
         .args(identity.iter().flat_map(|i| ["-i", i.as_str(), "-o", "IdentitiesOnly=yes"]))
         .arg("-L")
@@ -746,9 +752,8 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
         .arg(&destination)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Can't start ssh: {e}"))?;
+        .stderr(Stdio::piped());
+    let mut child = crate::lsp::spawn_watched(child).map_err(|e| format!("Can't start ssh: {e}"))?;
     // Wait until the forward accepts connections, or ssh gives up.
     for _ in 0..150 {
         if let Ok(Some(_)) = child.try_wait() {

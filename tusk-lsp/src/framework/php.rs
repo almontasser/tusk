@@ -2,7 +2,7 @@
 //! container's for Sail, Lando, and DDEV, else the `php` on `PATH`.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -34,7 +34,7 @@ impl Php {
 
 /// Runs a command in `root` and returns what it prints, if it succeeds in time.
 fn output(root: &Path, command: &[&str], timeout: Duration) -> Option<String> {
-    let mut child = Command::new(command[0])
+    let mut child = crate::command(command[0])
         .args(&command[1..])
         .current_dir(root)
         .stdin(Stdio::null())

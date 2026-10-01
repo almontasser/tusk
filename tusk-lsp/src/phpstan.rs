@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -224,7 +224,7 @@ pub fn arguments(settings: &Settings, paths: &[PathBuf]) -> Vec<String> {
 
 /// Runs PHPStan, and returns the problems by file, or why it failed.
 fn analyze(root: &Path, paths: &[PathBuf], settings: &Settings) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, String> {
-    let mut child = Command::new("php")
+    let mut child = crate::command("php")
         .arg(root.join("vendor/bin/phpstan"))
         .args(arguments(settings, paths))
         .current_dir(root)

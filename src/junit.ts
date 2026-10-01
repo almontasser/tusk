@@ -1,3 +1,4 @@
+import { isAbsolute } from "./platform.ts";
 // Reads the reports PHPUnit and Pest write: JUnit XML (--log-junit), the event stream, and Clover coverage
 // (--coverage-clover). Free of editor imports so Node can test it.
 
@@ -125,7 +126,7 @@ export function withDetails(results: TestResult[], live: LiveTest[]): TestResult
 
 /** A file a report names, on this Mac: under `containerRoot` it maps to the project, and a relative one is inside the project. */
 export const localPath = (file: string, root: string, containerRoot: string) =>
-  file.startsWith(`${containerRoot}/`) ? root + file.slice(containerRoot.length) : file.startsWith("/") ? file : `${root}/${file}`;
+  file.startsWith(`${containerRoot}/`) ? root + file.slice(containerRoot.length) : isAbsolute(file) ? file : `${root}/${file}`;
 
 // ponytail: assumes Laravel's autoload-dev mapping of Tests\ to tests/.
 export const classFile = (className: string) => `${className.replace(/^(P\\)?Tests\\/, "tests/").replace(/\\/g, "/")}.php`;

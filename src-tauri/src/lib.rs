@@ -23,14 +23,35 @@ pub fn login_path() {
     LazyLock::force(&LOGIN_PATH);
 }
 
+/// A path the way the frontend writes paths. On Windows that's with `/` between folders and a lowercase drive
+/// letter, as in Monaco's URIs (`c:/Users/me/app`); Windows takes either separator.
+pub fn slash(path: impl AsRef<std::path::Path>) -> String {
+    let path = path.as_ref().to_string_lossy();
+    #[cfg(windows)]
+    {
+        let mut path = path.replace('\\', "/");
+        if path.as_bytes().get(1) == Some(&b':') {
+            path[..1].make_ascii_lowercase();
+        }
+        path
+    }
+    #[cfg(not(windows))]
+    path.into_owned()
+}
+
 /// Runs blocking work on Tauri's blocking thread pool, so it holds neither the main thread (which
 /// draws the window and handles every command) nor the async workers.
 pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
+/// Windows apps get the full PATH from the registry, so there's nothing to read.
+#[cfg(windows)]
+fn use_login_shell_path() {}
+
+#[cfg(not(windows))]
 fn use_login_shell_path() {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| toolpaths::default_shell().into());
     let Ok(out) = std::process::Command::new(shell)
         .args(["-ilc", "printf '\\n__PATH__%s__PATH__' \"$PATH\""])
         .stdin(std::process::Stdio::null())
@@ -245,6 +266,8 @@ pub fn run() {
             tools::path_exists,
             tools::paths_exist,
             tools::run_capture,
+            tools::open_url,
+            tools::reveal_path,
             toolpaths::tools_configure,
             toolpaths::tool_which,
             search::list_files,

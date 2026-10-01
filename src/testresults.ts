@@ -2,7 +2,7 @@
 // the JUnit report the run wrote; a header with counts, time, and progress; and each test's failure, comparison,
 // stack, and output.
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save } from "./platform.ts";
 import { h, iconButton } from "./dom";
 import { findTests } from "./phptests";
 import { classFile, type LiveTest, localPath, parseEvents, parseFailure, parseJUnit, parseTeamcity, sameTest, testKey, type TestResult, withDetails } from "./junit";

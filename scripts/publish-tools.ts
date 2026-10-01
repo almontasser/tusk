@@ -1,5 +1,5 @@
 // Publishes the language tools the app downloads (see tools_ensure in src-tauri/src/tools.rs), so tools
-// update without an app release. It fetches each chip's tools with fetch-tools.sh, packs each tool whose files
+// update without an app release. It fetches each system's and chip's tools with fetch-tools.sh, packs each tool whose files
 // changed since the last publish, and uploads them with a tools.json listing every package, signed with the
 // updater's key from Bitwarden (bwnote), to the `tools` GitHub release.
 // Usage: node scripts/publish-tools.ts
@@ -16,12 +16,18 @@ const base = `https://github.com/${REPO}/releases/download/${TAG}`;
 const root = new URL("..", import.meta.url).pathname;
 const stage = join(root, "src-tauri/target/tools-stage");
 const out = join(root, "src-tauri/target/tools-publish");
-/** Each tool's folder, and whether it's built per chip. */
+/** Each tool's folder, and whether it's built per system and chip. */
 const TOOLS: [string, boolean][] = [
   ["composer", false], ["php-debug", false],
   ["mago", true], ["typos-lsp", true], ["node", true], ["llama", true],
 ];
-const ARCHS = ["aarch64", "x86_64"];
+/** Each build of the native tools: the target fetch-tools.sh fetches for, and the manifest's `arch` (see tools.rs). */
+const TARGETS: [string, string][] = [
+  ["aarch64-apple-darwin", "aarch64"], ["x86_64-apple-darwin", "x86_64"],
+  ["x86_64-unknown-linux-gnu", "linux-x86_64"], ["aarch64-unknown-linux-gnu", "linux-aarch64"],
+  ["x86_64-pc-windows-msvc", "windows-x86_64"],
+];
+const ARCHS = TARGETS.map(([, arch]) => arch);
 
 const run = (cmd: string, args: string[], env: Record<string, string> = {}) =>
   execFileSync(cmd, args, { cwd: root, stdio: "inherit", env: { ...process.env, ...env } });
@@ -46,7 +52,7 @@ function contentId(dir: string) {
 const key = execFileSync("zsh", ["-ic", "bwnote tusk-signing-key"], { stdio: ["inherit", "pipe", "ignore"], encoding: "utf8" }).trim().split("\n").at(-1) ?? "";
 if (!/^[A-Za-z0-9+/]{100,}=*$/.test(key)) throw new Error("Couldn't read tusk-signing-key with bwnote.");
 
-for (const arch of ARCHS) run("sh", ["scripts/fetch-tools.sh", `${arch}-apple-darwin`], { TOOLS_DEST: join(stage, arch) });
+for (const [target, arch] of TARGETS) run("sh", ["scripts/fetch-tools.sh", target], { TOOLS_DEST: join(stage, arch) });
 
 const published = await fetch(`${base}/tools.json`).then((r) => (r.ok ? r.json() : { packages: [] }), () => ({ packages: [] }));
 rmSync(out, { recursive: true, force: true });

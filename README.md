@@ -2,7 +2,7 @@
 
 # Tusk
 
-Tusk is a fast macOS desktop editor for PHP, Laravel, and Filament projects. It
+Tusk is a fast desktop editor for PHP, Laravel, and Filament projects, for macOS, Windows, and Linux. It
 aims for PhpStorm-class navigation and refactoring using only free, open-source
 language servers. Its name comes from PHP's
 elePHPant.
@@ -75,7 +75,7 @@ file to change when you add it.
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Settings designer | Renaming a property renames it in the class and the stored values, but not in code that reads it, such as a settings page's field. Dates are written as `CarbonImmutable` and rely on the package's global cast for dates. An encrypted property shows its encrypted value, and the designer writes `add` rather than `addEncrypted` for new ones. A settings migration that hasn't run yet isn't seen, so run pending migrations before applying. |
-| Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
+| Platform | AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. Windows and Linux are newer and less tested than macOS. There, Ctrl does what ⌘ does in the shortcuts, so a shortcut that uses ⌃ on a Mac needs the Windows key; the menus show no shortcuts, and hints in the app still name the Mac's keys. On Windows, the app's shell commands, such as installing packages or Git with a password prompt, run in Git for Windows' `sh`, and a restored terminal tab starts in its first folder. AI completion there uses the GPU through Vulkan, or the CPU. Windows on ARM isn't supported. |
 
 ### Missing
 
@@ -94,11 +94,12 @@ file to change when you add it.
 
 To use the app, you need:
 
-- macOS
-- PHP 8.1 or later. The app finds PHP through your login shell's `PATH`, so
-  installs from Homebrew and Laravel Herd work, or you set its path in
-  **Settings > Tools**.
-- Git, and optionally the GitHub CLI (`gh`) for pull requests.
+- macOS, Windows 10 or later on x64, or Linux on x64 or ARM64 with WebKitGTK 4.1
+- PHP 8.1 or later. The app finds PHP through your login shell's `PATH` (on
+  Windows, the system's), so installs from Homebrew, Laravel Herd, or your
+  package manager work, or you set its path in **Settings > Tools**.
+- Git, and optionally the GitHub CLI (`gh`) for pull requests. On Windows,
+  install Git for Windows: the app runs its shell commands with its `sh`.
 - Node.js, for Tailwind CSS, JavaScript, TypeScript, and Vue support. Laravel
   projects that use Vite already need it.
 
@@ -110,8 +111,10 @@ To build the app, you also need:
 The app manages its own tools (Mago, Composer, `typos-lsp`,
 the Xdebug adapter, `llama-server` for AI completion, and the Tailwind CSS, TypeScript, and Vue language
 servers), and compiles in the database drivers, so you don't install them
-yourself. The first launch downloads the tools for your Mac's chip (about
-90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/`, and
+yourself. The first launch downloads the tools for your system and chip (about
+90 MB) into `~/Library/Application Support/ly.almontasser.tusk/tools/` on a Mac,
+`%LOCALAPPDATA%\ly.almontasser.tusk\tools\` on Windows, or
+`~/.local/share/ly.almontasser.tusk/tools/` on Linux, and
 checks for newer versions at launch and every six hours, unless you turn off
 **Check for app and tool updates automatically** in **Settings > Tools**. Sail support needs
 Docker, which Sail itself needs. The PHP language server is the app's own
@@ -3271,7 +3274,7 @@ and see the server's version or why it failed. **+** adds a connection, the
 copy button duplicates one, and **−** removes a saved one. Nothing changes until
 you click **Save**.
 
-Passwords go to your Mac's Keychain, never to the project; leave the password
+Passwords go to your system's password store (the Keychain on a Mac, Credential Manager on Windows, the Secret Service on Linux), never to the project; leave the password
 empty to keep the saved one. `.env`'s connection shows its values read-only.
 Click **Override on This Mac** to change them for yourself (the project's
 `.env` stays as it is), and **Use .env's Values** to go back. The SSH tunnel and

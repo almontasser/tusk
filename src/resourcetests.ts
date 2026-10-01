@@ -15,6 +15,7 @@ import { shellQuote } from "./runconfig";
 import { errorText, showError } from "./status";
 import { composerCommand } from "./toolpaths";
 import { traitsEdits } from "./usergen";
+import { isAbsolute } from "./platform.ts";
 
 const HAS_FACTORY = "Illuminate\\Database\\Eloquent\\Factories\\HasFactory";
 const read = (path: string) => invoke<string>("read_file", { path });
@@ -69,7 +70,7 @@ export async function generateResourceTests(file: string) {
     // The policy's rules for the abilities the pages check.
     let rules: Partial<Record<TestAbility, Rule | null>> | null = null;
     if (policy.file) {
-      const path = policy.file.startsWith("/") ? policy.file : `${root}/${policy.file}`;
+      const path = isAbsolute(policy.file) ? policy.file : `${root}/${policy.file}`;
       const text = await read(path);
       const cls = (await fapp.outlineOf(text, path)).classes.find((c) => c.name);
       if (cls) rules = Object.fromEntries(readPolicy(text, cls, shortClass(info.model)).filter((r) => ["viewAny", "view", "create", "update"].includes(r.ability.name)).map((r) => [r.ability.name, r.rule]));
@@ -196,7 +197,7 @@ async function ensureFactories(models: string[]): Promise<boolean> {
   const traits = missing.filter((m) => m.trait && m.details.file);
   if (traits.length)
     await editFiles(
-      traits.map((m) => ({ path: m.details.file!.startsWith("/") ? m.details.file! : `${root}/${m.details.file}`, build: (text, outline) => {
+      traits.map((m) => ({ path: isAbsolute(m.details.file!) ? m.details.file! : `${root}/${m.details.file}`, build: (text, outline) => {
         const cls = classNamed(outline, m.details.class);
         return cls ? traitsEdits(text, cls, [HAS_FACTORY]) : null;
       } })),

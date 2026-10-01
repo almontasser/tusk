@@ -20,6 +20,7 @@ import { onSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
 import { errorText, showError } from "./status";
 import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
+import { isWindows } from "./platform.ts";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
@@ -127,15 +128,19 @@ let runCounter = 0;
 export const isRunning = () => runs.length > 0;
 const runsOf = (name: string) => runs.filter((r) => r.config.name === name);
 
-/** A command for this Mac: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in PATH. */
-const onMac = (command: string[]) => (command[0].startsWith("vendor/") ? [`${getRoot()}/${command[0]}`, ...command.slice(1)] : command);
+/**
+ * A command for this computer: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in
+ * PATH. Windows can't run those PHP scripts by themselves, so PHP runs them.
+ */
+const onComputer = (command: string[]) =>
+  command[0].startsWith("vendor/") ? [...(isWindows ? ["php"] : []), `${getRoot()}/${command[0]}`, ...command.slice(1)] : command;
 
-/** A PHP command in the project's running container (Sail or a Compose service), or else on this Mac, with `env` set. */
+/** A PHP command in the project's running container (Sail or a Compose service), or else on this computer, with `env` set. */
 async function php(command: string[], debug = false, env: string[] = [], docker = true): Promise<{ command: string[]; container: Container | null }> {
   const container = docker ? await runningContainer(getRoot()) : null;
   if (container) return { command: container.exec(command, [...env, ...(debug ? containerXdebugEnv() : [])]), container };
   const vars = [...env, ...(debug ? xdebugEnv() : [])];
-  return { command: vars.length ? ["/usr/bin/env", ...vars, ...onMac(command)] : onMac(command), container };
+  return { command: vars.length ? ["/usr/bin/env", ...vars, ...onComputer(command)] : onComputer(command), container };
 }
 
 const prefixes: Record<Mode, string> = { run: "", debug: "Debug: ", coverage: "Coverage: ", profile: "Profile: " };

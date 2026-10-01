@@ -9,6 +9,7 @@ import { interactiveRebase } from "./rebase";
 import { splitter } from "./splitter";
 import { errorText, showError, status } from "./status";
 import { showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; status(text: string): void };
 
@@ -377,8 +378,8 @@ export function initHistory(hst: Host) {
   list.addEventListener("keydown", (e) => {
     const hash = nav.selected();
     if (e.target !== list || !hash) return;
-    if (e.key === "c" && e.metaKey) (copyHash(hash), e.preventDefault());
-    else if (e.key === "ArrowRight" && !e.metaKey) (filesNav && $("history-detail").querySelector<HTMLElement>(".history-files")?.focus(), e.preventDefault());
+    if (e.key === "c" && mod(e)) (copyHash(hash), e.preventDefault());
+    else if (e.key === "ArrowRight" && !mod(e)) (filesNav && $("history-detail").querySelector<HTMLElement>(".history-files")?.focus(), e.preventDefault());
   });
   splitter($("history-split"), { target: document.querySelector<HTMLElement>(".history-commits")!, axis: "x", edge: "end", label: "Resize the commit list", min: 200, minRest: 200, save: "gitlog.commits" });
 }

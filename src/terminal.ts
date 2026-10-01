@@ -157,7 +157,7 @@ export async function openTerminal(
   term.loadAddon(fit);
   term.loadAddon(search);
   // URLs open in the browser; file references open in the editor.
-  term.loadAddon(new WebLinksAddon((_, url) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null }).catch(() => {})));
+  term.loadAddon(new WebLinksAddon((_, url) => invoke("open_url", { url: url }).catch(() => {})));
   term.open(el);
   fit.fit();
   if (scrollback) term.write(`${scrollback.replaceAll("\n", "\r\n")}\r\n\x1b[2m[Restored from the last session]\x1b[0m\r\n`);

@@ -1,3 +1,4 @@
+import { isAbsolute } from "./platform.ts";
 // Reads and writes .http files (PhpStorm's HTTP client format), builds curl arguments, reads curl's output, and
 // converts requests to and from other forms. Free of editor imports so Node can test it.
 
@@ -386,7 +387,7 @@ export type Prepared = {
 /** Whether a response that took `seconds` went over the request's @budget. */
 export const overBudget = (p: Prepared, seconds: number | undefined) => p.budget !== undefined && seconds !== undefined && seconds * 1000 > p.budget;
 
-const absolute = (dir: string, path: string) => (path.startsWith("/") ? path : `${dir}/${path.replace(/^\.\//, "")}`);
+const absolute = (dir: string, path: string) => (isAbsolute(path) ? path : `${dir}/${path.replace(/^\.\//, "")}`);
 
 /** The parts of a multipart/form-data body. A part whose content is a `< path` line sends that file. */
 export function multipartParts(body: string, boundary: string, dir: string): FormPart[] {

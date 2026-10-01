@@ -9,6 +9,7 @@ import { pick, rank, type Item } from "./palette";
 import { shellQuote } from "./runconfig";
 import { COMMON, commandLine, type Command, generatorLabel, type Values } from "./laravelnewdata";
 import { errorText, showError } from "./status";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, line: number): void; status(text: string): void };
 let host: Host;
@@ -144,7 +145,7 @@ export function openForm(c: Command) {
   dialog.showModal();
   update();
   requestAnimationFrame(() => dialog.querySelector<HTMLInputElement>(".rw-field input")?.focus());
-  dialog.addEventListener("keydown", (e) => e.key === "Enter" && (e.metaKey || !(e.target as HTMLElement).closest("textarea")) && !run.disabled && (e.target as HTMLElement).tagName === "INPUT" && (e.preventDefault(), run.click()));
+  dialog.addEventListener("keydown", (e) => e.key === "Enter" && (mod(e) || !(e.target as HTMLElement).closest("textarea")) && !run.disabled && (e.target as HTMLElement).tagName === "INPUT" && (e.preventDefault(), run.click()));
 }
 
 const humanizeArg = (name: string) => (name.charAt(0).toUpperCase() + name.slice(1)).replace(/([a-z])([A-Z])/g, "$1 $2");

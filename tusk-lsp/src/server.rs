@@ -71,11 +71,13 @@ pub fn index_config(root: &Path, options: &Options) -> IndexConfig {
     config
 }
 
-/// `~/Library/Caches/tusk-lsp/<hash of the root>` on macOS, the XDG cache folder elsewhere.
+/// `~/Library/Caches/tusk-lsp/<hash of the root>` on macOS, `%LOCALAPPDATA%` on Windows, the XDG cache folder elsewhere.
 fn default_cache_dir(root: &Path) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let base = if cfg!(target_os = "macos") {
+    let base = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+    } else if cfg!(target_os = "macos") {
         home?.join("Library/Caches")
     } else {
         std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| Some(home?.join(".cache")))?

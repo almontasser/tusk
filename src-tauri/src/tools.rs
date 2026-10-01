@@ -1,12 +1,12 @@
 use crate::lsp::{tool, tools_dir};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use tauri::AppHandle;
 
 /// Path of a tool's file, such as `mago/mago`, for tools the frontend runs or passes to a language server.
 #[tauri::command(async)]
 pub fn tool_path(app: AppHandle, name: String) -> Result<String, String> {
-    Ok(tool(&app, &name)?.to_string_lossy().into())
+    Ok(crate::slash(tool(&app, &name)?))
 }
 
 #[tauri::command(async)]
@@ -31,10 +31,9 @@ pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input:
 
 fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>, any_status: bool) -> Result<String, String> {
     crate::toolpaths::check(&[&[program.clone()], &args[..]].concat())?;
-    let mut child = Command::new(program)
+    let mut child = crate::toolpaths::command(program)
         .args(args)
         .current_dir(cwd)
-        .env("PATH", crate::toolpaths::path_env())
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -52,8 +51,50 @@ fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String
     Ok(String::from_utf8_lossy(&out.stdout).into())
 }
 
+/// Opens a web address in the browser, or a file in its app.
+#[tauri::command(async)]
+pub fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = crate::toolpaths::command("open");
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = crate::toolpaths::command("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = crate::toolpaths::command("xdg-open");
+    command.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Shows a file in Finder or Explorer, selected. Linux file managers have no common way to select one, so its folder opens.
+#[tauri::command(async)]
+pub fn reveal_path(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = crate::toolpaths::command("open");
+        command.args(["-R", &path]);
+        command
+    };
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut command = crate::toolpaths::command("explorer");
+        // Explorer reads its own arguments, and wants the path quoted after the comma.
+        command.raw_arg(format!("/select,\"{}\"", path.replace('/', "\\")));
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = crate::toolpaths::command("xdg-open");
+        command.arg(std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new("/")));
+        command
+    };
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 // Language tools are downloaded, not bundled, so the app stays small and tools update without an app
-// release. scripts/publish-tools.ts packs each tool (per chip when it's native) as a `tools` GitHub release
+// release. scripts/publish-tools.ts packs each tool (per system and chip when it's native) as a `tools` GitHub release
 // asset, listed with its checksum in tools.json, which is signed with the updater's key. Each tool unpacks
 // into its own folder under `tools_dir`, with the package's ID in `.tusk-id`.
 
@@ -67,7 +108,8 @@ struct Manifest {
 #[derive(serde::Deserialize)]
 struct Package {
     name: String,
-    /// `any`, `aarch64`, or `x86_64`.
+    /// `any`, or the system and chip a native tool is built for: `aarch64` or `x86_64` on a Mac (named before other
+    /// systems had tools, so older versions of the app still find theirs), else such as `linux-x86_64` or `windows-x86_64`.
     arch: String,
     /// A hash of the tool's files, which changes when the tool does.
     id: String,
@@ -77,9 +119,11 @@ struct Package {
 }
 
 impl Manifest {
-    /// The packages this Mac's chip needs.
+    /// The packages this computer needs.
     fn here(&self) -> impl Iterator<Item = &Package> {
-        self.packages.iter().filter(|p| p.arch == "any" || p.arch == std::env::consts::ARCH)
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        let here = if os == "macos" { arch.to_string() } else { format!("{os}-{arch}") };
+        self.packages.iter().filter(move |p| p.arch == "any" || p.arch == here)
     }
 }
 

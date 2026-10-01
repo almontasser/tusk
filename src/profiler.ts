@@ -3,7 +3,7 @@
 // is listed too, for profiles you made yourself.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open } from "./platform.ts";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
@@ -196,9 +196,9 @@ async function requestAndProfile(path: string) {
   host.status(`GET ${path}: ${code} in ${Math.round(Number(seconds) * 1000)} ms (with the profiler, which slows PHP down).`);
 }
 
-/** Profile files in a folder with their modification time (Unix seconds) and size. */
+/** Profile files in a folder with their modification time (Unix seconds) and size. GNU's `stat`, then the Mac's. */
 async function profilesIn(dir: string): Promise<{ path: string; time: number; size: number }[]> {
-  const out = await invoke<string>("run_capture", { cwd: dir, program: "/bin/sh", args: ["-c", 'stat -f "%m %z %N" cachegrind.out.* 2>/dev/null; true'], input: null }).catch(() => "");
+  const out = await invoke<string>("run_capture", { cwd: dir, program: "/bin/sh", args: ["-c", 'stat -c "%Y %s %n" cachegrind.out.* 2>/dev/null || stat -f "%m %z %N" cachegrind.out.* 2>/dev/null; true'], input: null }).catch(() => "");
   return out
     .split("\n")
     .map((l) => l.match(/^(\d+) (\d+) (.+)$/))
@@ -532,7 +532,7 @@ q('[data-action="open"]').onclick = () => chooseProfile();
 const detailPane = q(".profiler-detail");
 splitter(q(".profiler-resize"), { target: detailPane, axis: "x", edge: "start", label: "Resize the details", min: 200, minRest: 300, save: "profiler.detail", legacyKey: "profilerDetailWidth" });
 q('[data-action="compare"]').onclick = () => compareWith();
-q('[data-action="reveal"]').onclick = () => currentPath && invoke("run_capture", { cwd: "/", program: "/usr/bin/open", args: ["-R", currentPath], input: null }).catch(() => {});
+q('[data-action="reveal"]').onclick = () => currentPath && invoke("reveal_path", { path: currentPath }).catch(() => {});
 panel.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
   (b) =>
     (b.onclick = () => {

@@ -32,6 +32,7 @@ import { readText } from "./projectfiles";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
 import { descendantsOf, textOf } from "./refactor";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; status(text: string): void; openAt(path: string, line: number): Promise<unknown> };
 let host: Host;
@@ -287,7 +288,7 @@ function memberDialog(spec: DialogSpec) {
     dialog.onkeydown = (e) => {
       const target = e.target as HTMLElement;
       if (e.key === "Enter" && !(target instanceof HTMLButtonElement) && !(target instanceof HTMLSelectElement)) (e.preventDefault(), finish(false));
-      else if (e.metaKey && e.key.toLowerCase() === "a" && !(target instanceof HTMLInputElement && target.type !== "checkbox")) (e.preventDefault(), selectAll(true));
+      else if (mod(e) && e.key.toLowerCase() === "a" && !(target instanceof HTMLInputElement && target.type !== "checkbox")) (e.preventDefault(), selectAll(true));
     };
     dialog.onclose = () => {
       dialog.remove();

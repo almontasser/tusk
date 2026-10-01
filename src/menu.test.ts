@@ -4,12 +4,14 @@ import assert from "node:assert/strict";
 import { accelerator, passedOn } from "./menu.ts";
 
 test("menu shortcuts for single key combinations", () => {
-  assert.equal(accelerator({ keys: "Meta+Shift+O" }), "Cmd+Shift+O");
-  assert.equal(accelerator({ keys: "Alt+F12" }), "Alt+F12");
-  assert.equal(accelerator({ keys: "Meta+D" }), "Cmd+D");
-  assert.equal(accelerator({ keys: "Shift Shift" }), undefined);
-  assert.equal(accelerator({ keys: "Meta+K Meta+X" }), undefined);
-  assert.equal(accelerator({}), undefined);
+  assert.equal(accelerator({ keys: "Meta+Shift+O" }, true), "Cmd+Shift+O");
+  assert.equal(accelerator({ keys: "Alt+F12" }, true), "Alt+F12");
+  assert.equal(accelerator({ keys: "Meta+D" }, true), "Cmd+D");
+  assert.equal(accelerator({ keys: "Shift Shift" }, true), undefined);
+  assert.equal(accelerator({ keys: "Meta+K Meta+X" }, true), undefined);
+  assert.equal(accelerator({}, true), undefined);
+  // Off a Mac the page handles shortcuts, so the menu shows none.
+  assert.equal(accelerator({ keys: "Meta+D" }, false), undefined);
 });
 
 test("the menu skips a key the page passed on, for actions that only sometimes apply", () => {

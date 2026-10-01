@@ -49,6 +49,7 @@ import { usesSail } from "./sail";
 import { registerSettings } from "./settings";
 import { errorText, showError, status } from "./status";
 import { showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Result = { columns: string[]; rows: Cell[][]; affected: number; truncated: boolean; total: number; binary?: number[] };
 type Host = { root(): string; openFile(path: string): Promise<unknown>; status(text: string): void };
@@ -874,7 +875,7 @@ export function initDatabase(h_: Host) {
   });
   tree.addEventListener("keydown", (e) => {
     // ⌘C copies the selected table's or column's name.
-    if (e.metaKey && e.key.toLowerCase() === "c" && !isRedis() && nav.selectedRow()) e.preventDefault(), copyName(nav.selectedRow()!.querySelector(".name")?.textContent ?? "");
+    if (mod(e) && e.key.toLowerCase() === "c" && !isRedis() && nav.selectedRow()) e.preventDefault(), copyName(nav.selectedRow()!.querySelector(".name")?.textContent ?? "");
   });
   initRedis({ connection: () => limited(connection), results, status: (text) => host.status(text), friendlyError, nav, confirmDiscard });
   $("db-refresh").onclick = () => ((config = undefined), loadTables());

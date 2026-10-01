@@ -9,7 +9,7 @@ import { closeView, showEditorView } from "./terminal";
 type Preview = { el: HTMLElement; sync(ed: monaco.editor.ICodeEditor): void; close(): void };
 /** Open previews, by their model's URI. */
 const previews = new Map<string, Preview>();
-const openUrl = (url: string) => invoke("run_capture", { cwd: "/", program: "open", args: [url], input: null });
+const openUrl = (url: string) => invoke("open_url", { url: url });
 
 // Each editor showing a previewed file scrolls its preview. Editors are hooked once, as they're created.
 const hooked = new WeakSet<monaco.editor.ICodeEditor>();

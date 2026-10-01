@@ -14,6 +14,7 @@ import { addMember, type Edit, findCall, insertItem, methodNamed, nodeValue, typ
 import { historySettings } from "./historyview";
 import { confirm } from "./palette";
 import { showError } from "./status";
+import { isAbsolute } from "./platform.ts";
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
 
@@ -40,7 +41,7 @@ function card(iconEl: HTMLElement, title: string, details: (string | HTMLElement
   return el;
 }
 
-const abs = (d: Designer, file: string | null) => (file ? (file.startsWith("/") ? file : `${d.root}/${file}`) : null);
+const abs = (d: Designer, file: string | null) => (file ? (isAbsolute(file) ? file : `${d.root}/${file}`) : null);
 
 // ---- Relations ----
 

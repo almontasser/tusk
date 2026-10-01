@@ -4,6 +4,7 @@
 import { h, icon, iconButton } from "./dom";
 import { monaco } from "./editor";
 import { signatureProblem, signatureText, signatureWarning, type Param, type Signature } from "./refactorparse";
+import { mod } from "./platform.ts";
 
 type Kind = "method" | "function" | "constructor";
 /** `heading` names the refactoring; `focus` is the row whose name gets the focus, such as a parameter just added. */
@@ -167,7 +168,7 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
     refactorButton.onclick = () => finish(false);
     dialog.onkeydown = (e) => {
       if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) (e.preventDefault(), finish(false));
-      else if (e.metaKey && e.key.toLowerCase() === "n") (e.preventDefault(), add());
+      else if (mod(e) && e.key.toLowerCase() === "n") (e.preventDefault(), add());
     };
     dialog.onclose = () => {
       dialog.remove();

@@ -10,6 +10,7 @@ import { choose } from "./palette";
 import { configureTusk, magoConfigPath, newMagoConfigText, reindex, spellingRoot, tuskOptions, useProjectMagoConfig } from "./lsp";
 import { listEditor, openPath, registerProjectSettings, registerSettingsSection } from "./settings";
 import { errorText, showError, status } from "./status";
+import { isAbsolute } from "./platform.ts";
 
 // ---- The PHP server's index options ----
 
@@ -40,7 +41,7 @@ tuskOptions.stubs = () =>
     .stubs.split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-    .map((p) => normalize(p.startsWith("/") ? p : `${spellingRoot()}/${p}`));
+    .map((p) => normalize(isAbsolute(p) ? p : `${spellingRoot()}/${p}`));
 
 /** A path without `.` and `..` parts, since the index compares paths by their text. */
 export function normalize(path: string) {

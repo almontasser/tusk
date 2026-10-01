@@ -1,3 +1,4 @@
+import { isAbsolute } from "./platform.ts";
 // Reads a Laravel project's database connection from .env, and finds the SQL statement to run.
 // Free of editor imports so Node can test it.
 
@@ -28,7 +29,7 @@ export function parseEnv(text: string): Record<string, string> {
  */
 export function connectionFromEnv(env: Record<string, string>, root: string, sail = false): Connection {
   const driver = env.DB_CONNECTION || "sqlite";
-  const inProject = (file: string) => (file.startsWith("/") ? file : `${root}/${file}`);
+  const inProject = (file: string) => (isAbsolute(file) ? file : `${root}/${file}`);
   const tls = { ssl_mode: env.DB_SSLMODE ?? "", ssl_ca: (env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) ? inProject(env.MYSQL_ATTR_SSL_CA || env.DB_SSLROOTCERT) : "" };
   if (driver === "sqlite") return { driver, host: "", port: 0, username: "", password: "", database: inProject(env.DB_DATABASE || "database/database.sqlite"), ssl_mode: "", ssl_ca: "" };
   const port = Number(env.DB_PORT) || defaultPort(driver);
@@ -73,7 +74,7 @@ export function connectionFromUrl(text: string, root: string): Connection | null
   const driver = drivers[url.protocol.slice(0, -1)];
   const d = decodeURIComponent;
   if (!driver) return null;
-  const inProject = (file: string) => (file && !file.startsWith("/") ? `${root}/${file}` : file);
+  const inProject = (file: string) => (file && !isAbsolute(file) ? `${root}/${file}` : file);
   if (driver === "sqlite") return url.pathname ? { driver, host: "", port: 0, username: "", password: "", database: inProject(d(url.pathname)), ssl_mode: "", ssl_ca: "" } : null;
   if (!url.hostname) return null;
   const param = (name: string) => url.searchParams.get(name) ?? "";

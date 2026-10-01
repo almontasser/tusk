@@ -5,7 +5,7 @@
 // succeeds, the project opens.
 import { invoke } from "@tauri-apps/api/core";
 import { appLocalDataDir, homeDir } from "@tauri-apps/api/path";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "./platform.ts";
 import { h, icon } from "./dom";
 import { commitInput, segmented, toggleSwitch } from "./filamentpickers";
 import { toolPath } from "./lsp";

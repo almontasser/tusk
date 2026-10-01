@@ -33,7 +33,7 @@
 
   --ui-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   --ui: 13px/1.45 var(--ui-family);
-  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
   --radius: 5px;
   --row: 24px;
 
@@ -155,8 +155,8 @@ kbd {
 .count { color: var(--faint); font-weight: normal; font-size: 12px; }
 
 /* ==========================================================================
-   Title bar. The window has no native title bar: macOS draws its window buttons
-   over the left 78 px, so content starts after them.
+   Title bar. On a Mac the window has no native title bar: macOS draws its window
+   buttons over the left 78 px, so content starts after them.
    ========================================================================== */
 
 #titlebar {
@@ -169,6 +169,8 @@ kbd {
   background: var(--chrome);
   border-bottom: 1px solid var(--border);
 }
+/* Windows and Linux keep their own title bar, so nothing sits over this one. */
+:root:not(.mac) #titlebar { padding-left: 8px; }
 .tb-spacer { flex: 1; height: 100%; }
 .tb-button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--radius); font-weight: 600; white-space: nowrap; }
 .tb-button:hover, .tb-icon:hover, .tb-search:hover { background: var(--hover); }

@@ -1,7 +1,7 @@
 // User settings: stored in settings.json in the app's config folder and applied live.
 import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open } from "./platform.ts";
 import { monaco } from "./editor";
 import { h, icon, toast } from "./dom";
 import { choose, confirm, pick, rank } from "./palette";
@@ -41,7 +41,7 @@ const defaults: Settings = {
   darkTheme: "dark",
   lightTheme: "light",
   // JetBrains Mono, as its own release or the Nerd Font build names it.
-  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
+  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
   fontSize: 13,
   wordWrap: false,
   minimap: false,

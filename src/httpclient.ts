@@ -28,6 +28,7 @@ import ScriptWorker from "./httpscript.worker?worker";
 import { pick } from "./palette";
 import { limits } from "./limits";
 import { registerSettings } from "./settings";
+import { isAbsolute } from "./platform.ts";
 
 export type Host = {
   root(): string;
@@ -268,7 +269,7 @@ export async function scopes(path: string, text: string) {
 
 /** Runs a script in a worker, stopping it after 5 seconds. */
 async function runScript(script: Script, dir: string, input: Omit<Parameters<typeof postScript>[0], "code">): Promise<Output> {
-  const code = script.file ? await invoke<string>("read_file", { path: script.file.startsWith("/") ? script.file : `${dir}/${script.file.replace(/^\.\//, "")}` }).catch((e) => `throw new Error(${JSON.stringify(`Can't read ${script.file}: ${e}`)})`) : (script.code ?? "");
+  const code = script.file ? await invoke<string>("read_file", { path: isAbsolute(script.file) ? script.file : `${dir}/${script.file.replace(/^\.\//, "")}` }).catch((e) => `throw new Error(${JSON.stringify(`Can't read ${script.file}: ${e}`)})`) : (script.code ?? "");
   return postScript({ ...input, code });
 }
 
@@ -550,9 +551,9 @@ export async function probe(p: Prepared, path: string, env: string | undefined, 
 const LOG_LIMIT = 200 * 1024;
 const logFiles = () => ({ cwd: `${host.root()}/storage/logs`, program: "/bin/sh", input: null, any_status: true });
 
-/** Sizes of laravel.log and the newest daily log (laravel-YYYY-MM-DD.log), by path. */
+/** Sizes of laravel.log and the newest daily log (laravel-YYYY-MM-DD.log), by path. GNU's `stat` (Linux, Git for Windows) first, then the Mac's. */
 async function logSizes(): Promise<Record<string, number>> {
-  const out = await invoke<string>("run_capture", { ...logFiles(), args: ["-c", 'for f in laravel.log $(ls -t laravel-*.log 2>/dev/null | head -1); do [ -f "$f" ] && stat -f "%z %N" "$f"; done; true'] }).catch(() => "");
+  const out = await invoke<string>("run_capture", { ...logFiles(), args: ["-c", 'for f in laravel.log $(ls -t laravel-*.log 2>/dev/null | head -1); do [ -f "$f" ] && { stat -c "%s %n" "$f" 2>/dev/null || stat -f "%z %N" "$f"; }; done; true'] }).catch(() => "");
   return Object.fromEntries(out.split("\n").flatMap((l) => (l.match(/^(\d+) (.+)$/) ? [[l.slice(l.indexOf(" ") + 1), Number(l.split(" ")[0])]] : [])));
 }
 
@@ -571,7 +572,7 @@ export const isText = (type: string) => !type || /^text\/|json|xml|javascript|ht
 
 /** `>> path` adds a number to the name when the file exists; `>>! path` replaces it. */
 async function saveOutput(body: string, output: { path: string; force: boolean }, dir: string) {
-  let target = output.path.startsWith("/") ? output.path : `${dir}/${output.path.replace(/^\.\//, "")}`;
+  let target = isAbsolute(output.path) ? output.path : `${dir}/${output.path.replace(/^\.\//, "")}`;
   if (!output.force) {
     const dot = target.lastIndexOf(".") > target.lastIndexOf("/") ? target.lastIndexOf(".") : target.length;
     for (let n = 1; await invoke<boolean>("path_exists", { path: target }); n++) target = `${target.slice(0, dot).replace(/-\d+$/, "")}-${n}${target.slice(dot)}`;

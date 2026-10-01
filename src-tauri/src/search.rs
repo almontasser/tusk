@@ -43,7 +43,7 @@ fn walk_excluding(root: &str, include: &str, exclude: &str, all: bool) -> Result
 pub async fn list_files(root: String, all: Option<bool>) -> Vec<String> {
     crate::blocking(move || {
         Ok(walk(&root, "", all.unwrap_or(false))
-            .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(|p| p.to_string_lossy().into())).collect())
+            .map(|files| files.filter_map(|e| e.path().strip_prefix(&root).ok().map(crate::slash)).collect())
             .unwrap_or_default())
     })
     .await
@@ -107,7 +107,7 @@ fn find_symbol_free(root: &str) -> Result<Vec<Folder>, String> {
     let mut found: Vec<Folder> = folders
         .iter()
         .filter(|(dir, (_, bytes, free))| *free && *bytes >= 100 * 1024 && dir.parent().and_then(|p| folders.get(p)).is_some_and(|parent| !parent.2))
-        .map(|(dir, (files, bytes, _))| Folder { path: dir.to_string_lossy().into(), files: *files, bytes: *bytes })
+        .map(|(dir, (files, bytes, _))| Folder { path: crate::slash(dir), files: *files, bytes: *bytes })
         .collect();
     found.sort_by(|a, b| b.bytes.cmp(&a.bytes));
     Ok(found)
@@ -199,7 +199,7 @@ fn find_text(root: String, query: Query, include: String, exclude: String, stop:
                 let utf16 = |byte: usize| text[..byte].encode_utf16().count() + 1;
                 let _ = matcher.find_iter(text.as_bytes(), |m| {
                     matches.push(Match {
-                        path: path.to_string_lossy().into(),
+                        path: crate::slash(path),
                         line,
                         column: utf16(m.start()),
                         end: utf16(m.end()),
@@ -238,7 +238,7 @@ fn find_files(root: String, query: Query, include: String, exclude: String) -> R
             }),
         );
         if found {
-            files.push(entry.path().to_string_lossy().into());
+            files.push(crate::slash(entry.path()));
         }
     }
     Ok(files)

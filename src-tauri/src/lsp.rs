@@ -10,7 +10,45 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// often ignore the LSP `processId` and outlive a crashed or force-quit editor. The shell
 /// starts a loop that watches the app's PID, then `exec`s the server, so the server keeps
 /// the shell's PID and `Child::kill` still reaches it.
-pub(crate) const WATCHDOG: &str = r#"app=$PPID; (while kill -0 "$app" && kill -0 $$; do sleep 2; done; kill $$) >/dev/null 2>&1 </dev/null & exec "$@""#;
+#[cfg(unix)]
+const WATCHDOG: &str = r#"app=$PPID; (while kill -0 "$app" && kill -0 $$; do sleep 2; done; kill $$) >/dev/null 2>&1 </dev/null & exec "$@""#;
+
+/// A command for `program` that `spawn_watched` starts so that it dies with the app: through the watchdog on Unix,
+/// in a job object that closes with the app on Windows.
+pub(crate) fn watched(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg(unix)]
+    {
+        let mut command = crate::toolpaths::command("/bin/sh");
+        command.args(["-c", WATCHDOG, "sh"]).arg(program);
+        command
+    }
+    #[cfg(windows)]
+    crate::toolpaths::command(program)
+}
+
+pub(crate) fn spawn_watched(command: &mut Command) -> std::io::Result<Child> {
+    let child = command.spawn()?;
+    #[cfg(windows)]
+    kill_with_app(&child);
+    Ok(child)
+}
+
+/// Puts `child` in a job that Windows ends, with every process in it, when the app's handle to it closes, as it
+/// does when the app exits in any way. ponytail: a program the child starts before this runs escapes the job.
+#[cfg(windows)]
+fn kill_with_app(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::*;
+    static JOB: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info as *const _ as _, std::mem::size_of_val(&info) as u32);
+        job as usize
+    });
+    // Safety: both handles are open; the job's for the app's lifetime.
+    unsafe { AssignProcessToJobObject(*JOB as _, child.as_raw_handle() as _) };
+}
 
 /// Running language servers by name, each with a channel to the thread that writes its input.
 #[derive(Default)]
@@ -50,7 +88,13 @@ pub fn tool(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     if path == "mago.toml" || path == "introspect.php" {
         return Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("tools").join(path));
     }
-    Ok(tools_dir(app)?.join(path))
+    let path = tools_dir(app)?.join(path);
+    // Native tools, such as `mago/mago`, are `.exe` files on Windows.
+    #[cfg(windows)]
+    if path.extension().is_none() && path.with_extension("exe").is_file() {
+        return Ok(path.with_extension("exe"));
+    }
+    Ok(path)
 }
 
 /// Starts the bundled language server `name` (`tusk`, `tailwind`, `typescript`, `vue`, `svelte`, `astro`, or `angular`) for `root`, replacing a running one with the
@@ -87,17 +131,11 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
         crate::toolpaths::check(&[runtime.to_string()])?;
     }
     let program = if name == "tusk" { std::env::current_exe().map_err(|e| e.to_string())? } else { tool(&app, script)? };
-    let mut child = Command::new("/bin/sh")
-        .args(["-c", WATCHDOG, "sh"])
-        .args((!runtime.is_empty()).then_some(runtime))
-        .arg(program)
-        .args(args)
-        .current_dir(&root)
-        .env("PATH", crate::toolpaths::path_env())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
+    let mut command = if runtime.is_empty() { watched(&program) } else { watched(runtime) };
+    if !runtime.is_empty() {
+        command.arg(&program);
+    }
+    let mut child = spawn_watched(command.args(args).current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()))
         .map_err(|e| format!("Could not start {name}. Is {runtime} installed? ({e})"))?;
     let stdin = writer(child.stdin.take().unwrap());
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
@@ -150,18 +188,17 @@ fn clean_laravel_helpers(root: &Path) {
 #[tauri::command(async)]
 pub fn ai_start(app: AppHandle, state: State<'_, LspState>, model: String, key: String) -> Result<u16, String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
-    let mut child = Command::new("/bin/sh")
-        .args(["-c", WATCHDOG, "sh"])
-        .arg(tool(&app, "llama/llama-server")?)
+    let mut child = spawn_watched(
+        watched(tool(&app, "llama/llama-server")?)
         // --cache-reuse lets a request reuse the processed prompt even after text before the cursor shifts.
         // The server keeps up to 3/4 of -b tokens before the cursor, so 2048 allows about 150 lines.
         .args(["-m", &model, "--host", "127.0.0.1", "--port", &port.to_string(), "--api-key", &key])
         .args(["-ngl", "99", "-c", "8192", "-np", "1", "-b", "2048", "-ub", "1024", "--cache-reuse", "256"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Could not start llama-server: {e}"))?;
+        .stderr(Stdio::null()),
+    )
+    .map_err(|e| format!("Could not start llama-server: {e}"))?;
     let stdin = writer(child.stdin.take().unwrap());
     let old = state.0.lock().unwrap().insert("llama".into(), (child, stdin));
     if let Some((mut old, _)) = old {

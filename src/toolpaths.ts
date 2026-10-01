@@ -5,7 +5,7 @@
 // setting, and as a `tool-missing` event this module shows with Open Settings.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { isWindows, open } from "./platform.ts";
 import { toast } from "./dom";
 import { pick } from "./palette";
 import { onProjectValue, projectValue, setProjectValue, shareItem } from "./projectstate";
@@ -64,12 +64,12 @@ export const tools = registerSettings(
     path("toolGit", "git", "Runs every Git command."),
     path("toolGh", "gh", "Runs pull requests."),
     path("toolDocker", "docker", "Runs Docker Compose services, such as Sail's."),
-    { key: "checkForUpdates", label: "Check for app and tool updates automatically", type: "checkbox", help: "At launch and every six hours. Turn it off on an offline or locked-down Mac; Tusk > Check for Updates… still works. Tools that are missing still download." },
+    { key: "checkForUpdates", label: "Check for app and tool updates automatically", type: "checkbox", help: "At launch and every six hours. Turn it off on an offline or locked-down computer; Tusk > Check for Updates… still works. Tools that are missing still download." },
   ],
 );
 
-const shell = registerSettings("Terminal", { terminalShell: "", terminalShellArgs: "-l" }, [
-  { key: "terminalShell", label: "Shell", type: "path", placeholder: "Your login shell ($SHELL)", describe: (v) => describe("shell", v), help: "Applies to new terminal tabs." },
+const shell = registerSettings("Terminal", { terminalShell: "", terminalShellArgs: isWindows ? "-NoLogo" : "-l" }, [
+  { key: "terminalShell", label: "Shell", type: "path", placeholder: isWindows ? "PowerShell" : "Your login shell ($SHELL)", describe: (v) => describe("shell", v), help: "Applies to new terminal tabs." },
   { key: "terminalShellArgs", label: "Shell arguments", type: "text", placeholder: "None", help: "Separated by spaces. -l starts a login shell, which reads your profile." },
 ]);
 

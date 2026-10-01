@@ -12,6 +12,7 @@ import { confirm, type Item, pick, rank } from "./palette";
 import { errorText, showError, withProgress } from "./status";
 import { closeView, openTerminal, showEditorView } from "./terminal";
 import { historyActivity } from "./localhistory";
+import { isAbsolute, mod } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -374,7 +375,7 @@ export function showDiff(path: string, original: string, modified: string, label
       readOnly: true,
       originalEditable: false,
       fontSize: 13,
-      fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
+      fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
       minimap: { enabled: false },
     });
     diffEditor.getOriginalEditor().onDidFocusEditorText(() => (lastSide = "original"));
@@ -386,10 +387,10 @@ export function showDiff(path: string, original: string, modified: string, label
     original: monaco.editor.createModel(original, undefined, uri("original")),
     modified: monaco.editor.createModel(modified, undefined, uri("modified")),
   });
-  $("diff-path").textContent = path.startsWith("/") ? path.split("/").pop()! : path;
+  $("diff-path").textContent = isAbsolute(path) ? path.split("/").pop()! : path;
   $("diff-label").textContent = label;
   // Paths are relative to the project, except files outside it, such as HTTP responses in the app's cache.
-  $("diff-open").onclick = () => (closeDiff(), host.openFile(path.startsWith("/") ? path : `${host.root()}/${path}`));
+  $("diff-open").onclick = () => (closeDiff(), host.openFile(isAbsolute(path) ? path : `${host.root()}/${path}`));
   showEditorView(`${path.split("/").pop()} (diff)`, $("diff"), "diff", clearDiff);
   return diffEditor;
 }
@@ -826,7 +827,7 @@ export function initGit(h: Host) {
   host = h;
   $("diff-close").onclick = closeDiff;
   $("diff").addEventListener("keydown", (e) => {
-    if (!e.altKey || !e.metaKey || !diffFiles || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    if (!e.altKey || !mod(e) || !diffFiles || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
     e.preventDefault();
     e.stopPropagation();
     moveDiff(e.key === "ArrowLeft" ? -1 : 1);

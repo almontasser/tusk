@@ -18,6 +18,7 @@ import { errorText, showError, status } from "./status";
 import { onProjectValue, projectScope, projectValue, type Scope, setProjectValue, shareItem } from "./projectstate";
 import { projectRelative } from "./projectstatedata";
 import { showPanelView } from "./terminal";
+import { isAbsolute, mod } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
 type Frame = { id: number; name: string; line: number; source?: { path?: string; name?: string } };
@@ -188,7 +189,7 @@ export function loadBreakpoints() {
   breakpoints.clear();
   const root = host.root();
   for (const [path, list] of Object.entries(projectValue<SavedBreakpoints>("breakpoints") ?? {}))
-    if (Array.isArray(list)) breakpoints.set(path.startsWith("/") ? path : `${root}/${path}`, new Map(list.filter((b) => Array.isArray(b) && typeof b[0] === "number").map(([line, o]) => [line, o ?? {}])));
+    if (Array.isArray(list)) breakpoints.set(isAbsolute(path) ? path : `${root}/${path}`, new Map(list.filter((b) => Array.isArray(b) && typeof b[0] === "number").map(([line, o]) => [line, o ?? {}])));
   for (const path of new Set([...before, ...breakpoints.keys()])) {
     renderBreakpoints(path);
     if (running) sendBreakpoints(path);
@@ -435,7 +436,7 @@ function parseMappings(text: string): Record<string, string> {
   for (const entry of text.split(",").filter((e) => e.trim())) {
     const [server, local = ""] = entry.split("=");
     const to = trimSlash(local);
-    mappings[trimSlash(server)] = !to ? host.root() : to.startsWith("/") ? to : `${host.root()}/${to}`;
+    mappings[trimSlash(server)] = !to ? host.root() : isAbsolute(to) ? to : `${host.root()}/${to}`;
   }
   return mappings;
 }
@@ -1123,7 +1124,7 @@ for (const tree of [q<HTMLElement>(".debug-vars"), q<HTMLElement>(".debug-watche
     const data = row && rowData.get(row);
     if (e.target !== tree || !row || !data) return;
     if (e.key === "F2") editValue(row);
-    else if (e.metaKey && e.key === "c") copyValue(data.v);
+    else if (mod(e) && e.key === "c") copyValue(data.v);
     else if ((e.key === "Backspace" || e.key === "Delete") && data.watch !== undefined) removeWatch(data.watch);
     else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       const r = row.getBoundingClientRect();

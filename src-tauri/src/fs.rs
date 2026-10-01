@@ -25,7 +25,7 @@ fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
         .filter(|e| !matches!(e.file_name().to_str(), Some(".git" | ".DS_Store")))
         .map(|e| Entry {
             name: e.file_name().to_string_lossy().into(),
-            path: e.path().to_string_lossy().into(),
+            path: crate::slash(e.path()),
             is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
         })
         .collect();
@@ -222,7 +222,7 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
     let pending = std::sync::Arc::downgrade(&changed);
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            changed.lock().unwrap().extend(event.paths.iter().map(|p| p.to_string_lossy().into_owned()));
+            changed.lock().unwrap().extend(event.paths.iter().map(crate::slash));
         }
     })
     .map_err(|e| e.to_string())?;

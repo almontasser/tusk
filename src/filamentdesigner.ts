@@ -24,6 +24,7 @@ import { addMember, type PNode, classNamed, droppedImports, type Edit, findCall,
 import { showError } from "./status";
 import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
+import { isAbsolute } from "./platform.ts";
 
 export type DesignerHost = {
   root(): string;
@@ -278,7 +279,7 @@ export class Designer {
       try {
         if (!model) throw new Error("The resource's model isn't known.");
         const info = await fapp.policy(this.root, model, this.info?.class);
-        this.access = { info, doc: info.file ? await this.doc(info.file.startsWith("/") ? info.file : `${this.root}/${info.file}`) : null };
+        this.access = { info, doc: info.file ? await this.doc(isAbsolute(info.file) ? info.file : `${this.root}/${info.file}`) : null };
         this.accessError = "";
       } catch (e) {
         this.accessError = e instanceof Error ? e.message : String(e);
@@ -837,8 +838,8 @@ export class Designer {
   private openModel() {
     const file = this.facts?.details.file ?? this.info?.modelFile;
     if (!file) return;
-    if (this.page && this.cls && propertyNamed(this.cls, "settings")) return void import("./settingsdesigner").then((m) => m.openSettingsDesigner(file.startsWith("/") ? file : `${this.root}/${file}`));
-    void import("./modeldesigner").then((m) => m.openModelDesigner(file.startsWith("/") ? file : `${this.root}/${file}`));
+    if (this.page && this.cls && propertyNamed(this.cls, "settings")) return void import("./settingsdesigner").then((m) => m.openSettingsDesigner(isAbsolute(file) ? file : `${this.root}/${file}`));
+    void import("./modeldesigner").then((m) => m.openModelDesigner(isAbsolute(file) ? file : `${this.root}/${file}`));
   }
 
   private tabs() {

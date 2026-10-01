@@ -11,6 +11,7 @@ import type { Replacement } from "./replacedata";
 import type { Match, Query } from "./search";
 import { errorText, showError } from "./status";
 import { closeView, showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, range: monaco.IRange): unknown };
 let host: Host;
@@ -151,7 +152,7 @@ export async function showReplacePreview(o: PreviewOptions) {
   );
   panel.onkeydown = (e) => {
     if (e.key === "Escape") (e.preventDefault(), closeView(panel));
-    else if (e.key === "Enter" && e.metaKey) (e.preventDefault(), replaceButton.click());
+    else if (e.key === "Enter" && mod(e)) (e.preventDefault(), replaceButton.click());
   };
   update();
   tree.focus();

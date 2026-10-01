@@ -1,3 +1,4 @@
+import { isAbsolute } from "./platform.ts";
 // Bookmarks' pure parts: reading saved ones and reordering them. Free of editor imports so Node can test it.
 
 /** A bookmarked line. `mnemonic` is a digit or letter, `description` what you wrote about it. */
@@ -17,7 +18,7 @@ export function parseBookmarks(saved: unknown, root: string): Bookmark[] {
   const out: Bookmark[] = [];
   for (const b of saved) {
     if (!b || typeof b.path !== "string" || !Number.isInteger(b.line) || b.line < 1) continue;
-    const path = b.path.startsWith("/") ? b.path : `${root}/${b.path}`;
+    const path = isAbsolute(b.path) ? b.path : `${root}/${b.path}`;
     if (seen.has(`${path}:${b.line}`)) continue;
     seen.add(`${path}:${b.line}`);
     const mnemonic = typeof b.mnemonic === "string" && MNEMONICS.includes(b.mnemonic) && !used.has(b.mnemonic) ? b.mnemonic : undefined;

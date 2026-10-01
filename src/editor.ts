@@ -4,6 +4,7 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import { isWindows } from "./platform.ts";
 
 self.MonacoEnvironment = {
   getWorker(_, label) {
@@ -15,13 +16,21 @@ self.MonacoEnvironment = {
   },
 };
 
+// The app writes paths with `/` on Windows too (see platform.ts), so a URI's `fsPath` does as well.
+if (isWindows) {
+  for (let proto = Object.getPrototypeOf(monaco.Uri.file("/")); proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
+    const fsPath = Object.getOwnPropertyDescriptor(proto, "fsPath");
+    if (fsPath?.get) Object.defineProperty(proto, "fsPath", { ...fsPath, get() { return (fsPath.get!.call(this) as string).replaceAll("\\", "/"); } });
+  }
+}
+
 export { monaco };
 
 export function createEditor(el: HTMLElement) {
   return monaco.editor.create(el, {
     automaticLayout: true,
     fontSize: 13,
-    fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, monospace",
+    fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
     fontLigatures: true,
     lineHeight: 1.6,
     minimap: { enabled: false },

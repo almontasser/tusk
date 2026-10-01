@@ -10,6 +10,7 @@ import type { Outline } from "./phpcode";
 import { pathsFor, psr4From } from "./psr4";
 import { runningContainer } from "./sail";
 import { commandError } from "./laravelnewdata";
+import { isAbsolute } from "./platform.ts";
 
 export type PageInfo = { name: string; class: string; file: string | null; kind: "list" | "create" | "edit" | "view" | "manage" | "related" | "custom" };
 export type RelationInfo = { class: string; file: string | null; relationship: string | null; title: string | null; group: string | null };
@@ -268,7 +269,7 @@ export async function createdFiles(root: string, output: string): Promise<string
   for (const m of clean.matchAll(/\[([^\]\n]+)\]/g)) {
     const name = m[1].trim();
     let path: string | null = null;
-    if (/\.php$/.test(name)) path = name.startsWith("/") ? name.replace(/^\/var\/www\/html/, root) : `${root}/${name}`;
+    if (/\.php$/.test(name)) path = isAbsolute(name) ? name.replace(/^\/var\/www\/html/, root) : `${root}/${name}`;
     else if (/^[A-Z][\w]*(\\[A-Za-z_]\w*)+$/.test(name)) path = await fileOfClass(root, name);
     if (path && !found.includes(path) && (await invoke<boolean>("path_exists", { path }))) found.push(path);
   }

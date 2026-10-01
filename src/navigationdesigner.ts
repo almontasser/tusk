@@ -33,6 +33,7 @@ import { changeNavGroupEdits, type PanelCode, panelChains, readNavGroups } from 
 import { type Edit, methodNamed, type OClass, phpString } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
+import { isAbsolute } from "./platform.ts";
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
 const open = new Map<string, NavigationDesigner>();
@@ -70,7 +71,7 @@ class NavigationDesigner {
     this.render();
   }
 
-  private abs = (file: string) => (file.startsWith("/") ? file : `${this.root}/${file}`);
+  private abs = (file: string) => (isAbsolute(file) ? file : `${this.root}/${file}`);
   private inProject = (i: NavItem) => i.kind !== "link" && !!i.file && !i.file.startsWith("vendor/");
   private id = (i: NavItem) => i.class ?? `link:${i.label}`;
 

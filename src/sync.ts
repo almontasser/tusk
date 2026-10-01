@@ -11,6 +11,7 @@ import { openMerge } from "./merge";
 import { registerSettings } from "./settings";
 import { errorText, showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string };
 let host: Host;
@@ -168,7 +169,7 @@ export async function push() {
       h("div", { class: "buttons" }, note, h("button", { type: "button", onclick: () => dialog.close() }, "Cancel"), button),
     ),
   );
-  dialog.addEventListener("keydown", (e) => e.key === "Enter" && e.metaKey && (e.preventDefault(), button.click()));
+  dialog.addEventListener("keydown", (e) => e.key === "Enter" && mod(e) && (e.preventDefault(), button.click()));
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();

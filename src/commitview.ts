@@ -11,6 +11,7 @@ import { openMerge } from "./merge";
 import { confirm } from "./palette";
 import { onSettings, registerSettings, updateSetting } from "./settings";
 import { showError, status, withProgress } from "./status";
+import { mod } from "./platform.ts";
 
 type Host = { root(): string; openFile(path: string): unknown; push(): unknown; showHistory(path: string): unknown };
 let host: Host;
@@ -375,7 +376,7 @@ export function initCommitView(hst: Host) {
     const first = keys.map(fileOfKey).find(Boolean);
     const mod = e.metaKey || e.ctrlKey;
     if (e.key === " " && first) bulk(first.g === "s" ? "unstage" : "stage", keys);
-    else if (e.key === "z" && e.metaKey && e.altKey) bulk("rollback", keys);
+    else if (e.key === "z" && mod && e.altKey) bulk("rollback", keys);
     else if (e.key === "a" && mod) (fileKeys().forEach((k) => picked.add(k)), paint());
     else if (e.key === "F4" && first) host.openFile(`${host.root()}/${first.f.path}`);
     else if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && fileOfKey(cursor)) {
@@ -389,7 +390,7 @@ export function initCommitView(hst: Host) {
   onSettings(() => render());
   $("commit").onclick = () => commit(false);
   $("commit-push").onclick = () => commit(true);
-  $("commit-message").onkeydown = (e) => e.key === "Enter" && e.metaKey && (e.preventDefault(), commit(false));
+  $("commit-message").onkeydown = (e) => e.key === "Enter" && mod(e) && (e.preventDefault(), commit(false));
   refreshListeners.push(render, () => {
     const n = gitStatus()?.files.length ?? 0;
     document.querySelector<HTMLElement>('#activitybar [data-view="commit"]')!.dataset.count = n > 99 ? "99+" : n ? String(n) : "";

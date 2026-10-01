@@ -12,6 +12,7 @@ import { openSettings, settings, onSettings } from "./settings";
 import { listNav } from "./listnav";
 import { errorText, showError, withProgress } from "./status";
 import { closeView, showEditorView, showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -187,7 +188,7 @@ const copy = (text: string) => navigator.clipboard.writeText(text).then(() => ho
 // ⌘C copies the selected problem.
 list.addEventListener("keydown", (e) => {
   const r = rows.find((r) => r.key === nav.selected());
-  if (!(e.key === "c" && e.metaKey && r?.problem)) return;
+  if (!(e.key === "c" && mod(e) && r?.problem)) return;
   copy(problemText(r.path, r.problem));
   e.preventDefault();
   e.stopPropagation();

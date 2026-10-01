@@ -8,6 +8,7 @@ import { newFileContent, psr4From } from "./psr4";
 import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
 import { hideInTree } from "./treehidden";
+import { mod } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -132,7 +133,7 @@ export async function remove(path = selected || host.active()) {
 export const copyPath = (path = selected || host.active(), rel = false) =>
   path && navigator.clipboard.writeText(rel ? relative(path) : path).then(() => host.status(`Copied ${rel ? relative(path) : path}`));
 export const revealInFinder = (path = selected || host.active()) =>
-  path && invoke("run_capture", { cwd: "/", program: "open", args: ["-R", path], input: null });
+  path && invoke("reveal_path", { path: path });
 
 // ---- Context menu ----
 
@@ -276,7 +277,7 @@ export function initFiles(h: Host) {
       select(rows[i + step].dataset.path!);
       rows[i + step].focus();
     } else if (e.key === "Enter") rows[i]?.click();
-    else if ((e.key === "Backspace" && e.metaKey) || e.key === "Delete") remove(selected);
+    else if ((e.key === "Backspace" && mod(e)) || e.key === "Delete") remove(selected);
     else if (e.key === "F2" || (e.key === "F6" && e.shiftKey)) rename(selected);
     else return;
     e.preventDefault();

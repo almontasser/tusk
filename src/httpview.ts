@@ -3,7 +3,7 @@
 // so the file stays the one copy of each request, and edits in the editor show in the form.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open, save, isAbsolute, mod } from "./platform.ts";
 import { monaco } from "./editor";
 import { showMenu } from "./files";
 import { attachSchema, schemaFor } from "./graphqleditor";
@@ -116,7 +116,7 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
 const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   automaticLayout: true,
   fontSize: 12,
-  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, SF Mono, Menlo, monospace",
+  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
   lineNumbers: "off",
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
@@ -734,7 +734,7 @@ envSelect.onchange = () => {
   setEnvironment(envSelect.value);
 };
 panel.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && e.metaKey) {
+  if (e.key === "Enter" && mod(e)) {
     e.preventDefault();
     e.stopPropagation();
     sendCurrent();
@@ -1502,7 +1502,7 @@ function connectWebSocket(r: HttpRequest) {
     const connection = { close: () => invoke("ws_close", { id }), tab };
     socket = connection;
     input.onkeydown = (e) => {
-      if (e.key === "Enter" && e.metaKey) {
+      if (e.key === "Enter" && mod(e)) {
         e.preventDefault();
         e.stopPropagation();
         if (input.value.trim()) post(input.value), (input.value = "");
@@ -1958,7 +1958,7 @@ async function append(path: string, text: string) {
 
 export async function httpFiles(): Promise<string[]> {
   const files = await invoke<string[]>("list_files", { root: host.root() });
-  return files.filter((f) => /\.(http|rest)$/.test(f)).map((f) => (f.startsWith("/") ? f : `${host.root()}/${f}`));
+  return files.filter((f) => /\.(http|rest)$/.test(f)).map((f) => (isAbsolute(f) ? f : `${host.root()}/${f}`));
 }
 
 /** Asks which file a new request goes in, offering a new one in http/. */
@@ -2411,8 +2411,8 @@ export function initHttpClient(h_: Host) {
     const c = collections.find((c) => c.path === row.dataset.path);
     const r = c?.requests.find((q) => q.line === Number(row.dataset.line));
     if (!c || !r) return;
-    if (e.key === "Enter" && e.metaKey) sendAt(c.path, r.line);
-    else if (e.key === "Backspace" && e.metaKey) deleteRequest(c.path, r);
+    if (e.key === "Enter" && mod(e)) sendAt(c.path, r.line);
+    else if (e.key === "Backspace" && mod(e)) deleteRequest(c.path, r);
     else if (e.key === "F2") renameRequest(c.path, r);
     else return;
     e.preventDefault();

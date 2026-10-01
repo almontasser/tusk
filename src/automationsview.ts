@@ -14,6 +14,7 @@ import { classNamed, type Outline, phpFile } from "./phpcode";
 import { pathsFor, psr4From } from "./psr4";
 import { errorText, showError } from "./status";
 import { showEditorView } from "./terminal";
+import { isAbsolute } from "./platform.ts";
 
 const open = new Map<string, AutomationsView>();
 
@@ -120,7 +121,7 @@ class AutomationsView {
         await invoke("create_file", { path, contents: phpFile(fqn.slice(0, fqn.lastIndexOf("\\")), observerClass(shortClass(fqn))) });
         doc = this.doc = await this.read(path, fqn);
         if (f.info.attribute && f.details.file) {
-          const modelPath = f.details.file.startsWith("/") ? f.details.file : `${this.root}/${f.details.file}`;
+          const modelPath = isAbsolute(f.details.file) ? f.details.file : `${this.root}/${f.details.file}`;
           files.push({ path: modelPath, build: (text, outline) => observedByEdits(text, classNamed(outline, this.model)!, fqn) });
         } else host.status(`Register ${shortClass(fqn)} in a service provider's boot(): ${this.short}::observe(${shortClass(fqn)}::class);`);
       }
@@ -178,7 +179,7 @@ class AutomationsView {
     const plural = `${humanize(this.short).toLowerCase()}s`;
     const notes: HTMLElement[] = [];
     const note = (kind: string, ...children: (Node | string)[]) => notes.push(h("p", { class: "fd-note" }, icon(kind), " ", ...children));
-    const link = (label: string, path: string, line = 1) => h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(path.startsWith("/") ? path : `${this.root}/${path}`, line) }, label);
+    const link = (label: string, path: string, line = 1) => h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(isAbsolute(path) ? path : `${this.root}/${path}`, line) }, label);
     if (doc?.outline.errors) note("warning", "The observer has syntax errors. Fix them to change it here.");
     const registered = info.observers.find((o) => o.class === doc?.fqn);
     if (doc && !registered) note("warning", `${shortClass(doc.fqn)} isn't registered, so its rules don't run. `, info.attribute ? `Add #[ObservedBy([${shortClass(doc.fqn)}::class])] to ${this.short}, ` : "", `or call ${this.short}::observe(${shortClass(doc.fqn)}::class) in a service provider.`);

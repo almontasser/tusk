@@ -1,3 +1,4 @@
+import { isAbsolute } from "./platform.ts";
 // File references in terminal output, such as `app/Models/User.php:42`, which open in the editor when clicked.
 
 /** A file reference in a line of output: where it is in the line (`start` inclusive, `end` exclusive), and what it names. */
@@ -52,7 +53,7 @@ export function wrappedLine(buffer: Buffer, y: number) {
  */
 export function candidatePaths(path: string, cwd: string, root: string, containerRoot: string): string[] {
   if (path.startsWith(`${containerRoot}/`)) return [normalize(root + path.slice(containerRoot.length))];
-  if (path.startsWith("/")) return [normalize(path)];
+  if (isAbsolute(path)) return [normalize(path)];
   return [...new Set([normalize(`${cwd}/${path}`), normalize(`${root}/${path}`)])];
 }
 

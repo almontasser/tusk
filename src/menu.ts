@@ -1,6 +1,7 @@
 // The native menu bar. Its items run the same actions as Find Action, looked up by label.
 import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
 import { commandsIn } from "./editorcommands.ts";
+import { isMac } from "./platform.ts";
 
 type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean; when?: () => boolean };
 type Native = { native: "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll" | "Services" | "Hide" | "HideOthers" | "ShowAll" | "Quit" | "Minimize" | "Maximize" | "Fullscreen" };
@@ -8,6 +9,8 @@ type Native = { native: "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll"
 type Entry = string | Native | [string, Entry[]];
 
 const native = (name: Native["native"]): Native => ({ native: name });
+/** Native items that only macOS has. */
+const MAC_ONLY: Native["native"][] = ["Services", "Hide", "HideOthers", "ShowAll"];
 
 const LAYOUT: [string, Entry[]][] = [
   ["Tusk", ["About", "Check for Updates…", "-", "Settings…", "Keymap…", "-", native("Services"), "-", native("Hide"), native("HideOthers"), native("ShowAll"), "-", "Quit Tusk"]],
@@ -54,8 +57,9 @@ const LAYOUT: [string, Entry[]][] = [
  * The menu shortcut for an action, in Tauri's accelerator format. Double taps such as ⇧⇧ and chords such as
  * ⌘K ⌘X have no menu equivalent.
  */
-export function accelerator(a: Pick<Action, "keys">) {
-  if (!a.keys || a.keys.includes(" ")) return undefined;
+export function accelerator(a: Pick<Action, "keys">, mac = isMac) {
+  // Off a Mac the page handles every shortcut itself (main.ts), and a menu accelerator would run some twice.
+  if (!mac || !a.keys || a.keys.includes(" ")) return undefined;
   return a.keys.replace("Meta", "Cmd");
 }
 
@@ -76,7 +80,7 @@ export async function setMenu(actions: Action[]) {
   const build = async (entry: Entry, parent: string): Promise<MenuItem | PredefinedMenuItem | Submenu | undefined> => {
     if (entry === "-") return PredefinedMenuItem.new({ item: "Separator" });
     if (entry === "About") return PredefinedMenuItem.new({ item: { About: null }, text: "About Tusk" });
-    if (typeof entry === "object" && "native" in entry) return PredefinedMenuItem.new({ item: entry.native });
+    if (typeof entry === "object" && "native" in entry) return isMac || !MAC_ONLY.includes(entry.native) ? PredefinedMenuItem.new({ item: entry.native }) : undefined;
     if (Array.isArray(entry)) return submenu(entry[0], entry[1]);
     const action = byLabel.get(entry);
     if (!action) return void console.error(`Menu: no action named "${entry}"`);
@@ -89,8 +93,10 @@ export async function setMenu(actions: Action[]) {
   const menus = await Promise.all(LAYOUT.map(([text, entries]) => submenu(text, entries)));
   const menu = await Menu.new({ items: menus });
   await menu.setAsAppMenu();
-  await menus.at(-2)!.setAsWindowsMenuForNSApp();
-  await menus.at(-1)!.setAsHelpMenuForNSApp();
+  if (isMac) {
+    await menus.at(-2)!.setAsWindowsMenuForNSApp();
+    await menus.at(-1)!.setAsHelpMenuForNSApp();
+  }
   const old = current;
   current = menu;
   await old?.close();

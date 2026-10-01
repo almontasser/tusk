@@ -15,6 +15,7 @@ import { addMember, insertItem, methodNamed, moveItem, type OClass, propertyName
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
 import { WIDGET_KINDS, type WidgetKind, widgetFile } from "./widgetgen";
+import { isAbsolute } from "./platform.ts";
 
 const open = new Map<string, DashboardDesigner>();
 
@@ -69,7 +70,7 @@ class DashboardDesigner {
     }
   }
 
-  private abs = (file: string) => (file.startsWith("/") ? file : `${this.root}/${file}`);
+  private abs = (file: string) => (isAbsolute(file) ? file : `${this.root}/${file}`);
   private inProject = (w: { file: string | null }) => !!w.file && !w.file.startsWith("vendor/");
 
   render() {

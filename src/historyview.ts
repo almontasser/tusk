@@ -15,6 +15,7 @@ import { errorText, showError } from "./status";
 import { composerCommand } from "./toolpaths";
 import { toolPath } from "./lsp";
 import { shellQuote } from "./runconfig";
+import { isAbsolute } from "./platform.ts";
 
 /** What introspect.php's `activity` mode reports: the package's version, its table, and the latest entries. */
 export type ActivityInfo = {
@@ -188,7 +189,7 @@ export function historySettings(d: Designer): HTMLElement | null {
   const toggle = toggleSwitch(on, (want) => void (want ? showHistory(d, FLAVORS[relation?.name === FLAVORS[4].relation ? 4 : 5]) : arr && d.apply(doc, () => [removeItem(doc.text, arr, index)], "Removed the history from the record's page. Its relation manager's file stays.")));
   (toggle.querySelector("input") as HTMLInputElement).disabled = !on && (!relation || (!!method && !arr));
   const note = !relation
-    ? h("p", { class: "fd-note" }, `${shortClass(model ?? "The model")} doesn't record its history yet. `, modelFile ? h("button", { type: "button", class: "fd-chip-link", onclick: () => void import("./modeldesigner").then((m) => m.openModelDesigner(modelFile.startsWith("/") ? modelFile : `${d.root}/${modelFile}`, "history")) }, icon("history"), "Record history…") : null)
+    ? h("p", { class: "fd-note" }, `${shortClass(model ?? "The model")} doesn't record its history yet. `, modelFile ? h("button", { type: "button", class: "fd-chip-link", onclick: () => void import("./modeldesigner").then((m) => m.openModelDesigner(isAbsolute(modelFile) ? modelFile : `${d.root}/${modelFile}`, "history")) }, icon("history"), "Record history…") : null)
     : h("p", { class: "fd-note" }, "A History list under the edit and view pages: when, who, what happened, and the changed values.");
   return h("section", { class: "fd-settings-section" }, h("h3", {}, icon("history"), "History"), note, h("div", { class: "fd-rows" }, h("div", { class: `fd-row${on ? " set" : ""}` }, h("span", { class: "fd-row-label" }, "Show history on the record's page"), h("div", { class: "fd-row-editor" }, toggle), h("span", { class: "fd-row-spacer" }))));
 }

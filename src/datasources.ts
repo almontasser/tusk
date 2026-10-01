@@ -1,6 +1,6 @@
 // The Data Sources dialog: the project's database connections in a list, and the selected one's settings in a form,
 // as PhpStorm's has them. Nothing is saved until you click Save; database.ts writes what changed.
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, isAbsolute, mod } from "./platform.ts";
 import { type Connection, connectionFromUrl, connectionUrl, describe, destinationOf, parseDestination } from "./dbconfig";
 import { h, icon } from "./dom";
 import { listNav } from "./listnav";
@@ -119,7 +119,7 @@ export function openDataSources(o: Options): Promise<{ edits: SourceEdit[]; remo
   const copyButton = h("button", { type: "button", class: "icon-button", title: "Duplicate", onclick: () => add(current) }, icon("copy"));
   const removeButton = h("button", { type: "button", class: "icon-button", title: "Remove", onclick: remove }, icon("remove"));
   list.onkeydown = (e) => {
-    if ((e.key === "Backspace" || e.key === "Delete") && e.metaKey) e.preventDefault(), remove();
+    if ((e.key === "Backspace" || e.key === "Delete") && mod(e)) e.preventDefault(), remove();
   };
 
   // ---- The form ----
@@ -275,7 +275,7 @@ export function openDataSources(o: Options): Promise<{ edits: SourceEdit[]; remo
       c.username = user.el.value;
       if (d.typedPassword) c.password = pass.el.value;
       const f = file.el.value.trim();
-      c.database = c.driver === "sqlite" ? (f && !f.startsWith("/") ? `${o.root}/${f}` : f) : database.el.value.trim();
+      c.database = c.driver === "sqlite" ? (f && !isAbsolute(f) ? `${o.root}/${f}` : f) : database.el.value.trim();
       c.ssl_mode = sslMode.value;
       c.ssl_ca = ca.el.value.trim();
     }

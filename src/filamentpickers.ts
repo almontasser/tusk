@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { h, icon } from "./dom";
 import { COLORS, heroiconCase, heroiconFile } from "./filamentcatalog";
+import { mod } from "./platform.ts";
 
 let closeOpen: (() => void) | null = null;
 
@@ -210,7 +211,7 @@ export function commitInput(value: string, commit: (v: string) => unknown, o: { 
   input.addEventListener("change", done);
   input.addEventListener("keydown", (e) => {
     const k = e as KeyboardEvent;
-    if (k.key === "Enter" && !(input instanceof HTMLTextAreaElement && !k.metaKey)) (e.preventDefault(), input.blur());
+    if (k.key === "Enter" && !(input instanceof HTMLTextAreaElement && !mod(k))) (e.preventDefault(), input.blur());
     if (k.key === "Escape") ((input.value = last), input.blur());
   });
   return input;

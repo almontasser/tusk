@@ -40,6 +40,7 @@ import {
 } from "./redisdata";
 import { withProgress } from "./status";
 import { showPanelView } from "./terminal";
+import { mod } from "./platform.ts";
 
 export type RedisHost = {
   connection(): Connection | null;
@@ -245,8 +246,8 @@ function onTreeKey(e: KeyboardEvent) {
   if (!$("db-tables").classList.contains("redis-keys") || e.target !== $("db-tables")) return;
   const selected = selectedId();
   const [kind, id] = [selected.slice(0, 2), selected.slice(2)];
-  if (e.key === "Backspace" && e.metaKey && kind === "k:") e.preventDefault(), guard(() => deleteKey(id))();
-  else if (e.key === "Backspace" && e.metaKey && kind === "f:") e.preventDefault(), guard(() => deleteFolder(id))();
+  if (e.key === "Backspace" && mod(e) && kind === "k:") e.preventDefault(), guard(() => deleteKey(id))();
+  else if (e.key === "Backspace" && mod(e) && kind === "f:") e.preventDefault(), guard(() => deleteFolder(id))();
 }
 
 function keyMenu(e: MouseEvent, key: string) {
@@ -476,7 +477,7 @@ function disposeEditor() {
 const EDITOR: monaco.editor.IStandaloneEditorConstructionOptions = {
   automaticLayout: true,
   fontSize: 12,
-  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, SF Mono, Menlo, monospace",
+  fontFamily: "JetBrains Mono, JetBrainsMono Nerd Font Mono, SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace",
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
   renderLineHighlight: "none",
