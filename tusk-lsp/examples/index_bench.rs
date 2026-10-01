@@ -1,4 +1,5 @@
 //! Times indexing a project and one incremental update: `cargo run --release --example index_bench <root> [file]`.
+//! With `CACHE=<file>`, the index keeps its cache there.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::time::Instant;
@@ -10,7 +11,9 @@ fn main() {
     let _ = tusk_lsp::index::prelude();
     println!("prelude: {:?}", t.elapsed());
     rss("after prelude");
-    let mut idx = Index::empty(IndexConfig::new(&root));
+    let mut config = IndexConfig::new(&root);
+    config.cache = std::env::var_os("CACHE").map(Into::into);
+    let mut idx = Index::empty(config);
     let t = Instant::now();
     let paths = idx.discover();
     println!("discover: {} files in {:?}", paths.len(), t.elapsed());

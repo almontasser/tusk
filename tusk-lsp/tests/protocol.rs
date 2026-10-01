@@ -27,13 +27,15 @@ impl Client {
         }
         let (server, client) = Connection::memory();
         std::thread::spawn(move || tusk_lsp::server::run(server));
-        let mut c = Client { conn: client, next: 1, notifications: vec![], _dir: dir, root };
+        let mut c = Client { conn: client, next: 1, notifications: vec![], _dir: dir, root: root.clone() };
         let root_uri = c.uri("");
         let _: Value = c.request_raw(request::Initialize::METHOD, json!({
             "processId": null,
             "rootUri": root_uri,
             "workspaceFolders": [{ "uri": root_uri, "name": "p" }],
             "capabilities": {},
+            // A hidden folder, which the index skips, so the cache goes with the project.
+            "initializationOptions": { "cacheDir": root.join(".cache") },
         }));
         c.notify(notification::Initialized::METHOD, json!({}));
         c

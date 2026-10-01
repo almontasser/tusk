@@ -1088,12 +1088,13 @@ export async function startLsp(root: string, h: Host) {
     aliasStubs(root, () => reindex()).catch(() => null),
     exclusionsFor(root),
   ]);
-  // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, in about a
-  // second, so nothing is kept between starts.
+  // PHP, Laravel, and Filament, from Tusk's own server (tusk-lsp/). It indexes the project as it starts, keeping
+  // what each `vendor` file declares in the app's cache, so later starts parse only the files that changed.
   // `.env` files too, for the server's quick fix that turns their variables into Vite ones.
   tuskInit = {
     // The project's folders to skip (indexexclude.ts), on top of the server's defaults.
     exclude: excluded.list,
+    cacheDir: await projectCache("index", root),
     // Laravel's root aliases (`use DB;`).
     stubs: aliasDir ? [aliasDir.dir] : [],
     // Without a project mago.toml, defaults tuned for Laravel (src-tauri/resources/mago.toml).

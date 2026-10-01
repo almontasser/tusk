@@ -41,6 +41,8 @@ pub struct Options {
     pub load_all_libraries: bool,
     /// When and how PHPStan runs.
     pub phpstan: crate::phpstan::Settings,
+    /// The folder for this project's index cache. By default, a folder per project in the user's cache folder.
+    pub cache_dir: Option<PathBuf>,
 }
 
 /// The index's configuration from the options and the project's files.
@@ -65,7 +67,22 @@ pub fn index_config(root: &Path, options: &Options) -> IndexConfig {
         .unwrap_or(config.php_version);
     config.mago = Arc::new(mago);
     config.load_all = options.load_all_libraries;
+    config.cache = options.cache_dir.clone().or_else(|| default_cache_dir(root)).map(|dir| dir.join("index.json"));
     config
+}
+
+/// `~/Library/Caches/tusk-lsp/<hash of the root>` on macOS, the XDG cache folder elsewhere.
+fn default_cache_dir(root: &Path) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let base = if cfg!(target_os = "macos") {
+        home?.join("Library/Caches")
+    } else {
+        std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| Some(home?.join(".cache")))?
+    };
+    let mut hash = std::hash::DefaultHasher::new();
+    root.hash(&mut hash);
+    Some(base.join("tusk-lsp").join(format!("{:016x}", hash.finish())))
 }
 
 /// What a request handler reads: the open documents as they were when it arrived, and the index.
