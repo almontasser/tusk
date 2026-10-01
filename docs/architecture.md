@@ -4547,6 +4547,43 @@ that runs once, so it should hold the whole change.
 - **New enums** are written whole by `enumFile`, into the namespace's PSR-4
   folder. `make:enum` would make an empty class that Tusk would then replace.
 
+## Settings designer
+
+`src/settingsdesigner.ts` stages changes to a spatie/laravel-settings class, as
+the model designer does, and `src/settingsgen.ts` turns them into code and a
+settings migration.
+
+- **Reading:** `introspect.php settings` lists the app's settings classes with
+  their group, public properties, and the payloads the class's repository
+  stores for the group, which are JSON, so a date is its text and an enum its
+  value. It also lists the settings pages (`Filament\Pages\SettingsPage`) by
+  the class they edit, whether the settings table exists, and the package's
+  config: the folders it discovers, the classes it lists, and the migrations
+  folder. `readSettings` reads the class from the outline: a type the designer
+  writes (scalars, `array`, a date class, or one of the app's enums, nullable
+  or not) or one it keeps as code, and the string `group()` returns.
+- **Writing:** `settingsEdits` replaces only a changed property's type and name
+  inside its declaration, so attributes and comments stay, removes properties,
+  adds new ones after the last, and sets the group. `migrationLines` writes
+  renames (one per stored property when the group changes), deletes, updates
+  of changed values (`update('g.p', fn () => value)`), and adds for new
+  properties and for ones the database lacks.
+- **New classes** are written whole by `settingsFile`, since `make:setting`
+  writes an empty class Tusk would replace. A class outside the discovered
+  folders is listed in `config/settings.php`, and a cache of discovered classes
+  is cleared with `settings:clear-discovered`.
+- **Settings pages:** `make:filament-settings-page <Name> <Class> --panel=…`
+  makes the page without `--generate`, whose fields type a list as text, and
+  `pageFieldEdits` fills its empty `components([...])` with `formField` from
+  `src/filamentgen.ts`, as the New Resource wizard fills a resource. The
+  resource designer opens a settings page in its custom-page mode, which reads
+  its `form()`; for its palette, `settingsFactsOf` turns the class's properties
+  into model facts, so they're offered as columns.
+- **Installing:** `installSettings` runs the bundled Composer in a terminal
+  tab for `spatie/laravel-settings` and, with Filament,
+  `filament/spatie-laravel-settings-plugin:^<Filament's major>.0`, then
+  `vendor:publish` with the `migrations` and `config` tags, and `migrate`.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6256,4 +6293,25 @@ starter kits and their options (authentication, teams, Pest, Boost) are the
 installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
+
+### 2026-10-01: The settings designer stages changes and writes a settings migration
+
+A settings class and its stored values change together: a property the class
+declares but the database lacks makes the class fail to load. So the settings
+designer stages changes, as the model designer does, and writes one settings
+migration per Apply in `database/settings`, never editing one that exists,
+since each runs once. Stored values are shown from the database and changed
+through the same migration's `update`, so a value change is reviewed,
+committed, and deployed like the schema change beside it, rather than written
+straight into the local database.
+
+### 2026-10-01: Settings pages come from the plugin's generator, filled by Tusk
+
+`make:filament-settings-page` puts the page where the panel discovers pages
+and writes the shape the plugin expects. Its `--generate` option chooses
+fields too, but types an `array` property as a text input, which can't save a
+list. So Tusk runs the generator without it and fills the empty form with the
+same fields the resource designer chooses for a column of that type. The
+settings class's properties stand in for a model's columns in the designer's
+palette, so the custom-page mode needed no other change to design the form.
 

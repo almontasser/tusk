@@ -19,6 +19,7 @@
  *   php introspect.php <project root> policy <Model class> [<Resource class>]
  *   php introspect.php <project root> translations
  *   php introspect.php <project root> permission <create-permission|create-role|grant|revoke> <name> [<permission>]
+ *   php introspect.php <project root> settings
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
@@ -36,6 +37,7 @@
  * model's table, columns, indexes, and declarations. `policy` names a model's policy and lists the roles and
  * permissions of spatie/laravel-permission when the app has it; `permission` creates a permission or role, or
  * grants or revokes a role's permission. `translations` lists the strings of the app's lang files by locale.
+ * `settings` lists the app's spatie/laravel-settings classes with their properties and stored values.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -860,6 +862,8 @@ function filamentApp(string $root): array
                 })(),
                 'navigationGroup' => plainValue(tryStatic($page, 'getNavigationGroup')),
                 'navigationSort' => tryStatic($page, 'getNavigationSort'),
+                // A settings page's spatie/laravel-settings class.
+                'settings' => is_a($page, 'Filament\\Pages\\SettingsPage', true) ? tryStatic($page, 'getSettings') : null,
             ], array_filter($call('getPages'), fn ($page) => !is_a($page, 'Filament\\Pages\\Dashboard', true)))),
         ];
     }
@@ -1384,6 +1388,73 @@ function appNotifications(string $root): array
     return $out;
 }
 
+/**
+ * The app's spatie/laravel-settings classes: each one's group, public properties with their types, and the values
+ * stored for its group, with the settings pages that edit it, and the package's config. Values are the stored
+ * payloads, as the repository decodes them, so a date is its text and an enum its value.
+ */
+function appSettings(string $root): array
+{
+    if (!class_exists('Spatie\\LaravelSettings\\Settings')) {
+        return ['installed' => false];
+    }
+    $relative = fn (array $paths) => array_values(array_map(fn ($p) => ltrim(str_replace($root, '', (string) $p), '/'), $paths));
+    $table = config('settings.repositories.database.table') ?: 'settings';
+    try {
+        $tableExists = Illuminate\Support\Facades\Schema::hasTable($table);
+    } catch (Throwable) {
+        $tableExists = null;
+    }
+    $pages = [];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            if (is_subclass_of($class, 'Filament\\Pages\\SettingsPage') && !(new ReflectionClass($class))->isAbstract()) {
+                $pages[$class::getSettings()][] = ['class' => $class, 'file' => relativeFile($class, $root)];
+            }
+        } catch (Throwable) {
+        }
+    }
+    $classes = [];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            $r = new ReflectionClass($class);
+            if (!$r->isSubclassOf('Spatie\\LaravelSettings\\Settings') || $r->isAbstract()) {
+                continue;
+            }
+            $group = $class::group();
+            $properties = [];
+            foreach ($r->getProperties(ReflectionProperty::IS_PUBLIC) as $p) {
+                if ($p->isStatic()) {
+                    continue;
+                }
+                $type = $p->getType();
+                $properties[] = ['name' => $p->getName(), 'type' => $type ? (string) $type : null];
+            }
+            $values = null;
+            $error = null;
+            if ($tableExists !== false) {
+                try {
+                    $values = Spatie\LaravelSettings\Factories\SettingsRepositoryFactory::create($class::repository())->getPropertiesInGroup($group);
+                } catch (Throwable $e) {
+                    $error = $e->getMessage();
+                }
+            }
+            $classes[] = ['class' => $class, 'file' => relativeFile($class, $root), 'group' => $group, 'properties' => $properties, 'values' => $values, 'error' => $error, 'pages' => $pages[$class] ?? []];
+        } catch (Throwable) {
+        }
+    }
+    return [
+        'installed' => true,
+        'plugin' => class_exists('Filament\\Pages\\SettingsPage'),
+        'configFile' => is_file(config_path('settings.php')),
+        'table' => $tableExists,
+        'autoDiscover' => $relative((array) config('settings.auto_discover_settings', [])),
+        'registered' => array_values((array) config('settings.settings', [])),
+        'migrationsPath' => $relative((array) (config('settings.migrations_path') ?: config('settings.migrations_paths', [])))[0] ?? 'database/settings',
+        'classes' => $classes,
+    ];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1411,6 +1482,7 @@ try {
         'entry-access' => entryAccess($argv[3], $root),
         'porters' => porters($root),
         'notifications' => appNotifications($root),
+        'settings' => appSettings($root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

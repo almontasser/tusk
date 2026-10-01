@@ -1,0 +1,168 @@
+{
+  "errors": false,
+  "namespace": "App\\Settings",
+  "uses": [
+    {
+      "alias": "PostStatus",
+      "name": "App\\Enums\\PostStatus",
+      "kind": "class",
+      "span": [
+        32,
+        57
+      ]
+    },
+    {
+      "alias": "CarbonImmutable",
+      "name": "Carbon\\CarbonImmutable",
+      "kind": "class",
+      "span": [
+        58,
+        85
+      ]
+    },
+    {
+      "alias": "Settings",
+      "name": "Spatie\\LaravelSettings\\Settings",
+      "kind": "class",
+      "span": [
+        86,
+        122
+      ]
+    }
+  ],
+  "useInsert": 123,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "GeneralSettings",
+      "fqn": "App\\Settings\\GeneralSettings",
+      "abstract": false,
+      "final": false,
+      "extends": "Spatie\\LaravelSettings\\Settings",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        124,
+        438
+      ],
+      "bodyStart": 164,
+      "bodyEnd": 437,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "site_name",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "string",
+          "value": null,
+          "span": [
+            169,
+            194
+          ],
+          "attributes": []
+        },
+        {
+          "name": "tax_rate",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "float",
+          "value": null,
+          "span": [
+            200,
+            223
+          ],
+          "attributes": []
+        },
+        {
+          "name": "open",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "bool",
+          "value": null,
+          "span": [
+            229,
+            247
+          ],
+          "attributes": []
+        },
+        {
+          "name": "default_status",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "?PostStatus",
+          "value": null,
+          "span": [
+            253,
+            288
+          ],
+          "attributes": []
+        },
+        {
+          "name": "launch_at",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "?CarbonImmutable",
+          "value": null,
+          "span": [
+            294,
+            329
+          ],
+          "attributes": []
+        },
+        {
+          "name": "tags",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "array",
+          "value": null,
+          "span": [
+            335,
+            354
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "group",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            360,
+            436
+          ],
+          "docStart": null,
+          "body": [
+            404,
+            435
+          ],
+          "returns": [
+            {
+              "kind": "string",
+              "value": "general",
+              "quote": "single",
+              "interpolated": false,
+              "span": [
+                420,
+                429
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

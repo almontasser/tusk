@@ -1,0 +1,212 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Pages",
+  "uses": [
+    {
+      "alias": "GeneralSettings",
+      "name": "App\\Settings\\GeneralSettings",
+      "kind": "class",
+      "span": [
+        38,
+        71
+      ]
+    },
+    {
+      "alias": "BackedEnum",
+      "name": "BackedEnum",
+      "kind": "class",
+      "span": [
+        72,
+        87
+      ]
+    },
+    {
+      "alias": "SettingsPage",
+      "name": "Filament\\Pages\\SettingsPage",
+      "kind": "class",
+      "span": [
+        88,
+        120
+      ]
+    },
+    {
+      "alias": "Schema",
+      "name": "Filament\\Schemas\\Schema",
+      "kind": "class",
+      "span": [
+        121,
+        149
+      ]
+    },
+    {
+      "alias": "Heroicon",
+      "name": "Filament\\Support\\Icons\\Heroicon",
+      "kind": "class",
+      "span": [
+        150,
+        186
+      ]
+    }
+  ],
+  "useInsert": 187,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "EmptySettingsPage",
+      "fqn": "App\\Filament\\Pages\\EmptySettingsPage",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Pages\\SettingsPage",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        188,
+        539
+      ],
+      "bodyStart": 234,
+      "bodyEnd": 538,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "navigationIcon",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "string|BackedEnum|null",
+          "value": {
+            "kind": "classConst",
+            "class": "Filament\\Support\\Icons\\Heroicon",
+            "classSpan": [
+              297,
+              305
+            ],
+            "name": "OutlinedCog6Tooth",
+            "span": [
+              297,
+              324
+            ]
+          },
+          "span": [
+            239,
+            325
+          ],
+          "attributes": []
+        },
+        {
+          "name": "settings",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "string",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Settings\\GeneralSettings",
+            "classSpan": [
+              367,
+              382
+            ],
+            "name": "class",
+            "span": [
+              367,
+              389
+            ]
+          },
+          "span": [
+            331,
+            390
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "form",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "schema",
+              "type": "Schema",
+              "default": null,
+              "span": [
+                417,
+                431
+              ]
+            }
+          ],
+          "returnType": "Schema",
+          "attributes": [],
+          "span": [
+            396,
+            537
+          ],
+          "docStart": null,
+          "body": [
+            446,
+            536
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "schema",
+                "span": [
+                  462,
+                  469
+                ]
+              },
+              "calls": [
+                {
+                  "name": "components",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 494,
+                    "close": 529,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [],
+                          "open": 495,
+                          "close": 528,
+                          "legacy": false,
+                          "span": [
+                            495,
+                            529
+                          ]
+                        },
+                        "span": [
+                          495,
+                          529
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    482,
+                    530
+                  ],
+                  "nameSpan": [
+                    484,
+                    494
+                  ]
+                }
+              ],
+              "span": [
+                462,
+                530
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}
