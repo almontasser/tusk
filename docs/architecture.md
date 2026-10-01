@@ -2933,8 +2933,9 @@ in a dialog (hidden input for passwords and passphrases, plain for usernames,
 Yes or No for ssh's questions, by `askpassKind` in `gitparse.ts`), and
 `askpass_answer` sends the reply back. Answers live only in that round trip.
 Every git command that reaches a remote runs through `gitOutput`, including the
-pull request page's fetch of a pull request's head (`prepareDiff` in `prs.ts`),
-while **Check Out** runs `gh pr checkout` in a terminal tab, which prompts there.
+pull request page's fetch of a pull request's head (`prepareDiff` in `prs.ts`).
+**Check Out** runs `gh pr checkout` through `gitTask` with `gh: true`, in the
+same environment, so the git that `gh` starts asks in the dialog too.
 It writes git's process ID to a file in the app cache, so an aborted signal
 can `kill` it: Tauri commands can't be aborted, and this avoids a Rust
 command for it.
@@ -6943,3 +6944,13 @@ file shares, so the binding is the same for all of `tests/`; binding each
 folder to its own `in()` class would need a codebase per folder. Properties a
 test sets on `$this` stay filtered: typing them would mean analyzing the
 `beforeEach()` closures first.
+
+### 2026-10-01: A pull request's Check Out runs gh with the askpass environment
+
+**Check Out** ran `gh pr checkout` in a terminal tab, the one git command left
+that prompted there. `gh` runs git for the fetch and checkout, and git reads
+`GIT_ASKPASS` and `SSH_ASKPASS` from the environment it inherits, so running
+`gh` in `gitOutput`'s environment sends its prompts to the dialog with no Rust
+change. Doing the checkout with git alone would mean copying what `gh` does for
+forks: adding the fork's remote, setting `pushRemote`, and updating a branch
+that's already checked out.
