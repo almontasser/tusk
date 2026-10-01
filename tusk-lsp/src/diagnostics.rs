@@ -146,7 +146,7 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
     let parsed = if issues.is_empty() { exact } else { Parsed::new(arena, path, text) };
     let mago = &index.config.mago;
     let rel = path.strip_prefix(&index.config.root).unwrap_or(path);
-    let analysis = analyze_with(&parsed, arena, &index.codebase, mago.analyzer_settings(index.config.php_version));
+    let analysis = analyze_with(&parsed, arena, index, mago.analyzer_settings(index.config.php_version));
     issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref())));
     (parsed, issues)
 }
@@ -340,19 +340,28 @@ mod tests {
                 .filter_map(|d| match d.code { Some(NumberOrString::String(c)) if d.source.as_deref() == Some("mago") => Some((c, d.range.start.line)), _ => None })
                 .collect::<Vec<_>>()
         };
-        let problems = |pest: &str| {
+        let problems_in = |pest: &str, head: &str| {
             let mut files = crate::testing::PEST.to_vec();
             files.retain(|(name, _)| *name != "tests/Pest.php");
             files.push(("tests/Pest.php", pest));
-            files.push(("tests/Feature/HomeTest.php", "<?php\nbeforeEach(function () { $this->get('/'); });\nit('loads', function () {\n    $this->get('/');\n    $this->gte('/');\n});\n"));
+            let test = format!("<?php\n{head}beforeEach(function () {{ $this->get('/'); }});\nit('loads', function () {{\n    $this->get('/');\n    $this->gte('/');\n}});\n");
+            files.push(("tests/Feature/HomeTest.php", &test));
             mago(&Fixture::new(&files))
         };
+        let problems = |pest: &str| problems_in(pest, "");
+        let bound = vec![("non-existent-method".into(), 4)];
         // Bound to Tests\TestCase, by `pest()->extend()` or Pest 1's `uses()`: only the misspelled call is reported.
-        assert_eq!(problems("<?php\nuse Tests\\TestCase;\npest()->extend(TestCase::class)->in('Feature');\n"), vec![("non-existent-method".into(), 4)]);
-        assert_eq!(problems("<?php\nuses(Tests\\TestCase::class)->in('Feature');\n"), vec![("non-existent-method".into(), 4)]);
-        // Without one, PHPUnit's TestCase, which has no `get()`.
-        let unbound = problems("<?php\n");
-        assert_eq!(unbound.iter().filter(|(c, _)| c == "non-existent-method").count(), 3, "{unbound:?}");
+        assert_eq!(problems("<?php\nuse Tests\\TestCase;\npest()->extend(TestCase::class)->in('Feature');\n"), bound);
+        assert_eq!(problems("<?php\nuses(Tests\\TestCase::class)->in('Feature');\n"), bound);
+        assert_eq!(problems("<?php\npest()->use(Tests\\TestCase::class)->in('Unit', 'Feat*');\n"), bound);
+        assert_eq!(problems("<?php\nuses(Tests\\TestCase::class)->in(__DIR__);\n"), bound);
+        // By the test file's own `uses()`.
+        assert_eq!(problems_in("<?php\n", "uses(Tests\\TestCase::class);\n").into_iter().map(|(c, l)| (c, l - 1)).collect::<Vec<_>>(), bound);
+        // Without one, or with one for another folder, PHPUnit's TestCase, which has no `get()`.
+        for pest in ["<?php\n", "<?php\nuses(Tests\\TestCase::class)->in('Unit');\n", "<?php\nuses(Tests\\TestCase::class);\n"] {
+            let unbound = problems(pest);
+            assert_eq!(unbound.iter().filter(|(c, _)| c == "non-existent-method").count(), 3, "{pest}: {unbound:?}");
+        }
         // Editing Pest.php binds again.
         let mut files = crate::testing::PEST.to_vec();
         files.push(("tests/Feature/HomeTest.php", "<?php\nit('loads', function () { $this->get('/'); });\n"));
@@ -360,6 +369,20 @@ mod tests {
         assert!(mago(&fx).is_empty());
         fx.snap.index.write().update(&crate::testing::path("tests/Pest.php"), Some(b"<?php\n".to_vec()));
         assert_eq!(mago(&fx), vec![("non-existent-method".into(), 1)]);
+    }
+
+    #[test]
+    fn types_properties_pest_tests_set_on_this() {
+        let mut files = crate::testing::PEST.to_vec();
+        let test = "<?php\nclass User { public function posts(): void {} }\nbeforeEach(function () {\n    $this->user = new User;\n});\nit('loads', function () {\n    $this->user->posts();\n    $this->user->psts();\n});\n";
+        files.push(("tests/Feature/HomeTest.php", test));
+        let fx = Fixture::new(&files);
+        let codes: Vec<(String, u32)> = php_problems(&fx.snap.index, &fx.doc("tests/Feature/HomeTest.php"))
+            .into_iter()
+            .filter_map(|d| match d.code { Some(NumberOrString::String(c)) if d.source.as_deref() == Some("mago") => Some((c, d.range.start.line)), _ => None })
+            .collect();
+        // Setting the property is still reported, and the editor hides it; reading it gives a `User`.
+        assert_eq!(codes, vec![("non-existent-property".into(), 3), ("non-existent-method".into(), 7)]);
     }
 
     #[test]

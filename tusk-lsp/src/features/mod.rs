@@ -42,7 +42,7 @@ pub struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     pub fn analysis(&self) -> &Analysis {
-        self.analysis.get_or_init(|| analyze(&self.parsed, self.arena, &self.index.codebase, self.index.config.php_version))
+        self.analysis.get_or_init(|| analyze(&self.parsed, self.arena, &self.index))
     }
 
     pub fn resolver(&self) -> Resolver<'_, 'a> {

@@ -693,6 +693,14 @@ mod tests {
     }
 
     #[test]
+    fn completes_properties_pest_tests_set_on_this() {
+        let mut files = crate::testing::PEST.to_vec();
+        let test = "<?php\nclass User { public function posts(): void {} }\nbeforeEach(function () {\n    $this->user = new User;\n});\nit('loads', function () {\n    $this->user-><|>\n});\n";
+        files.push(("tests/Feature/HomeTest.php", test));
+        assert_eq!(labels(&complete_at(&files)), vec!["posts"]);
+    }
+
+    #[test]
     fn completes_static_members_constants_and_enum_cases() {
         let files = |t| [("lib.php", LIB), ("t.php", t)];
         let items = complete_at(&files("<?php\nuse App\\Models\\User;\nUser::<|>\n"));

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use foldhash::HashSet;
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 use mago_allocator::LocalArena;
 use mago_codex::metadata::{CodebaseEntryKeys, CodebaseMetadata};
 use mago_codex::symbol::SymbolKind;
@@ -34,6 +34,8 @@ use mago_php_version::PHPVersion;
 use mago_prelude::Prelude;
 use mago_word::{Word, WordSet};
 use rayon::prelude::*;
+
+use crate::analysis::Parsed;
 
 /// Folders never indexed, relative to the project root. `vendor`'s tests and Composer's generated files only
 /// add duplicate or unused classes.
@@ -139,8 +141,8 @@ pub struct Index {
     /// What each file declares, for every project and library file.
     declared: HashMap<FileId, Vec<Declared>>,
     excluded: GlobSet,
-    /// The classes `tests/Pest.php` names, in order: one of them is the test case Pest binds test closures to.
-    pest_names: Vec<String>,
+    /// What `tests/Pest.php` binds with `in()`: each chain's classes and traits, and the files and folders it covers.
+    pest_uses: Vec<(Vec<String>, GlobSet)>,
 }
 
 /// PHP's built-in functions and classes, built once per process. Building needs a deep stack.
@@ -199,13 +201,76 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
 /// Pest's configuration file, relative to the project.
 const PEST_FILE: &str = "tests/Pest.php";
 
-/// The names a file uses, fully qualified, in the order they appear.
-fn names_in_order(contents: &[u8]) -> Vec<String> {
+/// The test case Pest runs a file's tests in when nothing binds the file to another.
+pub const PHPUNIT_TEST_CASE: &str = "PHPUnit\\Framework\\TestCase";
+
+/// What each `uses()` or `pest()->extend()` chain in a Pest file binds: the classes and traits it names, fully
+/// qualified, and the targets its `in()` gives, relative to `tests/`. A chain without `in()` binds its own file.
+fn pest_uses(parsed: &Parsed<'_>) -> Vec<(Vec<String>, Vec<String>)> {
+    use mago_span::HasSpan;
+    use mago_syntax::cst::{Access, Argument, Call, ClassLikeConstantSelector, ClassLikeMemberSelector, Expression, Literal, MagicConstant, Node};
+    let mut out = vec![];
+    crate::locate::walk(parsed, |node, _| {
+        let Node::ExpressionStatement(s) = node else { return };
+        let (mut names, mut targets) = (vec![], vec![]);
+        let mut e = s.expression;
+        loop {
+            let (name, args, object) = match e {
+                Expression::Call(Call::Method(c)) => match &c.method {
+                    ClassLikeMemberSelector::Identifier(id) => (id.value, &c.argument_list, Some(c.object)),
+                    _ => return,
+                },
+                Expression::Call(Call::Function(c)) => match c.function {
+                    Expression::Identifier(id) => (id.value(), &c.argument_list, None),
+                    _ => return,
+                },
+                _ => return,
+            };
+            let name = name.to_ascii_lowercase();
+            for arg in args.arguments.iter().map(Argument::value) {
+                match (name.as_slice(), arg) {
+                    (b"uses" | b"use" | b"extend" | b"extends", Expression::Access(Access::ClassConstant(a)))
+                        if matches!(&a.constant, ClassLikeConstantSelector::Identifier(id) if id.value.eq_ignore_ascii_case(b"class")) =>
+                    {
+                        names.extend(parsed.name_at(a.class.span().start.offset).map(|(_, _, n, _)| n));
+                    }
+                    (b"in", Expression::Literal(Literal::String(s))) => targets.extend(s.value.map(|v| String::from_utf8_lossy(v).into_owned())),
+                    (b"in", Expression::MagicConstant(MagicConstant::Directory(_))) => targets.push(".".into()),
+                    _ => {}
+                }
+            }
+            match object {
+                Some(object) => e = object,
+                None if matches!(name.as_slice(), b"uses" | b"pest") => break,
+                None => return,
+            }
+        }
+        if !names.is_empty() {
+            out.push((names, targets));
+        }
+    });
+    out
+}
+
+/// Pest.php's chains that have `in()`, with their targets as globs: Pest expands them with PHP's `glob()` from
+/// `tests/`, and a folder covers the files under it.
+fn pest_bindings(contents: &[u8]) -> Vec<(Vec<String>, GlobSet)> {
     let arena = LocalArena::new();
-    let program = mago_syntax::parser::parse_file(&arena, &source_file(Path::new(PEST_FILE), FileType::Host, contents.to_vec()));
-    let mut names: Vec<(u32, String)> = NameResolver::new(&arena).resolve(program).iter().map(|(at, _, n, _)| (at, String::from_utf8_lossy(n).into_owned())).collect();
-    names.sort();
-    names.into_iter().map(|(_, n)| n).collect()
+    let parsed = Parsed::new(&arena, Path::new(PEST_FILE), &String::from_utf8_lossy(contents));
+    pest_uses(&parsed)
+        .into_iter()
+        .filter(|(_, targets)| !targets.is_empty())
+        .map(|(names, targets)| {
+            let mut set = GlobSetBuilder::new();
+            for target in &targets {
+                let target = target.trim_start_matches("./").trim_matches('/');
+                if let Ok(glob) = GlobBuilder::new(if target == "." { "" } else { target }).literal_separator(true).build() {
+                    set.add(glob);
+                }
+            }
+            (names, set.build().unwrap_or_else(|_| GlobSet::empty()))
+        })
+        .collect()
 }
 
 /// The lowercase names of the classes, interfaces, and traits a type mentions.
@@ -320,7 +385,7 @@ impl Index {
             library_names: HashMap::new(),
             declared: HashMap::new(),
             excluded,
-            pest_names: vec![],
+            pest_uses: vec![],
         }
     }
 
@@ -456,7 +521,7 @@ impl Index {
         if self.config.load_all {
             wanted.extend(self.library_names.keys().cloned());
         }
-        self.pest_names = read(&self.config.root.join(PEST_FILE)).map(|c| names_in_order(&c)).unwrap_or_default();
+        self.pest_uses = read(&self.config.root.join(PEST_FILE)).map(|c| pest_bindings(&c)).unwrap_or_default();
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
         break_inheritance_cycles(&mut self.codebase, None);
@@ -556,7 +621,7 @@ impl Index {
             }
             self.declared.remove(&id);
             if path == self.config.root.join(PEST_FILE) {
-                self.pest_names = contents.as_deref().map(names_in_order).unwrap_or_default();
+                self.pest_uses = contents.as_deref().map(pest_bindings).unwrap_or_default();
             }
             let Some(contents) = contents else { continue };
             if !self.includes(&path) {
@@ -642,15 +707,11 @@ impl Index {
         self.bind_pest_closures();
     }
 
-    /// Pest runs each test closure as a method of the project's test case, such as `Tests\TestCase`, which
-    /// `tests/Pest.php` names with `pest()->extend()` or `uses()`. Pest's functions declare only PHPUnit's
-    /// `TestCase` as the closures' `$this`, so this narrows it to the first class Pest.php names that extends it.
-    // ponytail: one class for every test file, though Pest.php's `in()` can bind folders to different classes, so
-    // a Unit test can call a Feature test case's method unreported. Per-file binding needs a codebase per folder.
+    /// Pest runs each test closure as a method of a test case. Its functions declare PHPUnit's `TestCase` as the
+    /// closures' `$this` (Pest 2 declares `TestCall`), so this sets PHPUnit's `TestCase` for every version. The
+    /// analysis then binds a test file's closures to its own test case, from [`Index::pest_case`].
     fn bind_pest_closures(&mut self) {
-        const PHPUNIT: &str = "PHPUnit\\Framework\\TestCase";
-        let case = self.pest_names.iter().find(|n| self.codebase.class_extends(n.as_bytes(), PHPUNIT.as_bytes())).map(|n| n.as_str()).unwrap_or(PHPUNIT);
-        let Some(case) = self.codebase.get_class_like(case.as_bytes()).map(|c| c.original_name) else { return };
+        let Some(case) = self.codebase.get_class_like(PHPUNIT_TEST_CASE.as_bytes()).map(|c| c.original_name) else { return };
         // Pest's functions whose closure Pest binds; `describe()` and `beforeAll()` closures run unbound.
         for name in ["test", "it", "beforeeach", "aftereach"] {
             let Some(f) = self.codebase.function_likes.get_mut(&(mago_word::empty_word(), mago_word::ascii_lowercase_word(name.as_bytes()))) else { continue };
@@ -658,6 +719,19 @@ impl Index {
                 this.type_union = TUnion::from_atomic(TAtomic::Object(TObject::Named(TNamedObject::new(case))));
             }
         }
+    }
+
+    /// The test case Pest runs a test file's closures in: the first class that extends PHPUnit's `TestCase` among
+    /// those the file's own `uses()` names and those of the `tests/Pest.php` chains whose `in()` covers the file.
+    /// `None` for PHPUnit's own, which Pest uses when nothing binds the file.
+    // ponytail: traits the chains add, such as `RefreshDatabase`, aren't bound, so calling their methods on `$this`
+    // is reported. Binding them needs a class per combination of test case and traits added to the codebase.
+    pub fn pest_case(&self, parsed: &Parsed<'_>) -> Option<Word> {
+        let rel = parsed.file.path.as_deref()?.strip_prefix(self.config.root.join("tests")).ok()?;
+        let own = pest_uses(parsed).into_iter().filter(|(_, targets)| targets.is_empty()).flat_map(|(names, _)| names);
+        let bound = self.pest_uses.iter().filter(|(_, set)| rel.ancestors().any(|a| set.is_match(a))).flat_map(|(names, _)| names.iter().cloned());
+        let case = own.chain(bound).find(|n| self.codebase.class_extends(n.as_bytes(), PHPUNIT_TEST_CASE.as_bytes()))?;
+        self.codebase.get_class_like(case.as_bytes()).map(|c| c.original_name)
     }
 
     pub fn path_of(&self, id: FileId) -> Option<&Path> {

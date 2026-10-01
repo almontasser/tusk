@@ -1,6 +1,8 @@
 //! Parsing and analyzing one file against the index. Mago's syntax tree, names, and types all borrow from an
 //! arena, so a request parses the file it needs, answers, and drops everything together.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -9,9 +11,8 @@ use mago_allocator::LocalArena;
 use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
 use mago_analyzer::artifacts::AnalysisArtifacts;
-use mago_analyzer::plugin::PluginRegistry;
+use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, HookContext, HookResult, PluginRegistry, Provider, ProviderMeta};
 use mago_analyzer::settings::Settings;
-use mago_codex::metadata::CodebaseMetadata;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::ttype::union::TUnion;
 use mago_database::file::{File, FileType};
@@ -20,10 +21,11 @@ use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
 use mago_reporting::IssueCollection;
 use mago_span::HasSpan;
-use mago_syntax::cst::{Node, Program};
+use mago_syntax::cst::{Access, ClassLikeMemberSelector, Expression, Node, Program, Variable};
 use mago_syntax::parser::parse_file;
+use mago_word::Word;
 
-use crate::index::source_file;
+use crate::index::{Index, PHPUNIT_TEST_CASE, source_file};
 
 /// Parses a file. If brackets are left open at its end, as when a class is being written at the end of a file,
 /// they're closed first, so the parser keeps the unfinished declaration. The index and every request parse the
@@ -40,7 +42,72 @@ pub fn parse_balanced<'a>(arena: &'a LocalArena, path: &Path, file_type: FileTyp
     (file, program)
 }
 
-static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(PluginRegistry::with_library_providers);
+static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
+    let mut plugins = PluginRegistry::with_library_providers();
+    plugins.register_expression_hook(PestHook);
+    plugins
+});
+
+thread_local! {
+    /// While a Pest test file is analyzed: its test case, and the type of each property its tests set on `$this`.
+    static PEST: RefCell<Option<(Word, HashMap<Vec<u8>, TUnion>)>> = const { RefCell::new(None) };
+}
+
+/// Binds a Pest test file's closures to the file's test case rather than PHPUnit's, and types the properties its
+/// tests set on `$this` that the test case doesn't declare from the values they're given. The analyzer reaches a
+/// file's closures in order, so what `beforeEach()` sets types the tests after it.
+struct PestHook;
+
+impl Provider for PestHook {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-pest", "Pest", "Binds Pest's test closures to the file's test case.");
+        &META
+    }
+}
+
+impl ExpressionHook for PestHook {
+    fn before_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<ExpressionHookResult> {
+        PEST.with_borrow(|pest| {
+            let Some((case, props)) = pest else { return Ok(ExpressionHookResult::Continue) };
+            if let Expression::Closure(_) | Expression::ArrowFunction(_) = expr
+                && let Some(scope) = &mut context.artifacts_mut().closure_bind_scope
+                && scope.class_name.is_some_and(|c| c.as_str_lossy().eq_ignore_ascii_case(PHPUNIT_TEST_CASE))
+            {
+                scope.class_name = Some(*case);
+            }
+            match this_property(expr).and_then(|name| props.get(name)) {
+                Some(t) if in_class(context, *case) => Ok(ExpressionHookResult::SkipWithType(t.clone())),
+                _ => Ok(ExpressionHookResult::Continue),
+            }
+        })
+    }
+
+    fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
+        let Expression::Assignment(a) = expr else { return Ok(()) };
+        let Some(name) = this_property(a.lhs).filter(|_| a.operator.is_assign()) else { return Ok(()) };
+        PEST.with_borrow_mut(|pest| {
+            let Some((case, props)) = pest else { return };
+            let declared = context.codebase().property_exists(case.as_bytes(), &[b"$", name].concat());
+            if let (true, false, Some(t)) = (in_class(context, *case), declared, context.get_expression_type(a.rhs)) {
+                props.insert(name.to_vec(), t.clone());
+            }
+        });
+        Ok(())
+    }
+}
+
+fn in_class(context: &HookContext<'_, '_>, class: Word) -> bool {
+    context.current_class_name().is_some_and(|c| c.as_str_lossy().eq_ignore_ascii_case(&class.as_str_lossy()))
+}
+
+/// `user` in `$this->user`.
+fn this_property<'a>(expr: &Expression<'a>) -> Option<&'a [u8]> {
+    let Expression::Access(Access::Property(a)) = expr else { return None };
+    match (a.object, &a.property) {
+        (Expression::Variable(Variable::Direct(v)), ClassLikeMemberSelector::Identifier(id)) if v.name == b"$this" => Some(id.value),
+        _ => None,
+    }
+}
 
 /// A parsed file with its names resolved.
 pub struct Parsed<'a> {
@@ -166,16 +233,18 @@ pub fn too_complex(program: &Program<'_>) -> bool {
     false
 }
 
-pub fn analyze(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, version: PHPVersion) -> Analysis {
-    analyze_with(parsed, arena, codebase, settings(version))
+pub fn analyze(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index) -> Analysis {
+    analyze_with(parsed, arena, index, settings(index.config.php_version))
 }
 
-pub fn analyze_with(parsed: &Parsed<'_>, arena: &LocalArena, codebase: &CodebaseMetadata, settings: Settings) -> Analysis {
+pub fn analyze_with(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings) -> Analysis {
     let mut result = AnalysisResult::new(SymbolReferences::new());
     if too_complex(parsed.program) {
         return Analysis { artifacts: Default::default(), issues: result.issues };
     }
-    let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, codebase, &PLUGINS, settings);
+    PEST.set(index.pest_case(parsed).map(|case| (case, HashMap::new())));
+    let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, &index.codebase, &PLUGINS, settings);
     let artifacts = analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default();
+    PEST.set(None);
     Analysis { artifacts, issues: result.issues }
 }

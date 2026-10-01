@@ -414,7 +414,7 @@ mod tests {
         let arena = LocalArena::new();
         let parsed = Parsed::new(&arena, &doc.path, &doc.text);
         let index = fx.snap.index.read();
-        let analysis = analyze(&parsed, &arena, &index.codebase, index.config.php_version);
+        let analysis = analyze(&parsed, &arena, &index);
         Resolver::new(&parsed, Some(&analysis), &index.codebase).at(doc.offset(pos))
     }
 

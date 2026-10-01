@@ -66,7 +66,7 @@ fn all_fixes(ctx: &Ctx<'_>, analysis: bool) -> Vec<Fix> {
     // The analysis parses the text with open brackets closed, so its offsets only match a complete file's.
     if analysis && ctx.parsed.text().len() == ctx.doc.text.len() {
         let settings = mago.analyzer_settings(index.config.php_version);
-        let result = crate::analysis::analyze_with(&ctx.parsed, ctx.arena, &index.codebase, settings);
+        let result = crate::analysis::analyze_with(&ctx.parsed, ctx.arena, &index, settings);
         let issues: Vec<Issue> = result.issues.iter().filter(|i| mago.reports_analysis(&rel, i.code.as_deref())).cloned().collect();
         out.extend(fixes_of(ctx.parsed.file.id, &issues, "mago"));
     }
