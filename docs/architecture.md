@@ -884,7 +884,8 @@ index (`bind_pest_closures` in `tusk-lsp/src/index.rs`) sets those parameters'
 closure type to PHPUnit's `TestCase`, for every Pest version.
 
 The index reads Pest.php's chains after it populates the codebase, when it's
-built and again when Pest.php changes (`pest_bindings`): the classes and traits
+built and after each update that changes PHP code (`pest_bindings`), from the
+text it keeps of Pest.php (`pest_file`): the classes and traits
 each chain names, with their imports resolved, its `in()` targets as globs
 relative to `tests/`, and the types of the properties its `beforeEach()` hooks
 set on `$this`. `__DIR__` covers all of `tests/`. When it scans a file under
@@ -907,8 +908,16 @@ trait repopulates them like any subclass. The name joins the parts with `＆`
 messages read `Tests\TestCase＆RefreshDatabase`. The classes belong to no
 indexed file, so names, symbols, and the project's files leave them out, and
 `is_pest_class` drops them from subclasses in navigation and the type
-hierarchy. A `uses()` typed in a test file binds its traits once the index has
-the edit; until then, the analysis binds the test case alone.
+hierarchy.
+
+The editor sends each edit to the index, and requests and diagnostics wait for
+it, so a `uses()` typed in a test file usually has its class by the time the
+file is analyzed. `Index::pest_binding` reads the file's own `uses()` from the
+parsed text, though, and when it differs from what the index has (`pest_own`)
+and no class is made for the pair yet, as when the diagnostics thread checks a
+newer text than the index has, the analysis binds the test case alone and drops
+Mago's `non-existent-method` and `non-existent-property` issues, which may be
+the trait's members.
 
 Mago reads Pest's functions from the one codebase every file shares, so the
 analysis binds each file itself. Before it analyzes a test file, `analyze_with`
@@ -932,18 +941,27 @@ file's closures in order, so what a closure sets types the closures after it.
 Reads start from what Pest.php's hooks set for the file. When a read comes
 before the line that sets it and the file's own `beforeEach()` sets the
 property, as when the hook comes after the tests, the file is analyzed a second
-time with the hooks' types from the start. Pest.php's hooks are analyzed once,
-when Pest.php is read (`this_assignments`): `UsesCall::beforeEach()` doesn't
+time with the hooks' types from the start. Pest.php's hooks are analyzed each
+time Pest.php is read (`this_assignments`): `UsesCall::beforeEach()` doesn't
 bind `$this`, so only the assigned values' types are kept, by where each
-assignment is. They're read again only when Pest.php changes, so a type that
-depends on another file can be stale until then.
+assignment is. A hook's type can depend on any file, such as a model's or a
+helper's return type, so they're analyzed again with every update, which takes
+about 0.1 ms for a Pest.php with a hook and 10 µs for one without.
 
 Pest lets tests set properties the test case doesn't declare, so `analyze_with`
 drops Mago's `non-existent-property` at each such assignment the hook saw. A
 read of a property that nothing sets is still reported. PHPStan doesn't know
-the binding, so in files under `tests/` that call `it()`, `test()`,
-`describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop its problems
-mentioning `$this`, `TestCase`, or `mixed` on lines that use `$this`. The filters
+the binding, and Pest's PHPStan extension (`vendor/pestphp/pest/extension.neon`)
+only makes `Expectation` accept any property. PHPStan reads `$this` as Pest's
+`@param-closure-this`: PHPUnit's `TestCase` in Pest 3 and `Pest\PendingCalls\TestCall`
+in Pest 5. So in files under `tests/` that call `it()`, `test()`, `describe()`,
+or `arch()`, the filters in `src/diagnostics.ts` drop PHPStan's problems on
+lines that use `$this` that come from that: `Undefined variable: $this`, an
+undefined method or property of `TestCase` or a `Pest\PendingCalls` class, and
+any problem about `mixed`, which is what PHPStan makes of those members and
+everything after them. Mago, which knows the binding, still checks those lines.
+Its other problems there, such as a property on a model that may be null, stay.
+The filters
 also drop Mago's issues about Pest's own classes, which answer through magic
 (`->not`, higher-order expectations such as `->name->toBe()`), and calls on null
 along an `expect()` chain: `expect()` returns an `Expectation<TValue|null>`.
@@ -7158,3 +7176,31 @@ the anonymous component tag around it. A default applies only when no component
 further out passes the variable, which the tags can't show, so defaults aren't
 used. A dynamic component with a name that isn't literal isn't read, so a view
 it also renders can still be typed from its other tags.
+
+### 2026-10-01: Pest.php's hook types follow the index, and PHPStan's `$this` filter is narrowed
+
+Pest.php's `beforeEach()` hooks were typed only when Pest.php changed, so a
+property set from a model's or a helper's return type kept its old type after
+that file changed. The index now keeps Pest.php's text and types the hooks
+again after every update that changes PHP code. That costs about 0.1 ms per
+update on a project whose Pest.php has a hook, against 2 ms for the update,
+which is simpler than keying them by generation and computing them on the next
+analysis.
+
+The index gets each edit as you type and requests wait for it, so a new
+`uses()` already binds its traits by the time completion and diagnostics run.
+The diagnostics thread can still check text newer than the index has. Making
+the trait's class in the analysis would mean changing the shared codebase from
+a request, so the analysis instead drops Mago's missing-member issues while the
+file's `uses()` differs from the index's and no class is made.
+
+PHPStan's filter on `$this` lines in Pest tests dropped problems mentioning
+`$this` or `TestCase`. Pest 5 declares `TestCall` as the closure's `$this`, so
+on a Pest 5 project the filter missed about 3,100 problems in `tests/`, nearly
+all `TestCall` members and the `mixed` values that follow from them. No PHPStan
+extension in these projects teaches PHPStan the binding: Pest's own only adds
+`Expectation` to the classes that accept any property. The filter now drops
+only what the unknown binding causes: `Undefined variable: $this`, missing
+members of PHPUnit's `TestCase` or a `Pest\PendingCalls` class, and problems
+about `mixed`. On three projects it keeps every other PHPStan problem on those
+lines, such as an undefined property on a model.

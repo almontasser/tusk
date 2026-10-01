@@ -295,7 +295,7 @@ fn run(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Setting
     Analysis { artifacts, issues: result.issues }
 }
 
-fn analyze_pest(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings, (case, seed, hooks): (Word, PestProps, Vec<(u32, u32)>)) -> Analysis {
+fn analyze_pest(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Settings, (case, seed, hooks, partial): (Word, PestProps, Vec<(u32, u32)>, bool)) -> Analysis {
     let start = |props| PEST.set(Some(Pest { case: Some(case), props, ..Default::default() }));
     start(seed.clone());
     let mut analysis = run(parsed, arena, index, settings.clone());
@@ -313,9 +313,14 @@ fn analyze_pest(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings
         analysis = run(parsed, arena, index, settings);
         pest = PEST.take().unwrap_or_default();
     }
-    // Setting a property the test case doesn't declare is how Pest tests share values.
+    // Setting a property the test case doesn't declare is how Pest tests share values. Bound to the test case
+    // without the traits the file names, as when the analysis runs on a `uses()` the index doesn't have yet, any
+    // missing member may be a trait's.
     let issues = analysis.issues.into_iter().filter(|i| {
         let dynamic = i.code.as_deref() == Some(IssueCode::NonExistentProperty.as_str());
+        if partial && (dynamic || i.code.as_deref() == Some(IssueCode::NonExistentMethod.as_str())) {
+            return false;
+        }
         let at = i.annotations.iter().find(|a| a.kind == AnnotationKind::Primary).map(|a| a.span.start.offset);
         !(dynamic && at.is_some_and(|at| pest.dynamic.iter().any(|(s, e)| *s <= at && at < *e)))
     });

@@ -80,8 +80,22 @@ it('works', function () {
     at(text, "$this->gte", "non-existent-method", "Method `gte` does not exist on type `Tests\\TestCase`."),
     at(text, "$this->user->name", "invalid-property-access", "Attempting to access a property on a non-object type (`int`)."),
     at(text, "$this->gte", "method.notFound", "Call to an undefined method PHPUnit\\Framework\\TestCase::gte().", "phpstan"),
+    at(text, "$this->user->name", "property.notFound", "Access to an undefined property Pest\\PendingCalls\\TestCall|Pest\\Support\\HigherOrderTapProxy::$user.", "phpstan"),
+    at(text, "$this->user->name", "property.nonObject", "Cannot access property $name on mixed.", "phpstan"),
+    at(text, "$this->user = 1", "variable.undefined", "Undefined variable: $this", "phpstan"),
   ];
   assert.deepEqual(kept("/p/tests/Feature/ATest.php", text, list), ["non-existent-method", "invalid-property-access"]);
+  // PHPStan's other problems on `$this` lines stay.
+  const other = `<?php
+it('works', function () {
+    $this->get('/users/'.$user->id);
+    $this->assertSame($data->name, 1);
+});`;
+  const real = [
+    at(other, "$this->get", "property.nonObject", "Cannot access property $id on App\\Models\\User|null.", "phpstan"),
+    at(other, "$this->assertSame", "property.notFound", "Access to an undefined property App\\Data::$name.", "phpstan"),
+  ];
+  assert.deepEqual(kept("/p/tests/Feature/ATest.php", other, real), ["property.nonObject", "property.notFound"]);
 });
 
 test("shows unproven types as warnings and mixed values as hints", () => {
