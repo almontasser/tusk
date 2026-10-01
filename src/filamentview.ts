@@ -48,6 +48,13 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(policy.index + policy[0].length - policy[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openAccess", title: "Open in Access", arguments: [policyModel[1]] } }], dispose() {} };
       }
+      // An observer: `class PostObserver` with a model import, opened as that model's Automations view.
+      const observer = !found && !modelClass && /^\s*(?:final\s+)?class\s+(\w+)Observer\b/m.exec(text);
+      const observed = observer && new RegExp(`^use\\s+([\\w\\\\]+\\\\${observer[1]})\\s*;`, "m").exec(text);
+      if (observer && observed) {
+        const line = model.getPositionAt(observer.index + observer[0].length - observer[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openAutomations", title: "Open in Automations", arguments: [observed[1]] } }], dispose() {} };
+      }
       // A panel provider: opened as the panel's settings.
       const provider = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+PanelProvider\b/m.exec(text);
       if (provider) {
@@ -84,6 +91,7 @@ export function initFilament(h_: typeof host) {
     },
   });
   monaco.editor.registerCommand("tusk.openDesigner", (_, path: string) => void openFileInDesigner(path));
+  monaco.editor.registerCommand("tusk.openAutomations", (_, model: string) => void import("./automationsview").then((m) => m.openAutomations(model)));
   monaco.editor.registerCommand("tusk.openAccess", (_, model: string) => void import("./accessview").then((m) => m.openAccess(model)));
   monaco.editor.registerCommand("tusk.openPanelSettings", (_, path: string, id: string) => void import("./panelsettings").then((m) => m.openPanelSettings(path, id)));
   monaco.editor.registerCommand("tusk.openPageDesigner", (_, path: string) => void openDesigner(path));

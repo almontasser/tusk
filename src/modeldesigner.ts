@@ -244,6 +244,7 @@ class ModelDesigner {
           existing && existing.columns === null ? h("span", { class: "fd-chip-warn", title: "The database can't be reached, so columns come from the model." }, icon("warning"), "Database not reachable") : null,
           this.file ? h("button", { type: "button", class: "fd-chip-link", onclick: () => designerHost.openAt(this.file!, 1) }, icon("go-to-file"), "Open the code") : null,
           existing ? h("button", { type: "button", class: "fd-chip-link", title: "Who can see, create, edit, and delete these records", onclick: () => void import("./accessview").then((m) => m.openAccess(existing.class)) }, icon("shield"), "Access") : null,
+          existing ? h("button", { type: "button", class: "fd-chip-link", title: "What happens when these records are created, changed, or deleted", onclick: () => void import("./automationsview").then((m) => m.openAutomations(existing.class)) }, icon("zap"), "Automations") : null,
           existing?.factory && existing.tableExists !== false ? sampleButton(existing.class) : null,
         ),
       ),

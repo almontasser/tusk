@@ -155,6 +155,17 @@ export const porters = (root: string) => cached(root, "app:porters", () => intro
 /** The app's notification classes: the record each one's constructor takes, and its channels when `via()` says without a user. */
 export type NotificationInfo = { class: string; file: string | null; record: string | null; channels: string[] | null };
 export const notifications = (root: string) => cached(root, "app:notifications", () => introspect<NotificationInfo[]>(root, "notifications"));
+/** What a model's Automations view needs: its registered observers, closures on its events, queued notifications, and more. */
+export type ObserversInfo = {
+  observers: { class: string; file: string | null; attribute: boolean }[];
+  closures: { event: string; file: string | null; line: number }[];
+  queued: string[];
+  user: string | null;
+  roles: string[] | null;
+  queue: string | null;
+  attribute: boolean;
+};
+export const observers = (root: string, model: string) => cached(root, `app:observers:${model}`, () => introspect<ObserversInfo>(root, "observers", model));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));

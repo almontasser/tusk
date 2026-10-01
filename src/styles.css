@@ -2742,3 +2742,19 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pd-csv table { border-collapse: collapse; font: 11.5px var(--mono); }
 .pd-csv th, .pd-csv td { padding: 5px 9px; border-inline-end: 1px solid var(--border-subtle); white-space: nowrap; text-align: start; }
 .pd-csv th { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
+/* The Automations view (src/automationsview.ts) */
+.au-rule { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-radius: 12px; background: var(--fi-card); box-shadow: 0 0 0 1px var(--fi-ring); }
+.au-rule.draft { box-shadow: 0 0 0 1px var(--accent); }
+.au-rule > .fd-note { margin: 0; }
+.au-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.au-line select, .au-line input { min-width: 0; max-width: 260px; }
+.au-word { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+.au-then { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; }
+.au-then > .au-word { padding-top: 6px; }
+.au-actions, .au-send { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.au-send .fd-note { margin: 0 0 0 4px; }
+.au-adds { display: flex; flex-wrap: wrap; gap: 6px; }
+.au-value { display: inline-flex; gap: 6px; min-width: 0; }
+.au-other { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.au-other h3 { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 13px; }

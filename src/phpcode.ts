@@ -47,6 +47,8 @@ export type OMethod = {
   returns: PNode[];
   /** The body's own expression statements; an assignment to a variable names it in `assigns`. */
   statements?: { assigns: string | null; value: PNode }[];
+  /** Every top-level statement's span; an `if` with a braced block and no `else` gives its condition and block too. */
+  bodyStatements?: { kind: "if" | "expression" | "other"; span: Span; condition?: Span; then?: Span[]; open?: number; close?: number }[];
 };
 export type OClass = {
   kind: "class" | "enum" | "trait" | "interface";

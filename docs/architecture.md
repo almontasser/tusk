@@ -4547,6 +4547,45 @@ that runs once, so it should hold the whole change.
 - **New enums** are written whole by `enumFile`, into the namespace's PSR-4
   folder. `make:enum` would make an empty class that Tusk would then replace.
 
+## Automations
+
+`src/automationsview.ts` shows a model's rules, and `src/automationgen.ts` reads
+and writes them in the model's observer. Each change is saved at once, as in
+the Access view.
+
+- **Reading the app:** `introspect.php observers <model>` boots the model,
+  which registers its `#[ObservedBy]` observers, and lists the observers and
+  closures the event dispatcher holds for its `eloquent.*` events, so an
+  observer registered with `observe()` in a provider is found too. It also
+  lists the notifications that implement `ShouldQueue`, the user model,
+  Spatie's roles, the queue connection, and whether Laravel has the
+  `ObservedBy` attribute (10.44 and later).
+- **Statements:** the outline gives each method's `bodyStatements`: every
+  top-level statement's span, and for an `if` with a braced block and no
+  `else`, its condition and its block's statements.
+- **A rule** is one block in an event method: an `if` whose condition is the
+  trigger and the conditions joined by `&&`, or a run of bare statements when
+  there are none. "A field changes" is `$order->wasChanged('status')` in
+  `updated` and `$order->isDirty('status')` in `updating`; "becomes" adds
+  `$order->status === OrderStatus::Shipped`. Statements are actions:
+  `sendCode` from `src/notifysend.ts` with the observer's parameter as the
+  record, or `$order->field = value;`. Other statements in a rule stay as
+  code; other statements and methods in the observer are listed as code.
+- **Before and after the save:** setting a field goes in `creating`,
+  `updating`, or `restoring`, and notifications go in `created`, `updated`,
+  `deleted`, or `restored`. `readObserver` pairs a before-block with the first
+  after-block that has the same trigger and conditions, so a rule that does
+  both reads as one.
+- **Writing:** `ruleEdits` turns a rule as read into the rule as changed: each
+  method's block is replaced where it is, removed, or added at the end of the
+  method. A method is added when missing and removed when nothing is left in
+  it. Before applying, the view reads the observer again and checks the rule's
+  blocks are where it saw them.
+- **New observers** are written by Tusk as an empty class in
+  `App\Observers` (through PSR-4), since `make:observer --model` writes five
+  empty methods. `observedByEdits` adds the class to the model's
+  `#[ObservedBy([...])]`, or adds the attribute.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6257,3 +6296,27 @@ installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
 
+### 2026-10-01: Automations set fields before the save and notify after it
+
+An observer can set a field after the save with `saveQuietly()`, which avoids
+the loop a plain `save()` would start. But that second save syncs the record's
+changes, so a later rule in the same `updated()` that checks
+`wasChanged('status')` would no longer see the change. Setting the field in
+`updating()` (or `creating()`, `restoring()`) needs no second save and leaves
+the changes alone, and notifications still go out after the save, when the
+record has its id and the change is in the database. So a rule that does both
+is two blocks with the same condition, one per method, which the designer
+pairs again when it reads them. Deleted records aren't saved again, so they
+don't offer setting a field.
+
+### 2026-10-01: One `if` block per rule, read through the outline
+
+A rule could be a method of its own, called from the event method, which would
+be easy to find. But observers people write put the logic in the event
+methods, and the designer should read those too. So a rule is one `if` block
+(or bare statements, with no conditions) in the event method. The outline's
+`statements` only gave expression statements, so it now also gives
+`bodyStatements` with every statement's span and an `if`'s condition and
+block, which is more reliable than splitting the body's text. A block's
+condition and statements are read with the same patterns the designer writes;
+anything else stays as code.
