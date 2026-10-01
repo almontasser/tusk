@@ -1792,6 +1792,8 @@ button.link:hover { text-decoration: underline; }
 /* Pull Members Up and Extract Interface: members to choose, the code they become, and what they'd break. */
 .refactor-dialog { width: min(860px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border-radius: 12px; border: 1px solid var(--popover-border); box-shadow: var(--shadow); }
 .refactor-dialog::backdrop { background: #0007; }
+.askpass-dialog { width: min(480px, calc(100vw - 32px)); }
+.askpass-prompt { margin: 0; overflow-wrap: anywhere; }
 .refactor-dialog form { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 18px; max-height: 88vh; }
 .refactor-dialog h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .refactor-dialog h2 .muted { font: 500 13px var(--mono); margin-left: 6px; color: var(--muted); }

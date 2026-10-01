@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
+import { askpassKind, age, alignmentGaps, graphRows, applyBlocks, applyLines, checksSummary, mirror, parseRebaseTodo, rebaseTodo, isConflict, lineChanges as changesOf, parseBlame, parseConflicts, parseHunks, parseLog, parseNameStatus, parseRefs, parseStashList, resolveSimple, parseStatus, parseWorktrees, remoteLineUrl } from "./gitparse.ts";
 
 test("parses branch, tracking, and file statuses", () => {
   const out = ["## main...origin/main [ahead 2, behind 1]", "M  app/Post.php", " M routes/web.php", "R  new.php", "old.php", "?? notes.md", ""].join("\0");
@@ -271,4 +271,12 @@ test("merges conflicts whose sides changed different lines", () => {
   // The same line changed two ways, or two insertions at one place, stay conflicts.
   assert.equal(resolveSimple(base, ["a", "B1", "c", "d"], ["a", "B2", "c", "d"]), null);
   assert.equal(resolveSimple(base, ["a", "x", "b", "c", "d"], ["a", "y", "b", "c", "d"]), null);
+});
+
+test("asks git's and ssh's prompts by kind", () => {
+  assert.equal(askpassKind("Username for 'https://github.com': ", false), "text");
+  assert.equal(askpassKind("Password for 'https://me@github.com': ", false), "secret");
+  assert.equal(askpassKind("Enter passphrase for key '/Users/me/.ssh/id_ed25519': ", false), "secret");
+  assert.equal(askpassKind("Are you sure you want to continue connecting (yes/no/[fingerprint])? ", false), "yesno");
+  assert.equal(askpassKind("Allow use of key?", true), "confirm");
 });

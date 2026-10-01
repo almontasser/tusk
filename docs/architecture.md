@@ -2896,6 +2896,15 @@ failure, so a command's messages are lost either way for commands such as
 conflicts on standard output and fails. `gitOutput` runs git through
 `/bin/sh` with `2>&1` and appends the exit code, and sets
 `GIT_TERMINAL_PROMPT=0`, since no terminal can answer a credential prompt.
+Prompts go to the app instead (`src-tauri/src/askpass.rs`): `GIT_ASKPASS` and
+`SSH_ASKPASS` (with `SSH_ASKPASS_REQUIRE=force`) name the app's own binary, and
+`TUSK_ASKPASS` names a Unix socket the app listens on, in the temporary folder
+and readable only by you. Started with `TUSK_ASKPASS` set, the binary sends its
+prompt over the socket and prints the answer, or exits 1 when you cancel. The
+app emits each prompt as the `askpass` event, `askpass` in `sync.ts` shows it
+in a dialog (hidden input for passwords and passphrases, plain for usernames,
+Yes or No for ssh's questions, by `askpassKind` in `gitparse.ts`), and
+`askpass_answer` sends the reply back. Answers live only in that round trip.
 It writes git's process ID to a file in the app cache, so an aborted signal
 can `kill` it: Tauri commands can't be aborted, and this avoids a Rust
 command for it.
@@ -6862,3 +6871,13 @@ library file's declarations, keyed by its modification time and size, and the
 binary's identity stands in for Mago's version. Hashing contents would be
 safer than time and size, but reading every file costs most of what the cache
 saves.
+
+### 2026-10-01: Git prompts in a dialog through askpass
+
+Push, update, and fetch fell back to a terminal tab when they needed a
+password, which loses the background run's messages. Git and ssh both ask an
+askpass program when one is set, so the app's binary is that program, the way
+it's also the PHP server. It reaches the window over a Unix socket rather than
+a port, so only your user can connect. The environment is set only for
+`gitOutput`, not the app process, so git in a terminal tab still prompts in
+the terminal.

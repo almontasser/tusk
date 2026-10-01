@@ -7,5 +7,9 @@ fn main() {
         tusk_lsp::run_stdio();
         return;
     }
+    // Started by git or ssh as GIT_ASKPASS or SSH_ASKPASS from a command the app ran (see askpass.rs).
+    if let Ok(socket) = std::env::var("TUSK_ASKPASS") {
+        php_editor_lib::askpass::client(&socket);
+    }
     php_editor_lib::run()
 }

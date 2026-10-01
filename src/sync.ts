@@ -1,10 +1,12 @@
 // Push and Update Project, as PhpStorm has them: a Push dialog with the commits to push, the target branch, and a
 // force-with-lease option, and an update that merges or rebases. Both run in the background with progress and
 // Cancel, and say what happened, or what to do next when git refuses.
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { defaultRemote } from "./branches";
 import { h } from "./dom";
 import { git, gitFailure, gitOutput, gitStatus, refreshGit } from "./git";
-import { isConflict } from "./gitparse";
+import { askpassKind, isConflict } from "./gitparse";
 import { openMerge } from "./merge";
 import { registerSettings } from "./settings";
 import { errorText, showError, status, withProgress } from "./status";
@@ -34,9 +36,43 @@ export const rejected = (out: string) => /\[rejected\]|\(fetch first\)|non-fast-
 /** Whether git's output says it couldn't log in, which a terminal could answer. */
 export const authFailed = (out: string) => /Authentication failed|could not read (Username|Password)|terminal prompts disabled|Permission denied \(publickey|Host key verification failed/i.test(out);
 
-/** Offers a terminal for a command git couldn't run without a prompt, such as a push that needs a password. */
+/**
+ * Asks a git or ssh prompt, such as a password for an HTTPS remote or a key's passphrase, in a dialog. The answer
+ * goes straight back to git through askpass.rs and is never kept.
+ */
+function askpass({ id, prompt, confirm }: { id: number; prompt: string; confirm: boolean }) {
+  const kind = askpassKind(prompt, confirm);
+  const answer = (value: string | null) => void invoke("askpass_answer", { id, answer: value });
+  let sent = false;
+  const finish = (value: string | null) => (sent || answer(value), (sent = true), dialog.close());
+  const field = h("input", { type: kind === "secret" ? "password" : "text", autocomplete: "off", spellcheck: false });
+  const yesNo = kind === "yesno" || kind === "confirm";
+  const dialog = h("dialog", { class: "refactor-dialog askpass-dialog" });
+  dialog.append(
+    h(
+      "form",
+      { method: "dialog", onsubmit: (e: Event) => (e.preventDefault(), finish(yesNo ? (kind === "yesno" ? "yes" : "") : field.value)) },
+      h("h2", {}, yesNo ? "Confirm" : kind === "text" ? "Git Login" : "Password Required"),
+      h("p", { class: "askpass-prompt" }, prompt.trim()),
+      yesNo ? null : h("div", { class: "dialog-fields" }, h("label", { class: "field grow" }, kind === "text" ? "Username" : /passphrase/i.test(prompt) ? "Passphrase" : "Password", field)),
+      h(
+        "div",
+        { class: "buttons" },
+        h("button", { type: "button", onclick: () => finish(kind === "yesno" ? "no" : null) }, yesNo ? "No" : "Cancel"),
+        h("button", { type: "submit", class: "primary" }, yesNo ? "Yes" : "OK"),
+      ),
+    ),
+  );
+  // Escape and closing the dialog count as Cancel.
+  dialog.addEventListener("close", () => (finish(null), dialog.remove()));
+  document.body.append(dialog);
+  dialog.showModal();
+  if (!yesNo) field.focus();
+}
+
+/** Offers a terminal for a command that couldn't log in, such as after a canceled or wrong password. */
 function inTerminal(message: string, args: string[]) {
-  showError(`${message}: git needs a password or passphrase`, undefined, { label: "Run in Terminal", run: () => openTerminal(host.root(), `git ${args[0]}`, ["git", ...args], () => refreshGit()) });
+  showError(`${message}: git couldn't log in`, undefined, { label: "Run in Terminal", run: () => openTerminal(host.root(), `git ${args[0]}`, ["git", ...args], () => refreshGit()) });
 }
 
 // ---- Update Project ----
@@ -161,6 +197,7 @@ async function pushTo(t: PushTarget): Promise<void> {
 
 export function initSync(h: Host) {
   host = h;
+  listen<{ id: number; prompt: string; confirm: boolean }>("askpass", (e) => askpass(e.payload));
   document.getElementById("git-pull")!.onclick = () => updateProject();
   document.getElementById("git-push")!.onclick = () => push();
 }
