@@ -93,12 +93,16 @@ of a pane's editor, measured to the nearest edge, splits that pane there
 (`splitPane`, which can put the new pane before or after), unless the tab is
 its own pane's only tab or four panes are open. The `#editor` listeners run in
 the capture phase, so Monaco never sees a tab dropped on its text as text to
-insert. Borders between panes have no element of their own, which would have
-to be skipped everywhere the layout reads a group's children: `sashAt` treats
-a press within 4 pixels of a pane's or group's edge, next to a sibling, as a
-resize. When a resize starts, each sibling's `flex-grow` becomes its size in
-pixels (all measured before any is set, since each change reflows the rest),
-and the two sides of the border trade pixels. Sizes go into the session as
+insert. Borders between panes are splitters from `src/splitter.ts`, so they
+take focus and the arrow keys like the others. Each pane holds two handles,
+for its left and top edges, rather than the groups holding elements between
+their children, which would have to be skipped everywhere the layout reads a
+group's children. `placeSashes`, run from `renderTabs`, points each handle at
+the pane or group whose edge it is and the sibling before it, or hides it;
+panes stacked along one edge each get a handle for that border. The
+splitter's `resize` option replaces its pixel width: each sibling's
+`flex-grow` becomes its size in pixels (all measured before any is set, since
+each change reflows the rest), and the two sides of the border trade pixels. Sizes go into the session as
 `grow`. A new split takes half of the pane's `flex-grow`, and a new group takes
 over the pane's.
 
@@ -6791,3 +6795,14 @@ formatters, which have no API without an editor, skipped them. `saveFile` now
 calls `formatModel` for every file, which runs the action in an editor showing
 the file or in a hidden editor made for the save. Every file then goes through
 the same providers, with minimal edits.
+
+### 2026-10-01: Editor pane borders are splitters held by the panes
+
+The borders between editor panes were a 4-pixel zone that a pointer handler
+found by geometry, so the keyboard couldn't reach them. They're now
+`src/splitter.ts` handles, so they get focus, the separator role, and the arrow
+keys as the other splits do. Elements between a group's children would have
+to be skipped wherever the layout reads them, so each pane holds handles for
+its own left and top edges, and the splitter's new `resize` option trades
+`flex-grow` instead of setting a width. Double-click and Enter keep the sizes,
+since panes have no default size to go back to.
