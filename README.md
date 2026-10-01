@@ -50,6 +50,7 @@ file to change when you add it.
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
+| Record history | The History section reads the `getActivitylogOptions()` calls it writes; other options, such as `$recordEvents` or `dontLogIfAttributesChangedOnly()`, show as code. A description is read when it's a string with `{$eventName}` in it, not other code. The History relation manager names the causer by its `name` attribute. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
@@ -1081,6 +1082,45 @@ Tusk writes a migration with only the changes, such as
 the model's fillable attributes, casts, soft deletes, and relationships in
 place, and keeps everything else. Dropping a column asks first. **Run the
 migration** runs `php artisan migrate` afterwards, in Sail when it's up.
+
+### Record history
+
+Record history keeps who created, changed, or deleted each record, and what
+changed, with
+[spatie/laravel-activitylog](https://github.com/spatie/laravel-activitylog).
+To turn it on for a model, open the **History** section at the bottom of the
+model designer, or run **Laravel: Record History…** and pick the model.
+
+- **Install:** when the package isn't installed, **Install
+  spatie/laravel-activitylog** runs Composer, publishes the package's migration
+  and config, and runs the migration, in a terminal tab. When the package is
+  installed but its table isn't, the section offers to run the migration.
+- **Record history:** adds the `LogsActivity` trait and its
+  `getActivitylogOptions()` to the model. The settings are the calls on
+  `LogOptions::defaults()`: which attributes it records (chosen ones, the
+  fillable ones, all of them, or only the event), **Only changed values**
+  (`logOnlyDirty()`), **Skip empty entries**, a log name, and a description
+  with `{event}` for created, updated, or deleted. Turning it on picks the
+  table's columns without the key, timestamps, and hidden attributes such as a
+  password. Unchecking an attribute when it records all of them adds it to
+  `logExcept()`.
+- **Latest entries:** the section lists the last ten entries for the model's
+  records, with who made them and the old and new values, so you can see that
+  logging works.
+
+Changes are staged with the model's other changes until you click **Apply
+changes**. Calls the designer doesn't know, such as
+`dontLogIfAttributesChangedOnly()`, are kept and show as code. So does a
+method written as code, such as one with statements before its `return`.
+
+To show a record's history in Filament, turn on **Show history on the
+record's page** in the resource designer's **Settings** tab. It writes
+`ActivitiesRelationManager`, a read-only relation manager titled **History**,
+next to the resource, and adds it to `getRelations()`. It lists each entry
+under the edit and view pages: when, who, what happened, and each changed
+attribute as `title: Old → New`. It opens in the designer like any other
+relation manager. Turning the setting off removes it from `getRelations()` and
+keeps its file.
 
 ## Enum designer
 

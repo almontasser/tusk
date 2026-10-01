@@ -36,11 +36,12 @@ import {
   camel,
   plural,
 } from "./modelgen";
-import { addMember, Imports, type Edit, insertItem, mergeEdits, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
+import { addMember, droppedImports, Imports, type Edit, insertItem, mergeEdits, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
 import { confirm } from "./palette";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView } from "./terminal";
 import { sampleButton } from "./sampledata";
+import { historyCard, historyChanges, historyModelEdits, type HistoryState, loadHistory } from "./historyview";
 
 let ids = 0;
 const newId = () => `c${++ids}`;
@@ -65,10 +66,12 @@ type State = {
 const open = new Map<string, ModelDesigner>();
 
 /** Opens the designer for an existing model's file. */
-export async function openModelDesigner(file: string) {
+export async function openModelDesigner(file: string, section?: "history") {
   let d = open.get(file);
   if (!d) open.set(file, (d = new ModelDesigner(file)));
+  d.section = section;
   d.show();
+  if (section && d.state) d.reveal();
 }
 
 /** Opens the designer for a new model; `then` runs with its class once it's created, as the resource wizard does. */
@@ -116,6 +119,10 @@ class ModelDesigner {
   previewTab: "migration" | "model" | "factory" = "migration";
   busy = "";
   then?: (cls: string) => void;
+  /** The model's activity log settings, staged like the rest; null for a new model. */
+  history: HistoryState | null = null;
+  /** A section to scroll to once the designer shows, such as History from the palette. */
+  section?: "history";
   private initialName: string;
 
   constructor(file: string | null, name = "", then?: (cls: string) => void) {
@@ -168,7 +175,9 @@ class ModelDesigner {
         const cls = outline.classes.find((c) => c.name);
         if (!cls) throw new Error("There's no class in this file.");
         fapp.forget([`model:${cls.fqn}`]);
+        const history = loadHistory(this.root, text, cls);
         const details = await fapp.model(this.root, cls.fqn);
+        this.history = await history;
         const unique = new Set(details.indexes.filter((i) => i.unique && !i.primary && i.columns.length === 1).map((i) => i.columns[0]));
         const indexed = new Set(details.indexes.filter((i) => !i.unique && i.columns.length === 1).map((i) => i.columns[0]));
         const foreign = new Map(details.foreignKeys.filter((f) => f.columns.length === 1).map((f) => [f.columns[0], { table: f.foreignTable, onDelete: f.onDelete }]));
@@ -219,10 +228,33 @@ class ModelDesigner {
       return;
     }
     const s = this.state!;
-    const main = h("div", { class: "md-main" }, this.modelCard(), this.columnsCard(), this.relationsCard(), s.existing ? null : this.alsoCard());
+    const main = h("div", { class: "md-main" }, this.modelCard(), this.columnsCard(), this.relationsCard(), s.existing ? null : this.alsoCard(), s.existing && this.history ? this.historyCard() : null);
     const preview = this.previewPane();
     this.el.replaceChildren(this.header(), h("div", { class: "md-body" }, main, preview), this.footer());
     this.updatePreview();
+    if (this.section) this.reveal();
+  }
+
+  /** Scrolls to the section the designer was opened for. */
+  reveal() {
+    // Once the tab shows; not in an animation frame, which waits while the window is hidden.
+    setTimeout(() => this.el.querySelector(".rh-section")?.scrollIntoView({ block: "start" }));
+    this.section = undefined;
+  }
+
+  private historyCard() {
+    const ex = this.state!.existing!;
+    return historyCard({
+      state: this.history!,
+      file: this.file!,
+      columns: (ex.columns ?? []).map((c) => c.name).filter((c) => c !== ex.keyName),
+      fillable: ex.fillable,
+      hidden: ex.hidden,
+      keyName: ex.keyName,
+      changed: () => this.updatePreview(),
+      render: () => this.render(),
+      reload: () => (fapp.forget(["models", "model:", "app"]), void this.load()),
+    });
   }
 
   private header() {
@@ -581,6 +613,7 @@ class ModelDesigner {
     }
     for (const r of s.spec.relations.filter((x) => !x.existing)) out.push(`Add ${r.name}(): ${r.type} ${shortClass(r.related)}`);
     if (s.spec.softDeletes && !s.softDeletesBefore) out.push("Use SoftDeletes");
+    if (this.history) out.push(...historyChanges(this.history));
     return out;
   }
 
@@ -775,7 +808,11 @@ class ModelDesigner {
       if (r.type !== "morphTo") imports.name(r.related);
       edits.push(addMember(text, cls, relationMethod(r)));
     }
-    if (edits.length) await this.edit(model, [...edits, ...imports.edits()]);
+    if (this.history) edits.push(...historyModelEdits(text, cls, this.history).map((e) => ({ ...e, text: e.text.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn)) })));
+    if (edits.length) {
+      const all = [...edits, ...imports.edits()];
+      await this.edit(model, [...all, ...droppedImports(text, outline, all)]);
+    }
   }
 
   /** Edits for a list of attributes, such as fillable: the property's array, the attribute's, or a new property. */

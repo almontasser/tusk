@@ -2742,3 +2742,14 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pd-csv table { border-collapse: collapse; font: 11.5px var(--mono); }
 .pd-csv th, .pd-csv td { padding: 5px 9px; border-inline-end: 1px solid var(--border-subtle); white-space: nowrap; text-align: start; }
 .pd-csv th { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
+/* Record history: the model designer's History section and its latest entries. */
+.rh-warn { display: flex; align-items: center; gap: 6px; padding: 4px 6px; color: var(--yellow); font-size: 12px; }
+.rh-entries { margin: 8px 4px 2px; }
+.rh-entries-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.rh-entries ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.rh-entry { display: grid; grid-template-columns: 64px 44px minmax(120px, auto) minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.rh-event { justify-self: start; padding: 0 6px; border-radius: 8px; font-size: 11px; background: color-mix(in srgb, var(--text) 8%, transparent); }
+.rh-event.created { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.rh-event.deleted { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.rh-changes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }

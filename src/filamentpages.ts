@@ -11,6 +11,7 @@ import { askName, commitInput, heroicon, pickHeroicon, popover, segmented, toggl
 import { translationRows } from "./filamentinspector";
 import { type Root, type RootKind, shortClass, walk } from "./filamentschema";
 import { addMember, type Edit, findCall, insertItem, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, removeItem, removeMethod, removeProperty, setProperty, textValue } from "./phpcode";
+import { historySettings } from "./historyview";
 import { confirm } from "./palette";
 import { showError } from "./status";
 
@@ -526,6 +527,7 @@ export function renderSettingsTab(d: Designer): HTMLElement {
     section("Navigation", "list-tree", [...NAVIGATION.map(row), badgeRow]),
     section("Names and address", "symbol-key", LABELS.filter((s) => s.kind !== "cluster" || d.panel?.clusters.length).map(row)),
     section("Global search", "search", [searchRow], "Global search finds records from the panel's search bar. It needs \"Records are titled by\" set."),
+    historySettings(d),
     model ? section("Model", "database", [h("div", { class: "fd-row" }, h("span", { class: "fd-row-label" }, "Model"), h("div", { class: "fd-row-editor" }, h("button", { type: "button", class: "fd-chip-link", onclick: () => d.host.openAt(abs(d, d.facts?.details.file ?? info?.modelFile ?? null) ?? d.file, 1) }, icon("database"), model)), h("span", { class: "fd-row-spacer" }))]) : null,
   );
 }

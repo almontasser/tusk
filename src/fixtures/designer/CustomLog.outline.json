@@ -1,0 +1,189 @@
+{
+  "errors": false,
+  "namespace": "App\\Models",
+  "uses": [
+    {
+      "alias": "Model",
+      "name": "Illuminate\\Database\\Eloquent\\Model",
+      "kind": "class",
+      "span": [
+        30,
+        69
+      ]
+    },
+    {
+      "alias": "LogsActivity",
+      "name": "Spatie\\Activitylog\\Models\\Concerns\\LogsActivity",
+      "kind": "class",
+      "span": [
+        70,
+        122
+      ]
+    },
+    {
+      "alias": "LogOptions",
+      "name": "Spatie\\Activitylog\\Support\\LogOptions",
+      "kind": "class",
+      "span": [
+        123,
+        165
+      ]
+    }
+  ],
+  "useInsert": 166,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "CustomLog",
+      "fqn": "App\\Models\\CustomLog",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Eloquent\\Model",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        167,
+        401
+      ],
+      "bodyStart": 198,
+      "bodyEnd": 400,
+      "traits": [
+        "Spatie\\Activitylog\\Models\\Concerns\\LogsActivity"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "getActivitylogOptions",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "LogOptions",
+          "attributes": [],
+          "span": [
+            226,
+            399
+          ],
+          "docStart": null,
+          "body": [
+            283,
+            398
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "options",
+                "span": [
+                  358,
+                  366
+                ]
+              },
+              "calls": [
+                {
+                  "name": "logExcept",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 377,
+                    "close": 391,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "prop",
+                          "object": {
+                            "kind": "var",
+                            "name": "this",
+                            "span": [
+                              378,
+                              383
+                            ]
+                          },
+                          "name": "secret",
+                          "nullsafe": false,
+                          "span": [
+                            378,
+                            391
+                          ]
+                        },
+                        "span": [
+                          378,
+                          391
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    366,
+                    392
+                  ],
+                  "nameSpan": [
+                    368,
+                    377
+                  ]
+                }
+              ],
+              "span": [
+                358,
+                392
+              ]
+            }
+          ],
+          "statements": [
+            {
+              "assigns": "options",
+              "value": {
+                "kind": "chain",
+                "base": {
+                  "kind": "static",
+                  "class": "Spatie\\Activitylog\\Support\\LogOptions",
+                  "classSpan": [
+                    303,
+                    313
+                  ],
+                  "method": "defaults",
+                  "args": {
+                    "open": 323,
+                    "close": 324,
+                    "items": []
+                  },
+                  "span": [
+                    303,
+                    325
+                  ]
+                },
+                "calls": [
+                  {
+                    "name": "logFillable",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 338,
+                      "close": 339,
+                      "items": []
+                    },
+                    "span": [
+                      325,
+                      340
+                    ],
+                    "nameSpan": [
+                      327,
+                      338
+                    ]
+                  }
+                ],
+                "span": [
+                  303,
+                  340
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
