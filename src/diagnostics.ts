@@ -54,7 +54,7 @@ function pestFalsePositive(text: string, lines: string[], lineStarts: number[], 
  * it returns is then on `mixed`. PhpStorm flags the first only faintly and the rest not at all, so these show as
  * hints: dots under the code, explained on hover, and not counted as problems.
  */
-export const magicNoise = (d: Diagnostic) => /^mago/.test(d.source ?? "") && (/^non-documented-(property|method)$/.test(String(d.code ?? "")) || onMixed(d));
+const magicNoise = (d: Diagnostic) => /^mago/.test(d.source ?? "") && (/^non-documented-(property|method)$/.test(String(d.code ?? "")) || onMixed(d));
 
 /**
  * Mago's issues about using a value of unknown type: the `mixed-*` rules, and a `foreach`, call, spread, cast, or
@@ -249,55 +249,6 @@ export function severityOf(d: Diagnostic): number {
   return d.severity ?? 1;
 }
 
-type MagoIssue = {
-  level: string;
-  code: string;
-  message: string;
-  notes?: string[];
-  help?: string;
-  annotations: { kind: string; message?: string; span: { file_id: { name: string }; start: { offset: number }; end: { offset: number } } }[];
-  /** Each file's edits that fix the issue. `new_text` is UTF-8 bytes. */
-  edits?: [unknown, { range: { start: number; end: number }; new_text: number[]; safety: string }[]][];
-};
-
-/**
- * The files `mago lint` or `mago analyze --reporting-format json` reports on, relative to the project, each with a
- * function that converts its issues for the file's text. Mago counts UTF-8 bytes; the diagnostics count UTF-16
- * units, as the language server's do. The messages match Tusk's server's, which the filters read, except
- * a parse error's: Mago's is always "Parse error encountered during parsing", so this takes the one on its location,
- * such as "Expected one of `Variable`, found `LeftBrace`". Levels map as the server's do: note to Information and help to
- * Hint. The Problems panel shows neither, so the scan asks Mago for warnings and errors only.
- */
-export function magoIssuesByFile(json: string, source: "mago" | "mago-lint"): Map<string, (text: string) => Diagnostic[]> {
-  const byFile = new Map<string, MagoIssue[]>();
-  for (const issue of (JSON.parse(json || "{}").issues ?? []) as MagoIssue[]) {
-    const primary = issue.annotations.find((a) => a.kind === "Primary") ?? issue.annotations[0];
-    if (!primary) continue;
-    const name = primary.span.file_id.name;
-    byFile.set(name, [...(byFile.get(name) ?? []), issue]);
-  }
-  const severity: Record<string, number> = { warning: 2, note: 3, help: 4 };
-  return new Map(
-    [...byFile].map(([name, issues]) => [
-      name,
-      (text: string) => {
-        const position = positions(text);
-        return issues.map((issue) => {
-          const primary = issue.annotations.find((a) => a.kind === "Primary") ?? issue.annotations[0];
-          const notes = (issue.notes ?? []).filter(Boolean).map((n) => `\n${n}`).join("");
-          return {
-            range: { start: position(primary.span.start.offset), end: position(primary.span.end.offset) },
-            message: (issue.code === "parse" && primary.message ? primary.message : issue.message) + notes + (issue.help ? `\n\n${issue.help}` : ""),
-            severity: severity[issue.level.toLowerCase()] ?? 1,
-            code: issue.code,
-            source,
-          };
-        });
-      },
-    ]),
-  );
-}
-
 type Range = { start: Position; end: Position };
 type TextEdit = { range: Range; text: string };
 
@@ -319,22 +270,6 @@ export function magoExpect(lines: string[], line: number, category: "lint" | "an
   }
   const at = { line, character: 0 };
   return { range: { start: at, end: at }, text: `${target.match(/^\s*/)![0]}// @mago-expect ${category}:${code}\n` };
-}
-
-/** Converts UTF-8 byte offsets in `text` to 0-based lines and UTF-16 characters. */
-function positions(text: string) {
-  const bytes = new TextEncoder().encode(text);
-  const lineStarts = [0];
-  bytes.forEach((b, i) => b === 10 && lineStarts.push(i + 1));
-  const decoder = new TextDecoder();
-  return (offset: number): Position => {
-    let [line, high] = [0, lineStarts.length - 1];
-    while (line < high) {
-      const mid = (line + high + 1) >> 1;
-      lineStarts[mid] <= offset ? (line = mid) : (high = mid - 1);
-    }
-    return { line, character: decoder.decode(bytes.subarray(lineStarts[line], offset)).length };
-  };
 }
 
 /** The lowest PHP version composer.json allows, such as `8.4` for `^8.4`: its platform setting, or else its requirement. */

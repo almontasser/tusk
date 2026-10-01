@@ -106,9 +106,9 @@ fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::ph
     });
 }
 
-/// The problems in `doc`: Mago's for PHP, and the framework's for PHP and Blade.
+/// The problems in `doc`: Mago's, and the framework's.
 pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
-    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { vec![] };
+    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { blade_problems_in(&snap.index.read(), doc) };
     let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
     out.extend(framework);
     out
@@ -121,32 +121,63 @@ pub fn php_problems(index: &SharedIndex, doc: &Document) -> Vec<Diagnostic> {
 /// [`php_problems`] with the index already locked, for work that runs in parallel and mustn't take the lock.
 pub fn php_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
     let arena = LocalArena::new();
-    // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
-    // the end of the file, which would hide a missing `}`.
-    let exact = Parsed::exact(&arena, &doc.path, &doc.text);
-    // After the first errors, the rest are mostly the parser losing its way, and each costs a position lookup.
-    let syntax: Vec<Issue> = exact.program.errors.iter().take(100).map(Issue::from).collect();
-    let parsed = if syntax.is_empty() { exact } else { Parsed::new(&arena, &doc.path, &doc.text) };
+    let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &doc.text);
     let mago = index.config.mago.clone();
     let rel = doc.path.strip_prefix(&index.config.root).unwrap_or(&doc.path).to_path_buf();
-    let complex = crate::analysis::too_complex(parsed.program);
-    let analysis = analyze_with(&parsed, &arena, &index.codebase, mago.analyzer_settings(index.config.php_version));
-    let mut out: Vec<Diagnostic> = syntax.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
-    out.extend(
-        analysis
-            .issues
-            .iter()
-            .filter(|i| mago.reports_analysis(&rel, i.code.as_deref()))
-            .filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")),
-    );
-    if complex {
+    let out: Vec<Diagnostic> = issues.iter().filter_map(|i| to_diagnostic(doc, parsed.file.id, i, "mago")).collect();
+    if crate::analysis::too_complex(parsed.program) {
         return out;
     }
+    let mut out = out;
     if mago.lints(&rel) {
         out.extend(lint(doc, &rel, &mago));
     }
     out.extend(crate::features::actions::organize::diagnostics(&parsed, doc));
     out
+}
+
+/// Mago's syntax errors and the analysis issues its configuration reports for `text`, a file at `path`.
+fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path: &std::path::Path, text: &str) -> (Parsed<'a>, Vec<Issue>) {
+    // Syntax errors come from the text as written: the parse the analysis uses closes what's left open at
+    // the end of the file, which would hide a missing `}`.
+    let exact = Parsed::exact(arena, path, text);
+    // After the first errors, the rest are mostly the parser losing its way, and each costs a position lookup.
+    let mut issues: Vec<Issue> = exact.program.errors.iter().take(100).map(Issue::from).collect();
+    let parsed = if issues.is_empty() { exact } else { Parsed::new(arena, path, text) };
+    let mago = &index.config.mago;
+    let rel = path.strip_prefix(&index.config.root).unwrap_or(path);
+    let analysis = analyze_with(&parsed, arena, &index.codebase, mago.analyzer_settings(index.config.php_version));
+    issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref())));
+    (parsed, issues)
+}
+
+/// Mago's problems in the PHP of `doc`, a Blade view, read as [`checked_php`] lays it out, at the view's
+/// positions. The view's variables come from the controller or component that renders it, so Mago doesn't
+/// know them. That drops undefined variables, uses of their `mixed` values, and Laravel's magic properties
+/// and methods, leaving syntax errors, unknown classes, functions, methods, and constants, and wrong arguments.
+///
+/// [`checked_php`]: crate::framework::laravel::blade::checked_php
+pub fn blade_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
+    let (php, head) = crate::framework::laravel::blade::checked_php(&doc.text);
+    let arena = LocalArena::new();
+    let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &php);
+    // The first line, `<?php` and the imports, is the view's start.
+    let at = |offset: u32| offset.saturating_sub(head as u32);
+    issues
+        .iter()
+        .filter_map(|i| to_diagnostic_at(doc, parsed.file.id, i, "mago", at))
+        .filter(|d| !blade_noise(d))
+        .collect()
+}
+
+/// Whether `d` is about a Blade view's variables, which [`blade_problems_in`] drops.
+fn blade_noise(d: &Diagnostic) -> bool {
+    let Some(NumberOrString::String(code)) = &d.code else { return false };
+    let on_mixed = matches!(code.as_str(), "invalid-iterator" | "invalid-callable" | "invalid-array-element" | "invalid-destructuring-source" | "invalid-type-cast")
+        && (d.message.contains("`mixed`") || d.message.contains("`nonnull`"));
+    matches!(code.as_str(), "undefined-variable" | "possibly-undefined-variable" | "unused-statement" | "no-value" | "non-documented-property" | "non-documented-method")
+        || code.starts_with("mixed-")
+        || on_mixed
 }
 
 /// Mago's linter on the document. Its rules match excluded paths against the file's name, so the file is
@@ -173,6 +204,11 @@ pub fn lint_issues(doc: &Document, rel: &std::path::Path, mago: &crate::mago_con
 }
 
 pub fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str) -> Option<Diagnostic> {
+    to_diagnostic_at(doc, file, issue, source, |offset| offset)
+}
+
+/// [`to_diagnostic`] for an issue in other text than the document's, whose offsets `at` maps to the document's.
+fn to_diagnostic_at(doc: &Document, file: mago_database::file::FileId, issue: &Issue, source: &str, at: impl Fn(u32) -> u32) -> Option<Diagnostic> {
     let primary = issue
         .annotations
         .iter()
@@ -195,7 +231,7 @@ pub fn to_diagnostic(doc: &Document, file: mago_database::file::FileId, issue: &
         message.push_str(&format!("\nHelp: {help}"));
     }
     Some(Diagnostic {
-        range: doc.range(primary.span.start.offset, primary.span.end.offset),
+        range: doc.range(at(primary.span.start.offset), at(primary.span.end.offset)),
         severity: Some(severity),
         code: issue.code.clone().map(NumberOrString::String),
         source: Some(source.into()),
@@ -232,6 +268,28 @@ mod tests {
         assert!(all.contains(&("mago-lint".into(), "strict-types".into())), "{all:?}");
         let configured = problems(code, "[analyzer]\nignore = [\"invalid-return-statement\"]\n[linter.rules]\nstrict-types = { enabled = false }\n");
         assert!(!configured.iter().any(|(_, c)| c == "invalid-return-statement" || c == "strict-types"), "{configured:?}");
+    }
+
+    #[test]
+    fn checks_the_php_in_blade_views_at_their_positions() {
+        let fx = Fixture::new(&[("app/Post.php", "<?php\nnamespace App;\nclass Post { public static function find(int $id): ?self { return null; } }\n")]);
+        let blade = "@use('App\\Post')\n<h1>{{ $title->name }}</h1>\n@foreach ($posts as $post)\n  <x-card :post=\"Post::find('x')\" />\n@endforeach\n@php nope(); @endphp\n";
+        let doc = Document::new(crate::testing::uri("resources/views/a.blade.php"), crate::testing::path("resources/views/a.blade.php"), "blade".into(), 1, blade.into());
+        let found: Vec<_> = blade_problems_in(&fx.snap.index.read(), &doc)
+            .into_iter()
+            .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line, d.range.start.character))
+            .collect();
+        // The undefined `$title`, `$posts`, and what's read from them are the controller's to define.
+        assert_eq!(found, vec![("invalid-argument".into(), 3, 28), ("non-existent-function".into(), 5, 5)], "{found:?}");
+    }
+
+    #[test]
+    fn drops_problems_about_a_views_variables() {
+        let d = |code: &str, message: &str| Diagnostic { code: Some(NumberOrString::String(code.into())), message: message.into(), ..Default::default() };
+        let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access"];
+        assert!(noise.iter().all(|c| blade_noise(&d(c, ""))));
+        assert!(blade_noise(&d("invalid-iterator", "of type `mixed`")) && !blade_noise(&d("invalid-iterator", "of type `int`")));
+        assert!(!blade_noise(&d("non-existent-function", "")) && !blade_noise(&d("parse", "")));
     }
 
     #[test]

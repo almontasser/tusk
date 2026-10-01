@@ -275,6 +275,22 @@ fn closing_a_file_goes_back_to_its_text_on_disk() {
     assert!(found.to_string().contains("Box.php"), "{found}");
 }
 
+#[test]
+fn checks_the_php_in_blade_views_open_and_in_the_project_scan() {
+    let view = "<h1>{{ $title }}</h1>\n{{ nope() }}\n";
+    let mut c = indexed(&[("resources/views/home.blade.php", view)]);
+    let uri = c.uri("resources/views/home.blade.php");
+    c.notify(notification::DidOpenTextDocument::METHOD, json!({
+        "textDocument": { "uri": uri, "languageId": "blade", "version": 1, "text": view }
+    }));
+    let diags = c.diagnostics(&uri, 1);
+    let mago: Vec<_> = diags.iter().filter(|d| d.source.as_deref() == Some("mago")).collect();
+    assert_eq!(mago.len(), 1, "{diags:?}");
+    assert_eq!(mago[0].range.start, Position { line: 1, character: 3 });
+    let problems = c.request_raw("tusk/projectProblems", json!({}));
+    assert!(problems["resources/views/home.blade.php"].to_string().contains("non-existent-function"), "{problems}");
+}
+
 /// Searches read many files in parallel while holding the index, and other requests wait for the index to
 /// catch up with edits. With requests on a rayon pool, a search waiting on its parallel work picked up a
 /// request that waited for the index, which the search held: the server stopped answering.

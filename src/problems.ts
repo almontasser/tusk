@@ -1,5 +1,5 @@
 // The Problems panel: errors and warnings across the whole project, as PhpStorm's project errors. Open files show
-// their language servers' live markers. The others come from a scan of every PHP file by Tusk's server, through the
+// their language servers' live markers. The others come from a scan of every PHP file and Blade view by Tusk's server, through the
 // same filters as open files (diagnostics.ts).
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
@@ -145,11 +145,11 @@ const openModel = (path: string) => monaco.editor.getModel(monaco.Uri.file(path)
 
 /**
  * Every file's problems: live markers for open files, and the scan for the rest. An open PHP file shows the scan
- * until Tusk's server has checked it. Blade views aren't in the scan, so theirs are always live.
+ * until Tusk's server has checked it.
  */
 function allProblems(): Map<string, Problem[]> {
   const root = host.root();
-  const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || path.endsWith(".blade.php") || diagnosed.has(path));
+  const live = (path: string) => !!openModel(path) && (!path.endsWith(".php") || diagnosed.has(path));
   const all = new Map([...scanned].filter(([path]) => !live(path)).map(([path, list]) => [path, [...list]]));
   for (const [path, list] of phpstanFound) if (!live(path)) (all.get(path) ?? all.set(path, []).get(path)!).push(...list);
   for (const m of monaco.editor.getModelMarkers({})) {
