@@ -1356,6 +1356,34 @@ function porters(string $root): array
     return $out;
 }
 
+/** The app's notifications: each class, its file, the record its constructor takes (if any), and its channels. */
+function appNotifications(string $root): array
+{
+    $out = [];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            $r = new ReflectionClass($class);
+            if (!$r->isSubclassOf('Illuminate\\Notifications\\Notification') || $r->isAbstract()) {
+                continue;
+            }
+            $param = $r->getConstructor()?->getParameters()[0] ?? null;
+            $type = $param?->getType();
+            $record = $type instanceof ReflectionNamedType && !$type->isBuiltin() ? $type->getName() : null;
+            // via() takes the notifiable; most return a fixed list, so ask with a blank user and accept failure.
+            $channels = null;
+            try {
+                $user = config('auth.providers.users.model');
+                $instance = $r->newInstanceWithoutConstructor();
+                $channels = array_values((array) $instance->via($user ? new $user() : new stdClass()));
+            } catch (Throwable) {
+            }
+            $out[] = ['class' => $class, 'file' => relativeFile($class, $root), 'record' => $record, 'channels' => $channels];
+        } catch (Throwable) {
+        }
+    }
+    return $out;
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1382,6 +1410,7 @@ try {
         'policy' => policyInfo($argv[3], $root, $argv[4] ?? null),
         'entry-access' => entryAccess($argv[3], $root),
         'porters' => porters($root),
+        'notifications' => appNotifications($root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

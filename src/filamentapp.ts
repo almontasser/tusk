@@ -152,6 +152,9 @@ export const entryAccess = (root: string, cls: string) => cached(root, `policy:e
 /** The app's importers and exporters, and the tables and queue imports and exports need. */
 export type PorterInfo = { class: string; file: string | null; model: string | null };
 export const porters = (root: string) => cached(root, "app:porters", () => introspect<{ importers: PorterInfo[]; exporters: PorterInfo[]; tables: Record<string, boolean | null>; queue: string | null }>(root, "porters"));
+/** The app's notification classes: the record each one's constructor takes, and its channels when `via()` says without a user. */
+export type NotificationInfo = { class: string; file: string | null; record: string | null; channels: string[] | null };
+export const notifications = (root: string) => cached(root, "app:notifications", () => introspect<NotificationInfo[]>(root, "notifications"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));
