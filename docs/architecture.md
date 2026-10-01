@@ -4492,6 +4492,36 @@ has, as `methodsOf` reports them.
   `getHeaderWidgets()`. A page that returns its resource's `getWidgets()`
   changes the resource's list.
 
+### Navigation
+
+- **Reading:** `introspect.php navigation <panel>` lists the panel's pages,
+  clusters, resources (not nested ones), and the provider's
+  `navigationItems()`, in the order Filament registers them, each with its
+  label, icon, group (a label, or an enum case with its place among the
+  cases), sort, parent item, badge, cluster, and `shouldRegisterNavigation()`.
+  It calls the static getters itself rather than `$panel->getNavigation()`,
+  which drops what the signed-in user can't open. `overrides` names, per
+  setting, the file of a method outside Filament that decides it. It also
+  reports the panel's `navigationGroups()` and whether a navigation builder
+  replaces the whole thing.
+- **Ordering:** `sidebar` in `src/navgen.ts` repeats `NavigationManager::get()`:
+  a stable sort by sort (none counts as -1), grouped, ungrouped first, then the
+  panel's list, an enum's cases, and unlisted groups by their first item. A
+  cluster's own navigation orders its groups by first item only, as
+  `HasSubNavigation` does.
+- **Writing:** `readNav` reads each setting from the class's outline: the
+  property, a getter returning `__('…')` (labels and groups), or code. A drag
+  computes the target group's new order and `orderSorts` gives each project
+  item a sort, past any fixed one before it; the moved item also gets
+  `groupEdits` (a string, a translated getter, or `Enum::Case`, as the group's
+  other items or the panel's list write it) and its `$cluster`. All files
+  change in one `editFiles` call. `groupOrderEdits` rewrites the provider's
+  array with each item's code and the comments above it.
+- **Clusters:** `make:filament-cluster <Name> --panel=<id>` writes the class in
+  the panel's cluster folder. A panel without one first gets
+  `discoverClusters()` beside `discoverPages()`. `src/navigationdesigner.ts`
+  draws the view.
+
 ### Sample records, translated names, and boot checks
 
 - `src/sampledata.ts` runs `Model::factory()->count(n)->create()` with
@@ -6256,4 +6286,33 @@ starter kits and their options (authentication, teams, Pest, Boost) are the
 installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
+
+### 2026-10-01: Moving into a cluster sets `$cluster` and leaves the file where it is
+
+`make:filament-resource --cluster` puts a cluster's resources in the cluster's
+folder, so moving a resource into a cluster could also move its files with the
+Move Class refactoring. Filament doesn't need that: a resource or page belongs
+to the cluster its `getCluster()` names, and `discoverClusters()` and
+`discoverResources()` find classes wherever their folders say. Moving files
+would rename namespaces across the resource's pages, schemas, and tables for
+no change in behavior, and a cluster would have to be undone the same way. So
+the navigation designer only sets `$cluster`; **Move Class** stays available
+for anyone who wants the folders to match.
+
+### 2026-10-01: The navigation designer saves each change, and reads the app again
+
+Like the dashboard, a navigation change spans several files (a group's sorts,
+or a rename), and each one is small and complete, so it's saved at once with
+`editFiles` rather than staged. The designer then runs introspect.php again,
+since the order it shows is the one Filament computes from the booted app,
+which reading the code alone can't give when methods or packages decide some
+of it.
+
+### 2026-10-01: Reordering writes sorts to the group's project items, not to every item
+
+A move could write the smallest change, one sort between its neighbors', but
+neighbors often share a sort or have none, which leaves no room. The designer
+numbers the group's project items 1, 2, 3 in their new order, as the dashboard
+designer does for widgets, and leaves items whose sort a method or a package
+decides as they are, counting past them.
 

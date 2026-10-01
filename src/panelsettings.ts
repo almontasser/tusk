@@ -273,7 +273,7 @@ class PanelSettings {
     return h(
       "section",
       { class: "fd-settings-section" },
-      h("h3", {}, icon("list-tree"), "Navigation groups", h("span", { class: "fd-spacer" }), other ? null : add),
+      h("h3", {}, icon("list-tree"), "Navigation groups", h("span", { class: "fd-spacer" }), h("button", { type: "button", title: "Move resources and pages between groups, into order, and into clusters", onclick: () => void import("./navigationdesigner").then((m) => m.openNavigation(this.panelId)) }, icon("list-tree"), "Navigation…"), other ? null : add),
       h("p", { class: "fd-note" }, other ? "The groups come from code the designer can't read." : "The order of the groups in the navigation. Resources choose their group in their own settings; groups not listed come after these."),
       ...list,
       missing.length && !other ? h("p", { class: "fd-note" }, `Not in the list: ${missing.join(", ")}.`) : null,

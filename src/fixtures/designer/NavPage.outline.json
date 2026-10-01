@@ -1,0 +1,167 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Pages",
+  "uses": [
+    {
+      "alias": "Page",
+      "name": "Filament\\Pages\\Page",
+      "kind": "class",
+      "span": [
+        38,
+        62
+      ]
+    }
+  ],
+  "useInsert": 63,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Reports",
+      "fqn": "App\\Filament\\Pages\\Reports",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Pages\\Page",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        64,
+        360
+      ],
+      "bodyStart": 92,
+      "bodyEnd": 359,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "navigationGroup",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "string",
+            "value": "Content",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              141,
+              150
+            ]
+          },
+          "span": [
+            97,
+            151
+          ],
+          "attributes": []
+        },
+        {
+          "name": "navigationSort",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?int",
+          "value": {
+            "kind": "func",
+            "name": "config",
+            "nameSpan": [
+              236,
+              242
+            ],
+            "args": {
+              "open": 242,
+              "close": 256,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "nav.reports",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      243,
+                      256
+                    ]
+                  },
+                  "span": [
+                    243,
+                    256
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              236,
+              257
+            ]
+          },
+          "span": [
+            196,
+            258
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "getNavigationGroup",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "?string",
+          "attributes": [],
+          "span": [
+            264,
+            358
+          ],
+          "docStart": null,
+          "body": [
+            322,
+            357
+          ],
+          "returns": [
+            {
+              "kind": "func",
+              "name": "__",
+              "nameSpan": [
+                338,
+                340
+              ],
+              "args": {
+                "open": 340,
+                "close": 350,
+                "items": [
+                  {
+                    "name": null,
+                    "value": {
+                      "kind": "string",
+                      "value": "Content",
+                      "quote": "single",
+                      "interpolated": false,
+                      "span": [
+                        341,
+                        350
+                      ]
+                    },
+                    "span": [
+                      341,
+                      350
+                    ],
+                    "spread": false
+                  }
+                ]
+              },
+              "span": [
+                338,
+                351
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

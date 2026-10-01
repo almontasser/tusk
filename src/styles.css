@@ -2742,3 +2742,25 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pd-csv table { border-collapse: collapse; font: 11.5px var(--mono); }
 .pd-csv th, .pd-csv td { padding: 5px 9px; border-inline-end: 1px solid var(--border-subtle); white-space: nowrap; text-align: start; }
 .pd-csv th { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
+/* Navigation designer (src/navigationdesigner.ts) */
+.nv-sidebar { display: flex; flex-direction: column; gap: 10px; max-width: 340px; padding: 12px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border-subtle); }
+.nv-group { display: flex; flex-direction: column; gap: 1px; border-radius: 8px; }
+.nv-group-head { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: var(--muted); cursor: grab; }
+.nv-group-head .codicon { font-size: 12px; opacity: 0.6; }
+.nv-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; cursor: grab; }
+.nv-item.fixed { cursor: default; }
+.nv-item:hover, .nv-group-head:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.nv-item.selected, .nv-group-head.selected { background: color-mix(in srgb, var(--fi-primary) 14%, transparent); color: var(--text); }
+.nv-item.hidden .nv-label { opacity: 0.45; text-decoration: line-through; }
+.nv-item > .codicon, .nv-item > span > .codicon { color: var(--muted); }
+.nv-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nv-badge { padding: 0 6px; border-radius: 6px; font-size: 10.5px; color: var(--fi-primary); background: color-mix(in srgb, var(--fi-primary) 14%, transparent); }
+.nv-child { padding-inline-start: 22px; }
+.nv-cluster { margin: 2px 0 4px 22px; padding: 6px; border-radius: 8px; border: 1px dashed var(--border); display: flex; flex-direction: column; gap: 6px; }
+.nv-over { outline: 2px solid var(--accent); outline-offset: -1px; }
+.nv-new-group { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; border: 1px dashed var(--border); color: var(--faint); font-size: 11.5px; }
+.nv-inspector { border-left: 1px solid var(--border-subtle); padding: 16px; overflow: auto; background: var(--bg); display: flex; flex-direction: column; gap: 12px; }
+.nv-inspector h3 { display: flex; align-items: center; gap: 6px; }
+.nv-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 10px; }
+.nv-group-note { padding: 0 12px 8px; }

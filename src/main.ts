@@ -1616,6 +1616,7 @@ const actions: Action[] = [
   { label: "Laravel: Check the App (Boot and Tests)", run: () => root && void import("./filamentview").then((m) => m.checkApp()) },
   { label: "Filament: New Page…", run: () => root && void import("./filamentview").then((m) => m.newPagePicker()) },
   { label: "Filament: Dashboard…", run: () => root && void import("./filamentview").then((m) => m.openDashboardPicker()) },
+  { label: "Filament: Navigation…", run: () => root && void import("./filamentview").then((m) => m.openNavigationPicker()) },
   { label: "Filament: Panel Settings…", run: () => root && void import("./filamentview").then((m) => m.openPanelPicker()) },
   { label: "Laravel: Add Sample Records…", run: () => root && void import("./sampledata").then((m) => m.sampleRecordsPicker()) },
   { label: "Laravel: Model Access…", run: () => root && void import("./filamentview").then((m) => m.openAccessPicker()) },

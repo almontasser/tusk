@@ -1,0 +1,287 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources\\Orders",
+  "uses": [
+    {
+      "alias": "NavGroup",
+      "name": "App\\Enums\\NavGroup",
+      "kind": "class",
+      "span": [
+        49,
+        72
+      ]
+    },
+    {
+      "alias": "ShopCluster",
+      "name": "App\\Filament\\Clusters\\Shop\\ShopCluster",
+      "kind": "class",
+      "span": [
+        73,
+        116
+      ]
+    },
+    {
+      "alias": "BackedEnum",
+      "name": "BackedEnum",
+      "kind": "class",
+      "span": [
+        117,
+        132
+      ]
+    },
+    {
+      "alias": "Resource",
+      "name": "Filament\\Resources\\Resource",
+      "kind": "class",
+      "span": [
+        133,
+        165
+      ]
+    },
+    {
+      "alias": "Heroicon",
+      "name": "Filament\\Support\\Icons\\Heroicon",
+      "kind": "class",
+      "span": [
+        166,
+        202
+      ]
+    },
+    {
+      "alias": "UnitEnum",
+      "name": "UnitEnum",
+      "kind": "class",
+      "span": [
+        203,
+        216
+      ]
+    }
+  ],
+  "useInsert": 217,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "OrderResource",
+      "fqn": "App\\Filament\\Resources\\Orders\\OrderResource",
+      "abstract": false,
+      "final": false,
+      "extends": "Filament\\Resources\\Resource",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        218,
+        828
+      ],
+      "bodyStart": 256,
+      "bodyEnd": 827,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "navigationIcon",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "string|BackedEnum|null",
+          "value": {
+            "kind": "classConst",
+            "class": "Filament\\Support\\Icons\\Heroicon",
+            "classSpan": [
+              319,
+              327
+            ],
+            "name": "OutlinedShoppingBag",
+            "span": [
+              319,
+              348
+            ]
+          },
+          "span": [
+            261,
+            349
+          ],
+          "attributes": []
+        },
+        {
+          "name": "navigationSort",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?int",
+          "value": {
+            "kind": "number",
+            "value": 3.0,
+            "raw": "3",
+            "span": [
+              395,
+              396
+            ]
+          },
+          "span": [
+            355,
+            397
+          ],
+          "attributes": []
+        },
+        {
+          "name": "cluster",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Filament\\Clusters\\Shop\\ShopCluster",
+            "classSpan": [
+              439,
+              450
+            ],
+            "name": "class",
+            "span": [
+              439,
+              457
+            ]
+          },
+          "span": [
+            403,
+            458
+          ],
+          "attributes": []
+        },
+        {
+          "name": "navigationParentItem",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "?string",
+          "value": {
+            "kind": "string",
+            "value": "Customers",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              513,
+              524
+            ]
+          },
+          "span": [
+            464,
+            525
+          ],
+          "attributes": []
+        },
+        {
+          "name": "navigationGroup",
+          "static": true,
+          "visibility": "protected",
+          "readonly": false,
+          "type": "string|UnitEnum|null",
+          "value": {
+            "kind": "classConst",
+            "class": "App\\Enums\\NavGroup",
+            "classSpan": [
+              588,
+              596
+            ],
+            "name": "Shop",
+            "span": [
+              588,
+              602
+            ]
+          },
+          "span": [
+            531,
+            603
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "getNavigationLabel",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            609,
+            701
+          ],
+          "docStart": null,
+          "body": [
+            666,
+            700
+          ],
+          "returns": [
+            {
+              "kind": "func",
+              "name": "__",
+              "nameSpan": [
+                682,
+                684
+              ],
+              "args": {
+                "open": 684,
+                "close": 693,
+                "items": [
+                  {
+                    "name": null,
+                    "value": {
+                      "kind": "string",
+                      "value": "Orders",
+                      "quote": "single",
+                      "interpolated": false,
+                      "span": [
+                        685,
+                        693
+                      ]
+                    },
+                    "span": [
+                      685,
+                      693
+                    ],
+                    "spread": false
+                  }
+                ]
+              },
+              "span": [
+                682,
+                694
+              ]
+            }
+          ]
+        },
+        {
+          "name": "shouldRegisterNavigation",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "bool",
+          "attributes": [],
+          "span": [
+            707,
+            826
+          ],
+          "docStart": null,
+          "body": [
+            768,
+            825
+          ],
+          "returns": [
+            {
+              "kind": "other",
+              "span": [
+                784,
+                819
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
