@@ -15,6 +15,9 @@ export async function usesSail(root: string): Promise<boolean> {
   return false;
 }
 
+const hasComposeFile = (root: string) =>
+  invoke<boolean[]>("paths_exist", { paths: COMPOSE_FILES.map((f) => `${root}/${f}`) }).then((found) => found.includes(true));
+
 const docker = (root: string, args: string[]) => invoke<string>("run_capture", { cwd: root, program: "docker", args: ["compose", ...args], input: null });
 
 /** Whether Sail's containers are up, so commands can run in them. */
@@ -54,10 +57,13 @@ export function composeServices(root: string): Promise<Service[]> {
   if (!composeConfigs.has(root))
     composeConfigs.set(
       root,
-      docker(root, ["config", "--format", "json"]).then(
-        (out) => servicesMounting(root, JSON.parse(out)),
-        () => (composeConfigs.delete(root), []),
-      ),
+      // Docker only runs for a project with a compose file, so one without needs no Docker installed.
+      hasComposeFile(root)
+        .then((has) => (has ? docker(root, ["config", "--format", "json"]) : Promise.reject()))
+        .then(
+          (out) => servicesMounting(root, JSON.parse(out)),
+          () => (composeConfigs.delete(root), []),
+        ),
     );
   return composeConfigs.get(root)!;
 }
