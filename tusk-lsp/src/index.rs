@@ -58,11 +58,13 @@ pub struct IndexConfig {
     pub mago: Arc<crate::mago_config::MagoConfig>,
     /// Load every library file, not only what the project reaches. Uses several times the memory.
     pub load_all: bool,
+    /// The file that keeps what each library file declares between starts, so unchanged files aren't parsed again.
+    pub cache: Option<PathBuf>,
 }
 
 impl IndexConfig {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into(), exclude: vec![], stubs: vec![], php_version: PHPVersion::PHP84, mago: Default::default(), load_all: false }
+        Self { root: root.into(), exclude: vec![], stubs: vec![], php_version: PHPVersion::PHP84, mago: Default::default(), load_all: false, cache: None }
     }
 
     fn exclusions(&self) -> GlobSet {
@@ -90,7 +92,7 @@ pub struct IndexedFile {
 }
 
 /// What kind of symbol a declaration is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DeclKind {
     Class(SymbolKind),
     Function,
@@ -98,7 +100,7 @@ pub enum DeclKind {
 }
 
 /// A class, function, or constant a file declares, known whether or not the file is loaded.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Declared {
     /// The name as declared, fully qualified.
     pub name: Word,
@@ -378,23 +380,45 @@ impl Index {
             }
         };
         let (project, library): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|p| self.file_type(p) == FileType::Host);
-        // Library files: only what they declare. Each scan is dropped at once, so the build's memory stays near
-        // what the index keeps, which is what the process keeps after it.
+        // Library files: only what they declare, from the cache when unchanged. Each scan is dropped at once, so
+        // the build's memory stays near what the index keeps, which is what the process keeps after it.
+        let key = cache_key(php_version);
+        let cached = self.config.cache.as_deref().map(|p| DeclCache::load(p, &key)).unwrap_or_default();
+        let mut fresh = DeclCache { key, files: HashMap::new() };
+        let mut hits = 0;
         for chunk in library.chunks(1024) {
-            let found: Vec<(PathBuf, FileType, Vec<Declared>)> = scan_pool().install(|| chunk
+            let found: Vec<(PathBuf, FileType, Vec<Declared>, Option<Stamp>)> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
-                    let contents = read(path)?;
                     let file_type = self.file_type(path);
+                    let stamp = stamp(path);
+                    if let Some((_, declared)) = cached.files.get(path).filter(|(s, _)| Some(*s) == stamp) {
+                        tick();
+                        return Some((path.clone(), file_type, declared.clone(), stamp));
+                    }
+                    let contents = read(path)?;
                     let (meta, _) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
                     tick();
-                    Some((path.clone(), file_type, declarations_of(&meta)))
+                    Some((path.clone(), file_type, declarations_of(&meta), stamp))
                 })
                 .collect());
-            for (path, file_type, declared) in found {
+            for (path, file_type, declared, stamp) in found {
+                hits += cached.files.get(&path).is_some_and(|(s, _)| Some(*s) == stamp) as usize;
+                // ponytail: an open library file's unsaved text is cached under the disk's stamp; it lasts until the
+                // file changes on disk. Have `read` say where text came from if editing `vendor` becomes common.
+                if let (Some(stamp), true) = (stamp, self.config.cache.is_some()) {
+                    fresh.files.insert(path.clone(), (stamp, declared.clone()));
+                }
                 self.add_library_file(path, file_type, declared);
             }
         }
+        // Written again only when something changed: a file parsed, or one gone.
+        if let Some(path) = &self.config.cache
+            && (hits != fresh.files.len() || hits != cached.files.len())
+        {
+            fresh.save(path);
+        }
+        drop((cached, fresh));
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
@@ -648,6 +672,47 @@ impl Index {
     }
 }
 
+/// A file's modification time in nanoseconds and its size: when both match, its contents are taken to match.
+type Stamp = (u128, u64);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos(), meta.len()))
+}
+
+/// What the cache depends on besides each file: its format, the PHP version, and the server binary, which pins
+/// Mago's version and Tusk's own scanning.
+fn cache_key(php_version: PHPVersion) -> String {
+    let exe = std::env::current_exe().ok().and_then(|p| stamp(&p));
+    format!("1 {php_version:?} {exe:?}")
+}
+
+/// What each library file declares, by path, as of its [`Stamp`]. Entries depend only on their file, so a change of
+/// exclusions or of `load_all` only changes which entries are used.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct DeclCache {
+    key: String,
+    files: HashMap<PathBuf, (Stamp, Vec<Declared>)>,
+}
+
+impl DeclCache {
+    /// The cache at `path`, or an empty one if it's missing, unreadable, or for another key.
+    fn load(path: &Path, key: &str) -> Self {
+        let cache: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if cache.key == key { cache } else { Self::default() }
+    }
+
+    /// Writes to a file of its own, then renames it over the cache, so another instance never reads half of one.
+    fn save(&self, path: &Path) {
+        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+        let written = path.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && serde_json::to_vec(self).is_ok_and(|bytes| std::fs::write(&tmp, bytes).is_ok());
+        if !written || std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
 /// An index behind a shared pointer, for passing to request threads.
 pub type SharedIndex = Arc<parking_lot::RwLock<Index>>;
 
@@ -850,6 +915,38 @@ mod tests {
         assert!(!idx.codebase.class_like_exists(b"Lib\\Unused"));
         idx.update(&root.join("app/B.php"), Some(b"<?php namespace App; function f() { return new \\Lib\\Unused; }".to_vec()));
         assert!(idx.codebase.class_like_exists(b"Lib\\Unused"));
+    }
+
+    /// What an unchanged library file declares comes from the cache; a changed one, or a cache that can't be read,
+    /// is parsed again.
+    #[test]
+    fn caches_what_library_files_declare() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("vendor/lib")).unwrap();
+        let lib = root.join("vendor/lib/A.php");
+        std::fs::write(&lib, "<?php namespace Lib; class A {}").unwrap();
+        let mut config = IndexConfig::new(&root);
+        config.cache = Some(root.join(".cache/index.json"));
+        // Which of the two names the index knows, with or without reading library files.
+        let names = |read_library: bool| {
+            let mut idx = Index::empty(config.clone());
+            let paths = idx.discover();
+            idx.build(paths, |p| if read_library || !p.starts_with(root.join("vendor")) { std::fs::read(p).ok() } else { None }, |_, _| {});
+            ["Lib\\A", "Lib\\Bee"].map(|n| idx.find_declared(n).is_some())
+        };
+        // The first build parses the file; the second gets its names without reading it.
+        assert_eq!(names(true), [true, false]);
+        assert_eq!(names(false), [true, false]);
+        // A change in size or time misses the cache.
+        std::fs::write(&lib, "<?php namespace Lib; class Bee {}").unwrap();
+        assert_eq!(names(false), [false, false]);
+        assert_eq!(names(true), [false, true]);
+        // A cache that can't be read is ignored, and written again.
+        std::fs::write(root.join(".cache/index.json"), "{ not json").unwrap();
+        assert_eq!(names(false), [false, false]);
+        assert_eq!(names(true), [false, true]);
+        assert_eq!(names(false), [false, true]);
     }
 
     #[test]

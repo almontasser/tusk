@@ -4914,13 +4914,17 @@ server's guards can turn a panic in a request into an error answer.
 | `exclude` | The project's index exclusions (`indexexclude.ts`), relative to the root |
 | `stubs` | The folder with Laravel's alias stubs |
 | `magoConfig` | The editor's `mago.toml` for the project, when the project has none of its own |
+| `cacheDir` | The project's folder for the index cache, `<app cache>/index/<root>` |
 
 The server also accepts `phpVersion` (otherwise from `mago.toml` or
 `composer.json`) and `loadAllLibraries` (load every library file, not only
 what the project reaches; see Index below), which the editor doesn't send.
 
-The server needs no index on disk: it indexes the project each time it starts,
-with `$/progress` titled "Indexing". `tusk/reindex` indexes it again with its
+The server indexes the project each time it starts, with `$/progress` titled
+"Indexing", and keeps a cache of what library files declare in `cacheDir`
+(see Index below). Without `cacheDir`, it uses
+`~/Library/Caches/tusk-lsp/<hash of the root>` on macOS, or the XDG cache
+folder elsewhere. `tusk/reindex` indexes it again with its
 configuration read again, which the editor asks for when the alias stubs or its
 `mago.toml` change. The server also does it by itself when `composer.lock` or
 the project's `mago.toml` changes.
@@ -4974,6 +4978,20 @@ returns.
   in all 425 project files are the same either way (`examples/lazy_check.rs`
   compares them). `loadAllLibraries` in `initializationOptions` loads
   everything, should a project need it.
+- **The declaration cache:** `index.json` in `cacheDir` keeps each library
+  file's `Declared` list with the file's modification time (in nanoseconds)
+  and size. At the next start, a file whose time and size match isn't read or
+  parsed. On the Laravel and Filament app, that cuts the build from about
+  0.6 s to 0.23 s, and peak memory from about 620 MB to 415 MB. Walking the
+  folders (0.2 s), loading the reached classes (0.09 s), and populating
+  (0.08 s) remain. The cache has a key of its own format version, the PHP
+  version, and the server binary's time and size, which pin Mago's version
+  and Tusk's scanning; another key, or a file that can't be read or parsed,
+  means a full scan. Entries depend only on their file, so a change of
+  exclusions or `loadAllLibraries` only changes which entries are used. The
+  server writes the cache when a file was parsed or is gone, to a temporary
+  file that it renames over the old one, so another instance never reads half
+  of it.
 - **Building in chunks:** files are scanned 1,024 at a time, and each scan is
   cloned into the index and dropped before the next chunk: the allocator keeps
   what the process peaks at, and holding every scan until the end doubled the
@@ -6781,3 +6799,15 @@ declarations, not call arguments, and `config/` is where Laravel apps read the
 environment. The files are small and the completion is rare, so nothing is
 cached. Values come only from `.env.example` and `env()` defaults: copying a
 value from `.env` into `.env.example` would commit a secret.
+
+### 2026-10-01: Cache library declarations, not the populated index
+
+A warm start spent about 0.5 s of its 0.8 s parsing `vendor`'s 22,000 files
+for their names. Project files (0.01 s), the library files the project reaches
+(0.09 s), and populating (0.08 s) cost little, and caching their full
+`CodebaseMetadata` would mean serializing Mago's types and keeping the
+incremental update's bookkeeping in step. So the server caches only each
+library file's declarations, keyed by its modification time and size, and the
+binary's identity stands in for Mago's version. Hashing contents would be
+safer than time and size, but reading every file costs most of what the cache
+saves.
