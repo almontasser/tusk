@@ -83,7 +83,7 @@ impl Data<'_> {
     }
 
     pub fn blade_components(&self) -> Option<Arc<Value>> {
-        self.script("blade-components", include_str!("../../../php/laravel/blade-components.php"), VIEWS)
+        self.script("blade-components", include_str!("../../../php/laravel/blade-components.php"), &["resources/views/", "Modules/", "app/View/", "app/Providers/"])
     }
 
     pub fn blade_directives(&self) -> Option<Arc<Value>> {

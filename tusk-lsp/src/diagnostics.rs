@@ -108,7 +108,13 @@ fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::ph
 
 /// The problems in `doc`: Mago's, and the framework's.
 pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
-    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { blade_problems_in(&snap.index.read(), doc, &|p| snap.read(p)) };
+    let mut out = if doc.language == "php" {
+        php_problems(&snap.index, doc)
+    } else {
+        // Before the index's lock, since it may run PHP.
+        let components = crate::framework::laravel::blade_components(&snap.framework);
+        blade_problems_in(&snap.index.read(), doc, &|p| snap.read(p), components.as_deref())
+    };
     let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
     out.extend(framework);
     out
@@ -153,15 +159,16 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
 
 /// Mago's problems in the PHP of `doc`, a Blade view, read as [`checked_php`] lays it out, at the view's
 /// positions. The view's variables get the types that the places rendering it pass ([`view_types`]); `read`
-/// gives a project file's text for finding them. Others are unknown, which drops undefined variables, uses of
-/// their `mixed` values, and Laravel's magic properties and methods, leaving syntax errors, unknown classes,
-/// functions, methods, constants, and properties, and wrong arguments.
+/// gives a project file's text for finding them, and `components` the app's Blade components. Others are
+/// unknown, which drops undefined variables, uses of their `mixed` values, and Laravel's magic properties and
+/// methods, leaving syntax errors, unknown classes, functions, methods, constants, and properties, and wrong
+/// arguments.
 ///
 /// [`view_types`]: crate::framework::laravel::views::view_types
 /// [`checked_php`]: crate::framework::laravel::blade::checked_php
-pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn Fn(&std::path::Path) -> Option<String>) -> Vec<Diagnostic> {
+pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn Fn(&std::path::Path) -> Option<String>, components: Option<&serde_json::Value>) -> Vec<Diagnostic> {
     use crate::framework::laravel::views;
-    let vars = views::view_name(index, &doc.path).map(|v| views::view_types(index, read, &v)).unwrap_or_default();
+    let vars = views::view_name(index, &doc.path).map(|v| views::view_types(index, read, components, &v)).unwrap_or_default();
     let (php, head, unsure) = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
     let arena = LocalArena::new();
     let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &php);
@@ -290,7 +297,7 @@ mod tests {
         let fx = Fixture::new(&[("app/Post.php", "<?php\nnamespace App;\nclass Post { public static function find(int $id): ?self { return null; } }\n")]);
         let blade = "@use('App\\Post')\n<h1>{{ $title->name }}</h1>\n@foreach ($posts as $post)\n  <x-card :post=\"Post::find('x')\" />\n@endforeach\n@php nope(); @endphp\n";
         let doc = Document::new(crate::testing::uri("resources/views/a.blade.php"), crate::testing::path("resources/views/a.blade.php"), "blade".into(), 1, blade.into());
-        let found: Vec<_> = blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p))
+        let found: Vec<_> = blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p), None)
             .into_iter()
             .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line, d.range.start.character))
             .collect();
@@ -306,7 +313,7 @@ mod tests {
         let fx = Fixture::new(&[("app/Models.php", models), ("app/PostController.php", controller), ("app/Counter.php", livewire)]);
         let check = |name: &str, blade: &str| {
             let doc = Document::new(crate::testing::uri(name), crate::testing::path(name), "blade".into(), 1, blade.into());
-            blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p))
+            blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p), None)
                 .into_iter()
                 .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line, d.range.start.character))
                 .collect::<Vec<_>>()
@@ -334,7 +341,7 @@ mod tests {
         let fx = Fixture::new(&[("app/Models.php", models), ("app/PostController.php", controller)]);
         let doc = |blade: &str| Document::new(crate::testing::uri("resources/views/posts/show.blade.php"), crate::testing::path("resources/views/posts/show.blade.php"), "blade".into(), 1, blade.into());
         let lines = |blade: &str| {
-            blade_problems_in(&fx.snap.index.read(), &doc(blade), &|p| fx.snap.read(p))
+            blade_problems_in(&fx.snap.index.read(), &doc(blade), &|p| fx.snap.read(p), None)
                 .into_iter()
                 .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line))
                 .collect::<Vec<_>>()

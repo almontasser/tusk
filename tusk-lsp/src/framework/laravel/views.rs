@@ -16,6 +16,7 @@ use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
 use mago_syntax::cst::{Argument, ArgumentList, ArrayElement, Expression, Literal, Node};
+use serde_json::Value;
 
 use crate::analysis::{Parsed, analyze};
 use crate::index::Index;
@@ -52,13 +53,14 @@ pub fn blade_views(root: &Path) -> Vec<PathBuf> {
 /// for an anonymous component, what each tag that uses it passes ([`tag_site`]). A variable is left out unless
 /// every such place passes it with a type that can be written; places with different types give a union. A view
 /// that renders itself gets the types that are stable when its own places pass what they're given
-/// ([`Walk::types`]). `read` gives a project file's text.
-pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &str) -> Vec<(String, String)> {
-    types_among(index, read, &blade_views(&index.config.root), view)
+/// ([`Walk::types`]). `read` gives a project file's text, and `components` the app's Blade components, as
+/// [`blade_components`](super::blade_components) reports them, for the tags of those registered outside the defaults.
+pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, components: Option<&Value>, view: &str) -> Vec<(String, String)> {
+    types_among(index, read, components, &blade_views(&index.config.root), view)
 }
 
 /// [`view_types`], with `paths` as the project's views.
-fn types_among(index: &Index, read: &dyn Fn(&Path) -> Option<String>, paths: &[PathBuf], view: &str) -> Vec<(String, String)> {
+fn types_among(index: &Index, read: &dyn Fn(&Path) -> Option<String>, components: Option<&Value>, paths: &[PathBuf], view: &str) -> Vec<(String, String)> {
     let views: Vec<(PathBuf, String)> = paths.iter().filter_map(|p| Some((p.clone(), read(p)?))).collect();
     let mut named: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, (_, text)) in views.iter().enumerate() {
@@ -66,11 +68,11 @@ fn types_among(index: &Index, read: &dyn Fn(&Path) -> Option<String>, paths: &[P
             named.entry(name).or_default().push(i);
         }
     }
-    Walk { index, read, views: &views, named: &named, code: code_mentions(index, read), stack: vec![], known: HashMap::new(), cut: false }.types(view)
+    Walk { index, read, components, views: &views, named: &named, code: code_mentions(index, read), stack: vec![], known: HashMap::new(), cut: false }.types(view)
 }
 
 /// The names `text` mentions: its quoted strings without spaces, `'posts.show'` as `posts.show`, and its
-/// component tags, `<x-card` or `<x:card` as `<x-card`.
+/// component tags, `<x-card` or `<x:card` as `<x-card`, and `<x-dynamic-component component="card"` as `<x-card` too.
 fn mentions(text: &str) -> BTreeSet<String> {
     let src = text.as_bytes();
     let mut found = BTreeSet::new();
@@ -82,7 +84,9 @@ fn mentions(text: &str) -> BTreeSet<String> {
             }
         } else if *b == b'<' && (src[at + 1..].starts_with(b"x-") || src[at + 1..].starts_with(b"x:")) {
             let len = src[at + 3..].iter().take_while(|c| c.is_ascii_alphanumeric() || b"_-:.".contains(c)).count();
-            found.insert(format!("<x-{}", &text[at + 3..at + 3 + len]));
+            let name = &text[at + 3..at + 3 + len];
+            let dynamic = (name == "dynamic-component").then(|| dynamic_name(text, at + 3 + len)).flatten();
+            found.insert(format!("<x-{}", dynamic.as_deref().unwrap_or(name)));
         }
     }
     found
@@ -119,6 +123,7 @@ type Props = Vec<(String, Option<Option<String>>)>;
 struct Walk<'a> {
     index: &'a Index,
     read: &'a dyn Fn(&Path) -> Option<String>,
+    components: Option<&'a Value>,
     /// The project's views, with their text.
     views: &'a [(PathBuf, String)],
     /// The views that mention each name ([`mentions`]), by their position in `views`.
@@ -134,11 +139,12 @@ struct Walk<'a> {
 }
 
 /// What [`code_sites`] and [`sites_in`] found, by a hash of what they read, for the index's
-/// [`generation`](Index::generation), since every view check reads them for each view that includes it.
-// ponytail: grows with each edit of a view until the project's code changes; cap it if memory shows.
+/// [`generation`](Index::generation), since every view check reads them for each view that includes it. Each
+/// edit of a view adds an entry until the project's code changes, so a cache past [`CACHED`] entries starts over.
 static CODE_SITES: Cache<Arc<HashMap<String, Vec<Site>>>> = LazyLock::new(Default::default);
 static VIEW_SITES: Cache<Vec<Site>> = LazyLock::new(Default::default);
 type Cache<T> = LazyLock<Mutex<(u64, HashMap<u64, T>)>>;
+const CACHED: usize = 4096;
 
 /// `find()`, or what it gave for the same `key` with the same index.
 fn cached<T: Clone>(cache: &Mutex<(u64, HashMap<u64, T>)>, index: &Index, key: impl Hash, find: impl FnOnce() -> T) -> T {
@@ -157,6 +163,9 @@ fn cached<T: Clone>(cache: &Mutex<(u64, HashMap<u64, T>)>, index: &Index, key: i
     let found = find();
     let mut cache = cache.lock();
     if cache.0 == index.generation {
+        if cache.1.len() >= CACHED {
+            cache.1.clear();
+        }
         cache.1.insert(key, found.clone());
     }
     found
@@ -192,8 +201,27 @@ impl Walk<'_> {
         let child = index.config.root.join(format!("resources/views/{}.blade.php", view.replace('.', "/")));
         let child_text = read(&child).unwrap_or_default();
         let names = read_vars(&child_text);
-        let tags = component_tags(index, read, view);
-        let props = if tags.is_empty() { None } else { props(index, &child_text) };
+        let components = self.components;
+        let tags = component_tags(index, read, components, view);
+        let props = if tags.is_empty() { None } else { self::props(index, &child_text, "@props") };
+        let names_aware: Vec<String> = if tags.is_empty() { vec![] } else { self::props(index, &child_text, "@aware").into_iter().flatten().map(|(n, _)| n).collect() };
+        let anonymous = |tag: &str| match component_files(components, tag) {
+            Some(files) => files.iter().all(|f| f.ends_with(".blade.php")),
+            None => components.is_none() && default_view(index, read, tag).is_some(),
+        };
+        let aware = |parent: &str, text: &str| {
+            // A component's own view: an anonymous one's tags pass what it reads, and a class component's aren't known.
+            // ponytail: a class component's view outside `components`, or a view included from a component's view,
+            // reads as a page, though Laravel looks in that component's data first; check the renderers if it bites.
+            let own = if names_aware.is_empty() {
+                None
+            } else if component_tags(index, read, components, parent).is_empty() {
+                parent.starts_with("components.").then(|| Some(vec![]))
+            } else {
+                Some(self::props(index, text, "@props"))
+            };
+            Aware { names: &names_aware, own, anonymous: &anonymous }
+        };
         let named = |name: &str| self.named.get(name).into_iter().flatten().copied();
         let renderers: BTreeSet<usize> = named(view).chain(tags.iter().flat_map(|tag| named(&format!("<x-{tag}")))).collect();
         let mut own = None;
@@ -208,7 +236,8 @@ impl Walk<'_> {
                 sites.push(Site::new());
                 continue;
             }
-            sites.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &names, &mut || self.types(&parent)));
+            let aware = aware(&parent, text);
+            sites.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware, &names, &mut || self.types(&parent)));
         }
         let mut vars = merge(&sites);
         let Some((path, text)) = own.filter(|_| !sites.is_empty()) else { return vars };
@@ -216,7 +245,7 @@ impl Walk<'_> {
         // other places pass, and add what it passes itself with those types, until they don't change.
         for _ in 0..4 {
             let mut all = sites.clone();
-            all.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &names, &mut || vars.clone()));
+            all.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware(view, text), &names, &mut || vars.clone()));
             let next = merge(&all);
             if next == vars {
                 return vars;
@@ -327,35 +356,65 @@ fn known_class(index: &Index, class: &str) -> Option<String> {
     index.codebase.class_like_exists(class.as_bytes()).then(|| format!("\\{class}"))
 }
 
-/// The tags that render `view` as an anonymous component in `resources/views/components`: `foo.bar`, for
+/// The tags that render `view` as an anonymous component: in `resources/views/components`, `foo.bar`, for
 /// `<x-foo.bar>`, renders `components.foo.bar`, or else `components.foo.bar.index` or `components.foo.bar.bar`,
-/// as Laravel looks them up, unless a class in `App\View\Components` takes the name.
-fn component_tags(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &str) -> Vec<String> {
-    // ponytail: only the default `App` namespace and views folder; components registered elsewhere are left out.
-    let Some(name) = view.strip_prefix("components.") else { return vec![] };
-    let exists = |v: &str| read(&index.config.root.join(format!("resources/views/components/{}.blade.php", v.replace('.', "/")))).is_some();
-    let last = |t: &str| t.rsplit('.').next().unwrap_or_default().to_string();
-    let mut tags = vec![name.to_string()];
-    tags.extend(name.strip_suffix(".index").map(str::to_string));
-    tags.extend(name.rsplit_once('.').filter(|(dir, file)| last(dir) == *file).map(|(dir, _)| dir.to_string()));
-    tags.retain(|tag| {
-        let found = [tag.clone(), format!("{tag}.index"), format!("{tag}.{}", last(tag))].into_iter().find(|v| exists(v));
-        let studly = |s: &str| {
-            let name = camel(s);
-            name.chars().next().map(|c| c.to_uppercase().chain(name.chars().skip(1)).collect::<String>()).unwrap_or_default()
-        };
-        let class = format!("App\\View\\Components\\{}", tag.split('.').map(studly).collect::<Vec<_>>().join("\\"));
-        let classes = [format!("{class}\\{}", studly(&last(tag))), class];
-        found.as_deref() == Some(name) && !classes.iter().any(|c| index.codebase.class_like_exists(c.as_bytes()))
-    });
+/// as Laravel looks them up, unless a class takes the name; elsewhere, a tag that `components` lists with the view
+/// as its only file, such as `ui::button` from `Blade::anonymousComponentPath(resource_path('views/ui'), 'ui')`.
+fn component_tags(index: &Index, read: &dyn Fn(&Path) -> Option<String>, components: Option<&Value>, view: &str) -> Vec<String> {
+    let mut tags = vec![];
+    if let Some(name) = view.strip_prefix("components.") {
+        let last = |t: &str| t.rsplit('.').next().unwrap_or_default().to_string();
+        tags.push(name.to_string());
+        tags.extend(name.strip_suffix(".index").map(str::to_string));
+        tags.extend(name.rsplit_once('.').filter(|(dir, file)| last(dir) == *file).map(|(dir, _)| dir.to_string()));
+        // One the app registers with a class, such as with `Blade::component()`, isn't anonymous.
+        tags.retain(|tag| default_view(index, read, tag).as_deref() == Some(view) && component_files(components, tag).is_none_or(|f| f.iter().all(|p| p.ends_with(".blade.php"))));
+    }
+    let rel = format!("resources/views/{}.blade.php", view.replace('.', "/"));
+    let path = index.config.root.join(&rel);
+    for (tag, c) in components.and_then(|c| c["components"].as_object()).into_iter().flatten() {
+        let Some([file]) = c["paths"].as_array().map(Vec::as_slice) else { continue };
+        let Some(file) = file.as_str().filter(|f| *f == rel || Path::new(f) == path) else { continue };
+        // `flux:button` is another tag for `flux::button`.
+        let name = tag.split_once("::").map_or(tag.as_str(), |(_, n)| n);
+        // The file must be where the tag's name leads, as the list's names are its files' names in kebab case.
+        let (dir, last) = (name.replace('.', "/"), name.rsplit('.').next().unwrap_or_default());
+        let at = [format!("/{dir}.blade.php"), format!("/{dir}/index.blade.php"), format!("/{dir}/{last}.blade.php")];
+        if !name.contains(':') && !tags.contains(tag) && at.iter().any(|e| file.ends_with(e.as_str())) {
+            tags.push(tag.clone());
+        }
+    }
     tags
 }
 
-/// The props a component view declares with `@props([...])`, or `None` without it.
-fn props(index: &Index, text: &str) -> Option<Props> {
+/// The view in `resources/views/components` that `<x-{tag}>` renders, unless a class in `App\View\Components`
+/// takes the name.
+fn default_view(index: &Index, read: &dyn Fn(&Path) -> Option<String>, tag: &str) -> Option<String> {
+    // ponytail: the default `App` namespace; a class component in another one is found only through `components`.
+    let last = tag.rsplit('.').next().unwrap_or_default();
+    let exists = |v: &String| read(&index.config.root.join(format!("resources/views/components/{}.blade.php", v.replace('.', "/")))).is_some();
+    let found = [tag.to_string(), format!("{tag}.index"), format!("{tag}.{last}")].into_iter().find(exists)?;
+    let studly = |s: &str| {
+        let name = camel(s);
+        name.chars().next().map(|c| c.to_uppercase().chain(name.chars().skip(1)).collect::<String>()).unwrap_or_default()
+    };
+    let class = format!("App\\View\\Components\\{}", tag.split('.').map(studly).collect::<Vec<_>>().join("\\"));
+    let classes = [format!("{class}\\{}", studly(last)), class];
+    (!classes.iter().any(|c| index.codebase.class_like_exists(c.as_bytes()))).then(|| format!("components.{found}"))
+}
+
+/// The files `components` lists for the component `tag`, or `None` when it doesn't list it.
+fn component_files<'v>(components: Option<&'v Value>, tag: &str) -> Option<Vec<&'v str>> {
+    Some(components?["components"].get(tag)?["paths"].as_array()?.iter().filter_map(Value::as_str).collect())
+}
+
+/// The props a component view declares with `@props([...])`, or `None` without it, or with `@aware([...])` when
+/// `directive` is `@aware`.
+fn props(index: &Index, text: &str, directive: &str) -> Option<Props> {
     let src = text.as_bytes();
-    let at = text.match_indices("@props").map(|(at, _)| at).find(|at| *at == 0 || !(src[at - 1].is_ascii_alphanumeric() || src[at - 1] == b'_'))?;
-    let open = at + 6 + src[at + 6..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+    let at = text.match_indices(directive).map(|(at, _)| at).find(|at| *at == 0 || !(src[at - 1].is_ascii_alphanumeric() || src[at - 1] == b'_'))?;
+    let at = at + directive.len();
+    let open = at + src[at..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
     let Some(close) = (src.get(open) == Some(&b'(')).then(|| blade::matching_paren(src, open)).flatten() else { return Some(vec![]) };
     let php = format!("<?php {};", &text[open + 1..close]);
     let arena = LocalArena::new();
@@ -474,6 +533,68 @@ fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)
     Some((attrs, slots))
 }
 
+/// The offset past the `>` that ends a tag whose attributes start at `at`, and whether it closes itself.
+fn tag_end(src: &[u8], mut at: usize) -> (usize, bool) {
+    while at < src.len() {
+        match src[at] {
+            q @ (b'"' | b'\'') => at += src[at + 1..].iter().position(|b| *b == q).map_or(src.len(), |e| e + 1),
+            b'{' if src.get(at + 1) == Some(&b'{') => at += src[at..].windows(2).position(|w| w == b"}}").unwrap_or(src.len()),
+            b'>' => return (at + 1, src[at - 1] == b'/'),
+            _ => {}
+        }
+        at += 1;
+    }
+    (src.len(), false)
+}
+
+/// The component a `<x-dynamic-component` tag renders, from `at` past its name, when its `component` attribute names
+/// it literally: `component="alert"` or `:component="'alert'"`.
+fn dynamic_name(text: &str, at: usize) -> Option<String> {
+    let src = text.as_bytes();
+    let end = tag_end(src, at).0;
+    let (found, _) = text[at..end].match_indices("component=").find(|(i, _)| {
+        let before = &src[..at + i];
+        before.ends_with(b" ") || before.ends_with(b"\n") || before.ends_with(b"\t") || (before.ends_with(b":") && before[..before.len() - 1].last().is_some_and(u8::is_ascii_whitespace))
+    })?;
+    let value = &text[at + found + 10..end];
+    let q = value.chars().next().filter(|q| matches!(q, '"' | '\''))?;
+    let mut value = &value[1..value[1..].find(q)? + 1];
+    if src[at + found - 1] == b':' {
+        value = value.trim().strip_prefix(['\'', '"']).and_then(|v| v.strip_suffix(['\'', '"']))?;
+    }
+    (!value.is_empty() && value.chars().all(|c| c.is_alphanumeric() || "_-:.".contains(c))).then(|| value.to_string())
+}
+
+/// The innermost component tag open at `at` in `text`, outside `comments`: `None` for none, or else its name and
+/// where its attributes start, or `None` for one with another prefix, such as `<flux:card>`. `<x-slot>` isn't one.
+fn enclosing(text: &str, at: usize, comments: &[std::ops::Range<usize>]) -> Option<Option<(String, usize)>> {
+    let src = text.as_bytes();
+    let mut open: Vec<Option<(String, usize)>> = vec![];
+    for (i, _) in text[..at].match_indices('<') {
+        let close = src.get(i + 1) == Some(&b'/');
+        let start = i + 1 + close as usize;
+        let len = src[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || b"_-:.".contains(c)).count();
+        let tag = &text[start..start + len];
+        let name = match tag.strip_prefix("x-").or_else(|| tag.strip_prefix("x:")) {
+            Some(name) if name == "slot" || name.starts_with("slot:") => continue,
+            Some(name) => Some(name),
+            None if tag.contains(':') && !tag.starts_with("livewire:") => None,
+            None => continue,
+        };
+        if comments.iter().any(|c| c.contains(&i)) {
+            continue;
+        }
+        if close {
+            if let Some(o) = open.iter().rposition(|o| o.as_ref().map(|(n, _)| n.as_str()) == name) {
+                open.truncate(o);
+            }
+        } else if !tag_end(src, start + len).1 {
+            open.push(name.map(|n| (n.to_string(), start + len)));
+        }
+    }
+    open.pop()
+}
+
 /// `user-name` as `userName`, as Laravel names a component's data.
 fn camel(name: &str) -> String {
     let mut out = String::new();
@@ -537,14 +658,27 @@ fn parts(t: &str) -> Vec<&str> {
     out
 }
 
+/// A component's `@aware` variables, and where its tags in a view that leave one out get it, as Laravel looks
+/// for it: in the data of the component whose view it is, then in that of the component tags around the tag.
+struct Aware<'a> {
+    names: &'a [String],
+    /// In a component's own view, its `@props` (`None` without them): its variables that are props without a
+    /// default, or all of them without `@props`, are what every one of its tags passed. A class component's view
+    /// has no props here, since what its tags pass isn't known. `None` in other views, where a variable comes from
+    /// the component tag around the tag, when that's an anonymous component's and passes it.
+    own: Option<Option<Props>>,
+    /// Whether a tag is an anonymous component's, whose attributes are what it passes.
+    anonymous: &'a dyn Fn(&str) -> bool,
+}
+
 /// The places in `text`, the Blade view at `path` whose variables `vars` gives, that render the view `quoted` names:
 /// its includes, with what their data arrays pass and the variables in `names` as they are at the include, since an
-/// include gets them all; its `@each`es, with the item and its `$key`; and its component tags among `tags`
-/// ([`tag_site`]). `@include` and `@includeIf` take the view first, `@includeWhen` and `@includeUnless` after their
-/// condition, and `@includeFirst` in its list of views. Other directives that name it, such as `@extends`, pass
-/// nothing known.
+/// include gets them all; its `@each`es, with the item and its `$key`; and its component tags among `tags`, or
+/// `<x-dynamic-component>`s that name one of them literally ([`tag_site`], with `aware`'s variables).
+/// `@include` and `@includeIf` take the view first, `@includeWhen` and `@includeUnless` after their condition, and
+/// `@includeFirst` in its list of views. Other directives that name it, such as `@extends`, pass nothing known.
 #[allow(clippy::too_many_arguments)]
-fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: &[String], props: Option<&Props>, names: &BTreeSet<String>, vars: &mut dyn FnMut() -> Vec<(String, String)>) -> Vec<Site> {
+fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: &[String], props: Option<&Props>, aware: &Aware<'_>, names: &BTreeSet<String>, vars: &mut dyn FnMut() -> Vec<(String, String)>) -> Vec<Site> {
     let src = text.as_bytes();
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let mut sites = vec![];
@@ -597,7 +731,7 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
         comments.push(at..text[at..].find("--}}").map_or(text.len(), |e| at + e));
     }
     let mut uses = vec![];
-    for tag in tags {
+    for tag in tags.iter().map(String::as_str).chain(["dynamic-component"]) {
         for prefix in ["<x-", "<x:"] {
             let opening = format!("{prefix}{tag}");
             for (at, _) in text.match_indices(&opening) {
@@ -605,7 +739,17 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
                 if text[after..].starts_with(|c: char| c.is_alphanumeric() || "_-:.".contains(c)) || comments.iter().any(|c| c.contains(&at)) {
                     continue;
                 }
-                uses.push(tag_attrs(text, after, tag));
+                let mut attrs = tag_attrs(text, after, tag);
+                if tag == "dynamic-component" {
+                    if !dynamic_name(text, after).is_some_and(|name| tags.contains(&name)) {
+                        continue;
+                    }
+                    if let Some((attrs, _)) = &mut attrs {
+                        attrs.retain(|(name, _)| name != "component");
+                    }
+                }
+                let around = (!aware.names.is_empty() && aware.own.is_none()).then(|| enclosing(text, at, &comments)).flatten().flatten().filter(|(tag, _)| (aware.anonymous)(tag));
+                uses.push((attrs, around));
             }
         }
     }
@@ -613,7 +757,8 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
         return sites;
     }
     let vars = vars();
-    let key = (path, text, quoted, tags, props, names, &vars);
+    let arounds: Vec<_> = uses.iter().map(|(_, around)| around.clone()).collect();
+    let key = (path, text, quoted, tags, props, names, &vars, (aware.names, &aware.own, arounds));
     let found_sites = cached(&VIEW_SITES, index, key, || {
         let mut sites = vec![];
         let (php, head, _) = blade::checked_php(&probed, &vars);
@@ -673,28 +818,42 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
             }
             sites.push(vars);
         }
-        for used in uses {
+        let typed = |attrs: Vec<(String, Attr)>| -> Site {
+            attrs
+                .into_iter()
+                .map(|(name, attr)| {
+                    let t = match attr {
+                        Attr::Bound(at) => arrays.get(&shift(at)).and_then(|a| match a.elements.first() {
+                            Some(ArrayElement::Value(v)) => type_of(v.value).and_then(|t| docblock_type(&t)),
+                            _ => None,
+                        }),
+                        Attr::Text => Some("string".into()),
+                        Attr::Flag => Some("true".into()),
+                        Attr::Unknown => None,
+                    };
+                    (name, t)
+                })
+                .collect()
+        };
+        for (used, around) in uses {
             let tag = used.map(|(attrs, slots)| {
-                let mut site: Site = attrs
-                    .into_iter()
-                    .map(|(name, attr)| {
-                        let t = match attr {
-                            Attr::Bound(at) => arrays.get(&shift(at)).and_then(|a| match a.elements.first() {
-                                Some(ArrayElement::Value(v)) => type_of(v.value).and_then(|t| docblock_type(&t)),
-                                _ => None,
-                            }),
-                            Attr::Text => Some("string".into()),
-                            Attr::Flag => Some("true".into()),
-                            Attr::Unknown => None,
-                        };
-                        (name, t)
-                    })
-                    .collect();
+                let mut site = typed(attrs);
                 // A prop may be passed as a slot.
                 site.extend(slots.into_iter().map(|s| (s, None)));
                 site
             });
-            sites.push(tag_site(index, tag, props));
+            let mut site = tag_site(index, tag.clone(), props);
+            let around = around.and_then(|(name, at)| tag_attrs(text, at, &name)).map(|(attrs, _)| typed(attrs));
+            for name in aware.names {
+                let t = tag.as_ref().and_then(|tag| match (tag.get(name), &aware.own) {
+                    (Some(t), _) => t.clone(),
+                    (None, Some(own)) if own.as_ref().is_none_or(|props| props.contains(&(name.clone(), None))) => vars.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()),
+                    (None, Some(_)) => None,
+                    (None, None) => around.as_ref().and_then(|around| around.get(name).cloned().flatten()),
+                });
+                site.insert(name.clone(), t);
+            }
+            sites.push(site);
         }
         sites
     });
@@ -808,7 +967,7 @@ mod tests {
         let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
         let index = fx.snap.index.read();
         let read = |p: &Path| fx.snap.read(p);
-        let types_of = |view: &str| types_among(&index, &read, &paths, view);
+        let types_of = |view: &str| types_among(&index, &read, None, &paths, view);
         let owned = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect::<Vec<_>>();
         // A loop variable as it is in the loop, the includer's own variables, and the include's data.
         assert_eq!(types_of("posts.comment"), owned(&[("comment", "\\App\\Comment"), ("n", "int"), ("post", "\\App\\Post")]));
@@ -846,7 +1005,7 @@ mod tests {
         let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
         let index = fx.snap.index.read();
         let read = |p: &Path| fx.snap.read(p);
-        let types_of = |view: &str| types_among(&index, &read, &paths, view);
+        let types_of = |view: &str| types_among(&index, &read, None, &paths, view);
         let owned = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect::<Vec<_>>();
         let (bag, slot) = (("attributes", "\\Illuminate\\View\\ComponentAttributeBag"), ("slot", "\\Illuminate\\View\\ComponentSlot"));
         // Bound and plain attributes, `:$post`, defaults where a tag leaves a prop out or passes null, and a prop
@@ -859,5 +1018,51 @@ mod tests {
         // A component that renders itself, and one passed attributes whose names aren't known.
         assert_eq!(types_of("components.tree"), owned(&[bag, ("node", "\\App\\Comment"), slot]));
         assert_eq!(types_of("components.spread"), owned(&[bag, slot]));
+    }
+
+    #[test]
+    fn types_registered_dynamic_and_aware_components() {
+        let models = "<?php\nnamespace App;\nclass Post {}\n";
+        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nabstract class Component {}\n";
+        let select = "<?php\nnamespace App\\View\\Components\\Forms;\nclass Select extends \\Illuminate\\View\\Component { public array $options = []; public function render() { return view('components.forms.select'); } }\n";
+        let controller = "<?php\nnamespace App;\nclass PageController {\n    public function show(Post $post, string $name) { return view('page', compact('post', 'name')); }\n}\n";
+        let page = "<x-dynamic-component component=\"alert\" :post=\"$post\" />\n<x-dynamic-component :component=\"'alert'\" :post=\"$post\"></x-dynamic-component>\n<x-dynamic-component :component=\"$name\" :post=\"1\" />\n<x-ui::button :size=\"5\" />\n<x-card title=\"x\" />\n<x-menu color=\"red\"><div><x-menu.item /></div></x-menu>\n<x-menu><x-menu.dot /></x-menu>\n<x-menu color=\"red\"><x-menu.dot /></x-menu>\n<x-nav :color=\"$post\" />\n";
+        let views = [
+            ("resources/views/page.blade.php", page),
+            ("resources/views/components/alert.blade.php", "@props(['post'])"),
+            ("resources/views/ui/button.blade.php", "{{ $size }}"),
+            ("resources/views/components/card.blade.php", "{{ $title }}"),
+            ("resources/views/components/forms/select.blade.php", "{{ $options }}"),
+            ("resources/views/components/menu.blade.php", "@props(['color' => 'gray'])"),
+            ("resources/views/components/menu/item.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/dot.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/nav.blade.php", "@props(['color'])\n<x-nav.link />"),
+            ("resources/views/components/nav/link.blade.php", "@aware(['color'])"),
+        ];
+        let mut files = vec![("app/Models.php", models), ("vendor/View.php", laravel), ("app/View/Components/Forms/Select.php", select), ("app/PageController.php", controller)];
+        files.extend(views);
+        let fx = Fixture::new(&files);
+        let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
+        let index = fx.snap.index.read();
+        let read = |p: &Path| fx.snap.read(p);
+        let anonymous = |tag: &str| (tag.to_string(), serde_json::json!({"paths": [format!("resources/views/components/{}.blade.php", tag.replace('.', "/"))]}));
+        let mut listed: serde_json::Map<String, Value> = ["alert", "menu", "menu.item", "menu.dot", "nav", "nav.link"].into_iter().map(anonymous).collect();
+        listed.insert("ui::button".into(), serde_json::json!({"paths": ["resources/views/ui/button.blade.php"]}));
+        listed.insert("card".into(), serde_json::json!({"paths": ["app/View/Components/Card.php", "resources/views/components/card.blade.php"]}));
+        let components = serde_json::json!({"components": listed});
+        let types_of = |view: &str| types_among(&index, &read, Some(&components), &paths, view);
+        let owned = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect::<Vec<_>>();
+        let (bag, slot) = (("attributes", "\\Illuminate\\View\\ComponentAttributeBag"), ("slot", "\\Illuminate\\View\\ComponentSlot"));
+        // A dynamic component with a literal name is its tag; one without isn't read.
+        assert_eq!(types_of("components.alert"), owned(&[bag, ("post", "\\App\\Post"), slot]));
+        // A component the app registers, by its tag, and one it registers with a class.
+        assert_eq!(types_of("ui.button"), owned(&[bag, ("size", "int"), slot]));
+        assert!(types_of("components.card").is_empty());
+        assert_eq!(types_among(&index, &read, None, &paths, "components.card"), owned(&[bag, slot, ("title", "string")]));
+        assert_eq!(types_of("components.forms.select"), owned(&[("options", "array"), slot]));
+        // `@aware` from the tag around it, unless that leaves it out, and in a component's view, from its tags.
+        assert_eq!(types_of("components.menu.item"), owned(&[bag, ("color", "string"), slot]));
+        assert_eq!(types_of("components.menu.dot"), owned(&[bag, slot]));
+        assert_eq!(types_of("components.nav.link"), owned(&[bag, ("color", "\\App\\Post"), slot]));
     }
 }
