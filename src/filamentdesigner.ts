@@ -82,6 +82,8 @@ export class Designer {
   app: fapp.AppInfo | null = null;
   facts: (ModelFacts & { details: fapp.ModelDetails }) | null = null;
   enums: fapp.EnumInfo[] = [];
+  /** The app's notifications and its user model, for actions that send one. */
+  private notices: { list: fapp.NotificationInfo[]; user: string | null } = { list: [], user: null };
   selection: Path | null = null;
   active = new Map<string, number>();
   paletteQuery = "";
@@ -153,6 +155,7 @@ export class Designer {
       const root = this.root;
       // The models are needed for relationships' titles later; reading them now overlaps the waits.
       void fapp.models(root).catch(() => {});
+      void Promise.all([fapp.notifications(root), fapp.notificationSetup(root)]).then(([list, setup]) => (this.notices = { list, user: setup.user }), () => {});
       // Translations only change what the preview shows, so the designer doesn't wait for them.
       void fapp.translations(root).then((t) => {
         this.translations = t;
@@ -1368,7 +1371,7 @@ export class Designer {
       action: (() => {
         const kind = classInfo(this.cat!, found.entry.comp!.cls)?.kind ?? "";
         const scope = kind === "action" || kind === "bulkAction" ? this.scopeOf(path, kind) : null;
-        return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {} } : undefined;
+        return scope ? { scope, model: this.facts?.class ?? null, casts: this.facts?.casts ?? {}, notifications: this.notices.list, userModel: this.notices.user } : undefined;
       })(),
       i18n: this.i18n(),
       openEnum: async (cls) => {

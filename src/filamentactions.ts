@@ -1,6 +1,7 @@
 // What a custom action does when it runs, as the designer offers it: common behaviors written as the closure of
 // `->action(...)`, and read back from it, so the inspector can show and change them. Anything else is code the
 // designer keeps. No editor imports, so Node tests it.
+import { readSend, type Send, sendCode } from "./notifysend.ts";
 import { phpString } from "./phpcode.ts";
 
 /** What the action has to work with: the row's record, the selected records, or neither, as on a list page. */
@@ -15,12 +16,14 @@ export type Behavior =
   | { kind: "delete"; notify?: string }
   /** Creates a record from the form's data. */
   | { kind: "create"; notify?: string }
+  /** Sends a notification about the record (each selected record), or one without a record (src/notifysend.ts). */
+  | { kind: "send"; send: Send; notify?: string }
   | { kind: "custom" };
 
 export const BEHAVIORS: Record<Scope, [Behavior["kind"], string][]> = {
-  record: [["none", "Nothing yet"], ["update", "Save the form to the record"], ["set", "Set a column"], ["delete", "Delete the record"]],
-  records: [["none", "Nothing yet"], ["update", "Save the form to each record"], ["set", "Set a column on each"], ["delete", "Delete them"]],
-  none: [["none", "Nothing yet"], ["create", "Create a record from the form"]],
+  record: [["none", "Nothing yet"], ["update", "Save the form to the record"], ["set", "Set a column"], ["delete", "Delete the record"], ["send", "Send a notification"]],
+  records: [["none", "Nothing yet"], ["update", "Save the form to each record"], ["set", "Set a column on each"], ["delete", "Delete them"], ["send", "Send a notification about each"]],
+  none: [["none", "Nothing yet"], ["create", "Create a record from the form"], ["send", "Send a notification"]],
 };
 
 const NOTIFICATION = "Filament\\Notifications\\Notification";
@@ -36,9 +39,9 @@ export function valueCode(v: string): string {
 
 /**
  * The closure for `->action(...)`, with classes as `{{Fqn}}` for the designer to import. `model` is the record's
- * class, or null to type it as Eloquent's Model.
+ * class, or null to type it as Eloquent's Model. `userModel` is the class a notification's recipients are.
  */
-export function behaviorCode(b: Behavior, scope: Scope, model: string | null): string | null {
+export function behaviorCode(b: Behavior, scope: Scope, model: string | null, userModel = "App\\Models\\User"): string | null {
   const M = `{{${model ?? "Illuminate\\Database\\Eloquent\\Model"}}}`;
   const each = scope === "records";
   const target = each ? "$records->each" : "$record";
@@ -61,6 +64,12 @@ export function behaviorCode(b: Behavior, scope: Scope, model: string | null): s
       params = ["array $data"];
       body = `${M}::create($data);`;
       break;
+    case "send": {
+      const send = sendCode({ ...b.send, withRecord: b.send.withRecord && scope !== "none" }, userModel);
+      params = scope === "none" ? [] : [each ? `{{${COLLECTION}}} $records` : `${M} $record`];
+      body = each ? `foreach ($records as $record) {\n    ${send}\n}` : send;
+      break;
+    }
     default:
       return null;
   }
@@ -71,8 +80,11 @@ export function behaviorCode(b: Behavior, scope: Scope, model: string | null): s
 const STRING = String.raw`'(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*"`;
 const unquote = (s: string) => (s.startsWith("'") ? s.slice(1, -1).replace(/\\(['\\])/g, "$1") : s.slice(1, -1).replace(/\\(.)/g, "$1"));
 
-/** Reads what `->action(...)`'s closure does, from its code. Code the presets don't write reads as custom. */
-export function readBehavior(code: string | null | undefined): Behavior {
+/**
+ * Reads what `->action(...)`'s closure does, from its code. Code the presets don't write reads as custom. `resolve`
+ * turns a class name as the file spells it into its full name, for a sent notification.
+ */
+export function readBehavior(code: string | null | undefined, resolve: (name: string) => string = (n) => n): Behavior {
   if (!code) return { kind: "none" };
   const fn = /^(?:static\s+)?function\s*\(([^)]*)\)\s*(?::\s*[\w\\?]+\s*)?(?:use\s*\([^)]*\)\s*)?\{([\s\S]*)\}$/.exec(code.trim());
   const arrow = !fn && /^(?:static\s+)?fn\s*\(([^)]*)\)\s*(?::\s*[\w\\?|]+\s*)?=>\s*([\s\S]+)$/.exec(code.trim());
@@ -91,5 +103,8 @@ export function readBehavior(code: string | null | undefined): Behavior {
   if (/^\\?[\w\\]+::create\(\$data\);$/.test(body)) return { kind: "create", notify };
   if ((r = new RegExp(String.raw`^${target}->update\(\[\s*(${STRING})\s*=>\s*(${STRING}|-?\d+(?:\.\d+)?|true|false|null)\s*,?\s*\]\);$`, "i").exec(body)))
     return { kind: "set", column: unquote(r[1]), value: /^['"]/.test(r[2]) ? unquote(r[2]) : r[2], notify };
+  const each = /^foreach\s*\(\s*\$records\s+as\s+\$record\s*\)\s*\{([\s\S]*)\}$/.exec(body);
+  const send = readSend(each ? each[1] : body, resolve);
+  if (send) return { kind: "send", send, notify };
   return { kind: "custom" };
 }

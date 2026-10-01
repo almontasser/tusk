@@ -1384,6 +1384,28 @@ function appNotifications(string $root): array
     return $out;
 }
 
+/**
+ * What sending notifications needs: the notifications table, a mailer that delivers (not `log` or `array`), the
+ * queue for queued ones, the user model, and which panels show the bell (`->databaseNotifications()`). Also the
+ * app's name, which emails sign with.
+ */
+function notificationSetup(): array
+{
+    $table = null;
+    try {
+        $table = Illuminate\Support\Facades\Schema::hasTable('notifications');
+    } catch (Throwable) {
+    }
+    $panels = [];
+    try {
+        foreach (Filament\Facades\Filament::getPanels() as $panel) {
+            $panels[$panel->getId()] = $panel->hasDatabaseNotifications();
+        }
+    } catch (Throwable) {
+    }
+    return ['app' => config('app.name'), 'table' => $table, 'mailer' => config('mail.default'), 'queue' => config('queue.default'), 'user' => config('auth.providers.users.model'), 'panels' => $panels];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1411,6 +1433,7 @@ try {
         'entry-access' => entryAccess($argv[3], $root),
         'porters' => porters($root),
         'notifications' => appNotifications($root),
+        'notification-setup' => notificationSetup(),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

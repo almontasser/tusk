@@ -39,3 +39,20 @@ test("valueCode", () => {
   assert.equal(valueCode("12"), "12");
   assert.equal(valueCode("True"), "true");
 });
+
+test("send behaviors round-trip through their code", () => {
+  const shipped = { notification: "App\\Notifications\\OrderShipped", recipient: { kind: "related", relation: "customer" }, withRecord: true } as const;
+  const report = { notification: "App\\Notifications\\WeeklyReport", recipient: { kind: "role", role: "admin" }, withRecord: false } as const;
+  const resolve = (n: string) => `App\\Notifications\\${n}`;
+  const cases: [Behavior, Scope][] = [
+    [{ kind: "send", send: shipped }, "record"],
+    [{ kind: "send", send: shipped, notify: "Sent" }, "records"],
+    [{ kind: "send", send: report }, "none"],
+  ];
+  for (const [b, scope] of cases) {
+    const code = fill(behaviorCode(b, scope, "App\\Models\\Order")!);
+    assert.deepEqual({ notify: undefined, ...readBehavior(code, resolve) }, { notify: undefined, ...b }, code);
+  }
+  assert.equal(fill(behaviorCode(cases[1][0], "records", "App\\Models\\Order")!), "function (Collection $records): void {\n    foreach ($records as $record) {\n        $record->customer?->notify(new OrderShipped($record));\n    }\n\n    Notification::make()\n        ->title('Sent')\n        ->success()\n        ->send();\n}");
+  assert.equal(fill(behaviorCode(cases[2][0], "none", null)!), "function (): void {\n    Notification::send(User::role('admin')->get(), new WeeklyReport());\n}");
+});

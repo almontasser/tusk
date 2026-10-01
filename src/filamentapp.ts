@@ -155,6 +155,9 @@ export const porters = (root: string) => cached(root, "app:porters", () => intro
 /** The app's notification classes: the record each one's constructor takes, and its channels when `via()` says without a user. */
 export type NotificationInfo = { class: string; file: string | null; record: string | null; channels: string[] | null };
 export const notifications = (root: string) => cached(root, "app:notifications", () => introspect<NotificationInfo[]>(root, "notifications"));
+/** What sending notifications needs: the notifications table, the mailer and queue, the user model, and each panel's bell. */
+export type NotificationSetup = { app: string | null; table: boolean | null; mailer: string | null; queue: string | null; user: string | null; panels: Record<string, boolean> };
+export const notificationSetup = (root: string) => cached(root, "app:notification-setup", () => introspect<NotificationSetup>(root, "notification-setup"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));

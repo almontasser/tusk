@@ -6,7 +6,8 @@ import { h, icon, iconButton } from "./dom";
 import { type CanvasCtx, arg, call, flag, labelOf } from "./filamentcanvas";
 import { type Catalog, type CClass, classInfo, COLORS, type Editor, essentials, HIDDEN_METHODS, heroiconCase, heroiconFile, humanize, labelFromName, look, majorVersion, type MethodInfo, methodEditor, methodsOf, palette } from "./filamentcatalog";
 import { type Condition, conditionClosure, getUtility, needsValue, type Operator, OPERATORS, readConditions, type Relation } from "./filamentgen";
-import type { EnumInfo } from "./filamentapp";
+import type { EnumInfo, NotificationInfo } from "./filamentapp";
+import { type Recipient, RECIPIENTS, type Send } from "./notifysend";
 import { colorChooser, commitInput, heroicon, pickHeroicon, segmented, toggleSwitch } from "./filamentpickers";
 import { ownTranslation, translate, type Translations } from "./translations";
 import { BEHAVIORS, type Behavior, behaviorCode, readBehavior, type Scope } from "./filamentactions";
@@ -45,7 +46,7 @@ export type InspectorCtx = {
   /** Opens an importer or exporter in its designer. */
   openPorter?(fqn: string): void;
   /** For a custom action: what it works with, and the record's model, for "What it does". */
-  action?: { scope: Scope; model: string | null; casts: Record<string, string> };
+  action?: { scope: Scope; model: string | null; casts: Record<string, string>; notifications?: NotificationInfo[]; userModel?: string | null };
   /** The app's translations, for text written with `__()`. */
   i18n?: { t: Translations; locale: string | null; write(locale: string, key: string, value: string): void; rename(from: string, to: string): Promise<void> };
 };
@@ -690,13 +691,13 @@ function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
   const a = ctx.action;
   if (!a || !["Action", "BulkAction"].includes(shortClass(c.cls))) return [];
   const node = arg(c, "action");
-  const current = readBehavior(node ? codeOf(ctx, node) : null);
+  const current = readBehavior(node ? codeOf(ctx, node) : null, resolveIn(ctx.text));
   const model = a.model ?? "Illuminate\\Database\\Eloquent\\Model";
   const fill = call(c, "fillForm");
   const ourFill = !!fill && /^fn\s*\([\w\\]+ \$record\): array => \$record->attributesToArray\(\)$/.test(codeOf(ctx, fill.args.items[0]?.value ?? c.node));
   const write = async (b: Behavior) => {
     if (current.kind === "custom" && node && !(await confirm("Replace what the action does, written as code?", "Replace"))) return;
-    const code = behaviorCode(b, a.scope, a.model);
+    const code = behaviorCode(b, a.scope, a.model, a.userModel ?? undefined);
     const changes: { name: string; args: string | null }[] = [{ name: "action", args: code }];
     if (b.kind === "update" && a.scope === "record" && !fill) changes.push({ name: "fillForm", args: FILL_FORM(model) });
     if (b.kind !== "update" && ourFill) changes.push({ name: "fillForm", args: null });
@@ -713,7 +714,11 @@ function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
     const kind = select.value as Behavior["kind"];
     const notify = "notify" in current ? current.notify : undefined;
     if (kind === "set") void write({ kind, column: ctx.columns.find((x) => /status|state|active|published/.test(x)) ?? ctx.columns[0] ?? "status", value: "", notify });
-    else void write({ kind, notify } as Behavior);
+    else if (kind === "send") {
+      const n = (a.notifications ?? []).find((x) => fitsAction(a, x));
+      if (n) void write({ kind, send: { notification: n.class, recipient: defaultRecipient(ctx), withRecord: !!n.record && a.scope !== "none" }, notify });
+      else newNotificationFor(ctx, select, notify, write);
+    } else void write({ kind, notify } as Behavior);
   };
   const rows = [row("What it does", select, { set: !!node, reset: () => ctx.set([{ name: "action", args: null }, ...(ourFill ? [{ name: "fillForm", args: null }] : [])]), doc: "What happens when the action runs, after its form or confirmation." })];
   if (current.kind === "set") {
@@ -729,9 +734,79 @@ function behaviorEditor(ctx: InspectorCtx): HTMLElement[] {
     if (values.length) (value as HTMLSelectElement).onchange = () => void write({ ...current, value: (value as HTMLSelectElement).value });
     rows.push(row("Column", column), row("Value", value, { doc: e ? `One of ${shortClass(e.class)}'s cases.` : "Numbers, true, false, and null are written as they are; anything else as text." }));
   }
+  if (current.kind === "send") rows.push(...sendRows(ctx, current, write));
   if (current.kind !== "none" && current.kind !== "custom")
     rows.push(row("Then notify", commitInput(current.notify ?? "", (v) => void write({ ...current, notify: v.trim() || undefined }), { placeholder: "Saved" }), { set: !!current.notify, doc: "A success notification's title, shown after it runs." }));
   return rows;
+}
+
+/** A class name as the file spells it, resolved through its `use` lines and namespace. */
+const resolveIn = (text: string) => (name: string) => {
+  if (name.startsWith("\\")) return name.slice(1);
+  const [first, ...rest] = name.split("\\");
+  for (const m of text.matchAll(/^use\s+([\w\\]+?)(?:\s+as\s+(\w+))?\s*;/gm))
+    if ((m[2] ?? m[1].split("\\").pop())!.toLowerCase() === first.toLowerCase()) return [m[1], ...rest].join("\\");
+  const ns = /^namespace\s+([\w\\]+)\s*;/m.exec(text)?.[1];
+  return ns ? `${ns}\\${name}` : name;
+};
+
+/** Whether an action can send a notification: one about its model's records, or one without a record. */
+const fitsAction = (a: NonNullable<InspectorCtx["action"]>, n: NotificationInfo) => !n.record || (a.scope !== "none" && n.record === a.model);
+
+/** The record's user, such as an order's `customer`, when it has one, and otherwise every user. */
+function defaultRecipient(ctx: InspectorCtx): Recipient {
+  const user = ctx.action?.userModel;
+  const rel = ctx.action?.scope !== "none" ? ctx.relations.find((r) => /belongsto/i.test(r.type) && r.related === user) : undefined;
+  return rel ? { kind: "related", relation: rel.name } : { kind: "users" };
+}
+
+/** Opens the New Notification form for the action's model, and sends what it makes. */
+function newNotificationFor(ctx: InspectorCtx, anchor: HTMLElement, notify: string | undefined, write: (b: Behavior) => unknown) {
+  const a = ctx.action!;
+  void import("./notifydesigner").then((m) =>
+    m.newNotification(anchor, { model: a.scope === "none" ? null : a.model, then: (fqn, record) => void write({ kind: "send", send: { notification: fqn, recipient: defaultRecipient(ctx), withRecord: !!record && a.scope !== "none" }, notify }) }),
+  );
+}
+
+/** "Send a notification": which one, and to whom (src/notifysend.ts). */
+function sendRows(ctx: InspectorCtx, b: Extract<Behavior, { kind: "send" }>, write: (b: Behavior) => unknown): HTMLElement[] {
+  const a = ctx.action!;
+  const s = b.send;
+  const set = (send: Partial<Send>) => void write({ ...b, send: { ...s, ...send } });
+  const list = (a.notifications ?? []).filter((n) => fitsAction(a, n));
+  const which = h(
+    "select",
+    {},
+    ...(list.some((n) => n.class === s.notification) ? [] : [h("option", { value: s.notification, textContent: shortClass(s.notification), selected: true })]),
+    ...list.map((n) => h("option", { value: n.class, textContent: shortClass(n.class), selected: n.class === s.notification })),
+    h("option", { value: "@new", textContent: "New notification…" }),
+  );
+  which.onchange = () => {
+    if (which.value === "@new") return newNotificationFor(ctx, which, b.notify, write);
+    const n = list.find((x) => x.class === which.value);
+    set({ notification: which.value, withRecord: !!n?.record && a.scope !== "none" });
+  };
+  const open = iconButton("go-to-file", "Open in the notifications designer", () => void import("./notifydesigner").then((m) => m.openNotificationClass(s.notification)));
+  const kinds = RECIPIENTS.filter(([k]) => k !== "related" || a.scope !== "none");
+  const who = h("select", {}, ...kinds.map(([k, l]) => h("option", { value: k, textContent: l, selected: k === s.recipient.kind })));
+  const users = ctx.relations.filter((r) => /belongsto/i.test(r.type));
+  who.onchange = () => {
+    const k = who.value as Recipient["kind"];
+    set({ recipient: k === "role" ? { kind: k, role: "admin" } : k === "related" ? { kind: k, relation: (users.find((r) => r.related === a.userModel) ?? users[0])?.name ?? "user" } : k === "address" ? { kind: k, email: "" } : { kind: k } });
+  };
+  const r = s.recipient;
+  let detail: HTMLElement | null = null;
+  if (r.kind === "role") detail = commitInput(r.role, (v) => v.trim() && set({ recipient: { kind: "role", role: v.trim() } }), { placeholder: "admin" });
+  else if (r.kind === "address") detail = commitInput(r.email, (v) => set({ recipient: { kind: "address", email: v.trim() } }), { placeholder: "ops@example.com", type: "email" });
+  else if (r.kind === "related") {
+    const rel = h("select", {}, ...(users.some((x) => x.name === r.relation) ? [] : [h("option", { value: r.relation, textContent: r.relation, selected: true })]), ...users.map((x) => h("option", { value: x.name, textContent: `${x.name} · ${shortClass(x.related ?? "")}`, selected: x.name === r.relation })));
+    rel.onchange = () => set({ recipient: { kind: "related", relation: rel.value } });
+    detail = rel;
+  }
+  return [
+    row("Notification", h("div", { class: "fd-inline-editor" }, which, open), { doc: "A notification class in App\\Notifications. Open it to design its bell notification and email." }),
+    row("Send to", h("div", { class: "fd-stack" }, who, detail), { stacked: !!detail, doc: r.kind === "address" ? "An email address gets the email only, not the bell." : "" }),
+  ];
 }
 
 /** Rows for methods that take more than a value: they get an editor of their own. */
