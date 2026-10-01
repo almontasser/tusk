@@ -1203,6 +1203,110 @@ function panelWidgets(string $root, string $id): array
     return ['widgets' => $widgets, 'dashboards' => $dashboards, 'hidden' => $hidden];
 }
 
+/**
+ * A panel's navigation as Filament builds it, without the signed-in user's access checks: its pages, resources, and
+ * clusters, and the provider's own navigation items, each with its label, icon, group, sort, parent item, badge, and
+ * cluster; whether it registers in the navigation; and which settings a method outside Filament decides, by the file
+ * that declares it. Also the panel's navigation groups in order, and whether a builder replaces the navigation.
+ */
+function panelNavigation(string $root, string $id): array
+{
+    $panel = Filament\Facades\Filament::getPanel($id);
+    Filament\Facades\Filament::setCurrentPanel($panel);
+    $call = function (string $class, string $method): mixed {
+        try {
+            return method_exists($class, $method) ? $class::$method() : null;
+        } catch (Throwable) {
+            return null;
+        }
+    };
+    $icon = fn (mixed $v) => $v instanceof BackedEnum ? $v->name : (is_string($v) ? $v : null);
+    // A group as written: a label, or an enum case with its label.
+    $group = function (mixed $g): ?array {
+        if ($g instanceof UnitEnum) {
+            $label = $g instanceof Filament\Support\Contracts\HasLabel ? $g->getLabel() : $g->name;
+            return ['label' => (string) $label, 'enum' => get_class($g), 'case' => $g->name, 'index' => array_search($g, $g::cases(), true)];
+        }
+        return filled($g) ? ['label' => (string) $g, 'enum' => null, 'case' => null] : null;
+    };
+    $settings = [
+        'navigationLabel' => 'getNavigationLabel',
+        'navigationIcon' => 'getNavigationIcon',
+        'navigationGroup' => 'getNavigationGroup',
+        'navigationSort' => 'getNavigationSort',
+        'navigationParentItem' => 'getNavigationParentItem',
+        'shouldRegisterNavigation' => 'shouldRegisterNavigation',
+        'cluster' => 'getCluster',
+    ];
+    $describe = function (string $class, string $kind) use ($call, $icon, $group, $settings, $root): array {
+        $overrides = [];
+        foreach ($settings as $setting => $method) {
+            try {
+                $declaring = (new ReflectionMethod($class, $method))->getDeclaringClass();
+                if (!str_starts_with($declaring->getName(), 'Filament\\')) {
+                    $overrides[$setting] = relativeFile($declaring->getName(), $root);
+                }
+            } catch (Throwable) {
+            }
+        }
+        $badge = $call($class, 'getNavigationBadge');
+        return [
+            'kind' => $kind,
+            'class' => $class,
+            'file' => relativeFile($class, $root),
+            'label' => plainValue($call($class, 'getNavigationLabel')),
+            'icon' => $icon($call($class, 'getNavigationIcon')),
+            'group' => $group($call($class, 'getNavigationGroup')),
+            'sort' => $call($class, 'getNavigationSort'),
+            'parent' => $call($class, 'getNavigationParentItem'),
+            'badge' => is_scalar($badge) ? (string) $badge : null,
+            'cluster' => $call($class, 'getCluster'),
+            // A cluster hides while no one can open what's in it; its own setting is the property.
+            'registers' => $kind === 'cluster' && !isset($overrides['shouldRegisterNavigation'])
+                ? (bool) (new ReflectionProperty($class, 'shouldRegisterNavigation'))->getValue()
+                : (bool) ($call($class, 'shouldRegisterNavigation') ?? true),
+            // A resource without a list page has no navigation item.
+            'hasItem' => $kind !== 'resource' || $class::hasPage('index'),
+            'overrides' => (object) $overrides,
+        ];
+    };
+    $items = [];
+    // Filament registers pages, then resources; items with the same sort keep that order.
+    $clusters = $panel->getClusters();
+    foreach ($panel->getPages() as $page) {
+        if (in_array($page, $clusters, true) || !method_exists($page, 'getNavigationItems')) {
+            continue;
+        }
+        $items[] = $describe($page, is_a($page, 'Filament\\Pages\\Dashboard', true) ? 'dashboard' : 'page');
+    }
+    foreach ($clusters as $cluster) {
+        $items[] = $describe($cluster, 'cluster');
+    }
+    foreach ($panel->getResources() as $resource) {
+        try {
+            if (!$resource::getParentResourceRegistration()) {
+                $items[] = $describe($resource, 'resource');
+            }
+        } catch (Throwable) {
+        }
+    }
+    // Items the provider adds with navigationItems([...]).
+    foreach ($panel->getNavigationItems() as $item) {
+        try {
+            $items[] = ['kind' => 'link', 'class' => null, 'file' => null, 'label' => plainValue($item->getLabel()), 'icon' => $icon($item->getIcon()), 'group' => $group($item->getGroup()), 'sort' => $item->getSort() === -1 ? null : $item->getSort(), 'parent' => $item->getParentItem(), 'badge' => is_scalar($item->getBadge()) ? (string) $item->getBadge() : null, 'cluster' => null, 'registers' => $item->isVisible(), 'hasItem' => true, 'overrides' => (object) []];
+        } catch (Throwable) {
+        }
+    }
+    $groups = [];
+    foreach ($panel->getNavigationGroups() as $key => $g) {
+        $groups[] = $g instanceof Filament\Navigation\NavigationGroup
+            ? ['key' => $key, 'label' => plainValue($g->getLabel()), 'icon' => $icon($g->getIcon()), 'collapsed' => $g->isCollapsed()]
+            : ['key' => $key, 'label' => (string) $g, 'icon' => null, 'collapsed' => false];
+    }
+    $builder = (new ReflectionProperty($panel, 'navigationBuilder'))->getValue($panel);
+    return ['items' => $items, 'groups' => $groups, 'custom' => $builder !== true, 'topNavigation' => $panel->hasTopNavigation()];
+}
+
 /** What a stats or chart widget shows, from its own code: each stat's label, value, and chart, or the chart's data. */
 function widgetData(string $class): array
 {
@@ -1568,6 +1672,7 @@ try {
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),
+        'navigation' => panelNavigation($root, $argv[3]),
         'widget-data' => widgetData($argv[3]),
         'permission' => changePermission($argv[3], $argv[4], $argv[5] ?? null),
         'mago-stubs' => magoStubs($root, $argv[3]),

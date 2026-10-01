@@ -143,6 +143,8 @@ export const migrations = (root: string) => cached(root, "migrations", () => int
 export const translations = (root: string) => cached(root, "translations", () => introspect<import("./translations").Translations>(root, "translations"));
 export const panelOptions = (root: string) => cached(root, "panel-options", () => introspect<import("./panelsettings").PanelOptions>(root, "panel-options"));
 export type WidgetInfo = { class: string; file: string | null; kind: "stats" | "chart" | "table" | "other"; sort: number | null; columnSpan: number | string | Record<string, number | string> | null; heading: string | null; discovered: boolean };
+/** A panel's navigation as Filament builds it: its items with their settings, and its groups. */
+export const navigation = (root: string, panel: string) => cached(root, `app:navigation:${panel}`, () => introspect<import("./navgen").PanelNav>(root, "navigation", panel));
 export const widgets = (root: string, panel: string) => cached(root, `app:widgets:${panel}`, () => introspect<{ widgets: WidgetInfo[]; dashboards: { class: string; file: string | null; title: string | null; columns: number | Record<string, number>; widgets: WidgetInfo[] | null }[]; hidden: WidgetInfo[] }>(root, "widgets", panel));
 /** What a stats or chart widget shows now, from running it as the first user; not kept, since the data changes. */
 export const widgetData = (root: string, cls: string) => introspect<{ as: string | null; stats?: { label: string | null; value: string | null; chart: number[] | null }[]; chart?: { datasets?: { data?: unknown[]; label?: string }[]; labels?: unknown[] }; type?: string }>(root, "widget-data", cls);

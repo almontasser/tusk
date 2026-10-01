@@ -216,6 +216,10 @@ export async function loadFilament() {
     dash.onclick = () => void import("./dashboarddesigner").then((m) => m.openDashboard(panel.id));
     dash.onkeydown = (e) => e.key === "Enter" && dash.click();
     rows.push(dash);
+    const nav = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The panel's navigation: groups, order, and clusters" }, icon("list-tree"), h("span", { class: "fv-name" }, "Navigation"), h("span", { class: "fv-detail" }, "groups and order"));
+    nav.onclick = () => void import("./navigationdesigner").then((m) => m.openNavigation(panel.id));
+    nav.onkeydown = (e) => e.key === "Enter" && nav.click();
+    rows.push(nav);
     const groups = new Map<string, fapp.ResourceInfo[]>();
     for (const r of panel.resources) {
       const g = r.navigationGroup ?? "";
@@ -401,6 +405,16 @@ export async function openDashboardPicker() {
   if (panels.length === 1) return go(panels[0].id);
   const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-dashboard", run: () => go(p.id) }));
   pick("Dashboard: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Picks a panel and opens its navigation. */
+export async function openNavigationPicker() {
+  const app = await fapp.app(host.root()).catch((e) => (host.status(`Can't read the app: ${errorText(e)}`), null));
+  const panels = app?.panels ?? [];
+  const go = (id: string) => void import("./navigationdesigner").then((m) => m.openNavigation(id));
+  if (panels.length === 1) return go(panels[0].id);
+  const items: Item[] = panels.map((p) => ({ label: p.id, detail: `/${p.path}`, icon: "codicon-list-tree", run: () => go(p.id) }));
+  pick("Navigation: pick a panel", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Picks a model and opens its Access view: who can do what with its records. */

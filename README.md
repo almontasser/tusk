@@ -51,6 +51,8 @@ file to change when you add it.
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
 | Notifications designer | Reads and writes the bell notification as Filament's `Notification::make()` chain in `toDatabase()`, and the email as a `MailMessage` chain in `toMail()`; a Mailable, a Markdown view, or a `toArray()` with plain arrays shows as code. Broadcast and other channels show as they are, without settings. Texts with the record's fields are strings or `__()` with replacements; other code, such as a concatenation, shows as code. The designer doesn't list where a notification is sent from. |
+
+| Navigation designer | It shows every item whatever its access rules, as if everyone could open everything. A panel that builds its navigation with `navigation(fn …)` shows as Filament would build it without that, and can't be changed. Reordering numbers the group's project items 1, 2, 3, and an item whose sort code decides keeps its place even when that breaks the new order. Group icons and collapsing are in the panel settings. A resource's record sub-navigation isn't shown. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
@@ -1046,6 +1048,43 @@ as each one is.
 
 The preview runs the widget to show its real numbers, as the first user when
 there is one.
+
+### Navigation
+
+Click **Navigation** under a panel in the Filament tool window, run
+**Filament: Navigation…**, or click **Navigation…** in the panel settings'
+navigation groups. The panel's sidebar shows as Filament builds it: its groups
+in order, then each group's pages, resources, and clusters with their icons,
+labels, and badges, and items nested under their parent item. A cluster shows
+the resources and pages in it below it.
+
+- **Reorder:** drag an item within its group, or select it and press
+  <kbd>⌥↑</kbd> or <kbd>⌥↓</kbd>. Each project item in the group gets a
+  `$navigationSort` in the new order.
+- **Move to another group:** drag the item onto the group, or pick the group
+  in the inspector. The group is written the way the project writes it: a
+  label, a translated `__()` label, or an enum case. Drop an item on **Drop
+  here for a new group** to start one.
+- **Reorder groups:** drag a group. The panel's `navigationGroups([...])`
+  lists them in the new order, keeping each group's icon and other settings.
+  Groups from an enum come in the order of its cases.
+- **Rename a group:** select it and change its name. Every file that names it
+  changes, and so does the panel's list and, for a translated name, its
+  translations.
+- **Clusters:** **New cluster** makes one with Filament's generator, after
+  adding `discoverClusters()` to the provider when the panel doesn't discover
+  clusters yet. Drag a resource or page onto a cluster, or pick the cluster in
+  the inspector, to move it in; the files stay where they are.
+- **One item:** the inspector changes its label, icon, group, parent item,
+  cluster, and whether it shows in the navigation. A hidden item stays in the
+  list, crossed out, so you can show it again. Right-click an item for the same
+  actions, or double-click it to open it in the designer.
+
+A setting a method decides, such as a `getNavigationSort()` the designer
+didn't write, shows as code and the item can't be moved, since a property would
+be ignored; the inspector says why and opens the method. Items from packages,
+and items the provider adds with `navigationItems()`, are read only. Badges
+show what the app returns now, and can't be changed here.
 
 ### Sample records and checks
 
