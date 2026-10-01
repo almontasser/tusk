@@ -6346,6 +6346,7 @@ in `.env` stands alone and there's nothing to stage it with. The choices offered
 config, so a project's own mailers and disks show, and the values the app really
 uses show beside `.env`'s, which catches a cached config and a config file that
 ignores a key, as Laravel 11's `config/app.php` does for `APP_TIMEZONE`.
+
 ### 2026-10-01: Automations set fields before the save and notify after it
 
 An observer can set a field after the save with `saveQuietly()`, which avoids
