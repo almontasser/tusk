@@ -93,12 +93,16 @@ of a pane's editor, measured to the nearest edge, splits that pane there
 (`splitPane`, which can put the new pane before or after), unless the tab is
 its own pane's only tab or four panes are open. The `#editor` listeners run in
 the capture phase, so Monaco never sees a tab dropped on its text as text to
-insert. Borders between panes have no element of their own, which would have
-to be skipped everywhere the layout reads a group's children: `sashAt` treats
-a press within 4 pixels of a pane's or group's edge, next to a sibling, as a
-resize. When a resize starts, each sibling's `flex-grow` becomes its size in
-pixels (all measured before any is set, since each change reflows the rest),
-and the two sides of the border trade pixels. Sizes go into the session as
+insert. Borders between panes are splitters from `src/splitter.ts`, so they
+take focus and the arrow keys like the others. Each pane holds two handles,
+for its left and top edges, rather than the groups holding elements between
+their children, which would have to be skipped everywhere the layout reads a
+group's children. `placeSashes`, run from `renderTabs`, points each handle at
+the pane or group whose edge it is and the sibling before it, or hides it;
+panes stacked along one edge each get a handle for that border. The
+splitter's `resize` option replaces its pixel width: each sibling's
+`flex-grow` becomes its size in pixels (all measured before any is set, since
+each change reflows the rest), and the two sides of the border trade pixels. Sizes go into the session as
 `grow`. A new split takes half of the pane's `flex-grow`, and a new group takes
 over the pane's.
 
@@ -261,9 +265,10 @@ The picker (`pickTheme` in `src/settings.ts`) is the palette with a `preview`
 on each item, which runs as the selection moves. Escape applies the saved
 theme again.
 
-Format on save formats the active editor through Monaco's format action, which
-applies minimal edits and keeps the cursor in place, and formats other files
-with one undoable edit.
+Format on save runs Monaco's format action on every file `saveFile` writes,
+so Save All formats too. `formatModel` uses an editor that shows the file, or
+a hidden one it creates and disposes of, since Monaco's built-in formatters
+need an editor. The action applies minimal edits and keeps the cursor in place.
 
 ### Keymap
 
@@ -2340,8 +2345,9 @@ add-on (`@xterm/addon-search`, which needs `allowProposedApi` for its match
 highlights) backs the find bar, which **Find in Terminal** (⌘F with a `when`
 of `terminalFocused`, so ⌘F still reaches Monaco in the editor) opens over the
 focused terminal. The web-links add-on opens URLs with `open`. A link provider
-finds file references in each line with `fileLinks` in `src/termlinks.ts`
-(tested), resolves them with `candidatePaths` (the container root from
+finds file references with `fileLinks` in `src/termlinks.ts` (tested) in each
+line of output, which `wrappedLine` joins from the rows xterm.js wrapped it
+onto (`isWrapped`), so a link can span rows; it resolves them with `candidatePaths` (the container root from
 `src/sail.ts` maps to the project; a relative path tries the shell's folder,
 then the project's), checks that the file exists with `path_exists` (cached),
 and opens it through the docking host's `openAt`. Tabs are a `tablist` with a
@@ -6797,3 +6803,32 @@ and the project scan covers views too. The conversion moved from
 attributes, since completion needs none of them. The scan reads views in
 `resources/views` only, since views that packages or modules register live
 elsewhere and the index doesn't list Blade files.
+
+### 2026-10-01: Format on save runs in an editor, hidden when the file isn't shown
+
+Format on save formatted only the active tab through Monaco's format action;
+other tabs got the project formatter's text as one edit, and Monaco's built-in
+formatters, which have no API without an editor, skipped them. `saveFile` now
+calls `formatModel` for every file, which runs the action in an editor showing
+the file or in a hidden editor made for the save. Every file then goes through
+the same providers, with minimal edits.
+
+### 2026-10-01: Editor pane borders are splitters held by the panes
+
+The borders between editor panes were a 4-pixel zone that a pointer handler
+found by geometry, so the keyboard couldn't reach them. They're now
+`src/splitter.ts` handles, so they get focus, the separator role, and the arrow
+keys as the other splits do. Elements between a group's children would have
+to be skipped wherever the layout reads them, so each pane holds handles for
+its own left and top edges, and the splitter's new `resize` option trades
+`flex-grow` instead of setting a width. Double-click and Enter keep the sizes,
+since panes have no default size to go back to.
+
+### 2026-10-01: Terminal file links read the whole wrapped line
+
+xterm.js asks a link provider for links one buffer row at a time, so a file
+reference that wrapped was split in two and matched neither half. The
+provider now reads the row's whole line, from the first row back through
+`isWrapped` to the last, and maps each link's offsets back to cells, so its
+range can start on one row and end on another. Each row of a long line reads
+the line again, which is a few rows of text per hover.

@@ -11,7 +11,7 @@ import { containerRoot } from "./sail";
 import { scrollbackText } from "./scrollback";
 import { onSettings, registerSettings, settings as editorSettings } from "./settings";
 import { showError } from "./status";
-import { candidatePaths, fileLinks } from "./termlinks";
+import { candidatePaths, fileLinks, wrappedLine } from "./termlinks";
 import { onTheme } from "./themes";
 
 /**
@@ -108,7 +108,7 @@ async function existing(candidates: string[]) {
 function linkFiles(term: Terminal, cwd: () => string) {
   term.registerLinkProvider({
     provideLinks(y, callback) {
-      const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      const { text, cell } = wrappedLine(term.buffer.active, y - 1);
       const refs = fileLinks(text);
       if (!refs.length) return callback(undefined);
       const root = editorHost.root();
@@ -117,7 +117,7 @@ function linkFiles(term: Terminal, cwd: () => string) {
           all
             .filter((a) => a.path)
             .map(({ r, path }) => ({
-              range: { start: { x: r.start + 1, y }, end: { x: r.end, y } },
+              range: { start: cell(r.start), end: cell(r.end - 1) },
               text: text.slice(r.start, r.end),
               activate: () => editorHost.openAt(path!, r.line, r.column),
             })),

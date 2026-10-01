@@ -386,12 +386,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .split > * { flex: 1; min-width: 0; min-height: 0; }
 .split.row > * + * { border-left: 1px solid var(--border); }
 .split.col > * + * { border-top: 1px solid var(--border); }
-#editor .pane { display: flex; flex-direction: column; }
+#editor .pane { display: flex; flex-direction: column; position: relative; }
 .pane-editor { flex: 1; min-height: 0; position: relative; }
 /* The focused pane's current tab is underlined in the accent color; other panes' in gray. */
 .pane:not(.focused) .tabs .tab.active::after { background: var(--faint); }
-#editor.sash-row, #editor.sash-row * { cursor: col-resize !important; }
-#editor.sash-col, #editor.sash-col * { cursor: row-resize !important; }
+/* The splitters on a pane's left and top edges, over its border with the pane or group before it. */
+#editor .pane > .splitter { position: absolute; z-index: 20; }
+#editor .pane > .splitter-x { top: 0; bottom: 0; left: -4px; width: 8px; }
+#editor .pane > .splitter-y { left: 0; right: 0; top: -4px; height: 8px; }
 .tabs .tab.drop-before, #terminal-tabs .tab.drop-before { box-shadow: inset 2px 0 var(--accent); }
 .pane.drop-target .pane-editor { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Dropping on an edge splits the pane: the half the new pane will take is shaded. */

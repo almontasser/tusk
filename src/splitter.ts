@@ -23,6 +23,8 @@ export type SplitterOptions = {
   save?: string;
   /** A localStorage key an older version kept the size under, read while there's no size saved under `save`. */
   legacyKey?: string;
+  /** Applies a size in place of setting the target's width or height, such as for panes that share by flex-grow. */
+  resize?(size: number): void;
   /** Runs after the size changes, such as to fit a terminal. */
   onResize?(size: number): void;
 };
@@ -71,7 +73,8 @@ export function splitter(handle: HTMLElement, o: SplitterOptions) {
   };
   const set = (size: number, save = true) => {
     const clamped = Math.round(Math.max(min, Math.min(max(), size)));
-    o.target.style[horizontal ? "width" : "height"] = `${clamped}px`;
+    if (o.resize) o.resize(clamped);
+    else o.target.style[horizontal ? "width" : "height"] = `${clamped}px`;
     handle.ariaValueNow = String(clamped);
     handle.ariaValueMin = String(min);
     handle.ariaValueMax = String(Math.round(max()));

@@ -70,6 +70,7 @@ import { limits } from "./limits";
 import "./spelling";
 import "./phpstan";
 import "./magosettings";
+import { splitter } from "./splitter";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
@@ -95,7 +96,7 @@ const activeFile = () => (isView(active) ? "" : active);
 function addPane(): Pane {
   const el = document.createElement("div");
   el.className = "pane";
-  el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-editor"></div>`;
+  el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-editor"></div><div class="pane-sash-x"></div><div class="pane-sash-y"></div>`;
   const ed = createEditor(el.querySelector<HTMLElement>(".pane-editor")!);
   // The code's context menu is the app's (codeMenu), with PhpStorm's actions and shortcuts rather than VS Code's.
   ed.updateOptions({ contextmenu: false });
@@ -477,47 +478,39 @@ function showViews(pane: Pane, shown: string) {
   }
 }
 
-// Drag the border between two panes to resize them. The border has no element of its own: a press
-// within 4 pixels of a pane's or group's leading edge, next to a sibling, starts the resize.
-function sashAt(e: MouseEvent) {
-  for (let el = (e.target as HTMLElement).closest<HTMLElement>(".split > *"); el; el = el.parentElement!.closest<HTMLElement>(".split > *")) {
-    const row = el.parentElement!.classList.contains("row");
-    const r = el.getBoundingClientRect();
-    if (el.previousElementSibling && (row ? e.clientX - r.left : e.clientY - r.top) <= 4) return { el, row };
-    const next = el.nextElementSibling as HTMLElement | null;
-    if (next && (row ? r.right - e.clientX : r.bottom - e.clientY) <= 4) return { el: next, row };
-  }
-  return null;
+// Each pane's left and top edges are splitters (src/splitter.ts) when another pane or group is there. A splitter
+// resizes the pane or the group whose edge it is, `el`, against the one before it; nested panes on one edge share it.
+function placeSashes() {
+  for (const pane of panes)
+    for (const row of [true, false]) {
+      const handle = pane.el.querySelector<HTMLElement>(row ? ".pane-sash-x" : ".pane-sash-y")!;
+      let el: HTMLElement | null = pane.el;
+      while (el && !(el.previousElementSibling && el.parentElement!.classList.contains(row ? "row" : "col"))) el = el.parentElement!.closest<HTMLElement>(".split > *");
+      handle.hidden = !el;
+      if (!el) continue;
+      const next = el;
+      const prev = el.previousElementSibling as HTMLElement;
+      const size = (e: HTMLElement) => e.getBoundingClientRect()[row ? "width" : "height"];
+      splitter(handle, {
+        target: prev,
+        axis: row ? "x" : "y",
+        edge: "end",
+        label: row ? "Resize the panes left and right of it" : "Resize the panes above and below it",
+        max: () => size(prev) + size(next) - 80,
+        // Every sibling's flex-grow becomes its size in pixels, so the two being resized can trade pixels.
+        // Measure them all before changing any, since each change reflows the rest.
+        resize(px) {
+          const siblings = [...next.parentElement!.children] as HTMLElement[];
+          const sizes = siblings.map(size);
+          siblings.forEach((child, i) => (child.style.flexGrow = String(sizes[i])));
+          const total = sizes[siblings.indexOf(prev)] + sizes[siblings.indexOf(next)];
+          prev.style.flexGrow = String(px);
+          next.style.flexGrow = String(total - px);
+        },
+        onResize: () => saveSoon(),
+      });
+    }
 }
-$("editor").addEventListener("pointermove", (e) => {
-  if (e.buttons) return;
-  const sash = sashAt(e);
-  $("editor").classList.toggle("sash-row", !!sash?.row);
-  $("editor").classList.toggle("sash-col", !!sash && !sash.row);
-});
-$("editor").addEventListener("pointerdown", (e) => {
-  const sash = sashAt(e);
-  if (!sash) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const { el, row } = sash;
-  const prev = el.previousElementSibling as HTMLElement;
-  // Every sibling's flex-grow becomes its size in pixels, so the two being resized can trade pixels.
-  // Measure them all before changing any, since each change reflows the rest.
-  const siblings = [...el.parentElement!.children] as HTMLElement[];
-  const sizes = siblings.map((child) => child.getBoundingClientRect()[row ? "width" : "height"]);
-  siblings.forEach((child, i) => (child.style.flexGrow = String(sizes[i])));
-  const start = prev.getBoundingClientRect()[row ? "left" : "top"];
-  const total = parseFloat(prev.style.flexGrow) + parseFloat(el.style.flexGrow);
-  const move = (m: PointerEvent) => {
-    const size = Math.min(Math.max((row ? m.clientX : m.clientY) - start, 80), total - 80);
-    prev.style.flexGrow = String(size);
-    el.style.flexGrow = String(total - size);
-  };
-  const up = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", up), saveSoon());
-  addEventListener("pointermove", move);
-  addEventListener("pointerup", up);
-}, true);
 
 /** `grow` is the pane's or group's flex-grow after a resize. */
 type Layout = ({ paths: string[]; active: string } | { dir: "row" | "col"; children: Layout[] }) & { grow?: string };
@@ -1188,11 +1181,7 @@ async function writeModel(path: string) {
 async function saveFile(path: string) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
-  if (formatOnSave(tab.model.getLanguageId())) {
-    // The active editor formats through Monaco, which applies minimal edits and keeps the cursor in place.
-    if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
-    else await formatModel(tab.model);
-  }
+  if (formatOnSave(tab.model.getLanguageId())) await formatModel(tab.model);
   await applySaveRules(tab.model);
   const text = tab.model.getValue();
   try {
@@ -1315,6 +1304,7 @@ function renderTabs() {
     pane.bar.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     showViews(pane, shown);
   }
+  placeSashes();
   showBreadcrumbs($("path"), activeFile() ? relative(active) : "", editor);
   followEditor(activeFile(), editor.getPosition());
   $("empty-editor").hidden = tabs.size + views.size > 0 || !root;
