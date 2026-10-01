@@ -40,7 +40,7 @@ file to change when you add it.
 
 | Area | Gap |
 | --- | --- |
-| Git | Push, update, and fetch can't answer a password or passphrase prompt; when one is needed, the message offers to run the command in a terminal tab (`src/sync.ts`). The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
+| Git | Push, update, and fetch ask for passwords and passphrases in a dialog, but other git commands that reach a remote, such as checking out a pull request, can't, and fail when one is needed (`gitOutput` in `src/git.ts`). Security keys that need a touch or a PIN, beyond ssh's own prompts, aren't supported. The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). |
 | Find in files | Results stop at 20,000 matches, which **Settings > Limits** changes, so the replace preview lists only those; **Replace in All Files…** changes every matching file without a preview. Refactorings that search the project, such as Safe Delete, stop at 20,000 matches whatever the setting. |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
 | Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
@@ -2699,8 +2699,13 @@ step:
 
 - The remote has commits you don't: **Update and Push** updates, then pushes.
 - The update stopped for conflicts: **Resolve** opens the merge tool.
-- Git needs a password or passphrase: **Run in Terminal** runs the command in a
-  terminal tab, where you can type it.
+- Git couldn't log in, such as after a canceled or wrong password: **Run in
+  Terminal** runs the command in a terminal tab.
+
+When git or ssh needs a password, a username, or a key's passphrase, or asks
+you to trust a new host's key, Tusk asks in a dialog. The answer goes straight
+to git and isn't kept; to save it, use git's credential helper or your SSH
+agent.
 
 To stage part of a file, open its diff from **Changes** and click **Stage
 Selected**:
@@ -3749,6 +3754,7 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
 | `src-tauri/src/grpc.rs` | gRPC calls for the HTTP client, with schemas from server reflection or the project's `.proto` files |
 | `src-tauri/src/profile.rs` | Reads Xdebug's Cachegrind profiles |
+| `src-tauri/src/askpass.rs` | Asks git's and ssh's password and passphrase prompts in a dialog |
 | `src-tauri/resources/mago.toml` | Default Mago configuration |
 | `tusk-lsp/` | The PHP language server, which the app runs as `tusk lsp`: indexing, navigation, completion, diagnostics, refactorings, and Laravel and Filament features |
 | `tusk-lsp/php/introspect.php` | Reads resources and models from the project, for the server and the editor |

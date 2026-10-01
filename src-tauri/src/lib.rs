@@ -1,3 +1,4 @@
+pub mod askpass;
 mod db;
 mod fs;
 mod grpc;
@@ -178,6 +179,7 @@ pub fn run() {
         )
         .setup(|_app| {
             toolpaths::init(_app.handle());
+            askpass::start(_app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = _app.get_webview_window("main") {
                 window.with_webview(|w| hide_write_with_siri(w.inner()))?;
@@ -207,6 +209,8 @@ pub fn run() {
         .manage(ws::WsState::default())
         .manage(grpc::GrpcState::default())
         .invoke_handler(tauri::generate_handler![
+            askpass::askpass_env,
+            askpass::askpass_answer,
             db::db_query,
             db::db_batch,
             db::db_cancel,

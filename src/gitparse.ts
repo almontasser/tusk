@@ -624,3 +624,13 @@ export function resolveSimple(base: string[], ours: string[], theirs: string[]):
   }
   return [...out, ...base.slice(at)];
 }
+
+/**
+ * How to ask a git or ssh prompt sent to the askpass program: ssh's confirmations as Yes or No, a username as
+ * plain text, and anything else, such as a password or a key's passphrase, hidden as you type.
+ */
+export function askpassKind(prompt: string, confirm: boolean): "confirm" | "yesno" | "text" | "secret" {
+  if (confirm) return "confirm";
+  if (/\(yes\/no/i.test(prompt)) return "yesno";
+  return /^\s*username/i.test(prompt) ? "text" : "secret";
+}
