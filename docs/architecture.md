@@ -2200,7 +2200,10 @@ starts with `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a
 directive's arguments `;  [$a]` (an array, since `@include('a', [...])` is a
 list), a bound component attribute `:post="$post"` reads `;[$post]`, and
 `@foreach`, `@forelse`, `@for`, and `@while` keep the loop, as
-`;foreach (…)`, whose body is the empty statement that follows. `@php …
+`;foreach (…)`. Its body is a block, so the loop variable keeps its type inside:
+the next statement starts with `{` instead of `;`, and `@endforeach` (or
+`@empty` in a `@forelse`) reads `;}`. Loops left open are closed at the end of
+the file. `@if` stays an expression statement, so it doesn't narrow types. `@php …
 @endphp` and `<?php … ?>` keep their code. Only Laravel's own directives are
 read, not every `@word(`, so CSS's `@media` and text stay text, as Blade
 leaves unknown directives; `{{-- --}}`, `@{{`, `@@`, and `@verbatim` are
@@ -2209,12 +2212,28 @@ reading strings. `virtual_php` in the same file serves completion and the
 framework's checks instead: it reads only the directives that name views,
 translations, or abilities, and needs no first line.
 
+`view_types` in `tusk-lsp/src/framework/laravel/views.rs` finds the view's
+variables. It reads each project PHP file that has the view's name in quotes,
+analyzes it, and takes each string with that name that's an argument of a call
+named `view`, `make`, or `markdown`: the next argument's type gives the
+variables, since Mago types both `compact('post')` and `['post' => $post]` as
+keyed arrays, and `->with()` calls chained on the call add more. A string inside
+a `Livewire\Component` subclass, such as `render()`'s view or a Filament page's
+`$view`, adds the class's public properties. A variable is kept only when every
+such place passes it with a type `docblock_type` can write (literals widened,
+`mixed` dropped), joined into a union. `checked_php` declares the variables on
+its first line as `/** @var T $post */ $post = $post;`: Mago takes the `@var`
+for the assignment, and the undefined read is dropped like any other.
+
 `blade_problems_in` in `tusk-lsp/src/diagnostics.rs` runs Mago's analyzer on
 that file against the server's codebase, as for a PHP file, with the view's
 path, so `mago.toml`'s ignores and excludes apply. It drops undefined
 variables, unused statements (every echo is one), Laravel's magic properties
-and methods, and uses of `mixed` values (`blade_noise`), since the view's
-variables have no types. Open views get these with the framework's problems on
+and methods, uses of `mixed` values, and the redundant, impossible, and
+"possibly" problems that typed variables bring without narrowing
+(`blade_noise`): a guard such as `@isset($post)` is there for another place
+that renders the view, and `@if ($a->paid_at)` doesn't make `paid_at`
+non-null inside. Open views get these with the framework's problems on
 each edit, and the project scan (`tusk/projectProblems`) checks every view in
 `resources/views`. The editor filters a view's problems with `realProblems` as
 a PHP file's, since they sit at the view's positions.
@@ -6868,6 +6887,22 @@ provider now reads the row's whole line, from the first row back through
 `isWrapped` to the last, and maps each link's offsets back to cells, so its
 range can start on one row and end on another. Each row of a long line reads
 the line again, which is a few rows of text per hover.
+
+### 2026-10-01: A view's variables are typed from where it's rendered
+
+Mistakes on a view's variables, such as `{{ $post->titel }}`, weren't reported,
+since the view doesn't say what it gets. The server now reads the places that
+render the view and types the variables they pass, but only when every place
+passes the variable with a known type, so a view rendered with different data
+in two places isn't checked against one of them. Wrapping the view in a
+function with `@param` tags didn't work: Mago reads a function's parameters
+from the codebase, which doesn't hold the view, so `@var` on an assignment
+declares them instead. Loop bodies became blocks so the loop variable keeps its
+element type. `@if` isn't made a branch, since `@elseif` and `@else` have no
+spare bytes for the `;}` a block needs before them, so "possibly null" problems
+are dropped in views. Finding the places reads every project file per check,
+about 25 ms per view on a Laravel app with 300 PHP files, so there's no cache
+yet.
 
 ### 2026-10-01: Cache library declarations, not the populated index
 

@@ -91,10 +91,13 @@ const PHP_DIRECTIVES: &[&str] = &[
 /// the view's `@use` imports. After that line comes the view with everything but its PHP blanked, so an offset
 /// past the first line, less its length, is the view's. Each piece of PHP becomes a statement that starts with
 /// `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an array,
-/// since they may be a list), `@foreach` keeps its keyword, as `;foreach (…)`, whose body is the empty
-/// statement that follows, and `@php … @endphp` and `<?php … ?>` keep their code as is. Unlike
+/// since they may be a list), `@foreach` keeps its keyword, as `;foreach (…)`, and its body is a block from
+/// the next statement, which starts with `{` instead, to `@endforeach`, which reads `;}`, and `@php … @endphp` and `<?php … ?>` keep their code as is. Unlike
 /// [`virtual_php`], it reads every directive, loop, and component attribute, to check them all.
-pub fn checked_php(text: &str) -> (String, usize) {
+///
+/// `vars`, the view's variables with their docblock types, are declared on the first line, so Mago checks their
+/// uses.
+pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
     let src = text.as_bytes();
     let mut out: Vec<u8> = src.iter().map(|b| if matches!(b, b'\n' | b'\r') { *b } else { b' ' }).collect();
     let put = |out: &mut Vec<u8>, at: usize, s: &[u8]| out[at..at + s.len()].copy_from_slice(s);
@@ -106,6 +109,9 @@ pub fn checked_php(text: &str) -> (String, usize) {
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let at_word = |i: usize, w: &[u8]| src[i..].starts_with(w) && !src.get(i + w.len()).is_some_and(|b| word(*b));
     let mut imports: Vec<String> = vec![];
+    // The loops open around `i`, each `true` for `@forelse`, and whether the last one's body is still to start.
+    let mut loops: Vec<bool> = vec![];
+    let mut pending = false;
     let mut i = 0;
     while i < src.len() {
         let rest = &src[i..];
@@ -116,7 +122,9 @@ pub fn checked_php(text: &str) -> (String, usize) {
         } else if rest.starts_with(b"{{") || rest.starts_with(b"{!!") {
             let raw = rest[1] == b'!';
             let Some(end) = find(src, i, if raw { b"!!}" } else { b"}}" }) else { break };
-            put(&mut out, if raw { i + 1 } else { i }, b";[");
+            let at = if raw { i + 1 } else { i };
+            lead(&mut out, at, &mut pending);
+            out[at + 1] = b'[';
             keep(&mut out, i + if raw { 3 } else { 2 }, end);
             out[end] = b']';
             i = end + if raw { 3 } else { 2 };
@@ -128,7 +136,7 @@ pub fn checked_php(text: &str) -> (String, usize) {
                 None if php => break,
                 None => src.len(),
             };
-            out[i] = b';';
+            lead(&mut out, i, &mut pending);
             keep(&mut out, i + if php { 4 } else { 5 }, end);
             if end < src.len() {
                 out[end] = b';';
@@ -142,6 +150,16 @@ pub fn checked_php(text: &str) -> (String, usize) {
             let open = name_end + src[name_end..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
             let end = (name_end > i + 1 && src.get(open) == Some(&b'(') && PHP_DIRECTIVES.contains(&name)).then(|| matching_paren(src, open)).flatten();
             let Some(end) = end.map(|e| e + 1) else {
+                // A loop's end closes its body; `@empty` ends a `@forelse`'s.
+                let forelse = match name {
+                    "endforeach" | "endfor" | "endwhile" => Some(false),
+                    "endforelse" | "empty" => Some(true),
+                    _ => None,
+                };
+                if forelse.is_some() && loops.last() == forelse.as_ref() {
+                    loops.pop();
+                    put(&mut out, i, if std::mem::take(&mut pending) { b"{}" } else { b";}" });
+                }
                 i = name_end;
                 continue;
             };
@@ -162,12 +180,16 @@ pub fn checked_php(text: &str) -> (String, usize) {
                 }
             } else if matches!(name, "foreach" | "forelse" | "for" | "while") {
                 put(&mut out, i, if name == "forelse" { b";foreach" } else { b";" });
+                lead(&mut out, i, &mut pending);
                 if name != "forelse" {
                     keep(&mut out, i + 1, name_end);
                 }
                 keep(&mut out, open, end);
+                // The statements up to the loop's end are its body, in a block that the next statement opens.
+                loops.push(name == "forelse");
+                pending = true;
             } else {
-                out[i] = b';';
+                lead(&mut out, i, &mut pending);
                 out[open] = b'[';
                 keep(&mut out, open + 1, end - 1);
                 out[end - 1] = b']';
@@ -199,7 +221,7 @@ pub fn checked_php(text: &str) -> (String, usize) {
                     p += 1;
                     continue;
                 };
-                out[eq] = b';';
+                lead(&mut out, eq, &mut pending);
                 out[q] = b'[';
                 keep(&mut out, q + 1, close);
                 out[close] = b']';
@@ -210,8 +232,16 @@ pub fn checked_php(text: &str) -> (String, usize) {
             i += 1;
         }
     }
-    let head = format!("<?php {}\n", imports.join(" "));
-    (format!("{head}{};", String::from_utf8(out).unwrap_or_default()), head.len())
+    // `@var` on an assignment types each variable; the `$x` read before it is undefined, which isn't reported.
+    let vars: String = vars.iter().map(|(name, t)| format!(" /** @var {t} ${name} */ ${name} = ${name};")).collect();
+    let head = format!("<?php {}{vars}\n", imports.join(" "));
+    let tail = format!("{}{}", if pending { "{" } else { ";" }, "}".repeat(loops.len()));
+    (format!("{head}{}{tail}", String::from_utf8(out).unwrap_or_default()), head.len())
+}
+
+/// Starts a statement at `at` with `;`, which ends the one before, or with `{` when it's the first in a loop's body.
+fn lead(out: &mut [u8], at: usize, pending: &mut bool) {
+    out[at] = if std::mem::take(pending) { b'{' } else { b';' };
 }
 
 fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
@@ -303,7 +333,7 @@ mod tests {
 
     /// The checked PHP without its first line.
     fn body(blade: &str) -> String {
-        let (php, head) = checked_php(blade);
+        let (php, head) = checked_php(blade, &[]);
         php[head..].to_string()
     }
 
@@ -312,15 +342,18 @@ mod tests {
         let blade = "<h1 class=\"{{ $a }}\">{!! $b !!}</h1>\n@if ($c && f(')'))\n  @foreach ($posts as $post) x @endforeach\n@endif\n@php $d = 1; @endphp";
         let php = body(blade);
         assert_eq!(php.len(), blade.len() + 1);
-        assert_eq!(php, "           ;[ $a ]    ;[ $b ]       \n;   [$c && f(')')]\n  ;foreach ($posts as $post)              \n      \n;    $d = 1; ;      ;");
+        assert_eq!(php, "           ;[ $a ]    ;[ $b ]       \n;   [$c && f(')')]\n  ;foreach ($posts as $post)   {}         \n      \n;    $d = 1; ;      ;");
     }
 
     #[test]
     fn checks_directive_lists_loops_use_and_bound_component_attributes() {
         assert_eq!(body("@include('a', ['x' => 1])"), ";       ['a', ['x' => 1]];");
-        assert_eq!(body("@forelse($a as $b) @empty @endforelse"), ";foreach($a as $b)                   ;");
+        assert_eq!(body("@forelse($a as $b) @empty @endforelse"), ";foreach($a as $b) {}                ;");
+        // A loop's body is a block, so its variables keep their types in it; an unclosed one is closed at the end.
+        assert_eq!(body("@foreach ($a as $b) {{ $b }} @endforeach"), ";foreach ($a as $b) {[ $b ]  ;}         ;");
+        assert_eq!(body("@while($a) @php $a--; @endphp"), ";while($a) {    $a--; ;      ;}");
         assert_eq!(body("<x-card :post=\"$post\" ::alpine=\"x\" title=\"t\" />"), "             ;[$post]                          ;");
-        assert!(checked_php("@use('App\\Models\\Post', 'P')").0.starts_with("<?php use App\\Models\\Post as P;\n"));
+        assert!(checked_php("@use('App\\Models\\Post', 'P')", &[]).0.starts_with("<?php use App\\Models\\Post as P;\n"));
     }
 
     #[test]
@@ -345,3 +378,4 @@ mod tests {
         assert_eq!(found[0].0, 1);
     }
 }
+
