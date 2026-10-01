@@ -28,10 +28,11 @@ const messageOf = (d: Diagnostic) => (typeof d.message === "string" ? d.message 
 export const isLibrary = (path: string) => /\/(vendor|node_modules)\//.test(path);
 
 /**
- * Pest binds each test closure to the project's test case, so `$this->get()` works, but Mago can't see that.
- * In Pest files, drop its complaints about `$this` lines.
+ * Pest's test closures run as methods of the project's test case, which the PHP server reads from tests/Pest.php, so
+ * `$this->get()` checks. They can also set properties the class doesn't declare (`$this->user = …` in
+ * `beforeEach()`), which Mago reports and then reads as `mixed`. PHPStan doesn't know the binding, so its problems
+ * about `$this` lines are dropped.
  */
-// ponytail: drops every such problem on a `$this` line; reading tests/Pest.php could type `$this` instead.
 const isPestFile = (path: string, text: string) => /\/tests\//.test(path) && /^\s*(it|test|describe|arch)\(/m.test(text);
 
 function pestFalsePositive(text: string, lines: string[], lineStarts: number[], d: Diagnostic): boolean {
@@ -45,7 +46,11 @@ function pestFalsePositive(text: string, lines: string[], lineStarts: number[], 
     if (/^(\s|\/\/.*)*expect\(/.test(text.slice(start))) return true;
   }
   const line = lines[d.range.start.line];
-  return line !== undefined && line.includes("$this") && /\$this|TestCase|`mixed`/.test(message);
+  if (line === undefined || !line.includes("$this")) return false;
+  // PHPStan doesn't know the binding.
+  if (!/^mago/.test(d.source ?? "")) return /\$this|TestCase|`mixed`/.test(message);
+  const property = d.code === "non-existent-property" && message.match(/^Property `\$(\w+)`/);
+  return (!!property && new RegExp(`\\$this->${property[1]}\\b`).test(line)) || /`mixed`/.test(message);
 }
 
 /**

@@ -616,9 +616,6 @@ its patch applies, so another Laravel version keeps its own files. The patches:
 - `artisan()` in tests returns a `PendingCommand`, not `PendingCommand|int`.
 - A service provider's `$app` is `Illuminate\Foundation\Application`, and
   `Storage::disk()` a `FilesystemAdapter` (with `assertExists()` and `url()`).
-- Pest's `it()`, `test()`, and `beforeEach()` bind their closure to the test
-  case `tests/Pest.php` extends, not to `TestCall` as Pest's
-  `@param-closure-this` says.
 - Collections' `TKey` and Eloquent's builder `TModel` are covariant, so
   `Collection<non-negative-int, X>` passes as `Collection<int, X>`, and
   `Builder<Post>` as `Builder<Model>` (Filament's `getEloquentQuery()`).
@@ -878,15 +875,26 @@ indexes the project again with its configuration read again when
 
 ### Pest in diagnostics
 
-Pest binds test closures to the test case that `tests/Pest.php` sets, so
-`$this->get()` works in a Pest test. Mago reads the type from the corrected
-copy of Pest's functions (see "Types Mago reads wrong"). In files under
-`tests/` that call `it()`, `test()`, `describe()`, or `arch()`, the filters
-drop problems that mention `$this`, `TestCase`, or `mixed` on lines that use
-`$this`. They also drop Mago's issues about Pest's own classes, which answer
-through magic (`->not`, higher-order expectations such as `->name->toBe()`),
-and calls on null along an `expect()` chain: `expect()` returns an
-`Expectation<TValue|null>`.
+Pest runs test closures as methods of the test case that `tests/Pest.php`
+binds with `pest()->extend()` or `uses()`, but its `test()`, `it()`,
+`beforeEach()`, and `afterEach()` declare PHPUnit's `TestCase` as the closure's
+`$this` (`@param-closure-this`). After each populate, the index
+(`bind_pest_closures` in `tusk-lsp/src/index.rs`) sets those parameters'
+closure type to the first class Pest.php names, with its imports resolved,
+that extends PHPUnit's `TestCase`. The index reads the names from Pest.php when
+it's built and again when Pest.php changes, so `$this->get()` completes,
+hovers, and checks, and `$this->gte()` is reported.
+
+Pest also lets a test set properties its class doesn't declare (`$this->user =
+…` in `beforeEach()`). In files under `tests/` that call `it()`, `test()`,
+`describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop Mago's
+`non-existent-property` for such a property on `$this`, and issues about
+`mixed` on lines that use `$this`. PHPStan doesn't know the binding, so its
+problems mentioning `$this`, `TestCase`, or `mixed` on those lines are
+dropped too. The filters also drop Mago's issues about Pest's own classes,
+which answer through magic (`->not`, higher-order expectations such as
+`->name->toBe()`), and calls on null along an `expect()` chain: `expect()`
+returns an `Expectation<TValue|null>`.
 
 ### Questions from servers
 
@@ -5313,8 +5321,9 @@ an `artisan` file.
     selection without an end, which the editor opener turns into a position.
 - **Left out on purpose:**
   - The Pest helper file: it would be written into the project, and the
-    functions it declares would duplicate Pest's own in the index. Pest's
-    `$this` problems are filtered in `diagnostics.ts` instead.
+    functions it declares would duplicate Pest's own in the index. The index
+    binds Pest's closures to the project's test case instead (see "Pest in
+    diagnostics").
   - The `laravel/data` request: VS Code's pickers use it, and Tusk's route
     list needs `artisan route:list`'s fields.
 
@@ -6862,3 +6871,18 @@ library file's declarations, keyed by its modification time and size, and the
 binary's identity stands in for Mago's version. Hashing contents would be
 safer than time and size, but reading every file costs most of what the cache
 saves.
+
+### 2026-10-01: Pest's `$this` is bound in the index, for every test file
+
+Pest's own `@param-closure-this` names PHPUnit's `TestCase` (Pest 2 named
+`TestCall`), so Mago saw no `get()` on `$this`, and the editor hid every
+problem on a `$this` line. The `mago-stubs` patch that rewrote Pest's
+docblock matched only Pest 2's text, read Pest.php with a regex that missed
+imported names, and stopped applying once a project had its own `mago.toml`,
+so it's gone. The index now sets the closure type itself after populating,
+from Pest.php's resolved names, which also follows edits to Pest.php without
+a restart. Mago reads a function's metadata from the one codebase that every
+file shares, so the binding is the same for all of `tests/`; binding each
+folder to its own `in()` class would need a codebase per folder. Properties a
+test sets on `$this` stay filtered: typing them would mean analyzing the
+`beforeEach()` closures first.

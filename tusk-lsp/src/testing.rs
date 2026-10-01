@@ -14,6 +14,13 @@ use crate::text::path_to_uri;
 pub const ROOT: &str = "/project";
 pub const CURSOR: &str = "<|>";
 
+/// Pest's functions as Pest declares them, PHPUnit's test case, and a project's test case that `tests/Pest.php` binds.
+pub const PEST: &[(&str, &str)] = &[
+    ("vendor/pest.php", "<?php\nnamespace PHPUnit\\Framework { abstract class TestCase { public function assertTrue($c): void {} } }\nnamespace {\n    /** @param-closure-this \\PHPUnit\\Framework\\TestCase $closure */\n    function it(string $description, ?Closure $closure = null) {}\n    /** @param-closure-this \\PHPUnit\\Framework\\TestCase $closure */\n    function beforeEach(?Closure $closure = null) {}\n}\n"),
+    ("tests/TestCase.php", "<?php\nnamespace Tests;\nabstract class TestCase extends \\PHPUnit\\Framework\\TestCase { public function get(string $uri): void {} }\n"),
+    ("tests/Pest.php", "<?php\nuse Tests\\TestCase;\npest()->extend(TestCase::class)->in('Feature');\n"),
+];
+
 pub struct Fixture {
     pub snap: Snapshot,
     /// The file and position of the cursor marker, if a file had one.

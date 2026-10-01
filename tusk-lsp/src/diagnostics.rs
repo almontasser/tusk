@@ -293,6 +293,36 @@ mod tests {
     }
 
     #[test]
+    fn checks_this_in_pest_tests_against_the_bound_test_case() {
+        let mago = |fx: &Fixture| {
+            php_problems(&fx.snap.index, &fx.doc("tests/Feature/HomeTest.php"))
+                .into_iter()
+                .filter_map(|d| match d.code { Some(NumberOrString::String(c)) if d.source.as_deref() == Some("mago") => Some((c, d.range.start.line)), _ => None })
+                .collect::<Vec<_>>()
+        };
+        let problems = |pest: &str| {
+            let mut files = crate::testing::PEST.to_vec();
+            files.retain(|(name, _)| *name != "tests/Pest.php");
+            files.push(("tests/Pest.php", pest));
+            files.push(("tests/Feature/HomeTest.php", "<?php\nbeforeEach(function () { $this->get('/'); });\nit('loads', function () {\n    $this->get('/');\n    $this->gte('/');\n});\n"));
+            mago(&Fixture::new(&files))
+        };
+        // Bound to Tests\TestCase, by `pest()->extend()` or Pest 1's `uses()`: only the misspelled call is reported.
+        assert_eq!(problems("<?php\nuse Tests\\TestCase;\npest()->extend(TestCase::class)->in('Feature');\n"), vec![("non-existent-method".into(), 4)]);
+        assert_eq!(problems("<?php\nuses(Tests\\TestCase::class)->in('Feature');\n"), vec![("non-existent-method".into(), 4)]);
+        // Without one, PHPUnit's TestCase, which has no `get()`.
+        let unbound = problems("<?php\n");
+        assert_eq!(unbound.iter().filter(|(c, _)| c == "non-existent-method").count(), 3, "{unbound:?}");
+        // Editing Pest.php binds again.
+        let mut files = crate::testing::PEST.to_vec();
+        files.push(("tests/Feature/HomeTest.php", "<?php\nit('loads', function () { $this->get('/'); });\n"));
+        let fx = Fixture::new(&files);
+        assert!(mago(&fx).is_empty());
+        fx.snap.index.write().update(&crate::testing::path("tests/Pest.php"), Some(b"<?php\n".to_vec()));
+        assert_eq!(mago(&fx), vec![("non-existent-method".into(), 1)]);
+    }
+
+    #[test]
     fn honors_expect_pragmas() {
         let code = "<?php\n\ndeclare(strict_types=1);\n\nfunction f(): int {\n    // @mago-expect analysis:invalid-return-statement\n    return 'x';\n}\n";
         let found = problems(code, "");

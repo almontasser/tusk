@@ -20,6 +20,7 @@ use mago_codex::metadata::{CodebaseEntryKeys, CodebaseMetadata};
 use mago_codex::symbol::SymbolKind;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::atomic::object::TObject;
+use mago_codex::ttype::atomic::object::named::TNamedObject;
 use mago_codex::ttype::atomic::reference::TReference;
 use mago_codex::ttype::union::TUnion;
 use mago_codex::ttype::{TType, TypeRef};
@@ -138,6 +139,8 @@ pub struct Index {
     /// What each file declares, for every project and library file.
     declared: HashMap<FileId, Vec<Declared>>,
     excluded: GlobSet,
+    /// The classes `tests/Pest.php` names, in order: one of them is the test case Pest binds test closures to.
+    pest_names: Vec<String>,
 }
 
 /// PHP's built-in functions and classes, built once per process. Building needs a deep stack.
@@ -191,6 +194,18 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
         }
     }
     (meta, used)
+}
+
+/// Pest's configuration file, relative to the project.
+const PEST_FILE: &str = "tests/Pest.php";
+
+/// The names a file uses, fully qualified, in the order they appear.
+fn names_in_order(contents: &[u8]) -> Vec<String> {
+    let arena = LocalArena::new();
+    let program = mago_syntax::parser::parse_file(&arena, &source_file(Path::new(PEST_FILE), FileType::Host, contents.to_vec()));
+    let mut names: Vec<(u32, String)> = NameResolver::new(&arena).resolve(program).iter().map(|(at, _, n, _)| (at, String::from_utf8_lossy(n).into_owned())).collect();
+    names.sort();
+    names.into_iter().map(|(_, n)| n).collect()
 }
 
 /// The lowercase names of the classes, interfaces, and traits a type mentions.
@@ -305,6 +320,7 @@ impl Index {
             library_names: HashMap::new(),
             declared: HashMap::new(),
             excluded,
+            pest_names: vec![],
         }
     }
 
@@ -440,11 +456,13 @@ impl Index {
         if self.config.load_all {
             wanted.extend(self.library_names.keys().cloned());
         }
+        self.pest_names = read(&self.config.root.join(PEST_FILE)).map(|c| names_in_order(&c)).unwrap_or_default();
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
         break_inheritance_cycles(&mut self.codebase, None);
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
+        self.bind_pest_closures();
         progress(total, total);
     }
 
@@ -537,6 +555,9 @@ impl Index {
                 self.forget_library_file(id);
             }
             self.declared.remove(&id);
+            if path == self.config.root.join(PEST_FILE) {
+                self.pest_names = contents.as_deref().map(names_in_order).unwrap_or_default();
+            }
             let Some(contents) = contents else { continue };
             if !self.includes(&path) {
                 continue;
@@ -618,6 +639,25 @@ impl Index {
         populate_codebase(&mut self.codebase, &mut refs, safe, HashSet::default());
         // The analyzer skips "safe" symbols only in its diff mode, but nothing here needs the set kept.
         self.codebase.safe_symbols.clear();
+        self.bind_pest_closures();
+    }
+
+    /// Pest runs each test closure as a method of the project's test case, such as `Tests\TestCase`, which
+    /// `tests/Pest.php` names with `pest()->extend()` or `uses()`. Pest's functions declare only PHPUnit's
+    /// `TestCase` as the closures' `$this`, so this narrows it to the first class Pest.php names that extends it.
+    // ponytail: one class for every test file, though Pest.php's `in()` can bind folders to different classes, so
+    // a Unit test can call a Feature test case's method unreported. Per-file binding needs a codebase per folder.
+    fn bind_pest_closures(&mut self) {
+        const PHPUNIT: &str = "PHPUnit\\Framework\\TestCase";
+        let case = self.pest_names.iter().find(|n| self.codebase.class_extends(n.as_bytes(), PHPUNIT.as_bytes())).map(|n| n.as_str()).unwrap_or(PHPUNIT);
+        let Some(case) = self.codebase.get_class_like(case.as_bytes()).map(|c| c.original_name) else { return };
+        // Pest's functions whose closure Pest binds; `describe()` and `beforeAll()` closures run unbound.
+        for name in ["test", "it", "beforeeach", "aftereach"] {
+            let Some(f) = self.codebase.function_likes.get_mut(&(mago_word::empty_word(), mago_word::ascii_lowercase_word(name.as_bytes()))) else { continue };
+            for this in f.parameters.iter_mut().filter_map(|p| p.closure_this_type.as_mut()) {
+                this.type_union = TUnion::from_atomic(TAtomic::Object(TObject::Named(TNamedObject::new(case))));
+            }
+        }
     }
 
     pub fn path_of(&self, id: FileId) -> Option<&Path> {

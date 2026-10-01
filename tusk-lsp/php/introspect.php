@@ -263,9 +263,6 @@ function describeResource(string $resource, ?string $context): array
  */
 function magoStubs(string $root, string $dir): array
 {
-    // Pest runs each test closure bound to the test case tests/Pest.php extends, not to the TestCall its docblocks say.
-    $pest = @file_get_contents("$root/tests/Pest.php") ?: '';
-    $testCase = preg_match('/(?:extend|uses)\(\s*\\\\?([\w\\\\]+)::class/', $pest, $m) ? $m[1] : null;
     // auth()->user() and Auth::user() ask the default guard, whose users are config/auth.php's model for it.
     global $booted;
     $user = $booted ? config('auth.providers.' . config('auth.guards.' . config('auth.defaults.guard') . '.provider') . '.model') : null;
@@ -290,7 +287,6 @@ function magoStubs(string $root, string $dir): array
         $laravel . 'Support/ServiceProvider.php' => ['@var \\Illuminate\\Contracts\\Foundation\\Application' => '@var \\Illuminate\\Foundation\\Application'],
         // Disks are filesystem adapters, which add assertExists(), url(), and more to the contract.
         $laravel . 'Support/Facades/Storage.php' => ['@method static \\Illuminate\\Contracts\\Filesystem\\Filesystem' => '@method static \\Illuminate\\Filesystem\\FilesystemAdapter'],
-        'vendor/pestphp/pest/src/Functions.php' => $testCase ? ['@param-closure-this TestCall' => "@param-closure-this \\$testCase"] : [],
         $laravel . 'Auth/AuthManager.php' => $user ? ["\n * @mixin \\Illuminate\\Contracts\\Auth\\Guard\n * @mixin \\Illuminate\\Contracts\\Auth\\StatefulGuard" => "\n * @mixin \\EditorStubs\\DefaultGuard"] : [],
         $laravel . 'Support/Facades/Auth.php' => $user ? ['@method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user()' => "@method static \\$user|null user()"] : [],
         // pluck() gives a collection of other values; Mago keeps the original values' type for `static<…>`.
