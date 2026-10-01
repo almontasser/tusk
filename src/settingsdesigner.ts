@@ -4,7 +4,7 @@
 // makes and fills the Filament settings page that edits the class.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import { monaco } from "./editor";
 import * as fapp from "./filamentapp";
 import { majorVersion } from "./filamentcatalog";
@@ -203,7 +203,7 @@ class SettingsDesigner {
   }
 
   async load() {
-    this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the settings…"));
+    redraw(this.el, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the settings…"));
     try {
       const root = this.root;
       // The app's values need it to boot; without them, the designer still edits the code.
@@ -231,16 +231,16 @@ class SettingsDesigner {
 
   render() {
     if (this.error) {
-      this.el.replaceChildren(h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The settings designer can't read this class"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
+      redraw(this.el, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The settings designer can't read this class"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
       return;
     }
     if (this.info && !this.info.installed) {
-      this.el.replaceChildren(h("div", { class: "fd-error" }, icon("package"), h("div", {}, h("strong", {}, "spatie/laravel-settings isn't installed"), h("p", {}, "Settings classes keep app-wide values, such as a tax rate, in the database. Tusk installs the package with Composer, with Filament's settings page plugin when the project has Filament, then publishes its migration and config and migrates."), h("div", { class: "fd-error-actions" }, h("button", { type: "button", class: "primary", onclick: () => void installSettings(() => void this.load()) }, icon("cloud-download"), "Install spatie/laravel-settings")))));
+      redraw(this.el, h("div", { class: "fd-error" }, icon("package"), h("div", {}, h("strong", {}, "spatie/laravel-settings isn't installed"), h("p", {}, "Settings classes keep app-wide values, such as a tax rate, in the database. Tusk installs the package with Composer, with Filament's settings page plugin when the project has Filament, then publishes its migration and config and migrates."), h("div", { class: "fd-error-actions" }, h("button", { type: "button", class: "primary", onclick: () => void installSettings(() => void this.load()) }, icon("cloud-download"), "Install spatie/laravel-settings")))));
       return;
     }
     const s = this.spec!;
     const doc = this.outline;
-    this.el.replaceChildren(
+    redraw(this.el, 
       h(
         "header",
         { class: "fd-header" },

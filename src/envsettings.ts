@@ -3,7 +3,7 @@
 // to `.env` at once through the editor's model, so open tabs and local history stay in step; src/envgen.ts edits
 // the text. Beside each value, the value the booted app uses, from introspect.php, shows when they differ.
 import { invoke } from "@tauri-apps/api/core";
-import { h, icon, iconButton, toast } from "./dom";
+import { h, icon, iconButton, redraw, toast } from "./dom";
 import type { monaco } from "./editor";
 import { blockKeys, encode, envValues, interpolate, isSecret, readEnv, setEnv, timezoneFromEnv, timezoneSource } from "./envgen";
 import * as fapp from "./filamentapp";
@@ -190,10 +190,7 @@ class EnvSettings {
       this.storage(env),
       this.cache(env),
     );
-    // Redrawing after each change keeps the place you were at.
-    const scroll = this.el.querySelector(".md-main")?.scrollTop ?? 0;
-    this.el.replaceChildren(header, main);
-    main.scrollTop = scroll;
+    redraw(this.el, header, main);
     // Once the config files are read, since their notes change the layout above the section.
     if (this.section && this.files.app !== undefined) main.querySelector(`[data-section="${this.section}"]`)?.scrollIntoView({ block: "start" }), (this.section = undefined);
   }

@@ -1,7 +1,7 @@
 // The widget designer: a stats overview's cards or a chart's data, heading, and size, in an editor tab, changed in
 // the widget's code as you go (src/widgetgen.ts), with a preview beside them. A table widget opens in the resource
 // designer's table tab instead.
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import { editFiles, type FileBuild } from "./codeapply";
 import { removeTraitEdits, traitsEdits } from "./usergen";
 import { renderEntryAccess } from "./filamentaccess";
@@ -161,8 +161,8 @@ class WidgetDesigner {
       h("div", { class: "fd-header-titles" }, h("h1", {}, humanize(name)), h("div", { class: "fd-header-chips" }, h("span", { class: "fd-chip-static" }, d ? { stats: "Stats overview", chart: "Chart", other: "Widget" }[this.kind] : "Widget"), h("button", { type: "button", class: "fd-chip-link", onclick: () => host.openAt(this.file, 1) }, icon("go-to-file"), `${name}.php`))),
       h("span", { class: "fd-spacer" }),
     );
-    if (!d) return void this.el.replaceChildren(header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the widget…"));
-    if (d.outline.errors) return void this.el.replaceChildren(header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The widget has syntax errors. Fix them to design it here."))));
+    if (!d) return void redraw(this.el, header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the widget…"));
+    if (d.outline.errors) return void redraw(this.el, header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The widget has syntax errors. Fix them to design it here."))));
     const main = h("div", { class: "md-main" }, this.settings(d));
     let preview: HTMLElement;
     if (this.kind === "stats") {
@@ -177,7 +177,7 @@ class WidgetDesigner {
       preview = h("div");
     }
     main.append(this.accessSection(d));
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, h("div", { class: "ps-preview-head" }, h("strong", {}, "Preview")), preview, this.liveNote())));
+    redraw(this.el, header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, h("div", { class: "ps-preview-head" }, h("strong", {}, "Preview")), preview, this.liveNote())));
   }
 
   private liveNote(): HTMLElement {

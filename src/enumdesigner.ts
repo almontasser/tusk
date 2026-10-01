@@ -3,7 +3,7 @@
 // place (src/enumgen.ts), keeping what the designer can't read. Changes are staged, with the file's code previewed.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import { monaco } from "./editor";
 import { type Attr, caseLabel, caseName, caseValue, CONTRACTS, type DesignedCase, enumEdits, enumFile, type EnumSpec, readEnum, type ReadEnum } from "./enumgen";
 import * as fapp from "./filamentapp";
@@ -72,7 +72,7 @@ class EnumDesigner {
   }
 
   async load() {
-    this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the enum…"));
+    redraw(this.el, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the enum…"));
     try {
       const cat = (await fapp.hasFilament(this.root)) ? await fapp.catalog(this.root).catch(() => null) : null;
       this.heroicons = cat?.heroicons ?? [];
@@ -107,11 +107,11 @@ class EnumDesigner {
 
   render() {
     if (this.error) {
-      this.el.replaceChildren(h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The enum designer can't read this enum"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
+      redraw(this.el, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The enum designer can't read this enum"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
       return;
     }
     const s = this.spec!;
-    this.el.replaceChildren(
+    redraw(this.el, 
       h(
         "header",
         { class: "fd-header" },

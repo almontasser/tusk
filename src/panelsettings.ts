@@ -1,7 +1,7 @@
 // A panel's settings, in an editor tab of its own: its brand, colors, sign-in pages, layout, navigation groups,
 // plugins, and tenancy, read from the panel provider's `panel()` and changed there (src/panelgen.ts), with a preview
 // of the panel beside them. Each change is saved at once, as in the other designers.
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import type { Catalog } from "./filamentcatalog";
 import { type Doc, host } from "./filamentdesigner";
@@ -148,11 +148,11 @@ class PanelSettings {
       h("span", { class: "fd-spacer" }),
       iconButton("refresh", "Read the panel again", () => (fapp.forget(["panel-options", "app"]), void this.load())),
     );
-    if (this.error) return void this.el.replaceChildren(header, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "Can't read the panel"), h("p", {}, this.error))));
+    if (this.error) return void redraw(this.el, header, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "Can't read the panel"), h("p", {}, this.error))));
     const code = this.code();
-    if (!this.doc) return void this.el.replaceChildren(header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the panel…"));
+    if (!this.doc) return void redraw(this.el, header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the panel…"));
     if (!code?.main)
-      return void this.el.replaceChildren(
+      return void redraw(this.el, 
         header,
         h("div", { class: "md-main" }, h("p", { class: "fd-note" }, "The designer reads the calls on $panel in the provider's panel() method, and there are none it can read. Open the code to change the panel."), h("button", { type: "button", onclick: () => host.openAt(this.file, 1) }, icon("go-to-file"), "Open the code")),
       );
@@ -168,7 +168,7 @@ class PanelSettings {
       this.twoFactor(text, code),
       this.tenancy(text, code),
     );
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, this.preview(text, code)));
+    redraw(this.el, header, h("div", { class: "md-body" }, main, this.preview(text, code)));
   }
 
   private section(group: string, text: string, code: PanelCode): HTMLElement {

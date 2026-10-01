@@ -2,6 +2,19 @@
 type Child = Node | string | null | undefined | false;
 type Props<K extends keyof HTMLElementTagNameMap> = Omit<Partial<HTMLElementTagNameMap[K]>, "style"> & { class?: string; style?: string; data?: Record<string, string> };
 
+/**
+ * Replaces `el`'s children, keeping where its scrolled panes were: a designer redraws itself whole after each
+ * change, and would otherwise jump to the top. Panes are matched by class and order.
+ */
+export function redraw(el: HTMLElement, ...children: Child[]) {
+  const scrolled = [...el.querySelectorAll<HTMLElement>("*")].filter((e) => e.scrollTop && e.className).map((e) => [e.className, [...el.getElementsByClassName(e.className)].indexOf(e), e.scrollTop] as const);
+  el.replaceChildren(...children.filter((c): c is Node | string => !!c));
+  for (const [cls, i, top] of scrolled) {
+    const e = el.getElementsByClassName(cls)[i];
+    if (e) e.scrollTop = top;
+  }
+}
+
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props<K> = {} as Props<K>, ...children: Child[]) {
   const e = document.createElement(tag);
   const { class: className, style, data, ...rest } = props;

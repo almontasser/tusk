@@ -3,7 +3,7 @@
 // runs. It also explains that the scheduler must run, with buttons for development and the line for a server's
 // cron, and edits the prunable() query of the models `model:prune` cleans up.
 import { invoke } from "@tauri-apps/api/core";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import { editFiles } from "./codeapply";
 import * as fapp from "./filamentapp";
 import { host } from "./filamentdesigner";
@@ -203,10 +203,7 @@ class ScheduleDesigner {
       this.tasksSection(),
       this.pruneSection(),
     );
-    // Each change draws the view again; keep the place you were at.
-    const scroll = this.el.querySelector(".md-main")?.scrollTop ?? 0;
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, this.schedulerNote())));
-    main.scrollTop = scroll;
+    redraw(this.el, header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, this.schedulerNote())));
   }
 
   // ---- The scheduler ----

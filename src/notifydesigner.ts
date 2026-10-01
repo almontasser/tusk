@@ -4,7 +4,7 @@
 // notifications. Action buttons send them through src/notifysend.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { editFiles } from "./codeapply";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import { type Catalog, humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -252,8 +252,8 @@ class NotificationDesigner {
       h("span", { class: "fd-spacer" }),
       iconButton("refresh", "Check again", () => (fapp.forget(["app:notification"]), void this.load())),
     );
-    if (!d) return void this.el.replaceChildren(header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the notification…"));
-    if (d.outline.errors) return void this.el.replaceChildren(header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The notification has syntax errors. Fix them to design it here."))));
+    if (!d) return void redraw(this.el, header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the notification…"));
+    if (d.outline.errors) return void redraw(this.el, header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The notification has syntax errors. Fix them to design it here."))));
     const rec = this.rec(d.cls);
     const ch = readChannels(d.cls);
     const channels = "channels" in ch ? ch.channels : null;
@@ -267,7 +267,7 @@ class NotificationDesigner {
     if (bell && !("code" in bell) && (!channels || channels.includes("database"))) preview.append(this.bellPreview(bell));
     if (mail && !("code" in mail) && (!channels || channels.includes("mail"))) preview.append(this.mailPreview(mail));
     preview.append(h("p", { class: "fd-note" }, model ? `Sample values stand in for the ${humanize(shortClass(model)).toLowerCase()}'s fields.` : "The notification isn't about a record."));
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, preview));
+    redraw(this.el, header, h("div", { class: "md-body" }, main, preview));
   }
 
   // ---- What it needs ----

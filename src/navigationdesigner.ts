@@ -4,7 +4,7 @@
 // `navigationGroups([...])`. The inspector changes one item's label, icon, group, parent item, cluster, and whether
 // it shows. Settings a method decides, and items from packages, show as they are. The logic is src/navgen.ts's.
 import { editFiles, type FileBuild } from "./codeapply";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import { type Doc, host, openDesigner } from "./filamentdesigner";
 import { askName, commitInput, heroicon, pickHeroicon, toggleSwitch } from "./filamentpickers";
@@ -277,8 +277,8 @@ class NavigationDesigner {
       this.panel?.provider?.file ? iconButton("settings-gear", "Panel settings: group icons and collapsing", () => void import("./panelsettings").then((m) => m.openPanelSettings(this.abs(this.panel!.provider!.file!), this.panelId))) : null,
       iconButton("refresh", "Read the navigation again", () => (fapp.forget(["app"]), void this.load())),
     );
-    if (this.error) return void this.el.replaceChildren(header, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "Can't read the navigation"), h("p", {}, this.error))));
-    if (!this.nav) return void this.el.replaceChildren(header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the navigation…"));
+    if (this.error) return void redraw(this.el, header, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "Can't read the navigation"), h("p", {}, this.error))));
+    if (!this.nav) return void redraw(this.el, header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the navigation…"));
     const notes = [
       this.nav.custom ? h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The provider builds this panel's navigation itself with navigation(…), so the items' settings don't apply. It shows here as Filament would build it without that.")) : null,
       this.nav.topNavigation ? h("p", { class: "fd-note" }, "The panel shows its navigation at the top: groups become menus, in the same order.") : null,
@@ -286,7 +286,7 @@ class NavigationDesigner {
     const groups = sidebar(this.nav.items, this.nav.groups);
     const side = h("div", { class: "nv-sidebar" }, ...groups.map((g) => this.groupEl(g, null)), this.newGroupZone());
     const main = h("div", { class: "md-main nv-main" }, ...notes, h("p", { class: "fd-note" }, "Drag items to reorder them or move them to another group or cluster, and drag groups to reorder them. Each change is saved to the files."), side);
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, this.inspector()));
+    redraw(this.el, header, h("div", { class: "md-body" }, main, this.inspector()));
   }
 
   private groupEl(g: SideGroup, cluster: string | null): HTMLElement {

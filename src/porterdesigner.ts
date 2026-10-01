@@ -2,7 +2,7 @@
 // the record a row fills, changed in its code as you go (src/portergen.ts), with the CSV they read or write beside
 // them. It also says what imports and exports still need in the app: Filament's tables, and a queue worker.
 import { editFiles } from "./codeapply";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -104,12 +104,12 @@ class PorterDesigner {
       h("span", { class: "fd-spacer" }),
       iconButton("refresh", "Check again", () => (fapp.forget(["app:porters"]), void this.load())),
     );
-    if (!d) return void this.el.replaceChildren(header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading…"));
-    if (d.outline.errors) return void this.el.replaceChildren(header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The file has syntax errors. Fix them to design it here."))));
+    if (!d) return void redraw(this.el, header, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading…"));
+    if (d.outline.errors) return void redraw(this.el, header, h("div", { class: "md-main" }, h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, "The file has syntax errors. Fix them to design it here."))));
     const arr = columnsArray(d.cls);
     const columns = arr ? readColumns(arr) : [];
     const main = h("div", { class: "md-main" }, this.setupNote(), this.kind === "importer" ? this.records(d, columns) : null, arr ? this.columnsSection(d, columns) : h("p", { class: "fd-note" }, "getColumns() is written as code the designer can't read."));
-    this.el.replaceChildren(header, h("div", { class: "md-body" }, main, this.preview(columns)));
+    redraw(this.el, header, h("div", { class: "md-body" }, main, this.preview(columns)));
   }
 
   /** What the app still needs for imports and exports to run. */

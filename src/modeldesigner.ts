@@ -3,7 +3,7 @@
 // existing model it writes a migration with the changes to its table, and edits the model's fillable attributes,
 // casts, and relationships in place. Changes are staged: the preview shows the code, and Apply writes it.
 import { invoke } from "@tauri-apps/api/core";
-import { h, icon, iconButton } from "./dom";
+import { h, icon, iconButton, redraw } from "./dom";
 import { monaco } from "./editor";
 import * as fapp from "./filamentapp";
 import { host as designerHost } from "./filamentdesigner";
@@ -146,7 +146,7 @@ class ModelDesigner {
   }
 
   async load() {
-    this.el.replaceChildren(h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the model…"));
+    redraw(this.el, h("div", { class: "fd-loading" }, h("span", { class: "codicon codicon-loading codicon-modifier-spin" }), "Reading the model…"));
     try {
       const [models, enums, migrations] = await Promise.all([fapp.models(this.root).catch(() => ({}) as Record<string, fapp.ModelSummary>), fapp.enums(this.root).catch(() => []), fapp.migrations(this.root).catch(() => null)]);
       this.models = Object.keys(models).sort();
@@ -224,13 +224,13 @@ class ModelDesigner {
 
   render() {
     if (this.error) {
-      this.el.replaceChildren(h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The model designer can't read this model"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
+      redraw(this.el, h("div", { class: "fd-error" }, icon("warning"), h("div", {}, h("strong", {}, "The model designer can't read this model"), h("p", {}, this.error), h("div", { class: "fd-error-actions" }, h("button", { type: "button", onclick: () => void this.load() }, icon("refresh"), "Try again")))));
       return;
     }
     const s = this.state!;
     const main = h("div", { class: "md-main" }, this.modelCard(), this.columnsCard(), this.relationsCard(), s.existing ? null : this.alsoCard(), s.existing && this.history ? this.historyCard() : null);
     const preview = this.previewPane();
-    this.el.replaceChildren(this.header(), h("div", { class: "md-body" }, main, preview), this.footer());
+    redraw(this.el, this.header(), h("div", { class: "md-body" }, main, preview), this.footer());
     this.updatePreview();
     if (this.section) this.reveal();
   }
