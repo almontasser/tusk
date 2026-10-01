@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { candidatePaths, fileLinks } from "./termlinks.ts";
+import { candidatePaths, fileLinks, wrappedLine } from "./termlinks.ts";
 
 const paths = (text: string) => fileLinks(text).map((l) => [l.path, l.line, l.column]);
 
@@ -28,4 +28,16 @@ test("candidatePaths maps the container root and resolves relative paths", () =>
   assert.deepEqual(candidatePaths("/var/www/html/app/User.php", "/p", "/p", "/var/www/html"), ["/p/app/User.php"]);
   assert.deepEqual(candidatePaths("../app/User.php", "/p/tests", "/p", "/var/www/html"), ["/p/app/User.php", "/app/User.php"]);
   assert.deepEqual(candidatePaths("./app/User.php", "/p", "/p", "/var/www/html"), ["/p/app/User.php"]);
+});
+
+test("wrappedLine joins the rows a line wrapped onto, and maps offsets back to cells", () => {
+  const rows: [string, boolean][] = [["$ ls    ", false], ["  at app/Mo", false], ["dels/User.", true], ["php:42    ", true], ["next      ", false]];
+  const buffer = { getLine: (i: number) => rows[i] && { isWrapped: rows[i][1], translateToString: (trim?: boolean) => (trim ? rows[i][0].trimEnd() : rows[i][0]) } };
+  for (const y of [1, 2, 3]) {
+    const { text, cell } = wrappedLine(buffer, y);
+    assert.equal(text, "  at app/Models/User.php:42");
+    const [link] = fileLinks(text);
+    assert.deepEqual([cell(link.start), cell(link.end - 1)], [{ x: 6, y: 2 }, { x: 6, y: 4 }]);
+  }
+  assert.equal(wrappedLine(buffer, 4).text, "next");
 });

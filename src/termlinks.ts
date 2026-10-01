@@ -21,6 +21,31 @@ export function fileLinks(text: string): FileLink[] {
   return links;
 }
 
+/** The part of an xterm.js buffer this reads. */
+type Buffer = { getLine(i: number): { isWrapped: boolean; translateToString(trimRight?: boolean): string } | undefined };
+
+/**
+ * The line of output that buffer row `y` (0-based) is part of, with the rows the terminal wrapped it onto joined, so a
+ * reference that wraps is found whole. `cell` gives an offset's cell in the buffer, with 1-based `x` and `y`.
+ */
+export function wrappedLine(buffer: Buffer, y: number) {
+  let first = y;
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+  const starts: number[] = [];
+  let text = "";
+  for (let i = first, line = buffer.getLine(i); line && (i === first || line.isWrapped); line = buffer.getLine(++i)) {
+    starts.push(text.length);
+    // Rows that wrap keep their trailing spaces, which are part of the line.
+    text += line.translateToString(!buffer.getLine(i + 1)?.isWrapped);
+  }
+  const cell = (offset: number) => {
+    let row = starts.length - 1;
+    while (row > 0 && starts[row] > offset) row--;
+    return { x: offset - starts[row] + 1, y: first + row + 1 };
+  };
+  return { text, cell };
+}
+
 /**
  * The local paths a reference may mean, most likely first. A path in the Sail or Docker container, under
  * `containerRoot`, maps to the project; a relative path is tried from the terminal's folder, then the project's.

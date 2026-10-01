@@ -72,7 +72,7 @@ file to change when you add it.
 | Split editors | Up to four panes. |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
-| Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
+| Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Settings designer | Renaming a property renames it in the class and the stored values, but not in code that reads it, such as a settings page's field. Dates are written as `CarbonImmutable` and rely on the package's global cast for dates. An encrypted property shows its encrypted value, and the designer writes `add` rather than `addEncrypted` for new ones. A settings migration that hasn't run yet isn't seen, so run pending migrations before applying. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |

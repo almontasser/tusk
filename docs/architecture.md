@@ -2342,8 +2342,9 @@ add-on (`@xterm/addon-search`, which needs `allowProposedApi` for its match
 highlights) backs the find bar, which **Find in Terminal** (⌘F with a `when`
 of `terminalFocused`, so ⌘F still reaches Monaco in the editor) opens over the
 focused terminal. The web-links add-on opens URLs with `open`. A link provider
-finds file references in each line with `fileLinks` in `src/termlinks.ts`
-(tested), resolves them with `candidatePaths` (the container root from
+finds file references with `fileLinks` in `src/termlinks.ts` (tested) in each
+line of output, which `wrappedLine` joins from the rows xterm.js wrapped it
+onto (`isWrapped`), so a link can span rows; it resolves them with `candidatePaths` (the container root from
 `src/sail.ts` maps to the project; a relative path tries the shell's folder,
 then the project's), checks that the file exists with `path_exists` (cached),
 and opens it through the docking host's `openAt`. Tabs are a `tablist` with a
@@ -6806,3 +6807,12 @@ to be skipped wherever the layout reads them, so each pane holds handles for
 its own left and top edges, and the splitter's new `resize` option trades
 `flex-grow` instead of setting a width. Double-click and Enter keep the sizes,
 since panes have no default size to go back to.
+
+### 2026-10-01: Terminal file links read the whole wrapped line
+
+xterm.js asks a link provider for links one buffer row at a time, so a file
+reference that wrapped was split in two and matched neither half. The
+provider now reads the row's whole line, from the first row back through
+`isWrapped` to the last, and maps each link's offsets back to cells, so its
+range can start on one row and end on another. Each row of a long line reads
+the line again, which is a few rows of text per hover.
