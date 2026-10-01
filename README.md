@@ -50,6 +50,7 @@ file to change when you add it.
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
+| Generated tests | Fields are tested when they're always on the form: a field that a condition shows, hides, or disables, or that's in a repeater or a layout with its own relationship, is left out. File uploads, repeaters, and multiple selects aren't filled; a required one gets a comment in the create and edit tests asking you to fill it. Dates and rich text are filled but not compared after saving. A factory is found where Laravel looks for it in an app in the `App` namespace. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
@@ -1053,6 +1054,42 @@ there is one.
   again, and a notice says when it can't start, with the file and line; another
   says when it starts again. **Laravel: Check the App (Boot and Tests)**
   loads the routes and runs the tests in a terminal tab.
+
+### Generated tests
+
+**Generate tests** (the beaker in the resource designer's header), **Generate
+Tests** in a resource's menu in the Filament tool window, or **Filament:
+Generate Resource Tests…** writes tests for a resource to
+`tests/Feature/Filament/<Resource>Test.php` and runs them. The New Resource
+wizard's last step has the same option. The tests check that:
+
+- The list page shows records and the table's columns.
+- A record can be created and edited with the form, and its values are saved.
+  An edit also checks that the form shows the record.
+- Each required field is required, and each unique field rejects a value
+  another record has.
+- The View page opens.
+- A user the policy refuses can't open the list, create, edit, or view pages.
+
+A simple resource, with one page and modals, is tested through its **New** and
+**Edit** actions.
+
+- **Values:** the tests fill the form with the model's factory, and give
+  fields the factory doesn't fill a value for their type. When a model the
+  tests need has no factory, Tusk offers to make one, with a fake value for
+  each column, and adds `HasFactory` to the model.
+- **Who acts:** a user from the user model's factory, with the permissions and
+  roles the policy's rules ask for. With spatie/laravel-permission, the tests
+  create them. A rule Tusk can't read gets a comment that asks you to set the
+  user up.
+- **Pest or PHPUnit:** a project with Pest gets Pest tests. Without Pest, you
+  choose PHPUnit tests or installing Pest first.
+- **Your code:** a test file that exists isn't overwritten. Tusk offers to add
+  the tests it lacks, such as one for a field that became required, or to open
+  it.
+
+The tests run in the Tests tab, and **Laravel: Check the App (Boot and Tests)**
+runs them with the app's other tests.
 
 ## Model designer
 

@@ -4504,6 +4504,45 @@ has, as `methodsOf` reports them.
   change under `app/`, and speaks only when booting starts or stops failing,
   so a working app stays quiet.
 
+### Generated tests
+
+`src/resourcetests.ts` reads a resource as the designer does (the form and
+table through `readRoot`, following `PostForm::configure()`), with the pages
+from `filament-app`, the model from `model`, and the policy's rules from
+`readPolicy` in `src/policygen.ts`. `src/resourcetestgen.ts` turns them into
+tests:
+
+- **Fields:** `readFields` keeps named fields from `Filament\Forms\Components`
+  that are always on the form and save to the record, with their kind (text,
+  email, number, toggle, date, relationship select, enum select, and so on),
+  `required()`, and `unique()`. A field under a repeater, or under a layout
+  with a relationship, state path, or condition, is left out.
+- **Values:** the create and edit tests fill
+  `Arr::only(Model::factory()->make()->getAttributes(), [...])`: the raw
+  attributes, so enums and dates are the strings the form takes. Fields the
+  factory's `definition()` doesn't list get a value for their kind. Only kinds
+  that save as filled are compared with `assertDatabaseHas` and
+  `assertSchemaStateSet`.
+- **Access:** the setup gives the acting user what the readable rules for
+  `viewAny`, `create`, `update`, and `view` ask for: Spatie permissions and
+  roles through `findOrCreate`, and ownership by creating records with the
+  user's ID. A rule that refuses everyone drops that page's tests. Each rule
+  that can refuse gets a test that a new user gets 403.
+- **Writing:** a new file is written whole by `testFile`, in Pest or as a
+  PHPUnit class. An existing file is the user's code: `missingBlocks` finds
+  the tests it lacks by their names, which are appended (Pest) or added as
+  methods (PHPUnit) with `editFiles`. The file then runs through `runTest` in
+  `src/runner.ts`, which shows the results in the Tests tab.
+- **Factories:** `factoryFor` writes a factory for an existing model with the
+  model designer's `factoryFile`, and `factoryParents` names the models its
+  required foreign keys make, which need factories too. `HasFactory` is added
+  with `traitsEdits` from `src/usergen.ts`.
+
+The tests use `Livewire::test()`, which every Filament app has, rather than
+Pest's `livewire()`, which needs pest-plugin-livewire. They pass on the
+demo's Post and Author resources, a simple resource, and a policy with Spatie
+permissions and roles, in Pest and PHPUnit.
+
 ## Model designer
 
 `src/modeldesigner.ts` stages changes to a model and writes them on Apply,
@@ -6256,4 +6295,30 @@ starter kits and their options (authentication, teams, Pest, Boost) are the
 installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
+
+### 2026-10-01: Generated tests are written once, then added to
+
+A generated test file could be written again whenever the resource changes, as
+the designers keep code in step. But tests are where people pin down behavior
+the generator doesn't know, and rewriting them would lose that. So Tusk writes
+the file once and afterwards only adds the tests it lacks, found by their
+names, such as one for a field that became required. It never changes or
+removes a test.
+
+### 2026-10-01: Test values come from the factory's raw attributes
+
+The tests could list a value for each field, but the factory already says
+what a valid record looks like, and stays right as the model changes. So the
+tests fill the form with the factory's attributes as they'd be stored, which
+are the strings and numbers a form takes (an enum's value, not the enum), and
+make values only for fields the factory leaves out. A model without a factory
+gets one, as the model designer writes them, since the tests can't run
+without it.
+
+### 2026-10-01: Without Pest, ask rather than choose
+
+A project without Pest could get PHPUnit tests silently, or Pest installed
+for it. Installing a test framework changes the project's dependencies, and
+some teams use PHPUnit on purpose, so Tusk asks: PHPUnit tests that run as
+they are, or Pest installed with its Laravel plugin first.
 

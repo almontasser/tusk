@@ -1,0 +1,1930 @@
+{
+  "errors": false,
+  "namespace": "App\\Filament\\Resources\\Articles\\Schemas",
+  "uses": [
+    {
+      "alias": "ArticleStatus",
+      "name": "App\\Enums\\ArticleStatus",
+      "kind": "class",
+      "span": [
+        59,
+        87
+      ]
+    },
+    {
+      "alias": "DatePicker",
+      "name": "Filament\\Forms\\Components\\DatePicker",
+      "kind": "class",
+      "span": [
+        88,
+        129
+      ]
+    },
+    {
+      "alias": "FileUpload",
+      "name": "Filament\\Forms\\Components\\FileUpload",
+      "kind": "class",
+      "span": [
+        130,
+        171
+      ]
+    },
+    {
+      "alias": "Hidden",
+      "name": "Filament\\Forms\\Components\\Hidden",
+      "kind": "class",
+      "span": [
+        172,
+        209
+      ]
+    },
+    {
+      "alias": "Repeater",
+      "name": "Filament\\Forms\\Components\\Repeater",
+      "kind": "class",
+      "span": [
+        210,
+        249
+      ]
+    },
+    {
+      "alias": "RichEditor",
+      "name": "Filament\\Forms\\Components\\RichEditor",
+      "kind": "class",
+      "span": [
+        250,
+        291
+      ]
+    },
+    {
+      "alias": "Select",
+      "name": "Filament\\Forms\\Components\\Select",
+      "kind": "class",
+      "span": [
+        292,
+        329
+      ]
+    },
+    {
+      "alias": "TextInput",
+      "name": "Filament\\Forms\\Components\\TextInput",
+      "kind": "class",
+      "span": [
+        330,
+        370
+      ]
+    },
+    {
+      "alias": "Toggle",
+      "name": "Filament\\Forms\\Components\\Toggle",
+      "kind": "class",
+      "span": [
+        371,
+        408
+      ]
+    },
+    {
+      "alias": "Section",
+      "name": "Filament\\Schemas\\Components\\Section",
+      "kind": "class",
+      "span": [
+        409,
+        449
+      ]
+    },
+    {
+      "alias": "Schema",
+      "name": "Filament\\Schemas\\Schema",
+      "kind": "class",
+      "span": [
+        450,
+        478
+      ]
+    }
+  ],
+  "useInsert": 479,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "ArticleForm",
+      "fqn": "App\\Filament\\Resources\\Articles\\Schemas\\ArticleForm",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        480,
+        2490
+      ],
+      "bodyStart": 499,
+      "bodyEnd": 2489,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "configure",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "schema",
+              "type": "Schema",
+              "default": null,
+              "span": [
+                537,
+                551
+              ]
+            }
+          ],
+          "returnType": "Schema",
+          "attributes": [],
+          "span": [
+            504,
+            2488
+          ],
+          "docStart": null,
+          "body": [
+            566,
+            2487
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "var",
+                "name": "schema",
+                "span": [
+                  582,
+                  589
+                ]
+              },
+              "calls": [
+                {
+                  "name": "components",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 614,
+                    "close": 2480,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Schemas\\Components\\Section",
+                                  "classSpan": [
+                                    633,
+                                    640
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 646,
+                                    "close": 656,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "Content",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            647,
+                                            656
+                                          ]
+                                        },
+                                        "span": [
+                                          647,
+                                          656
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    633,
+                                    657
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "schema",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 686,
+                                      "close": 1264,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "array",
+                                            "items": [
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      713,
+                                                      722
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 728,
+                                                      "close": 736,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "title",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              729,
+                                                              736
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            729,
+                                                            736
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      713,
+                                                      737
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "required",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 776,
+                                                        "close": 777,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        766,
+                                                        778
+                                                      ],
+                                                      "nameSpan": [
+                                                        768,
+                                                        776
+                                                      ]
+                                                    },
+                                                    {
+                                                      "name": "maxLength",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 818,
+                                                        "close": 822,
+                                                        "items": [
+                                                          {
+                                                            "name": null,
+                                                            "value": {
+                                                              "kind": "number",
+                                                              "value": 255.0,
+                                                              "raw": "255",
+                                                              "span": [
+                                                                819,
+                                                                822
+                                                              ]
+                                                            },
+                                                            "span": [
+                                                              819,
+                                                              822
+                                                            ],
+                                                            "spread": false
+                                                          }
+                                                        ]
+                                                      },
+                                                      "span": [
+                                                        807,
+                                                        823
+                                                      ],
+                                                      "nameSpan": [
+                                                        809,
+                                                        818
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    713,
+                                                    823
+                                                  ]
+                                                },
+                                                "span": [
+                                                  713,
+                                                  823
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      849,
+                                                      858
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 864,
+                                                      "close": 871,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "slug",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              865,
+                                                              871
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            865,
+                                                            871
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      849,
+                                                      872
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "required",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 911,
+                                                        "close": 912,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        901,
+                                                        913
+                                                      ],
+                                                      "nameSpan": [
+                                                        903,
+                                                        911
+                                                      ]
+                                                    },
+                                                    {
+                                                      "name": "unique",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 950,
+                                                        "close": 969,
+                                                        "items": [
+                                                          {
+                                                            "name": "ignoreRecord",
+                                                            "value": {
+                                                              "kind": "bool",
+                                                              "value": true,
+                                                              "span": [
+                                                                965,
+                                                                969
+                                                              ]
+                                                            },
+                                                            "span": [
+                                                              951,
+                                                              969
+                                                            ],
+                                                            "spread": false
+                                                          }
+                                                        ]
+                                                      },
+                                                      "span": [
+                                                        942,
+                                                        970
+                                                      ],
+                                                      "nameSpan": [
+                                                        944,
+                                                        950
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    849,
+                                                    970
+                                                  ]
+                                                },
+                                                "span": [
+                                                  849,
+                                                  970
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      996,
+                                                      1005
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 1011,
+                                                      "close": 1021,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "contact",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              1012,
+                                                              1021
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            1012,
+                                                            1021
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      996,
+                                                      1022
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "email",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 1058,
+                                                        "close": 1059,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        1051,
+                                                        1060
+                                                      ],
+                                                      "nameSpan": [
+                                                        1053,
+                                                        1058
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    996,
+                                                    1060
+                                                  ]
+                                                },
+                                                "span": [
+                                                  996,
+                                                  1060
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      1086,
+                                                      1095
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 1101,
+                                                      "close": 1109,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "price",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              1102,
+                                                              1109
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            1102,
+                                                            1109
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      1086,
+                                                      1110
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "numeric",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 1148,
+                                                        "close": 1149,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        1139,
+                                                        1150
+                                                      ],
+                                                      "nameSpan": [
+                                                        1141,
+                                                        1148
+                                                      ]
+                                                    },
+                                                    {
+                                                      "name": "required",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 1189,
+                                                        "close": 1190,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        1179,
+                                                        1191
+                                                      ],
+                                                      "nameSpan": [
+                                                        1181,
+                                                        1189
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    1086,
+                                                    1191
+                                                  ]
+                                                },
+                                                "span": [
+                                                  1086,
+                                                  1191
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "static",
+                                                  "class": "Filament\\Forms\\Components\\RichEditor",
+                                                  "classSpan": [
+                                                    1217,
+                                                    1227
+                                                  ],
+                                                  "method": "make",
+                                                  "args": {
+                                                    "open": 1233,
+                                                    "close": 1240,
+                                                    "items": [
+                                                      {
+                                                        "name": null,
+                                                        "value": {
+                                                          "kind": "string",
+                                                          "value": "body",
+                                                          "quote": "single",
+                                                          "interpolated": false,
+                                                          "span": [
+                                                            1234,
+                                                            1240
+                                                          ]
+                                                        },
+                                                        "span": [
+                                                          1234,
+                                                          1240
+                                                        ],
+                                                        "spread": false
+                                                      }
+                                                    ]
+                                                  },
+                                                  "span": [
+                                                    1217,
+                                                    1241
+                                                  ]
+                                                },
+                                                "span": [
+                                                  1217,
+                                                  1241
+                                                ],
+                                                "spread": false
+                                              }
+                                            ],
+                                            "open": 687,
+                                            "close": 1263,
+                                            "legacy": false,
+                                            "span": [
+                                              687,
+                                              1264
+                                            ]
+                                          },
+                                          "span": [
+                                            687,
+                                            1264
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      678,
+                                      1265
+                                    ],
+                                    "nameSpan": [
+                                      680,
+                                      686
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  633,
+                                  1265
+                                ]
+                              },
+                              "span": [
+                                633,
+                                1265
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Select",
+                                  "classSpan": [
+                                    1283,
+                                    1289
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1295,
+                                    "close": 1309,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "category_id",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1296,
+                                            1309
+                                          ]
+                                        },
+                                        "span": [
+                                          1296,
+                                          1309
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1283,
+                                    1310
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "relationship",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1345,
+                                      "close": 1364,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "category",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1346,
+                                              1356
+                                            ]
+                                          },
+                                          "span": [
+                                            1346,
+                                            1356
+                                          ],
+                                          "spread": false
+                                        },
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "name",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1358,
+                                              1364
+                                            ]
+                                          },
+                                          "span": [
+                                            1358,
+                                            1364
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1331,
+                                      1365
+                                    ],
+                                    "nameSpan": [
+                                      1333,
+                                      1345
+                                    ]
+                                  },
+                                  {
+                                    "name": "required",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1396,
+                                      "close": 1397,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1386,
+                                      1398
+                                    ],
+                                    "nameSpan": [
+                                      1388,
+                                      1396
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1283,
+                                  1398
+                                ]
+                              },
+                              "span": [
+                                1283,
+                                1398
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Select",
+                                  "classSpan": [
+                                    1416,
+                                    1422
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1428,
+                                    "close": 1437,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "status",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1429,
+                                            1437
+                                          ]
+                                        },
+                                        "span": [
+                                          1429,
+                                          1437
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1416,
+                                    1438
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "options",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1468,
+                                      "close": 1489,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "classConst",
+                                            "class": "App\\Enums\\ArticleStatus",
+                                            "classSpan": [
+                                              1469,
+                                              1482
+                                            ],
+                                            "name": "class",
+                                            "span": [
+                                              1469,
+                                              1489
+                                            ]
+                                          },
+                                          "span": [
+                                            1469,
+                                            1489
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1459,
+                                      1490
+                                    ],
+                                    "nameSpan": [
+                                      1461,
+                                      1468
+                                    ]
+                                  },
+                                  {
+                                    "name": "required",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1521,
+                                      "close": 1522,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1511,
+                                      1523
+                                    ],
+                                    "nameSpan": [
+                                      1513,
+                                      1521
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1416,
+                                  1523
+                                ]
+                              },
+                              "span": [
+                                1416,
+                                1523
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Select",
+                                  "classSpan": [
+                                    1541,
+                                    1547
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1553,
+                                    "close": 1560,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "kind",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1554,
+                                            1560
+                                          ]
+                                        },
+                                        "span": [
+                                          1554,
+                                          1560
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1541,
+                                    1561
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "options",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1591,
+                                      "close": 1628,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "array",
+                                            "items": [
+                                              {
+                                                "key": {
+                                                  "kind": "string",
+                                                  "value": "news",
+                                                  "quote": "single",
+                                                  "interpolated": false,
+                                                  "span": [
+                                                    1593,
+                                                    1599
+                                                  ]
+                                                },
+                                                "value": {
+                                                  "kind": "string",
+                                                  "value": "News",
+                                                  "quote": "single",
+                                                  "interpolated": false,
+                                                  "span": [
+                                                    1603,
+                                                    1609
+                                                  ]
+                                                },
+                                                "span": [
+                                                  1593,
+                                                  1609
+                                                ],
+                                                "spread": false
+                                              },
+                                              {
+                                                "key": {
+                                                  "kind": "string",
+                                                  "value": "blog",
+                                                  "quote": "single",
+                                                  "interpolated": false,
+                                                  "span": [
+                                                    1611,
+                                                    1617
+                                                  ]
+                                                },
+                                                "value": {
+                                                  "kind": "string",
+                                                  "value": "Blog",
+                                                  "quote": "single",
+                                                  "interpolated": false,
+                                                  "span": [
+                                                    1621,
+                                                    1627
+                                                  ]
+                                                },
+                                                "span": [
+                                                  1611,
+                                                  1627
+                                                ],
+                                                "spread": false
+                                              }
+                                            ],
+                                            "open": 1592,
+                                            "close": 1627,
+                                            "legacy": false,
+                                            "span": [
+                                              1592,
+                                              1628
+                                            ]
+                                          },
+                                          "span": [
+                                            1592,
+                                            1628
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1582,
+                                      1629
+                                    ],
+                                    "nameSpan": [
+                                      1584,
+                                      1591
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1541,
+                                  1629
+                                ]
+                              },
+                              "span": [
+                                1541,
+                                1629
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Select",
+                                  "classSpan": [
+                                    1647,
+                                    1653
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1659,
+                                    "close": 1666,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "tags",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1660,
+                                            1666
+                                          ]
+                                        },
+                                        "span": [
+                                          1660,
+                                          1666
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1647,
+                                    1667
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "relationship",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1702,
+                                      "close": 1717,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "tags",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1703,
+                                              1709
+                                            ]
+                                          },
+                                          "span": [
+                                            1703,
+                                            1709
+                                          ],
+                                          "spread": false
+                                        },
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "name",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1711,
+                                              1717
+                                            ]
+                                          },
+                                          "span": [
+                                            1711,
+                                            1717
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1688,
+                                      1718
+                                    ],
+                                    "nameSpan": [
+                                      1690,
+                                      1702
+                                    ]
+                                  },
+                                  {
+                                    "name": "multiple",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1749,
+                                      "close": 1750,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1739,
+                                      1751
+                                    ],
+                                    "nameSpan": [
+                                      1741,
+                                      1749
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1647,
+                                  1751
+                                ]
+                              },
+                              "span": [
+                                1647,
+                                1751
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Toggle",
+                                  "classSpan": [
+                                    1769,
+                                    1775
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1781,
+                                    "close": 1792,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "featured",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1782,
+                                            1792
+                                          ]
+                                        },
+                                        "span": [
+                                          1782,
+                                          1792
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1769,
+                                    1793
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "required",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1824,
+                                      "close": 1825,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1814,
+                                      1826
+                                    ],
+                                    "nameSpan": [
+                                      1816,
+                                      1824
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1769,
+                                  1826
+                                ]
+                              },
+                              "span": [
+                                1769,
+                                1826
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "static",
+                                "class": "Filament\\Forms\\Components\\DatePicker",
+                                "classSpan": [
+                                  1844,
+                                  1854
+                                ],
+                                "method": "make",
+                                "args": {
+                                  "open": 1860,
+                                  "close": 1875,
+                                  "items": [
+                                    {
+                                      "name": null,
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "published_on",
+                                        "quote": "single",
+                                        "interpolated": false,
+                                        "span": [
+                                          1861,
+                                          1875
+                                        ]
+                                      },
+                                      "span": [
+                                        1861,
+                                        1875
+                                      ],
+                                      "spread": false
+                                    }
+                                  ]
+                                },
+                                "span": [
+                                  1844,
+                                  1876
+                                ]
+                              },
+                              "span": [
+                                1844,
+                                1876
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\TextInput",
+                                  "classSpan": [
+                                    1894,
+                                    1903
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1909,
+                                    "close": 1918,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "secret",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1910,
+                                            1918
+                                          ]
+                                        },
+                                        "span": [
+                                          1910,
+                                          1918
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    1894,
+                                    1919
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "required",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1950,
+                                      "close": 1951,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1940,
+                                      1952
+                                    ],
+                                    "nameSpan": [
+                                      1942,
+                                      1950
+                                    ]
+                                  },
+                                  {
+                                    "name": "visibleOn",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1984,
+                                      "close": 1993,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "create",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1985,
+                                              1993
+                                            ]
+                                          },
+                                          "span": [
+                                            1985,
+                                            1993
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1973,
+                                      1994
+                                    ],
+                                    "nameSpan": [
+                                      1975,
+                                      1984
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  1894,
+                                  1994
+                                ]
+                              },
+                              "span": [
+                                1894,
+                                1994
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\FileUpload",
+                                  "classSpan": [
+                                    2012,
+                                    2022
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 2028,
+                                    "close": 2036,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "cover",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            2029,
+                                            2036
+                                          ]
+                                        },
+                                        "span": [
+                                          2029,
+                                          2036
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    2012,
+                                    2037
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "required",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 2068,
+                                      "close": 2069,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      2058,
+                                      2070
+                                    ],
+                                    "nameSpan": [
+                                      2060,
+                                      2068
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  2012,
+                                  2070
+                                ]
+                              },
+                              "span": [
+                                2012,
+                                2070
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "static",
+                                "class": "Filament\\Forms\\Components\\Hidden",
+                                "classSpan": [
+                                  2088,
+                                  2094
+                                ],
+                                "method": "make",
+                                "args": {
+                                  "open": 2100,
+                                  "close": 2108,
+                                  "items": [
+                                    {
+                                      "name": null,
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "token",
+                                        "quote": "single",
+                                        "interpolated": false,
+                                        "span": [
+                                          2101,
+                                          2108
+                                        ]
+                                      },
+                                      "span": [
+                                        2101,
+                                        2108
+                                      ],
+                                      "spread": false
+                                    }
+                                  ]
+                                },
+                                "span": [
+                                  2088,
+                                  2109
+                                ]
+                              },
+                              "span": [
+                                2088,
+                                2109
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Forms\\Components\\Repeater",
+                                  "classSpan": [
+                                    2127,
+                                    2135
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 2141,
+                                    "close": 2149,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "links",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            2142,
+                                            2149
+                                          ]
+                                        },
+                                        "span": [
+                                          2142,
+                                          2149
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    2127,
+                                    2150
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "schema",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 2179,
+                                      "close": 2263,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "array",
+                                            "items": [
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      2206,
+                                                      2215
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 2221,
+                                                      "close": 2227,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "url",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              2222,
+                                                              2227
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            2222,
+                                                            2227
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      2206,
+                                                      2228
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "required",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 2238,
+                                                        "close": 2239,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        2228,
+                                                        2240
+                                                      ],
+                                                      "nameSpan": [
+                                                        2230,
+                                                        2238
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    2206,
+                                                    2240
+                                                  ]
+                                                },
+                                                "span": [
+                                                  2206,
+                                                  2240
+                                                ],
+                                                "spread": false
+                                              }
+                                            ],
+                                            "open": 2180,
+                                            "close": 2262,
+                                            "legacy": false,
+                                            "span": [
+                                              2180,
+                                              2263
+                                            ]
+                                          },
+                                          "span": [
+                                            2180,
+                                            2263
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      2171,
+                                      2264
+                                    ],
+                                    "nameSpan": [
+                                      2173,
+                                      2179
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  2127,
+                                  2264
+                                ]
+                              },
+                              "span": [
+                                2127,
+                                2264
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Schemas\\Components\\Section",
+                                  "classSpan": [
+                                    2282,
+                                    2289
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 2295,
+                                    "close": 2304,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "Author",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            2296,
+                                            2304
+                                          ]
+                                        },
+                                        "span": [
+                                          2296,
+                                          2304
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    2282,
+                                    2305
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "relationship",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 2340,
+                                      "close": 2349,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "author",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              2341,
+                                              2349
+                                            ]
+                                          },
+                                          "span": [
+                                            2341,
+                                            2349
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      2326,
+                                      2350
+                                    ],
+                                    "nameSpan": [
+                                      2328,
+                                      2340
+                                    ]
+                                  },
+                                  {
+                                    "name": "schema",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 2379,
+                                      "close": 2464,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "array",
+                                            "items": [
+                                              {
+                                                "key": null,
+                                                "value": {
+                                                  "kind": "chain",
+                                                  "base": {
+                                                    "kind": "static",
+                                                    "class": "Filament\\Forms\\Components\\TextInput",
+                                                    "classSpan": [
+                                                      2406,
+                                                      2415
+                                                    ],
+                                                    "method": "make",
+                                                    "args": {
+                                                      "open": 2421,
+                                                      "close": 2428,
+                                                      "items": [
+                                                        {
+                                                          "name": null,
+                                                          "value": {
+                                                            "kind": "string",
+                                                            "value": "name",
+                                                            "quote": "single",
+                                                            "interpolated": false,
+                                                            "span": [
+                                                              2422,
+                                                              2428
+                                                            ]
+                                                          },
+                                                          "span": [
+                                                            2422,
+                                                            2428
+                                                          ],
+                                                          "spread": false
+                                                        }
+                                                      ]
+                                                    },
+                                                    "span": [
+                                                      2406,
+                                                      2429
+                                                    ]
+                                                  },
+                                                  "calls": [
+                                                    {
+                                                      "name": "required",
+                                                      "nullsafe": false,
+                                                      "args": {
+                                                        "open": 2439,
+                                                        "close": 2440,
+                                                        "items": []
+                                                      },
+                                                      "span": [
+                                                        2429,
+                                                        2441
+                                                      ],
+                                                      "nameSpan": [
+                                                        2431,
+                                                        2439
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "span": [
+                                                    2406,
+                                                    2441
+                                                  ]
+                                                },
+                                                "span": [
+                                                  2406,
+                                                  2441
+                                                ],
+                                                "spread": false
+                                              }
+                                            ],
+                                            "open": 2380,
+                                            "close": 2463,
+                                            "legacy": false,
+                                            "span": [
+                                              2380,
+                                              2464
+                                            ]
+                                          },
+                                          "span": [
+                                            2380,
+                                            2464
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      2371,
+                                      2465
+                                    ],
+                                    "nameSpan": [
+                                      2373,
+                                      2379
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  2282,
+                                  2465
+                                ]
+                              },
+                              "span": [
+                                2282,
+                                2465
+                              ],
+                              "spread": false
+                            }
+                          ],
+                          "open": 615,
+                          "close": 2479,
+                          "legacy": false,
+                          "span": [
+                            615,
+                            2480
+                          ]
+                        },
+                        "span": [
+                          615,
+                          2480
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    602,
+                    2481
+                  ],
+                  "nameSpan": [
+                    604,
+                    614
+                  ]
+                }
+              ],
+              "span": [
+                582,
+                2481
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

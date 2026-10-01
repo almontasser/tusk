@@ -1,0 +1,314 @@
+{
+  "errors": false,
+  "namespace": "Database\\Factories",
+  "uses": [
+    {
+      "alias": "Category",
+      "name": "App\\Models\\Category",
+      "kind": "class",
+      "span": [
+        38,
+        62
+      ]
+    },
+    {
+      "alias": "Factory",
+      "name": "Illuminate\\Database\\Eloquent\\Factories\\Factory",
+      "kind": "class",
+      "span": [
+        63,
+        114
+      ]
+    }
+  ],
+  "useInsert": 115,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "ArticleFactory",
+      "fqn": "Database\\Factories\\ArticleFactory",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Eloquent\\Factories\\Factory",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        116,
+        422
+      ],
+      "bodyStart": 154,
+      "bodyEnd": 421,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "definition",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            159,
+            420
+          ],
+          "docStart": null,
+          "body": [
+            200,
+            419
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "title",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      230,
+                      237
+                    ]
+                  },
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "func",
+                      "name": "fake",
+                      "nameSpan": [
+                        241,
+                        245
+                      ],
+                      "args": {
+                        "open": 245,
+                        "close": 246,
+                        "items": []
+                      },
+                      "span": [
+                        241,
+                        247
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "sentence",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 257,
+                          "close": 258,
+                          "items": []
+                        },
+                        "span": [
+                          247,
+                          259
+                        ],
+                        "nameSpan": [
+                          249,
+                          257
+                        ]
+                      }
+                    ],
+                    "span": [
+                      241,
+                      259
+                    ]
+                  },
+                  "span": [
+                    230,
+                    259
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "slug",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      273,
+                      279
+                    ]
+                  },
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "func",
+                      "name": "fake",
+                      "nameSpan": [
+                        283,
+                        287
+                      ],
+                      "args": {
+                        "open": 287,
+                        "close": 288,
+                        "items": []
+                      },
+                      "span": [
+                        283,
+                        289
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "unique",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 297,
+                          "close": 298,
+                          "items": []
+                        },
+                        "span": [
+                          289,
+                          299
+                        ],
+                        "nameSpan": [
+                          291,
+                          297
+                        ]
+                      },
+                      {
+                        "name": "slug",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 305,
+                          "close": 306,
+                          "items": []
+                        },
+                        "span": [
+                          299,
+                          307
+                        ],
+                        "nameSpan": [
+                          301,
+                          305
+                        ]
+                      }
+                    ],
+                    "span": [
+                      283,
+                      307
+                    ]
+                  },
+                  "span": [
+                    273,
+                    307
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "category_id",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      321,
+                      334
+                    ]
+                  },
+                  "value": {
+                    "kind": "static",
+                    "class": "App\\Models\\Category",
+                    "classSpan": [
+                      338,
+                      346
+                    ],
+                    "method": "factory",
+                    "args": {
+                      "open": 355,
+                      "close": 356,
+                      "items": []
+                    },
+                    "span": [
+                      338,
+                      357
+                    ]
+                  },
+                  "span": [
+                    321,
+                    357
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": {
+                    "kind": "string",
+                    "value": "featured",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      371,
+                      381
+                    ]
+                  },
+                  "value": {
+                    "kind": "chain",
+                    "base": {
+                      "kind": "func",
+                      "name": "fake",
+                      "nameSpan": [
+                        385,
+                        389
+                      ],
+                      "args": {
+                        "open": 389,
+                        "close": 390,
+                        "items": []
+                      },
+                      "span": [
+                        385,
+                        391
+                      ]
+                    },
+                    "calls": [
+                      {
+                        "name": "boolean",
+                        "nullsafe": false,
+                        "args": {
+                          "open": 400,
+                          "close": 401,
+                          "items": []
+                        },
+                        "span": [
+                          391,
+                          402
+                        ],
+                        "nameSpan": [
+                          393,
+                          400
+                        ]
+                      }
+                    ],
+                    "span": [
+                      385,
+                      402
+                    ]
+                  },
+                  "span": [
+                    371,
+                    402
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 216,
+              "close": 412,
+              "legacy": false,
+              "span": [
+                216,
+                413
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

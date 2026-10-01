@@ -527,7 +527,7 @@ export function removeMethod(text: string, method: OMethod): Edit {
 
 /**
  * A new PHP file in `namespace` whose code names classes as `{{Fqn}}`: each is imported and written by its short
- * name, or fully qualified when another import already took that name.
+ * name, or fully qualified when another import already took that name. An empty namespace writes none.
  */
 export function phpFile(namespace: string, code: string): string {
   const taken = new Map<string, string>();
@@ -539,5 +539,6 @@ export function phpFile(namespace: string, code: string): string {
     return short;
   });
   const uses = [...taken.values()].filter((fqn) => fqn.slice(0, fqn.lastIndexOf("\\")) !== namespace).sort((a, b) => a.localeCompare(b));
-  return `<?php\n\nnamespace ${namespace};\n${uses.length ? `\n${uses.map((u) => `use ${u};`).join("\n")}\n` : ""}\n${body.trim()}\n`;
+  // A file without a namespace, such as a Pest test, starts with its imports.
+  return `<?php\n${namespace ? `\nnamespace ${namespace};\n` : ""}${uses.length ? `\n${uses.map((u) => `use ${u};`).join("\n")}\n` : ""}\n${body.trim()}\n`;
 }

@@ -1611,6 +1611,7 @@ const actions: Action[] = [
   { label: "Filament", run: () => showView("filament") },
   { label: "Filament: Open Resource in Designer…", run: () => root && openResourcePicker() },
   { label: "Filament: New Resource…", run: () => root && newResource() },
+  { label: "Filament: Generate Resource Tests…", run: () => root && void import("./resourcetests").then((m) => m.resourceTestsPicker()) },
   { label: "Filament: Install Filament", run: () => root && installFilament() },
   { label: "Laravel: New Model…", run: () => root && void import("./modeldesigner").then((m) => m.openNewModel()) },
   { label: "Laravel: Check the App (Boot and Tests)", run: () => root && void import("./filamentview").then((m) => m.checkApp()) },

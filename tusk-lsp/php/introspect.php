@@ -722,12 +722,13 @@ function designerResource(string $resource, string $root): array
     foreach (($resource::getPages()) as $name => $registration) {
         try {
             $page = $registration->getPage();
+            // ManageRecords extends ListRecords, so it's checked first.
             $kind = match (true) {
+                is_subclass_of($page, 'Filament\\Resources\\Pages\\ManageRecords') => 'manage',
                 is_subclass_of($page, 'Filament\\Resources\\Pages\\ListRecords') => 'list',
                 is_subclass_of($page, 'Filament\\Resources\\Pages\\CreateRecord') => 'create',
                 is_subclass_of($page, 'Filament\\Resources\\Pages\\EditRecord') => 'edit',
                 is_subclass_of($page, 'Filament\\Resources\\Pages\\ViewRecord') => 'view',
-                is_subclass_of($page, 'Filament\\Resources\\Pages\\ManageRecords') => 'manage',
                 is_subclass_of($page, 'Filament\\Resources\\Pages\\ManageRelatedRecords') => 'related',
                 default => 'custom',
             };
