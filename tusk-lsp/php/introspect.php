@@ -19,6 +19,7 @@
  *   php introspect.php <project root> policy <Model class> [<Resource class>]
  *   php introspect.php <project root> translations
  *   php introspect.php <project root> permission <create-permission|create-role|grant|revoke> <name> [<permission>]
+ *   php introspect.php <project root> env-settings <config key>...
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
@@ -1384,6 +1385,38 @@ function appNotifications(string $root): array
     return $out;
 }
 
+/**
+ * What the environment settings show beside `.env`: the config values the booted app uses (by config key), each
+ * mailer's transport, the queue connections' drivers, the disks, cache stores, and session drivers, whether the
+ * tables the database queue, session, and cache drivers need exist, and whether the config is cached.
+ */
+function envSettings(array $keys): array
+{
+    $values = [];
+    foreach ($keys as $key) {
+        $values[$key] = config($key);
+    }
+    $table = function (?string $name) {
+        try {
+            return $name ? Illuminate\Support\Facades\Schema::hasTable($name) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    };
+    $jobs = config('queue.connections.database.table', 'jobs');
+    $sessions = config('session.table', 'sessions');
+    $cache = config('cache.stores.database.table', 'cache');
+    return [
+        'values' => $values,
+        'mailers' => array_map(fn ($m) => $m['transport'] ?? null, (array) config('mail.mailers', [])),
+        'queues' => array_map(fn ($c) => $c['driver'] ?? null, (array) config('queue.connections', [])),
+        'disks' => array_map(fn ($d) => $d['driver'] ?? null, (array) config('filesystems.disks', [])),
+        'stores' => array_map(fn ($s) => $s['driver'] ?? null, (array) config('cache.stores', [])),
+        'tables' => ['jobs' => [$jobs, $table($jobs)], 'sessions' => [$sessions, $table($sessions)], 'cache' => [$cache, $table($cache)]],
+        'configCached' => app()->configurationIsCached(),
+    ];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1411,6 +1444,7 @@ try {
         'entry-access' => entryAccess($argv[3], $root),
         'porters' => porters($root),
         'notifications' => appNotifications($root),
+        'env-settings' => envSettings(array_slice($argv, 3)),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

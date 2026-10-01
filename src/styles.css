@@ -2742,3 +2742,13 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pd-csv table { border-collapse: collapse; font: 11.5px var(--mono); }
 .pd-csv th, .pd-csv td { padding: 5px 9px; border-inline-end: 1px solid var(--border-subtle); white-space: nowrap; text-align: start; }
 .pd-csv th { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
+/* Environment settings (src/envsettings.ts) */
+.es-designer .md-main { max-width: 820px; }
+.es-designer .fd-row { grid-template-columns: 220px minmax(0, 1fr) 24px; }
+.es-key { margin-left: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-weight: 400; }
+.es-input { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; }
+.es-input > input { flex: 1; min-width: 0; padding: 3px 7px; font-size: 12px; }
+.es-differs { grid-column: 2 / -1; color: var(--yellow, var(--muted)); }
+.es-actions { display: flex; gap: 8px; padding: 0 12px 10px; }
+.es-designer .fd-helper-note { margin: 0 8px 10px; max-width: none; }

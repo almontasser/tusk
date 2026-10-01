@@ -91,6 +91,14 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
+  // The project's .env: its environment settings.
+  monaco.languages.registerCodeLensProvider("*", {
+    provideCodeLenses(model) {
+      const env = model.uri.scheme === "file" && model.uri.fsPath === `${host.root()}/.env`;
+      return { lenses: env ? [{ range: new monaco.Range(1, 1, 1, 1), command: { id: "tusk.openEnvSettings", title: "Open in Environment Settings" } }] : [], dispose() {} };
+    },
+  });
+  monaco.editor.registerCommand("tusk.openEnvSettings", (_, section?: string) => void import("./envsettings").then((m) => m.openEnvSettings(section)));
 }
 
 /** Opens a file in the designer: a resource or relation manager itself, or the resource a schema class belongs to. */
@@ -257,6 +265,10 @@ export async function loadFilament() {
       rows.push(row);
     }
   } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));
+  const env = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "Mail, queue, storage, app URL, and time zone in .env" }, icon("settings"), h("span", { class: "fv-name" }, "Environment"), h("span", { class: "fv-detail" }, ".env"));
+  env.onclick = () => void import("./envsettings").then((m) => m.openEnvSettings());
+  env.onkeydown = (e) => e.key === "Enter" && env.click();
+  rows.push(h("li", { class: "fv-group" }, "App"), env);
   const tree = h("ul", { class: "fv-tree", role: "tree" }, ...rows);
   list.replaceChildren(tree);
   applyFilter();

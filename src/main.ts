@@ -1617,6 +1617,7 @@ const actions: Action[] = [
   { label: "Filament: New Page…", run: () => root && void import("./filamentview").then((m) => m.newPagePicker()) },
   { label: "Filament: Dashboard…", run: () => root && void import("./filamentview").then((m) => m.openDashboardPicker()) },
   { label: "Filament: Panel Settings…", run: () => root && void import("./filamentview").then((m) => m.openPanelPicker()) },
+  { label: "Laravel: Environment Settings…", run: () => root && void import("./envsettings").then((m) => m.openEnvSettings()) },
   { label: "Laravel: Add Sample Records…", run: () => root && void import("./sampledata").then((m) => m.sampleRecordsPicker()) },
   { label: "Laravel: Model Access…", run: () => root && void import("./filamentview").then((m) => m.openAccessPicker()) },
   { label: "Laravel: New Enum…", run: () => root && void import("./enumdesigner").then((m) => m.openNewEnum()) },
