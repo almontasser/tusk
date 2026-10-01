@@ -50,6 +50,7 @@ file to change when you add it.
 | Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. Only open views are checked. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
+| Notifications designer | Reads and writes the bell notification as Filament's `Notification::make()` chain in `toDatabase()`, and the email as a `MailMessage` chain in `toMail()`; a Mailable, a Markdown view, or a `toArray()` with plain arrays shows as code. Broadcast and other channels show as they are, without settings. Texts with the record's fields are strings or `__()` with replacements; other code, such as a concatenation, shows as code. The designer doesn't list where a notification is sent from. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
@@ -850,7 +851,10 @@ Filament version or a plugin needs no update to Tusk.
   or model columns into it, or click them in the palette, as in a form.
 - **What it does:** a custom action can save its form to the record, set a
   column to a value (an enum column offers its cases), delete the record, or,
-  on a list page, create a record. It can then show a success notification.
+  on a list page, create a record. It can also send one of the app's
+  notifications about the record, to the people you pick (see
+  [Notifications designer](#notifications-designer)). It can then show a
+  success notification.
   Bulk actions do the same to each selected record. Saving the form also fills
   it with the record's values when it opens. The designer writes these as the
   action's code; an action written otherwise shows as code.
@@ -1211,6 +1215,42 @@ Each change is saved in the code as you make it, as in the Filament designer.
 A task the designer can't read, such as a closure of the app's own, shows as
 code, and you can still change when it runs. Calls it doesn't write, such as
 `when()` or `emailOutputTo()`, stay as they are.
+
+## Notifications designer
+
+The notifications designer creates and changes a notification class: what
+shows in the panel's bell, and the email. To open it, click **Open in
+Notifications Designer** above a notification's class, run **Laravel: New
+Notification…** or **Laravel: Open Notification in Designer…**, or click
+**Notifications** in the Filament tool window.
+
+- **New notification:** a class name, the model it's about (or none, as for a
+  weekly report), and whether it goes to the bell, by email, or both. Tusk
+  writes it in `app/Notifications` with a title that names the record and a
+  button that opens the record's page.
+- **Sent to:** turns the bell and email on or off. Turning one on adds its
+  part when the class doesn't have it; turning it off keeps it.
+- **Bell:** the title, body, icon, and status, which colors the icon, and
+  buttons that open the record's view or edit page, a resource's list, or a
+  web address, and can mark the notification as read.
+- **Email:** the subject, greeting, lines before and after the button, the
+  button, and the salutation.
+- **The record's fields:** **+ Field** puts a field in a text, such as
+  `Order {number} shipped`, or a related record's field, such as
+  `{customer.name}`. Texts written with `__()` stay translated.
+- **Preview:** the bell notification and the email, with sample values for the
+  record's fields.
+- **What it needs:** says when the database lacks the notifications table,
+  with **Create it**; when no panel shows the bell, with **Turn it on**; and
+  when the app's mailer is `log` or `array`, so emails aren't delivered, with
+  a link to `.env`.
+- **Sending it:** shows the code that sends it to every user, users with a
+  role, the record's user, the signed-in user, or an email address. In the
+  Filament designer, an action button sends it with **What it does > Send a
+  notification**.
+
+Each change is saved as you make it. Calls the designer doesn't write, such as
+`->cc()`, and texts written as other code show as code and are kept.
 
 ## New Laravel projects and elements
 

@@ -1623,6 +1623,8 @@ const actions: Action[] = [
   { label: "Laravel: Automations…", run: () => root && void import("./automationsview").then((m) => m.openAutomationsPicker()) },
   { label: "Laravel: New Enum…", run: () => root && void import("./enumdesigner").then((m) => m.openNewEnum()) },
   { label: "Laravel: Scheduled Tasks…", run: () => root && void import("./scheduledesigner").then((m) => m.openSchedule()) },
+  { label: "Laravel: New Notification…", run: () => root && void import("./notifydesigner").then((m) => m.newNotification({ x: innerWidth / 2 - 160, y: 120 })) },
+  { label: "Laravel: Open Notification in Designer…", run: () => root && void import("./notifydesigner").then((m) => m.openNotificationPicker()) },
   { label: "Open in Enum Designer", run: () => active && void import("./enumdesigner").then((m) => m.openEnumDesigner(active)), when: () => /\/app\/.*Enums?\/\w+\.php$|Enum\.php$/.test(active) },
   { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
   { label: "Laravel: New Project…", run: () => newLaravelProject() },

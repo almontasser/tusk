@@ -2779,3 +2779,30 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .sd-flags { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .sd-flag { display: inline-flex; align-items: center; gap: 6px; }
 .sd-runs { font-variant-numeric: tabular-nums; }
+
+/* The notifications designer (src/notifydesigner.ts): editors, and the bell and email previews */
+.nd-text { width: 100%; }
+.nd-text > input { flex: 1; min-width: 0; }
+.nd-field-menu { flex: none; width: auto; padding: 2px 4px; font-size: 11.5px; }
+.nd-line { width: 100%; }
+.nd-line > .nd-text, .nd-line > input { flex: 1; min-width: 0; }
+.nd-sub { display: flex; align-items: center; gap: 8px; margin: 10px 2px 6px; }
+.nd-code { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border-subtle); }
+.nd-code pre { flex: 1; margin: 0; font: 11.5px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nd-preview-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.nd-bell-card { display: flex; gap: 10px; padding: 12px; border-radius: 10px; background: #fff; color: #18181b; box-shadow: 0 1px 3px rgb(0 0 0 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.05); font-size: 12.5px; }
+.nd-bell-icon .fd-heroicon, .nd-bell-icon svg { width: 22px; height: 22px; display: block; }
+.nd-bell-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nd-bell-text p { margin: 2px 0 0; color: #52525b; }
+.nd-bell-time { font-size: 11px; color: #71717a; }
+.nd-bell-buttons { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+.nd-bell-link { color: #d97706; font-weight: 600; font-size: 12px; }
+.nd-mail { margin-top: 8px; }
+.nd-mail-subject { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.nd-mail-page { padding: 14px 12px 18px; border-radius: 10px; background: #edf2f7; color: #718096; font-size: 12px; }
+.nd-mail-app { text-align: center; font-weight: 700; font-size: 14px; color: #3d4852; margin-bottom: 12px; }
+.nd-mail-body { padding: 16px 18px; border-radius: 4px; background: #fff; box-shadow: 0 2px 0 rgb(0 0 150 / 0.03); }
+.nd-mail-body h4 { margin: 0 0 10px; color: #3d4852; font-size: 14px; }
+.nd-mail-body p { margin: 0 0 10px; line-height: 1.5; }
+.nd-mail-button { text-align: center; margin: 12px 0 14px; }
+.nd-mail-button span { display: inline-block; padding: 7px 16px; border-radius: 4px; background: #2d3748; color: #fff; font-weight: 600; }

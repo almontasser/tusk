@@ -4658,6 +4658,50 @@ writes the code.
   `prunable()` query of `where` conditions (as `src/widgetgen.ts` writes them)
   and a date column older than some days.
 
+## Notifications designer
+
+`src/notifydesigner.ts` saves each change, as the widget designer does, and
+`src/notifygen.ts` reads and writes the code.
+
+- **Reading:** `introspect.php notifications` lists the app's notification
+  classes with the record each constructor takes and their channels.
+  `notification-setup` reports whether the `notifications` table exists, the
+  mailer and queue, the user model, the app's name, and which panels have
+  `->databaseNotifications()`. `readChannels` reads `via()` when it returns a
+  list of names. `readBell` reads `toDatabase()` (or `toArray()`) when it
+  returns `Notification::make()->…->getDatabaseMessage()`, and `readMail`
+  reads `toMail()` when it returns a chain on `new MailMessage`. Calls they
+  don't know stay in `other` and show as code.
+- **Texts:** a template such as `Order {number} shipped` is written as a
+  double-quoted string with `{$this->record->number}`, or, when the text was
+  translated, as `__('Order :number shipped', ['number' => …])`. A related
+  field, `{customer.name}`, is `$this->record->customer?->name`. `readText`
+  reads both back, and anything else is code. The record's property comes
+  from the constructor's first parameter.
+- **Writing:** new calls on the bell go before `getDatabaseMessage()`
+  (`insertCall`), and a new email line goes at the end of the lines on its
+  side of the button, since a `MailMessage` puts lines before the action in
+  its intro and lines after it in its outro. Buttons link with the resource's
+  `getUrl()`, with the record for view and edit pages.
+- **Setup:** turning the bell on in a panel uses `settingEdits` from
+  `src/panelgen.ts`, as Panel settings does. The notifications table comes
+  from `make:notifications-table` and `migrate` in a terminal tab.
+- **New notifications** are written whole by `notificationFile`, into
+  `app/Notifications`. `make:notification` writes a mail-only stub that Tusk
+  would replace.
+
+### Sending notifications
+
+`src/notifysend.ts` is the one statement that sends a notification, shared by
+action buttons, automations, and scheduled tasks: `sendCode` writes it for a
+recipient (every user, users with a role, a user the record points at, the
+signed-in user, or an email address), and `readSend` reads it back with any
+layout. A notification takes the record it's about as its constructor's one
+argument, or none. In the Filament designer, the **Send a notification**
+behavior in `src/filamentactions.ts` writes the statement as the action's
+closure: once for a record, or in a `foreach` over the selected records.
+`readBehavior` resolves the class through the file's imports.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6430,3 +6474,24 @@ needs the file saved and read again after each change. The designer builds
 the cron expression from the calls it reads, as Laravel does, and finds the
 next matches itself, so the times change as you choose them. Conditions such
 as `when()` are named as possibly skipping runs.
+
+### 2026-10-01: The notifications designer saves each change
+
+A change to a notification is one edit to its class, with nothing to run
+afterwards, unlike a migration. So the designer saves each change as the
+Filament and widget designers do, and the preview follows.
+
+### 2026-10-01: Texts name the record's fields in the string
+
+A notification's text could build its value with concatenation, `sprintf()`,
+or a helper. The designer writes the record's fields into a double-quoted
+string, `"Order {$this->record->number} shipped"`, which reads like the text,
+and uses `__()` with replacements when the text is already translated, since
+a translation can't hold PHP. Anything else stays as code.
+
+### 2026-10-01: The notifications designer points at `.env` for mail
+
+Emails need a mailer that delivers, which is a setting in `.env`. The
+designer says when the mailer is `log` or `array` and opens `.env`, rather
+than editing it, since the environment settings belong to their own designer.
+

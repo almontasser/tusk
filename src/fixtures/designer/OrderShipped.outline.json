@@ -1,0 +1,1168 @@
+{
+  "errors": false,
+  "namespace": "App\\Notifications",
+  "uses": [
+    {
+      "alias": "OrderResource",
+      "name": "App\\Filament\\Resources\\Orders\\OrderResource",
+      "kind": "class",
+      "span": [
+        37,
+        85
+      ]
+    },
+    {
+      "alias": "Order",
+      "name": "App\\Models\\Order",
+      "kind": "class",
+      "span": [
+        86,
+        107
+      ]
+    },
+    {
+      "alias": "Action",
+      "name": "Filament\\Actions\\Action",
+      "kind": "class",
+      "span": [
+        108,
+        136
+      ]
+    },
+    {
+      "alias": "FilamentNotification",
+      "name": "Filament\\Notifications\\Notification",
+      "kind": "class",
+      "span": [
+        137,
+        201
+      ]
+    },
+    {
+      "alias": "Heroicon",
+      "name": "Filament\\Support\\Icons\\Heroicon",
+      "kind": "class",
+      "span": [
+        202,
+        238
+      ]
+    },
+    {
+      "alias": "Queueable",
+      "name": "Illuminate\\Bus\\Queueable",
+      "kind": "class",
+      "span": [
+        239,
+        268
+      ]
+    },
+    {
+      "alias": "MailMessage",
+      "name": "Illuminate\\Notifications\\Messages\\MailMessage",
+      "kind": "class",
+      "span": [
+        269,
+        319
+      ]
+    },
+    {
+      "alias": "Notification",
+      "name": "Illuminate\\Notifications\\Notification",
+      "kind": "class",
+      "span": [
+        320,
+        362
+      ]
+    }
+  ],
+  "useInsert": 363,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "OrderShipped",
+      "fqn": "App\\Notifications\\OrderShipped",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Notifications\\Notification",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        364,
+        1680
+      ],
+      "bodyStart": 405,
+      "bodyEnd": 1679,
+      "traits": [
+        "Illuminate\\Bus\\Queueable"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "__construct",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "record",
+              "type": "Order",
+              "default": null,
+              "span": [
+                458,
+                478
+              ]
+            }
+          ],
+          "returnType": null,
+          "attributes": [],
+          "span": [
+            430,
+            482
+          ],
+          "docStart": null,
+          "body": [
+            481,
+            481
+          ],
+          "returns": [],
+          "statements": []
+        },
+        {
+          "name": "via",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "notifiable",
+              "type": "object",
+              "default": null,
+              "span": [
+                508,
+                526
+              ]
+            }
+          ],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            488,
+            583
+          ],
+          "docStart": null,
+          "body": [
+            540,
+            582
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "database",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      557,
+                      567
+                    ]
+                  },
+                  "span": [
+                    557,
+                    567
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "mail",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      569,
+                      575
+                    ]
+                  },
+                  "span": [
+                    569,
+                    575
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 556,
+              "close": 575,
+              "legacy": false,
+              "span": [
+                556,
+                576
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "toDatabase",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "notifiable",
+              "type": "object",
+              "default": null,
+              "span": [
+                616,
+                634
+              ]
+            }
+          ],
+          "returnType": "array",
+          "attributes": [],
+          "span": [
+            589,
+            1239
+          ],
+          "docStart": null,
+          "body": [
+            648,
+            1238
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "static",
+                "class": "Filament\\Notifications\\Notification",
+                "classSpan": [
+                  664,
+                  684
+                ],
+                "method": "make",
+                "args": {
+                  "open": 690,
+                  "close": 691,
+                  "items": []
+                },
+                "span": [
+                  664,
+                  692
+                ]
+              },
+              "calls": [
+                {
+                  "name": "title",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 712,
+                    "close": 777,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "func",
+                          "name": "__",
+                          "nameSpan": [
+                            713,
+                            715
+                          ],
+                          "args": {
+                            "open": 715,
+                            "close": 776,
+                            "items": [
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": "string",
+                                  "value": "Order :number shipped",
+                                  "quote": "single",
+                                  "interpolated": false,
+                                  "span": [
+                                    716,
+                                    739
+                                  ]
+                                },
+                                "span": [
+                                  716,
+                                  739
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": "array",
+                                  "items": [
+                                    {
+                                      "key": {
+                                        "kind": "string",
+                                        "value": "number",
+                                        "quote": "single",
+                                        "interpolated": false,
+                                        "span": [
+                                          742,
+                                          750
+                                        ]
+                                      },
+                                      "value": {
+                                        "kind": "prop",
+                                        "object": {
+                                          "kind": "prop",
+                                          "object": {
+                                            "kind": "var",
+                                            "name": "this",
+                                            "span": [
+                                              754,
+                                              759
+                                            ]
+                                          },
+                                          "name": "record",
+                                          "nullsafe": false,
+                                          "span": [
+                                            754,
+                                            767
+                                          ]
+                                        },
+                                        "name": "number",
+                                        "nullsafe": false,
+                                        "span": [
+                                          754,
+                                          775
+                                        ]
+                                      },
+                                      "span": [
+                                        742,
+                                        775
+                                      ],
+                                      "spread": false
+                                    }
+                                  ],
+                                  "open": 741,
+                                  "close": 775,
+                                  "legacy": false,
+                                  "span": [
+                                    741,
+                                    776
+                                  ]
+                                },
+                                "span": [
+                                  741,
+                                  776
+                                ],
+                                "spread": false
+                              }
+                            ]
+                          },
+                          "span": [
+                            713,
+                            777
+                          ]
+                        },
+                        "span": [
+                          713,
+                          777
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    705,
+                    778
+                  ],
+                  "nameSpan": [
+                    707,
+                    712
+                  ]
+                },
+                {
+                  "name": "body",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 797,
+                    "close": 853,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "Hi {$this->record->customer?->name}, it's on its way.",
+                          "quote": "double",
+                          "interpolated": true,
+                          "span": [
+                            798,
+                            853
+                          ]
+                        },
+                        "span": [
+                          798,
+                          853
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    791,
+                    854
+                  ],
+                  "nameSpan": [
+                    793,
+                    797
+                  ]
+                },
+                {
+                  "name": "icon",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 873,
+                    "close": 897,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "classConst",
+                          "class": "Filament\\Support\\Icons\\Heroicon",
+                          "classSpan": [
+                            874,
+                            882
+                          ],
+                          "name": "OutlinedTruck",
+                          "span": [
+                            874,
+                            897
+                          ]
+                        },
+                        "span": [
+                          874,
+                          897
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    867,
+                    898
+                  ],
+                  "nameSpan": [
+                    869,
+                    873
+                  ]
+                },
+                {
+                  "name": "success",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 920,
+                    "close": 921,
+                    "items": []
+                  },
+                  "span": [
+                    911,
+                    922
+                  ],
+                  "nameSpan": [
+                    913,
+                    920
+                  ]
+                },
+                {
+                  "name": "iconColor",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 946,
+                    "close": 956,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "primary",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            947,
+                            956
+                          ]
+                        },
+                        "span": [
+                          947,
+                          956
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    935,
+                    957
+                  ],
+                  "nameSpan": [
+                    937,
+                    946
+                  ]
+                },
+                {
+                  "name": "actions",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 979,
+                    "close": 1196,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "chain",
+                                "base": {
+                                  "kind": "static",
+                                  "class": "Filament\\Actions\\Action",
+                                  "classSpan": [
+                                    998,
+                                    1004
+                                  ],
+                                  "method": "make",
+                                  "args": {
+                                    "open": 1010,
+                                    "close": 1017,
+                                    "items": [
+                                      {
+                                        "name": null,
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "view",
+                                          "quote": "single",
+                                          "interpolated": false,
+                                          "span": [
+                                            1011,
+                                            1017
+                                          ]
+                                        },
+                                        "span": [
+                                          1011,
+                                          1017
+                                        ],
+                                        "spread": false
+                                      }
+                                    ]
+                                  },
+                                  "span": [
+                                    998,
+                                    1018
+                                  ]
+                                },
+                                "calls": [
+                                  {
+                                    "name": "label",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1046,
+                                      "close": 1059,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "View order",
+                                            "quote": "single",
+                                            "interpolated": false,
+                                            "span": [
+                                              1047,
+                                              1059
+                                            ]
+                                          },
+                                          "span": [
+                                            1047,
+                                            1059
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1039,
+                                      1060
+                                    ],
+                                    "nameSpan": [
+                                      1041,
+                                      1046
+                                    ]
+                                  },
+                                  {
+                                    "name": "url",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1086,
+                                      "close": 1145,
+                                      "items": [
+                                        {
+                                          "name": null,
+                                          "value": {
+                                            "kind": "static",
+                                            "class": "App\\Filament\\Resources\\Orders\\OrderResource",
+                                            "classSpan": [
+                                              1087,
+                                              1100
+                                            ],
+                                            "method": "getUrl",
+                                            "args": {
+                                              "open": 1108,
+                                              "close": 1144,
+                                              "items": [
+                                                {
+                                                  "name": null,
+                                                  "value": {
+                                                    "kind": "string",
+                                                    "value": "view",
+                                                    "quote": "single",
+                                                    "interpolated": false,
+                                                    "span": [
+                                                      1109,
+                                                      1115
+                                                    ]
+                                                  },
+                                                  "span": [
+                                                    1109,
+                                                    1115
+                                                  ],
+                                                  "spread": false
+                                                },
+                                                {
+                                                  "name": null,
+                                                  "value": {
+                                                    "kind": "array",
+                                                    "items": [
+                                                      {
+                                                        "key": {
+                                                          "kind": "string",
+                                                          "value": "record",
+                                                          "quote": "single",
+                                                          "interpolated": false,
+                                                          "span": [
+                                                            1118,
+                                                            1126
+                                                          ]
+                                                        },
+                                                        "value": {
+                                                          "kind": "prop",
+                                                          "object": {
+                                                            "kind": "var",
+                                                            "name": "this",
+                                                            "span": [
+                                                              1130,
+                                                              1135
+                                                            ]
+                                                          },
+                                                          "name": "record",
+                                                          "nullsafe": false,
+                                                          "span": [
+                                                            1130,
+                                                            1143
+                                                          ]
+                                                        },
+                                                        "span": [
+                                                          1118,
+                                                          1143
+                                                        ],
+                                                        "spread": false
+                                                      }
+                                                    ],
+                                                    "open": 1117,
+                                                    "close": 1143,
+                                                    "legacy": false,
+                                                    "span": [
+                                                      1117,
+                                                      1144
+                                                    ]
+                                                  },
+                                                  "span": [
+                                                    1117,
+                                                    1144
+                                                  ],
+                                                  "spread": false
+                                                }
+                                              ]
+                                            },
+                                            "span": [
+                                              1087,
+                                              1145
+                                            ]
+                                          },
+                                          "span": [
+                                            1087,
+                                            1145
+                                          ],
+                                          "spread": false
+                                        }
+                                      ]
+                                    },
+                                    "span": [
+                                      1081,
+                                      1146
+                                    ],
+                                    "nameSpan": [
+                                      1083,
+                                      1086
+                                    ]
+                                  },
+                                  {
+                                    "name": "markAsRead",
+                                    "nullsafe": false,
+                                    "args": {
+                                      "open": 1179,
+                                      "close": 1180,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      1167,
+                                      1181
+                                    ],
+                                    "nameSpan": [
+                                      1169,
+                                      1179
+                                    ]
+                                  }
+                                ],
+                                "span": [
+                                  998,
+                                  1181
+                                ]
+                              },
+                              "span": [
+                                998,
+                                1181
+                              ],
+                              "spread": false
+                            }
+                          ],
+                          "open": 980,
+                          "close": 1195,
+                          "legacy": false,
+                          "span": [
+                            980,
+                            1196
+                          ]
+                        },
+                        "span": [
+                          980,
+                          1196
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    970,
+                    1197
+                  ],
+                  "nameSpan": [
+                    972,
+                    979
+                  ]
+                },
+                {
+                  "name": "getDatabaseMessage",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1230,
+                    "close": 1231,
+                    "items": []
+                  },
+                  "span": [
+                    1210,
+                    1232
+                  ],
+                  "nameSpan": [
+                    1212,
+                    1230
+                  ]
+                }
+              ],
+              "span": [
+                664,
+                1232
+              ]
+            }
+          ],
+          "statements": []
+        },
+        {
+          "name": "toMail",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "notifiable",
+              "type": "object",
+              "default": null,
+              "span": [
+                1268,
+                1286
+              ]
+            }
+          ],
+          "returnType": "MailMessage",
+          "attributes": [],
+          "span": [
+            1245,
+            1678
+          ],
+          "docStart": null,
+          "body": [
+            1306,
+            1677
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "new",
+                "class": "Illuminate\\Notifications\\Messages\\MailMessage",
+                "args": null,
+                "span": [
+                  1323,
+                  1338
+                ]
+              },
+              "calls": [
+                {
+                  "name": "subject",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1361,
+                    "close": 1401,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "Order {$this->record->number} shipped",
+                          "quote": "double",
+                          "interpolated": true,
+                          "span": [
+                            1362,
+                            1401
+                          ]
+                        },
+                        "span": [
+                          1362,
+                          1401
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1352,
+                    1402
+                  ],
+                  "nameSpan": [
+                    1354,
+                    1361
+                  ]
+                },
+                {
+                  "name": "greeting",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1425,
+                    "close": 1434,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "Hello!",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1426,
+                            1434
+                          ]
+                        },
+                        "span": [
+                          1426,
+                          1434
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1415,
+                    1435
+                  ],
+                  "nameSpan": [
+                    1417,
+                    1425
+                  ]
+                },
+                {
+                  "name": "line",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1454,
+                    "close": 1482,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "Your order is on its way.",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1455,
+                            1482
+                          ]
+                        },
+                        "span": [
+                          1455,
+                          1482
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1448,
+                    1483
+                  ],
+                  "nameSpan": [
+                    1450,
+                    1454
+                  ]
+                },
+                {
+                  "name": "action",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1504,
+                    "close": 1577,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "View order",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1505,
+                            1517
+                          ]
+                        },
+                        "span": [
+                          1505,
+                          1517
+                        ],
+                        "spread": false
+                      },
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "static",
+                          "class": "App\\Filament\\Resources\\Orders\\OrderResource",
+                          "classSpan": [
+                            1519,
+                            1532
+                          ],
+                          "method": "getUrl",
+                          "args": {
+                            "open": 1540,
+                            "close": 1576,
+                            "items": [
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": "string",
+                                  "value": "view",
+                                  "quote": "single",
+                                  "interpolated": false,
+                                  "span": [
+                                    1541,
+                                    1547
+                                  ]
+                                },
+                                "span": [
+                                  1541,
+                                  1547
+                                ],
+                                "spread": false
+                              },
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": "array",
+                                  "items": [
+                                    {
+                                      "key": {
+                                        "kind": "string",
+                                        "value": "record",
+                                        "quote": "single",
+                                        "interpolated": false,
+                                        "span": [
+                                          1550,
+                                          1558
+                                        ]
+                                      },
+                                      "value": {
+                                        "kind": "prop",
+                                        "object": {
+                                          "kind": "var",
+                                          "name": "this",
+                                          "span": [
+                                            1562,
+                                            1567
+                                          ]
+                                        },
+                                        "name": "record",
+                                        "nullsafe": false,
+                                        "span": [
+                                          1562,
+                                          1575
+                                        ]
+                                      },
+                                      "span": [
+                                        1550,
+                                        1575
+                                      ],
+                                      "spread": false
+                                    }
+                                  ],
+                                  "open": 1549,
+                                  "close": 1575,
+                                  "legacy": false,
+                                  "span": [
+                                    1549,
+                                    1576
+                                  ]
+                                },
+                                "span": [
+                                  1549,
+                                  1576
+                                ],
+                                "spread": false
+                              }
+                            ]
+                          },
+                          "span": [
+                            1519,
+                            1577
+                          ]
+                        },
+                        "span": [
+                          1519,
+                          1577
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1496,
+                    1578
+                  ],
+                  "nameSpan": [
+                    1498,
+                    1504
+                  ]
+                },
+                {
+                  "name": "line",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1597,
+                    "close": 1631,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "Thank you for shopping with us.",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1598,
+                            1631
+                          ]
+                        },
+                        "span": [
+                          1598,
+                          1631
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1591,
+                    1632
+                  ],
+                  "nameSpan": [
+                    1593,
+                    1597
+                  ]
+                },
+                {
+                  "name": "cc",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 1649,
+                    "close": 1670,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "orders@example.com",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            1650,
+                            1670
+                          ]
+                        },
+                        "span": [
+                          1650,
+                          1670
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    1645,
+                    1671
+                  ],
+                  "nameSpan": [
+                    1647,
+                    1649
+                  ]
+                }
+              ],
+              "span": [
+                1322,
+                1671
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

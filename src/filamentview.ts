@@ -80,6 +80,12 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(porter.index + porter[0].length - porter[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openPorter", title: `Open in ${porter[1] === "Importer" ? "Import" : "Export"} Designer`, arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      // A notification: the notifications designer.
+      const notification = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+Notification\b/m.exec(text);
+      if (notification && /^use Illuminate\\Notifications\\Notification;/m.test(text)) {
+        const line = model.getPositionAt(notification.index + notification[0].length - notification[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openNotification", title: "Open in Notifications Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -97,6 +103,7 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openPageDesigner", (_, path: string) => void openDesigner(path));
   monaco.editor.registerCommand("tusk.openPorter", (_, path: string) => void import("./porterdesigner").then((m) => m.openPorter(path)));
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
+  monaco.editor.registerCommand("tusk.openNotification", (_, path: string) => void import("./notifydesigner").then((m) => m.openNotification(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
   // The project's .env: its environment settings.
@@ -258,6 +265,12 @@ export async function loadFilament() {
       row.onkeydown = (e) => e.key === "Enter" && void openDesigner(file);
       rows.push(row);
     }
+  }
+  if (app.booted && app.panels.length) {
+    const notices = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The app's notifications: the panel's bell and emails" }, icon("bell"), h("span", { class: "fv-name" }, "Notifications"));
+    notices.onclick = () => void import("./notifydesigner").then((m) => m.openNotificationPicker());
+    notices.onkeydown = (e) => e.key === "Enter" && notices.click();
+    rows.push(notices);
   }
   if (!app.booted) {
     // The app can't start, often because of a mistake in a file Filament loads. Say where, and still list the

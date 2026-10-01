@@ -173,6 +173,10 @@ export const observers = (root: string, model: string) => cached(root, `app:obse
 /** What the schedule designer offers: queued jobs (and whether their constructors need arguments), prunable models, the schedule's time zone, and the user model. */
 export type ScheduleInfo = { timezone: string; user: string | null; jobs: { class: string; file: string | null; needsArgs: boolean }[]; prunable: { class: string; file: string | null; trait: "Prunable" | "MassPrunable" }[] };
 export const scheduleInfo = (root: string) => cached(root, "app:schedule", () => introspect<ScheduleInfo>(root, "schedule"));
+
+/** What sending notifications needs: the notifications table, the mailer and queue, the user model, and each panel's bell. */
+export type NotificationSetup = { app: string | null; table: boolean | null; mailer: string | null; queue: string | null; user: string | null; panels: Record<string, boolean> };
+export const notificationSetup = (root: string) => cached(root, "app:notification-setup", () => introspect<NotificationSetup>(root, "notification-setup"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));
