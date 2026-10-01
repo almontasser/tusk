@@ -1,7 +1,7 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, line comments, and diffs.
 import { invoke } from "@tauri-apps/api/core";
 import type { monaco } from "./editor";
-import { diffCursor, git, gitOutput, showDiff } from "./git";
+import { diffCursor, git, gitOutput, gitTask, showDiff } from "./git";
 import { age, type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
 import { listNav } from "./listnav";
@@ -214,7 +214,8 @@ export async function showPullRequest(number: number) {
     b.onclick = run;
     actions.append(b);
   };
-  action("Check Out", () => openTerminal(host.root(), `Check out #${number}`, ["gh", "pr", "checkout", String(number)]));
+  // gh fetches and checks out with git, which asks for a password or passphrase in the dialog through gitTask.
+  action("Check Out", () => gitTask(`Checking out #${number}…`, ["pr", "checkout", String(number)], `Can't check out #${number}`, { gh: true }).then((o) => o !== undefined && status(`Checked out #${number}.`, "app", "info")));
   action("Open in Browser", () => openUrl(pr.url));
   action("Refresh", () => showPullRequest(number));
   if (pr.state === "OPEN") action("Merge…", () => merge(pr));

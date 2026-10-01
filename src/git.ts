@@ -65,24 +65,28 @@ export function change(...args: string[]): Promise<boolean> {
   return next;
 }
 
+let askpass: Promise<[string, string] | null> | undefined;
+
 /**
  * Runs git with standard error in the output and returns the exit code instead of failing, for commands whose
  * messages matter either way, such as push, pull, and commit hooks. Credential prompts are asked in a dialog
  * rather than a terminal (`askpass` in src/sync.ts). Aborting `signal` stops git.
  */
-let askpass: Promise<[string, string] | null> | undefined;
-export async function gitOutput(args: string[], signal?: AbortSignal): Promise<{ code: number; output: string }> {
+export const gitOutput = (args: string[], signal?: AbortSignal) => askpassOutput(["git", "--no-optional-locks", ...args], signal);
+
+/** Runs a command the way `gitOutput` runs git, for programs that run git themselves, such as `gh pr checkout`. */
+async function askpassOutput(command: string[], signal?: AbortSignal): Promise<{ code: number; output: string }> {
   const dir = `${await appCacheDir()}/git`;
   await invoke("create_dir", { path: dir });
   const pidFile = `${dir}/${Date.now()}-${Math.random().toString(36).slice(2)}.pid`;
   // ponytail: a pid file lets the webview stop git without a Rust command for killing processes.
   // Prompts for a password or passphrase go to the app's askpass program, which asks in a dialog (askpass.rs).
   const [exe, socket] = (await (askpass ??= invoke<[string, string] | null>("askpass_env"))) ?? ["", ""];
-  const script = `exe=$1 sock=$2; shift 2; [ -n "$sock" ] && export GIT_ASKPASS="$exe" SSH_ASKPASS="$exe" SSH_ASKPASS_REQUIRE=force TUSK_ASKPASS="$sock"; export GIT_TERMINAL_PROMPT=0; git --no-optional-locks "$@" 2>&1 & echo $! > "$0"; wait $!; code=$?; rm -f "$0"; printf '\\n\\036%s' $code`;
+  const script = `exe=$1 sock=$2; shift 2; [ -n "$sock" ] && export GIT_ASKPASS="$exe" SSH_ASKPASS="$exe" SSH_ASKPASS_REQUIRE=force TUSK_ASKPASS="$sock"; export GIT_TERMINAL_PROMPT=0; "$@" 2>&1 & echo $! > "$0"; wait $!; code=$?; rm -f "$0"; printf '\\n\\036%s' $code`;
   const stop = () => void invoke("run_capture", { cwd: "/", program: "/bin/sh", args: ["-c", 'kill "$(cat "$0")" 2>/dev/null', pidFile], input: null }).catch(() => {});
   signal?.addEventListener("abort", stop);
   try {
-    const out = await invoke<string>("run_capture", { cwd: host.root(), program: "/bin/sh", args: ["-c", script, pidFile, exe, socket, ...args], input: null });
+    const out = await invoke<string>("run_capture", { cwd: host.root(), program: "/bin/sh", args: ["-c", script, pidFile, exe, socket, ...command], input: null });
     signal?.throwIfAborted();
     const at = out.lastIndexOf("\n\x1e");
     return { code: Number(out.slice(at + 2)), output: out.slice(0, at).trim() };
@@ -96,8 +100,8 @@ export async function gitOutput(args: string[], signal?: AbortSignal): Promise<{
  * git's message, with its full output a click away; one that left conflicts offers the merge tool instead.
  * Resolves to git's output when it worked, or undefined.
  */
-export async function gitTask(label: string, args: string[], failure: string, options: { cancellable?: boolean } = {}): Promise<string | undefined> {
-  const result = await withProgress(label, (signal) => gitOutput(args, signal), { ...options, error: failure });
+export async function gitTask(label: string, args: string[], failure: string, options: { cancellable?: boolean; gh?: boolean } = {}): Promise<string | undefined> {
+  const result = await withProgress(label, (signal) => (options.gh ? askpassOutput(["gh", ...args], signal) : gitOutput(args, signal)), { ...options, error: failure });
   await refreshGit();
   if (!result) return;
   if (!result.code) return result.output;
