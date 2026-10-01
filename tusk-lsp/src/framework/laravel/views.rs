@@ -1,7 +1,7 @@
 //! The variables a Blade view gets where it's rendered, with their types, so its PHP is checked against them.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use mago_allocator::LocalArena;
 use mago_codex::ttype::atomic::TAtomic;
@@ -11,12 +11,14 @@ use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::atomic::scalar::TScalar;
 use mago_codex::ttype::union::TUnion;
 use mago_span::HasSpan;
-use mago_syntax::cst::{Argument, ArgumentList, Expression, Node};
+use mago_syntax::cst::{Argument, ArgumentList, ArrayElement, Expression, Literal, Node};
 
 use crate::analysis::{Parsed, analyze};
 use crate::index::Index;
 use crate::locate::walk;
 use crate::symbol::Resolver;
+
+use super::blade;
 
 /// Calls whose argument names a view, with the view's data in the next argument: `view('x', $data)`,
 /// `View::make('x', $data)`, `response()->view('x', $data)`, and `Route::view('/url', 'x', $data)`.
@@ -28,11 +30,30 @@ pub fn view_name(index: &Index, path: &Path) -> Option<String> {
     Some(rel.strip_suffix(".blade.php")?.replace('/', "."))
 }
 
+/// Every Blade view in `resources/views`.
+pub fn blade_views(root: &Path) -> Vec<PathBuf> {
+    // ponytail: only the app's own views folder; views that packages or modules register elsewhere are left out.
+    ignore::WalkBuilder::new(root.join("resources/views"))
+        .standard_filters(false)
+        .build()
+        .flatten()
+        .map(|e| e.into_path())
+        .filter(|p| p.to_string_lossy().ends_with(".blade.php"))
+        .collect()
+}
+
 /// The variables `view` gets, as `(name, docblock type)`: what each place in the project that renders it passes,
-/// in a data array, `compact()`, or `->with()`, and a Livewire component's (or Filament page's) public properties.
-/// A variable is left out unless every such place passes it with a type that can be written; places with
-/// different types give a union. `read` gives a project file's text.
+/// in a data array, `compact()`, or `->with()`, a Livewire component's (or Filament page's) public properties,
+/// and what each view that includes it passes ([`included_by`]). A variable is left out unless every such place
+/// passes it with a type that can be written; places with different types give a union. `read` gives a project
+/// file's text.
 pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &str) -> Vec<(String, String)> {
+    types(index, read, &blade_views(&index.config.root), &mut vec![view.to_string()])
+}
+
+/// [`view_types`] for the last view in `stack`, which is included by the ones before it, among `views`.
+fn types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, views: &[PathBuf], stack: &mut Vec<String>) -> Vec<(String, String)> {
+    let view = stack.last().cloned().unwrap_or_default();
     let quoted = [format!("'{view}'"), format!("\"{view}\"")];
     // Each place that renders the view, with the variables it passes.
     let mut sites: Vec<BTreeMap<String, Option<String>>> = vec![];
@@ -102,6 +123,13 @@ pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &
             }
         });
     }
+    // The variables the view reads, which a view that includes it passes as they are there.
+    let child = index.config.root.join(format!("resources/views/{}.blade.php", view.replace('.', "/")));
+    let names = read(&child).map(|t| read_vars(&t)).unwrap_or_default();
+    for path in views {
+        let Some(text) = read(path).filter(|t| quoted.iter().any(|q| t.contains(q.as_str()))) else { continue };
+        sites.extend(included_by(index, read, views, stack, path, &text, &quoted, &names));
+    }
     let Some(first) = sites.first() else { return vec![] };
     first
         .keys()
@@ -116,6 +144,96 @@ pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &
             Some((name.clone(), parts.join("|")))
         })
         .collect()
+}
+
+/// The places in `text`, the Blade view at `path`, that include the view `quoted` names, with the variables each
+/// passes: its data array's, and those in `names` as they are where it includes it, since an include gets them
+/// all. `@include` and `@includeIf` take the view first, `@includeWhen` and `@includeUnless` after their
+/// condition. Other directives that name it, such as `@each` and `@extends`, pass nothing known.
+#[allow(clippy::too_many_arguments)]
+fn included_by(index: &Index, read: &dyn Fn(&Path) -> Option<String>, views: &[PathBuf], stack: &mut Vec<String>, path: &Path, text: &str, quoted: &[String; 2], names: &BTreeSet<String>) -> Vec<BTreeMap<String, Option<String>>> {
+    let src = text.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut sites = vec![];
+    // The view with each include's variables echoed just before it, `{{ $post }}`, so their types there are read.
+    let mut probed = String::new();
+    // Each include: the offset of its `(` in `probed`, the view's position among its arguments, and its echoes.
+    let mut found = vec![];
+    let mut last = 0;
+    for (at, _) in text.match_indices('@').filter(|(at, _)| *at == 0 || !word(src[at - 1])) {
+        let name_end = at + 1 + src[at + 1..].iter().take_while(|b| word(**b)).count();
+        let open = name_end + src[name_end..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+        let Some(close) = (src.get(open) == Some(&b'(')).then(|| blade::matching_paren(src, open)).flatten() else { continue };
+        if !quoted.iter().any(|q| text[open..close].contains(q.as_str())) {
+            continue;
+        }
+        let position = match &text[at + 1..name_end] {
+            "include" | "includeIf" => 0,
+            "includeWhen" | "includeUnless" => 1,
+            "includeFirst" | "each" | "extends" | "extendsFirst" | "component" => {
+                sites.push(BTreeMap::new());
+                continue;
+            }
+            _ => continue,
+        };
+        probed.push_str(&text[last..at]);
+        let mut echoes = vec![];
+        for name in names {
+            let start = probed.len() + 3;
+            probed.push_str(&format!("{{{{ ${name} }}}}"));
+            echoes.push((name.clone(), start, start + 1 + name.len()));
+        }
+        found.push((probed.len() + open - at, position, echoes));
+        last = at;
+    }
+    probed.push_str(&text[last..]);
+    let Some(parent) = view_name(index, path).filter(|_| !found.is_empty()) else { return sites };
+    // A view that includes itself, directly or through others, passes nothing known to itself.
+    if stack.contains(&parent) {
+        sites.extend(found.iter().map(|_| BTreeMap::new()));
+        return sites;
+    }
+    stack.push(parent);
+    let vars = types(index, read, views, stack);
+    stack.pop();
+    let (php, head, _) = blade::checked_php(&probed, &vars);
+    let arena = LocalArena::new();
+    let parsed = Parsed::new(&arena, path, &php);
+    let analysis = analyze(&parsed, &arena, index);
+    let type_of = |e: &Expression<'_>| analysis.type_of(e.span().start.offset, e.span().end.offset);
+    // The directives' arguments, which read as arrays.
+    let mut arrays = vec![];
+    walk(&parsed, |node, _| {
+        if let Node::Array(a) = node {
+            arrays.push(a);
+        }
+    });
+    for (open, position, echoes) in found {
+        // One in a comment isn't read.
+        let Some(array) = arrays.iter().find(|a| a.left_bracket.start.offset as usize == head + open) else { continue };
+        let args: Vec<Option<&Expression<'_>>> = array.elements.iter().map(|e| if let ArrayElement::Value(v) = e { Some(v.value) } else { None }).collect();
+        let names_it = |e: &Expression<'_>| matches!(e, Expression::Literal(Literal::String(s)) if quoted.iter().any(|q| &php[s.span.start.offset as usize..s.span.end.offset as usize] == q));
+        if !args.get(position).copied().flatten().is_some_and(names_it) {
+            continue;
+        }
+        let mut vars: BTreeMap<String, Option<String>> = echoes.into_iter().map(|(name, s, e)| (name, analysis.type_of((head + s) as u32, (head + e) as u32).and_then(|t| docblock_type(&t)))).collect();
+        if let Some(data) = args.get(position + 1) {
+            let t = data.and_then(|d| type_of(d));
+            // Data whose keys aren't all known may replace any variable.
+            if !matches!(t.as_deref().map(|t| &t.types[..]), Some([TAtomic::Array(TArray::Keyed(k))]) if k.parameters.is_none()) {
+                vars.clear();
+            }
+            entries(t.as_deref(), &mut vars);
+        }
+        sites.push(vars);
+    }
+    sites
+}
+
+/// The variables a view reads, by name without `$`.
+fn read_vars(text: &str) -> BTreeSet<String> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.split('$').skip(1).map(|s| &s[..s.find(|c| !word(c)).unwrap_or(s.len())]).filter(|n| n.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') && *n != "this").map(str::to_string).collect()
 }
 
 /// The entries of a keyed array type, such as `compact()`'s or a data array literal's.
@@ -188,4 +306,40 @@ pub fn docblock_type(t: &TUnion) -> Option<String> {
         }
     }
     (!parts.is_empty()).then(|| parts.join("|"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{Fixture, path};
+
+    #[test]
+    fn types_an_included_views_variables_from_the_view_that_includes_it() {
+        let models = "<?php\nnamespace App;\nclass User {}\nclass Comment {}\nclass Post { /** @var list<Comment> */ public array $comments = []; public ?User $author = null; }\n";
+        let controller = "<?php\nnamespace App;\nclass PostController {\n    public function show(Post $post, array $extra) { return view('posts.show', compact('post', 'extra')); }\n    public function tree(Comment $c) { return view('tree', ['node' => $c]); }\n}\n";
+        let show = "@foreach ($post->comments as $comment) @include('posts.comment', ['n' => 1]) @endforeach\n@include('posts.meta')\n@includeWhen($post->author, 'posts.byline', ['by' => $post->author])\n{{-- @include('posts.meta', ['post' => 1]) --}}\n@include('posts.extra', $extra) @each('posts.each', $post->comments, 'comment')\n";
+        let views = [
+            ("resources/views/posts/show.blade.php", show),
+            ("resources/views/posts/comment.blade.php", "{{ $comment }} {{ $post }} {{ $n }} {{ $nope }}"),
+            ("resources/views/posts/meta.blade.php", "{{ $post }}"),
+            ("resources/views/posts/byline.blade.php", "{{ $by }} {{ $post }}"),
+            ("resources/views/posts/extra.blade.php", "{{ $post }}"),
+            ("resources/views/posts/each.blade.php", "{{ $comment }}"),
+            ("resources/views/tree.blade.php", "{{ $node }} @include('tree', ['node' => $node])"),
+        ];
+        let mut files = vec![("app/Models.php", models), ("app/PostController.php", controller)];
+        files.extend(views);
+        let fx = Fixture::new(&files);
+        let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
+        let types_of = |view: &str| types(&fx.snap.index.read(), &|p| fx.snap.read(p), &paths, &mut vec![view.to_string()]);
+        let owned = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect::<Vec<_>>();
+        // A loop variable as it is in the loop, the includer's own variables, and the include's data.
+        assert_eq!(types_of("posts.comment"), owned(&[("comment", "\\App\\Comment"), ("n", "int"), ("post", "\\App\\Post")]));
+        assert_eq!(types_of("posts.meta"), owned(&[("post", "\\App\\Post")]));
+        assert_eq!(types_of("posts.byline"), owned(&[("by", "null|\\App\\User"), ("post", "\\App\\Post")]));
+        // Data of unknown keys, `@each`, and a view that includes itself pass nothing known.
+        assert!(types_of("posts.extra").is_empty());
+        assert!(types_of("posts.each").is_empty());
+        assert!(types_of("tree").is_empty());
+    }
 }

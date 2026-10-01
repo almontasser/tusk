@@ -87,17 +87,29 @@ const PHP_DIRECTIVES: &[&str] = &[
     "method", "lang", "choice", "inject", "dd", "dump", "vite", "once", "fragment", "livewire", "use",
 ];
 
-/// A Blade view as a PHP file for Mago's analyzer, and the length of its first line, which holds `<?php` and
-/// the view's `@use` imports. After that line comes the view with everything but its PHP blanked, so an offset
-/// past the first line, less its length, is the view's. Each piece of PHP becomes a statement that starts with
-/// `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an array,
-/// since they may be a list), `@foreach` keeps its keyword, as `;foreach (…)`, and its body is a block from
-/// the next statement, which starts with `{` instead, to `@endforeach`, which reads `;}`, and `@php … @endphp` and `<?php … ?>` keep their code as is. Unlike
+/// A Blade view as a PHP file for Mago's analyzer, the length of its first line, which holds `<?php` and the
+/// view's `@use` imports, and the ranges of the view where "possibly null" problems can't be trusted. After the
+/// first line comes the view with everything but its PHP blanked, so an offset past the first line, less its
+/// length, is the view's. Each piece of PHP becomes a statement that starts with `;` in place of its delimiter:
+/// `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an array, since they may be a list), and
+/// `@php … @endphp` and `<?php … ?>` keep their code as is. `@foreach` keeps its keyword, as `;foreach (…)`, and
+/// its body is a block from the next statement, which starts with `{` instead, to `@endforeach`, which reads
+/// `;}`. `@if` keeps its keyword too, in PHP's `if (…): … endif;` form, so it narrows types: the next statement
+/// starts with `:`, `@elseif` and `@else` read `;elseif` and `;else`, and `@endif` reads `;endif`. Unlike
 /// [`virtual_php`], it reads every directive, loop, and component attribute, to check them all.
 ///
 /// `vars`, the view's variables with their docblock types, are declared on the first line, so Mago checks their
-/// uses.
-pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
+/// uses. The untrusted ranges are the bodies of blocks such as `@isset` and `@auth`, which guard what's in them
+/// without narrowing, or the whole view when its `@if`s don't nest, which leaves them unread as branches.
+pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize, Vec<std::ops::Range<usize>>) {
+    laid_out(text, vars, true).unwrap_or_else(|| {
+        let (php, head, _) = laid_out(text, vars, false).unwrap_or_default();
+        (php, head, vec![0..text.len()])
+    })
+}
+
+/// [`checked_php`], with `@if` read as a branch when `narrow`, or `None` when its blocks don't nest.
+fn laid_out(text: &str, vars: &[(String, String)], narrow: bool) -> Option<(String, usize, Vec<std::ops::Range<usize>>)> {
     let src = text.as_bytes();
     let mut out: Vec<u8> = src.iter().map(|b| if matches!(b, b'\n' | b'\r') { *b } else { b' ' }).collect();
     let put = |out: &mut Vec<u8>, at: usize, s: &[u8]| out[at..at + s.len()].copy_from_slice(s);
@@ -109,9 +121,11 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let at_word = |i: usize, w: &[u8]| src[i..].starts_with(w) && !src.get(i + w.len()).is_some_and(|b| word(*b));
     let mut imports: Vec<String> = vec![];
-    // The loops open around `i`, each `true` for `@forelse`, and whether the last one's body is still to start.
-    let mut loops: Vec<bool> = vec![];
-    let mut pending = false;
+    // The blocks open around `i`, by their directive and offset, and what starts the next statement when it's the
+    // first in a loop's body (`{`) or an `@if` branch (`:`).
+    let mut blocks: Vec<(&str, usize)> = vec![];
+    let mut pending: Option<u8> = None;
+    let mut guarded = vec![];
     let mut i = 0;
     while i < src.len() {
         let rest = &src[i..];
@@ -148,18 +162,62 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
             let name_end = i + 1 + src[i + 1..].iter().take_while(|b| word(**b)).count();
             let name = std::str::from_utf8(&src[i + 1..name_end]).unwrap_or("");
             let open = name_end + src[name_end..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
-            let end = (name_end > i + 1 && src.get(open) == Some(&b'(') && PHP_DIRECTIVES.contains(&name)).then(|| matching_paren(src, open)).flatten();
-            let Some(end) = end.map(|e| e + 1) else {
-                // A loop's end closes its body; `@empty` ends a `@forelse`'s.
-                let forelse = match name {
-                    "endforeach" | "endfor" | "endwhile" => Some(false),
-                    "endforelse" | "empty" => Some(true),
-                    _ => None,
-                };
-                if forelse.is_some() && loops.last() == forelse.as_ref() {
-                    loops.pop();
-                    put(&mut out, i, if std::mem::take(&mut pending) { b"{}" } else { b";}" });
+            let end = (name_end > i + 1 && src.get(open) == Some(&b'(') && PHP_DIRECTIVES.contains(&name)).then(|| matching_paren(src, open)).flatten().map(|e| e + 1);
+            let top = blocks.last().map(|b| b.0);
+            // Whether `name` ends the innermost block: a loop's end, or `@empty` for a `@forelse`'s body, whose
+            // `@empty` branch `@endforelse` ends; `@endif`, which also ends `@hasSection`; `@show` and the like for a
+            // `@section`; and `@end…` for any other, such as `@endauth`.
+            let closes = top.is_some_and(|top| match name {
+                "empty" => end.is_none() && top == "forelse",
+                "endforelse" => matches!(top, "forelse" | "forelse-empty"),
+                "endif" => matches!(top, "if" | "hasSection" | "sectionMissing"),
+                "show" | "stop" | "append" | "overwrite" => top == "section",
+                _ => name.strip_prefix("end") == Some(top),
+            });
+            if closes {
+                let (block, at) = blocks.pop().unwrap_or_default();
+                match block {
+                    "foreach" | "forelse" | "for" | "while" => {
+                        put(&mut out, i, if pending.take().is_some() { b"{}" } else { b";}" });
+                        if name == "empty" {
+                            blocks.push(("forelse-empty", i));
+                        }
+                    }
+                    "if" => {
+                        lead(&mut out, i, &mut pending);
+                        keep(&mut out, i + 1, name_end);
+                    }
+                    "forelse-empty" | "section" | "push" | "prepend" | "once" | "fragment" | "component" | "slot" => {}
+                    // A guard, such as `@isset ($a->b)`, keeps `$a->b` possibly null inside.
+                    _ => guarded.push(at..i),
                 }
+                i = name_end;
+                continue;
+            }
+            if narrow && top == Some("if") && (name == "else" || (name == "elseif" && end.is_some())) {
+                let to = end.unwrap_or(name_end);
+                lead(&mut out, i, &mut pending);
+                keep(&mut out, i + 1, to);
+                pending = Some(b':');
+                i = to;
+                continue;
+            }
+            // An end that isn't the innermost block's, around an `@if`, means the blocks don't nest as read.
+            if narrow && (name == "endif" || (top == Some("if") && name.starts_with("end"))) {
+                return None;
+            }
+            // Any block opens, so `@else` is matched to its own: `@auth … @else … @endauth` too.
+            let block = match name {
+                "foreach" | "forelse" | "for" | "while" => end.is_some(),
+                "if" => narrow && end.is_some(),
+                "hasSection" | "sectionMissing" => narrow,
+                "php" | "else" | "elseif" => false,
+                _ => narrow && find(src, name_end, format!("@end{name}").as_bytes()).is_some(),
+            };
+            if block {
+                blocks.push((name, i));
+            }
+            let Some(end) = end else {
                 i = name_end;
                 continue;
             };
@@ -178,16 +236,15 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
                     let alias = quoted.get(1).filter(|a| !a.is_empty()).map(|a| format!(" as {a}")).unwrap_or_default();
                     imports.push(format!("use {}{alias};", class.trim_start_matches('\\')));
                 }
-            } else if matches!(name, "foreach" | "forelse" | "for" | "while") {
+            } else if matches!(name, "foreach" | "forelse" | "for" | "while") || name == "if" && narrow {
                 put(&mut out, i, if name == "forelse" { b";foreach" } else { b";" });
                 lead(&mut out, i, &mut pending);
                 if name != "forelse" {
                     keep(&mut out, i + 1, name_end);
                 }
                 keep(&mut out, open, end);
-                // The statements up to the loop's end are its body, in a block that the next statement opens.
-                loops.push(name == "forelse");
-                pending = true;
+                // The statements up to the block's end are its body, which the next statement opens.
+                pending = Some(if name == "if" { b':' } else { b'{' });
             } else {
                 lead(&mut out, i, &mut pending);
                 out[open] = b'[';
@@ -235,13 +292,17 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> (String, usize) {
     // `@var` on an assignment types each variable; the `$x` read before it is undefined, which isn't reported.
     let vars: String = vars.iter().map(|(name, t)| format!(" /** @var {t} ${name} */ ${name} = ${name};")).collect();
     let head = format!("<?php {}{vars}\n", imports.join(" "));
-    let tail = format!("{}{}", if pending { "{" } else { ";" }, "}".repeat(loops.len()));
-    (format!("{head}{}{tail}", String::from_utf8(out).unwrap_or_default()), head.len())
+    if blocks.iter().any(|b| b.0 == "if") {
+        return None;
+    }
+    let loops = blocks.iter().filter(|b| matches!(b.0, "foreach" | "forelse" | "for" | "while")).count();
+    let tail = format!("{}{}", if pending.is_some() { "{" } else { ";" }, "}".repeat(loops));
+    Some((format!("{head}{}{tail}", String::from_utf8(out).unwrap_or_default()), head.len(), guarded))
 }
 
-/// Starts a statement at `at` with `;`, which ends the one before, or with `{` when it's the first in a loop's body.
-fn lead(out: &mut [u8], at: usize, pending: &mut bool) {
-    out[at] = if std::mem::take(pending) { b'{' } else { b';' };
+/// Starts a statement at `at` with `;`, which ends the one before, or with what opens the block it's first in.
+fn lead(out: &mut [u8], at: usize, pending: &mut Option<u8>) {
+    out[at] = pending.take().unwrap_or(b';');
 }
 
 fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
@@ -249,7 +310,7 @@ fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
 }
 
 /// The `)` matching the `(` at `open`, skipping strings.
-fn matching_paren(src: &[u8], open: usize) -> Option<usize> {
+pub(super) fn matching_paren(src: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0;
     let mut quote = None;
     let mut i = open;
@@ -333,7 +394,7 @@ mod tests {
 
     /// The checked PHP without its first line.
     fn body(blade: &str) -> String {
-        let (php, head) = checked_php(blade, &[]);
+        let (php, head, _) = checked_php(blade, &[]);
         php[head..].to_string()
     }
 
@@ -342,7 +403,7 @@ mod tests {
         let blade = "<h1 class=\"{{ $a }}\">{!! $b !!}</h1>\n@if ($c && f(')'))\n  @foreach ($posts as $post) x @endforeach\n@endif\n@php $d = 1; @endphp";
         let php = body(blade);
         assert_eq!(php.len(), blade.len() + 1);
-        assert_eq!(php, "           ;[ $a ]    ;[ $b ]       \n;   [$c && f(')')]\n  ;foreach ($posts as $post)   {}         \n      \n;    $d = 1; ;      ;");
+        assert_eq!(php, "           ;[ $a ]    ;[ $b ]       \n;if ($c && f(')'))\n  :foreach ($posts as $post)   {}         \n;endif\n;    $d = 1; ;      ;");
     }
 
     #[test]
@@ -354,6 +415,22 @@ mod tests {
         assert_eq!(body("@while($a) @php $a--; @endphp"), ";while($a) {    $a--; ;      ;}");
         assert_eq!(body("<x-card :post=\"$post\" ::alpine=\"x\" title=\"t\" />"), "             ;[$post]                          ;");
         assert!(checked_php("@use('App\\Models\\Post', 'P')", &[]).0.starts_with("<?php use App\\Models\\Post as P;\n"));
+    }
+
+    #[test]
+    fn reads_if_as_branches_and_marks_guarded_bodies() {
+        assert_eq!(body("@if($a) {{ $a }} @elseif($b) @else {{ $c }} @endif"), ";if($a) :[ $a ]  ;elseif($b) :else :[ $c ]  ;endif;");
+        // `@else` belongs to the innermost block, here `@auth`, whose body is guarded.
+        let blade = "@if($a) @auth {{ $a }} @else x @endauth @endif";
+        let (php, head, guarded) = checked_php(blade, &[]);
+        assert_eq!(&php[head..], ";if($a)       :[ $a ]                   ;endif;");
+        assert_eq!(guarded, vec![8..31]);
+        // Blocks that don't nest leave `@if` as an expression, and the whole view guarded.
+        let blade = "@if($a) @foreach($b as $c) @endif @endforeach";
+        let (php, head, guarded) = checked_php(blade, &[]);
+        assert_eq!(&php[head..], ";  [$a] ;foreach($b as $c)        {}         ;");
+        assert_eq!(guarded, vec![0..blade.len()]);
+        assert_eq!(checked_php("@if($a)", &[]).2, vec![0..7]);
     }
 
     #[test]
