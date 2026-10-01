@@ -261,9 +261,10 @@ The picker (`pickTheme` in `src/settings.ts`) is the palette with a `preview`
 on each item, which runs as the selection moves. Escape applies the saved
 theme again.
 
-Format on save formats the active editor through Monaco's format action, which
-applies minimal edits and keeps the cursor in place, and formats other files
-with one undoable edit.
+Format on save runs Monaco's format action on every file `saveFile` writes,
+so Save All formats too. `formatModel` uses an editor that shows the file, or
+a hidden one it creates and disposes of, since Monaco's built-in formatters
+need an editor. The action applies minimal edits and keeps the cursor in place.
 
 ### Keymap
 
@@ -6781,3 +6782,12 @@ declarations, not call arguments, and `config/` is where Laravel apps read the
 environment. The files are small and the completion is rare, so nothing is
 cached. Values come only from `.env.example` and `env()` defaults: copying a
 value from `.env` into `.env.example` would commit a secret.
+
+### 2026-10-01: Format on save runs in an editor, hidden when the file isn't shown
+
+Format on save formatted only the active tab through Monaco's format action;
+other tabs got the project formatter's text as one edit, and Monaco's built-in
+formatters, which have no API without an editor, skipped them. `saveFile` now
+calls `formatModel` for every file, which runs the action in an editor showing
+the file or in a hidden editor made for the save. Every file then goes through
+the same providers, with minimal edits.

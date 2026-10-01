@@ -1188,11 +1188,7 @@ async function writeModel(path: string) {
 async function saveFile(path: string) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
-  if (formatOnSave(tab.model.getLanguageId())) {
-    // The active editor formats through Monaco, which applies minimal edits and keeps the cursor in place.
-    if (path === active) await editor.getAction("editor.action.formatDocument")?.run();
-    else await formatModel(tab.model);
-  }
+  if (formatOnSave(tab.model.getLanguageId())) await formatModel(tab.model);
   await applySaveRules(tab.model);
   const text = tab.model.getValue();
   try {

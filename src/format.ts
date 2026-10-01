@@ -198,11 +198,15 @@ export function initFormatting(h: Host) {
 }
 
 /**
- * Formats a model in place with an undoable edit, for format on save in a tab that isn't active. Monaco's built-in
- * formatters need an editor, so such a file isn't formatted.
+ * Formats a model for format on save, in an editor that shows it or else a hidden one: Monaco's built-in formatters
+ * need an editor, and Monaco turns the result into minimal edits, so the cursor stays put.
  */
 export async function formatModel(model: monaco.editor.ITextModel) {
-  if (!host.root() || model.uri.scheme !== "file") return;
-  const text = await formatReported(model);
-  if (text !== null && text !== model.getValue()) model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  const shown = monaco.editor.getEditors().find((e) => e.getModel() === model);
+  const editor = shown ?? monaco.editor.create(document.createElement("div"), { model });
+  try {
+    await editor.getAction("editor.action.formatDocument")?.run();
+  } finally {
+    if (!shown) editor.dispose();
+  }
 }
