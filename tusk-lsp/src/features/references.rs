@@ -130,7 +130,6 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMen
     paths.extend(snap.docs.iter().filter(|d| d.language == "php").map(|d| d.path.clone()));
     paths.sort();
     paths.dedup();
-    let php_version = index.config.php_version;
     crate::index::scan_pool().install(|| paths
         .into_par_iter()
         .filter_map(|path| {
@@ -145,7 +144,7 @@ pub fn search(snap: &Snapshot, index: &Index, symbols: &[Symbol]) -> Vec<FileMen
             }
             let arena = LocalArena::new();
             let parsed = Parsed::new(&arena, &path, &text);
-            let analysis = analyze(&parsed, &arena, codebase, php_version);
+            let analysis = analyze(&parsed, &arena, index);
             let spans = mentions(&parsed, &analysis, codebase, &targets, &shorts);
             drop(parsed);
             (!spans.is_empty()).then_some((path, text, spans))

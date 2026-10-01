@@ -41,7 +41,7 @@ pub fn view_types(index: &Index, read: &dyn Fn(&Path) -> Option<String>, view: &
         let Some(text) = read(path).filter(|t| quoted.iter().any(|q| t.contains(q.as_str()))) else { continue };
         let arena = LocalArena::new();
         let parsed = Parsed::new(&arena, path, &text);
-        let analysis = analyze(&parsed, &arena, &index.codebase, index.config.php_version);
+        let analysis = analyze(&parsed, &arena, &index);
         let resolver = Resolver::new(&parsed, Some(&analysis), &index.codebase);
         let type_of = |e: &Expression<'_>| analysis.type_of(e.span().start.offset, e.span().end.offset);
         let source = |span: mago_span::Span| &text[span.start.offset as usize..span.end.offset as usize];

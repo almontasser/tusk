@@ -876,18 +876,43 @@ indexes the project again with its configuration read again when
 ### Pest in diagnostics
 
 Pest runs test closures as methods of the test case that `tests/Pest.php`
-binds with `pest()->extend()` or `uses()`, but its `test()`, `it()`,
-`beforeEach()`, and `afterEach()` declare PHPUnit's `TestCase` as the closure's
-`$this` (`@param-closure-this`). After each populate, the index
-(`bind_pest_closures` in `tusk-lsp/src/index.rs`) sets those parameters'
-closure type to the first class Pest.php names, with its imports resolved,
-that extends PHPUnit's `TestCase`. The index reads the names from Pest.php when
-it's built and again when Pest.php changes, so `$this->get()` completes,
-hovers, and checks, and `$this->gte()` is reported.
+binds to their folder with `pest()->extend()` or `uses()` and `in()`, or that
+the test file's own `uses()` names. Pest's `test()`, `it()`, `beforeEach()`,
+and `afterEach()` declare PHPUnit's `TestCase` as the closure's `$this`
+(`@param-closure-this`; Pest 2 declares `TestCall`). After each populate, the
+index (`bind_pest_closures` in `tusk-lsp/src/index.rs`) sets those parameters'
+closure type to PHPUnit's `TestCase`, for every Pest version.
 
-Pest also lets a test set properties its class doesn't declare (`$this->user =
-…` in `beforeEach()`). In files under `tests/` that call `it()`, `test()`,
-`describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop Mago's
+The index reads Pest.php's chains when it's built and again when Pest.php
+changes (`pest_bindings`): the classes and traits each chain names, with their
+imports resolved, and its `in()` targets as globs relative to `tests/`.
+`__DIR__` covers all of `tests/`. `Index::pest_case` picks a test file's test
+case: the first class that extends PHPUnit's `TestCase` among those its own
+`uses()` names and those of the chains whose targets match the file or a
+folder above it. A file nothing binds keeps PHPUnit's `TestCase`, as in Pest.
+
+Mago reads Pest's functions from the one codebase every file shares, so the
+analysis binds each file itself. Before it analyzes a file, `analyze_with` in
+`tusk-lsp/src/analysis.rs` puts the file's test case in a thread-local. An
+expression hook (`PestHook`, registered with Mago's analyzer plugins) runs
+before each closure and replaces a `$this` bound to PHPUnit's `TestCase` with
+it. So `$this->get()` completes, hovers, and checks in a Feature test,
+`$this->gte()` is reported, and a Unit test bound to PHPUnit's `TestCase`
+can't call the Feature test case's methods.
+
+The same hook types the properties a test sets on `$this`. After an
+assignment to `$this->name` in a bound closure, it records the assigned value's
+type, unless the test case declares the property. Before a read of
+`$this->name`, it gives the expression that type. The analyzer reaches the
+file's closures in order, so what `beforeEach()` sets types the tests after it.
+A property set in another file, or read before the line that sets it, stays
+`mixed`. The hook doesn't bind traits that a chain adds, such as
+`RefreshDatabase`: that needs a class for each combination of test case and
+traits in the codebase.
+
+Mago still reports setting a property the class doesn't declare
+(`$this->user = …` in `beforeEach()`). In files under `tests/` that call
+`it()`, `test()`, `describe()`, or `arch()`, the filters in `src/diagnostics.ts` drop Mago's
 `non-existent-property` for such a property on `$this`, and issues about
 `mixed` on lines that use `$this`. PHPStan doesn't know the binding, so its
 problems mentioning `$this`, `TestCase`, or `mixed` on those lines are
@@ -6954,3 +6979,16 @@ that prompted there. `gh` runs git for the fetch and checkout, and git reads
 change. Doing the checkout with git alone would mean copying what `gh` does for
 forks: adding the fork's remote, setting `pushRemote`, and updating a branch
 that's already checked out.
+
+### 2026-10-01: Pest's `$this` is bound per file, in the analysis
+
+The index bound one test case for all of `tests/`, so a Unit test could call a
+Feature test case's method unreported, and properties tests set on `$this` read
+as `mixed`. A codebase per folder would cost a copy of the index for each. Mago's
+analyzer plugins let a hook change a closure's bound class before the analyzer
+enters the closure, so the index now normalizes Pest's functions to PHPUnit's
+`TestCase`, and the analysis binds each file to the test case Pest.php's `in()`
+gives its folder, or its own `uses()` names. The same hook records the types of
+properties a test assigns on `$this` and gives them to later reads in the file.
+Traits stay unbound: binding them means adding a class per combination of test
+case and traits to the codebase.
