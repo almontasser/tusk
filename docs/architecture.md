@@ -529,7 +529,9 @@ the rest of the code doesn't ask which system it's on.
 - **Keys.** Off a Mac, `comboOf` reads Ctrl as the keymap's `Meta` and the
   Windows key as its `Ctrl`, so one keymap serves every system, and
   `symbolsFor` shows keys as words (`Ctrl+Shift+F`). Handlers that check ⌘ use
-  `mod(e)`. The menu bar gets no accelerators there: the page handles every
+  `mod(e)`. Hints written with the Mac's symbols (`⌥⌘Z`) go through `keyText`:
+  the page's static `<kbd>`s and tooltips at startup, context menus' keys, and
+  status messages. The menu bar gets no accelerators there: the page handles every
   shortcut, and an accelerator could run an action twice. macOS-only menu
   items are left out.
 - **The rest.** Database passwords go through the `keyring` crate: the

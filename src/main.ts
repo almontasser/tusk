@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isMac, open } from "./platform.ts";
+import { isMac, keyText, open } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
@@ -1749,7 +1749,7 @@ const KEY_SYMBOLS: Record<string, string> = {
   Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
   Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
 };
-const symbolsFor = (keys?: string) => (isMac ? macSymbols(keys) : keys?.replace(/\bCtrl\b/g, "Win").replace(/\bMeta\b/g, "Ctrl").replace(/\+(Key|Digit)?([A-Z0-9])$/, "+$2"));
+const symbolsFor = (keys?: string) => keys && keyText(macSymbols(keys)!);
 const macSymbols = (keys?: string) =>
   keys
     ?.replace(/^(\w+) \1$/, "$1+$1+")
@@ -1875,6 +1875,18 @@ function canonical(keys: string) {
 function comboOf(e: KeyboardEvent) {
   const held = isMac ? [e.ctrlKey, e.altKey, e.shiftKey, e.metaKey] : [e.metaKey, e.altKey, e.shiftKey, e.ctrlKey];
   return [...modifiers.filter((_, i) => held[i]), e.code.replace(/^(Key|Digit)/, "")].join("+");
+}
+
+// The page's own hints, such as the welcome screen's keys and the buttons' tooltips, name the Mac's keys.
+if (!isMac) {
+  // A shortcut's keys are a group of <kbd>s, one per key, so ⌃⌃ is read whole.
+  for (const parent of new Set([...document.querySelectorAll("kbd")].map((k) => k.parentElement!))) {
+    const kbds = [...parent.querySelectorAll(":scope > kbd")];
+    const keys = keyText(kbds.map((k) => k.textContent).join("")).split(/[+ ]/);
+    kbds.slice(1).forEach((k) => k.remove());
+    kbds[0].replaceWith(...keys.map((key) => Object.assign(document.createElement("kbd"), { textContent: key })));
+  }
+  for (const el of document.querySelectorAll<HTMLElement>("[title]")) el.title = keyText(el.title);
 }
 
 // Capture phase, so these shortcuts win over Monaco's own bindings (such as ⇧⌘O).

@@ -10,6 +10,7 @@
 //                                  undefined when it failed or was canceled.
 //   installErrorHandlers()         Shows unhandled promise rejections and errors as toasts, once per message.
 import { toast } from "./dom.ts";
+import { keyText } from "./platform.ts";
 
 const statuses = new Map<string, string>();
 const statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -25,6 +26,7 @@ const $ = (id: string) => document.getElementById(id);
  * for callers that predate `kind`.
  */
 export function status(text: string, source = "app", kind?: "error" | "info") {
+  text = keyText(text);
   statuses.delete(source);
   if (text) statuses.set(source, text);
   clearTimeout(statusTimers.get(source));

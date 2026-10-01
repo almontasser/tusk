@@ -8,7 +8,7 @@ import { newFileContent, psr4From } from "./psr4";
 import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
 import { hideInTree } from "./treehidden";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -179,7 +179,7 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
         li.onmouseenter = () => (focus(level, i), sub());
         li.onclick = sub;
       } else {
-        if (item.keys) li.append(Object.assign(document.createElement("kbd"), { textContent: item.keys }));
+        if (item.keys) li.append(Object.assign(document.createElement("kbd"), { textContent: keyText(item.keys) }));
         li.onmouseenter = () => (focus(level, i), closeFrom(depth + 1));
         li.onclick = () => (close(), item.run());
       }

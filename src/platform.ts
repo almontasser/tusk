@@ -12,6 +12,23 @@ globalThis.document?.documentElement.classList.toggle("mac", isMac);
 /** Whether the platform's command modifier is held: ⌘ on a Mac, Ctrl elsewhere. */
 export const mod = (e: { metaKey: boolean; ctrlKey: boolean }) => (isMac ? e.metaKey : e.ctrlKey);
 
+const MOD_NAMES: [string, string][] = [["⌘", "Ctrl"], ["⌃", "Win"], ["⌥", "Alt"], ["⇧", "Shift"]];
+const KEY_NAMES: Record<string, string> = { "⏎": "Enter", "⌫": "Backspace", "⌦": "Delete", "⎋": "Esc", "⇥": "Tab" };
+
+/**
+ * Text with keys written as a Mac draws them (`⌥⌘Z`), as this platform names them: unchanged on a Mac, else as words
+ * (`Ctrl+Alt+Z`), with Ctrl for ⌘ and the Windows key for ⌃ as the keymap reads them (see `comboOf` in main.ts). A
+ * double tap such as `⇧⇧` stays a double tap, and `⌃⌃` is Ctrl's.
+ */
+export const keyText = (text: string, mac = isMac) =>
+  mac
+    ? text
+    : text.replace(/([⌘⌃⌥⇧]+)([⏎⌫⌦⎋⇥]|[A-Za-z0-9]+\b|F\d+|[^\s⌘⌃⌥⇧]?)/g, (_, mods: string, key: string) => {
+        if (!key && mods.length === 2 && mods[0] === mods[1]) return `${mods[0] === "⌃" ? "Ctrl" : MOD_NAMES.find(([g]) => g === mods[0])![1]} ${mods[0] === "⌃" ? "Ctrl" : MOD_NAMES.find(([g]) => g === mods[0])![1]}`;
+        const names = MOD_NAMES.filter(([g]) => mods.includes(g)).map(([, n]) => n);
+        return [...names, KEY_NAMES[key] ?? key].filter(Boolean).join("+");
+      });
+
 /** Whether a path is absolute: `/…`, or `c:/…` on Windows. */
 export const isAbsolute = (path: string) => path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 
