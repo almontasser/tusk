@@ -102,8 +102,12 @@ class ScheduleDesigner {
     this.commands = commands;
     this.notifications = notifications;
     this.models = models;
-    await this.read();
-    await this.readPrunables();
+    try {
+      await this.read();
+      await this.readPrunables();
+    } catch (e) {
+      this.problem = errorText(e);
+    }
     this.loaded = true;
     this.render();
   }
@@ -195,11 +199,14 @@ class ScheduleDesigner {
       "div",
       { class: "md-main" },
       ...broken.map((s) => h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, `${s.path.slice(this.root.length + 1)} has syntax errors. Fix them to change its tasks here.`))),
-      this.problem ? h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, `Can't read the app: ${this.problem}`)) : null,
+      this.problem ? h("div", { class: "fd-helper-note fd-error-note" }, icon("warning"), h("span", {}, `Can't read the schedule: ${this.problem}`)) : null,
       this.tasksSection(),
       this.pruneSection(),
     );
+    // Each change draws the view again; keep the place you were at.
+    const scroll = this.el.querySelector(".md-main")?.scrollTop ?? 0;
     this.el.replaceChildren(header, h("div", { class: "md-body" }, main, h("aside", { class: "ps-preview" }, this.schedulerNote())));
+    main.scrollTop = scroll;
   }
 
   // ---- The scheduler ----
