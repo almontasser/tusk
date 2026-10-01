@@ -69,7 +69,7 @@ it('works', function () {
   assert.deepEqual(kept("/p/tests/Unit/ATest.php", text, list), ["null-array-access"]);
 });
 
-test("checks $this in Pest tests, except properties a test sets", () => {
+test("checks $this in Pest tests with Mago, not PHPStan", () => {
   const text = `<?php
 beforeEach(function () { $this->user = 1; });
 it('works', function () {
@@ -77,11 +77,11 @@ it('works', function () {
     $this->user->name;
 });`;
   const list = [
-    at(text, "$this->user = 1", "non-existent-property", "Property `$user` does not exist on class `Tests\\TestCase`."),
     at(text, "$this->gte", "non-existent-method", "Method `gte` does not exist on type `Tests\\TestCase`."),
-    at(text, "$this->user->name", "mixed-property-access", "Attempting to access a property on a non-object type (`mixed`)."),
+    at(text, "$this->user->name", "invalid-property-access", "Attempting to access a property on a non-object type (`int`)."),
+    at(text, "$this->gte", "method.notFound", "Call to an undefined method PHPUnit\\Framework\\TestCase::gte().", "phpstan"),
   ];
-  assert.deepEqual(kept("/p/tests/Feature/ATest.php", text, list), ["non-existent-method"]);
+  assert.deepEqual(kept("/p/tests/Feature/ATest.php", text, list), ["non-existent-method", "invalid-property-access"]);
 });
 
 test("shows unproven types as warnings and mixed values as hints", () => {
