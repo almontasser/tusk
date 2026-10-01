@@ -1186,6 +1186,13 @@ fn blade_completion(ctx: &Ctx<'_>, data: &Data<'_>, offset: u32) -> Option<Vec<C
     None
 }
 
+/// The app's Blade components, as `blade-components.php` reports them, or `None` outside a Laravel app or when PHP
+/// fails.
+pub fn blade_components(state: &crate::framework::State) -> Option<std::sync::Arc<Value>> {
+    let data = Data(state);
+    data.active().then(|| data.blade_components()).flatten()
+}
+
 /// The component or Livewire tag at `offset`, with its span.
 fn tag_at(ctx: &Ctx<'_>, data: &Data<'_>, offset: u32) -> Option<(u32, u32, String, bool)> {
     let text = &ctx.doc.text;

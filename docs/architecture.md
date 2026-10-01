@@ -2297,7 +2297,19 @@ unknown keys, `@extends`, and `@component` pass nothing known.
 A view in `resources/views/components` is an anonymous component when no class
 in `App\View\Components` has its name (`component_tags`): `<x-foo.bar>` renders
 `components/foo/bar.blade.php`, or else `foo/bar/index.blade.php` or
-`foo/bar/bar.blade.php`, in Laravel's order. Each tag outside a `{{-- --}}`
+`foo/bar/bar.blade.php`, in Laravel's order. Components registered elsewhere
+come from the app's component list, which `blade-components.php` reports by
+booting the app and the editor already uses for tag completion and links:
+`Blade::component()` and `Blade::components()` aliases,
+`Blade::componentNamespace()` classes, `Blade::anonymousComponentPath()` and
+`Blade::anonymousComponentNamespace()` folders, and packages' view namespaces.
+A tag the list gives a class doesn't render a view in `resources/views/components`,
+and a tag whose only file is a view in `resources/views`, at the path its name
+leads to, renders that view, so `<x-ui::button>` types `ui/button.blade.php`.
+The list is read once per check, before the index's lock, and the project scan
+reads it once. `<x-dynamic-component>` with a literal name, `component="alert"`
+or `:component="'alert'"`, counts as that tag without its `component` attribute;
+one with any other name isn't read. Each tag outside a `{{-- --}}`
 passes its attributes by their camel-case names (`tag_attrs`): a bound one,
 `:post="$post"` or `:$post`, with its expression's type, which `checked_php`
 lays out as an array at the attribute; a plain one as `string`; and one with no
@@ -2306,8 +2318,17 @@ prop the tag leaves out gets its default's type, and one passed a nullable value
 gets the default in place of `null`, as `@props` compiles to `??`. A tag that
 passes `{{ $attributes }}`, or a prop as a `<x-slot>`, leaves those props
 untyped. `$attributes` and `$slot` are typed when the project has
-`ComponentAttributeBag` and `ComponentSlot`. Package components, `<x-pkg::…>`,
-don't map to a view in `resources/views/components`.
+`ComponentAttributeBag` and `ComponentSlot`.
+
+A component's `@aware` variables follow Laravel's lookup (the `Aware` struct in
+`views.rs`): a tag that passes one gives its type; otherwise, in an anonymous
+component's own view, each of that component's tags must have passed it, which
+the view's variables show for a prop without a default or, without `@props`, for
+any variable; in other views, the nearest component tag around the tag gives
+its type when it's an anonymous component's and passes it. Anything else, such
+as a class component around the tag, a tag with another prefix such as
+`<flux:card>`, or a default that applies only when no component further out
+passes the variable, leaves it untyped.
 
 A view that renders itself, such as a comment that includes itself for its
 replies, starts from the types the other places pass, then adds the places in
@@ -2322,7 +2343,9 @@ files' map, each file's render sites (`code_sites`), and each includer's
 analyzed sites (`sites_in`) are kept until the index's `generation` changes,
 which happens on each build and each change to a PHP file the index has, not
 on a Blade view's. The analyzed sites are keyed by a hash of the includer's
-text and everything else they read, so an edited view is read again.
+text and everything else they read, so an edited view is read again, and each
+cache starts over past 4,096 entries, since edits to views add entries until
+the generation changes.
 A variable is kept only when every
 such place passes it with a type `docblock_type` can write (literals widened,
 `mixed` dropped), joined into a union. `checked_php` declares the variables on
@@ -7119,3 +7142,19 @@ typing either as the method's return type would be wrong. A partial included by
 file once per includer, so the walk now reads each view once and keeps what it
 analyzed per index generation: the same check takes 12 ms cold.
 
+### 2026-10-01: Registered, dynamic, and `@aware` components are typed
+
+Components registered outside `resources/views/components`, `<x-dynamic-component>`,
+and `@aware` left their views' variables untyped. The registered components come
+from the component list the editor already gets by booting the app with PHP,
+rather than from reading service providers: booting resolves `resource_path()`,
+packages' namespaces, and the registration order that a reader of providers
+would have to reimplement. The list now also refreshes on changes in
+`app/Providers/`. A tag maps to a view only when the view is its only file and
+sits where Laravel looks for the tag's name, since the list names files in kebab
+case. `@aware` is typed only where the component data Laravel reads is known
+from the tags: the tag itself, the tags of the component whose view it's in, or
+the anonymous component tag around it. A default applies only when no component
+further out passes the variable, which the tags can't show, so defaults aren't
+used. A dynamic component with a name that isn't literal isn't read, so a view
+it also renders can still be typed from its other tags.
