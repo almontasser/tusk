@@ -143,6 +143,14 @@ pub struct Index {
     excluded: GlobSet,
     /// What `tests/Pest.php` binds with `in()`: each chain's classes and traits, and the files and folders it covers.
     pest_uses: Vec<(Vec<String>, GlobSet)>,
+    /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
+    /// what's found with the index can be kept until it changes.
+    pub generation: u64,
+}
+
+fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// PHP's built-in functions and classes, built once per process. Building needs a deep stack.
@@ -386,6 +394,7 @@ impl Index {
             declared: HashMap::new(),
             excluded,
             pest_uses: vec![],
+            generation: next_generation(),
         }
     }
 
@@ -528,6 +537,7 @@ impl Index {
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
         self.bind_pest_closures();
+        self.generation = next_generation();
         progress(total, total);
     }
 
@@ -602,6 +612,10 @@ impl Index {
     }
 
     pub fn update_many(&mut self, changes: Vec<(PathBuf, Option<Vec<u8>>)>) {
+        // A Blade view's changes leave the index as it was.
+        if changes.iter().any(|(path, _)| self.includes(path) || self.by_path.contains_key(path) || self.library.contains_key(&file_id(path))) {
+            self.generation = next_generation();
+        }
         let arena = LocalArena::new();
         let mut dirty = WordSet::default();
         let mut scans = vec![];

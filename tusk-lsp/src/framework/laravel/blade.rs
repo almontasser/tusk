@@ -267,6 +267,18 @@ fn laid_out(text: &str, vars: &[(String, String)], narrow: bool) -> Option<(Stri
             let mut p = i;
             while p + 1 < end {
                 let bound = src[p].is_ascii_whitespace() && src[p + 1] == b':' && src.get(p + 2) != Some(&b':');
+                // :$post is short for :post="$post".
+                if bound && src.get(p + 2) == Some(&b'$') {
+                    let name = p + 3 + src[p + 3..end].iter().take_while(|b| word(**b)).count();
+                    if name > p + 3 && name < src.len() {
+                        lead(&mut out, p, &mut pending);
+                        out[p + 1] = b'[';
+                        keep(&mut out, p + 2, name);
+                        out[name] = b']';
+                    }
+                    p = name;
+                    continue;
+                }
                 let name = p + 2 + src[p + 2..end].iter().take_while(|b| word(**b) || matches!(b, b'-' | b':' | b'.')).count();
                 let eq = name + src[name..end].iter().take_while(|b| b.is_ascii_whitespace()).count();
                 if !bound || name == p + 2 || src.get(eq) != Some(&b'=') {
@@ -414,6 +426,7 @@ mod tests {
         assert_eq!(body("@foreach ($a as $b) {{ $b }} @endforeach"), ";foreach ($a as $b) {[ $b ]  ;}         ;");
         assert_eq!(body("@while($a) @php $a--; @endphp"), ";while($a) {    $a--; ;      ;}");
         assert_eq!(body("<x-card :post=\"$post\" ::alpine=\"x\" title=\"t\" />"), "             ;[$post]                          ;");
+        assert_eq!(body("<x-card :$post/>"), "       ;[$post] ;");
         assert!(checked_php("@use('App\\Models\\Post', 'P')", &[]).0.starts_with("<?php use App\\Models\\Post as P;\n"));
     }
 
