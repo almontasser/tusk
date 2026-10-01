@@ -2228,7 +2228,17 @@ list), a bound component attribute `:post="$post"` reads `;[$post]`, and
 `;foreach (…)`. Its body is a block, so the loop variable keeps its type inside:
 the next statement starts with `{` instead of `;`, and `@endforeach` (or
 `@empty` in a `@forelse`) reads `;}`. Loops left open are closed at the end of
-the file. `@if` stays an expression statement, so it doesn't narrow types. `@php …
+the file. `@if` keeps its keyword too, in PHP's `if (…): … endif;` form, so it
+narrows types: the next statement starts with `:`, and `@elseif`, `@else`, and
+`@endif` read `;elseif`, `;else`, and `;endif`, which fit in their bytes where
+`;}` before them wouldn't. Every block is tracked, so `@else` goes to its own:
+any directive with a matching `@end…` later in the view opens one, as do
+`@hasSection` and `@sectionMissing`, which end with `@endif`. The bodies of
+guards, such as `@isset`, `@unless`, and `@auth`, are returned as ranges where
+"possibly null" problems can't be trusted, since the guard doesn't narrow.
+When an `@endif` or another end doesn't close the innermost block around an
+`@if`, the view is laid out again with `@if` as an expression statement, and
+the whole view is such a range. `@php …
 @endphp` and `<?php … ?>` keep their code. Only Laravel's own directives are
 read, not every `@word(`, so CSS's `@media` and text stay text, as Blade
 leaves unknown directives; `{{-- --}}`, `@{{`, `@@`, and `@verbatim` are
@@ -2244,7 +2254,17 @@ named `view`, `make`, or `markdown`: the next argument's type gives the
 variables, since Mago types both `compact('post')` and `['post' => $post]` as
 keyed arrays, and `->with()` calls chained on the call add more. A string inside
 a `Livewire\Component` subclass, such as `render()`'s view or a Filament page's
-`$view`, adds the class's public properties. A variable is kept only when every
+`$view`, adds the class's public properties. Then it reads each Blade view in
+`resources/views` that has the name in quotes (`included_by`). An `@include`,
+`@includeIf`, `@includeWhen`, or `@includeUnless` of the view passes its data
+array's entries and, since Blade passes an include all of the includer's
+variables, those the included view reads, typed as they are at the include. To
+get those types, it echoes each variable just before the directive,
+`{{ $post }}`, lays the includer out with `checked_php` and its own variables
+from `view_types`, analyzes it, and reads each echo's type. Data of unknown
+keys, `@each`, `@includeFirst`, `@extends`, and `@component` pass nothing
+known, and so does a view that includes itself, which also ends the recursion.
+A variable is kept only when every
 such place passes it with a type `docblock_type` can write (literals widened,
 `mixed` dropped), joined into a union. `checked_php` declares the variables on
 its first line as `/** @var T $post */ $post = $post;`: Mago takes the `@var`
@@ -2254,11 +2274,11 @@ for the assignment, and the undefined read is dropped like any other.
 that file against the server's codebase, as for a PHP file, with the view's
 path, so `mago.toml`'s ignores and excludes apply. It drops undefined
 variables, unused statements (every echo is one), Laravel's magic properties
-and methods, uses of `mixed` values, and the redundant, impossible, and
-"possibly" problems that typed variables bring without narrowing
-(`blade_noise`): a guard such as `@isset($post)` is there for another place
-that renders the view, and `@if ($a->paid_at)` doesn't make `paid_at`
-non-null inside. Open views get these with the framework's problems on
+and methods, uses of `mixed` values, and the redundant and impossible problems
+that typed variables bring (`blade_noise`): a guard such as `@isset($post)` is
+there for another place that renders the view. It keeps "possibly null"
+problems outside the ranges `checked_php` marks, and drops other "possibly"
+ones. Open views get these with the framework's problems on
 each edit, and the project scan (`tusk/projectProblems`) checks every view in
 `resources/views`. The editor filters a view's problems with `realProblems` as
 a PHP file's, since they sit at the view's positions.
@@ -6992,3 +7012,19 @@ gives its folder, or its own `uses()` names. The same hook records the types of
 properties a test assigns on `$this` and gives them to later reads in the file.
 Traits stay unbound: binding them means adding a class per combination of test
 case and traits to the codebase.
+
+### 2026-10-01: Includes type a view's variables, and `@if` narrows
+
+A view rendered only through `@include` got no types, and `@if` didn't narrow,
+so "possibly null" problems were dropped in every view. An include now counts
+as a place that renders the view. Its inherited variables are typed by echoing
+them before the directive in the includer's checked PHP, which gets loop
+variables and `@php` assignments right, where the includer's own variable
+types would be wrong for a variable it reassigns. `@if` became PHP's
+alternative `if (…):` syntax, since `;elseif`, `;else`, and `;endif` fit in
+the directives' bytes where braces didn't. `@unless` and `@empty` would need a
+`!(…)` around the condition, one byte longer than the directive, and
+`@isset($a, $b)` isn't a valid condition, so guards stay unnarrowed and their
+bodies drop "possibly null" problems instead. Components' `@props` aren't typed
+from their tags yet: that needs tag names mapped to component views and
+attributes mapped to camel-case props.

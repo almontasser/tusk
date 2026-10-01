@@ -162,16 +162,22 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
 pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn Fn(&std::path::Path) -> Option<String>) -> Vec<Diagnostic> {
     use crate::framework::laravel::views;
     let vars = views::view_name(index, &doc.path).map(|v| views::view_types(index, read, &v)).unwrap_or_default();
-    let (php, head) = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
+    let (php, head, unsure) = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
     let arena = LocalArena::new();
     let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &php);
     // The first line, `<?php` and the imports, is the view's start.
     let at = |offset: u32| offset.saturating_sub(head as u32);
+    let guarded = |d: &Diagnostic| possibly_null(d) && unsure.iter().any(|r| r.contains(&(doc.offset(d.range.start) as usize)));
     issues
         .iter()
         .filter_map(|i| to_diagnostic_at(doc, parsed.file.id, i, "mago", at))
-        .filter(|d| !blade_noise(d))
+        .filter(|d| !blade_noise(d) && !guarded(d))
         .collect()
+}
+
+/// Whether `d` is a "possibly null" problem, such as `possibly-null-property-access`.
+fn possibly_null(d: &Diagnostic) -> bool {
+    matches!(&d.code, Some(NumberOrString::String(c)) if c.starts_with("possibly-null-") || c == "possible-method-access-on-null")
 }
 
 /// Whether `d` is about a Blade view's variables, which [`blade_problems_in`] drops.
@@ -184,10 +190,8 @@ fn blade_noise(d: &Diagnostic) -> bool {
         // Typed variables make a view's guards look needless, but the guards are for other places that render it.
         || code.starts_with("redundant-")
         || code.starts_with("impossible-")
-        // `@if` reads as an expression, not a branch, so it doesn't narrow types: `@if ($a->paid_at)` doesn't
-        // make `$a->paid_at` non-null inside, and "possibly null" problems would be wrong there.
-        || code.starts_with("possibly-")
-        || code.starts_with("possible-")
+        // Other "possibly" problems, such as on a union of the types two places pass, aren't checked yet.
+        || ((code.starts_with("possibly-") || code.starts_with("possible-")) && !possibly_null(d))
         || on_mixed
 }
 
@@ -324,9 +328,28 @@ mod tests {
     }
 
     #[test]
+    fn narrows_a_views_variables_in_if_branches() {
+        let models = "<?php\nnamespace App;\nclass User { public string $name = ''; }\nclass Post { public string $title = ''; public ?User $author = null; }\n";
+        let controller = "<?php\nnamespace App;\nclass PostController {\n    public function show(Post $post, ?Post $maybe) { return view('posts.show', compact('post', 'maybe')); }\n}\n";
+        let fx = Fixture::new(&[("app/Models.php", models), ("app/PostController.php", controller)]);
+        let doc = |blade: &str| Document::new(crate::testing::uri("resources/views/posts/show.blade.php"), crate::testing::path("resources/views/posts/show.blade.php"), "blade".into(), 1, blade.into());
+        let lines = |blade: &str| {
+            blade_problems_in(&fx.snap.index.read(), &doc(blade), &|p| fx.snap.read(p))
+                .into_iter()
+                .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line))
+                .collect::<Vec<_>>()
+        };
+        let blade = "{{ $post->author->name }}\n@if ($post->author) {{ $post->author->name }} @endif\n@if ($maybe) {{ $maybe->title }} @elseif ($post->author) {{ $maybe->title }} @endif\n@isset($post->author) {{ $post->author->name }} @endisset\n@unless(is_null($maybe)) {{ $maybe->title }} @endunless\n@auth {{ $maybe->title }} @else x @endauth\n{{ $post->author?->name }} {{ $maybe->title ?? '' }}\n";
+        // Unguarded, and `$maybe` in the `@elseif`, where it's null; `@isset`, `@unless`, and `@auth` guard without narrowing.
+        assert_eq!(lines(blade), vec![("possibly-null-property-access".into(), 0), ("null-property-access".into(), 2)]);
+        // Blocks that don't nest leave the view unnarrowed, so its "possibly null" problems aren't reported.
+        assert!(lines("{{ $post->author->name }}\n@if ($post) @foreach ([] as $x) @endif @endforeach\n").is_empty());
+    }
+
+    #[test]
     fn drops_problems_about_a_views_variables() {
         let d = |code: &str, message: &str| Diagnostic { code: Some(NumberOrString::String(code.into())), message: message.into(), ..Default::default() };
-        let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access", "redundant-condition", "possibly-null-property-access", "possible-method-access-on-null"];
+        let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access", "redundant-condition", "possibly-non-existent-method"];
         assert!(noise.iter().all(|c| blade_noise(&d(c, ""))));
         assert!(blade_noise(&d("invalid-iterator", "of type `mixed`")) && !blade_noise(&d("invalid-iterator", "of type `int`")));
         assert!(!blade_noise(&d("non-existent-function", "")) && !blade_noise(&d("parse", "")));
