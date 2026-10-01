@@ -2254,16 +2254,48 @@ named `view`, `make`, or `markdown`: the next argument's type gives the
 variables, since Mago types both `compact('post')` and `['post' => $post]` as
 keyed arrays, and `->with()` calls chained on the call add more. A string inside
 a `Livewire\Component` subclass, such as `render()`'s view or a Filament page's
-`$view`, adds the class's public properties. Then it reads each Blade view in
-`resources/views` that has the name in quotes (`included_by`). An `@include`,
-`@includeIf`, `@includeWhen`, or `@includeUnless` of the view passes its data
-array's entries and, since Blade passes an include all of the includer's
-variables, those the included view reads, typed as they are at the include. To
-get those types, it echoes each variable just before the directive,
-`{{ $post }}`, lays the includer out with `checked_php` and its own variables
-from `view_types`, analyzes it, and reads each echo's type. Data of unknown
-keys, `@each`, `@includeFirst`, `@extends`, and `@component` pass nothing
-known, and so does a view that includes itself, which also ends the recursion.
+`$view`, adds the class's public properties, and so does one inside an
+`Illuminate\View\Component` subclass, a class component, with `$slot`. Then it
+reads each Blade view in `resources/views` that has the name in quotes or a tag
+for it (`sites_in`). An `@include`, `@includeIf`, `@includeWhen`,
+`@includeUnless`, or `@includeFirst` of the view passes its data array's entries
+and, since Blade passes an include all of the includer's variables, those the
+included view reads, typed as they are at the include. To get those types, it
+echoes each variable just before the directive, `{{ $post }}`, lays the
+includer out with `checked_php` and its own variables from `view_types`,
+analyzes it, and reads each echo's type. `@each('view', $items, 'item')` passes
+`$item` and `$key`, typed from Mago's iterable parameters of `$items`. Data of
+unknown keys, `@extends`, and `@component` pass nothing known.
+
+A view in `resources/views/components` is an anonymous component when no class
+in `App\View\Components` has its name (`component_tags`): `<x-foo.bar>` renders
+`components/foo/bar.blade.php`, or else `foo/bar/index.blade.php` or
+`foo/bar/bar.blade.php`, in Laravel's order. Each tag outside a `{{-- --}}`
+passes its attributes by their camel-case names (`tag_attrs`): a bound one,
+`:post="$post"` or `:$post`, with its expression's type, which `checked_php`
+lays out as an array at the attribute; a plain one as `string`; and one with no
+value as `true`. With `@props`, only the props are variables (`tag_site`): a
+prop the tag leaves out gets its default's type, and one passed a nullable value
+gets the default in place of `null`, as `@props` compiles to `??`. A tag that
+passes `{{ $attributes }}`, or a prop as a `<x-slot>`, leaves those props
+untyped. `$attributes` and `$slot` are typed when the project has
+`ComponentAttributeBag` and `ComponentSlot`. Package components, `<x-pkg::…>`,
+don't map to a view in `resources/views/components`.
+
+A view that renders itself, such as a comment that includes itself for its
+replies, starts from the types the other places pass, then adds the places in
+its own text, analyzed with those types, until the types don't change. After
+four rounds, or with no other place that renders it, it gets no types. A view
+that includes itself through other views passes nothing known to itself, which
+also ends the recursion.
+
+A view check reads each view once, and finds the views and project files that
+render a view by maps of the names each mentions (`mentions`). The project
+files' map, each file's render sites (`code_sites`), and each includer's
+analyzed sites (`sites_in`) are kept until the index's `generation` changes,
+which happens on each build and each change to a PHP file the index has, not
+on a Blade view's. The analyzed sites are keyed by a hash of the includer's
+text and everything else they read, so an edited view is read again.
 A variable is kept only when every
 such place passes it with a type `docblock_type` can write (literals widened,
 `mixed` dropped), joined into a union. `checked_php` declares the variables on
@@ -7028,3 +7060,20 @@ the directives' bytes where braces didn't. `@unless` and `@empty` would need a
 bodies drop "possibly null" problems instead. Components' `@props` aren't typed
 from their tags yet: that needs tag names mapped to component views and
 attributes mapped to camel-case props.
+
+### 2026-10-01: Components' props, `@each`, and views that render themselves are typed
+
+Anonymous components, `@each`, `@includeFirst`, and views that include
+themselves passed nothing known, so their views went unchecked. A component tag
+now counts as a place that renders its view. Laravel's own lookup maps the tag
+to the view, so the order of `foo/bar`, `foo/bar/index`, and `foo/bar/bar` and
+the class that takes precedence follow it. A recursive view gets the least fixed
+point: starting from the other places' types and growing them is what the
+recursion can reach, where starting from no types would find nothing. Public
+methods of class components stay untyped: Laravel passes a method with no
+parameters as an `InvokableComponentVariable` and others as a `Closure`, and
+typing either as the method's return type would be wrong. A partial included by
+100 views took 360 ms to check, nearly all of it reading every view and project
+file once per includer, so the walk now reads each view once and keeps what it
+analyzed per index generation: the same check takes 12 ms cold.
+
