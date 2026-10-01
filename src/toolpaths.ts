@@ -119,7 +119,21 @@ export async function configureTools(opening = false) {
 onSettings(() => void configureTools());
 onProjectValue("phpInterpreter", () => void configureTools());
 
-listen<string>("tool-missing", (e) => toast(e.payload, { action: { label: "Open Settings", run: () => openSettings("Tools") } }));
+/** Where to get the tools the app can't do without for some features, by the name errors give them. */
+const DOWNLOADS: Record<string, [label: string, url: string]> = {
+  "Node.js": ["Get Node.js", "https://nodejs.org/en/download"],
+  "GitHub CLI (gh)": ["Get the GitHub CLI", "https://cli.github.com"],
+};
+
+listen<string>("tool-missing", (e) => {
+  const download = Object.entries(DOWNLOADS).find(([name]) => e.payload.startsWith(`${name} wasn't found.`))?.[1];
+  toast(e.payload, {
+    action: [
+      ...(download ? [{ label: download[0], run: () => invoke("open_url", { url: download[1] }) }] : []),
+      { label: "Open Settings", run: () => openSettings("Tools") },
+    ],
+  });
+});
 
 async function setProjectPhp(path: string | undefined) {
   try {

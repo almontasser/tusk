@@ -595,6 +595,9 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 .toast .toast-action { flex-shrink: 0; margin-left: 4px; padding: 2px 10px; color: var(--text); border: 1px solid var(--input-border); border-radius: var(--radius); }
 .toast .toast-action:hover { background: var(--hover); }
 .toast p { margin: 0; overflow-wrap: anywhere; }
+.toast-body { display: flex; flex-direction: column; gap: 8px; }
+.toast-actions { display: flex; gap: 6px; }
+.toast .toast-actions .toast-action { margin-left: 0; }
 .toast button { margin-left: 6px; color: var(--faint); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 

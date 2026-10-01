@@ -481,6 +481,10 @@ the name.
   ("PHP wasn't found at /x. Set its path in Settings > Tools."), and the
   `tool-missing` event carries it to a toast with **Open Settings**, so callers
   that stay quiet on failure, such as the model introspection, still tell you.
+  For Node.js and the GitHub CLI the toast also links to their download pages,
+  with its buttons on a row below the message. A language server that fails
+  for a missing tool says so in the status bar only, since the toast has said
+  it.
 - The frontend sends the paths with `configureTools` after each settings
   change, when a project opens (before its servers start), and when `tusk.json`
   changes the project's PHP. A change of PHP or Node.js offers to restart the

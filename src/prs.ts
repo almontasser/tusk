@@ -145,7 +145,7 @@ function problemItem(what: string, e: unknown, retry: () => unknown = loadPullRe
     li.append(el("br"), b);
   };
   if (/os error 2|No such file/i.test(text)) {
-    li.textContent = "Pull requests need the GitHub CLI (gh). Install it, such as with brew install gh, then log in to GitHub with it.";
+    li.textContent = "Pull requests need the GitHub CLI (gh). Install it from cli.github.com, then log in to GitHub with it.";
     button("Get the GitHub CLI", () => openUrl("https://cli.github.com"));
   } else if (/gh auth login|not logged in|authenticat/i.test(text)) {
     li.textContent = "Log in to GitHub with the GitHub CLI to see pull requests.";

@@ -33,7 +33,10 @@ export const iconButton = (name: string, title: string, onclick: () => unknown) 
  * Shows a message in the corner. An error closes itself after 6 seconds; a hint with an action stays until
  * you act on it or close it, or for `timeout` ms, as for a notice of what just happened.
  */
-export function toast(text: string, { kind = "error", action, timeout }: { kind?: "error" | "info"; action?: { label: string; run(): unknown }; timeout?: number } = {}) {
+type ToastAction = { label: string; run(): unknown };
+
+export function toast(text: string, { kind = "error", action, timeout }: { kind?: "error" | "info"; action?: ToastAction | ToastAction[]; timeout?: number } = {}) {
+  const actions = action ? [action].flat() : [];
   if (kind === "error") console.warn(`[toast] ${text}`); // So an error can be traced after the toast closes.
   const close = () => el.remove();
   // Git's "hint:" lines repeat advice; the first lines carry the error.
@@ -41,14 +44,16 @@ export function toast(text: string, { kind = "error", action, timeout }: { kind?
   // The same message twice, such as from a failure that repeats, shows once while its toast is up.
   const shown = [...document.querySelectorAll<HTMLElement>(`#toasts .toast.${kind} p`)].some((p) => p.textContent === message);
   if (shown) return;
+  const buttons = actions.map((a) => h("button", { class: "toast-action", onclick: () => (close(), a.run()) }, a.label));
   const el = h(
     "div",
     { class: `toast ${kind}` },
     icon(kind),
-    h("p", {}, message),
-    action && h("button", { class: "toast-action", onclick: () => (close(), action.run()) }, action.label),
+    // One button sits beside the message; more go on a row below it, so the message keeps its width.
+    actions.length > 1 ? h("div", { class: "toast-body" }, h("p", {}, message), h("div", { class: "toast-actions" }, ...buttons)) : h("p", {}, message),
+    ...(actions.length > 1 ? [] : buttons),
     h("button", { class: "codicon codicon-close", ariaLabel: "Dismiss", onclick: close }),
   );
   document.getElementById("toasts")!.append(el);
-  if (!action || timeout) setTimeout(close, timeout ?? 6000);
+  if (!actions.length || timeout) setTimeout(close, timeout ?? 6000);
 }

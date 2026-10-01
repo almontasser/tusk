@@ -1109,7 +1109,8 @@ export async function startLsp(root: string, h: Host) {
   startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
   for (const s of await Promise.allSettled([tusk, tailwind, typos])) {
     if (s.status === "fulfilled" && s.value) servers.push(s.value);
-    else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`);
+    // A missing tool has its own toast already (toolpaths.ts), so the status bar says the rest.
+    else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`, "app", /wasn't found\./.test(String(s.reason)) ? "info" : undefined);
   }
   checkComposerLock(root);
 }
