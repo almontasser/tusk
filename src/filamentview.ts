@@ -149,10 +149,38 @@ export async function openFileInDesigner(path: string) {
 }
 
 /** Loads the panels and resources into the tool window. */
+/** The app's designers, as tiles above the panels: each opens its designer, or a picker when it needs a choice. */
+const DESIGNERS: { label: string; icon: string; title: string; open: () => unknown }[] = [
+  { label: "Models", icon: "database", title: "Eloquent models and their tables", open: () => openModelPicker() },
+  { label: "Enums", icon: "symbol-enum", title: "Enums with Filament's labels, colors, and icons", open: () => openEnumPicker() },
+  { label: "Access", icon: "shield", title: "Who can do what with a model's records", open: () => openAccessPicker() },
+  { label: "Notifications", icon: "bell", title: "The panel's bell and emails", open: () => import("./notifydesigner").then((m) => m.openNotificationPicker()) },
+  { label: "Automations", icon: "zap", title: "Rules that run when records change", open: () => import("./automationsview").then((m) => m.openAutomationsPicker()) },
+  { label: "Schedule", icon: "watch", title: "Jobs Laravel's scheduler runs", open: () => import("./scheduledesigner").then((m) => m.openSchedule()) },
+  { label: "Environment", icon: "settings", title: "Mail, queue, storage, app URL, and time zone in .env", open: () => import("./envsettings").then((m) => m.openEnvSettings()) },
+  { label: "App settings", icon: "symbol-property", title: "App-wide values, such as a tax rate, with spatie/laravel-settings", open: () => import("./settingsdesigner").then((m) => m.openSettingsPicker()) },
+  { label: "Record history", icon: "history", title: "An activity log on chosen models", open: () => import("./historyview").then((m) => m.openHistoryPicker()) },
+  { label: "Check the app", icon: "beaker", title: "Boot the app and run its tests", open: () => checkApp() },
+];
+
+function launcher(): HTMLElement {
+  const box = h(
+    "details",
+    { class: "fv-designers" },
+    h("summary", { class: "fv-section" }, "App designers"),
+    h("div", { class: "fv-tiles" }, ...DESIGNERS.map((d) => h("button", { type: "button", class: "fv-tile", title: d.title, onclick: () => void d.open() }, icon(d.icon), h("span", {}, d.label)))),
+  ) as HTMLDetailsElement;
+  // Open unless closed before; the tiles take room a long panel list may want.
+  box.open = localStorage.getItem("tusk.designersClosed") !== "1";
+  box.ontoggle = () => localStorage.setItem("tusk.designersClosed", box.open ? "0" : "1");
+  return box;
+}
+
 export async function loadFilament() {
   const root = host.root();
   const list = $("filament-list");
-  if (!root) return list.replaceChildren();
+  if (!root) return list.replaceChildren(), $("filament-designers").replaceChildren();
+  if (!$("filament-designers").childElementCount) $("filament-designers").replaceChildren(launcher());
   if (!(await fapp.hasFilament(root))) {
     // A project that requires Filament but hasn't installed its packages, such as a fresh clone.
     const composerJson = await (await import("@tauri-apps/api/core")).invoke<string>("read_file", { path: `${root}/composer.json` }).catch(() => "");
@@ -219,14 +247,17 @@ export async function loadFilament() {
     };
     rows.push(head);
     if (!open) continue;
-    const dash = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The panel's dashboards and widgets" }, icon("dashboard"), h("span", { class: "fv-name" }, "Dashboard"), h("span", { class: "fv-detail" }, "widgets"));
-    dash.onclick = () => void import("./dashboarddesigner").then((m) => m.openDashboard(panel.id));
-    dash.onkeydown = (e) => e.key === "Enter" && dash.click();
-    rows.push(dash);
-    const nav = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The panel's navigation: groups, order, and clusters" }, icon("list-tree"), h("span", { class: "fv-name" }, "Navigation"), h("span", { class: "fv-detail" }, "groups and order"));
-    nav.onclick = () => void import("./navigationdesigner").then((m) => m.openNavigation(panel.id));
-    nav.onkeydown = (e) => e.key === "Enter" && nav.click();
-    rows.push(nav);
+    // The panel's own designers, as chips, so they don't read as pages in its navigation.
+    const chip = (label: string, name: string, title: string, run: () => unknown) => h("button", { type: "button", class: "fv-chip", title, onclick: () => void run() }, icon(name), label);
+    rows.push(
+      h(
+        "li",
+        { class: "fv-chips" },
+        chip("Dashboard", "dashboard", "The panel's dashboards and widgets", () => import("./dashboarddesigner").then((m) => m.openDashboard(panel.id))),
+        chip("Navigation", "list-tree", "The panel's navigation: groups, order, and clusters", () => import("./navigationdesigner").then((m) => m.openNavigation(panel.id))),
+        ...(panel.provider?.file ? [chip("Settings", "settings-gear", "Panel settings", () => openPanel(panel))] : []),
+      ),
+    );
     const groups = new Map<string, fapp.ResourceInfo[]>();
     for (const r of panel.resources) {
       const g = r.navigationGroup ?? "";
@@ -293,12 +324,6 @@ export async function loadFilament() {
       rows.push(row);
     }
   }
-  if (app.booted && app.panels.length) {
-    const notices = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The app's notifications: the panel's bell and emails" }, icon("bell"), h("span", { class: "fv-name" }, "Notifications"));
-    notices.onclick = () => void import("./notifydesigner").then((m) => m.openNotificationPicker());
-    notices.onkeydown = (e) => e.key === "Enter" && notices.click();
-    rows.push(notices);
-  }
   if (!app.booted) {
     // The app can't start, often because of a mistake in a file Filament loads. Say where, and still list the
     // resource files so they can be opened and fixed.
@@ -326,14 +351,6 @@ export async function loadFilament() {
       rows.push(row);
     }
   } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));
-  const env = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "Mail, queue, storage, app URL, and time zone in .env" }, icon("settings"), h("span", { class: "fv-name" }, "Environment"), h("span", { class: "fv-detail" }, ".env"));
-  env.onclick = () => void import("./envsettings").then((m) => m.openEnvSettings());
-  env.onkeydown = (e) => e.key === "Enter" && env.click();
-  
-  const schedule = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The app's scheduled tasks" }, icon("watch"), h("span", { class: "fv-name" }, "Scheduled tasks"), h("span", { class: "fv-detail" }, "Laravel"));
-  schedule.onclick = () => void import("./scheduledesigner").then((m) => m.openSchedule());
-  schedule.onkeydown = (e) => e.key === "Enter" && schedule.click();
-  rows.push(h("li", { class: "fv-group" }, "App"), env, schedule);
   const tree = h("ul", { class: "fv-tree", role: "tree" }, ...rows);
   list.replaceChildren(tree);
   applyFilter();
@@ -388,6 +405,17 @@ export async function openModelPicker() {
   );
   items.push({ label: "New Model…", detail: "Design a model, its migration, and its factory", icon: "codicon-add", run: () => openNewModel() });
   pick("Open a model in the designer", (query) => (query.trim() ? rank(query, items) : items));
+}
+
+/** Picks an enum to open in the enum designer, or makes a new one. */
+export async function openEnumPicker() {
+  const root = host.root();
+  const enums = await fapp.enums(root).catch((e) => (host.status(`Can't read the enums: ${errorText(e)}`), null));
+  if (!enums) return;
+  const { openEnumDesigner, openNewEnum } = await import("./enumdesigner");
+  const items: Item[] = enums.filter((e) => e.file).map((e) => ({ label: shortClass(e.class), detail: `${e.cases.length} cases · ${e.class}`, icon: "codicon-symbol-enum", run: () => openEnumDesigner(e.file!.startsWith("/") ? e.file! : `${root}/${e.file}`) }));
+  items.push({ label: "New Enum…", detail: "Cases with labels, colors, and icons", icon: "codicon-add", run: () => openNewEnum() });
+  pick("Open an enum in the designer", (query) => (query.trim() ? rank(query, items) : items));
 }
 
 /** Asks for a new custom page in a panel. */

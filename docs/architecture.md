@@ -4186,6 +4186,16 @@ one block where it appears whole (its last occurrence, which is usually in the
 file name), or else the letters of a fuzzy match. The folder part of a path is
 dimmed.
 
+## The Designers tool window
+
+`src/filamentview.ts` draws the tool window in two parts, so a designer never
+looks like a page of the app. **App designers** is a grid of tiles from
+`DESIGNERS`, drawn once into `#filament-designers` whatever the project has,
+since most of them work without Filament. Below it, each panel lists its
+resources and pages as its navigation does, with the panel's own designers
+(dashboard, navigation, and settings) as chips under its name rather than rows
+among its pages.
+
 ## Filament designer
 
 The designer (`src/filamentdesigner.ts`) edits a resource through its code.
@@ -6743,3 +6753,12 @@ same fields the resource designer chooses for a column of that type. The
 settings class's properties stand in for a model's columns in the designer's
 palette, so the custom-page mode needed no other change to design the form.
 
+
+### 2026-10-01: The app's designers are tiles, apart from the panels
+
+The first app designers were added as rows in the Filament tool window, beside
+the panels' resources and pages, where they read as pages of the app. Some had
+no row at all and opened only from the palette. So the tool window became
+**Designers**: the app's designers are tiles above the panels, styled unlike
+the rows that mirror the panels' navigation, and a panel's own designers are
+chips under its name.

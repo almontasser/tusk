@@ -2847,3 +2847,20 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .sd-snippet-head { display: flex; align-items: center; justify-content: space-between; }
 .sd-snippet .fd-code-preview { margin: 4px 0 0; }
 .sd-designer .ed-row input.invalid { border-color: var(--red); }
+
+/* The Designers tool window: the app's designers as tiles, apart from the panels' navigation below them. */
+.fv-designers { border-bottom: 1px solid var(--border); padding: 0 0 8px; }
+.fv-section { display: flex; align-items: center; gap: 4px; height: var(--row); padding: 0 10px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; cursor: default; list-style: none; }
+.fv-section::-webkit-details-marker { display: none; }
+.fv-section::before { content: ""; width: 0; height: 0; border: 4px solid transparent; border-left-color: currentColor; margin-right: 2px; transition: transform 0.1s; }
+.fv-designers[open] > .fv-section::before { transform: rotate(90deg) translateX(2px); }
+.fv-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; padding: 0 8px; }
+.fv-tile { display: flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: color-mix(in srgb, var(--accent) 6%, transparent); font-size: 12px; text-align: left; }
+.fv-tile:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.fv-tile > .codicon { color: var(--accent); flex-shrink: 0; }
+.fv-tile > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fv-tree li.fv-chips { gap: 4px; padding-left: 28px; height: auto; padding-top: 2px; padding-bottom: 4px; }
+.fv-tree li.fv-chips:hover { background: none; }
+.fv-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 10px; font-size: 11px; color: var(--muted); }
+.fv-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.fv-chip > .codicon { font-size: 12px; color: var(--accent); }

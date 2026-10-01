@@ -785,13 +785,26 @@ names don't count. Click one to open it. The list updates when
 files change, and the refresh button reloads it. Files that `.gitignore`
 excludes, such as `vendor`, aren't searched.
 
+## The Designers tool window
+
+The **Designers** tool window (its icon is in the tool window bar) is where
+the designers start:
+
+- **App designers:** a tile for each of the app's designers, which opens it or
+  asks which model, enum, or class to open. The tiles are Models, Enums,
+  Access, Notifications, Automations, Schedule, Environment, App settings,
+  Record history, and Check the app. Click the heading to hide them.
+- **Panels:** each Filament panel, with chips for its **Dashboard**,
+  **Navigation**, and **Settings**, then its resources and pages as the
+  panel's navigation lists them.
+
 ## Filament designer
 
 The designer builds a Filament resource without writing code: its form, table,
 infolist, relation managers, pages, and settings. It works with Filament 4 and
 later. To open it, do one of the following:
 
-- Open the **Filament** tool window and click a resource. It lists each panel's
+- Open the **Designers** tool window and click a resource. It lists each panel's
   resources by navigation group.
 - Click **Open in Designer** above a resource's or relation manager's class, or
   above a Filament 4 schema class such as `PostForm`.
@@ -839,7 +852,7 @@ grids with column spans, tabs, wizards, repeaters, and every field type.
 Values the designer can't show in full, such as closures, options with keys
 written as code, or settings a method decides, show as code you can open. The
 designer asks before replacing them. A file with syntax errors opens read-only
-until you fix them. When the app can't start, the Filament tool window shows
+until you fix them. When the app can't start, the Designers tool window shows
 why, with a link to the file and line, and still lists the resource files.
 
 The palette lists the components the project has: Filament's, plugins', and the
@@ -928,7 +941,7 @@ key. A translation that's already in a PHP file, such as
 
 ### New resources
 
-**Filament: New Resource…**, the **+** in the Filament tool window, or
+**Filament: New Resource…**, the **+** in the Designers tool window, or
 **Filament resource** in the model designer opens a wizard:
 
 1. **Model:** pick one of the app's models, or design a new one.
@@ -959,7 +972,7 @@ the form, table, infolist, and settings, and opens the designer.
 
 ### Panel settings
 
-Click the gear on a panel in the Filament tool window, **Open Panel
+Click **Settings** under a panel in the Designers tool window, **Open Panel
 Settings** above a panel provider's class, or run **Filament: Panel
 Settings…**. Each change is saved to the provider at once, and a preview of
 the panel follows it.
@@ -1010,7 +1023,7 @@ the columns an export writes.
 ### Custom pages
 
 Pages that aren't a resource's are listed under **Pages** in each panel in the
-Filament tool window, and open in the designer: their form or table, header
+Designers tool window, and open in the designer: their form or table, header
 actions, access, and navigation settings (label, icon, group, order, title,
 and address). **Open in Designer** shows above a page's class too.
 
@@ -1025,7 +1038,7 @@ New pages draw their content from `content()`, so they need no Blade view.
 
 ### Dashboards and widgets
 
-Click **Dashboard** under a panel in the Filament tool window, or run
+Click **Dashboard** under a panel in the Designers tool window, or run
 **Filament: Dashboard…**. The dashboard shows its widgets in a grid, as wide
 as each one is.
 
@@ -1056,7 +1069,7 @@ there is one.
 
 ### Navigation
 
-Click **Navigation** under a panel in the Filament tool window, run
+Click **Navigation** under a panel in the Designers tool window, run
 **Filament: Navigation…**, or click **Navigation…** in the panel settings'
 navigation groups. The panel's sidebar shows as Filament builds it: its groups
 in order, then each group's pages, resources, and clusters with their icons,
@@ -1109,7 +1122,7 @@ show what the app returns now, and can't be changed here.
 ### Generated tests
 
 **Generate tests** (the beaker in the resource designer's header), **Generate
-Tests** in a resource's menu in the Filament tool window, or **Filament:
+Tests** in a resource's menu in the Designers tool window, or **Filament:
 Generate Resource Tests…** writes tests for a resource to
 `tests/Feature/Filament/<Resource>Test.php` and runs them. The New Resource
 wizard's last step has the same option. The tests check that:
@@ -1239,8 +1252,8 @@ and opens the method after applying.
 The environment settings edit the values in `.env` that password reset, email
 codes, notifications, and imports and exports depend on. To open them, run
 **Laravel: Environment Settings…**, click **Open in Environment Settings**
-above the project's `.env`, or click **Environment** in the Filament tool
-window. Each change is saved to `.env` at once, like typing it there: comments,
+above the project's `.env`, or click **Environment** under **App designers** in the
+Designers tool window. Each change is saved to `.env` at once, like typing it there: comments,
 order, and quoting stay as they are, and a new key goes after the others of its
 group, such as `MAIL_HOST` after `MAIL_PORT`.
 
@@ -1303,8 +1316,8 @@ The schedule designer shows the app's scheduled tasks and changes them in
 Laravel's scheduler: what runs, when, and how. To open it, run **Laravel:
 Scheduled Tasks…**, click **Open Scheduled Tasks** in `routes/console.php`, in
 `bootstrap/app.php` when it has `withSchedule()`, or in an older
-`app/Console/Kernel.php`, or click **Scheduled tasks** in the Filament tool
-window.
+`app/Console/Kernel.php`, or click **Schedule** under **App designers** in the
+Designers tool window.
 
 - **Tasks:** an Artisan command with its arguments, picked from the project's
   own commands; one of the app's queued jobs; a notification sent to every
@@ -1341,7 +1354,7 @@ The notifications designer creates and changes a notification class: what
 shows in the panel's bell, and the email. To open it, click **Open in
 Notifications Designer** above a notification's class, run **Laravel: New
 Notification…** or **Laravel: Open Notification in Designer…**, or click
-**Notifications** in the Filament tool window.
+**Notifications** under **App designers** in the Designers tool window.
 
 - **New notification:** a class name, the model it's about (or none, as for a
   weekly report), and whether it goes to the bell, by email, or both. Tusk
@@ -1396,7 +1409,7 @@ migration and config and migrates, in a terminal tab.
 - **Settings page:** **Make a settings page**, or **Filament: New Settings
   Page…**, makes a Filament page with a field for each property and opens its
   form in the designer, where the settings' properties are the palette's
-  columns. Settings pages are listed under **Pages** in the Filament tool
+  columns. Settings pages are listed under **Pages** in the Designers tool
   window; right-click one to open its settings.
 
 Changes are staged until you click **Create settings** or **Apply changes**,

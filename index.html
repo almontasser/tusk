@@ -36,7 +36,7 @@
         <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
         <button data-view="composer" title="Composer"><span class="codicon codicon-package"></span></button>
         <button data-view="http" title="HTTP Client"><span class="codicon codicon-globe"></span></button>
-        <button data-view="filament" title="Filament"><span class="codicon codicon-symbol-structure"></span></button>
+        <button data-view="filament" title="Designers"><span class="codicon codicon-symbol-structure"></span></button>
         <div class="spacer"></div>
         <button data-panel="problems" title="Problems (⌘6)"><span class="codicon codicon-warning"></span></button>
         <button data-panel="log" title="Git Log (⌘9)"><span class="codicon codicon-history"></span></button>
@@ -184,7 +184,7 @@
         </section>
         <section id="view-filament" hidden>
           <header class="view-header">
-            <span>Filament</span>
+            <span>Designers</span>
             <div class="view-actions">
               <button class="icon-button" id="filament-new" title="New Resource…"><span class="codicon codicon-add"></span></button>
               <button class="icon-button" id="filament-refresh" title="Read the app again"><span class="codicon codicon-refresh"></span></button>
@@ -193,6 +193,7 @@
           <div class="pr-toolbar">
             <input id="filament-filter" type="search" placeholder="Filter resources" aria-label="Filter resources" spellcheck="false" />
           </div>
+          <div id="filament-designers"></div>
           <div id="filament-list"></div>
         </section>
         <section id="view-composer" hidden>
