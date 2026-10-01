@@ -783,6 +783,7 @@ export class Designer {
         else host.openAt(this.file, 1);
       }),
       panel?.url && info?.slug ? iconButton("link-external", "Open in the browser", () => host.openUrl(`${panel.url}/${info.slug}`)) : null,
+      info && !this.manager && !this.page ? iconButton("beaker", "Generate tests", () => void import("./resourcetests").then((m) => m.generateResourceTests(this.file))) : null,
       iconButton("refresh", "Read the app again", () => (fapp.forget(), void this.load())),
     );
   }

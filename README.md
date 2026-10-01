@@ -55,6 +55,8 @@ file to change when you add it.
 | Navigation designer | It shows every item whatever its access rules, as if everyone could open everything. A panel that builds its navigation with `navigation(fn …)` shows as Filament would build it without that, and can't be changed. Reordering numbers the group's project items 1, 2, 3, and an item whose sort code decides keeps its place even when that breaks the new order. Group icons and collapsing are in the panel settings. A resource's record sub-navigation isn't shown. |
 
 | Record history | The History section reads the `getActivitylogOptions()` calls it writes; other options, such as `$recordEvents` or `dontLogIfAttributesChangedOnly()`, show as code. A description is read when it's a string with `{$eventName}` in it, not other code. The History relation manager names the causer by its `name` attribute. |
+
+| Generated tests | Fields are tested when they're always on the form: a field that a condition shows, hides, or disables, or that's in a repeater or a layout with its own relationship, is left out. File uploads, repeaters, and multiple selects aren't filled; a required one gets a comment in the create and edit tests asking you to fill it. Dates and rich text are filled but not compared after saving. A factory is found where Laravel looks for it in an app in the `App` namespace. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
@@ -1102,6 +1104,42 @@ show what the app returns now, and can't be changed here.
   again, and a notice says when it can't start, with the file and line; another
   says when it starts again. **Laravel: Check the App (Boot and Tests)**
   loads the routes and runs the tests in a terminal tab.
+
+### Generated tests
+
+**Generate tests** (the beaker in the resource designer's header), **Generate
+Tests** in a resource's menu in the Filament tool window, or **Filament:
+Generate Resource Tests…** writes tests for a resource to
+`tests/Feature/Filament/<Resource>Test.php` and runs them. The New Resource
+wizard's last step has the same option. The tests check that:
+
+- The list page shows records and the table's columns.
+- A record can be created and edited with the form, and its values are saved.
+  An edit also checks that the form shows the record.
+- Each required field is required, and each unique field rejects a value
+  another record has.
+- The View page opens.
+- A user the policy refuses can't open the list, create, edit, or view pages.
+
+A simple resource, with one page and modals, is tested through its **New** and
+**Edit** actions.
+
+- **Values:** the tests fill the form with the model's factory, and give
+  fields the factory doesn't fill a value for their type. When a model the
+  tests need has no factory, Tusk offers to make one, with a fake value for
+  each column, and adds `HasFactory` to the model.
+- **Who acts:** a user from the user model's factory, with the permissions and
+  roles the policy's rules ask for. With spatie/laravel-permission, the tests
+  create them. A rule Tusk can't read gets a comment that asks you to set the
+  user up.
+- **Pest or PHPUnit:** a project with Pest gets Pest tests. Without Pest, you
+  choose PHPUnit tests or installing Pest first.
+- **Your code:** a test file that exists isn't overwritten. Tusk offers to add
+  the tests it lacks, such as one for a field that became required, or to open
+  it.
+
+The tests run in the Tests tab, and **Laravel: Check the App (Boot and Tests)**
+runs them with the app's other tests.
 
 ## Model designer
 

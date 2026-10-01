@@ -252,6 +252,7 @@ export async function loadFilament() {
               { label: "Design the Form", run: () => file && void openDesigner(file, "form") },
               { label: "Design the Table", run: () => file && void openDesigner(file, "table") },
               { label: "Relation Managers", run: () => file && void openDesigner(file, "relations") },
+              { label: "Generate Tests", run: () => file && void import("./resourcetests").then((m) => m.generateResourceTests(file)) },
             ]),
           );
         };

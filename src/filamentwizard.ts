@@ -87,6 +87,8 @@ class Wizard {
   actions = { view: true, edit: true, delete: false, bulkDelete: true, bulkRestore: true };
   sort = "";
   sortDir: "asc" | "desc" = "desc";
+  /** Whether to write tests for the new resource once it's made. */
+  tests = false;
   busy = "";
 
   constructor(root: string, o: Options) {
@@ -384,7 +386,15 @@ class Wizard {
       this.heading("Ready to create", "Filament's generator makes the files, then the wizard fills in the form and table. The designer opens next."),
       h("dl", { class: "rw-summary" }, ...items.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       h("div", { class: "rw-code" }, h("div", { class: "rw-code-title" }, "Form"), h("pre", {}, code.form), h("div", { class: "rw-code-title" }, "Table columns"), h("pre", {}, code.table)),
+      this.testsBox(),
     );
+  }
+
+  /** The review step's option to write tests for the new resource, which run once they're written. */
+  private testsBox() {
+    const b = h("input", { type: "checkbox", checked: this.tests });
+    b.onchange = () => (this.tests = b.checked);
+    return h("label", { class: "fd-check-label rw-check", title: "Pest tests for listing, creating, editing, required fields, and access. They run when they're written." }, b, "Write tests for the resource");
   }
 
   // ---- The code ----
@@ -492,6 +502,7 @@ class Wizard {
       this.o.onCreated();
       designerHost.status(`Created ${shortClass(model)}Resource.`);
       await openDesigner(resource, "form");
+      if (this.tests) void import("./resourcetests").then((m) => m.generateResourceTests(resource));
     } catch (e) {
       showError("Can't create the resource", e);
       this.setBusy("");
