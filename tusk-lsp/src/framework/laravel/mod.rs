@@ -726,6 +726,137 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     .filter(|items| !items.is_empty())
 }
 
+/// Keys to offer while typing a key in a `.env` file: those the project's other `.env*` files assign and those
+/// `config/` reads with `env()`, less the ones this file has. Values come only from `.env.example` and `env()`
+/// defaults, so a secret in `.env` never lands in a committed file.
+pub fn env_file_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
+    let text = &ctx.doc.text;
+    let line_start = text[..offset as usize].rfind('\n').map_or(0, |i| i + 1);
+    let line = text[line_start..offset as usize].trim_start();
+    let typed = line.strip_prefix("export ").map_or(line, str::trim_start);
+    if !typed.chars().all(is_env_key_char) {
+        return None;
+    }
+    let root = Data(&ctx.snap.framework).root().to_path_buf();
+    let read = |dir: &Path, keep: &dyn Fn(&str) -> bool| -> Vec<(String, String)> {
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| keep(&e.file_name().to_string_lossy()) && e.path() != ctx.doc.path)
+            .filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), std::fs::read_to_string(e.path()).ok()?)))
+            .collect();
+        // `.env.example` first: its values are the ones to offer.
+        files.sort_by_key(|(name, _)| (name != ".env.example", name.clone()));
+        files
+    };
+    let envs = read(&root, &|n| n.starts_with(".env"));
+    let configs = read(&root.join("config"), &|n| n.ends_with(".php"));
+    let range = ctx.doc.range(offset - typed.len() as u32, offset);
+    let items: Vec<_> = env_candidates(text, &envs, &configs)
+        .into_iter()
+        .map(|(key, value, source)| CompletionItem {
+            detail: Some(if value.is_empty() { source } else { format!("{value} ({source})") }),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text: format!("{key}={value}") })),
+            ..completion_item(&key, Some(CompletionItemKind::CONSTANT), range)
+        })
+        .collect();
+    (!items.is_empty()).then_some(items)
+}
+
+/// Where the project reads the `.env` key under the cursor with `env('KEY')`, for ⌘-click on the key.
+// ponytail: walks the project's PHP files from disk on each request; read the index's file list if it's slow.
+pub fn env_key_usages(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
+    let text = &ctx.doc.text;
+    let line_start = text[..offset as usize].rfind('\n').map_or(0, |i| i + 1);
+    let line = text[line_start..].lines().next().unwrap_or("");
+    let Some((key, _)) = env_assignments(line).next() else { return vec![] };
+    let key_start = line_start + line.find(key).unwrap_or(0);
+    if !(key_start..=key_start + key.len()).contains(&(offset as usize)) {
+        return vec![];
+    }
+    let root = Data(&ctx.snap.framework).root().to_path_buf();
+    let skip = ["vendor", "node_modules", "storage", "bootstrap"];
+    let mut out = vec![];
+    let walker = ignore::WalkBuilder::new(&root).filter_entry(move |e| !skip.iter().any(|s| e.file_name() == *s)).build();
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "php") {
+            continue;
+        }
+        let Ok(php) = std::fs::read_to_string(path) else { continue };
+        for (line_no, line) in php.lines().enumerate() {
+            for (at, found, _) in env_calls(line) {
+                if found == key {
+                    let col = line[..at].encode_utf16().count() as u32;
+                    let range = Range { start: Position::new(line_no as u32, col), end: Position::new(line_no as u32, col + key.len() as u32) };
+                    out.push(Location { uri: path_to_uri(path), range });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.uri.as_str().cmp(b.uri.as_str()).then(a.range.start.line.cmp(&b.range.start.line)));
+    out
+}
+
+fn is_env_key_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '.'
+}
+
+/// The assignments in `.env` text, as key and raw value.
+fn env_assignments(text: &str) -> impl Iterator<Item = (&str, &str)> {
+    text.lines().filter_map(|l| {
+        let l = l.trim();
+        let l = l.strip_prefix("export ").map_or(l, str::trim_start);
+        let (key, value) = l.split_once('=')?;
+        (!l.starts_with('#') && !key.trim().is_empty()).then(|| (key.trim(), value.trim()))
+    })
+}
+
+/// The keys PHP reads with `env('KEY')`: each key's offset, the key, and the default when it's a quoted word.
+fn env_calls(php: &str) -> Vec<(usize, &str, &str)> {
+    let mut out = vec![];
+    for (at, _) in php.match_indices("env(") {
+        let after_paren = &php[at + 4..];
+        let rest = after_paren.trim_start();
+        let Some(q) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') else { continue };
+        let Some((key, after)) = rest[1..].split_once(q) else { continue };
+        let default = after
+            .trim_start()
+            .strip_prefix(',')
+            .map(str::trim_start)
+            .and_then(|a| a.chars().next().filter(|c| *c == '\'' || *c == '"').and_then(|d| a[1..].split_once(d)).map(|(v, _)| v))
+            .filter(|v| !v.contains(char::is_whitespace))
+            .unwrap_or("");
+        if !key.is_empty() && key.chars().all(is_env_key_char) {
+            out.push((php.len() - rest.len() + 1, key, default));
+        }
+    }
+    out
+}
+
+/// `(key, value, source)` for the keys other `.env*` files and `env()` calls name that `current` doesn't assign.
+fn env_candidates(current: &str, envs: &[(String, String)], configs: &[(String, String)]) -> Vec<(String, String, String)> {
+    let mut seen: std::collections::HashSet<String> = env_assignments(current).map(|(k, _)| k.to_string()).collect();
+    let mut out = vec![];
+    for (name, text) in envs {
+        for (key, value) in env_assignments(text) {
+            if seen.insert(key.to_string()) {
+                let value = if name == ".env.example" { value } else { "" };
+                out.push((key.to_string(), value.to_string(), name.clone()));
+            }
+        }
+    }
+    for (name, text) in configs {
+        for (_, key, default) in env_calls(text) {
+            if seen.insert(key.to_string()) {
+                out.push((key.to_string(), default.to_string(), format!("config/{name}")));
+            }
+        }
+    }
+    out
+}
+
 /// The range completions replace: the word being typed in the string, up to the cursor.
 fn replacement(ctx: &Ctx<'_>, arg_start: u32, offset: u32) -> Range {
     let text = &ctx.doc.text[arg_start as usize..offset as usize];

@@ -56,6 +56,10 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     let text = &ctx.doc.text;
     let offset = offset as usize;
     let before = &text[..offset];
+    // A `.env` file completes its keys.
+    if ctx.doc.language == "dotenv" {
+        return crate::framework::laravel::env_file_completion(ctx, offset as u32).map(|items| (items, false));
+    }
     // A Blade view isn't PHP; only the framework completes in it.
     if ctx.doc.language == "blade" || ctx.doc.path.to_string_lossy().ends_with(".blade.php") {
         return crate::framework::completion(ctx, offset as u32).map(|items| (items, false));

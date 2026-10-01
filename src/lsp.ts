@@ -357,9 +357,6 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
 // Servers can link to a location with this command, for example in code lenses.
 monaco.editor.registerCommand("phpEditor.open", (_, uri: string, line: number) => host.openAt(pathOf(uri), line));
 
-// `.env` files get a language of their own, so Tusk's server can offer fixes in them.
-monaco.languages.register({ id: "dotenv", filenames: [".env"], filenamePatterns: [".env.*"], aliases: ["Environment"] });
-
 // Code actions carry the function that runs them, so each one goes back to the server that made it.
 monaco.editor.registerCommand("lsp.codeAction", (_, run: (a: L.CodeAction | L.Command) => Promise<void>, action) => run(action));
 

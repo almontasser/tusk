@@ -2407,6 +2407,12 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   Inertia page, add a missing variable to `.env` (or the value from
   `.env.example`), and, in `.env` files, add a `VITE_` copy of the selected
   variables. Each opens what it changed.
+- **`.env` files** are highlighted: keys, values, comments, `export`, and
+  `${VAR}` references. Typing a key completes the keys your other `.env*`
+  files assign and those `config/*.php` reads with `env()`, less the ones the
+  file already has. The value comes from `.env.example` or the `env()`
+  default, never from `.env`, so a secret doesn't land in a committed file.
+  ⌘-click a key to see where the project reads it with `env('KEY')`.
 
 Translation keys in `__()`, `trans()`, `trans_choice()`, `@lang()`, and
 `Lang::get()` complete from `lang/*/*.php`, `lang/*.json`, and packages'

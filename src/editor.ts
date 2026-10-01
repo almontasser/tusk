@@ -122,6 +122,39 @@ monaco.languages.onLanguage("blade", async () => {
   });
 });
 
+// `.env` files get a language of their own, so Tusk's server can complete keys and offer fixes in them. The
+// grammar reads them as phpdotenv does: `#` comments, `export`, quoted values that span lines, and `${VAR}` references.
+monaco.languages.register({ id: "dotenv", filenames: [".env"], filenamePatterns: [".env.*"], aliases: ["Environment"] });
+monaco.languages.setLanguageConfiguration("dotenv", {
+  comments: { lineComment: "#" },
+  autoClosingPairs: [{ open: '"', close: '"' }, { open: "'", close: "'" }, { open: "${", close: "}" }],
+});
+monaco.languages.setMonarchTokensProvider("dotenv", {
+  tokenizer: {
+    root: [
+      [/^\s*#.*$/, "comment"],
+      [/^(\s*)(export\s+|)([A-Za-z_][\w.]*)(\s*)(=)/, ["", "keyword", "key", "", "delimiter"]],
+      [/"/, "string", "@double"],
+      [/'/, "string", "@single"],
+      [/\s+#.*$/, "comment"],
+      [/(?:true|false|null|empty)(?=\s*(?:#|$))/i, "constant"],
+      [/-?\d+(?:\.\d+)?(?=\s*(?:#|$))/, "number"],
+      [/\$\{[^}]*\}/, "variable"],
+      [/[^\s"'$#]+|[$#]/, "string"],
+    ],
+    double: [
+      [/"/, "string", "@pop"],
+      [/\\./, "string.escape"],
+      [/\$\{[^}]*\}/, "variable"],
+      [/[^"\\$]+|\$/, "string"],
+    ],
+    single: [
+      [/'/, "string", "@pop"],
+      [/[^']+/, "string"],
+    ],
+  },
+});
+
 // Vue, Svelte, and Astro components use Monaco's HTML grammar, which highlights <script> as JavaScript
 // and <style> as CSS. They pick the language with lang="ts" or lang="scss" rather than type, so those
 // rules switch to the grammar's custom-type states. The Vue and TypeScript servers add the rest for Vue.

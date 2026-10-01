@@ -5250,7 +5250,15 @@ an `artisan` file.
   (after the variables sharing its prefix) or the value from `.env.example`,
   and, in `.env` files, `VITE_` copies of the selected variables. They carry
   their edit and the editor's `phpEditor.open` command, which the client runs
-  itself. `.env` files have a `dotenv` language so the server sees them.
+  itself. `.env` files have a `dotenv` language so the server sees them; its
+  Monarch grammar is in `src/editor.ts`.
+- **`.env` keys:** in a `dotenv` document, `env_file_completion` in
+  `laravel/mod.rs` offers keys at the start of a line from the root's other
+  `.env*` files and the `env('KEY')` calls in `config/*.php`, read from disk on
+  each request. Only `.env.example` and `env()` defaults supply values.
+  ⌘-click on a key (`env_key_usages`, from `definition`) lists the
+  `env('KEY')` calls in the project's PHP files outside `vendor`,
+  `node_modules`, `storage`, and `bootstrap`, read from disk.
 - **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
   pages, and controller actions (read from `app/Http/Controllers`).
 - **Blade:** a view becomes "virtual PHP" of the same length.
@@ -6764,3 +6772,12 @@ no row at all and opened only from the palette. So the tool window became
 **Designers**: the app's designers are tiles above the panels, styled unlike
 the rows that mirror the panels' navigation, and a panel's own designers are
 chips under its name.
+
+### 2026-10-01: `.env` key completion reads files, not the index
+
+Keys come from the other `.env*` files and from `env()` calls in
+`config/*.php`, scanned as text on each completion. The index holds
+declarations, not call arguments, and `config/` is where Laravel apps read the
+environment. The files are small and the completion is rare, so nothing is
+cached. Values come only from `.env.example` and `env()` defaults: copying a
+value from `.env` into `.env.example` would commit a secret.

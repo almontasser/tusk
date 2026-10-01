@@ -398,3 +398,17 @@ fn loads_facts_from_a_real_app() {
     }
     eprintln!("controllers: {}, assets: {}", data.controllers().as_array().map_or(0, Vec::len), data.assets().as_array().map_or(0, Vec::len));
 }
+
+#[test]
+fn env_files_complete_keys_other_env_files_and_config_name() {
+    let envs = [(".env.example".to_string(), "# c\nAPP_KEY=\nexport DB_HOST=127.0.0.1\n".to_string()), (".env".to_string(), "APP_KEY=secret\nAPP_NAME=Tusk\nREDIS_PASSWORD=hunter2\n".to_string())];
+    let configs = [("app.php".to_string(), "'key' => env('APP_KEY'), 'url' => env(\"APP_URL\", 'http://localhost'), 'x' => env('MAIL_FROM', 'Tusk app')".to_string())];
+    let got = env_candidates("APP_NAME=Mine\n", &envs, &configs);
+    let got: Vec<_> = got.iter().map(|(k, v, s)| (k.as_str(), v.as_str(), s.as_str())).collect();
+    assert_eq!(
+        got,
+        vec![("APP_KEY", "", ".env.example"), ("DB_HOST", "127.0.0.1", ".env.example"), ("REDIS_PASSWORD", "", ".env"), ("APP_URL", "http://localhost", "config/app.php"), ("MAIL_FROM", "", "config/app.php")]
+    );
+    let line = "'url' => env( 'APP_URL'),";
+    assert_eq!(env_calls(line).iter().map(|(at, k, _)| &line[*at..*at + k.len()]).collect::<Vec<_>>(), vec!["APP_URL"]);
+}
