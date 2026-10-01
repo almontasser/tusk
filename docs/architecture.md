@@ -4498,7 +4498,9 @@ has, as `methodsOf` reports them.
   clusters, resources (not nested ones), and the provider's
   `navigationItems()`, in the order Filament registers them, each with its
   label, icon, group (a label, or an enum case with its place among the
-  cases), sort, parent item, badge, cluster, and `shouldRegisterNavigation()`.
+  cases), sort, parent item, badge, cluster, and `shouldRegisterNavigation()`
+  (for a cluster, its property, since Filament also hides a cluster whose
+  items no one can open).
   It calls the static getters itself rather than `$panel->getNavigation()`,
   which drops what the signed-in user can't open. `overrides` names, per
   setting, the file of a method outside Filament that decides it. It also

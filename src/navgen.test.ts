@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fixture } from "./designerfixture.ts";
-import { discoverClustersEdits, groupEdits, groupOrderEdits, type NavItem, orderSorts, readNav, renameGroupEdits, setNav, sidebar } from "./navgen.ts";
+import { combine, discoverClustersEdits, groupEdits, groupOrderEdits, type NavItem, orderSorts, readNav, renameGroupEdits, setNav, sidebar } from "./navgen.ts";
 import { panelChains } from "./panelgen.ts";
-import { applyEdits, methodNamed } from "./phpcode.ts";
+import { applyEdits, mergeEdits, methodNamed } from "./phpcode.ts";
 
 const item = (label: string, o: Partial<NavItem> = {}): NavItem => ({ kind: "resource", class: `App\\${label}`, file: `app/${label}.php`, label, icon: null, group: null, sort: null, parent: null, badge: null, cluster: null, registers: true, hasItem: true, overrides: {}, ...o });
 const g = (label: string) => ({ label, enum: null, case: null });
@@ -65,6 +65,9 @@ test("moving into a group keeps the project's way of writing it", () => {
   const back = applyEdits(page.text, groupEdits(page.text, pcls, { label: "Blog", enum: null, case: null, translated: false }));
   assert.doesNotMatch(back, /getNavigationGroup/);
   assert.match(back, /\$navigationGroup = 'Blog';/);
+  // A sort and a group together, where the new properties go where the getter was.
+  const both = applyEdits(page.text, mergeEdits(combine(setNav(page.text, pcls, "navigationParentItem", "'Posts'"), groupEdits(page.text, pcls, { label: "Blog", enum: null, case: null, translated: false }))));
+  assert.match(both, /\$navigationGroup = 'Blog';[\s\S]*\$navigationParentItem = 'Posts';\n\}\n$/);
 });
 
 test("sorts count up around fixed items", () => {

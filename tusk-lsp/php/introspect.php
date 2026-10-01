@@ -1260,7 +1260,10 @@ function panelNavigation(string $root, string $id): array
             'parent' => $call($class, 'getNavigationParentItem'),
             'badge' => is_scalar($badge) ? (string) $badge : null,
             'cluster' => $call($class, 'getCluster'),
-            'registers' => (bool) ($call($class, 'shouldRegisterNavigation') ?? true),
+            // A cluster hides while no one can open what's in it; its own setting is the property.
+            'registers' => $kind === 'cluster' && !isset($overrides['shouldRegisterNavigation'])
+                ? (bool) (new ReflectionProperty($class, 'shouldRegisterNavigation'))->getValue()
+                : (bool) ($call($class, 'shouldRegisterNavigation') ?? true),
             // A resource without a list page has no navigation item.
             'hasItem' => $kind !== 'resource' || $class::hasPage('index'),
             'overrides' => (object) $overrides,

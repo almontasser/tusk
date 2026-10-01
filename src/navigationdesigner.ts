@@ -10,6 +10,7 @@ import { type Doc, host, openDesigner } from "./filamentdesigner";
 import { askName, commitInput, heroicon, pickHeroicon, toggleSwitch } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
 import {
+  combine,
   discoverClustersEdits,
   editable,
   groupEdits,
@@ -198,13 +199,13 @@ class NavigationDesigner {
       const sort = sorts[n];
       const moved = this.id(i) === this.id(item);
       if (!this.inProject(i) || (!moved && sort === i.sort)) return [];
-      return [this.build(i, (text, cls) => [
-        ...(sort !== i.sort && sort !== null ? setNav(text, cls, "navigationSort", String(sort)) : []),
-        ...(moved && regroup ? groupEdits(text, cls, to.group) : []),
+      return [this.build(i, (text, cls) => combine(
+        sort !== i.sort && sort !== null ? setNav(text, cls, "navigationSort", String(sort)) : [],
+        moved && regroup ? groupEdits(text, cls, to.group) : [],
         // A parent item belongs to the old group.
-        ...(moved && regroup && i.parent ? setNav(text, cls, "navigationParentItem", null) : []),
-        ...(moved && recluster ? setNav(text, cls, "cluster", to.cluster ? `{{${to.cluster}}}::class` : null) : []),
-      ])];
+        moved && regroup && i.parent ? setNav(text, cls, "navigationParentItem", null) : [],
+        moved && recluster ? setNav(text, cls, "cluster", to.cluster ? `{{${to.cluster}}}::class` : null) : [],
+      ))];
     });
     await this.edit(files, `Moved ${this.label(item)}`);
   }

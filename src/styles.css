@@ -2764,3 +2764,5 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .nv-inspector h3 { display: flex; align-items: center; gap: 6px; }
 .nv-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 10px; }
 .nv-group-note { padding: 0 12px 8px; }
+.nv-inspector .fd-settings .fd-row { grid-template-columns: 120px minmax(0, 1fr) 24px; }
+.nv-inspector .fd-row-editor > select, .nv-inspector .fd-row-editor > input { width: 100%; }

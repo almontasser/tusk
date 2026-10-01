@@ -151,6 +151,12 @@ export const editable = (r: Readout) => r.kind !== "code";
 
 // ---- Writing an item's settings ----
 
+/**
+ * Edits to one class from several settings, inserts first: a new property goes where a removed getter starts, and
+ * mergeEdits keeps inserts at an offset before an edit that starts there.
+ */
+export const combine = (...lists: Edit[][]): Edit[] => lists.flat().sort((a, b) => Number(a.start !== a.end) - Number(b.start !== b.end));
+
 /** Sets a setting's property to `code`, or back to Filament's default when null, replacing a translated getter. */
 export function setNav(text: string, cls: OClass, s: NavSetting, code: string | null): Edit[] {
   const edits: Edit[] = [];
@@ -158,7 +164,7 @@ export function setNav(text: string, cls: OClass, s: NavSetting, code: string | 
   if (getter) edits.push(removeMethod(text, getter));
   const prop = propertyNamed(cls, s);
   if (code === null) return prop ? [...edits, removeProperty(text, prop)] : edits;
-  return [...edits, setProperty(text, cls, s, code, DECLARATION[s])];
+  return combine(edits, [setProperty(text, cls, s, code, DECLARATION[s])]);
 }
 
 /** Writes a label or group as a getter returning `__('text')`, since a property can't call __(). */
@@ -167,7 +173,7 @@ export function setTranslated(text: string, cls: OClass, s: NavSetting, value: s
   const ret = getter?.returns.length === 1 ? getter.returns[0] : null;
   if (ret && textValue(ret)?.translated) return [replaceNode(text, ret, `__(${phpString(value)})`)];
   const prop = propertyNamed(cls, s);
-  return [...(prop ? [removeProperty(text, prop)] : []), addMember(text, cls, `${TRANSLATED[s]}\n{\n    return __(${phpString(value)});\n}`)];
+  return combine(prop ? [removeProperty(text, prop)] : [], [addMember(text, cls, `${TRANSLATED[s]}\n{\n    return __(${phpString(value)});\n}`)]);
 }
 
 /** A group to move an item into, written as the project writes it: a string, `__()`, or an enum case. */
