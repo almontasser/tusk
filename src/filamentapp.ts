@@ -155,6 +155,9 @@ export const porters = (root: string) => cached(root, "app:porters", () => intro
 /** The app's notification classes: the record each one's constructor takes, and its channels when `via()` says without a user. */
 export type NotificationInfo = { class: string; file: string | null; record: string | null; channels: string[] | null };
 export const notifications = (root: string) => cached(root, "app:notifications", () => introspect<NotificationInfo[]>(root, "notifications"));
+/** The config values the booted app uses for `keys`, and the mailers, queues, disks, stores, and tables `.env` chooses between. */
+export type EnvSettingsInfo = { values: Record<string, unknown>; mailers: Record<string, string | null>; queues: Record<string, string | null>; disks: Record<string, string | null>; stores: Record<string, string | null>; tables: Record<"jobs" | "sessions" | "cache", [string, boolean | null]>; configCached: boolean };
+export const envSettings = (root: string, keys: string[]) => cached(root, "env-settings", () => introspect<EnvSettingsInfo>(root, "env-settings", ...keys));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));

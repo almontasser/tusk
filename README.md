@@ -51,6 +51,7 @@ file to change when you add it.
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
+| Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
@@ -1106,6 +1107,41 @@ the code previewed. A method the designer can't read, such as an icon that
 comes from a helper, shows as **In code** and is kept. A renamed case is renamed
 there too. When a new case is missing from such a method, the designer says so
 and opens the method after applying.
+
+## Environment settings
+
+The environment settings edit the values in `.env` that password reset, email
+codes, notifications, and imports and exports depend on. To open them, run
+**Laravel: Environment Settings…**, click **Open in Environment Settings**
+above the project's `.env`, or click **Environment** in the Filament tool
+window. Each change is saved to `.env` at once, like typing it there: comments,
+order, and quoting stay as they are, and a new key goes after the others of its
+group, such as `MAIL_HOST` after `MAIL_PORT`.
+
+- **App:** name, environment, debug mode, URL, language, and time zone. A
+  missing `APP_KEY` can be generated. Laravel 11 and later set the time zone in
+  `config/app.php` rather than reading `APP_TIMEZONE`, so the time zone then
+  edits `config/app.php`, and **Read it from .env instead** makes it read
+  `APP_TIMEZONE`.
+- **Mail:** the mailer, from the mailers in `config/mail.php`. SMTP shows the
+  host, port, username, password, and scheme; other services, such as Resend,
+  Postmark, or SES, show the keys `config/services.php` reads for them. Then
+  the from address and name. **Send a test email** sends one with Tinker, using
+  the app's own settings; with the log mailer, it opens the log.
+- **Queue:** the connection. `sync` gets a warning, since Filament's imports
+  and exports need a real queue and a worker; **Run a worker** runs
+  `queue:work` in a terminal tab. The database queue offers to create its
+  table when it's missing.
+- **Storage:** the default disk, with an S3 disk's keys, and **Link it** when
+  `public/storage` is missing.
+- **Cache and sessions:** the cache store, the session driver, and how long
+  sessions last, with their tables for the database drivers.
+
+Passwords and keys are masked, and messages name the key, never its value.
+When a value the booted app uses differs from `.env`, the row says so: the
+config is cached, or the config file doesn't read the key. With a cached
+config, **Clear the config cache** runs `config:clear`. A key new to `.env` can
+be added to `.env.example` too, with secrets left empty.
 
 ## New Laravel projects and elements
 

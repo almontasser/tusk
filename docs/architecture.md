@@ -4547,6 +4547,44 @@ that runs once, so it should hold the whole change.
 - **New enums** are written whole by `enumFile`, into the namespace's PSR-4
   folder. `make:enum` would make an empty class that Tusk would then replace.
 
+## Environment settings
+
+`src/envsettings.ts` edits `.env`; `src/envgen.ts` reads and changes its text.
+
+- **Reading:** `readEnv` follows phpdotenv: a key's last assignment wins, an
+  `export` prefix is allowed, double quotes take `\\`, `\"`, `\$`, and `\n`
+  escapes and can span lines, single quotes are literal, and a bare value ends
+  at whitespace or `#`. `null` reads as no value, as `env()` returns it.
+- **Writing:** `setEnv` replaces only the value's range, so an inline comment
+  and an `export` prefix stay. A new key goes after the line that has it
+  commented out, else after the last key with the same prefix before its first
+  `_`, else at the end. `encode` keeps the old quoting where it can hold the new
+  value, and quotes values with spaces, `#`, quotes, or backslashes. `${VAR}`
+  stays a reference, except in secrets (`isSecret`), where `$` is escaped, so a
+  password is always taken as typed. Each change is one edit over the changed
+  text, through `applyWorkspaceEdit`, so an open `.env` tab and local history
+  follow it, and changes run one at a time.
+- **The app's view:** `introspect.php env-settings <config key>…` reports the
+  values the booted app uses for the given config keys, the mailers', queue
+  connections', disks', and cache stores' drivers (the choices offered), the
+  queue, session, and cache tables, and whether the config is cached. A row
+  whose `.env` value, with `${VAR}` filled in, differs from the config value
+  says so. Secrets aren't compared.
+- **Config files:** `timezoneSource` reads how `config/app.php` sets the time
+  zone, and `timezoneFromEnv` turns a fixed `'UTC'` into
+  `env('APP_TIMEZONE', 'UTC')`. `blockKeys` reads the `env()` keys of an entry
+  in `config/services.php` or `config/filesystems.php`, for a mail service's or
+  an S3 disk's fields.
+- **Commands:** the test email runs `Mail::raw()` with `artisan tinker
+  --execute` through `fapp.artisan`, so it runs in Sail when it's up and uses
+  the app's own mail settings. `queue:work` and the table migrations run in a
+  terminal tab; a table's `make:*-table` is skipped when migrations are
+  waiting, since Laravel's default migrations already create `jobs`,
+  `sessions`, and `cache`.
+
+Other designers link to a section with `openEnvSettings("mail")` (or `"app"`,
+`"queue"`, `"storage"`, `"cache"`), or the `tusk.openEnvSettings` command.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6257,3 +6295,15 @@ installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
 
+### 2026-10-01: Environment settings save each change to .env as text
+
+`.env` could be read into a table and written back whole, but that would lose
+comments, blank lines, and the order people keep, and write back values phpdotenv
+reads differently from how they were written. So the settings change only a
+value's range, keep the old quoting where it fits, and add new keys beside their
+group. Each change saves at once, as in the Filament designer, since a setting
+in `.env` stands alone and there's nothing to stage it with. The choices offered
+(mailers, queue connections, disks, cache stores) come from the booted app's
+config, so a project's own mailers and disks show, and the values the app really
+uses show beside `.env`'s, which catches a cached config and a config file that
+ignores a key, as Laravel 11's `config/app.php` does for `APP_TIMEZONE`.
