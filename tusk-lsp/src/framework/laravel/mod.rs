@@ -9,6 +9,7 @@ pub mod actions;
 pub mod blade;
 mod data;
 mod tables;
+pub mod views;
 
 use std::path::{Path, PathBuf};
 

@@ -108,7 +108,7 @@ fn publish(client: &Client, snap: &Snapshot, doc: &Document, phpstan: &crate::ph
 
 /// The problems in `doc`: Mago's, and the framework's.
 pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
-    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { blade_problems_in(&snap.index.read(), doc) };
+    let mut out = if doc.language == "php" { php_problems(&snap.index, doc) } else { blade_problems_in(&snap.index.read(), doc, &|p| snap.read(p)) };
     let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
     out.extend(framework);
     out
@@ -152,13 +152,17 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
 }
 
 /// Mago's problems in the PHP of `doc`, a Blade view, read as [`checked_php`] lays it out, at the view's
-/// positions. The view's variables come from the controller or component that renders it, so Mago doesn't
-/// know them. That drops undefined variables, uses of their `mixed` values, and Laravel's magic properties
-/// and methods, leaving syntax errors, unknown classes, functions, methods, and constants, and wrong arguments.
+/// positions. The view's variables get the types that the places rendering it pass ([`view_types`]); `read`
+/// gives a project file's text for finding them. Others are unknown, which drops undefined variables, uses of
+/// their `mixed` values, and Laravel's magic properties and methods, leaving syntax errors, unknown classes,
+/// functions, methods, constants, and properties, and wrong arguments.
 ///
+/// [`view_types`]: crate::framework::laravel::views::view_types
 /// [`checked_php`]: crate::framework::laravel::blade::checked_php
-pub fn blade_problems_in(index: &crate::index::Index, doc: &Document) -> Vec<Diagnostic> {
-    let (php, head) = crate::framework::laravel::blade::checked_php(&doc.text);
+pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn Fn(&std::path::Path) -> Option<String>) -> Vec<Diagnostic> {
+    use crate::framework::laravel::views;
+    let vars = views::view_name(index, &doc.path).map(|v| views::view_types(index, read, &v)).unwrap_or_default();
+    let (php, head) = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
     let arena = LocalArena::new();
     let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &php);
     // The first line, `<?php` and the imports, is the view's start.
@@ -177,6 +181,13 @@ fn blade_noise(d: &Diagnostic) -> bool {
         && (d.message.contains("`mixed`") || d.message.contains("`nonnull`"));
     matches!(code.as_str(), "undefined-variable" | "possibly-undefined-variable" | "unused-statement" | "no-value" | "non-documented-property" | "non-documented-method")
         || code.starts_with("mixed-")
+        // Typed variables make a view's guards look needless, but the guards are for other places that render it.
+        || code.starts_with("redundant-")
+        || code.starts_with("impossible-")
+        // `@if` reads as an expression, not a branch, so it doesn't narrow types: `@if ($a->paid_at)` doesn't
+        // make `$a->paid_at` non-null inside, and "possibly null" problems would be wrong there.
+        || code.starts_with("possibly-")
+        || code.starts_with("possible-")
         || on_mixed
 }
 
@@ -275,7 +286,7 @@ mod tests {
         let fx = Fixture::new(&[("app/Post.php", "<?php\nnamespace App;\nclass Post { public static function find(int $id): ?self { return null; } }\n")]);
         let blade = "@use('App\\Post')\n<h1>{{ $title->name }}</h1>\n@foreach ($posts as $post)\n  <x-card :post=\"Post::find('x')\" />\n@endforeach\n@php nope(); @endphp\n";
         let doc = Document::new(crate::testing::uri("resources/views/a.blade.php"), crate::testing::path("resources/views/a.blade.php"), "blade".into(), 1, blade.into());
-        let found: Vec<_> = blade_problems_in(&fx.snap.index.read(), &doc)
+        let found: Vec<_> = blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p))
             .into_iter()
             .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line, d.range.start.character))
             .collect();
@@ -284,9 +295,38 @@ mod tests {
     }
 
     #[test]
+    fn types_a_views_variables_from_where_it_is_rendered() {
+        let models = "<?php\nnamespace App;\nclass Post { public string $title = ''; }\nclass User { public string $name = ''; }\n";
+        let controller = "<?php\nnamespace App;\nclass PostController {\n    /** @param list<Post> $all */\n    public function show(Post $post, array $all, int $n, $any) {\n        return view('posts.show', compact('post', 'all'))->with('n', $n)->with(['any' => $any, 'user' => new User]);\n    }\n    public function other(Post $post) {\n        return \\Illuminate\\Support\\Facades\\View::make(\"posts.show\", ['post' => $post, 'all' => [$post], 'n' => 1, 'any' => 2]);\n    }\n}\n";
+        let livewire = "<?php\nnamespace Livewire;\nabstract class Component {}\nnamespace App;\nclass Counter extends \\Livewire\\Component {\n    public int $count = 0;\n    public function render() { return view('livewire.counter'); }\n}\n";
+        let fx = Fixture::new(&[("app/Models.php", models), ("app/PostController.php", controller), ("app/Counter.php", livewire)]);
+        let check = |name: &str, blade: &str| {
+            let doc = Document::new(crate::testing::uri(name), crate::testing::path(name), "blade".into(), 1, blade.into());
+            blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p))
+                .into_iter()
+                .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line, d.range.start.character))
+                .collect::<Vec<_>>()
+        };
+        // `$post` and `$all` are typed by both places; `$user` is passed by one only and `$any` is untyped.
+        let blade = "{{ $post->titel }}\n@foreach ($all as $p) {{ $p->nope }} @endforeach\n{{ $n->x }}\n{{ $user->whatever }} {{ $any->x }} {{ $post->title }}\n";
+        let found = check("resources/views/posts/show.blade.php", blade);
+        assert!(found.contains(&("non-existent-property".into(), 0, 10)), "{found:?}");
+        assert!(found.contains(&("non-existent-property".into(), 1, 29)), "{found:?}");
+        assert!(found.iter().any(|f| f.1 == 2), "{found:?}");
+        assert!(!found.iter().any(|f| f.1 == 3), "{found:?}");
+        let found = check("resources/views/livewire/counter.blade.php", "{{ $count->x }}\n");
+        assert_eq!(found.len(), 1, "{found:?}");
+        // Guards that typed variables make redundant aren't reported: the view may be rendered elsewhere too.
+        let found = check("resources/views/posts/show.blade.php", "@if ($post) @endif @isset($post) @endisset {{ $post?->title }} {{ $n ?? 0 }} @if ($post instanceof \\App\\Post) @endif {{ is_null($n) }}\n");
+        assert!(found.is_empty(), "{found:?}");
+        // A view nothing renders keeps its variables untyped.
+        assert!(check("resources/views/other.blade.php", "{{ $post->titel }}\n").is_empty());
+    }
+
+    #[test]
     fn drops_problems_about_a_views_variables() {
         let d = |code: &str, message: &str| Diagnostic { code: Some(NumberOrString::String(code.into())), message: message.into(), ..Default::default() };
-        let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access"];
+        let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access", "redundant-condition", "possibly-null-property-access", "possible-method-access-on-null"];
         assert!(noise.iter().all(|c| blade_noise(&d(c, ""))));
         assert!(blade_noise(&d("invalid-iterator", "of type `mixed`")) && !blade_noise(&d("invalid-iterator", "of type `int`")));
         assert!(!blade_noise(&d("non-existent-function", "")) && !blade_noise(&d("parse", "")));

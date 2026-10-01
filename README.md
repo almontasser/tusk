@@ -48,7 +48,7 @@ file to change when you add it.
 | Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at the Find in Files limit (20,000 matches by default), counted before those outside comments are dropped. |
 | Test detection | `src/phptests.ts` reads tests with regexes over the code outside comments, so a test declared inside a heredoc string still gets a run link. |
-| Blade | The PHP in a view is checked without its variables' types, which come from the controller, so mistakes on a variable, such as a misspelled property, aren't reported. The Problems panel's scan covers views in `resources/views` only. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
+| Blade | A view's variables get their types from the project code that renders it with a literal view name: `view()`, `View::make()`, `->view()`, and `Route::view()` with a data array, `compact()`, or `->with()`, and a Livewire component's or Filament page's public properties. A variable gets no type, and isn't checked, when any of those places doesn't pass it or passes a value of unknown type, and when the view is only rendered elsewhere, such as through `@include`, a Mailable's `Content`, a view composer, `View::share()`, or a Livewire component without `render()`. `@if` doesn't narrow types, so "possibly null" problems aren't reported in views. The Problems panel's scan covers views in `resources/views` only. Directives inside `<style>` aren't highlighted, since CSS has at-rules of its own. |
 | Indexing | The PHP server indexes the project and `vendor` each time it starts, in about a second for a Laravel and Filament app with 23,000 PHP files the first time. Later starts take about 0.4 s: the server caches what each `vendor` file declares and parses only the files that changed. Walking the folders and loading the classes the project reaches still happen at each start. It loads `vendor`'s classes only as far as the project reaches them (about one in eight on that app), in about 370 MB of memory; every class's name is still known, so completion, imports, and Go to Symbol find them all. Hidden folders, `node_modules`, `storage`, `bootstrap/cache`, and the project's index exclusions are skipped. |
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
 | Notifications designer | Reads and writes the bell notification as Filament's `Notification::make()` chain in `toDatabase()`, and the email as a `MailMessage` chain in `toMail()`; a Mailable, a Markdown view, or a `toArray()` with plain arrays shows as code. Broadcast and other channels show as they are, without settings. Texts with the record's fields are strings or `__()` with replacements; other code, such as a concatenation, shows as code. The designer doesn't list where a notification is sent from. |
@@ -2449,9 +2449,15 @@ checks every view in `resources/views`: echoes,
 `@foreach`, `@include`, `@class`, `@props`, and the rest), and bound attributes
 on component tags. It reports syntax errors, and unknown classes, functions,
 methods, and constants, and wrong arguments, at their place in the view.
-`@use` imports count. A view's variables come from the controller or component
-that renders it, so the check doesn't report undefined variables or anything
-about a variable's value. Custom directives aren't checked.
+`@use` imports count. A view's variables have the types that the project code
+rendering it passes: `view('posts.show', compact('post'))` in a controller types
+`$post`, so `{{ $post->titel }}` is reported as an unknown property, and so is
+a misspelling on `$comment` inside `@foreach ($post->comments as $comment)`.
+`View::make()`, `->view()`, `Route::view()`, `->with()`, and a Livewire
+component's or Filament page's public properties count too. When several places
+render a view, a variable they all pass gets each place's type; one that some
+place doesn't pass, or passes a value of unknown type, isn't checked. The check
+doesn't report undefined variables. Custom directives aren't checked.
 
 Blade files format (⌥⌘L) with the bundled `blade-formatter`, which indents
 Blade, HTML, and scripts, and reads your project's `.bladeformatterrc` when it

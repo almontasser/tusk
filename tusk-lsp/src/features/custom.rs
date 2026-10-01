@@ -79,8 +79,8 @@ pub fn project_problems(snap: &Snapshot, params: Value) -> Result<Value, String>
                 let text = snap.read(&path)?;
                 let blade = path.to_string_lossy().ends_with(".blade.php");
                 let doc = Document::new(path_to_uri(&path), path.clone(), if blade { "blade" } else { "php" }.into(), 0, text);
-                let check = if blade { crate::diagnostics::blade_problems_in } else { crate::diagnostics::php_problems_in };
-                let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(index, &doc))).ok()?;
+                let check = || if blade { crate::diagnostics::blade_problems_in(index, &doc, &|p| snap.read(p)) } else { crate::diagnostics::php_problems_in(index, &doc) };
+                let problems = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)).ok()?;
                 let rel = path.strip_prefix(&snap.root).ok()?.to_string_lossy().into_owned();
                 (!problems.is_empty()).then_some((rel, problems))
             })();
