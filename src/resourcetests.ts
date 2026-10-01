@@ -186,7 +186,7 @@ async function ensureFactories(models: string[]): Promise<boolean> {
   }
   if (!missing.length) return true;
   const names = missing.map((m) => shortClass(m.details.class));
-  if (!(await confirm(`The tests make records with factories. ${names.join(", ")} ${names.length > 1 ? "have" : "has"} none. Make ${names.length > 1 ? "them" : "it"}?`, "Make the factories"))) return false;
+  if (!(await confirm(`The tests make records with factories. ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]} ${names.length > 1 ? "have" : "has"} none. Make ${names.length > 1 ? "them" : "it"}?`, "Make the factories"))) return false;
   const enums = (await fapp.enums(root).catch(() => [])).map((e) => e.class);
   for (const m of missing) {
     if (m.file) continue;
