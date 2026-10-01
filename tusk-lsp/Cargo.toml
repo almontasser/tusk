@@ -3,7 +3,7 @@ name = "tusk-lsp"
 version = "0.1.0"
 description = "Tusk's PHP language server, built on Mago's parser, codebase index and analyzer"
 edition = "2024"
-license = "MIT"
+license = "FSL-1.1-MIT"
 
 [dependencies]
 # Mago's crates change their API between minor versions, so they're pinned and upgraded on purpose.

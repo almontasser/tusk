@@ -3439,3 +3439,7 @@ The screenshots come from the dev app with `fixtures/demo` open, taken at
 | `scripts/make-fixture.sh` | Creates the test app |
 | `docs/architecture.md` | Architecture and decision log |
 | `website/` | The Tusk website |
+
+## License
+
+Tusk is licensed under the [Functional Source License, Version 1.1, MIT Future License](LICENSE.md) (FSL-1.1-MIT). You can use, change, and share Tusk for any purpose except offering it, or something built from it, as a competing commercial product. Two years after each version is released, that version also becomes available under the MIT license.

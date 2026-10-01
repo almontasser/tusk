@@ -1,6 +1,7 @@
 {
   "name": "php-editor",
   "private": true,
+  "license": "FSL-1.1-MIT",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
