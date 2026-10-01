@@ -1,7 +1,7 @@
 // Pull requests through the GitHub CLI (`gh`): list, details, checks, reviews, line comments, and diffs.
 import { invoke } from "@tauri-apps/api/core";
 import type { monaco } from "./editor";
-import { diffCursor, git, showDiff } from "./git";
+import { diffCursor, git, gitOutput, showDiff } from "./git";
 import { age, type Check, checkState, checksSummary } from "./gitparse";
 import { pick } from "./palette";
 import { listNav } from "./listnav";
@@ -522,7 +522,10 @@ function prepareDiff(pr: Details): Promise<string> {
     const base = `refs/remotes/origin/${pr.baseRefName}`;
     const ready = (async () => {
       const here = await git("cat-file", "-e", `${pr.headRefOid}^{commit}`).then(() => git("rev-parse", "--verify", "-q", base)).then(() => true, () => false);
-      if (!here) await git("fetch", "--no-tags", "origin", `+refs/pull/${pr.number}/head:refs/remotes/pr/${pr.number}`, `+refs/heads/${pr.baseRefName}:${base}`);
+      if (!here) {
+        const { code, output } = await gitOutput(["fetch", "--no-tags", "origin", `+refs/pull/${pr.number}/head:refs/remotes/pr/${pr.number}`, `+refs/heads/${pr.baseRefName}:${base}`]);
+        if (code) throw new Error(output);
+      }
       return (await git("merge-base", pr.headRefOid, base)).trim();
     })();
     // A failed fetch is tried again next time.

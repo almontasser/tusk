@@ -2932,6 +2932,9 @@ app emits each prompt as the `askpass` event, `askpass` in `sync.ts` shows it
 in a dialog (hidden input for passwords and passphrases, plain for usernames,
 Yes or No for ssh's questions, by `askpassKind` in `gitparse.ts`), and
 `askpass_answer` sends the reply back. Answers live only in that round trip.
+Every git command that reaches a remote runs through `gitOutput`, including the
+pull request page's fetch of a pull request's head (`prepareDiff` in `prs.ts`),
+while **Check Out** runs `gh pr checkout` in a terminal tab, which prompts there.
 It writes git's process ID to a file in the app cache, so an aborted signal
 can `kill` it: Tauri commands can't be aborted, and this avoids a Rust
 command for it.
