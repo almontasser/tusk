@@ -4734,6 +4734,43 @@ behavior in `src/filamentactions.ts` writes the statement as the action's
 closure: once for a record, or in a `foreach` over the selected records.
 `readBehavior` resolves the class through the file's imports.
 
+## Record history
+
+`src/historyview.ts` draws the model designer's History section and the
+resource designer's history setting; `src/historygen.ts` reads and writes the
+code.
+
+- **Reading:** `readHistory` finds the `LogsActivity` trait in the outline's
+  traits, and reads `getActivitylogOptions()` when its body is one `return` of
+  a chain on `LogOptions::defaults()`: `logOnly`, `logAll`, `logFillable`,
+  `logExcept`, `logOnlyDirty`, the empty-log call, `useLogName`, and
+  `setDescriptionForEvent` with an arrow function returning a string. A
+  setting whose arguments are other code, and calls it doesn't know, stay as
+  written and show as code.
+- **Writing:** `historyEdits` adds the trait (`traitsEdits` from
+  `src/usergen.ts`) and a new method, or changes one call at a time in the
+  chain it read, with `setCall` and `removeCall`, so other calls stay. Turning
+  history off removes the trait, from a list such as `use HasFactory,
+  LogsActivity;` too, and the method. The model designer applies these with its
+  other edits to the class, and `droppedImports` removes the imports left
+  unused.
+- **Versions:** version 5 of the package moved its classes
+  (`Models\Concerns\LogsActivity`, `Support\LogOptions`), renamed
+  `dontSubmitEmptyLogs()` to `dontLogEmptyChanges()`, named the relationship
+  `activitiesAsSubject()`, and keeps changes in `attribute_changes` rather than
+  `properties`. Both are read; new code follows the installed version, which
+  `introspect.php activity <model>` reports with whether the migration is
+  published, whether the table exists, and the model's last ten entries.
+- **Install:** the bundled Composer requires the package, then
+  `vendor:publish` with the `activitylog-migrations` and `activitylog-config`
+  tags, then `migrate`, in a terminal tab.
+- **The timeline:** turning on the resource's setting writes
+  `RelationManagers/ActivitiesRelationManager.php` next to the resource (in a
+  folder named for the resource when it sits directly in `Resources/`), and
+  adds it to `getRelations()`. The setting finds it there by its relationship,
+  as `filament-app` reports it. The relationship comes from the model's
+  relationships, which also says which version wrote it.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6555,4 +6592,30 @@ neighbors often share a sort or have none, which leaves no room. The designer
 numbers the group's project items 1, 2, 3 in their new order, as the dashboard
 designer does for widgets, and leaves items whose sort a method or a package
 decides as they are, counting past them.
+
+### 2026-10-01: A record's history is a read-only relation manager
+
+Filament can show a record's activity as an infolist section, a page action
+that opens a slide-over, or a relation manager on the
+relationship the trait gives the model. An infolist section loads every entry
+with the record, and only the view page shows it; a slide-over hides the
+history behind a button. A relation manager needs no other package, pages
+through a long history, shows under both the edit and view pages, and opens in
+the resource designer like any other, where its columns can be changed. So the
+History is `ActivitiesRelationManager`, with `isReadOnly()` returning `true` and
+no actions. The changed values are a method of the manager that turns the
+entry's old and new attributes into `title: Old → New` lines, which a person can
+edit like any other PHP.
+
+### 2026-10-01: Record history is staged with the model, and follows the installed package
+
+History settings live in the model's class, which the model designer already
+stages and edits on Apply, so the History section is part of that designer
+rather than a view of its own that saves each change: one Apply writes the
+migration, the fillable attributes, and the history together. The resource's
+setting saves at once, as the rest of the resource designer does.
+spatie/laravel-activitylog 5 renamed the trait's and options' namespaces and
+some calls, and needs PHP 8.4, so many apps stay on version 4. The designer
+reads both, and writes the installed version's names, as `introspect.php`
+reports it.
 

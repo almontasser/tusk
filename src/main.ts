@@ -1622,6 +1622,7 @@ const actions: Action[] = [
   { label: "Laravel: Add Sample Records…", run: () => root && void import("./sampledata").then((m) => m.sampleRecordsPicker()) },
   { label: "Laravel: Model Access…", run: () => root && void import("./filamentview").then((m) => m.openAccessPicker()) },
   { label: "Laravel: Automations…", run: () => root && void import("./automationsview").then((m) => m.openAutomationsPicker()) },
+  { label: "Laravel: Record History…", run: () => root && void import("./historyview").then((m) => m.openHistoryPicker()) },
   { label: "Laravel: New Enum…", run: () => root && void import("./enumdesigner").then((m) => m.openNewEnum()) },
   { label: "Laravel: Scheduled Tasks…", run: () => root && void import("./scheduledesigner").then((m) => m.openSchedule()) },
   { label: "Laravel: New Notification…", run: () => root && void import("./notifydesigner").then((m) => m.newNotification({ x: innerWidth / 2 - 160, y: 120 })) },

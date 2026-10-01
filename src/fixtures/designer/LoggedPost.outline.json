@@ -1,0 +1,422 @@
+{
+  "errors": false,
+  "namespace": "App\\Models",
+  "uses": [
+    {
+      "alias": "HasFactory",
+      "name": "Illuminate\\Database\\Eloquent\\Factories\\HasFactory",
+      "kind": "class",
+      "span": [
+        30,
+        84
+      ]
+    },
+    {
+      "alias": "Model",
+      "name": "Illuminate\\Database\\Eloquent\\Model",
+      "kind": "class",
+      "span": [
+        85,
+        124
+      ]
+    },
+    {
+      "alias": "LogOptions",
+      "name": "Spatie\\Activitylog\\LogOptions",
+      "kind": "class",
+      "span": [
+        125,
+        159
+      ]
+    },
+    {
+      "alias": "LogsActivity",
+      "name": "Spatie\\Activitylog\\Traits\\LogsActivity",
+      "kind": "class",
+      "span": [
+        160,
+        203
+      ]
+    }
+  ],
+  "useInsert": 204,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "LoggedPost",
+      "fqn": "App\\Models\\LoggedPost",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Eloquent\\Model",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        205,
+        684
+      ],
+      "bodyStart": 237,
+      "bodyEnd": 683,
+      "traits": [
+        "Illuminate\\Database\\Eloquent\\Factories\\HasFactory",
+        "Spatie\\Activitylog\\Traits\\LogsActivity"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "fillable",
+          "static": false,
+          "visibility": "protected",
+          "readonly": false,
+          "type": null,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "title",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    300,
+                    307
+                  ]
+                },
+                "span": [
+                  300,
+                  307
+                ],
+                "spread": false
+              },
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "slug",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    309,
+                    315
+                  ]
+                },
+                "span": [
+                  309,
+                  315
+                ],
+                "spread": false
+              },
+              {
+                "key": null,
+                "value": {
+                  "kind": "string",
+                  "value": "body",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    317,
+                    323
+                  ]
+                },
+                "span": [
+                  317,
+                  323
+                ],
+                "spread": false
+              }
+            ],
+            "open": 299,
+            "close": 323,
+            "legacy": false,
+            "span": [
+              299,
+              324
+            ]
+          },
+          "span": [
+            277,
+            325
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "getActivitylogOptions",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "LogOptions",
+          "attributes": [],
+          "span": [
+            331,
+            682
+          ],
+          "docStart": null,
+          "body": [
+            388,
+            681
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "static",
+                "class": "Spatie\\Activitylog\\LogOptions",
+                "classSpan": [
+                  404,
+                  414
+                ],
+                "method": "defaults",
+                "args": {
+                  "open": 424,
+                  "close": 425,
+                  "items": []
+                },
+                "span": [
+                  404,
+                  426
+                ]
+              },
+              "calls": [
+                {
+                  "name": "logOnly",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 448,
+                    "close": 466,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "title",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  450,
+                                  457
+                                ]
+                              },
+                              "span": [
+                                450,
+                                457
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "body",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  459,
+                                  465
+                                ]
+                              },
+                              "span": [
+                                459,
+                                465
+                              ],
+                              "spread": false
+                            }
+                          ],
+                          "open": 449,
+                          "close": 465,
+                          "legacy": false,
+                          "span": [
+                            449,
+                            466
+                          ]
+                        },
+                        "span": [
+                          449,
+                          466
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    439,
+                    467
+                  ],
+                  "nameSpan": [
+                    441,
+                    448
+                  ]
+                },
+                {
+                  "name": "logOnlyDirty",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 494,
+                    "close": 495,
+                    "items": []
+                  },
+                  "span": [
+                    480,
+                    496
+                  ],
+                  "nameSpan": [
+                    482,
+                    494
+                  ]
+                },
+                {
+                  "name": "useLogName",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 521,
+                    "close": 529,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "posts",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            522,
+                            529
+                          ]
+                        },
+                        "span": [
+                          522,
+                          529
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    509,
+                    530
+                  ],
+                  "nameSpan": [
+                    511,
+                    521
+                  ]
+                },
+                {
+                  "name": "setDescriptionForEvent",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 567,
+                    "close": 613,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "closure",
+                          "arrow": true,
+                          "static": false,
+                          "params": [
+                            "eventName"
+                          ],
+                          "body": [
+                            594,
+                            613
+                          ],
+                          "span": [
+                            568,
+                            613
+                          ]
+                        },
+                        "span": [
+                          568,
+                          613
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    543,
+                    614
+                  ],
+                  "nameSpan": [
+                    545,
+                    567
+                  ]
+                },
+                {
+                  "name": "dontLogIfAttributesChangedOnly",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 659,
+                    "close": 674,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "array",
+                          "items": [
+                            {
+                              "key": null,
+                              "value": {
+                                "kind": "string",
+                                "value": "updated_at",
+                                "quote": "single",
+                                "interpolated": false,
+                                "span": [
+                                  661,
+                                  673
+                                ]
+                              },
+                              "span": [
+                                661,
+                                673
+                              ],
+                              "spread": false
+                            }
+                          ],
+                          "open": 660,
+                          "close": 673,
+                          "legacy": false,
+                          "span": [
+                            660,
+                            674
+                          ]
+                        },
+                        "span": [
+                          660,
+                          674
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    627,
+                    675
+                  ],
+                  "nameSpan": [
+                    629,
+                    659
+                  ]
+                }
+              ],
+              "span": [
+                404,
+                675
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ]
+}

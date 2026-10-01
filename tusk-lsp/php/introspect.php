@@ -1636,6 +1636,42 @@ function notificationSetup(): array
     return ['app' => config('app.name'), 'table' => $table, 'mailer' => config('mail.default'), 'queue' => config('queue.default'), 'user' => config('auth.providers.users.model'), 'panels' => $panels];
 }
 
+/**
+ * spatie/laravel-activitylog for the model designer's History: its major version, whether its migration is published
+ * and its table exists, and the latest entries for a model's records.
+ */
+function activityLog(string $class, string $root): array
+{
+    $version = trait_exists('Spatie\\Activitylog\\Models\\Concerns\\LogsActivity') ? 5 : (trait_exists('Spatie\\Activitylog\\Traits\\LogsActivity') ? 4 : null);
+    $out = ['version' => $version, 'published' => (bool) glob($root . '/database/migrations/*_create_activity_log_table.php'), 'table' => null, 'entries' => []];
+    if (!$version) {
+        return $out;
+    }
+    try {
+        $activity = config('activitylog.activity_model') ?: 'Spatie\\Activitylog\\Models\\Activity';
+        $model = new $activity();
+        $out['table'] = $model->getConnection()->getSchemaBuilder()->hasTable($model->getTable());
+        if ($out['table'] && is_a($class, Model::class, true)) {
+            $latest = $activity::query()->where('subject_type', (new $class())->getMorphClass())->with('causer')->latest('id')->limit(10)->get();
+            foreach ($latest as $a) {
+                $changes = $version === 5 ? $a->attribute_changes : $a->properties;
+                $out['entries'][] = [
+                    'subject' => $a->subject_id,
+                    'event' => $a->event,
+                    'description' => $a->description,
+                    'causer' => $a->causer ? (string) ($a->causer->name ?? $a->causer->getKey()) : null,
+                    'at' => $a->created_at?->toIso8601String(),
+                    'attributes' => $changes?->get('attributes'),
+                    'old' => $changes?->get('old'),
+                ];
+            }
+        }
+    } catch (Throwable $e) {
+        $out['error'] = $e->getMessage();
+    }
+    return $out;
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1669,6 +1705,7 @@ try {
         'schedule' => scheduleInfo($root),
 
         'notification-setup' => notificationSetup(),
+        'activity' => activityLog($argv[3], $root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

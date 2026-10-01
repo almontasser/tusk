@@ -181,6 +181,8 @@ export type NotificationSetup = { app: string | null; table: boolean | null; mai
 export const notificationSetup = (root: string) => cached(root, "app:notification-setup", () => introspect<NotificationSetup>(root, "notification-setup"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
+/** spatie/laravel-activitylog's version and table, and a model's latest entries; not kept, since the entries change. */
+export const activityLog = (root: string, cls: string) => introspect<import("./historyview").ActivityInfo>(root, "activity", cls);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));
 
 /** Whether the project has Filament installed. */

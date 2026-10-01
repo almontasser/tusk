@@ -53,6 +53,8 @@ file to change when you add it.
 | Notifications designer | Reads and writes the bell notification as Filament's `Notification::make()` chain in `toDatabase()`, and the email as a `MailMessage` chain in `toMail()`; a Mailable, a Markdown view, or a `toArray()` with plain arrays shows as code. Broadcast and other channels show as they are, without settings. Texts with the record's fields are strings or `__()` with replacements; other code, such as a concatenation, shows as code. The designer doesn't list where a notification is sent from. |
 
 | Navigation designer | It shows every item whatever its access rules, as if everyone could open everything. A panel that builds its navigation with `navigation(fn …)` shows as Filament would build it without that, and can't be changed. Reordering numbers the group's project items 1, 2, 3, and an item whose sort code decides keeps its place even when that breaks the new order. Group icons and collapsing are in the panel settings. A resource's record sub-navigation isn't shown. |
+
+| Record history | The History section reads the `getActivitylogOptions()` calls it writes; other options, such as `$recordEvents` or `dontLogIfAttributesChangedOnly()`, show as code. A description is read when it's a string with `{$eventName}` in it, not other code. The History relation manager names the causer by its `name` attribute. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
@@ -1128,6 +1130,45 @@ Tusk writes a migration with only the changes, such as
 the model's fillable attributes, casts, soft deletes, and relationships in
 place, and keeps everything else. Dropping a column asks first. **Run the
 migration** runs `php artisan migrate` afterwards, in Sail when it's up.
+
+### Record history
+
+Record history keeps who created, changed, or deleted each record, and what
+changed, with
+[spatie/laravel-activitylog](https://github.com/spatie/laravel-activitylog).
+To turn it on for a model, open the **History** section at the bottom of the
+model designer, or run **Laravel: Record History…** and pick the model.
+
+- **Install:** when the package isn't installed, **Install
+  spatie/laravel-activitylog** runs Composer, publishes the package's migration
+  and config, and runs the migration, in a terminal tab. When the package is
+  installed but its table isn't, the section offers to run the migration.
+- **Record history:** adds the `LogsActivity` trait and its
+  `getActivitylogOptions()` to the model. The settings are the calls on
+  `LogOptions::defaults()`: which attributes it records (chosen ones, the
+  fillable ones, all of them, or only the event), **Only changed values**
+  (`logOnlyDirty()`), **Skip empty entries**, a log name, and a description
+  with `{event}` for created, updated, or deleted. Turning it on picks the
+  table's columns without the key, timestamps, and hidden attributes such as a
+  password. Unchecking an attribute when it records all of them adds it to
+  `logExcept()`.
+- **Latest entries:** the section lists the last ten entries for the model's
+  records, with who made them and the old and new values, so you can see that
+  logging works.
+
+Changes are staged with the model's other changes until you click **Apply
+changes**. Calls the designer doesn't know, such as
+`dontLogIfAttributesChangedOnly()`, are kept and show as code. So does a
+method written as code, such as one with statements before its `return`.
+
+To show a record's history in Filament, turn on **Show history on the
+record's page** in the resource designer's **Settings** tab. It writes
+`ActivitiesRelationManager`, a read-only relation manager titled **History**,
+next to the resource, and adds it to `getRelations()`. It lists each entry
+under the edit and view pages: when, who, what happened, and each changed
+attribute as `title: Old → New`. It opens in the designer like any other
+relation manager. Turning the setting off removes it from `getRelations()` and
+keeps its file.
 
 ## Enum designer
 
