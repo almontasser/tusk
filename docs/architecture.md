@@ -6597,11 +6597,12 @@ string, `"Order {$this->record->number} shipped"`, which reads like the text,
 and uses `__()` with replacements when the text is already translated, since
 a translation can't hold PHP. Anything else stays as code.
 
-### 2026-10-01: The notifications designer points at `.env` for mail
+### 2026-10-01: The notifications designer points at the mail settings
 
 Emails need a mailer that delivers, which is a setting in `.env`. The
-designer says when the mailer is `log` or `array` and opens `.env`, rather
-than editing it, since the environment settings belong to their own designer.
+designer says when the mailer is `log` or `array` and opens the environment
+settings' mail section, rather than editing `.env` itself, since those
+settings belong to their own designer.
 
 ### 2026-10-01: Moving into a cluster sets `$cluster` and leaves the file where it is
 

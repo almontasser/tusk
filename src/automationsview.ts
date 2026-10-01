@@ -8,7 +8,6 @@ import { h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
-import { askName } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
 import { RECIPIENTS, type Recipient, type Send } from "./notifysend";
 import { classNamed, type Outline, phpFile } from "./phpcode";
@@ -269,7 +268,7 @@ class AutomationsView {
     const addSend = h("button", { type: "button", class: "fd-chip-link" }, icon("mail"), "Send a notification");
     addSend.onclick = () => {
       const n = this.notifications()[0];
-      if (!n) return void this.newNotification(addSend, (cls) => set({ ...rule, actions: [...rule.actions, { kind: "send", send: { notification: cls, recipient: { kind: "users" }, withRecord: false } }] }, "Added a notification"));
+      if (!n) return void this.newNotification(addSend, (cls, withRecord) => set({ ...rule, actions: [...rule.actions, { kind: "send", send: { notification: cls, recipient: { kind: "users" }, withRecord } }] }, "Added a notification"));
       set({ ...rule, actions: [...rule.actions, { kind: "send", send: { notification: n.class, recipient: this.defaultRecipient(), withRecord: n.record === this.model } }] }, `Send ${shortClass(n.class)}`);
     };
     const addSet = t.kind === "deleted" ? null : h("button", { type: "button", class: "fd-chip-link" }, icon("edit"), "Set a field");
@@ -337,7 +336,7 @@ class AutomationsView {
     const known = list.some((n) => n.class === s.notification);
     const pick = h("select", {}, ...(known ? [] : [h("option", { value: s.notification, textContent: shortClass(s.notification), selected: true })]), ...list.map((n) => h("option", { value: n.class, textContent: shortClass(n.class), selected: n.class === s.notification })), h("option", { value: "+", textContent: "New notification…" }));
     pick.onchange = () => {
-      if (pick.value === "+") return void this.newNotification(pick, (cls) => change({ ...s, notification: cls, withRecord: false }, `Send ${shortClass(cls)}`));
+      if (pick.value === "+") return void this.newNotification(pick, (cls, withRecord) => change({ ...s, notification: cls, withRecord }, `Send ${shortClass(cls)}`));
       const n = list.find((x) => x.class === pick.value)!;
       change({ ...s, notification: n.class, withRecord: n.record === this.model }, `Send ${shortClass(n.class)}`);
     };
@@ -380,24 +379,16 @@ class AutomationsView {
     );
   }
 
-  /** Makes a notification with Artisan, then hands its class to `then`. */
-  private async newNotification(anchor: HTMLElement, then: (cls: string) => void) {
-    // TODO(coordinator): open the new notification in the Notifications designer once it's merged.
-    const name = await askName(anchor, { title: "New notification", placeholder: `${this.short}Shipped`, action: "Create", validate: (v) => (/^[A-Z]\w*$/.test(v) ? null : "A class name, such as OrderShipped.") });
-    if (!name) return this.render();
-    try {
-      const out = await fapp.artisan(this.root, ["make:notification", name]);
-      fapp.forget(["app:notifications"]);
-      this.facts!.notifications = await fapp.notifications(this.root);
-      const made = this.facts!.notifications.find((n) => shortClass(n.class) === name);
-      const cls = made?.class ?? `App\\Notifications\\${name}`;
-      then(cls);
-      const file = (await fapp.createdFiles(this.root, out))[0];
-      host.status(`Created ${name}. Write its message in the class.`);
-      if (file) host.openAt(file, 1);
-    } catch (e) {
-      showError("Can't create the notification", e);
-    }
+  /** Makes a notification in the Notifications designer, then hands its class, and whether it takes this model, to `then`. */
+  private async newNotification(anchor: HTMLElement, then: (cls: string, withRecord: boolean) => void) {
+    const m = await import("./notifydesigner");
+    await m.newNotification(anchor, {
+      model: this.model,
+      then: (cls, record) => void fapp.notifications(this.root).then((list) => {
+        this.facts!.notifications = list;
+        then(cls, record === this.model);
+      }),
+    });
   }
 
   // ---- Fields and values ----

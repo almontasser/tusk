@@ -281,7 +281,7 @@ class ScheduleDesigner {
   /** Notifications that take no record: a scheduled task has none to give them. */
   private pickNotification(done: (cls: string) => void) {
     const items: Item[] = this.notifications.filter((n) => !n.record).map((n) => ({ label: shortClass(n.class), detail: `${n.class}${n.channels ? ` · ${n.channels.join(", ")}` : ""}`, icon: "codicon-mail", run: () => done(n.class) }));
-    if (!items.length) return host.status("The app has no notifications that take no record. Make one with Laravel: New Element… (make:notification).");
+    items.push({ label: "New notification…", detail: "One that takes no record, in the Notifications designer", icon: "codicon-add", run: () => void import("./notifydesigner").then((m) => m.newNotification({ x: innerWidth / 2 - 160, y: 120 }, { model: null, then: (cls) => (fapp.forget(["app"]), done(cls)) })) });
     pick("Pick a notification", (q) => (q.trim() ? rank(q, items) : items));
   }
 

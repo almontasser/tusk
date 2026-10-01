@@ -135,7 +135,7 @@ class PorterDesigner {
         ),
       );
     }
-    if (s.queue && s.queue !== "sync") notes.push(h("p", { class: "fd-note" }, icon("info"), ` They run on the ${s.queue} queue, so a worker must be running: php artisan queue:work.`));
+    if (s.queue && s.queue !== "sync") notes.push(h("p", { class: "fd-note" }, icon("info"), ` They run on the ${s.queue} queue, so a worker must be running: php artisan queue:work. `, h("button", { type: "button", class: "fd-chip-link", onclick: () => void import("./envsettings").then((m) => m.openEnvSettings("queue")) }, "Queue settings")));
     notes.push(h("p", { class: "fd-note" }, icon("info"), " People hear when one finishes through the panel's notifications bell (Panel settings > Notifications bell)."));
     return h("section", { class: "fd-settings-section" }, h("h3", {}, icon("checklist"), "What it needs"), ...notes);
   }

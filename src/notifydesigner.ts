@@ -306,8 +306,8 @@ class NotificationDesigner {
           "div",
           { class: "fd-helper-note" },
           icon("info"),
-          h("span", {}, s.mailer === "log" ? "Emails go to the log (storage/logs), not to people: the app's mailer is log. Set MAIL_MAILER and its settings in .env to deliver them. " : `Emails aren't delivered: the app's mailer is ${s.mailer ?? "not set"}. Set MAIL_MAILER and its settings in .env. `),
-          h("button", { type: "button", class: "fd-chip-link", onclick: () => void this.openEnv() }, "Open .env"),
+          h("span", {}, s.mailer === "log" ? "Emails go to the log (storage/logs), not to people: the app's mailer is log. Choose a mailer that delivers them in the mail settings. " : `Emails aren't delivered: the app's mailer is ${s.mailer ?? "not set"}. Choose one in the mail settings. `),
+          h("button", { type: "button", class: "fd-chip-link", onclick: () => this.openEnv() }, "Mail settings"),
         ),
       );
     if (d.cls.implements.some((i) => /(^|\\)ShouldQueue$/.test(i)) && s.queue && s.queue !== "sync") notes.push(h("p", { class: "fd-note" }, icon("info"), ` It's sent on the ${s.queue} queue, so a worker must be running: php artisan queue:work.`));
@@ -326,11 +326,8 @@ class NotificationDesigner {
     if (changed) this.recheck();
   }
 
-  private async openEnv() {
-    const path = `${this.root}/.env`;
-    const text = await invoke<string>("read_file", { path }).catch(() => "");
-    const line = text.split("\n").findIndex((l) => /^MAIL_MAILER=/.test(l));
-    host.openAt(path, line + 1 || 1);
+  private openEnv() {
+    void import("./envsettings").then((m) => m.openEnvSettings("mail"));
   }
 
   // ---- Channels ----

@@ -1283,7 +1283,7 @@ observer's class, or run **Laravel: Automations…**.
   user, users with a role, the record's user (such as the order's
   `customer`), the signed-in user, or an email address. Pick from the app's
   notifications that take the model, or none, or make one with **New
-  notification…**, which runs `make:notification`.
+  notification…**, which opens the Notifications designer.
 
 Each change is saved at once. The first rule creates
 `App\Observers\OrderObserver` and registers it on the model with
