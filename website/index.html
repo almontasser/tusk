@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tusk: the PHP editor for Laravel artisans</title>
-<meta name="description" content="Tusk is a fast macOS editor for PHP, Laravel, and Filament, with PhpStorm-class navigation built on free, open-source language servers. Now in beta.">
+<meta name="description" content="Tusk is a fast macOS editor for PHP, Laravel, and Filament, with PhpStorm-class navigation with visual designers for Filament apps. Free, and now in alpha.">
 <meta property="og:title" content="Tusk: the PHP editor for Laravel artisans">
-<meta property="og:description" content="A fast macOS editor for PHP, Laravel, and Filament. Now in beta.">
-<meta property="og:image" content="https://tusk.almontasser.ly/img/filament.webp">
+<meta property="og:description" content="A fast macOS editor for PHP, Laravel, and Filament, with visual designers. Free, and now in alpha.">
+<meta property="og:image" content="https://tusk.almontasser.ly/img/designer.webp">
 <meta property="og:url" content="https://tusk.almontasser.ly/">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="img/favicon.png">
@@ -94,7 +94,7 @@ code { font: .88em var(--mono); background: #f1f1ee; border: 1px solid var(--lin
 .hero { display: grid; grid-template-columns: 1fr 1fr; align-items: center; min-height: 660px; position: relative; overflow: hidden; }
 .hero-copy { padding: 96px 0 96px 48px; position: relative; z-index: 2; }
 .hero-copy .lede { max-width: 440px; margin: 22px 0 36px; }
-.hero-copy .actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.actions { display: flex; gap: 14px; flex-wrap: wrap; }
 .beta-note { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; font-size: 14.5px; color: var(--muted); }
 .hero-art { position: relative; height: 100%; min-height: 660px; perspective: 2200px; }
 .iso { position: absolute; width: 860px; left: 30px; top: 120px; transform: rotateX(52deg) rotateZ(-32deg); transform-style: preserve-3d; transform-origin: 30% 30%; }
@@ -168,7 +168,7 @@ code { font: .88em var(--mono); background: #f1f1ee; border: 1px solid var(--lin
 .key { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; font-size: 15px; box-shadow: 0 1px 2px rgba(0, 0, 0, .03); }
 kbd { font: 13px var(--mono); background: #f5f5f2; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
 
-/* Beta */
+/* Alpha */
 .beta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; margin-top: 26px; }
 .beta-grid ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
 .beta-grid li { padding: 16px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 110px 1fr; gap: 16px; font-size: 16px; }
@@ -180,13 +180,6 @@ a.u { color: var(--accent); text-decoration: underline; text-underline-offset: 3
 .cta .grid-bg { -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 5%, transparent 65%); mask-image: radial-gradient(ellipse at 50% 50%, #000 5%, transparent 65%); }
 .cta > * { position: relative; }
 .cta .lede { max-width: 520px; margin: 22px auto 36px; }
-.waitlist { display: flex; gap: 10px; max-width: 500px; margin: 0 auto; }
-.waitlist input[type=email] { flex: 1; min-width: 0; font: 17px var(--sans); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 13px 16px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
-.waitlist input[type=email]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-.hp { position: absolute; left: -9999px; }
-.form-note { font-size: 14.5px; color: var(--muted); margin-top: 14px; min-height: 1.5em; }
-.form-note.ok { color: #1a7f4b; }
-.form-note.err { color: #c42602; }
 
 /* Footer */
 footer { border-top: 1px solid var(--line); }
@@ -241,7 +234,6 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
   .quad > div:last-child { border-bottom: 0 !important; }
   .keys { grid-template-columns: 1fr; }
   .beta-grid li { grid-template-columns: 1fr; gap: 4px; }
-  .waitlist { flex-direction: column; }
   .cta { padding: 80px 20px; }
   footer .inner { grid-template-columns: 1fr; padding: 56px 20px 40px; }
   footer .legal { padding: 20px; }
@@ -256,13 +248,14 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
     <a class="logo" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
     <div class="nav-links">
       <a href="#laravel">Laravel</a>
+      <a href="#designers">Designers</a>
       <a href="#tools">Tools</a>
       <a href="#features">Features</a>
-      <a href="#beta">Beta</a>
+      <a href="#alpha">Alpha</a>
     </div>
     <div class="nav-right">
       <a class="gh" href="https://github.com/almontasser/tusk" aria-label="Tusk on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
-      <a class="btn btn-outline btn-sm" href="#waitlist">Join the waitlist</a>
+      <a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk/releases/latest">Download</a>
     </div>
   </div>
 </nav>
@@ -272,11 +265,11 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
     <div class="hero">
       <div class="grid-bg"></div>
       <div class="hero-copy">
-        <div class="beta-note"><span class="tag">Beta</span> Now in beta for macOS</div>
+        <div class="beta-note"><span class="tag">Alpha</span> Free for macOS, and looking for testers</div>
         <h1 class="display">The PHP editor for Laravel artisans.</h1>
-        <p class="lede">Tusk is a fast macOS editor that understands PHP, Laravel, and Filament, built on free, open-source language servers.</p>
+        <p class="lede">Tusk is a fast macOS editor that understands PHP, Laravel, and Filament, with visual designers that write your Filament code for you.</p>
         <div class="actions">
-          <a class="btn btn-accent" href="#waitlist">Join the waitlist <span class="arrow">→</span></a>
+          <a class="btn btn-accent" href="https://github.com/almontasser/tusk/releases/latest">Download for macOS <span class="arrow">↓</span></a>
           <a class="btn btn-outline" href="https://github.com/almontasser/tusk">View on GitHub <span class="arrow">↗</span></a>
         </div>
       </div>
@@ -285,7 +278,7 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
         <div class="iso">
           <div class="layer l1"></div>
           <div class="layer l2"></div>
-          <div class="shot-3d"><img src="img/filament.webp" width="2800" height="1800" alt=""></div>
+          <div class="shot-3d"><img src="img/designer.webp" width="2800" height="1800" alt=""></div>
         </div>
       </div>
     </div>
@@ -296,7 +289,7 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
   <div class="rail">
     <div class="strip">
       <div class="cap">Built on the best<br>open-source tools</div>
-      <div>Phpactor</div><div>Laravel LSP</div><div>Mago</div><div>Larastan</div><div>Xdebug</div><div>Tailwind CSS</div><div>Pest</div>
+      <div>Mago</div><div>Larastan</div><div>Xdebug</div><div>Tailwind CSS</div><div>Pest</div><div>llama.cpp</div><div>Tauri</div>
     </div>
   </div>
 </div>
@@ -314,10 +307,10 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
     <div class="split wash">
       <div class="copy">
         <h2 class="h3">An editor for Laravel<br>and Filament developers</h2>
-        <p class="body">Tusk understands the strings Laravel and Filament resolve at runtime, like routes, views, config keys, and model columns, so completion and ⌘-click work where other editors see plain text.</p>
+        <p class="body">Tusk understands the strings Laravel and Filament resolve at runtime, like routes, views, config keys, and model columns, so completion and ⌘-click work where other editors see plain text. Its PHP language server is its own, written in Rust, and indexes a 23,000-file app in about a second.</p>
         <ul class="checks">
           <li>Filament completion from your Eloquent models</li>
-          <li>Routes, views, and config through Laravel LSP</li>
+          <li>Routes, views, config, and translations, with ⌘-click</li>
           <li>Blade and Tailwind CSS, highlighted and completed</li>
           <li>Pest and PHPUnit with one-click Run, Debug, and Profile</li>
         </ul>
@@ -336,6 +329,38 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
             <img data-panel="blade" src="img/blade.webp" width="1914" height="1090" alt="A Blade view in Tusk's light theme with Tailwind color swatches" hidden>
             <img data-panel="tests" class="fit" src="img/tests.webp" width="1914" height="760" alt="Pest test results in Tusk" hidden>
             <img data-panel="git" src="img/git.webp" width="2800" height="1160" alt="A side-by-side git diff in Tusk's commit view" hidden>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="band" id="designers">
+  <div class="rail">
+    <div class="split">
+      <div class="copy">
+        <h2 class="h3">Design Filament apps,<br>and keep the code</h2>
+        <p class="body">The designers draw your resources, models, and navigation the way Filament does, and every change is a small edit to your own files. Comments and code they can't read stay as you wrote them.</p>
+        <ul class="checks">
+          <li>Forms, tables, infolists, actions, and relation managers</li>
+          <li>Models with their migration, relationships, and factory</li>
+          <li>Navigation, dashboards, panel settings, and access rules</li>
+          <li>Notifications, automations, scheduled tasks, and settings pages</li>
+        </ul>
+        <a class="btn btn-outline btn-sm" href="https://github.com/almontasser/tusk#filament-designer">Explore the designers <span class="arrow">↗</span></a>
+      </div>
+      <div class="showcase">
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="designer">Resource</button>
+          <button role="tab" aria-selected="false" data-tab="model">Model</button>
+          <button role="tab" aria-selected="false" data-tab="navigation">Navigation</button>
+        </div>
+        <div class="window">
+          <div class="screen">
+            <img data-panel="designer" loading="lazy" src="img/designer.webp" width="2800" height="1800" alt="The Filament designer showing a product form, with the selected field's settings on the right">
+            <img data-panel="model" loading="lazy" src="img/model.webp" width="2800" height="1800" alt="The model designer with a new column and the migration it writes" hidden>
+            <img data-panel="navigation" loading="lazy" src="img/navigation.webp" width="2800" height="1800" alt="The navigation designer listing a panel's groups and resources" hidden>
           </div>
         </div>
       </div>
@@ -446,17 +471,18 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
   </div>
 </div>
 
-<div class="band" id="beta">
+<div class="band" id="alpha">
   <div class="rail">
     <div class="pad">
-      <div class="label">[ Beta ]</div>
-      <h2 class="h2" style="margin-top:18px">Tusk is in beta.</h2>
+      <div class="label">[ Alpha ]</div>
+      <h2 class="h2" style="margin-top:18px">Tusk is in alpha.</h2>
       <div class="beta-grid">
-        <p class="lede">Tusk is ready for daily work, and it's still young. Expect rough edges, and expect them to get fixed quickly. The code is open on <a class="u" href="https://github.com/almontasser/tusk">GitHub</a>, where you can report what you find.</p>
+        <p class="lede">Tusk does a lot, and most of it has only been tested by one person on a few apps. Expect bugs, especially in the designers. Use it on code that's in git, and tell us what breaks on <a class="u" href="https://github.com/almontasser/tusk/issues">GitHub</a>. Every report helps.</p>
         <ul>
           <li><b>Platform</b><span>macOS only, on Apple silicon and Intel Macs.</span></li>
-          <li><b>Signing</b><span>The app isn't signed yet. The first time you open it, allow it in System Settings &gt; Privacy &amp; Security.</span></li>
-          <li><b>Updates</b><span>There's no auto-update. Each version is a new download.</span></li>
+          <li><b>You bring</b><span>PHP 8.1 or later and git. Node.js for Tailwind CSS, TypeScript, and Vue. Tusk downloads its other tools (about 90 MB) on first launch.</span></li>
+          <li><b>Signing</b><span>The app isn't notarized yet. The first time you open it, click <strong>Open Anyway</strong> in System Settings &gt; Privacy &amp; Security.</span></li>
+          <li><b>Updates</b><span>Tusk checks GitHub for new versions and updates itself.</span></li>
           <li><b>Gaps</b><span>Some PhpStorm features are missing. The <a class="u" href="https://github.com/almontasser/tusk#known-gaps">known gaps</a> list them.</span></li>
         </ul>
       </div>
@@ -464,18 +490,16 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
   </div>
 </div>
 
-<div class="band" id="waitlist">
+<div class="band" id="download">
   <div class="rail">
     <div class="cta">
       <div class="grid-bg"></div>
       <h2 class="h2">Write less boilerplate.<br>Ship more Laravel.</h2>
-      <p class="lede">Join the waitlist, and we'll email you when a beta build is ready to download.</p>
-      <form class="waitlist" data-waitlist>
-        <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" autocomplete="email">
-        <input class="hp" type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true">
-        <button class="btn btn-accent" type="submit">Join the waitlist <span class="arrow">→</span></button>
-      </form>
-      <p class="form-note" data-note aria-live="polite">One email per release. Unsubscribe anytime.</p>
+      <p class="lede">Tusk is free to download. Try it on your app, and tell us what works and what doesn't.</p>
+      <div class="actions" style="justify-content:center">
+        <a class="btn btn-accent" href="https://github.com/almontasser/tusk/releases/latest">Download for macOS <span class="arrow">↓</span></a>
+        <a class="btn btn-outline" href="https://github.com/almontasser/tusk/issues/new">Report an issue <span class="arrow">↗</span></a>
+      </div>
     </div>
   </div>
 </div>
@@ -487,51 +511,23 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
         <a class="logo" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
         <p class="tagline">The fast, focused way to write PHP, Laravel, and Filament on your Mac.</p>
       </div>
-      <div><h4>Product</h4><ul><li><a href="#laravel">Laravel</a></li><li><a href="#tools">Tools</a></li><li><a href="#features">Features</a></li><li><a href="#beta">Beta</a></li></ul></div>
-      <div><h4>Resources</h4><ul><li><a href="https://github.com/almontasser/tusk#readme">Documentation</a></li><li><a href="https://github.com/almontasser/tusk/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/almontasser/tusk#known-gaps">Known gaps</a></li></ul></div>
-      <div><h4>Community</h4><ul><li><a href="https://github.com/almontasser/tusk">GitHub</a></li><li><a href="https://github.com/almontasser/tusk/issues">Report an issue</a></li></ul></div>
+      <div><h4>Product</h4><ul><li><a href="#laravel">Laravel</a></li><li><a href="#designers">Designers</a>
+      <a href="#tools">Tools</a></li><li><a href="#features">Features</a></li><li><a href="#alpha">Alpha</a></li></ul></div>
+      <div><h4>Resources</h4><ul><li><a href="https://github.com/almontasser/tusk#readme">Documentation</a></li><li><a href="https://github.com/almontasser/tusk/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/almontasser/tusk#known-gaps">Known gaps</a></li><li><a href="https://github.com/almontasser/tusk/blob/main/LICENSE.md">License</a></li></ul></div>
+      <div><h4>Community</h4><ul><li><a href="https://github.com/almontasser/tusk">GitHub</a></li><li><a href="https://github.com/almontasser/tusk/releases/latest">Download</a></li><li><a href="https://github.com/almontasser/tusk/issues">Report an issue</a></li></ul></div>
     </div>
     <div class="legal"><span>Tusk is named for PHP's elePHPant.</span><span>Made by Mahmoud Almontasser.</span></div>
   </div>
 </footer>
 
 <script>
-// The waitlist posts to a Formspree form. Create one at formspree.io and paste its endpoint here.
-const WAITLIST_ENDPOINT = "https://formspree.io/f/YOUR_FORM_ID";
-
-document.querySelectorAll("[data-waitlist]").forEach((form) => {
-  const note = form.nextElementSibling;
-  const button = form.querySelector("button");
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (form._gotcha.value) return;
-    button.disabled = true;
-    note.className = "form-note";
-    note.textContent = "Adding you…";
-    try {
-      const response = await fetch(WAITLIST_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ email: form.email.value, source: "tusk.almontasser.ly" }),
-      });
-      if (!response.ok) throw new Error(String(response.status));
-      form.reset();
-      note.className = "form-note ok";
-      note.textContent = "You're on the list. We'll email you when the next build is ready.";
-    } catch {
-      note.className = "form-note err";
-      note.textContent = "That didn't go through. Try again in a moment.";
-    } finally {
-      button.disabled = false;
-    }
-  });
+document.querySelectorAll(".showcase").forEach((showcase) => {
+  const tabs = showcase.querySelectorAll("[data-tab]");
+  tabs.forEach((tab) => tab.addEventListener("click", () => {
+    tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+    showcase.querySelectorAll("[data-panel]").forEach((img) => { img.hidden = img.dataset.panel !== tab.dataset.tab; });
+  }));
 });
-
-const tabs = document.querySelectorAll("[data-tab]");
-tabs.forEach((tab) => tab.addEventListener("click", () => {
-  tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
-  document.querySelectorAll("[data-panel]").forEach((img) => { img.hidden = img.dataset.panel !== tab.dataset.tab; });
-}));
 
 document.querySelector(".toggle").addEventListener("click", (event) => {
   const on = event.currentTarget.getAttribute("aria-pressed") === "true";

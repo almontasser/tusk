@@ -5846,9 +5846,11 @@ show the same mark.
 
 The site at tusk.almontasser.ly is a single HTML file with inline CSS and a few
 lines of script, so it needs no build and hosts anywhere, such as GitHub Pages.
-The waitlist posts to Formspree rather than a server of our own, since a static
-host can't store emails. The site says Tusk is in beta and lists what that means
-(macOS only, unsigned, no auto-update), so nobody downloads it expecting more.
+The site says Tusk is in alpha and lists what that means (macOS only, not
+notarized, lightly tested), so nobody downloads it expecting more. It links
+straight to the latest GitHub release; an earlier waitlist form was dropped once
+builds were public. GitHub Actions deploys it to GitHub Pages on each push that
+changes `website/`, so publishing the site is a commit.
 The screenshots are real captures of the dev app on the test app, not mockups.
 The design follows laravel.com's: a light page framed by dashed rails and
 hairlines with accent squares at the corners, light-weight display type in

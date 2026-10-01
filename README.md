@@ -3627,13 +3627,17 @@ committed.
 
 `website/` is the static site for [tusk.almontasser.ly](https://tusk.almontasser.ly):
 one `index.html` with inline CSS, the screenshots in `website/img/`, and a
-`CNAME` file for GitHub Pages. It has no build step; serve the folder as it is.
+`CNAME` file. It has no build step; serve the folder as it is.
 
-The waitlist form posts each email as JSON to a Formspree form. Before you
-publish, create a form at [formspree.io](https://formspree.io) and set
-`WAITLIST_ENDPOINT` near the end of `index.html` to its endpoint.
+Each push to `main` that changes `website/` deploys it to GitHub Pages through
+`.github/workflows/website.yml`. To deploy without a change, run the
+**Website** workflow from the repository's Actions tab. The domain needs a
+`CNAME` record for `tusk` pointing at `almontasser.github.io`.
 
-The screenshots come from the dev app with `fixtures/demo` open, taken at
+The download buttons link to the latest GitHub release.
+
+The screenshots come from the dev app with `fixtures/demo` open (the designer
+screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), taken at
 1400 × 900 through the Tauri MCP bridge, cropped, and saved as WebP with
 `cwebp -q 88`.
 
