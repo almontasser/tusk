@@ -75,6 +75,145 @@ pub fn virtual_php(text: &str, upto: usize) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// Laravel's directives that take PHP arguments, for [`checked_php`]. Others, such as `@media` in CSS, stay
+/// text, as Blade leaves them.
+const PHP_DIRECTIVES: &[&str] = &[
+    "if", "elseif", "unless", "isset", "empty", "switch", "case", "break", "continue", "foreach", "forelse", "for",
+    "while", "php", "json", "js", "class", "style", "checked", "selected", "disabled", "readonly", "required",
+    "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "each", "extends", "extendsFirst",
+    "section", "yield", "hasSection", "sectionMissing", "push", "pushIf", "prepend", "pushOnce", "prependOnce",
+    "stack", "component", "slot", "props", "aware", "can", "cannot", "canany", "elsecan", "elsecannot",
+    "elsecanany", "auth", "guest", "elseauth", "elseguest", "env", "production", "session", "context", "error",
+    "method", "lang", "choice", "inject", "dd", "dump", "vite", "once", "fragment", "livewire", "use",
+];
+
+/// A Blade view as a PHP file for Mago's analyzer, and the length of its first line, which holds `<?php` and
+/// the view's `@use` imports. After that line comes the view with everything but its PHP blanked, so an offset
+/// past the first line, less its length, is the view's. Each piece of PHP becomes a statement that starts with
+/// `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an array,
+/// since they may be a list), `@foreach` keeps its keyword, as `;foreach (…)`, whose body is the empty
+/// statement that follows, and `@php … @endphp` and `<?php … ?>` keep their code as is. Unlike
+/// [`virtual_php`], it reads every directive, loop, and component attribute, to check them all.
+pub fn checked_php(text: &str) -> (String, usize) {
+    let src = text.as_bytes();
+    let mut out: Vec<u8> = src.iter().map(|b| if matches!(b, b'\n' | b'\r') { *b } else { b' ' }).collect();
+    let put = |out: &mut Vec<u8>, at: usize, s: &[u8]| out[at..at + s.len()].copy_from_slice(s);
+    let keep = |out: &mut Vec<u8>, from: usize, to: usize| {
+        if from < to {
+            out[from..to].copy_from_slice(&src[from..to]);
+        }
+    };
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let at_word = |i: usize, w: &[u8]| src[i..].starts_with(w) && !src.get(i + w.len()).is_some_and(|b| word(*b));
+    let mut imports: Vec<String> = vec![];
+    let mut i = 0;
+    while i < src.len() {
+        let rest = &src[i..];
+        if rest.starts_with(b"{{--") {
+            i = find(src, i, b"--}}").map_or(src.len(), |e| e + 4);
+        } else if rest.starts_with(b"@{{") || rest.starts_with(b"@@") {
+            i += 2;
+        } else if rest.starts_with(b"{{") || rest.starts_with(b"{!!") {
+            let raw = rest[1] == b'!';
+            let Some(end) = find(src, i, if raw { b"!!}" } else { b"}}" }) else { break };
+            put(&mut out, if raw { i + 1 } else { i }, b";[");
+            keep(&mut out, i + if raw { 3 } else { 2 }, end);
+            out[end] = b']';
+            i = end + if raw { 3 } else { 2 };
+        } else if at_word(i, b"<?php") || (at_word(i, b"@php") && src[i + 4..].iter().find(|b| !b.is_ascii_whitespace()) != Some(&b'(')) {
+            let php = rest[0] == b'@';
+            // A PHP file may leave out ?>.
+            let end = match find(src, i, if php { b"@endphp" } else { b"?>" }) {
+                Some(end) => end,
+                None if php => break,
+                None => src.len(),
+            };
+            out[i] = b';';
+            keep(&mut out, i + if php { 4 } else { 5 }, end);
+            if end < src.len() {
+                out[end] = b';';
+            }
+            i = end + if php { 7 } else { 2 };
+        } else if at_word(i, b"@verbatim") {
+            i = find(src, i, b"@endverbatim").map_or(src.len(), |e| e + 12);
+        } else if rest[0] == b'@' && !(i > 0 && word(src[i - 1])) {
+            let name_end = i + 1 + src[i + 1..].iter().take_while(|b| word(**b)).count();
+            let name = std::str::from_utf8(&src[i + 1..name_end]).unwrap_or("");
+            let open = name_end + src[name_end..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+            let end = (name_end > i + 1 && src.get(open) == Some(&b'(') && PHP_DIRECTIVES.contains(&name)).then(|| matching_paren(src, open)).flatten();
+            let Some(end) = end.map(|e| e + 1) else {
+                i = name_end;
+                continue;
+            };
+            if name == "use" {
+                // @use('App\Models\Post', 'P') imports a class, as `use` at the top of a file.
+                let args = &text[open..end];
+                let mut quoted = vec![];
+                let mut rest = args;
+                while let Some(q) = rest.find(['\'', '"']) {
+                    let quote = &rest[q..q + 1];
+                    let Some(len) = rest[q + 1..].find(quote) else { break };
+                    quoted.push(&rest[q + 1..q + 1 + len]);
+                    rest = &rest[q + 2 + len..];
+                }
+                if let Some(class) = quoted.first().filter(|c| !c.is_empty()) {
+                    let alias = quoted.get(1).filter(|a| !a.is_empty()).map(|a| format!(" as {a}")).unwrap_or_default();
+                    imports.push(format!("use {}{alias};", class.trim_start_matches('\\')));
+                }
+            } else if matches!(name, "foreach" | "forelse" | "for" | "while") {
+                put(&mut out, i, if name == "forelse" { b";foreach" } else { b";" });
+                if name != "forelse" {
+                    keep(&mut out, i + 1, name_end);
+                }
+                keep(&mut out, open, end);
+            } else {
+                out[i] = b';';
+                out[open] = b'[';
+                keep(&mut out, open + 1, end - 1);
+                out[end - 1] = b']';
+            }
+            i = end;
+        } else if rest.starts_with(b"<x-") || rest.starts_with(b"<x:") {
+            // A component's bound attributes, such as :title="$post->title", hold PHP. ::title is Alpine's, escaped.
+            let mut end = i;
+            let mut quote = None;
+            while end < src.len() && (quote.is_some() || src[end] != b'>') {
+                match quote {
+                    Some(q) if src[end] == q => quote = None,
+                    None if matches!(src[end], b'"' | b'\'') => quote = Some(src[end]),
+                    _ => {}
+                }
+                end += 1;
+            }
+            let mut p = i;
+            while p + 1 < end {
+                let bound = src[p].is_ascii_whitespace() && src[p + 1] == b':' && src.get(p + 2) != Some(&b':');
+                let name = p + 2 + src[p + 2..end].iter().take_while(|b| word(**b) || matches!(b, b'-' | b':' | b'.')).count();
+                let eq = name + src[name..end].iter().take_while(|b| b.is_ascii_whitespace()).count();
+                if !bound || name == p + 2 || src.get(eq) != Some(&b'=') {
+                    p += 1;
+                    continue;
+                }
+                let q = eq + 1 + src[eq + 1..end].iter().take_while(|b| b.is_ascii_whitespace()).count();
+                let Some(close) = src.get(q).filter(|b| matches!(b, b'"' | b'\'')).and_then(|b| find(src, q + 1, &[*b])) else {
+                    p += 1;
+                    continue;
+                };
+                out[eq] = b';';
+                out[q] = b'[';
+                keep(&mut out, q + 1, close);
+                out[close] = b']';
+                p = close + 1;
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    let head = format!("<?php {}\n", imports.join(" "));
+    (format!("{head}{};", String::from_utf8(out).unwrap_or_default()), head.len())
+}
+
 fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     hay.get(from..)?.windows(needle.len()).position(|w| w == needle).map(|p| p + from)
 }
@@ -160,6 +299,35 @@ mod tests {
         assert_eq!(php.lines().count(), blade.lines().count());
         assert_eq!(directive_name("_include").as_deref(), Some("@include"));
         assert_eq!(directive_name("__"), None);
+    }
+
+    /// The checked PHP without its first line.
+    fn body(blade: &str) -> String {
+        let (php, head) = checked_php(blade);
+        php[head..].to_string()
+    }
+
+    #[test]
+    fn checks_the_php_where_it_is_in_the_view_and_blanks_the_rest() {
+        let blade = "<h1 class=\"{{ $a }}\">{!! $b !!}</h1>\n@if ($c && f(')'))\n  @foreach ($posts as $post) x @endforeach\n@endif\n@php $d = 1; @endphp";
+        let php = body(blade);
+        assert_eq!(php.len(), blade.len() + 1);
+        assert_eq!(php, "           ;[ $a ]    ;[ $b ]       \n;   [$c && f(')')]\n  ;foreach ($posts as $post)              \n      \n;    $d = 1; ;      ;");
+    }
+
+    #[test]
+    fn checks_directive_lists_loops_use_and_bound_component_attributes() {
+        assert_eq!(body("@include('a', ['x' => 1])"), ";       ['a', ['x' => 1]];");
+        assert_eq!(body("@forelse($a as $b) @empty @endforelse"), ";foreach($a as $b)                   ;");
+        assert_eq!(body("<x-card :post=\"$post\" ::alpine=\"x\" title=\"t\" />"), "             ;[$post]                          ;");
+        assert!(checked_php("@use('App\\Models\\Post', 'P')").0.starts_with("<?php use App\\Models\\Post as P;\n"));
+    }
+
+    #[test]
+    fn leaves_comments_escapes_verbatim_and_unknown_directives_as_text() {
+        for blade in ["{{-- {{ $a }} --}}", "@{{ vue }}", "@@if($a)", "@verbatim {{ $a }} @endverbatim", "@media (x: 1)", "a@if($x)"] {
+            assert_eq!(body(blade).trim(), ";", "{blade}");
+        }
     }
 
     #[test]

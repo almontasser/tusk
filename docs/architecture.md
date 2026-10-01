@@ -639,8 +639,8 @@ at each start, and the last start's list (`replaced.json`) is used until then.
 ones, `vendor` (already an include), `node_modules`, and `storage`. Mago walks
 every file under a path before it applies `excludes`, so with `.` each check
 walked the worktrees in `.claude` and all of `node_modules`. A top-level folder
-made later is read after the next start. Mago's fixes and Blade's checks run
-Mago's command line from the app, on every core.
+made later is read after the next start. Mago's fixes run Mago's command line
+from the app, on every core.
 
 ### False problems the filters drop
 
@@ -676,9 +676,10 @@ like.
 ### The project's problems
 
 `src/problems.ts` scans the whole project for the Problems panel with one
-`tusk/projectProblems` request. The server checks every project PHP file in its
-own process, in parallel, with the same checks as open files (Mago's analyzer
-and linter, and its own), and returns the problems by path relative to the
+`tusk/projectProblems` request. The server checks every project PHP file, and
+the PHP of every Blade view in `resources/views`, in its own process, in
+parallel, with the same Mago checks as open files (Mago's analyzer and linter,
+and its own), and returns the problems by path relative to the
 root. That takes a few seconds, where running Mago's command line over the
 project and Phpactor's diagnostics command per file took minutes, so there's
 no cache: a file's results depend on the files it uses, and every scan checks
@@ -2028,7 +2029,7 @@ you to reopen the project instead.
 
 Tusk's server runs Mago's analyzer and linter in its own process on each edit
 (see "Tusk's language server"), so their problems arrive with sources `mago`
-and `mago-lint` while you type. Mago's command line still checks Blade views,
+and `mago-lint` while you type, for Blade views' PHP too. Mago's command line
 lists the linter's rules for the Problems panel, and computes Mago's fixes.
 
 Formatting doesn't go through a language server; see the next section.
@@ -2078,8 +2079,8 @@ that change `mago.toml`:
   a key is added. Without a `mago.toml`, the first change creates it from
   `newMagoConfigText` (the bundled defaults with the project's PHP version and
   top-level folders), then `useProjectMagoConfig` drops `magoConfig` from the
-  server's options (`configureTusk`), which reindexes with the new file, and
-  Blade checks read it too. Otherwise `reindex` reads the file again at once
+  server's options (`configureTusk`), which reindexes with the new file.
+  Otherwise `reindex` reads the file again at once
   rather than waiting for the file watcher.
 - The page keeps its controls as you change them, so a toggle doesn't lose
   the rules list's scroll or filter; a failed write draws the page again from
@@ -2177,31 +2178,33 @@ sorting classes, a PHP parser, and Linguist's language data.
 
 #### Checking the PHP in views
 
-`bladeToPhp` in `src/bladephp.ts` turns a view into one PHP file: a first line
-of `<?php` and the view's `@use` imports, then the view with everything but
-its PHP replaced by spaces, one for each UTF-16 unit, keeping line breaks. So a
-problem's line, less one, and column are the view's, with no position map.
-Each piece of PHP becomes a statement that starts with `;` in place of its
-delimiter: `{{ $a }}` reads `;[ $a ]`, a directive's arguments `;  [$a]` (an
-array, since `@include('a', [...])` is a list), a bound component attribute
-`:post="$post"` reads `;[$post]`, and `@foreach`, `@forelse`, `@for`, and
-`@while` keep the loop, as `;foreach (…)`, whose body is the empty statement
-that follows. `@php … @endphp` and `<?php … ?>` keep their code. Only
-Laravel's own directives are read, not every `@word(`, so CSS's `@media` and
-text stay text, as Blade leaves unknown directives; `{{-- --}}`, `@{{`, `@@`,
-and `@verbatim` are skipped. Echo delimiters are found as Blade's own regex
-finds them, without reading strings.
+`checked_php` in `tusk-lsp/src/framework/laravel/blade.rs` turns a view into
+one PHP file: a first line of `<?php` and the view's `@use` imports, then the
+view with everything but its PHP replaced by spaces, one for each byte, keeping
+line breaks. So a problem's offset, less the first line's length, is the
+view's, with no position map. Each piece of PHP becomes a statement that
+starts with `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a
+directive's arguments `;  [$a]` (an array, since `@include('a', [...])` is a
+list), a bound component attribute `:post="$post"` reads `;[$post]`, and
+`@foreach`, `@forelse`, `@for`, and `@while` keep the loop, as
+`;foreach (…)`, whose body is the empty statement that follows. `@php …
+@endphp` and `<?php … ?>` keep their code. Only Laravel's own directives are
+read, not every `@word(`, so CSS's `@media` and text stay text, as Blade
+leaves unknown directives; `{{-- --}}`, `@{{`, `@@`, and `@verbatim` are
+skipped. Echo delimiters are found as Blade's own regex finds them, without
+reading strings. `virtual_php` in the same file serves completion and the
+framework's checks instead: it reads only the directives that name views,
+translations, or abilities, and needs no first line.
 
-`checkBlade` in `lsp.ts` sends that file to `mago analyze --stdin-input` with
-the view's path and the editor's Mago settings, a second after typing stops,
-and puts the problems under the `blade` owner. They go through `realProblems`
-as a PHP file's do, then `bladeProblems` drops undefined variables, unused
-statements (every echo is one), and Laravel magic and uses of `mixed` values
-(`magicNoise`), since the view's variables have no types. Mago has no server
-mode, so only open views are checked; the project scan reads Blade files as
-PHP with inline HTML, which has nothing to report. Blade views' markers count
-in the Problems panel as soon as the view is open, since no server check
-has to finish first.
+`blade_problems_in` in `tusk-lsp/src/diagnostics.rs` runs Mago's analyzer on
+that file against the server's codebase, as for a PHP file, with the view's
+path, so `mago.toml`'s ignores and excludes apply. It drops undefined
+variables, unused statements (every echo is one), Laravel's magic properties
+and methods, and uses of `mixed` values (`blade_noise`), since the view's
+variables have no types. Open views get these with the framework's problems on
+each edit, and the project scan (`tusk/projectProblems`) checks every view in
+`resources/views`. The editor filters a view's problems with `realProblems` as
+a PHP file's, since they sit at the view's positions.
 
 Tusk's server answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
@@ -4945,7 +4948,7 @@ the linter gets the file named by its path relative to the root. Mago's
 | --- | --- | --- |
 | `tusk/reindex` | none | Indexes the project again, with the configuration read again |
 | `tusk/memberReferences` | `class`, `method` | Every call of the method in the project, through subclasses too, without its declarations |
-| `tusk/projectProblems` | none | Every project PHP file's problems, by path relative to the root |
+| `tusk/projectProblems` | none | Every project PHP file's and Blade view's problems, by path relative to the root |
 | `tusk/phpOutline` | `text`, optional `path` | The classes in the text, with their properties, constants, methods, and return expressions as a tree of nodes with UTF-16 ranges. It parses the text without the index. The Filament designer and the model designer read and edit code through it |
 
 The command (`workspace/executeCommand`) `tusk.extractMethod` applies its edit
@@ -6781,3 +6784,16 @@ declarations, not call arguments, and `config/` is where Laravel apps read the
 environment. The files are small and the completion is rare, so nothing is
 cached. Values come only from `.env.example` and `env()` defaults: copying a
 value from `.env` into `.env.example` would commit a secret.
+
+### 2026-10-01: Check Blade's PHP in Tusk's server
+
+The editor ran `mago analyze --stdin-input` for each open view, which parsed
+the whole project again for each check, about a second on a large app. The
+server now checks a view's PHP in its own process against the codebase it
+already holds, as it checks PHP files, so a view's problems arrive as you type
+and the project scan covers views too. The conversion moved from
+`src/bladephp.ts` to Rust as `checked_php`, rather than reusing `virtual_php`:
+`virtual_php` skips `@php` blocks, loop directives, conditions, and component
+attributes, since completion needs none of them. The scan reads views in
+`resources/views` only, since views that packages or modules register live
+elsewhere and the index doesn't list Blade files.

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, inlineProblem, matchesFilter, magoConfigText, magoExpect, problemMarkdown, magoIssuesByFile, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, inlineProblem, matchesFilter, magoConfigText, magoExpect, problemMarkdown, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -79,22 +79,10 @@ test("shows unproven types as warnings and mixed values as hints", () => {
   assert.equal(severityOf(d("invalid-return-tag")), 2);
 });
 
-test("reads Mago's report with UTF-8 byte offsets", () => {
-  const text = "<?php\n// é\n$x = 1;\n";
-  const offset = new TextEncoder().encode(text.slice(0, text.indexOf("$x"))).length;
-  const json = JSON.stringify({
-    issues: [{ level: "Error", code: "c", message: "m", annotations: [{ kind: "Primary", span: { file_id: { name: "a.php" }, start: { offset }, end: { offset: offset + 2 } } }] }],
-  });
-  const [d] = magoIssuesByFile(json, "mago").get("a.php")!(text);
-  assert.deepEqual(d.range, { start: { line: 2, character: 0 }, end: { line: 2, character: 2 } });
-});
-
-test("shows each parse error once, with the message on its location", () => {
+test("shows each parse error once", () => {
   const text = "<?php\nfunction a( {\n";
-  const annotations = [{ message: "Expected one of `Variable`, found `LeftBrace`", kind: "Primary", span: { file_id: { name: "a.php" }, start: { offset: 18 }, end: { offset: 19 } } }];
-  const json = JSON.stringify({ issues: [{ level: "Error", code: "parse", message: "Parse error encountered during parsing", annotations }] });
-  const list = [...magoIssuesByFile(json, "mago").get("a.php")!(text), ...magoIssuesByFile(json, "mago-lint").get("a.php")!(text)];
-  assert.equal(list[0].message, "Expected one of `Variable`, found `LeftBrace`");
+  const parse = (source: string): Diagnostic => ({ range: { start: { line: 1, character: 12 }, end: { line: 1, character: 13 } }, message: "Expected one of `Variable`, found `LeftBrace`", code: "parse", source });
+  const list = [parse("mago"), parse("mago-lint")];
   assert.deepEqual(realProblems("/p/a.php", text, "php", list, facts).map((d) => d.source), ["mago-lint"]);
 });
 
