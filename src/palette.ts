@@ -202,6 +202,8 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
 
   const dismiss = (restoreFocus = true, chosen = false) => {
     if (!overlay.isConnected) return;
+    // Chromium (Windows' WebView2) blurs the input while removing it, which would dismiss again mid-removal.
+    input.onblur = null;
     overlay.remove();
     close = null;
     if (restoreFocus) previousFocus?.focus();
