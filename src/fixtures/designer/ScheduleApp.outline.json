@@ -1,0 +1,210 @@
+{
+  "errors": false,
+  "namespace": null,
+  "uses": [
+    {
+      "alias": "Schedule",
+      "name": "Illuminate\\Console\\Scheduling\\Schedule",
+      "kind": "class",
+      "span": [
+        7,
+        50
+      ]
+    },
+    {
+      "alias": "Application",
+      "name": "Illuminate\\Foundation\\Application",
+      "kind": "class",
+      "span": [
+        51,
+        89
+      ]
+    }
+  ],
+  "useInsert": 90,
+  "classes": [],
+  "statements": [],
+  "returns": [
+    {
+      "kind": "chain",
+      "base": {
+        "kind": "static",
+        "class": "Illuminate\\Foundation\\Application",
+        "classSpan": [
+          98,
+          109
+        ],
+        "method": "configure",
+        "args": {
+          "open": 120,
+          "close": 147,
+          "items": [
+            {
+              "name": "basePath",
+              "value": {
+                "kind": "func",
+                "name": "dirname",
+                "nameSpan": [
+                  131,
+                  138
+                ],
+                "args": {
+                  "open": 138,
+                  "close": 146,
+                  "items": [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "other",
+                        "span": [
+                          139,
+                          146
+                        ]
+                      },
+                      "span": [
+                        139,
+                        146
+                      ],
+                      "spread": false
+                    }
+                  ]
+                },
+                "span": [
+                  131,
+                  147
+                ]
+              },
+              "span": [
+                121,
+                147
+              ],
+              "spread": false
+            }
+          ]
+        },
+        "span": [
+          98,
+          148
+        ]
+      },
+      "calls": [
+        {
+          "name": "withRouting",
+          "nullsafe": false,
+          "args": {
+            "open": 166,
+            "close": 224,
+            "items": [
+              {
+                "name": "commands",
+                "value": {
+                  "kind": "concat",
+                  "parts": [
+                    {
+                      "kind": "other",
+                      "span": [
+                        186,
+                        193
+                      ]
+                    },
+                    {
+                      "kind": "string",
+                      "value": "/../routes/console.php",
+                      "quote": "single",
+                      "interpolated": false,
+                      "span": [
+                        194,
+                        218
+                      ]
+                    }
+                  ],
+                  "span": [
+                    186,
+                    218
+                  ]
+                },
+                "span": [
+                  176,
+                  218
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            153,
+            225
+          ],
+          "nameSpan": [
+            155,
+            166
+          ]
+        },
+        {
+          "name": "withSchedule",
+          "nullsafe": false,
+          "args": {
+            "open": 244,
+            "close": 293,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "closure",
+                  "arrow": false,
+                  "static": false,
+                  "params": [
+                    "schedule"
+                  ],
+                  "body": [
+                    276,
+                    292
+                  ],
+                  "statements": [],
+                  "span": [
+                    245,
+                    293
+                  ]
+                },
+                "span": [
+                  245,
+                  293
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            230,
+            294
+          ],
+          "nameSpan": [
+            232,
+            244
+          ]
+        },
+        {
+          "name": "create",
+          "nullsafe": false,
+          "args": {
+            "open": 307,
+            "close": 308,
+            "items": []
+          },
+          "span": [
+            299,
+            309
+          ],
+          "nameSpan": [
+            301,
+            307
+          ]
+        }
+      ],
+      "span": [
+        98,
+        309
+      ]
+    }
+  ]
+}

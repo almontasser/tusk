@@ -169,6 +169,10 @@ export type ObserversInfo = {
   attribute: boolean;
 };
 export const observers = (root: string, model: string) => cached(root, `app:observers:${model}`, () => introspect<ObserversInfo>(root, "observers", model));
+
+/** What the schedule designer offers: queued jobs (and whether their constructors need arguments), prunable models, the schedule's time zone, and the user model. */
+export type ScheduleInfo = { timezone: string; user: string | null; jobs: { class: string; file: string | null; needsArgs: boolean }[]; prunable: { class: string; file: string | null; trait: "Prunable" | "MassPrunable" }[] };
+export const scheduleInfo = (root: string) => cached(root, "app:schedule", () => introspect<ScheduleInfo>(root, "schedule"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));

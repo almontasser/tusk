@@ -53,6 +53,8 @@ file to change when you add it.
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
 | Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
+
+| Scheduled tasks | The designer reads tasks in `routes/console.php`, in `bootstrap/app.php`'s `withSchedule()` closure, and in `app/Console/Kernel.php`'s `schedule()`, not tasks added inside `if` blocks or by packages. Next runs come from the cron expression, so a task with `when()`, `skip()`, or `between()` may skip some of them, and `lastDayOfMonth()` or seconds-based frequencies show none. A notification task sends a notification that takes no record. Old records are deleted with `model:prune`; marking them as archived instead is code you write (`src/schedulegen.ts`). |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
@@ -1171,6 +1173,44 @@ both is written in both methods under the same condition. A queued
 notification (one that implements `ShouldQueue`) is sent only while a queue
 worker runs, which the rule says. Code in the observer the designer can't read
 shows as code you can open, and stays as written.
+
+## Scheduled tasks
+
+The schedule designer shows the app's scheduled tasks and changes them in
+Laravel's scheduler: what runs, when, and how. To open it, run **Laravel:
+Scheduled Tasks…**, click **Open Scheduled Tasks** in `routes/console.php`, in
+`bootstrap/app.php` when it has `withSchedule()`, or in an older
+`app/Console/Kernel.php`, or click **Scheduled tasks** in the Filament tool
+window.
+
+- **Tasks:** an Artisan command with its arguments, picked from the project's
+  own commands; one of the app's queued jobs; a notification sent to every
+  user, the users with a role, or an email address; or **Delete old records**,
+  which schedules `model:prune`. **Add task** writes the new task beside the
+  existing ones, or in `routes/console.php`.
+- **When:** every few minutes, hourly, daily at a time, weekly on a day at a
+  time, monthly on a day at a time, or a cron expression. The next three runs
+  show in the task's time zone, or the app's.
+- **Options:** a time zone, the environments the task runs in, **Skip while
+  still running** (`withoutOverlapping()`), **On one server**
+  (`onOneServer()`), and **In the background** (`runInBackground()`).
+- **Run now:** runs a command directly, and other tasks with
+  `php artisan schedule:test`, in a terminal tab.
+- **Old records:** each prunable model with the records `model:prune` deletes:
+  those older than some days, by a date column, that match conditions such as
+  `status is cancelled`. **Add a model** makes a model prunable with Laravel's
+  `Prunable` trait and a `prunable()` query. A model with soft deletes loses
+  those records for good.
+
+Laravel runs the tasks only while its scheduler runs. The side panel says so,
+runs `php artisan schedule:work` in a terminal tab while you develop, and gives
+the line to add to a server's crontab:
+`* * * * * cd /path/to/app && php artisan schedule:run >> /dev/null 2>&1`.
+
+Each change is saved in the code as you make it, as in the Filament designer.
+A task the designer can't read, such as a closure of the app's own, shows as
+code, and you can still change when it runs. Calls it doesn't write, such as
+`when()` or `emailOutputTo()`, stay as they are.
 
 ## New Laravel projects and elements
 

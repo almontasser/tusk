@@ -1478,6 +1478,38 @@ function modelObservers(string $class, string $root): array
     ];
 }
 
+/** What the schedule designer offers: the app's queued jobs, its prunable models, the schedule's time zone, and the user model. */
+function scheduleInfo(string $root): array
+{
+    $jobs = [];
+    $prunable = [];
+    foreach (classesIn($root . '/app') as $class) {
+        try {
+            $r = new ReflectionClass($class);
+            if ($r->isAbstract()) {
+                continue;
+            }
+            $traits = class_uses_recursive($class);
+            if ($r->implementsInterface('Illuminate\\Contracts\\Queue\\ShouldQueue') && in_array('Illuminate\\Foundation\\Bus\\Dispatchable', $traits, true)) {
+                $jobs[] = ['class' => $class, 'file' => relativeFile($class, $root), 'needsArgs' => ($r->getConstructor()?->getNumberOfRequiredParameters() ?? 0) > 0];
+            }
+            if ($r->isSubclassOf(Model::class)) {
+                $trait = in_array('Illuminate\\Database\\Eloquent\\MassPrunable', $traits, true) ? 'MassPrunable' : (in_array('Illuminate\\Database\\Eloquent\\Prunable', $traits, true) ? 'Prunable' : null);
+                if ($trait) {
+                    $prunable[] = ['class' => $class, 'file' => relativeFile($class, $root), 'trait' => $trait];
+                }
+            }
+        } catch (Throwable) {
+        }
+    }
+    return [
+        'timezone' => config('app.schedule_timezone') ?? config('app.timezone') ?? 'UTC',
+        'user' => config('auth.providers.users.model'),
+        'jobs' => $jobs,
+        'prunable' => $prunable,
+    ];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1507,6 +1539,8 @@ try {
         'notifications' => appNotifications($root),
         'env-settings' => envSettings(array_slice($argv, 3)),
         'observers' => modelObservers($argv[3], $root),
+
+        'schedule' => scheduleInfo($root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

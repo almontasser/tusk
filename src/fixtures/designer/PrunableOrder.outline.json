@@ -1,0 +1,270 @@
+{
+  "errors": false,
+  "namespace": "App\\Models",
+  "uses": [
+    {
+      "alias": "Builder",
+      "name": "Illuminate\\Database\\Eloquent\\Builder",
+      "kind": "class",
+      "span": [
+        30,
+        71
+      ]
+    },
+    {
+      "alias": "Model",
+      "name": "Illuminate\\Database\\Eloquent\\Model",
+      "kind": "class",
+      "span": [
+        72,
+        111
+      ]
+    },
+    {
+      "alias": "Prunable",
+      "name": "Illuminate\\Database\\Eloquent\\Prunable",
+      "kind": "class",
+      "span": [
+        112,
+        154
+      ]
+    }
+  ],
+  "useInsert": 155,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Order",
+      "fqn": "App\\Models\\Order",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Database\\Eloquent\\Model",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        156,
+        369
+      ],
+      "bodyStart": 183,
+      "bodyEnd": 368,
+      "traits": [
+        "Illuminate\\Database\\Eloquent\\Prunable"
+      ],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "prunable",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "Builder",
+          "attributes": [],
+          "span": [
+            207,
+            367
+          ],
+          "docStart": null,
+          "body": [
+            248,
+            366
+          ],
+          "returns": [
+            {
+              "kind": "chain",
+              "base": {
+                "kind": "static",
+                "class": "static",
+                "classSpan": [
+                  264,
+                  270
+                ],
+                "method": "where",
+                "args": {
+                  "open": 277,
+                  "close": 299,
+                  "items": [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "string",
+                        "value": "status",
+                        "quote": "single",
+                        "interpolated": false,
+                        "span": [
+                          278,
+                          286
+                        ]
+                      },
+                      "span": [
+                        278,
+                        286
+                      ],
+                      "spread": false
+                    },
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "string",
+                        "value": "cancelled",
+                        "quote": "single",
+                        "interpolated": false,
+                        "span": [
+                          288,
+                          299
+                        ]
+                      },
+                      "span": [
+                        288,
+                        299
+                      ],
+                      "spread": false
+                    }
+                  ]
+                },
+                "span": [
+                  264,
+                  300
+                ]
+              },
+              "calls": [
+                {
+                  "name": "where",
+                  "nullsafe": false,
+                  "args": {
+                    "open": 320,
+                    "close": 359,
+                    "items": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "created_at",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            321,
+                            333
+                          ]
+                        },
+                        "span": [
+                          321,
+                          333
+                        ],
+                        "spread": false
+                      },
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "string",
+                          "value": "<=",
+                          "quote": "single",
+                          "interpolated": false,
+                          "span": [
+                            335,
+                            339
+                          ]
+                        },
+                        "span": [
+                          335,
+                          339
+                        ],
+                        "spread": false
+                      },
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": "chain",
+                          "base": {
+                            "kind": "func",
+                            "name": "now",
+                            "nameSpan": [
+                              341,
+                              344
+                            ],
+                            "args": {
+                              "open": 344,
+                              "close": 345,
+                              "items": []
+                            },
+                            "span": [
+                              341,
+                              346
+                            ]
+                          },
+                          "calls": [
+                            {
+                              "name": "subDays",
+                              "nullsafe": false,
+                              "args": {
+                                "open": 355,
+                                "close": 358,
+                                "items": [
+                                  {
+                                    "name": null,
+                                    "value": {
+                                      "kind": "number",
+                                      "value": 90.0,
+                                      "raw": "90",
+                                      "span": [
+                                        356,
+                                        358
+                                      ]
+                                    },
+                                    "span": [
+                                      356,
+                                      358
+                                    ],
+                                    "spread": false
+                                  }
+                                ]
+                              },
+                              "span": [
+                                346,
+                                359
+                              ],
+                              "nameSpan": [
+                                348,
+                                355
+                              ]
+                            }
+                          ],
+                          "span": [
+                            341,
+                            359
+                          ]
+                        },
+                        "span": [
+                          341,
+                          359
+                        ],
+                        "spread": false
+                      }
+                    ]
+                  },
+                  "span": [
+                    313,
+                    360
+                  ],
+                  "nameSpan": [
+                    315,
+                    320
+                  ]
+                }
+              ],
+              "span": [
+                264,
+                360
+              ]
+            }
+          ],
+          "statements": []
+        }
+      ]
+    }
+  ],
+  "statements": [],
+  "returns": []
+}

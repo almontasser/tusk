@@ -60,7 +60,7 @@ export const aggCode = (m: Pick<Metric, "agg" | "column">) => (m.agg === "count"
 export const metricCode = (m: Metric) => queryCode(m) + aggCode(m);
 
 /** Reads the query part of a metric, from `Model::query()` to where its filters end, and what comes after. */
-function readQuery(code: string): { m: Omit<Metric, "agg" | "column">; rest: string } | null {
+export function readQuery(code: string): { m: Omit<Metric, "agg" | "column">; rest: string } | null {
   const table = code.startsWith(TABLE_QUERY);
   const head = table ? [TABLE_QUERY, TABLE] : /^\\?([A-Za-z_][\w\\]*)::query\(\)/.exec(code);
   if (!head) return null;
