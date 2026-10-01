@@ -117,6 +117,10 @@ code { font: .88em var(--mono); background: #f1f1ee; border: 1px solid var(--lin
 .toggle::after { content: ""; position: absolute; top: .08em; left: calc(100% - .6em); width: .52em; height: .52em; border-radius: 50%; background: #fff; transition: left .25s; }
 .toggle[aria-pressed="false"] { background: #cfcfcb; box-shadow: none; }
 .toggle[aria-pressed="false"]::after { left: .08em; }
+.statement .off, .statement:has([aria-pressed="false"]) .on { display: none; }
+.statement:has([aria-pressed="false"]) .off { display: inline; }
+.statement .quip { font-size: 19px; color: var(--muted); margin-top: 18px; visibility: hidden; }
+.statement:has([aria-pressed="false"]) .quip { visibility: visible; }
 
 /* Split cell with tabs */
 .split { display: grid; grid-template-columns: 5fr 7fr; position: relative; overflow: hidden; }
@@ -297,7 +301,8 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
 <div class="band">
   <div class="rail">
     <div class="statement">
-      <h2 class="h2">The editor that speaks<br>Laravel <button class="toggle" aria-pressed="true" aria-label="Laravel fluency"></button> fluently</h2>
+      <h2 class="h2">The editor that speaks<br>Laravel <button class="toggle" aria-pressed="true" aria-label="Laravel fluency"></button> <span class="on">fluently</span><span class="off">barely</span></h2>
+      <p class="quip" aria-live="polite">Like every editor that sees routes and views as plain strings.</p>
     </div>
   </div>
 </div>
