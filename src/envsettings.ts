@@ -190,9 +190,12 @@ class EnvSettings {
       this.storage(env),
       this.cache(env),
     );
+    // Redrawing after each change keeps the place you were at.
+    const scroll = this.el.querySelector(".md-main")?.scrollTop ?? 0;
     this.el.replaceChildren(header, main);
-    if (this.section) main.querySelector(`[data-section="${this.section}"]`)?.scrollIntoView({ block: "start" });
-    this.section = undefined;
+    main.scrollTop = scroll;
+    // Once the config files are read, since their notes change the layout above the section.
+    if (this.section && this.files.app !== undefined) main.querySelector(`[data-section="${this.section}"]`)?.scrollIntoView({ block: "start" }), (this.section = undefined);
   }
 
   private noEnv(): HTMLElement {
@@ -276,14 +279,18 @@ class EnvSettings {
       "The app's address goes into links in emails, such as password reset and email verification, and into file URLs on the public disk. Dates show in its time zone.",
       env.APP_KEY ? null : this.note("warning", "The app has no APP_KEY, so sessions and encryption fail.", ["Generate one", () => void this.artisan(["key:generate"], "Generated an app key.")]),
       env.APP_ENV === "production" && env.APP_DEBUG === "true" ? this.note("warning", "Debug mode is on in production: error pages show your code and settings to visitors.") : null,
-      this.rows(env, [
-        { key: "APP_NAME", label: "Name", config: "app.name", hint: "Shown in emails, as the sender's name by default, and in the browser's title." },
-        { key: "APP_ENV", label: "Environment", config: "app.env", list: ["local", "staging", "production", "testing"] },
-        { key: "APP_DEBUG", label: "Debug mode", config: "app.debug", kind: "flag", hint: "Detailed error pages. Keep it off in production." },
-        { key: "APP_URL", label: "URL", config: "app.url", placeholder: "http://localhost", hint: "The address people open the app at, with http:// or https://." },
-        { key: "APP_LOCALE", label: "Language", config: "app.locale", placeholder: "en" },
-      ]),
-      tzRow,
+      h(
+        "div",
+        { class: "fd-rows" },
+        ...([
+          { key: "APP_NAME", label: "Name", config: "app.name", hint: "Shown in emails, as the sender's name by default, and in the browser's title." },
+          { key: "APP_ENV", label: "Environment", config: "app.env", list: ["local", "staging", "production", "testing"] },
+          { key: "APP_DEBUG", label: "Debug mode", config: "app.debug", kind: "flag", hint: "Detailed error pages. Keep it off in production." },
+          { key: "APP_URL", label: "URL", config: "app.url", placeholder: "http://localhost", hint: "The address people open the app at, with http:// or https://." },
+          { key: "APP_LOCALE", label: "Language", config: "app.locale", placeholder: "en" },
+        ] as Field[]).map((f) => this.row(env, f)),
+        tzRow,
+      ),
       tzNote,
     );
   }
