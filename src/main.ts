@@ -1632,6 +1632,8 @@ const actions: Action[] = [
   { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
   { label: "Laravel: New Project…", run: () => newLaravelProject() },
   { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },
+  { label: "Laravel: Open Settings in Designer…", run: () => root && void import("./settingsdesigner").then((m) => m.openSettingsPicker()) },
+  { label: "Filament: New Settings Page…", run: () => root && void import("./settingsdesigner").then((m) => m.newSettingsPagePicker()) },
   { label: "Open in Designer", run: () => active && openFileInDesigner(active), when: () => /(Resource|RelationManager|Form|Table|Infolist)\.php$/.test(active) },
   { label: "Composer: Require Package…", run: () => requirePackage() },
   { label: "Composer: Update All", run: () => root && updateAll() },

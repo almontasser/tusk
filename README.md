@@ -78,6 +78,7 @@ file to change when you add it.
 | Terminal | A file reference that wraps onto the next line isn't a link. A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
 | Formatters | The built-in formatter formats on save only in the active tab; a file saved in another tab, such as with Save All, isn't formatted. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
+| Settings designer | Renaming a property renames it in the class and the stored values, but not in code that reads it, such as a settings page's field. Dates are written as `CarbonImmutable` and rely on the package's global cast for dates. An encrypted property shows its encrypted value, and the designer writes `add` rather than `addEncrypted` for new ones. A settings migration that hasn't run yet isn't seen, so run pending migrations before applying. |
 | Platform | macOS only. AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. |
 
 ### Missing
@@ -1369,6 +1370,43 @@ Notification…** or **Laravel: Open Notification in Designer…**, or click
 
 Each change is saved as you make it. Calls the designer doesn't write, such as
 `->cc()`, and texts written as other code show as code and are kept.
+
+## Settings designer
+
+The settings designer creates or changes a settings class of
+[spatie/laravel-settings](https://github.com/spatie/laravel-settings): app-wide
+values, such as a tax rate or the site's name, kept in the database. To open
+it, click **Open in Settings Designer** above a settings class, or run
+**Laravel: Open Settings in Designer…**, which also offers **New Settings…**.
+When the package isn't installed, the designer installs it with Composer, with
+Filament's settings page plugin for your Filament version, then publishes its
+migration and config and migrates, in a terminal tab.
+
+- **Properties:** each property's name, type (text, whole number, decimal,
+  yes or no, list, date and time, or one of the app's enums), and whether it
+  can be null. Drag rows to reorder them. A type the designer doesn't write,
+  such as a data object, shows as **In code** and stays as written.
+- **Group:** the values are stored as `group.property`, such as
+  `general.tax_rate`. Changing the group renames the stored values.
+- **Stored values:** the value column shows what the app stores now. Change
+  one and Apply updates it. A new property's value is its first value.
+- **Read it in code:** `app(\App\Settings\GeneralSettings::class)->tax_rate`,
+  or the class injected into a controller, job, or command, with a copy
+  button. Each property's copy button copies its own line.
+- **Settings page:** **Make a settings page**, or **Filament: New Settings
+  Page…**, makes a Filament page with a field for each property and opens its
+  form in the designer, where the settings' properties are the palette's
+  columns. Settings pages are listed under **Pages** in the Filament tool
+  window; right-click one to open its settings.
+
+Changes are staged until you click **Create settings** or **Apply changes**,
+with the class and the settings migration previewed. Tusk writes a new
+settings migration in `database/settings` each time, with `add`, `rename`,
+`delete`, and `update` calls, and never edits one that exists, since each runs
+once. **Run the migration** runs `php artisan migrate` afterwards. **Add
+fields to …** adds a form field for each new property to the class's settings
+page. A class outside the folders the package discovers is listed in
+`config/settings.php`.
 
 ## New Laravel projects and elements
 

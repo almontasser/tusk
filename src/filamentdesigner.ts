@@ -173,6 +173,9 @@ export class Designer {
       this.info = app?.panels.flatMap((p) => p.resources).find((r) => r.file === rel || r.class === this.cls?.fqn) ?? null;
       const model = this.info?.model ?? (this.manager ? await this.relatedModel(app) : null) ?? this.modelOfCode();
       this.facts = model ? await fapp.modelFacts(root, model).catch(() => null) : null;
+      // A settings page's fields are its settings class's properties.
+      const settings = this.page && this.cls ? propertyNamed(this.cls, "settings")?.value : null;
+      if (!this.facts && settings?.kind === "classConst") this.facts = await import("./settingsdesigner").then((m) => m.settingsFactsOf(settings.class)).catch(() => null);
       await this.readPageActions();
       // A page without a form opens on its table, or its actions.
       if (this.page && this.tab === "form" && "missing" in (this.roots.get("form") ?? { missing: true })) this.tab = "missing" in (this.roots.get("table") ?? { missing: true }) ? "actions" : "table";
@@ -834,6 +837,7 @@ export class Designer {
   private openModel() {
     const file = this.facts?.details.file ?? this.info?.modelFile;
     if (!file) return;
+    if (this.page && this.cls && propertyNamed(this.cls, "settings")) return void import("./settingsdesigner").then((m) => m.openSettingsDesigner(file.startsWith("/") ? file : `${this.root}/${file}`));
     void import("./modeldesigner").then((m) => m.openModelDesigner(file.startsWith("/") ? file : `${this.root}/${file}`));
   }
 

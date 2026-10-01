@@ -47,7 +47,7 @@ export type PanelInfo = {
   url: string | null;
   resources: ResourceInfo[];
   clusters: { class: string; file: string | null; label: string | null }[];
-  pages: { class: string; file: string | null; label: string | null; navigationIcon: string | null; navigationGroup: string | null; navigationSort: number | null }[];
+  pages: { class: string; file: string | null; label: string | null; navigationIcon: string | null; navigationGroup: string | null; navigationSort: number | null; settings?: string | null }[];
 };
 export type AppInfo = {
   version: string | null;
@@ -179,6 +179,10 @@ export const scheduleInfo = (root: string) => cached(root, "app:schedule", () =>
 /** What sending notifications needs: the notifications table, the mailer and queue, the user model, and each panel's bell. */
 export type NotificationSetup = { app: string | null; table: boolean | null; mailer: string | null; queue: string | null; user: string | null; panels: Record<string, boolean> };
 export const notificationSetup = (root: string) => cached(root, "app:notification-setup", () => introspect<NotificationSetup>(root, "notification-setup"));
+/** The app's spatie/laravel-settings classes with their stored values and settings pages, and the package's config. */
+export type SettingsClassInfo = { class: string; file: string | null; group: string; properties: { name: string; type: string | null }[]; values: Record<string, import("./settingsgen").Stored> | null; error: string | null; pages: { class: string; file: string | null }[] };
+export type SettingsInfo = { installed: false } | { installed: true; plugin: boolean; configFile: boolean; table: boolean | null; autoDiscover: string[]; registered: string[]; migrationsPath: string; classes: SettingsClassInfo[] };
+export const settings = (root: string) => cached(root, "app:settings", () => introspect<SettingsInfo>(root, "settings"));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 /** spatie/laravel-activitylog's version and table, and a model's latest entries; not kept, since the entries change. */

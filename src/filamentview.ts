@@ -86,6 +86,12 @@ export function initFilament(h_: typeof host) {
         const line = model.getPositionAt(notification.index + notification[0].length - notification[0].trimStart().length).lineNumber;
         return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openNotification", title: "Open in Notifications Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
       }
+      // A spatie/laravel-settings class: the settings designer. A settings page: the designer, like other pages.
+      const settings = !found && !modelClass && /^\s*(?:final\s+)?class\s+\w+\s+extends\s+(Settings|SettingsPage)\b/m.exec(text);
+      if (settings && (settings[1] === "Settings" ? /use Spatie\\LaravelSettings\\Settings;/ : /use Filament\\Pages\\SettingsPage;/).test(text)) {
+        const line = model.getPositionAt(settings.index + settings[0].length - settings[0].trimStart().length).lineNumber;
+        return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: settings[1] === "Settings" ? { id: "tusk.openSettingsDesigner", title: "Open in Settings Designer", arguments: [model.uri.fsPath] } : { id: "tusk.openPageDesigner", title: "Open in Designer", arguments: [model.uri.fsPath] } }], dispose() {} };
+      }
       const enumDecl = !found && !modelClass && /^\s*enum\s+\w+/m.exec(text);
       if (enumDecl) {
         const line = model.getPositionAt(enumDecl.index + enumDecl[0].length - enumDecl[0].trimStart().length).lineNumber;
@@ -105,6 +111,7 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openNotification", (_, path: string) => void import("./notifydesigner").then((m) => m.openNotification(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
+  monaco.editor.registerCommand("tusk.openSettingsDesigner", (_, path: string) => void import("./settingsdesigner").then((m) => m.openSettingsDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
   // The project's .env: its environment settings.
   monaco.languages.registerCodeLensProvider("*", {
@@ -268,6 +275,21 @@ export async function loadFilament() {
       const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: pg.class }, pg.navigationIcon ? heroicon(iconsDir, pg.navigationIcon) : icon("file"), h("span", { class: "fv-name" }, pg.label ?? shortClass(pg.class)), h("span", { class: "fv-detail" }, pg.navigationGroup ?? ""));
       row.onclick = () => void openDesigner(file);
       row.onkeydown = (e) => e.key === "Enter" && void openDesigner(file);
+      // A settings page: its spatie/laravel-settings class opens in the settings designer.
+      const settings = pg.settings;
+      if (settings) {
+        row.title = `${pg.class}\nSettings: ${settings}`;
+        row.oncontextmenu = (e) => {
+          e.preventDefault();
+          void import("./files").then(({ showMenu }) =>
+            showMenu(e.clientX, e.clientY, [
+              { label: "Open in Designer", run: () => void openDesigner(file) },
+              { label: "Open Settings", run: () => void fapp.fileOfClass(root, settings).then((f) => f && void import("./settingsdesigner").then((m) => m.openSettingsDesigner(f))) },
+              { label: "Open Code", run: () => host.openAt(file, 1) },
+            ]),
+          );
+        };
+      }
       rows.push(row);
     }
   }

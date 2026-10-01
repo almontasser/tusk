@@ -2841,3 +2841,9 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .rh-event.created { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
 .rh-event.deleted { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .rh-changes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+
+/* Settings designer */
+.sd-snippet { margin: 6px 4px 0; }
+.sd-snippet-head { display: flex; align-items: center; justify-content: space-between; }
+.sd-snippet .fd-code-preview { margin: 4px 0 0; }
+.sd-designer .ed-row input.invalid { border-color: var(--red); }
