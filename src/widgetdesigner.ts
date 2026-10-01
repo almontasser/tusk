@@ -454,23 +454,10 @@ class WidgetDesigner {
     column.onchange = () => set({ ...m, column: column.value });
     const days = h("select", {}, ...[["", "All time"], ["1", "Today"], ["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 90 days"], ["365", "Last year"]].map(([v, l]) => h("option", { value: v, textContent: l, selected: String(m.days ?? "") === v })));
     days.onchange = () => set({ ...m, days: days.value ? Number(days.value) : null });
-    const wheres = m.where.map((w, j) => this.whereRow(w, columns, (next) => set({ ...m, where: next ? m.where.map((x, k) => (k === j ? next : x)) : m.where.filter((_, k) => k !== j) })));
+    const wheres = m.where.map((w, j) => whereRow(w, columns, (next) => set({ ...m, where: next ? m.where.map((x, k) => (k === j ? next : x)) : m.where.filter((_, k) => k !== j) })));
     const addWhere = h("button", { type: "button", class: "link", textContent: "+ Only records where…" });
     addWhere.onclick = () => set({ ...m, where: [...m.where, { column: columns.find((c) => /status|state|type|active/.test(c)) ?? columns.find((c) => !/^(id|uuid|created_at|updated_at|deleted_at)$/.test(c)) ?? columns[0] ?? "id", op: "=", value: "" }] });
     return h("div", { class: "wd-metric" }, h("div", { class: "wd-inline" }, agg, column, h("span", { class: "fd-note" }, "of"), modelSelect, withDays ? days : null), ...wheres, columns.length ? addWhere : null);
-  }
-
-  private whereRow(w: Where, columns: string[], set: (w: Where | null) => void): HTMLElement {
-    const col = h("select", {}, ...[...new Set([w.column, ...columns])].map((c) => h("option", { value: c, textContent: c, selected: c === w.column })));
-    const ops: [Op | "null" | "notnull", string][] = [["=", "is"], ["!=", "is not"], [">", ">"], ["<", "<"], [">=", "≥"], ["<=", "≤"], ["null", "is empty"], ["notnull", "is not empty"]];
-    const current = w.value === null ? (w.op === "!=" ? "notnull" : "null") : w.op;
-    const op = h("select", {}, ...ops.map(([v, l]) => h("option", { value: v, textContent: l, selected: v === current })));
-    const parse = (x: string) => (/^-?\d+(\.\d+)?$/.test(x.trim()) ? Number(x.trim()) : x.trim() === "true" || x.trim() === "false" ? x.trim() === "true" : x);
-    const value = commitInput(w.value === null ? "" : String(w.value), (x) => set({ ...w, value: parse(x) }), { placeholder: "value" });
-    value.hidden = w.value === null;
-    col.onchange = () => set({ ...w, column: col.value });
-    op.onchange = () => set(op.value === "null" || op.value === "notnull" ? { ...w, op: op.value === "null" ? "=" : "!=", value: null } : { ...w, op: op.value as Op, value: w.value ?? "" });
-    return h("div", { class: "wd-inline wd-where" }, h("span", { class: "fd-note" }, "where"), col, op, value, iconButton("close", "Remove the condition", () => set(null)));
   }
 
   // ---- Charts ----
@@ -601,6 +588,20 @@ class WidgetDesigner {
     box.querySelector(".wd-chart-svg")!.innerHTML = chart;
     return box;
   }
+}
+
+/** A filter on a column: where it is, isn't, compares to, or is empty. The schedule designer uses it too. */
+export function whereRow(w: Where, columns: string[], set: (w: Where | null) => void): HTMLElement {
+  const col = h("select", {}, ...[...new Set([w.column, ...columns])].map((c) => h("option", { value: c, textContent: c, selected: c === w.column })));
+  const ops: [Op | "null" | "notnull", string][] = [["=", "is"], ["!=", "is not"], [">", ">"], ["<", "<"], [">=", "≥"], ["<=", "≤"], ["null", "is empty"], ["notnull", "is not empty"]];
+  const current = w.value === null ? (w.op === "!=" ? "notnull" : "null") : w.op;
+  const op = h("select", {}, ...ops.map(([v, l]) => h("option", { value: v, textContent: l, selected: v === current })));
+  const parse = (x: string) => (/^-?\d+(\.\d+)?$/.test(x.trim()) ? Number(x.trim()) : x.trim() === "true" || x.trim() === "false" ? x.trim() === "true" : x);
+  const value = commitInput(w.value === null ? "" : String(w.value), (x) => set({ ...w, value: parse(x) }), { placeholder: "value" });
+  value.hidden = w.value === null;
+  col.onchange = () => set({ ...w, column: col.value });
+  op.onchange = () => set(op.value === "null" || op.value === "notnull" ? { ...w, op: op.value === "null" ? "=" : "!=", value: null } : { ...w, op: op.value as Op, value: w.value ?? "" });
+  return h("div", { class: "wd-inline wd-where" }, h("span", { class: "fd-note" }, "where"), col, op, value, iconButton("close", "Remove the condition", () => set(null)));
 }
 
 /** A small sample trend line for a stat card. */

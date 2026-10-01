@@ -21,7 +21,7 @@ export type PNode = { span: Span } & (
   | { kind: "func"; name: string; nameSpan: Span; args: PArgs }
   | { kind: "new"; class: string; args: PArgs | null }
   | { kind: "chain"; base: PNode; calls: PCall[] }
-  | { kind: "closure"; arrow: boolean; static: boolean; params: string[]; body: Span }
+  | { kind: "closure"; arrow: boolean; static: boolean; params: string[]; body: Span; statements?: Statement[] }
   | { kind: "const"; name: string }
   | { kind: "concat"; parts: PNode[] }
   | { kind: "other" }
@@ -46,8 +46,10 @@ export type OMethod = {
   body: Span | null;
   returns: PNode[];
   /** The body's own expression statements; an assignment to a variable names it in `assigns`. */
-  statements?: { assigns: string | null; value: PNode }[];
+  statements?: Statement[];
 };
+/** An expression statement; an assignment to a variable names it in `assigns`. */
+export type Statement = { assigns: string | null; value: PNode };
 export type OClass = {
   kind: "class" | "enum" | "trait" | "interface";
   name: string;
@@ -72,6 +74,9 @@ export type Outline = {
   uses: { alias: string; name: string; kind: "class" | "function" | "const"; span: Span }[];
   useInsert: number;
   classes: OClass[];
+  /** The file's own expression statements, as in routes/console.php, and what it returns, as bootstrap/app.php does. */
+  statements?: Statement[];
+  returns?: PNode[];
 };
 
 /** A change to a text: replace `start..end` with `text`. Offsets are UTF-16, as JavaScript strings count. */

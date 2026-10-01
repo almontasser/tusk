@@ -2742,3 +2742,14 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .pd-csv table { border-collapse: collapse; font: 11.5px var(--mono); }
 .pd-csv th, .pd-csv td { padding: 5px 9px; border-inline-end: 1px solid var(--border-subtle); white-space: nowrap; text-align: start; }
 .pd-csv th { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
+/* Schedule designer */
+.sd-scheduler { display: flex; flex-direction: column; gap: 8px; }
+.sd-subhead { margin-top: 6px; font-size: 12px; }
+.sd-cron { display: block; padding: 8px; border-radius: 6px; background: var(--bg); font: 11px var(--mono); white-space: pre-wrap; word-break: break-all; user-select: text; }
+.sd-scheduler > button { align-self: flex-start; }
+.sd-task-title { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-what { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.sd-flags { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.sd-flag { display: inline-flex; align-items: center; gap: 6px; }
+.sd-runs { font-variant-numeric: tabular-nums; }

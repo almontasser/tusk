@@ -4547,6 +4547,40 @@ that runs once, so it should hold the whole change.
 - **New enums** are written whole by `enumFile`, into the namespace's PSR-4
   folder. `make:enum` would make an empty class that Tusk would then replace.
 
+## Schedule designer
+
+`src/scheduledesigner.ts` shows the app's scheduled tasks and saves each change
+as it's made, as the Filament designer does; `src/schedulegen.ts` reads and
+writes the code.
+
+- **Where:** `findPlace` reads three places: `routes/console.php`'s own
+  statements on the `Schedule` facade, the `withSchedule()` closure in
+  `bootstrap/app.php`'s returned chain, and a Console Kernel's `schedule()`,
+  whose statements call the closure's or method's first parameter. The
+  outline reports a file's top-level statements and returns, and each
+  closure's statements, for this. New tasks go beside existing ones, or in
+  the Kernel when it has `schedule()`, or in `routes/console.php`.
+- **Tasks:** `readTasks` reads each statement whose first call is `command`,
+  `job`, `call`, or `exec`. A command written as one string, a job's `new`
+  class, and a closure holding the one statement `src/notifysend.ts` writes
+  (with no record) are readable; anything else shows as code. Calls after it
+  are frequency calls, options (`timezone`, `withoutOverlapping`,
+  `onOneServer`, `runInBackground`, `environments`), a name, or other calls,
+  which stay as written. Notification tasks get a `name()`, which Laravel
+  needs for `withoutOverlapping()` on a closure and `schedule:test` uses to
+  find the task.
+- **When:** `cronOf` builds the cron expression from the frequency calls in
+  order, as Laravel's `ManagesFrequencies` does, and `freqOf` turns it into
+  one of the designer's frequencies or a cron expression. Changing it
+  rewrites the first frequency call and removes the others. `nextRuns` finds
+  the next matches on a wall clock in the task's time zone (`wallClock`,
+  through `Intl`), which needs no booted app.
+- **Old records:** `introspect.php schedule` lists the app's queued jobs
+  (classes with `ShouldQueue` and `Dispatchable`), its prunable models, the
+  schedule's time zone, and the user model. `readPrunable` reads a
+  `prunable()` query of `where` conditions (as `src/widgetgen.ts` writes them)
+  and a date column older than some days.
+
 ## New Laravel projects and elements
 
 `src/laravelnew.ts` uses `laravel/installer` rather than
@@ -6257,3 +6291,27 @@ installer's, and they change with Laravel. So Tusk runs the installer itself,
 from its own tools folder, where the bundled Composer installs and updates it.
 Nothing is installed globally, as the editor promises.
 
+### 2026-10-01: The schedule designer saves each change
+
+The model and enum designers stage changes because a migration or an enum's
+cases are a unit. A scheduled task is one statement, and each change to it
+stands alone, so the schedule designer saves each change as the Filament
+designer does, with local history to undo it.
+
+### 2026-10-01: Old records are pruned with Laravel's Prunable
+
+Deleting old records could be a scheduled closure, or an update that marks
+them archived. Laravel already has `Prunable`: a model says which records go
+in `prunable()`, and `model:prune` finds every such model, deletes in chunks,
+fires the model's events, and force-deletes soft-deleted models. So the
+designer writes that query and schedules `model:prune`, and the rule lives on
+the model, where it's found. Archiving by status is app-specific (which
+column, which value, what hides archived records), so it stays code you write.
+
+### 2026-10-01: Next runs from the cron expression, not schedule:list
+
+`php artisan schedule:list` knows every frequency, but it boots the app and
+needs the file saved and read again after each change. The designer builds
+the cron expression from the calls it reads, as Laravel does, and finds the
+next matches itself, so the times change as you choose them. Conditions such
+as `when()` are named as possibly skipping runs.

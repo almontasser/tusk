@@ -143,12 +143,22 @@ impl<'p, 'a> Outliner<'p, 'a> {
         found.sort_by_key(|n| n.span().start.offset);
         let classes: Vec<Value> = found.into_iter().filter_map(|n| self.class(n)).collect();
 
+        // A file's own statements, such as routes/console.php's, and what it returns, as bootstrap/app.php does.
+        let returns: Vec<Value> = statements
+            .iter()
+            .filter_map(|s| match s {
+                Statement::Return(r) => r.value.map(|e| self.node(e)),
+                _ => None,
+            })
+            .collect();
         json!({
             "errors": errors,
             "namespace": namespace,
             "uses": uses,
             "useInsert": use_insert.unwrap_or(fallback),
             "classes": classes,
+            "statements": self.statements(statements.iter().copied()),
+            "returns": returns,
         })
     }
 
@@ -298,20 +308,7 @@ impl<'p, 'a> Outliner<'p, 'a> {
                 }
                 found.sort_by_key(|e| e.span().start.offset);
                 // The body's own expression statements, such as `$panel->login();` or `$panel = $panel->…;`.
-                let statements = b
-                    .statements
-                    .iter()
-                    .filter_map(|s| match s {
-                        Statement::Expression(es) => Some(match es.expression {
-                            Expression::Assignment(a) if matches!(a.operator, AssignmentOperator::Assign(_)) => match a.lhs {
-                                Expression::Variable(Variable::Direct(v)) => json!({ "assigns": var_name(v), "value": self.node(a.rhs) }),
-                                _ => json!({ "assigns": null, "value": self.node(es.expression) }),
-                            },
-                            e => json!({ "assigns": null, "value": self.node(e) }),
-                        }),
-                        _ => None,
-                    })
-                    .collect();
+                let statements = self.statements(b.statements.iter());
                 (self.range(b.left_brace.end.offset, b.right_brace.start.offset), found.into_iter().map(|e| self.node(e)).collect(), statements)
             }
         };
@@ -342,6 +339,24 @@ impl<'p, 'a> Outliner<'p, 'a> {
             "returns": returns,
             "statements": statements,
         })
+    }
+
+    /// Expression statements, each with the variable it assigns, if any.
+    fn statements<'s>(&self, list: impl Iterator<Item = &'s Statement<'s>>) -> Vec<Value>
+    where
+        'a: 's,
+    {
+        list.filter_map(|s| match s {
+            Statement::Expression(es) => Some(match es.expression {
+                Expression::Assignment(a) if matches!(a.operator, AssignmentOperator::Assign(_)) => match a.lhs {
+                    Expression::Variable(Variable::Direct(v)) => json!({ "assigns": var_name(v), "value": self.node(a.rhs) }),
+                    _ => json!({ "assigns": null, "value": self.node(es.expression) }),
+                },
+                e => json!({ "assigns": null, "value": self.node(e) }),
+            }),
+            _ => None,
+        })
+        .collect()
     }
 
     /// The start of the docblock directly above `offset`, with only whitespace between.
@@ -547,6 +562,7 @@ impl<'p, 'a> Outliner<'p, 'a> {
                 "static": c.r#static.is_some(),
                 "params": c.parameter_list.parameters.iter().map(|p| var_name(&p.variable)).collect::<Vec<_>>(),
                 "body": self.range(c.body.left_brace.end.offset, c.body.right_brace.start.offset),
+                "statements": self.statements(c.body.statements.iter()),
             }),
             Expression::ArrowFunction(f) => json!({
                 "kind": "closure",
@@ -857,6 +873,21 @@ class PostResource extends BaseResource
         assert!(other["body"].is_null());
         assert_eq!(other["abstract"], true);
         assert_eq!(other["visibility"], "protected");
+    }
+
+    #[test]
+    fn outlines_a_files_own_statements_and_closure_bodies() {
+        let text = "<?php\n\nuse Illuminate\\Support\\Facades\\Schedule;\n\nSchedule::command('inspire')->hourly();\n$x = 1;\n\nreturn App::configure()->withSchedule(function ($schedule) {\n    $schedule->job(new Ping)->daily();\n})->create();\n";
+        let o = run(text);
+        let statements = o["statements"].as_array().unwrap();
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0]["value"]["base"]["class"], "Illuminate\\Support\\Facades\\Schedule");
+        assert_eq!(at(text, &statements[0]["value"]["span"]), "Schedule::command('inspire')->hourly()");
+        assert_eq!(statements[1]["assigns"], "x");
+        let chain = &o["returns"][0];
+        assert_eq!(chain["calls"][0]["name"], "withSchedule");
+        let closure = &chain["calls"][0]["args"]["items"][0]["value"];
+        assert_eq!(at(text, &closure["statements"][0]["value"]["span"]), "$schedule->job(new Ping)->daily()");
     }
 
     #[test]

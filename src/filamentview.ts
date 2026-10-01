@@ -91,6 +91,18 @@ export function initFilament(h_: typeof host) {
   monaco.editor.registerCommand("tusk.openWidget", (_, path: string) => void import("./widgetdesigner").then((m) => m.openWidget(path)));
   monaco.editor.registerCommand("tusk.openEnumDesigner", (_, path: string) => void import("./enumdesigner").then((m) => m.openEnumDesigner(path)));
   monaco.editor.registerCommand("tusk.openModelDesigner", (_, path: string) => void import("./modeldesigner").then((m) => m.openModelDesigner(path)));
+  // Where the schedule lives: routes/console.php, bootstrap/app.php's withSchedule(), or a Console Kernel's schedule().
+  monaco.languages.registerCodeLensProvider("php", {
+    provideCodeLenses(model) {
+      const path = model.uri.fsPath;
+      const text = model.getValue();
+      const at = /\/routes\/console\.php$/.test(path) ? /^Schedule::/m.exec(text) ?? { index: 0 } : /\/bootstrap\/app\.php$/.test(path) ? /->withSchedule\(/.exec(text) : /\/app\/Console\/Kernel\.php$/.test(path) ? /function schedule\(/.exec(text) : null;
+      if (model.uri.scheme !== "file" || !at) return { lenses: [], dispose() {} };
+      const line = model.getPositionAt(at.index).lineNumber;
+      return { lenses: [{ range: new monaco.Range(line, 1, line, 1), command: { id: "tusk.openSchedule", title: "Open Scheduled Tasks", arguments: [] } }], dispose() {} };
+    },
+  });
+  monaco.editor.registerCommand("tusk.openSchedule", () => void import("./scheduledesigner").then((m) => m.openSchedule()));
 }
 
 /** Opens a file in the designer: a resource or relation manager itself, or the resource a schema class belongs to. */
@@ -257,6 +269,10 @@ export async function loadFilament() {
       rows.push(row);
     }
   } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));
+  const schedule = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: "The app's scheduled tasks" }, icon("watch"), h("span", { class: "fv-name" }, "Scheduled tasks"), h("span", { class: "fv-detail" }, "Laravel"));
+  schedule.onclick = () => void import("./scheduledesigner").then((m) => m.openSchedule());
+  schedule.onkeydown = (e) => e.key === "Enter" && schedule.click();
+  rows.push(h("li", { class: "fv-group" }, "App"), schedule);
   const tree = h("ul", { class: "fv-tree", role: "tree" }, ...rows);
   list.replaceChildren(tree);
   applyFilter();

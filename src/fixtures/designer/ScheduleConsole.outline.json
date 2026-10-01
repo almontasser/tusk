@@ -1,0 +1,861 @@
+{
+  "errors": false,
+  "namespace": null,
+  "uses": [
+    {
+      "alias": "Heartbeat",
+      "name": "App\\Jobs\\Heartbeat",
+      "kind": "class",
+      "span": [
+        7,
+        30
+      ]
+    },
+    {
+      "alias": "User",
+      "name": "App\\Models\\User",
+      "kind": "class",
+      "span": [
+        31,
+        51
+      ]
+    },
+    {
+      "alias": "WeeklyReport",
+      "name": "App\\Notifications\\WeeklyReport",
+      "kind": "class",
+      "span": [
+        52,
+        87
+      ]
+    },
+    {
+      "alias": "Inspiring",
+      "name": "Illuminate\\Foundation\\Inspiring",
+      "kind": "class",
+      "span": [
+        88,
+        124
+      ]
+    },
+    {
+      "alias": "Artisan",
+      "name": "Illuminate\\Support\\Facades\\Artisan",
+      "kind": "class",
+      "span": [
+        125,
+        164
+      ]
+    },
+    {
+      "alias": "Notification",
+      "name": "Illuminate\\Support\\Facades\\Notification",
+      "kind": "class",
+      "span": [
+        165,
+        209
+      ]
+    },
+    {
+      "alias": "Schedule",
+      "name": "Illuminate\\Support\\Facades\\Schedule",
+      "kind": "class",
+      "span": [
+        210,
+        250
+      ]
+    }
+  ],
+  "useInsert": 251,
+  "classes": [],
+  "statements": [
+    {
+      "assigns": null,
+      "value": {
+        "kind": "chain",
+        "base": {
+          "kind": "static",
+          "class": "Illuminate\\Support\\Facades\\Artisan",
+          "classSpan": [
+            252,
+            259
+          ],
+          "method": "command",
+          "args": {
+            "open": 268,
+            "close": 335,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "string",
+                  "value": "inspire",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    269,
+                    278
+                  ]
+                },
+                "span": [
+                  269,
+                  278
+                ],
+                "spread": false
+              },
+              {
+                "name": null,
+                "value": {
+                  "kind": "closure",
+                  "arrow": false,
+                  "static": false,
+                  "params": [],
+                  "body": [
+                    293,
+                    334
+                  ],
+                  "statements": [
+                    {
+                      "assigns": null,
+                      "value": {
+                        "kind": "chain",
+                        "base": {
+                          "kind": "var",
+                          "name": "this",
+                          "span": [
+                            298,
+                            303
+                          ]
+                        },
+                        "calls": [
+                          {
+                            "name": "comment",
+                            "nullsafe": false,
+                            "args": {
+                              "open": 312,
+                              "close": 331,
+                              "items": [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": "static",
+                                    "class": "Illuminate\\Foundation\\Inspiring",
+                                    "classSpan": [
+                                      313,
+                                      322
+                                    ],
+                                    "method": "quote",
+                                    "args": {
+                                      "open": 329,
+                                      "close": 330,
+                                      "items": []
+                                    },
+                                    "span": [
+                                      313,
+                                      331
+                                    ]
+                                  },
+                                  "span": [
+                                    313,
+                                    331
+                                  ],
+                                  "spread": false
+                                }
+                              ]
+                            },
+                            "span": [
+                              303,
+                              332
+                            ],
+                            "nameSpan": [
+                              305,
+                              312
+                            ]
+                          }
+                        ],
+                        "span": [
+                          298,
+                          332
+                        ]
+                      }
+                    }
+                  ],
+                  "span": [
+                    280,
+                    335
+                  ]
+                },
+                "span": [
+                  280,
+                  335
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            252,
+            336
+          ]
+        },
+        "calls": [
+          {
+            "name": "purpose",
+            "nullsafe": false,
+            "args": {
+              "open": 345,
+              "close": 374,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "Display an inspiring quote",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      346,
+                      374
+                    ]
+                  },
+                  "span": [
+                    346,
+                    374
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              336,
+              375
+            ],
+            "nameSpan": [
+              338,
+              345
+            ]
+          }
+        ],
+        "span": [
+          252,
+          375
+        ]
+      }
+    },
+    {
+      "assigns": null,
+      "value": {
+        "kind": "chain",
+        "base": {
+          "kind": "static",
+          "class": "Illuminate\\Support\\Facades\\Schedule",
+          "classSpan": [
+            378,
+            386
+          ],
+          "method": "command",
+          "args": {
+            "open": 395,
+            "close": 419,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "string",
+                  "value": "reports:send --weekly",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    396,
+                    419
+                  ]
+                },
+                "span": [
+                  396,
+                  419
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            378,
+            420
+          ]
+        },
+        "calls": [
+          {
+            "name": "weeklyOn",
+            "nullsafe": false,
+            "args": {
+              "open": 430,
+              "close": 440,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "number",
+                    "value": 1.0,
+                    "raw": "1",
+                    "span": [
+                      431,
+                      432
+                    ]
+                  },
+                  "span": [
+                    431,
+                    432
+                  ],
+                  "spread": false
+                },
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "8:00",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      434,
+                      440
+                    ]
+                  },
+                  "span": [
+                    434,
+                    440
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              420,
+              441
+            ],
+            "nameSpan": [
+              422,
+              430
+            ]
+          },
+          {
+            "name": "timezone",
+            "nullsafe": false,
+            "args": {
+              "open": 451,
+              "close": 467,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "Europe/Berlin",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      452,
+                      467
+                    ]
+                  },
+                  "span": [
+                    452,
+                    467
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              441,
+              468
+            ],
+            "nameSpan": [
+              443,
+              451
+            ]
+          },
+          {
+            "name": "withoutOverlapping",
+            "nullsafe": false,
+            "args": {
+              "open": 488,
+              "close": 489,
+              "items": []
+            },
+            "span": [
+              468,
+              490
+            ],
+            "nameSpan": [
+              470,
+              488
+            ]
+          }
+        ],
+        "span": [
+          378,
+          490
+        ]
+      }
+    },
+    {
+      "assigns": null,
+      "value": {
+        "kind": "chain",
+        "base": {
+          "kind": "static",
+          "class": "Illuminate\\Support\\Facades\\Schedule",
+          "classSpan": [
+            493,
+            501
+          ],
+          "method": "job",
+          "args": {
+            "open": 506,
+            "close": 534,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "new",
+                  "class": "App\\Jobs\\Heartbeat",
+                  "args": null,
+                  "span": [
+                    507,
+                    520
+                  ]
+                },
+                "span": [
+                  507,
+                  520
+                ],
+                "spread": false
+              },
+              {
+                "name": null,
+                "value": {
+                  "kind": "string",
+                  "value": "heartbeats",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    522,
+                    534
+                  ]
+                },
+                "span": [
+                  522,
+                  534
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            493,
+            535
+          ]
+        },
+        "calls": [
+          {
+            "name": "everyFiveMinutes",
+            "nullsafe": false,
+            "args": {
+              "open": 558,
+              "close": 559,
+              "items": []
+            },
+            "span": [
+              540,
+              560
+            ],
+            "nameSpan": [
+              542,
+              558
+            ]
+          },
+          {
+            "name": "onOneServer",
+            "nullsafe": false,
+            "args": {
+              "open": 578,
+              "close": 579,
+              "items": []
+            },
+            "span": [
+              565,
+              580
+            ],
+            "nameSpan": [
+              567,
+              578
+            ]
+          }
+        ],
+        "span": [
+          493,
+          580
+        ]
+      }
+    },
+    {
+      "assigns": null,
+      "value": {
+        "kind": "chain",
+        "base": {
+          "kind": "static",
+          "class": "Illuminate\\Support\\Facades\\Schedule",
+          "classSpan": [
+            583,
+            591
+          ],
+          "method": "call",
+          "args": {
+            "open": 597,
+            "close": 670,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "closure",
+                  "arrow": false,
+                  "static": false,
+                  "params": [],
+                  "body": [
+                    611,
+                    669
+                  ],
+                  "statements": [
+                    {
+                      "assigns": null,
+                      "value": {
+                        "kind": "static",
+                        "class": "Illuminate\\Support\\Facades\\Notification",
+                        "classSpan": [
+                          616,
+                          628
+                        ],
+                        "method": "send",
+                        "args": {
+                          "open": 634,
+                          "close": 666,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "static",
+                                "class": "App\\Models\\User",
+                                "classSpan": [
+                                  635,
+                                  639
+                                ],
+                                "method": "all",
+                                "args": {
+                                  "open": 644,
+                                  "close": 645,
+                                  "items": []
+                                },
+                                "span": [
+                                  635,
+                                  646
+                                ]
+                              },
+                              "span": [
+                                635,
+                                646
+                              ],
+                              "spread": false
+                            },
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "new",
+                                "class": "App\\Notifications\\WeeklyReport",
+                                "args": {
+                                  "open": 664,
+                                  "close": 665,
+                                  "items": []
+                                },
+                                "span": [
+                                  648,
+                                  666
+                                ]
+                              },
+                              "span": [
+                                648,
+                                666
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          616,
+                          667
+                        ]
+                      }
+                    }
+                  ],
+                  "span": [
+                    598,
+                    670
+                  ]
+                },
+                "span": [
+                  598,
+                  670
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            583,
+            671
+          ]
+        },
+        "calls": [
+          {
+            "name": "name",
+            "nullsafe": false,
+            "args": {
+              "open": 677,
+              "close": 697,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "Send WeeklyReport",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      678,
+                      697
+                    ]
+                  },
+                  "span": [
+                    678,
+                    697
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              671,
+              698
+            ],
+            "nameSpan": [
+              673,
+              677
+            ]
+          },
+          {
+            "name": "weekdays",
+            "nullsafe": false,
+            "args": {
+              "open": 708,
+              "close": 709,
+              "items": []
+            },
+            "span": [
+              698,
+              710
+            ],
+            "nameSpan": [
+              700,
+              708
+            ]
+          },
+          {
+            "name": "at",
+            "nullsafe": false,
+            "args": {
+              "open": 714,
+              "close": 722,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "17:00",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      715,
+                      722
+                    ]
+                  },
+                  "span": [
+                    715,
+                    722
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              710,
+              723
+            ],
+            "nameSpan": [
+              712,
+              714
+            ]
+          }
+        ],
+        "span": [
+          583,
+          723
+        ]
+      }
+    },
+    {
+      "assigns": null,
+      "value": {
+        "kind": "static",
+        "class": "Illuminate\\Support\\Facades\\Schedule",
+        "classSpan": [
+          726,
+          734
+        ],
+        "method": "command",
+        "args": {
+          "open": 743,
+          "close": 757,
+          "items": [
+            {
+              "name": null,
+              "value": {
+                "kind": "string",
+                "value": "model:prune",
+                "quote": "single",
+                "interpolated": false,
+                "span": [
+                  744,
+                  757
+                ]
+              },
+              "span": [
+                744,
+                757
+              ],
+              "spread": false
+            }
+          ]
+        },
+        "span": [
+          726,
+          758
+        ]
+      }
+    },
+    {
+      "assigns": null,
+      "value": {
+        "kind": "chain",
+        "base": {
+          "kind": "static",
+          "class": "Illuminate\\Support\\Facades\\Schedule",
+          "classSpan": [
+            761,
+            769
+          ],
+          "method": "exec",
+          "args": {
+            "open": 775,
+            "close": 804,
+            "items": [
+              {
+                "name": null,
+                "value": {
+                  "kind": "string",
+                  "value": "node /home/forge/script.js",
+                  "quote": "single",
+                  "interpolated": false,
+                  "span": [
+                    776,
+                    804
+                  ]
+                },
+                "span": [
+                  776,
+                  804
+                ],
+                "spread": false
+              }
+            ]
+          },
+          "span": [
+            761,
+            805
+          ]
+        },
+        "calls": [
+          {
+            "name": "daily",
+            "nullsafe": false,
+            "args": {
+              "open": 812,
+              "close": 813,
+              "items": []
+            },
+            "span": [
+              805,
+              814
+            ],
+            "nameSpan": [
+              807,
+              812
+            ]
+          },
+          {
+            "name": "when",
+            "nullsafe": false,
+            "args": {
+              "open": 820,
+              "close": 834,
+              "items": [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": "closure",
+                    "arrow": true,
+                    "static": false,
+                    "params": [],
+                    "body": [
+                      830,
+                      834
+                    ],
+                    "span": [
+                      821,
+                      834
+                    ]
+                  },
+                  "span": [
+                    821,
+                    834
+                  ],
+                  "spread": false
+                }
+              ]
+            },
+            "span": [
+              814,
+              835
+            ],
+            "nameSpan": [
+              816,
+              820
+            ]
+          }
+        ],
+        "span": [
+          761,
+          835
+        ]
+      }
+    }
+  ],
+  "returns": []
+}

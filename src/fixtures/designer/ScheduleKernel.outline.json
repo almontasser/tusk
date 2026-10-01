@@ -1,0 +1,230 @@
+{
+  "errors": false,
+  "namespace": "App\\Console",
+  "uses": [
+    {
+      "alias": "Schedule",
+      "name": "Illuminate\\Console\\Scheduling\\Schedule",
+      "kind": "class",
+      "span": [
+        31,
+        74
+      ]
+    },
+    {
+      "alias": "ConsoleKernel",
+      "name": "Illuminate\\Foundation\\Console\\Kernel",
+      "kind": "class",
+      "span": [
+        75,
+        133
+      ]
+    }
+  ],
+  "useInsert": 134,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "Kernel",
+      "fqn": "App\\Console\\Kernel",
+      "abstract": false,
+      "final": false,
+      "extends": "Illuminate\\Foundation\\Console\\Kernel",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        135,
+        333
+      ],
+      "bodyStart": 171,
+      "bodyEnd": 332,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "schedule",
+          "static": false,
+          "abstract": false,
+          "visibility": "protected",
+          "params": [
+            {
+              "name": "schedule",
+              "type": "Schedule",
+              "default": null,
+              "span": [
+                204,
+                222
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            176,
+            331
+          ],
+          "docStart": null,
+          "body": [
+            235,
+            330
+          ],
+          "returns": [],
+          "statements": [
+            {
+              "assigns": null,
+              "value": {
+                "kind": "chain",
+                "base": {
+                  "kind": "var",
+                  "name": "schedule",
+                  "span": [
+                    244,
+                    253
+                  ]
+                },
+                "calls": [
+                  {
+                    "name": "command",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 262,
+                      "close": 275,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "backup:run",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              263,
+                              275
+                            ]
+                          },
+                          "span": [
+                            263,
+                            275
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      253,
+                      276
+                    ],
+                    "nameSpan": [
+                      255,
+                      262
+                    ]
+                  },
+                  {
+                    "name": "dailyAt",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 285,
+                      "close": 293,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "string",
+                            "value": "02:30",
+                            "quote": "single",
+                            "interpolated": false,
+                            "span": [
+                              286,
+                              293
+                            ]
+                          },
+                          "span": [
+                            286,
+                            293
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      276,
+                      294
+                    ],
+                    "nameSpan": [
+                      278,
+                      285
+                    ]
+                  },
+                  {
+                    "name": "environments",
+                    "nullsafe": false,
+                    "args": {
+                      "open": 308,
+                      "close": 323,
+                      "items": [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": "array",
+                            "items": [
+                              {
+                                "key": null,
+                                "value": {
+                                  "kind": "string",
+                                  "value": "production",
+                                  "quote": "single",
+                                  "interpolated": false,
+                                  "span": [
+                                    310,
+                                    322
+                                  ]
+                                },
+                                "span": [
+                                  310,
+                                  322
+                                ],
+                                "spread": false
+                              }
+                            ],
+                            "open": 309,
+                            "close": 322,
+                            "legacy": false,
+                            "span": [
+                              309,
+                              323
+                            ]
+                          },
+                          "span": [
+                            309,
+                            323
+                          ],
+                          "spread": false
+                        }
+                      ]
+                    },
+                    "span": [
+                      294,
+                      324
+                    ],
+                    "nameSpan": [
+                      296,
+                      308
+                    ]
+                  }
+                ],
+                "span": [
+                  244,
+                  324
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": [],
+  "returns": []
+}

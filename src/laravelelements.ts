@@ -16,15 +16,18 @@ export const initLaravelElements = (h_: Host) => (host = h_);
 
 let cache: { root: string; commands: Command[] } | undefined;
 
-/** The project's generators, from `artisan list --format=json`. */
-async function generators(root: string): Promise<Command[]> {
+/** The project's Artisan commands, from `artisan list --format=json`, without hidden ones. */
+export async function artisanCommands(root: string): Promise<Command[]> {
   if (cache?.root === root) return cache.commands;
   const out = await fapp.artisan(root, ["list", "--format=json"]);
   const json = JSON.parse(out.slice(out.indexOf("{"))) as { commands: Command[] };
-  const commands = json.commands.filter((c) => c.name.startsWith("make:") && !c.hidden);
+  const commands = json.commands.filter((c) => !c.hidden);
   cache = { root, commands };
   return commands;
 }
+
+/** The project's generators. */
+const generators = async (root: string) => (await artisanCommands(root)).filter((c) => c.name.startsWith("make:"));
 
 /** Forgets the generators, as after `composer require` adds a package's. */
 export const forgetGenerators = () => (cache = undefined);
