@@ -144,6 +144,9 @@ pub struct Index {
     /// What `tests/Pest.php` binds with `in()`: each chain's classes and traits, the files and folders it covers,
     /// and the type of each property its `beforeEach()` hooks set on `$this`.
     pest_uses: Vec<(Vec<String>, GlobSet, PestProps)>,
+    /// `tests/Pest.php`'s text, kept so its hooks are typed again after each update: their types can depend on
+    /// any file.
+    pest_file: Option<Vec<u8>>,
     /// The classes and traits each test file binds itself to with its own `uses()`.
     pest_own: HashMap<FileId, Vec<String>>,
     /// The classes made for the test files bound to traits, by test case and traits; see [`Index::sync_pest_classes`].
@@ -427,6 +430,7 @@ impl Index {
             declared: HashMap::new(),
             excluded,
             pest_uses: vec![],
+            pest_file: None,
             pest_own: HashMap::new(),
             pest_classes: vec![],
             generation: next_generation(),
@@ -574,7 +578,8 @@ impl Index {
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
         self.bind_pest_closures();
-        self.pest_uses = read(&self.config.root.join(PEST_FILE)).map(|c| pest_bindings(self, &c)).unwrap_or_default();
+        self.pest_file = read(&self.config.root.join(PEST_FILE));
+        self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();
         self.sync_pest_classes();
         self.generation = next_generation();
         progress(total, total);
@@ -652,14 +657,14 @@ impl Index {
 
     pub fn update_many(&mut self, changes: Vec<(PathBuf, Option<Vec<u8>>)>) {
         // A Blade view's changes leave the index as it was.
-        if changes.iter().any(|(path, _)| self.includes(path) || self.by_path.contains_key(path) || self.library.contains_key(&file_id(path))) {
+        let changed = changes.iter().any(|(path, _)| self.includes(path) || self.by_path.contains_key(path) || self.library.contains_key(&file_id(path)));
+        if changed {
             self.generation = next_generation();
         }
         let arena = LocalArena::new();
         let mut dirty = WordSet::default();
         let mut scans = vec![];
         let mut wanted: Vec<String> = vec![];
-        let mut pest_file = None;
         for (path, contents) in changes {
             let id = file_id(&path);
             if let Some(old) = self.files.remove(&id) {
@@ -676,7 +681,7 @@ impl Index {
             self.declared.remove(&id);
             self.pest_own.remove(&id);
             if path == self.config.root.join(PEST_FILE) {
-                pest_file = Some(contents.clone());
+                self.pest_file = contents.clone();
             }
             let Some(contents) = contents else { continue };
             if !self.includes(&path) {
@@ -705,11 +710,9 @@ impl Index {
         // Names the edit started to use, from the disk: library files an editor has open are loaded already.
         self.ensure_loaded(wanted, &|p: &Path| std::fs::read(p).ok());
         self.repopulate(dirty);
-        // Pest.php's hooks are typed against the updated index.
-        // ponytail: only when Pest.php changes, so a hook's type that depends on another file can go stale; type them
-        // after every update if that bites.
-        if let Some(contents) = pest_file {
-            self.pest_uses = contents.map(|c| pest_bindings(self, &c)).unwrap_or_default();
+        // Pest.php's hooks are typed against the updated index, as their types can depend on any file.
+        if changed {
+            self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();
         }
         self.sync_pest_classes();
     }
@@ -807,10 +810,11 @@ impl Index {
     }
 
     /// How the analysis binds a Pest test file: the class its closures run in, the type of each property the
-    /// `beforeEach()` hooks of the Pest.php chains that cover it set on `$this`, and the spans of its own hooks.
-    /// `None` for a file nothing binds, which runs in PHPUnit's `TestCase`.
+    /// `beforeEach()` hooks of the Pest.php chains that cover it set on `$this`, the spans of its own hooks, and
+    /// whether the class may lack traits the file names, as the index doesn't have its `uses()` yet. `None` for a
+    /// file nothing binds, which runs in PHPUnit's `TestCase`.
     #[allow(clippy::type_complexity)]
-    pub fn pest_binding(&self, parsed: &Parsed<'_>) -> Option<(Word, PestProps, Vec<(u32, u32)>)> {
+    pub fn pest_binding(&self, parsed: &Parsed<'_>) -> Option<(Word, PestProps, Vec<(u32, u32)>, bool)> {
         let path = parsed.file.path.as_deref()?;
         let rel = path.strip_prefix(self.config.root.join("tests")).ok()?;
         let chains = pest_uses(parsed);
@@ -818,10 +822,11 @@ impl Index {
         let combo = self.pest_combo(path, &own)?;
         // A class made for the traits, or until the index catches up with a new `uses()`, the test case alone.
         let made = self.pest_classes.iter().find(|(k, _)| *k == combo).map(|(_, name)| *name);
+        let partial = made.is_none() && self.pest_own.get(&file_id(path)).map_or(&[][..], Vec::as_slice) != own.as_slice();
         let case = made.or_else(|| self.codebase.get_class_like(combo.0.as_bytes()).map(|c| c.original_name))?;
         let props = self.pest_uses.iter().filter(|(_, set, _)| rel.ancestors().any(|a| set.is_match(a))).flat_map(|(.., props)| props.clone()).collect();
         let hooks = chains.into_iter().filter(|(_, targets, _)| targets.is_empty()).flat_map(|(.., hooks)| hooks).collect();
-        Some((case, props, hooks))
+        Some((case, props, hooks, partial))
     }
 
     /// Pest runs a test file's closures in a class that extends its test case and uses the traits Pest.php or the

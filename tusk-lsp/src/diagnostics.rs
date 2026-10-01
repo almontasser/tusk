@@ -420,6 +420,18 @@ mod tests {
         let own = test.replace("<?php\n", "<?php\nuses(Illuminate\\Foundation\\Testing\\RefreshDatabase::class);\n");
         let own_bound = vec![("non-existent-method".into(), 5)];
         assert_eq!(problems(crate::testing::PEST[2].1, &own, "tests/Feature/HomeTest.php"), own_bound);
+        // A `uses()` the index doesn't have yet, such as one just typed: until the index makes a class with the
+        // trait, missing members aren't reported. (Closures after the edit wait for the index anyway.)
+        let mut files = crate::testing::PEST.to_vec();
+        files.extend([("tests/Feature/HomeTest.php", test), ("vendor/refresh.php", crate::testing::REFRESH_DATABASE)]);
+        let typed = format!("{test}uses(Illuminate\\Foundation\\Testing\\RefreshDatabase::class);\n");
+        let doc = Document::new(crate::testing::uri("tests/Feature/HomeTest.php"), crate::testing::path("tests/Feature/HomeTest.php"), "php".into(), 2, typed);
+        // Whether or not another file loaded the trait (until the index loads it, it's reported as not found).
+        for other in [None, Some(("tests/Unit/OtherTest.php", own.as_str()))] {
+            let fx = Fixture::new(&files.iter().copied().chain(other).collect::<Vec<_>>());
+            let found = php_problems(&fx.snap.index, &doc);
+            assert!(!found.iter().any(|d| d.code == Some(NumberOrString::String("non-existent-method".into()))), "{other:?}: {found:?}");
+        }
         // A trait without a test case runs in PHPUnit's, which has no `get()`.
         let unbound = problems("<?php\n", &own, "tests/Feature/HomeTest.php");
         assert_eq!(unbound.iter().map(|(_, l)| *l).collect::<Vec<_>>(), vec![3, 5], "{unbound:?}");
@@ -467,6 +479,17 @@ mod tests {
         // Never set: reading it is reported.
         let unset = codes(pest, &format!("<?php\n{user}{read}"));
         assert!(unset.contains(&("non-existent-property".into(), 3)), "{unset:?}");
+        // A Pest.php hook's type follows the files it depends on.
+        let mut files = crate::testing::PEST.to_vec();
+        files.retain(|(name, _)| *name != "tests/Pest.php");
+        let hooked = "<?php\npest()->extend(Tests\\TestCase::class)->beforeEach(function () {\n    $this->user = make_user();\n})->in('Feature');\n";
+        let helper = |returns: &str| format!("<?php\nclass User {{ public function posts(): void {{}} }}\nclass Post {{}}\nfunction make_user(): {returns} {{ return new {returns}; }}\n");
+        let user = helper("User");
+        files.extend([("tests/Pest.php", hooked), ("app/helpers.php", user.as_str()), ("tests/Feature/HomeTest.php", "<?php\nit('loads', function () {\n    $this->user->posts();\n});\n")]);
+        let fx = Fixture::new(&files);
+        assert!(mago_codes(&fx, "tests/Feature/HomeTest.php").is_empty());
+        fx.snap.index.write().update(&crate::testing::path("app/helpers.php"), Some(helper("Post").into_bytes()));
+        assert_eq!(mago_codes(&fx, "tests/Feature/HomeTest.php"), vec![("non-existent-method".into(), 2)]);
     }
 
     #[test]

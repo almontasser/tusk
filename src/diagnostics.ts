@@ -30,8 +30,9 @@ export const isLibrary = (path: string) => /\/(vendor|node_modules)\//.test(path
 /**
  * Pest's test closures run as methods of the project's test case and traits, which the PHP server reads from
  * tests/Pest.php and the file's `uses()`, so `$this->get()` checks. The server also types the properties tests set on
- * `$this` and doesn't report setting them. PHPStan doesn't know the binding, so its problems about `$this` lines are
- * dropped.
+ * `$this` and doesn't report setting them. PHPStan doesn't know the binding, and Pest's PHPStan extension doesn't
+ * teach it, so its problems that come from that are dropped: `$this` as PHPUnit's `TestCase` or Pest's
+ * `TestCall`, depending on the Pest version, and the `mixed` values that come from it.
  */
 const isPestFile = (path: string, text: string) => /\/tests\//.test(path) && /^\s*(it|test|describe|arch)\(/m.test(text);
 
@@ -47,8 +48,11 @@ function pestFalsePositive(text: string, lines: string[], lineStarts: number[], 
   }
   const line = lines[d.range.start.line];
   if (line === undefined || !line.includes("$this")) return false;
-  // PHPStan doesn't know the binding.
-  return !/^mago/.test(d.source ?? "") && /\$this|TestCase|`mixed`/.test(message);
+  if (/^mago/.test(d.source ?? "")) return false;
+  if (message === "Undefined variable: $this") return true;
+  if (/^(Call to an undefined method|Access to an undefined property) (PHPUnit\\Framework\\TestCase|Pest\\PendingCalls\\\w+)[|:]/.test(message)) return true;
+  // What `$this` gives PHPStan is `mixed`, as is all that follows; Mago checks those types with the binding.
+  return /\bmixed\b/.test(message);
 }
 
 /**
