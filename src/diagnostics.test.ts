@@ -69,6 +69,21 @@ it('works', function () {
   assert.deepEqual(kept("/p/tests/Unit/ATest.php", text, list), ["null-array-access"]);
 });
 
+test("checks $this in Pest tests, except properties a test sets", () => {
+  const text = `<?php
+beforeEach(function () { $this->user = 1; });
+it('works', function () {
+    $this->gte('/');
+    $this->user->name;
+});`;
+  const list = [
+    at(text, "$this->user = 1", "non-existent-property", "Property `$user` does not exist on class `Tests\\TestCase`."),
+    at(text, "$this->gte", "non-existent-method", "Method `gte` does not exist on type `Tests\\TestCase`."),
+    at(text, "$this->user->name", "mixed-property-access", "Attempting to access a property on a non-object type (`mixed`)."),
+  ];
+  assert.deepEqual(kept("/p/tests/Feature/ATest.php", text, list), ["non-existent-method"]);
+});
+
 test("shows unproven types as warnings and mixed values as hints", () => {
   const d = (code: string, message = "") => ({ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, message, code, source: "mago", severity: 1 });
   assert.equal(severityOf(d("possibly-null-argument")), 2);

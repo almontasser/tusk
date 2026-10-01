@@ -686,6 +686,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_the_test_case_on_this_in_pest_tests() {
+        let mut files = crate::testing::PEST.to_vec();
+        files.push(("tests/Feature/HomeTest.php", "<?php\nit('loads', function () {\n    $this-><|>\n});\n"));
+        assert_eq!(labels(&complete_at(&files)), vec!["assertTrue", "get"]);
+    }
+
+    #[test]
     fn completes_static_members_constants_and_enum_cases() {
         let files = |t| [("lib.php", LIB), ("t.php", t)];
         let items = complete_at(&files("<?php\nuse App\\Models\\User;\nUser::<|>\n"));

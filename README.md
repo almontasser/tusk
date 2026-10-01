@@ -63,7 +63,7 @@ file to change when you add it.
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
-| Laravel | The PHP server doesn't write Laravel LSP's Pest helper file (`storage/framework/testing/_pest.php`); Pest's `$this` problems are filtered instead. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
+| Laravel | Pest's test closures are bound to one test case for all of `tests/`: the first class `tests/Pest.php` names that extends PHPUnit's `TestCase`, even where `in()` binds a folder to another, so a Unit test can call a Feature test case's method unreported. Properties a test sets on `$this`, such as in `beforeEach()`, aren't checked, and what's read from them is `mixed`. Vite assets complete from `resources/` only, though any existing file in the project checks as found. `Route::view()` with an array of views gets no hover. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
@@ -2646,9 +2646,10 @@ the editor sets `XDEBUG_MODE=coverage` for Xdebug. Only the folders in
 `phpunit.xml`'s `<source>` are measured. In Sail, the container's PHP must have
 one of them, as Sail's images do when `SAIL_XDEBUG_MODE` includes `coverage`.
 
-In Pest files, `$this` in a test is the project's test case, which Mago
-can't see, so the editor hides its problems about `$this` on those
-lines.
+In Pest files, `$this` in a test is the project's test case, read from
+`pest()->extend()` or `uses()` in `tests/Pest.php`, so `$this->` completes the
+test case's methods and a misspelled one is reported. Properties a test sets on
+`$this` aren't reported.
 
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
@@ -3549,8 +3550,8 @@ problem. Laravel's root aliases, such as `use DB;`, resolve too: the editor
 writes stubs for them that the PHP server and Mago read. It also gives Mago corrected
 copies of the Laravel and Pest files whose types are wider than what your code
 gets back, as Larastan does: `__()` returns a string, `auth()->user()` your
-user model, a test's `$this` your test case, and `shouldReceive()` takes
-arguments. Problems Mago can't prove, such as a value that may be null, show
+user model, and `shouldReceive()` takes arguments. A Pest test's `$this` is
+your test case, which the PHP server reads from `tests/Pest.php`. Problems Mago can't prove, such as a value that may be null, show
 as warnings; using a value of unknown type shows as a hint.
 
 ⌥⏎ on a Mago problem offers Mago's own fix, such as removing an unused import,
