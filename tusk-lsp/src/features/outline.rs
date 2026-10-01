@@ -283,8 +283,8 @@ impl<'p, 'a> Outliner<'p, 'a> {
 
     fn method(&self, m: &Method<'_>) -> Value {
         let span = m.span();
-        let (body, returns, statements) = match &m.body {
-            MethodBody::Abstract(_) => (Value::Null, vec![], vec![]),
+        let (body, returns, statements, body_statements) = match &m.body {
+            MethodBody::Abstract(_) => (Value::Null, vec![], vec![], vec![]),
             MethodBody::Concrete(b) => {
                 let mut found = vec![];
                 let mut stack = vec![Node::Block(b)];
@@ -312,7 +312,10 @@ impl<'p, 'a> Outliner<'p, 'a> {
                         _ => None,
                     })
                     .collect();
-                (self.range(b.left_brace.end.offset, b.right_brace.start.offset), found.into_iter().map(|e| self.node(e)).collect(), statements)
+                // Every top-level statement's span; an `if` with a braced block and no `else` also gives its
+                // condition and its block's statements, as the automations designer writes rules.
+                let body_statements = b.statements.iter().map(|s| self.body_statement(s)).collect();
+                (self.range(b.left_brace.end.offset, b.right_brace.start.offset), found.into_iter().map(|e| self.node(e)).collect(), statements, body_statements)
             }
         };
         let params: Vec<Value> = m
@@ -341,7 +344,30 @@ impl<'p, 'a> Outliner<'p, 'a> {
             "body": body,
             "returns": returns,
             "statements": statements,
+            "bodyStatements": body_statements,
         })
+    }
+
+    fn body_statement(&self, s: &Statement<'_>) -> Value {
+        let span = self.span(s.span());
+        match s {
+            Statement::Expression(_) => json!({ "kind": "expression", "span": span }),
+            Statement::If(i) => match &i.body {
+                IfBody::Statement(b) if b.else_if_clauses.is_empty() && b.else_clause.is_none() => match b.statement {
+                    Statement::Block(block) => json!({
+                        "kind": "if",
+                        "span": span,
+                        "condition": self.span(i.condition.span()),
+                        "then": block.statements.iter().map(|s| self.span(s.span())).collect::<Vec<_>>(),
+                        "open": self.at(block.left_brace.end.offset),
+                        "close": self.at(block.right_brace.start.offset),
+                    }),
+                    _ => json!({ "kind": "other", "span": span }),
+                },
+                _ => json!({ "kind": "other", "span": span }),
+            },
+            _ => json!({ "kind": "other", "span": span }),
+        }
     }
 
     /// The start of the docblock directly above `offset`, with only whitespace between.
@@ -857,6 +883,19 @@ class PostResource extends BaseResource
         assert!(other["body"].is_null());
         assert_eq!(other["abstract"], true);
         assert_eq!(other["visibility"], "protected");
+    }
+
+    #[test]
+    fn gives_body_statements_with_if_blocks() {
+        let text = "<?php\nclass O\n{\n    public function updated(Order $order): void\n    {\n        if ($order->wasChanged('status')) {\n            $order->user?->notify(new X($order));\n        }\n        log('x');\n        if ($a) { b(); } else { c(); }\n        foreach ($a as $b) {}\n    }\n}\n";
+        let out = run(text);
+        let stmts = method(&out["classes"][0], "updated")["bodyStatements"].as_array().unwrap().clone();
+        let kinds: Vec<&str> = stmts.iter().map(|s| s["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["if", "expression", "other", "other"]);
+        assert_eq!(at(text, &stmts[0]["condition"]), "$order->wasChanged('status')");
+        assert_eq!(at(text, &stmts[0]["then"][0]), "$order->user?->notify(new X($order));");
+        assert_eq!(at(text, &stmts[1]["span"]), "log('x');");
+        assert!(at(text, &stmts[0]["span"]).ends_with('}'));
     }
 
     #[test]

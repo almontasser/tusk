@@ -1620,6 +1620,7 @@ const actions: Action[] = [
   { label: "Laravel: Environment Settings…", run: () => root && void import("./envsettings").then((m) => m.openEnvSettings()) },
   { label: "Laravel: Add Sample Records…", run: () => root && void import("./sampledata").then((m) => m.sampleRecordsPicker()) },
   { label: "Laravel: Model Access…", run: () => root && void import("./filamentview").then((m) => m.openAccessPicker()) },
+  { label: "Laravel: Automations…", run: () => root && void import("./automationsview").then((m) => m.openAutomationsPicker()) },
   { label: "Laravel: New Enum…", run: () => root && void import("./enumdesigner").then((m) => m.openNewEnum()) },
   { label: "Open in Enum Designer", run: () => active && void import("./enumdesigner").then((m) => m.openEnumDesigner(active)), when: () => /\/app\/.*Enums?\/\w+\.php$|Enum\.php$/.test(active) },
   { label: "Laravel: New Element…", run: () => root && newLaravelElement() },

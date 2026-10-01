@@ -52,6 +52,7 @@ file to change when you add it.
 | Filament designer | Works with Filament 4 and later. The canvas draws components as Filament does, close enough to judge a layout, but it isn't Filament rendering the page; **Open in the browser** shows the real one. Closures show as code, and conditions only as the designer writes them (`$get('field')` compared with values). The palette and settings come from the project's Filament and plugins, read with the app's PHP; a project whose app doesn't boot shows no panels. Relation managers find their model through the resource that registers them. Panel settings read the calls on `$panel` in `panel()`, not ones inside `if` blocks or other methods. Tenancy's setup writes the user model's side; each resource's model still needs its relationship to the tenant, which the settings list. Widget values the designer reads are the ones it writes (a model's `query()`, `where` conditions, and one count or aggregate); anything else shows as code. |
 | Model designer | Indexes over several columns and foreign keys to other columns than `id` show as they are but can't be edited. Renaming or changing a column needs a database that supports it (SQLite 3.25 and later, MySQL, PostgreSQL). A model whose table can't be read shows the columns its fillable attributes and casts name. |
 | Environment settings | The settings edit the project's `.env`, not `.env.testing` or other environments' files. Mail service keys come from the service's entry in `config/services.php`, read as text, so keys built in code aren't shown. Values that differ from what the app uses are compared after `${VAR}` references are filled in, but not with a config file's own changes, such as a cast. |
+| Automations | Conditions are all joined with **and**; a rule with **or** shows as code. The designer reads and writes one observer per model: the one named for it, or else the first the app registers; others are listed with a link. A rule written in another shape, such as an `if` with an `else`, shows as code. Setting a field isn't offered for deleted records, since they aren't saved again. |
 | New projects | The first Filament user is created only on SQLite, since other databases need their server first; `php artisan make:filament-user` creates it later. Front-end packages need npm, pnpm, Bun, or Yarn on your PATH. |
 | Mago analysis | The PHP server runs Mago's analyzer and linter in its own process, pinned to Mago 1.50.0, so a newer Mago's rules and fixes arrive only with an app update. It reads the `mago.toml` options it uses (the analyzer's switches, excludes, and ignored codes, and the linter's integrations and rules) and ignores the rest. Blade views are still checked with Mago's command line, which parses the project again for each check. **Settings > PHP Analysis** doesn't edit the linter's integrations, a rule's own options, or ignores limited to some paths; edit those in `mago.toml`. Once a project has its own `mago.toml`, Mago no longer gets Tusk's corrected copies of Laravel's vendor files. |
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
@@ -1142,6 +1143,34 @@ When a value the booted app uses differs from `.env`, the row says so: the
 config is cached, or the config file doesn't read the key. With a cached
 config, **Clear the config cache** runs `config:clear`. A key new to `.env` can
 be added to `.env.example` too, with secrets left empty.
+
+## Automations
+
+Automations are rules such as "when an order's status becomes shipped, email
+the customer". Tusk writes them as the model's observer. To open them, click
+**Automations** in the model designer, **Open in Automations** above an
+observer's class, or run **Laravel: Automations…**.
+
+- **When:** the record is created, updated, deleted, or restored (with soft
+  deletes), a field changes, or a field becomes a value, such as an enum case.
+- **If:** optional conditions that compare the record's fields with values,
+  such as `total` is at least 100. Enum fields offer their cases.
+- **Then:** send a notification, or set a field. A notification goes to every
+  user, users with a role, the record's user (such as the order's
+  `customer`), the signed-in user, or an email address. Pick from the app's
+  notifications that take the model, or none, or make one with **New
+  notification…**, which runs `make:notification`.
+
+Each change is saved at once. The first rule creates
+`App\Observers\OrderObserver` and registers it on the model with
+`#[ObservedBy]`. An observer the app registers elsewhere, such as with
+`Order::observe()` in a provider, is used as it is. Fields are set before the
+save, in `creating` or `updating`, so they're saved with the record;
+notifications are sent after it, in `created` or `updated`. A rule that does
+both is written in both methods under the same condition. A queued
+notification (one that implements `ShouldQueue`) is sent only while a queue
+worker runs, which the rule says. Code in the observer the designer can't read
+shows as code you can open, and stays as written.
 
 ## New Laravel projects and elements
 

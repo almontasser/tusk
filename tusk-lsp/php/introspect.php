@@ -1417,6 +1417,67 @@ function envSettings(array $keys): array
     ];
 }
 
+/**
+ * What a model's Automations view needs: the observers the app registers for it (by `#[ObservedBy]` or `observe()`
+ * elsewhere), closures listening to its events, the notifications that queue, the user model, the roles, and the queue.
+ */
+function modelObservers(string $class, string $root): array
+{
+    if (!is_a($class, Model::class, true)) {
+        throw new InvalidArgumentException("Not a model: $class");
+    }
+    new $class(); // Boots the model, which registers its #[ObservedBy] observers.
+    $byAttribute = [];
+    foreach ((new ReflectionClass($class))->getAttributes('Illuminate\\Database\\Eloquent\\Attributes\\ObservedBy') as $attribute) {
+        foreach ((array) ($attribute->getArguments()[0] ?? []) as $observer) {
+            $byAttribute[] = ltrim($observer, '\\');
+        }
+    }
+    $observers = [];
+    $closures = [];
+    foreach (app('events')->getRawListeners() as $event => $listeners) {
+        if (!preg_match('/^eloquent\.(\w+): (.+)$/', $event, $m) || $m[2] !== $class) {
+            continue;
+        }
+        foreach ($listeners as $listener) {
+            if (is_string($listener) && str_contains($listener, '@')) {
+                $observer = ltrim(explode('@', $listener)[0], '\\');
+                $observers[$observer] ??= ['class' => $observer, 'file' => relativeFile($observer, $root), 'attribute' => in_array($observer, $byAttribute, true)];
+            } elseif ($listener instanceof Closure) {
+                $r = new ReflectionFunction($listener);
+                $closures[] = ['event' => $m[1], 'file' => $r->getFileName() ? ltrim(str_replace($root, '', $r->getFileName()), '/') : null, 'line' => $r->getStartLine()];
+            }
+        }
+    }
+    $queued = [];
+    foreach (classesIn($root . '/app') as $notification) {
+        try {
+            if (is_subclass_of($notification, 'Illuminate\\Notifications\\Notification') && is_subclass_of($notification, 'Illuminate\\Contracts\\Queue\\ShouldQueue')) {
+                $queued[] = $notification;
+            }
+        } catch (Throwable) {
+        }
+    }
+    $roles = null;
+    if (class_exists('Spatie\\Permission\\Models\\Role')) {
+        try {
+            $roles = Spatie\Permission\Models\Role::query()->pluck('name')->all();
+        } catch (Throwable) {
+            $roles = [];
+        }
+    }
+    return [
+        'observers' => array_values($observers),
+        'closures' => $closures,
+        'queued' => $queued,
+        'user' => config('auth.providers.users.model'),
+        'roles' => $roles,
+        'queue' => config('queue.default'),
+        // Laravel 10.44 added the attribute; older apps register observers with observe() in a provider.
+        'attribute' => class_exists('Illuminate\\Database\\Eloquent\\Attributes\\ObservedBy'),
+    ];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1445,6 +1506,7 @@ try {
         'porters' => porters($root),
         'notifications' => appNotifications($root),
         'env-settings' => envSettings(array_slice($argv, 3)),
+        'observers' => modelObservers($argv[3], $root),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),

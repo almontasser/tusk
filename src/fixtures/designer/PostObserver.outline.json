@@ -1,0 +1,454 @@
+{
+  "errors": false,
+  "namespace": "App\\Observers",
+  "uses": [
+    {
+      "alias": "PostStatus",
+      "name": "App\\Enums\\PostStatus",
+      "kind": "class",
+      "span": [
+        33,
+        58
+      ]
+    },
+    {
+      "alias": "Post",
+      "name": "App\\Models\\Post",
+      "kind": "class",
+      "span": [
+        59,
+        79
+      ]
+    },
+    {
+      "alias": "User",
+      "name": "App\\Models\\User",
+      "kind": "class",
+      "span": [
+        80,
+        100
+      ]
+    },
+    {
+      "alias": "PostPublished",
+      "name": "App\\Notifications\\PostPublished",
+      "kind": "class",
+      "span": [
+        101,
+        137
+      ]
+    },
+    {
+      "alias": "Notification",
+      "name": "Illuminate\\Support\\Facades\\Notification",
+      "kind": "class",
+      "span": [
+        138,
+        182
+      ]
+    }
+  ],
+  "useInsert": 183,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "PostObserver",
+      "fqn": "App\\Observers\\PostObserver",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        184,
+        1228
+      ],
+      "bodyStart": 204,
+      "bodyEnd": 1227,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "created",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                233,
+                243
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            209,
+            344
+          ],
+          "docStart": null,
+          "body": [
+            256,
+            343
+          ],
+          "returns": [],
+          "statements": [
+            {
+              "assigns": null,
+              "value": {
+                "kind": "static",
+                "class": "Illuminate\\Support\\Facades\\Notification",
+                "classSpan": [
+                  265,
+                  277
+                ],
+                "method": "send",
+                "args": {
+                  "open": 283,
+                  "close": 336,
+                  "items": [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "chain",
+                        "base": {
+                          "kind": "static",
+                          "class": "App\\Models\\User",
+                          "classSpan": [
+                            284,
+                            288
+                          ],
+                          "method": "role",
+                          "args": {
+                            "open": 294,
+                            "close": 302,
+                            "items": [
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": "string",
+                                  "value": "admin",
+                                  "quote": "single",
+                                  "interpolated": false,
+                                  "span": [
+                                    295,
+                                    302
+                                  ]
+                                },
+                                "span": [
+                                  295,
+                                  302
+                                ],
+                                "spread": false
+                              }
+                            ]
+                          },
+                          "span": [
+                            284,
+                            303
+                          ]
+                        },
+                        "calls": [
+                          {
+                            "name": "get",
+                            "nullsafe": false,
+                            "args": {
+                              "open": 308,
+                              "close": 309,
+                              "items": []
+                            },
+                            "span": [
+                              303,
+                              310
+                            ],
+                            "nameSpan": [
+                              305,
+                              308
+                            ]
+                          }
+                        ],
+                        "span": [
+                          284,
+                          310
+                        ]
+                      },
+                      "span": [
+                        284,
+                        310
+                      ],
+                      "spread": false
+                    },
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": "new",
+                        "class": "App\\Notifications\\PostPublished",
+                        "args": {
+                          "open": 329,
+                          "close": 335,
+                          "items": [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": "var",
+                                "name": "post",
+                                "span": [
+                                  330,
+                                  335
+                                ]
+                              },
+                              "span": [
+                                330,
+                                335
+                              ],
+                              "spread": false
+                            }
+                          ]
+                        },
+                        "span": [
+                          312,
+                          336
+                        ]
+                      },
+                      "span": [
+                        312,
+                        336
+                      ],
+                      "spread": false
+                    }
+                  ]
+                },
+                "span": [
+                  265,
+                  337
+                ]
+              }
+            }
+          ],
+          "bodyStatements": [
+            {
+              "kind": "expression",
+              "span": [
+                265,
+                338
+              ]
+            }
+          ]
+        },
+        {
+          "name": "updating",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                375,
+                385
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            350,
+            538
+          ],
+          "docStart": null,
+          "body": [
+            398,
+            537
+          ],
+          "returns": [],
+          "statements": [],
+          "bodyStatements": [
+            {
+              "kind": "if",
+              "span": [
+                407,
+                532
+              ],
+              "condition": [
+                411,
+                478
+              ],
+              "then": [
+                [
+                  494,
+                  522
+                ]
+              ],
+              "open": 481,
+              "close": 531
+            }
+          ]
+        },
+        {
+          "name": "updated",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                568,
+                578
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            544,
+            926
+          ],
+          "docStart": null,
+          "body": [
+            591,
+            925
+          ],
+          "returns": [],
+          "statements": [],
+          "bodyStatements": [
+            {
+              "kind": "if",
+              "span": [
+                600,
+                788
+              ],
+              "condition": [
+                604,
+                674
+              ],
+              "then": [
+                [
+                  690,
+                  737
+                ],
+                [
+                  750,
+                  778
+                ]
+              ],
+              "open": 677,
+              "close": 787
+            },
+            {
+              "kind": "if",
+              "span": [
+                826,
+                920
+              ],
+              "condition": [
+                830,
+                867
+              ],
+              "then": [
+                [
+                  883,
+                  910
+                ]
+              ],
+              "open": 870,
+              "close": 919
+            }
+          ]
+        },
+        {
+          "name": "deleted",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                956,
+                966
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            932,
+            1151
+          ],
+          "docStart": null,
+          "body": [
+            979,
+            1150
+          ],
+          "returns": [],
+          "statements": [],
+          "bodyStatements": [
+            {
+              "kind": "if",
+              "span": [
+                988,
+                1145
+              ],
+              "condition": [
+                992,
+                1038
+              ],
+              "then": [
+                [
+                  1054,
+                  1135
+                ]
+              ],
+              "open": 1041,
+              "close": 1144
+            }
+          ]
+        },
+        {
+          "name": "forceDeleted",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [
+            {
+              "name": "post",
+              "type": "Post",
+              "default": null,
+              "span": [
+                1186,
+                1196
+              ]
+            }
+          ],
+          "returnType": "void",
+          "attributes": [],
+          "span": [
+            1157,
+            1226
+          ],
+          "docStart": null,
+          "body": [
+            1209,
+            1225
+          ],
+          "returns": [],
+          "statements": [],
+          "bodyStatements": []
+        }
+      ]
+    }
+  ]
+}

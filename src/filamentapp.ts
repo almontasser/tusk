@@ -158,6 +158,17 @@ export const notifications = (root: string) => cached(root, "app:notifications",
 /** The config values the booted app uses for `keys`, and the mailers, queues, disks, stores, and tables `.env` chooses between. */
 export type EnvSettingsInfo = { values: Record<string, unknown>; mailers: Record<string, string | null>; queues: Record<string, string | null>; disks: Record<string, string | null>; stores: Record<string, string | null>; tables: Record<"jobs" | "sessions" | "cache", [string, boolean | null]>; configCached: boolean };
 export const envSettings = (root: string, keys: string[]) => cached(root, "env-settings", () => introspect<EnvSettingsInfo>(root, "env-settings", ...keys));
+/** What a model's Automations view needs: its registered observers, closures on its events, queued notifications, and more. */
+export type ObserversInfo = {
+  observers: { class: string; file: string | null; attribute: boolean }[];
+  closures: { event: string; file: string | null; line: number }[];
+  queued: string[];
+  user: string | null;
+  roles: string[] | null;
+  queue: string | null;
+  attribute: boolean;
+};
+export const observers = (root: string, model: string) => cached(root, `app:observers:${model}`, () => introspect<ObserversInfo>(root, "observers", model));
 /** Creates a permission or role, or grants or revokes a role's permission: `["grant", "editor", "update_post"]`. */
 export const changePermission = (root: string, args: string[]) => introspect<{ ok: boolean }>(root, "permission", ...args);
 export const model = (root: string, cls: string) => cached(root, `model:${cls}`, () => introspect<ModelDetails>(root, "model", cls));
