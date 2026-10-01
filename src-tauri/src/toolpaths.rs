@@ -55,7 +55,7 @@ pub fn path_env() -> std::ffi::OsString {
 /// A command that runs `program` with `path_env()` as its PATH. On Windows it finds the program as a shell would,
 /// runs `/bin/sh` and `/usr/bin/env` from Git for Windows, and opens no console window.
 pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
-    let path = path_env();
+    let path = path_env_for(&program.as_ref().to_string_lossy());
     #[cfg(windows)]
     let mut command = {
         use std::os::windows::process::CommandExt;
@@ -67,6 +67,20 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
     let mut command = std::process::Command::new(program);
     command.env("PATH", path);
     command
+}
+
+/// `path_env()` for running `program`. Git for Windows' `sh` and `env` run from outside Git Bash find none of its
+/// Unix programs, such as `stat` or `uname`, so its `usr/bin` comes first for them.
+pub fn path_env_for(program: &str) -> std::ffi::OsString {
+    let path = path_env();
+    #[cfg(windows)]
+    if matches!(program, "/bin/sh" | "/usr/bin/env") {
+        if let Some(bin) = git_unix_tool("sh.exe").and_then(|sh| Some(sh.parent()?.to_path_buf())) {
+            return std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap_or(path);
+        }
+    }
+    let _ = program;
+    path
 }
 
 /// The file Windows runs for `program`: a set or PATH tool by name, with its extension (`composer` is
@@ -92,6 +106,7 @@ pub fn resolve(program: &str) -> String {
 fn git_unix_tool(exe: &str) -> Option<PathBuf> {
     let set = CONFIG.read().unwrap().as_ref().and_then(|c| c.paths.get("git").filter(|p| !p.is_empty()).map(PathBuf::from));
     let git = set.or_else(|| which("git")).unwrap_or_else(|| PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"));
+    // usr/bin first: bin/ has only wrappers for sh and bash, and no other Unix programs beside them.
     git.ancestors().flat_map(|dir| [dir.join("usr/bin").join(exe), dir.join("bin").join(exe)]).find(|p| p.is_file())
 }
 

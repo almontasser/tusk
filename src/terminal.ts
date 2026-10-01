@@ -171,10 +171,22 @@ export async function openTerminal(
     ]);
   };
 
+  // Listened for before the process starts, since it can print at once: Windows' terminal first asks for the cursor
+  // position and waits for xterm's answer. What arrives early is held until the answer can go back (onData below).
+  const channel = `term-${crypto.randomUUID()}`;
+  const held: (() => void)[] = [];
+  let ready = false;
+  const whenReady = (f: () => void) => (ready ? f() : held.push(f));
+  let onProcessExit: (code: number | null) => void = () => {};
+  const unlisteners = await Promise.all([
+    listen<string>(`pty:${channel}`, (e) => whenReady(() => (term.write(e.payload), changed()))),
+    listen<number | null>(`pty-exit:${channel}`, (e) => whenReady(() => onProcessExit(e.payload))),
+  ]);
   let id: number;
   try {
-    id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols });
+    id = await invoke<number>("pty_spawn", { cwd, command: command ?? null, rows: term.rows, cols: term.cols, channel });
   } catch (e) {
+    unlisteners.forEach((u) => u());
     term.dispose();
     el.remove();
     if (!sessions.length) showPanel(false);
@@ -196,17 +208,14 @@ export async function openTerminal(
     }, 500);
   };
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  const unlisteners = await Promise.all([
-    listen<string>(`pty:${id}`, (e) => (term.write(e.payload), changed())),
-    listen<number | null>(`pty-exit:${id}`, (e) => {
-      session.exited = true;
-      clearTimeout(killTimer);
-      const code = typeof e.payload === "number" ? e.payload : null;
-      term.write(`\r\n\x1b[2m[Process exited${code === null ? "" : ` with code ${code}`}]\x1b[0m\r\n`);
-      renderTabs();
-      onExit?.(code);
-    }),
-  ]);
+  onProcessExit = (payload) => {
+    session.exited = true;
+    clearTimeout(killTimer);
+    const code = typeof payload === "number" ? payload : null;
+    term.write(`\r\n\x1b[2m[Process exited${code === null ? "" : ` with code ${code}`}]\x1b[0m\r\n`);
+    renderTabs();
+    onExit?.(code);
+  };
   const kill = () => invoke("pty_kill", { id });
   if (command)
     session.stop = () => {
@@ -217,6 +226,8 @@ export async function openTerminal(
     };
   const input = term.onData((data) => (followCwd(data), invoke("pty_write", { id, data }).catch(() => {})));
   const resize = term.onResize(({ rows, cols }) => invoke("pty_resize", { id, rows, cols }).catch(() => {}));
+  ready = true;
+  held.splice(0).forEach((f) => f());
   const observer = new ResizeObserver(() => el.offsetParent && fit.fit());
   observer.observe(el);
   session.dispose = () => {

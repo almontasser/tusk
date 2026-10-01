@@ -24,11 +24,13 @@ pub fn login_path() {
 }
 
 /// A path the way the frontend writes paths. On Windows that's with `/` between folders and a lowercase drive
-/// letter, as in Monaco's URIs (`c:/Users/me/app`); Windows takes either separator.
+/// letter, as in Monaco's URIs (`c:/Users/me/app`), and never verbatim (`\\?\`); Windows takes either separator.
 pub fn slash(path: impl AsRef<std::path::Path>) -> String {
     let path = path.as_ref().to_string_lossy();
     #[cfg(windows)]
     {
+        // Tauri's folders, such as the resource folder, can be verbatim paths (`\\?\C:\…`).
+        let path = path.strip_prefix(r"\\?\UNC\").map(|p| format!(r"\\{p}")).or_else(|| path.strip_prefix(r"\\?\").map(String::from)).unwrap_or(path.into_owned());
         let mut path = path.replace('\\', "/");
         if path.as_bytes().get(1) == Some(&b':') {
             path[..1].make_ascii_lowercase();

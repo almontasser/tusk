@@ -80,6 +80,8 @@ let host = { restartServers: () => {} };
 export const initToolPaths = (h: typeof host) => (host = h);
 
 let sent: { paths: Record<Tool, string> } | null = null;
+/** Whether a project's servers have started, with the paths `sent` then. */
+let serversStarted = false;
 
 /**
  * Sends the paths to the backend when they change: after a settings change, when a project opens (`opening`, whose
@@ -106,7 +108,9 @@ export async function configureTools(opening = false) {
     sent = before;
     return showError("Can't apply Settings > Tools", e);
   }
-  if (!opening && before && (before.paths.php !== paths.php || before.paths.node !== paths.node))
+  // Only servers that started with the old paths need a restart: at launch, the saved settings load after the defaults went out.
+  serversStarted ||= opening;
+  if (!opening && serversStarted && before && (before.paths.php !== paths.php || before.paths.node !== paths.node))
     toast(`${before.paths.php !== paths.php ? "PHP" : "Node.js"} changed. Restart the language servers to use it there too.`, {
       kind: "info",
       action: { label: "Restart Language Servers", run: () => host.restartServers() },

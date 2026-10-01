@@ -509,7 +509,9 @@ the rest of the code doesn't ask which system it's on.
   also finds the program as a shell would (PATHEXT, so `composer` is
   `composer.bat`), runs `/bin/sh` and `/usr/bin/env` from Git for Windows
   (found from where `git` is), and passes `CREATE_NO_WINDOW` so no console
-  window flashes. The frontend's shell scripts therefore run unchanged. Windows
+  window flashes. Those two get Git's `usr/bin` first on `PATH`
+  (`path_env_for`), since outside Git Bash's login profile its `sh` finds no
+  `stat` or `uname`. The frontend's shell scripts therefore run unchanged. Windows
   has no shims, since a program that starts `php` looks only for `php.exe`;
   `path_env()` puts each set tool's folder first instead. tusk-lsp's own
   `command()` passes `CREATE_NO_WINDOW` too, since PHP started by a process
@@ -520,7 +522,8 @@ the rest of the code doesn't ask which system it's on.
   closes, which happens however the app exits.
 - **Paths.** The frontend writes paths with `/` and, on Windows, a lowercase
   drive letter (`c:/Users/me/app`), as Monaco's URIs do. The backend's
-  `slash()` writes the paths it returns that way, `platform.ts` normalizes the
+  `slash()` writes the paths it returns that way, without the verbatim `\\?\`
+  prefix Tauri's resource folder has, `platform.ts` normalizes the
   file dialogs' paths, and `editor.ts` makes Monaco's `fsPath` use `/`.
   Windows takes either separator, so paths built with `/` work as they are.
   `isAbsolute()` replaces `startsWith("/")`. tusk-lsp turns URIs into
@@ -539,7 +542,10 @@ the rest of the code doesn't ask which system it's on.
   helper talks to the app over a local TCP port with a 128-bit secret, since
   Rust has no Unix sockets on Windows. `open_url` and `reveal_path` use `open`,
   `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux;
-  on Windows a restored terminal starts in its first folder. The terminal's
+  on Windows a restored terminal starts in its first folder. A terminal tab
+  listens on a channel before its process starts and holds the output until
+  xterm's input is connected, because Windows' ConPTY first asks for the cursor
+  position (`ESC[6n`) and waits for the answer. The terminal's
   default shell is PowerShell on Windows. The title bar leaves room for the
   window buttons only on a Mac (`.mac` on the root element), since Windows and
   Linux keep their own title bars.
@@ -7267,4 +7273,11 @@ backend and the dialogs normalizing what they hand over, because 65,000 lines
 of TypeScript build paths with `/` and Windows accepts them. Keys map Ctrl to
 the keymap's `Meta` rather than adding a second keymap. A proper
 Windows and Linux keymap, like PhpStorm's, can come later.
+
+Tested on Windows 11 on ARM (x64 build under emulation) in a UTM VM and on
+Debian in Docker. Windows found four problems that compiling couldn't: the
+resource folder's verbatim path broke the language servers' start, the
+terminal lost ConPTY's first question and hung, Git's `sh` had no `stat`, and
+the "PHP changed" toast showed at every launch on any system once a PHP path was
+set, because the saved settings load after the defaults are sent.
 
