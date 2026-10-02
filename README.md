@@ -1504,8 +1504,11 @@ project.
 ## Docblocks
 
 In PHP files, pressing Enter in a `/** … */` docblock starts the new line with a
-`*` lined up under the one above. Pressing Enter after `*/` goes back to the
-indentation of the `/**`.
+`*` lined up under the one above, and with the same spaces after it, so what you
+type next lines up with the text above, such as an array shape's next key.
+Pressing Enter after `*/` goes back to the indentation of the `/**`. Tab in a
+docblock line moves to tab stops counted from the text after `* `, not from the
+start of the line.
 
 ## Snippets
 
@@ -3970,6 +3973,7 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | --- | --- |
 | `src/main.ts` | Layout, file tree, tabs, save, and keyboard shortcuts |
 | `src/editor.ts` | Monaco setup, web workers, and the Blade, Vue, Svelte, and Astro grammars |
+| `src/docblock.ts` | Enter and Tab in PHP docblock lines |
 | `src/lsp.ts` | Language Server Protocol client and Monaco providers |
 | `src/indexexclude.ts`, `src/indexexcludedialog.ts` | The vendor folders the index and Mago skip, per project, and the dialog that edits them |
 | `src/diagnostics.ts` | Filters false problems out of the servers' diagnostics, and reads Mago's report |

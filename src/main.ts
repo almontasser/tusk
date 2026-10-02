@@ -11,6 +11,7 @@ import { fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
 import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOptions, initDebugger, isListening, isPaused, setExceptionClasses, setServerRoot, showBreakpoints, togglePauseOnExceptions, loadBreakpoints, resume, showDebugPanel, startDebugging, stepInto, stepOut, stepOver, stopDebugging, toggleBreakpoint, xdebugEnv } from "./debug";
 import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
+import { attachDocblocks } from "./docblock";
 import { indentation, type Properties } from "./editorconfig";
 import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
@@ -111,6 +112,7 @@ function addPane(): Pane {
   attachDebugger(ed);
   attachTestRunner(ed);
   attachSuperMethods(ed);
+  attachDocblocks(ed);
   ed.onContextMenu((e) => gutterMenu(ed, e) || codeMenu(ed, e));
   showInlineProblems(ed);
   ed.onDidChangeCursorPosition(() => saveSoon());

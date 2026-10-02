@@ -81,3 +81,14 @@ export function inComment(line: string, column: number): boolean {
   if (/^\s*\*/.test(before)) return true;
   return isComment(scan(before));
 }
+
+/** The line's ` *   ` prefix, when it's a docblock line under another one, else null. */
+export function docblockPrefix(line: string, previous: string): string | null {
+  if (!/^\s*(\/\*\*|\*(?!\/))/.test(previous)) return null;
+  return line.match(/^\s*\*(?!\/)\s*/)?.[0] ?? null;
+}
+
+/** Spaces that Tab inserts at `column` (0-based) on a line whose docblock text starts at `start`. */
+export function tabSpaces(column: number, start: number, tabSize: number): number {
+  return tabSize - ((column - start) % tabSize);
+}
