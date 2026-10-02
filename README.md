@@ -75,7 +75,7 @@ file to change when you add it.
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Settings designer | Renaming a property renames it in the class and the stored values, but not in code that reads it, such as a settings page's field. Dates are written as `CarbonImmutable` and rely on the package's global cast for dates. An encrypted property shows its encrypted value, and the designer writes `add` rather than `addEncrypted` for new ones. A settings migration that hasn't run yet isn't seen, so run pending migrations before applying. |
-| Platform | AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. Windows and Linux are newer and less tested than macOS. There, Ctrl does what ⌘ does in the shortcuts, so a shortcut that uses ⌃ on a Mac needs the Windows key. On Windows, the app's shell commands, such as installing packages or Git with a password prompt, run in Git for Windows' `sh`, and a restored terminal tab starts in its first folder. AI completion there uses the GPU through Vulkan, or the CPU. Windows on ARM isn't supported. |
+| Platform | AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. Windows and Linux are newer and less tested than macOS. There, Ctrl does what ⌘ does in the shortcuts, so a shortcut that uses ⌃ on a Mac needs the Windows key. On Windows, the app's shell commands, such as installing packages or Git with a password prompt, run in Git for Windows' `sh`. AI completion there uses the GPU through Vulkan, or the CPU. Windows on ARM isn't supported. |
 
 ### Missing
 
@@ -431,7 +431,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Spelling: file types to check | All: PHP, Blade, JavaScript, TypeScript, Vue, Svelte, Astro, Markdown, HTML, CSS, SCSS, JSON, YAML, plain text |
 | AI code completion, and its model | Off, Qwen2.5-Coder 3B |
 | Terminal font and font size | Same as the editor's |
-| Terminal shell and its arguments | Your login shell (`$SHELL`), `-l` |
+| Terminal shell and its arguments | Your login shell (`$SHELL`), `-l`; PowerShell, `-NoLogo` on Windows |
 | Tools: paths of PHP, Composer, Node.js, Git, the GitHub CLI, and Docker | Empty: found on your `PATH`; Composer is the bundled `composer.phar` |
 | Tools: check for app and tool updates automatically | On |
 | Project tree: show hidden files and folders | Off |
@@ -475,7 +475,10 @@ interpreters on this Mac, a file you choose, and the default from Settings. The
 choice is a project setting, which you can share in `tusk.json`.
 
 **Settings > Terminal** sets the shell for new terminal tabs and its arguments
-(`-l` by default, for a login shell).
+(`-l` by default, for a login shell). On Windows, the default is PowerShell
+with `-NoLogo`. When PowerShell's arguments don't run a command or script,
+Tusk adds a prompt that keeps its process in the folder you `cd` to, so the
+tab reopens there.
 
 ### Vim emulation
 

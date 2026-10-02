@@ -560,8 +560,8 @@ the rest of the code doesn't ask which system it's on.
   Keychain, Windows' Credential Manager, or Linux's Secret Service. The askpass
   helper talks to the app over a local TCP port with a 128-bit secret, since
   Rust has no Unix sockets on Windows. `open_url` and `reveal_path` use `open`,
-  `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux;
-  on Windows a restored terminal starts in its first folder. A terminal tab
+  `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux
+  and the process's memory on Windows (see "Sessions"). A terminal tab
   listens on a channel before its process starts and holds the output until
   xterm's input is connected, because Windows' ConPTY first asks for the cursor
   position (`ESC[6n`) and waits for the answer. The terminal's
@@ -3565,8 +3565,16 @@ and reopens the terminals, after the language servers start.
 A shell reopens in its last folder. `terminal.ts` can't see `cd`, so 500 ms
 after you press Enter in a shell, it asks for the shell process's working
 directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
-`PROC_PIDVNODEPATHINFO` (no subprocess). A folder that no longer exists falls
-back to the project folder.
+`PROC_PIDVNODEPATHINFO` (no subprocess). On Linux, it reads
+`/proc/<pid>/cwd`. On Windows, it reads the folder from the shell's process
+parameters with `NtQueryInformationProcess` and `ReadProcessMemory`. cmd and
+Git Bash move their process's folder when you `cd`, but PowerShell moves only
+its own location, on every system. So when the terminal starts PowerShell
+without a command or script of its own, `follow_location` in `pty.rs` adds
+`-NoExit -EncodedCommand` with a prompt that sets
+`[Environment]::CurrentDirectory` to the location and then runs your
+profile's prompt. A folder that no longer exists falls back to the project
+folder.
 
 Each reopened terminal writes its earlier output before its process starts,
 followed by a dimmed `[Restored from the last session]` line. `scrollbackText`
@@ -7332,4 +7340,16 @@ shows your data, such as a file's content or a database value, which must stay
 as it is. So shared helpers that show only the app's text (`iconButton`,
 `toast`, `status`, context menus, settings help) convert, and each panel wraps
 its other hints.
+
+### 2026-10-02: A Windows terminal's folder comes from its process
+
+A restored shell on Windows starts in the folder its process was last in, as
+on macOS and Linux. Shell integration that prints the folder (OSC 7 or
+Windows Terminal's OSC 9;9) would need each shell configured, and Windows'
+built-in ConPTY can drop sequences it doesn't know before xterm.js sees them.
+Reading the process's folder needs nothing from the shell and works for cmd
+and Git Bash as they are. PowerShell is the exception, since `cd` there doesn't
+move the process, so its prompt moves it. The prompt is passed as
+`-EncodedCommand`, because PowerShell's command-line parsing of quotes differs
+between versions.
 
