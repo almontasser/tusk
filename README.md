@@ -84,7 +84,7 @@ file to change when you add it.
 | --- | --- |
 | Debugger | With Sail, `sail debug` uses Sail's own Xdebug settings, so a port other than 9003 needs `SAIL_XDEBUG_CONFIG="client_host=host.docker.internal client_port=<port>"` in `.env`. A request to Xdebug that never answers, such as while PHP is stopped in another debugger, leaves the tab running until you stop it. Values in the editor come from the lines' `$names`, so a name from another scope, such as a closure's, can show the outer value. Xdebug can't tell at a throw whether code will catch the exception, so **Only uncaught** pauses later: in Laravel, when its handler starts rendering the exception, and elsewhere, at PHP's fatal error, when the stack is gone and chosen classes match by name only, without their subclasses. A queued job's exception isn't rendered, so it doesn't pause. |
 | Local history | Reverting to a label doesn't delete files created after it. Versions from before this release show as **Saved**. A closed file's text before its first change by another program is kept only if git has it staged. One burst of changes by other programs keeps at most 200 closed files, so a branch switch that rewrites more keeps only some. Deleting a folder keeps its first 500 files, leaving out ignored ones such as `vendor`. |
-| Refactoring | Rename, the Extracts, Introduce Field and Parameter, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable and Introduce Field assign the value before the statement that held it, as PhpStorm does, so an expression that ran only sometimes, such as in a `match` arm or on the right of `&&` or `??`, then runs every time, and one in a loop's condition runs once. Introduce Field initializes the property in the current method only, not in the constructor or its declaration. Extract Constant writes a class constant, not a global `const`. Inline reads code with the editor's own parser (`src/extractparse.ts`), which treats ternaries as boundaries and doesn't read heredocs. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline Constant, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable works within one function. Inline Method handles a body that's statements and one final `return`, and keeps the method when any call can't be inlined. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
+| Refactoring | Rename, the Extracts, Introduce Field and Parameter, Inline, and Move Class come from the PHP server. Move Class needs a PSR-4 map in `composer.json` that covers the new folder. Extract Method refuses a selection with a `return` that doesn't end its function, and doesn't check `break` or `continue` for a loop outside the selection. Extract Variable and Introduce Field assign the value before the statement that held it, as PhpStorm does, so an expression that ran only sometimes, such as in a `match` arm or on the right of `&&` or `??`, then runs every time, and one in a loop's condition runs once. The occurrences popup and the hint above the new name warn when that happens. Introduce Field initializes the property in the current method only, not in the constructor or its declaration. Extract Constant writes a class constant, not a global `const`. Change Signature finds overriding methods only in project files, not `vendor`, and a constructor's calls only where the class is named, so `new $class()` and the service container's `app(Money::class)` aren't changed. Change Signature, Inline, and Safe Delete don't see uses through dynamic names, such as `$this->$method()` or `constant('Order::LIMIT')`. Inline Variable needs a variable assigned once, by a statement of its own, in the block that holds its uses. Inline Method needs a body with at most one `return`, at its end, and keeps the method when any call can't be inlined. A call whose value is used, of a method with statements, is inlined only where its statement runs it every time and first: not on the right of `&&` or `??`, in a loop's condition or an `elseif`, or after another call in the statement. Introduce Parameter writes its edit in the server only when nothing else changes in the dialog; other changes go through Change Signature, written in the editor. Pull Members Up offers parents and interfaces in the project, not in `vendor`, and checks sibling classes found by a text search for the parent's name. Extract Interface changes parameter and private property types, not return types or public and protected properties, and reads a parameter's uses within its function only; it doesn't follow a value passed on. Moved code's unqualified constants are recognized by upper-case names. |
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. There's no comment that turns spelling off for one line: typos-lsp lets the project's ignore patterns replace a user-wide one. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
@@ -1601,6 +1601,11 @@ whole expression around it, and the status bar says so.
   `$invoice`, and a value of a class type the class's name. Every copy of the
   name is framed; type another name and every copy follows. A hint above it
   reminds you that ⏎ or Escape finishes, and ⌘Z undoes the whole extraction.
+- When an occurrence runs only sometimes, such as on the right of `&&` or `??`,
+  in a ternary's branch, or in a `match` arm, the occurrences popup says so:
+  **Will run every time, not only when $n > 1 is true**. With one occurrence,
+  the hint above the new name says it. For Introduce Parameter, an enclosing
+  `if` or `else` counts too, since every call would compute the value.
 - When the expression can't be extracted, a hint at the caret says why: it's
   written to (`$a['x'] = 1`), it uses an arrow function's parameters, or it's
   a declaration's default value, for example.
@@ -1633,45 +1638,77 @@ existing calls. The expression can't use the method's variables or `$this`,
 which don't exist at the calls, nor, unless it's a constant, `self`, `static`,
 or `parent`, which would name the calling class.
 
+When you only add the parameter in the dialog, the PHP server writes the
+change: the declaration, the methods that override it, and every call,
+including `new` for a constructor. A call passes the expression, with an
+import when it names a class, and a call that leaves out optional arguments
+before the new parameter passes it by name. A parameter without a default
+can't go on a method that overrides, or is overridden by, another one, whose
+signatures must still match. Other editors get **Introduce parameter** as a
+code action.
+
 Press ⌥⌘M to extract the selection, or an expression chosen as above, into a
 method. The PHP server writes the method with its parameters and return type; you
 then type its name in place.
 
 ## Inline
 
-Press ⌥⌘N on a method or function, at its declaration or at a call, to replace
-calls with its body, PhpStorm's **Inline Method**. Choose to inline every call
-and remove it, every call and keep it, or only the call under the cursor.
+Press ⌥⌘N on a variable, a constant, or a method or function, at its
+declaration or at a use, to replace its uses with its value or body, as
+PhpStorm's **Inline** does. The PHP server reads the code and writes the edit.
+A popup at the caret offers the choices: inline every use and remove the
+declaration, inline every use and keep it, or inline only the use under the
+cursor. The editor highlights what each choice changes. When the change would
+make something run differently, such as a call that would run three times
+instead of once, each choice says so, and you decide. ⌘Z undoes the whole
+change, in every file it touched.
 
-- Arguments take their parameters' places. One that's read more than once, or
-  not at all, and does more than read a value, such as `f()`, runs once into a
-  variable first. A missing argument gets the default.
-- `$this` becomes the object the call was made on, and a local variable whose
-  name the caller already uses gets a number, such as `$line2`.
+- The value gets parentheses only where the code around it would bind tighter:
+  `$total * 2` with `$total = $a + $b` becomes `($a + $b) * 2`, and
+  `[$total]` becomes `[$a + $b]`. In a string, a value that starts with `$`
+  goes in braces, as in `"Hi {$user->name}"`. A heredoc or a multi-line array
+  moves with its lines' indentation.
+- When it can't inline at all, a hint at the caret says why. Places it has to
+  leave, such as a call from another class to a method that reads private
+  properties, show in the **Refactoring Preview** with the reason, and the rest
+  applies from there.
+- Other editors get it as a `refactor.inline` code action, which inlines every
+  use.
+
+**Variables.** Inline works on a variable that a statement of its own assigns
+once, as `$total = $a + $b;`, in the block that holds its uses. It refuses, and
+says why, when the variable is a parameter, a closure captures it with `use`,
+something changes it later (including a function that takes it by reference,
+such as `sort($items)`), a variable its value reads changes before a use, or
+the function reads its variables by name with `compact()` or `extract()`.
+
+**Constants.** On a class constant or a global `const`, its uses take its
+value. Uses through subclasses count, unless a subclass declares its own. The
+value's names are written so they mean the same in each file: `self::BASE`
+becomes `Order::BASE` elsewhere, and a class the file doesn't import gets a
+`use` line. A use that can't reach what the value names, such as a private
+constant, is left. A constant declared with others in one statement is removed
+from it alone. Enum cases are objects, not values, so they can't be inlined.
+
+**Methods and functions.** Calls take the body.
+
+- Arguments take their parameters' places. An argument that does more than
+  read a value, such as `$this->load()`, and that the body reads more than
+  once, in a closure, or after other code runs, goes into a variable first, in
+  argument order; so does one the body changes. Named arguments find their
+  parameters, and a missing argument gets the default.
+- `$this` becomes the object the call was made on. In another class, `self`
+  and `__CLASS__` name the method's class, and class names get imports. A local
+  variable whose name the caller already uses gets a number, such as `$sum2`.
 - A call that's a statement of its own becomes the body's statements. A call
   whose value is used becomes the method's `return` expression, with any
-  statements before it placed ahead of the statement, which works for
-  `$x = …`, `return …`, and `echo …`.
-- It refuses, and says why, for a method with more than one `return`, one that
-  changes a parameter, a generator, a method a subclass overrides, and a call
-  from another class to a method that uses its object's members, which may be
-  private there. Calls it can't inline show in the **Refactoring Preview**.
-
-Press ⌥⌘N on a class constant, at its declaration or at a use such as
-`Order::LIMIT`, to replace it with its value. From the declaration, every use in
-the project is replaced and the constant is removed with its docblock; from a
-use, choose between all uses or only that one. Uses through subclasses count,
-unless a subclass declares its own. The value's class names are written so they
-still mean the same class in each file (`self::BASE` becomes `Order::BASE`
-elsewhere), and an expression gets parentheses. Uses in strings, such as
-`constant('Order::LIMIT')`, aren't found.
-
-Press ⌥⌘N on a variable to replace it with its value and remove the
-assignment. It works when the variable is assigned once, in a statement that
-starts its line (it may continue over several lines, such as a query builder
-chain), and never changed afterwards, within the same function, and no
-closure captures it with `use`; otherwise it says why it can't. The value gets
-parentheses when it's an expression, such as `($a + $b)`.
+  statements before the statement that holds it.
+- It refuses, and says why, for a method that returns early, a generator, one
+  with static variables, by-reference or variadic parameters, or
+  `__METHOD__`, and one a subclass overrides. It leaves a nullsafe call
+  (`?->`), a first-class callable such as `$this->total(...)`, and a call from
+  another class to a method that uses members private there. A method that
+  calls itself, or implements another class's method, stays.
 
 ## Change signature
 
@@ -3942,14 +3979,13 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src/graphqleditor.ts` | GraphQL schema completion and hovers |
 | `src/hierarchy.ts` | The type hierarchy view |
 | `src/safedelete.ts` | Safe Delete |
-| `src/refactor.ts` | Inline Variable and Change Signature |
+| `src/refactor.ts` | Inline's popup, Change Signature, Introduce Parameter, and Move Class |
 | `src/classrefactor.ts` | Pull Members Up and Extract Interface: the member dialog, targets, and applying the edits |
 | `src/classparse.ts` | Class members, their dependencies, moving class names between files, and the edits both refactorings make |
-| `src/refactorparse.ts` | Argument, parameter, declaration, and assignment parsing for the refactorings |
+| `src/refactorparse.ts` | Argument, parameter, and declaration parsing for Change Signature |
 | `src/signaturedialog.ts` | The Change Signature dialog |
 | `src/refactorpreview.ts` | The Refactoring Preview panel |
 | `src/extract.ts` | Extract Variable, Extract Constant, Introduce Field, and Extract Method's popups, naming in place, refusal hints, and Refactor This |
-| `src/extractparse.ts` | Inline's text-level reading: the call around a method name, where a statement goes, and the body to substitute |
 | `src/dom.ts` | The `h()` helper that builds DOM elements |
 | `src/phptypes.ts` | Reads PHP declarations, Laravel's names for methods and components, and route actions |
 | `src/icons.ts` | File and folder icons |

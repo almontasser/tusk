@@ -89,6 +89,16 @@ let close: (() => void) | null = null;
  */
 type Options = { value: string; select?: [number, number]; onCancel?: () => void; anchor?: HTMLElement; title?: string; numbered?: boolean; code?: boolean; question?: boolean };
 
+/** The open popup's warning line, below its title. */
+let note: HTMLElement | undefined;
+
+/** Shows a warning below the open popup's title, such as for the highlighted choice, or hides it without `text`. */
+export function pickNote(text?: string) {
+  if (!note) return;
+  note.hidden = !text;
+  note.textContent = text ? `⚠ ${text}` : "";
+}
+
 export function pick(placeholder: string, source: Source, delay = 0, initial?: Options) {
   close?.();
   lowered.clear();
@@ -102,7 +112,11 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
   const header = document.createElement("div");
   header.className = "popup-title";
   if (initial?.title) overlay.append(header);
-  overlay.append(input, list);
+  note = document.createElement("div");
+  note.className = "popup-note";
+  note.role = "status";
+  note.hidden = true;
+  overlay.append(note, input, list);
   const anchor = initial?.anchor?.getBoundingClientRect();
   if (anchor) {
     overlay.className = initial?.title ? "dropdown popup" : "dropdown";

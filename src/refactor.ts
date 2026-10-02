@@ -1,14 +1,14 @@
-// Inline Variable and Change Signature, refactorings written here rather than in the language server. Both refuse, with a
-// reason, when the code does something they can't rewrite safely.
+// Inline, Change Signature, Introduce Parameter, and Move Class. Inline is Tusk's server's (this is its UI), and so is
+// Introduce Parameter's edit when only the new parameter changes; Change Signature is written here, and refuses, with a
+// reason, when the code does something it can't rewrite safely.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
-import { applyWorkspaceEdit, tuskRequest, typeSymbol } from "./lsp";
-import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
-import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
+import { applyWorkspaceEdit, tuskRequest } from "./lsp";
+import { constructorCalls, inlinedValue, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
+import { declarationParts, formatArgs, formatParams, matchBracket, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { constantDeclaration, constantRefs, declarationPoint, expressionsAt, functionScope, inlineCall, reindentCode, inlinedValue, methodToInline, type Expr, type Inlinable } from "./extractparse";
-import { chosenAll, chosenTarget, extraction, pickAtCaret } from "./extract";
+import { ask, chosenAll, chosenTarget, errorText, extraction, interactive, refuse, type Target } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
@@ -22,291 +22,80 @@ let host: Host;
 const symbolsOf = async (model: monaco.editor.ITextModel) =>
   (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } })) ?? [];
 
-// ---- Inline variable ----
-
 // ---- Inline ----
 
-/** Inline (⌥⌘N), as in PhpStorm: the method or function called or declared at the cursor, the class constant, or else the variable. */
+/** What `tusk/inlineTarget` says the caret is on, and the choices to offer. */
+type InlineTarget = {
+  kind: "variable" | "constant" | "method";
+  title: string;
+  /** Each choice, what it changes, and what it alone would run differently, such as a call that would run twice. */
+  choices: { mode: "all" | "keep" | "this"; label: string; detail: string | null; warning: string | null; highlight: L.Range[] }[];
+  /** What would run differently whichever choice, such as a call that would run later. */
+  warnings: string[];
+};
+/** A server refactoring's edit, the places it left as they were, and a message for the status bar. */
+type ServerEdit = { edit: L.WorkspaceEdit; skipped: { uri: string; line: number; reason: string }[]; message: string };
+
+/**
+ * Inline (⌥⌘N), as in PhpStorm: the variable, constant, or method or function call at the caret. Tusk's server
+ * reads the code and writes the edit (`tusk/inlineTarget`, `tusk/inline`). This asks which uses to inline, with
+ * what each choice changes highlighted and anything that would run differently shown with it, then applies the
+ * edit as one undo step, showing first the places the server had to leave.
+ */
 export async function inline(editor: monaco.editor.ICodeEditor) {
-  if (!(await inlineMethod(editor)) && !(await inlineConstant(editor))) await inlineVariable(editor);
-}
-
-/** Asks in a popup at the caret; null for Escape. */
-const choose = (editor: monaco.editor.ICodeEditor, question: string, options: string[]) =>
-  new Promise<string | null>((resolve) => pickAtCaret(editor, question, options.map((label) => ({ label, run: () => resolve(label) })), () => resolve(null)));
-
-/**
- * Class names in code moved from the owner's file written in full, so its imports don't matter elsewhere:
- * `X::`, `new X`, `instanceof X`, and `catch (X`. `self::` and `static::` name the owner outside it.
- */
-function qualifyNames(code: string, ownerSource: string, owner: string | null, insideOwner: boolean): string {
-  const { resolve } = nameResolver(ownerSource);
-  const functions = new Map([...ownerSource.matchAll(/^use\s+function\s+([\w\\]+?)(?:\s+as\s+(\w+))?\s*;/gm)].map((m) => [(m[2] ?? m[1].split("\\").pop()!).toLowerCase(), `\\${m[1]}`]));
-  return outsideStrings(code, (c) =>
-    c
-      .replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
-        const lower = n.toLowerCase();
-        if (lower === "self" || lower === "static") return insideOwner || !owner ? n : `\\${owner}`;
-        return lower === "parent" ? n : `\\${resolve(n)}`;
-      })
-      .replace(/\b(new|instanceof|catch\s*\()\s+(?![\\$]|class\b|static\b|self\b)([A-Za-z_][\w\\]*)/g, (_, kw: string, n: string) => `${kw} \\${resolve(n)}`)
-      // Types in a closure's parameters and return type; PHP's own types are lowercase.
-      .replace(/(?<=[(,]\s*\??)(?<![\\\w$])([A-Z][\w\\]*)(?=\s+&?(?:\.\.\.)?\$)/g, (n) => `\\${resolve(n)}`)
-      .replace(/(\)\s*:\s*\??)([A-Z][\w\\]*)/g, (_, pre: string, n: string) => `${pre}\\${resolve(n)}`)
-      // Functions imported with `use function`.
-      .replace(/(?<![\\\w$>:])([a-z_]\w*)(?=\s*\()/gi, (n) => functions.get(n.toLowerCase()) ?? n),
-  );
-}
-
-/**
- * Inline Method: replaces calls of the method or function at the cursor with its body. From its declaration,
- * every call, then the method goes unless you keep it; from a call, that call or all of them. False when the
- * cursor isn't on a method or function name followed by `(`.
- */
-async function inlineMethod(editor: monaco.editor.ICodeEditor): Promise<boolean> {
   const model = editor.getModel();
   const pos = editor.getPosition();
-  const word = model && pos ? model.getWordAtPosition(pos) : null;
-  if (!model || !pos || !word || model.getLanguageId() !== "php") return false;
-  const text = model.getValue();
-  const wordStart = model.getOffsetAt({ lineNumber: pos.lineNumber, column: word.startColumn });
-  const wordEnd = wordStart + word.word.length;
-  if (!/^\s*\(/.test(text.slice(wordEnd)) || /\$$/.test(text.slice(0, wordStart))) return false;
-  // The declaration: here, or where Go to Definition leads from a call.
-  let def = model;
-  let at: L.Position = { line: pos.lineNumber - 1, character: pos.column - 1 };
-  const onDeclaration = /\bfunction\s+&?$/.test(text.slice(0, wordStart));
-  if (!onDeclaration) {
-    if (/\bnew\s+$/.test(text.slice(0, wordStart))) return false;
-    const found = await tuskRequest<L.Location[] | L.Location | null>("textDocument/definition", { textDocument: { uri: model.uri.toString() }, position: at }).catch(() => null);
-    const loc = Array.isArray(found) ? found[0] : found;
-    if (!loc) return host.status(`Can't find the declaration of ${word.word}. Tusk's PHP server must be running.`), true;
-    if (!loc.uri.startsWith("file:") || loc.uri.includes(".phar") || loc.uri.includes("/vendor/")) return host.status(`${word.word} is declared in a library, which can't be inlined.`), true;
-    def = await host.ensureModel(monaco.Uri.parse(loc.uri).fsPath);
-    at = loc.range.start;
+  if (!model || !pos || model.getLanguageId() !== "php" || editor.getOption(monaco.editor.EditorOption.readOnly)) return host.status("Inline works in PHP files.");
+  const version = model.getVersionId();
+  const at = { textDocument: { uri: model.uri.toString() }, position: { line: pos.lineNumber - 1, character: pos.column - 1 } };
+  let target: InlineTarget | null;
+  try {
+    target = await tuskRequest<InlineTarget>("tusk/inlineTarget", at);
+  } catch (e) {
+    return refuse(editor, errorText(e));
   }
-  const found = symbolAt(await symbolsOf(def), at.line, at.character);
-  if (!found || ![6, 12].includes(found.symbol.kind) || found.symbol.name !== word.word) return false;
-  const { symbol, container } = found;
-  const label = container ? `${container.name}::${symbol.name}()` : `${symbol.name}()`;
-  if (isConstructor(symbol)) return host.status("A constructor can't be inlined."), true;
-  const defText = def.getValue();
-  const method = methodToInline(defText, offsetAt(defText, symbol.selectionRange.end));
-  if ("error" in method) return host.status(`Can't inline ${label}: ${method.error}.`), true;
-  const owner = container ? fqnOf(def, container) : null;
-  if (container && (await overridesOf(def, container, symbol.name)).length) return host.status(`Can't inline ${label}: a subclass overrides it, so a call may run the override.`), true;
-
-  host.status(`Looking for calls to ${label}…`);
-  const refs = (await callsOf(def, symbol, container)).filter(
-    (r) => !(r.uri === def.uri.toString() && r.range.start.line >= symbol.range.start.line && r.range.start.line <= symbol.range.end.line),
-  );
-  const recursive = (await callsOf(def, symbol, container)).length !== refs.length;
-  host.status("");
-  const here = onDeclaration ? null : refs.find((r) => r.uri === model.uri.toString() && offsetAt(text, r.range.start) === wordStart);
-  if (!refs.length) return host.status(`Nothing calls ${label}.`), true;
-  const calls = refs.length === 1 ? "the only call" : `all ${refs.length} calls`;
-  const all = `Inline ${calls} and remove the ${container ? "method" : "function"}`;
-  const keep = `Inline ${calls} and keep it`;
-  const options = here && refs.length > 1 ? [all, keep, "Inline this call only"] : [all, keep];
-  const answer = await choose(editor, `Inline ${label}`, recursive ? options.filter((o) => o !== all) : options);
-  editor.focus();
-  if (!answer) return true;
-  const chosen = answer === "Inline this call only" ? [here!] : refs;
-
-  const texts = new Map<string, string>();
-  const raw = new Map<string, { start: number; end: number; text: string }[]>();
-  const skipped: Skipped[] = [];
-  let inlined = 0;
-  for (const ref of chosen) {
-    const path = monaco.Uri.parse(ref.uri).fsPath;
-    const source = texts.get(ref.uri) ?? (await textOf(path).catch(() => null));
-    if (source === null) continue;
-    texts.set(ref.uri, source);
-    const line = ref.range.start.line + 1;
-    const skip = (reason: string) => skipped.push({ path, line, reason });
-    const result = inlineAt(source, offsetAt(source, ref.range.start), symbol.name, method, defText, owner);
-    if ("error" in result) {
-      skip(result.error);
-      continue;
-    }
-    const edits = raw.get(ref.uri) ?? [];
-    if (result.edits.some((e) => edits.some((o) => e.start < o.end && o.start < e.end))) {
-      skip("it's inside another call being inlined");
-      continue;
-    }
-    raw.set(ref.uri, [...edits, ...result.edits]);
-    inlined++;
+  if (!target) return refuse(editor, "Tusk's PHP server isn't running yet. Try again once it has started.");
+  const warningFor = (c: InlineTarget["choices"][number]) => [...target.warnings, c.warning].filter(Boolean).join(" ") || undefined;
+  // One choice with nothing to warn about needs no question.
+  const mode =
+    target.choices.length === 1 && !warningFor(target.choices[0])
+      ? target.choices[0].mode
+      : await ask(editor, target.title, target.choices.map((c) => ({ label: c.label, detail: c.detail ?? undefined, warning: warningFor(c), value: c.mode, highlight: c.highlight })), true);
+  if (!mode) return;
+  if (model.getVersionId() !== version) return host.status("The file changed while choosing. Run Inline again.");
+  if (target.kind !== "variable") host.status(`${target.title.replace(/ = .*/, "")}: looking for uses…`);
+  let result: ServerEdit | null;
+  try {
+    result = await tuskRequest<ServerEdit>("tusk/inline", { ...at, mode });
+  } catch (e) {
+    host.status("");
+    return refuse(editor, errorText(e));
   }
-  // The declaration goes once every call is inlined, with its docblock.
-  if (answer === all && !skipped.length) {
-    const lines = defText.split("\n");
-    const [first, last] = deletionLines(lines, symbol.range.start.line + 1, symbol.range.end.line + 1);
-    const start = offsetAt(defText, { line: first - 1, character: 0 });
-    const end = last < lines.length ? offsetAt(defText, { line: last, character: 0 }) : defText.length;
-    texts.set(def.uri.toString(), defText);
-    raw.set(def.uri.toString(), [...(raw.get(def.uri.toString()) ?? []), { start, end, text: "" }]);
-  }
-  const changes: Record<string, L.TextEdit[]> = {};
-  for (const [u, edits] of raw) changes[u] = edits.map((e) => ({ range: { start: positionAt(texts.get(u)!, e.start), end: positionAt(texts.get(u)!, e.end) }, newText: e.text }));
-  const apply = () =>
-    applyWorkspaceEdit({ changes }).then(() =>
-      host.status(`Inlined ${label} in ${inlined} ${inlined === 1 ? "place" : "places"}${answer === all && !skipped.length ? " and removed it" : ""}.${Object.keys(changes).length > 1 ? " ⌘Z undoes it in every file." : ""}`),
-    );
-  if (skipped.length) showRefactorPreview(`Inline ${label}`, changes, texts, skipped, apply);
-  else await apply();
-  return true;
+  if (!result) return refuse(editor, "Tusk's PHP server isn't running yet. Try again once it has started.");
+  await applyServerEdit(result, target.title.replace(/ = .*/, ""));
 }
 
-/** The edits that inline one call, whose name starts at `nameStart`, or why it can't be. */
-function inlineAt(source: string, nameStart: number, name: string, method: Inlinable, ownerSource: string, owner: string | null): { edits: { start: number; end: number; text: string }[] } | { error: string } {
-  const nameEnd = nameStart + name.length;
-  const paren = source.slice(nameEnd).match(/^\s*\(/);
-  if (!paren) return { error: "not a call, such as a callable string" };
-  const argsOpen = nameEnd + paren[0].length - 1;
-  const argsClose = matchBracket(source, argsOpen);
-  if (argsClose < 0) return { error: "its arguments couldn't be read" };
-  const inner = source.slice(argsOpen + 1, argsClose);
-  if (inner.trim() === "...") return { error: "a first-class callable" };
-  const call = expressionsAt(source, nameStart).find((e) => e.end === argsClose + 1 && e.start <= nameStart);
-  if (!call) return { error: "the call couldn't be read" };
-  const through = source.slice(call.start, nameStart).trim();
-  if (through.endsWith("?->")) return { error: "a nullsafe call (?->)" };
-  const receiver = through.endsWith("->") ? through.slice(0, -2).trim() : null;
-  const types = parseTypeDeclarations(source);
-  const inside = owner !== null && [...types].reverse().find((t) => t.offset < nameStart)?.fqn === owner;
-  const code = `${method.statements}${method.result ?? ""}`;
-  if (owner && !inside) {
-    // Outside its class, the body may only reach members that are public there.
-    if (/\bparent\s*::/.test(code)) return { error: "the method calls parent::, which means another class here" };
-    const hidden = [...code.matchAll(/(?:\$this\s*->\s*|\b(?:self|static)\s*::\s*\$?)(\w+)(\s*\()?/g)].find(
-      ([, member, call]) => !new RegExp(call ? `\\bpublic\\s+(?:static\\s+)?function\\s+&?${member}\\b` : `\\bpublic\\s+(?:static\\s+|readonly\\s+)*(?:[?\\w\\\\|]+\\s+)?(?:\\$${member}\\b|const\\s+(?:\\w+\\s+)?${member}\\b)|(?:^|[;{}])\\s*const\\s+${member}\\b`).test(ownerSource),
-    );
-    if (hidden) return { error: `the method uses ${hidden[1]}, which isn't public outside its class` };
-  }
-  const qualify = (code: string) => (inside || !owner && source === ownerSource ? code : shortenNames(qualifyNames(code, ownerSource, owner, inside), source));
-  const m: Inlinable = {
-    ...method,
-    statements: qualify(method.statements),
-    result: method.result === null ? null : qualify(method.result),
-    params: method.params.map((p) => (p.defaultValue ? { ...p, defaultValue: qualify(p.defaultValue) } : p)),
-  };
-  const [from, to] = functionScope(source, nameStart);
-  const taken = new Set([...source.slice(from, to).matchAll(/\$(\w+)/g)].map((x) => x[1]));
-  const r = inlineCall(m, splitTopLevel(inner), receiver, taken);
-  if ("error" in r) return r;
-  const point = declarationPoint(source, [call]);
-  if ("error" in point) return point;
-  const body = reindentCode(r.body, point.indent);
-  const intro = [...r.statements.map((l) => point.indent + l), ...body];
-  const pure = (e: string) => /^(\$\w+|-?\d[\d_.]*|'[^']*'|true|false|null)$/i.test(e.trim());
-  if (point.replace) {
-    // The call is a statement of its own: the body takes its place.
-    const semicolon = source.indexOf(";", call.end);
-    const tail = r.result && !pure(r.result) ? [`${point.indent}${r.result};`] : [];
-    const code = [...intro, ...tail].join("\n").slice(point.indent.length);
-    return { edits: [{ start: call.start, end: semicolon + 1, text: code || "" }] };
-  }
-  if (r.result === null) return { error: "it returns nothing, but the call's value is used" };
-  const value = /^[\w$\\]+(\s*(->|::)\s*\$?\w+(\([^()]*\))?)*$|^\w+\([^()]*\)$/.test(r.result.trim()) ? r.result : `(${r.result})`;
-  if (!intro.length) return { edits: [{ start: call.start, end: call.end, text: value }] };
-  // Statements run before the statement holding the call, which is safe only where nothing else runs first.
-  const lead = source.slice(point.offset, call.start);
-  const follows = source.slice(call.end).match(/^\s*;/);
-  if (!follows || !/^(\$\w+(\s*->\s*\w+|\[[^\]]*\])*\s*=|return|echo|yield|throw)?\s*$/.test(lead)) return { error: "the method has statements, which can't run in the middle of this expression" };
-  return {
-    edits: [
-      { start: point.offset, end: point.offset, text: `${intro.join("\n").slice(point.indent.length)}\n${point.indent}` },
-      { start: call.start, end: call.end, text: value },
-    ],
-  };
+/** The edit's changes by file, as the refactoring preview lists them. */
+function changesOf(edit: L.WorkspaceEdit): Record<string, L.TextEdit[]> {
+  const changes: Record<string, L.TextEdit[]> = { ...(edit.changes ?? {}) };
+  for (const op of edit.documentChanges ?? []) if (!("kind" in op)) changes[op.textDocument.uri] = op.edits.filter((e): e is L.TextEdit => "range" in e);
+  return changes;
 }
 
 /**
- * Replaces a class constant with its value, at every use in the project and removing its declaration, or at
- * the use under the cursor only. False when the cursor isn't on a constant.
+ * Applies a server refactoring's edit, as one undo step in every file it changes. When the server left places as
+ * they were, the preview lists them with why, and the edit applies from there.
  */
-async function inlineConstant(editor: monaco.editor.ICodeEditor): Promise<boolean> {
-  const model = editor.getModel();
-  const pos = editor.getPosition();
-  const name = model && pos ? model.getWordAtPosition(pos)?.word : undefined;
-  if (!model || !pos || !name || model.getLanguageId() !== "php") return false;
-  const text = model.getValue();
-  const offset = model.getOffsetAt(pos);
-  const types = parseTypeDeclarations(text);
-  const bodyOf = (source: string, t: TypeDeclaration) => source.indexOf("{", t.offset);
-  // On a use (X::NAME) or on the declaration itself.
-  const here = constantRefs(text, name).find((r) => r.start <= offset && offset <= r.end);
-  const around = [...types].reverse().find((t) => t.offset < offset);
-  const declaredHere = around && constantDeclaration(text, name, bodyOf(text, around));
-  const onDeclaration = !here && declaredHere && !("error" in declaredHere) && declaredHere.start <= offset && offset <= declaredHere.end;
-  if (!here && !onDeclaration) return false;
-  const owner = here ? here.owner : around!.fqn;
-  const ownerPath = types.some((t) => t.fqn === owner) ? model.uri.fsPath : (await typeSymbol(owner))?.path;
-  const ownerText = ownerPath ? await textOf(ownerPath).catch(() => null) : null;
-  const ownerType = ownerText ? parseTypeDeclarations(ownerText).find((t) => t.fqn === owner) : undefined;
-  const decl = ownerText && ownerType ? constantDeclaration(ownerText, name, bodyOf(ownerText, ownerType)) : null;
-  if (!decl) return host.status(`Can't find the declaration of ${owner.split("\\").pop()}::${name} in the project.`), true;
-  if ("error" in decl) return host.status(`Can't inline ${name}: ${decl.error}.`), true;
-
-  host.status(`Looking for uses of ${name}…`);
-  // Subclasses that don't declare their own reach it as self::, static::, or by their own name.
-  const heirs = new Set([owner, ...(await descendantsOf(owner)).filter((d) => !constantDeclaration(d.text, name, bodyOf(d.text, d.type))).map((d) => d.type.fqn)]);
-  const matches = await invoke<Match[]>("search_text", { root: host.root(), query: { text: `::\\s*${name}\\b`, regex: true, caseSensitive: true, wholeWord: false }, include: "*.php" });
-  const uses: { path: string; text: string; start: number; end: number }[] = [];
-  for (const path of new Set([model.uri.fsPath, ...matches.map((m) => m.path)])) {
-    const source = await textOf(path).catch(() => null);
-    if (source !== null) for (const r of constantRefs(source, name)) if (heirs.has(r.owner)) uses.push({ path, text: source, start: r.start, end: r.end });
-  }
-  host.status("");
-  const label = `${owner.split("\\").pop()}::${name}`;
-  let chosen = uses;
-  if (here && uses.length > 1) {
-    const all = `Inline all ${uses.length} uses and remove ${label}`;
-    const answer = await choose(editor, `Inline ${label} = ${decl.value}`, [all, "Inline this use only"]);
-    editor.focus();
-    if (!answer) return true;
-    if (answer !== all) chosen = uses.filter((u) => u.path === model.uri.fsPath && u.start === here.start);
-  }
-  const changes: Record<string, L.TextEdit[]> = {};
-  const edit = (path: string, source: string, start: number, end: number, newText: string) =>
-    (changes[monaco.Uri.file(path).toString()] ??= []).push({ range: { start: positionAt(source, start), end: positionAt(source, end) }, newText });
-  for (const u of chosen) {
-    const inside = [...parseTypeDeclarations(u.text)].reverse().find((t) => t.offset < u.start)?.fqn === owner;
-    edit(u.path, u.text, u.start, u.end, shortenNames(inlinedValue(decl.value, ownerText!, owner, inside), u.text));
-  }
-  // The declaration goes too once nothing uses it, with its docblock and a blank line.
-  if (chosen.length === uses.length) {
-    const lines = ownerText!.split("\n");
-    const [first, last] = deletionLines(lines, positionAt(ownerText!, decl.start).line + 1, positionAt(ownerText!, decl.end).line + 1);
-    edit(ownerPath!, ownerText!, offsetAt(ownerText!, { line: first - 1, character: 0 }), last < lines.length ? offsetAt(ownerText!, { line: last, character: 0 }) : ownerText!.length, "");
-  }
-  await applyWorkspaceEdit({ changes });
+async function applyServerEdit(result: ServerEdit, title: string) {
+  const changes = changesOf(result.edit);
   const files = Object.keys(changes).length;
-  host.status(`Inlined ${label} in ${chosen.length} ${chosen.length === 1 ? "place" : "places"}${chosen.length === uses.length ? " and removed it" : ""}.${files > 1 ? " ⌘Z undoes it in every file." : ""}`);
-  return true;
-}
-
-/** Replaces the variable at the cursor with its value everywhere in its function, and removes the assignment. */
-export async function inlineVariable(editor: monaco.editor.ICodeEditor) {
-  const model = editor.getModel();
-  const pos = editor.getPosition();
-  if (!model || !pos || model.getLanguageId() !== "php") return host.status("Inline Variable works in PHP files.");
-  const line = model.getLineContent(pos.lineNumber);
-  const name = [...line.matchAll(/\$(\w+)/g)].find((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1)?.[1];
-  if (!name || name === "this") return host.status("Put the cursor on a variable to inline it.");
-  // The enclosing function, method, or closure, or the whole file for top-level code.
-  const [start, end] = functionScope(model.getValue(), model.getOffsetAt(pos));
-  const [from, to] = [model.getPositionAt(start).lineNumber, model.getPositionAt(end).lineNumber];
-  const plan = planInline(model.getLinesContent(), name, from, to);
-  if ("error" in plan) return host.status(`Can't inline $${name}: ${plan.error}.`);
-  const edits: monaco.editor.IIdentifiedSingleEditOperation[] = plan.uses.map((u) => ({
-    range: new monaco.Range(u.line, u.column, u.line, u.column + name.length + 1),
-    text: plan.value,
-  }));
-  const [a, z] = [plan.assignment, plan.assignmentEnd];
-  edits.push({ range: z < model.getLineCount() ? new monaco.Range(a, 1, z + 1, 1) : new monaco.Range(a, 1, z, model.getLineMaxColumn(z)), text: "" });
-  model.pushEditOperations(editor.getSelections(), edits, () => null);
-  host.status(`Inlined $${name} in ${plan.uses.length} ${plan.uses.length === 1 ? "place" : "places"}. Undo with ⌘Z.`);
+  const apply = () => applyWorkspaceEdit(result.edit).then(() => host.status(`${result.message}${files > 1 ? " ⌘Z undoes it in every file." : ""}`));
+  if (!result.skipped.length) return apply();
+  const texts = new Map<string, string>();
+  for (const uri of new Set([...Object.keys(changes), ...result.skipped.map((s) => s.uri)])) texts.set(uri, await textOf(monaco.Uri.parse(uri).fsPath).catch(() => ""));
+  const skipped: Skipped[] = result.skipped.map((s) => ({ path: monaco.Uri.parse(s.uri).fsPath, line: s.line, reason: s.reason }));
+  host.status("");
+  showRefactorPreview(title, changes, texts, skipped, apply);
 }
 
 // ---- Change signature ----
@@ -330,7 +119,12 @@ export const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.
  * Opens the Change Signature dialog for the method or function at the cursor, then rewrites its declaration, its
  * overrides in classes that extend or implement its class, and every call Tusk's server finds.
  */
-export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: { expr: Expr; uses: Expr[]; name: string; type: string; constant: boolean }) {
+/** An expression in the source, as offsets. `text` is the source between them. */
+type Expr = { start: number; end: number; text: string };
+/** Introduce Parameter's expression: the server's target, whether all its occurrences go, and its suggestion. */
+type Introduced = { target: Target; all: boolean; expr: Expr; uses: Expr[]; name: string; type: string; constant: boolean };
+
+export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: Introduced) {
   const model = editor.getModel();
   const pos = introduce ? editor.getModel()?.getPositionAt(introduce.expr.start) : editor.getPosition();
   if (!model || !pos || model.getLanguageId() !== "php") return host.status("Change Signature works in PHP files.");
@@ -360,6 +154,25 @@ export async function changeSignature(editor: monaco.editor.ICodeEditor, introdu
   if (model.getVersionId() !== version) return host.status("The file changed while the dialog was open. Run Change Signature again.");
   // The expression's uses become the new parameter, if it's still there.
   const added = introduce && chosen.signature.params.find((p) => !p.from && (p.callValue === introduce.expr.text || p.defaultValue === introduce.expr.text));
+  // Only the new parameter changed: Tusk's server writes it, its calls, and overriding methods.
+  if (introduce && added && !chosen.preview && onlyAdded(parts, chosen.signature, added)) {
+    let result: ServerEdit | null;
+    try {
+      result = await tuskRequest<ServerEdit>("tusk/introduceParameter", {
+        textDocument: { uri: model.uri.toString() },
+        range: introduce.target.range,
+        all: introduce.all,
+        name: added.name,
+        type: added.type,
+        default: added.defaultValue,
+        value: added.callValue === introduce.expr.text ? undefined : added.callValue,
+        position: chosen.signature.params.indexOf(added),
+      });
+    } catch (e) {
+      return refuse(editor, errorText(e));
+    }
+    if (result) return applyServerEdit(result, `Introduce Parameter in ${title}`);
+  }
   await plan(model, symbol, container, title, chosen.signature, chosen.preview, added ? introduce!.uses.map((u) => ({ ...u, text: `$${added.name}` })) : []);
 }
 
@@ -504,6 +317,21 @@ type Site = { path: string; line: number; nameStart: number; nameEnd: number; ar
 const applyRaw = (text: string, base: number, edits: Raw[]) =>
   [...edits].sort((a, b) => b.start - a.start).reduce((t, e) => t.slice(0, e.start - base) + e.text + t.slice(e.end - base), text);
 
+/** Whether a signature only adds `added` to the declaration's, leaving the rest as it was. */
+function onlyAdded(was: { modifiers: string; name: string; returnType: string; params: Param[] }, now: Signature, added: Param): boolean {
+  const rest = now.params.filter((p) => p !== added);
+  return (
+    now.name === was.name &&
+    now.modifiers === was.modifiers &&
+    now.returnType === was.returnType &&
+    rest.length === was.params.length &&
+    rest.every((p, i) => {
+      const q = was.params[i];
+      return p.from === q.name && p.name === q.name && p.type === q.type && p.defaultValue === q.defaultValue && p.byRef === q.byRef && p.variadic === q.variadic;
+    })
+  );
+}
+
 async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, container: L.DocumentSymbol | undefined, title: string, s: Signature, preview: boolean, bodyEdits: Raw[] = []) {
   host.status(`Looking for calls to ${symbol.name}…`);
   const texts = new Map<string, string>();
@@ -627,7 +455,8 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
 /**
  * Introduce Parameter (⌥⌘P): turns an expression in a method into a new parameter, through the Change Signature
  * dialog, so the name and position can be set there. Calls pass the expression, which must not use the method's
- * variables, since they don't exist at the call; Tusk's server checks that, and names and types the parameter.
+ * variables, since they don't exist at the call. Tusk's server checks that, names and types the parameter, and,
+ * when only the new parameter changes in the dialog, writes the edit (`tusk/introduceParameter`).
  */
 export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();
@@ -644,7 +473,7 @@ export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
     return { start, end, text: model.getValue().slice(start, end) };
   };
   const uses = (all ? target.occurrences : [target.range]).map(expr);
-  await changeSignature(editor, { expr: expr(target.range), uses, name: x.name, type: x.type ?? "", constant: x.constant });
+  await changeSignature(editor, { target, all, expr: expr(target.range), uses, name: x.name, type: x.type ?? "", constant: x.constant });
 }
 
 // ---- Move class ----
@@ -690,4 +519,6 @@ export async function moveClass(editor: monaco.editor.ICodeEditor) {
 
 export function initRefactor(h: Host) {
   host = h;
+  interactive["refactor.inline"] = inline;
+  interactive["refactor.extract.parameter"] = introduceParameter;
 }

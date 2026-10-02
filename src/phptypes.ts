@@ -341,3 +341,25 @@ export function shortenNames(text: string, code: string): string {
     }),
   );
 }
+
+/**
+ * A default value written into a call in another file: class names in full, so the owner's imports don't matter,
+ * and `self::` and `static::` naming the owner unless the call is inside it. Parentheses keep an expression whole.
+ */
+export function inlinedValue(value: string, ownerSource: string, owner: string, insideOwner: boolean): string {
+  const { resolve } = nameResolver(commentMask(ownerSource));
+  let out = outsideStrings(value, (code) =>
+    code.replace(/(?<![\\\w$>:])([A-Za-z_][\w\\]*)(?=\s*::)/g, (n) => {
+      const lower = n.toLowerCase();
+      if (lower === "self" || lower === "static") return insideOwner ? n : `\\${owner}`;
+      if (lower === "parent") return n;
+      return `\\${resolve(n)}`;
+    }),
+  );
+  // Parentheses when an operator outside brackets and strings would bind to the code around it.
+  let outer = out.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
+  while (/\([^()]*\)|\[[^[\]]*\]/.test(outer)) outer = outer.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");
+  // A sign counts too: `10 - -1` must not become `10--1`.
+  if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/\d\.\d/g, "0"))) out = `(${out})`;
+  return out;
+}

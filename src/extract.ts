@@ -6,7 +6,7 @@ import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { h } from "./dom";
 import { runTuskAction, tuskRequest } from "./lsp";
-import { pick, type Item } from "./palette";
+import { pick, pickNote, type Item } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
 import { symbolAt } from "./safedelete";
@@ -19,8 +19,11 @@ type Snippets = { insert(template: string, opts?: object): void; cancel(): void;
 
 /** What the server can extract into: `tusk/extractTargets`' and `tusk/extract`'s `kind`. */
 export type ExtractKind = "variable" | "constant" | "field" | "parameter";
-/** An expression the server offers, with the occurrences the same extraction could replace, itself included. */
-export type Target = { range: L.Range; text: string; occurrences: L.Range[] };
+/**
+ * An expression the server offers, with the occurrences the same extraction could replace, itself included, and for
+ * each, when it runs only sometimes, the condition, as "when $n > 1 is true": extracted, it would run every time.
+ */
+export type Target = { range: L.Range; text: string; occurrences: L.Range[]; conditions?: (string | null)[] };
 /** The server's edit: `\0` marks each place the new name goes, `name` is its suggestion. */
 export type Extraction = { edits: L.TextEdit[]; name: string; type: string | null; constant: boolean };
 
@@ -41,8 +44,11 @@ export function pickAtCaret(editor: Editor, title: string, items: Item[] | ((q: 
   anchor.remove();
 }
 
-/** Asks in a popup at the caret, highlighting in the editor what each option would change. Null for Escape. */
-function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; value: T; highlight: L.Range[] }[], code = false): Promise<T | null> {
+/**
+ * Asks in a popup at the caret, highlighting in the editor what each option would change, with its warning, if any,
+ * below the title while it's the one highlighted. Null for Escape.
+ */
+export function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; warning?: string; value: T; highlight: L.Range[] }[], code = false): Promise<T | null> {
   const marks = editor.createDecorationsCollection();
   const show = (ranges: L.Range[]) => {
     marks.set(ranges.map((r) => ({ range: toRange(r), options: { className: "refactor-highlight", overviewRuler: { color: "#4a9eff99", position: monaco.editor.OverviewRulerLane.Center } } })));
@@ -54,7 +60,15 @@ function ask<T>(editor: Editor, title: string, options: { label: string; detail?
       editor.focus();
       resolve(value);
     };
-    const items: Item[] = options.map((o) => ({ label: o.label, detail: o.detail, run: () => finish(o.value), preview: () => show(o.highlight) }));
+    const items: Item[] = options.map((o) => ({
+      label: o.label,
+      detail: o.detail,
+      run: () => finish(o.value),
+      preview: () => {
+        show(o.highlight);
+        pickNote(o.warning);
+      },
+    }));
     pickAtCaret(editor, title, items, () => finish(null), code);
   });
 }
@@ -90,7 +104,7 @@ function showHint(editor: Editor, node: HTMLElement, until: (hide: () => void) =
 }
 
 /** Why a refactoring can't run here: a hint at the caret until the caret moves or the text changes, and in the status bar. */
-function refuse(editor: Editor, message: string) {
+export function refuse(editor: Editor, message: string) {
   host.status(message);
   showHint(editor, h("div", { class: "naming-hint refactor-refusal", role: "alert" }, message), (hide) => {
     const timer = setTimeout(hide, 6000);
@@ -103,7 +117,8 @@ function refuse(editor: Editor, message: string) {
 const naming = new WeakMap<Editor, monaco.editor.IContextKey<boolean>>();
 
 /** A hint above the name being typed, until naming ends. */
-const showNamingHint = (editor: Editor) => showHint(editor, h("div", { class: "naming-hint" }, h("kbd", {}, "⏎"), " or ", h("kbd", {}, "Esc"), " to finish"), () => []);
+const showNamingHint = (editor: Editor, warning?: string) =>
+  showHint(editor, h("div", { class: "naming-hint" }, ...(warning ? [h("span", { class: "naming-warning" }, `⚠ ${warning}`), " · "] : []), h("kbd", {}, "⏎"), " or ", h("kbd", {}, "Esc"), " to finish"), () => []);
 const hideNamingHint = (editor: Editor) => hints.get(editor)?.();
 
 /** Enter and Escape finish the name, as in PhpStorm, instead of adding a line at every copy of it. */
@@ -132,7 +147,7 @@ function namingKey(editor: Editor): monaco.editor.IContextKey<boolean> {
  * Typing then renames them all at once. Edits without the name before the first one with it, such as an import,
  * are applied plainly, so the snippet spans only the code that changes.
  */
-function applyNamed(editor: Editor, edits: L.TextEdit[], name: string) {
+function applyNamed(editor: Editor, edits: L.TextEdit[], name: string, warning?: string) {
   const model = editor.getModel()!;
   const offsets = edits.map((e) => ({ start: model.getOffsetAt(toRange(e.range).getStartPosition()), end: model.getOffsetAt(toRange(e.range).getEndPosition()), text: e.newText }));
   offsets.sort((a, b) => a.start - b.start || a.end - b.end);
@@ -159,12 +174,12 @@ function applyNamed(editor: Editor, edits: L.TextEdit[], name: string) {
   editor.focus();
   snippets(editor).insert(template, { adjustWhitespace: false, undoStopBefore: false, undoStopAfter: true });
   namingKey(editor).set(true);
-  showNamingHint(editor);
+  showNamingHint(editor, warning);
 }
 
 // ---- Choosing ----
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
+export const errorText = (e: unknown) => (e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 
 /** The server's targets for `kind` at the selection, or null after explaining why there are none. */
 export async function targetsAt(editor: Editor, kind: ExtractKind, quiet = false): Promise<{ targets: Target[]; snapped: boolean } | null> {
@@ -191,13 +206,26 @@ export async function chosenTarget(editor: Editor, kind: ExtractKind): Promise<T
   return ask(editor, "Expressions", targets.map((t) => ({ label: oneLine(t.text), value: t, highlight: [t.range] })), true);
 }
 
-/** Whether to replace every occurrence or only the target, as chosen when there are several. Null for Escape. */
+/** What would change about when the occurrences run, for those that run only sometimes. */
+export function runsEveryTime(target: Target, all: boolean): string | undefined {
+  const own = target.occurrences.findIndex((o) => o.start.line === target.range.start.line && o.start.character === target.range.start.character);
+  const conditions = (all ? target.conditions : [target.conditions?.[own]]) ?? [];
+  const when = conditions.find((c): c is string => !!c);
+  if (!when) return undefined;
+  const which = all && conditions.filter(Boolean).length < conditions.length ? "Some will run" : "Will run";
+  return `${which} every time, not only ${when}`;
+}
+
+/**
+ * Whether to replace every occurrence or only the target, as chosen when there are several. An occurrence that runs
+ * only sometimes, such as after `&&`, gets its warning in the choice. Null for Escape.
+ */
 export async function chosenAll(editor: Editor, target: Target): Promise<boolean | null> {
   const n = target.occurrences.length;
   if (n < 2) return false;
   return ask(editor, `${n} occurrences found`, [
-    { label: `Replace all ${n} occurrences`, value: true, highlight: target.occurrences },
-    { label: "Replace this occurrence only", value: false, highlight: [target.range] },
+    { label: `Replace all ${n} occurrences`, warning: runsEveryTime(target, true), value: true, highlight: target.occurrences },
+    { label: "Replace this occurrence only", warning: runsEveryTime(target, false), value: false, highlight: [target.range] },
   ]);
 }
 
@@ -233,7 +261,7 @@ async function extractInto(editor: Editor, kind: Exclude<ExtractKind, "parameter
   if (model.getVersionId() !== version) return host.status(`The file changed while choosing. Run ${what} again.`);
   const x = await extraction(editor, kind, target, all);
   if (!x || model.getVersionId() !== version) return;
-  applyNamed(editor, x.edits, x.name);
+  applyNamed(editor, x.edits, x.name, runsEveryTime(target, all));
 }
 
 export const extractVariable = (editor: Editor) => extractInto(editor, "variable", "Extract Variable");
@@ -316,26 +344,20 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   if (variable || !sel.isEmpty()) names.push("Extract Method…");
   if (field) names.push("Introduce Field…");
   if (parameter) names.push("Introduce Parameter…");
-  const line = model.getLineContent(pos.lineNumber);
-  const onVariable = [...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this");
-  const word = model.getWordAtPosition(pos);
-  const before = word ? line.slice(0, word.startColumn - 1) : "";
-  const onConstant = !!word && (/::\s*$/.test(before) || /\bconst\s+(?:[\w\\|?]+\s+)?$/.test(before));
-  const onCall = !!word && /^\s*\(/.test(line.slice(word.endColumn - 1)) && !/(\$|\bnew\s+)$/.test(before);
-  if (onVariable || onConstant || onCall) names.push("Inline…");
-  if (found) names.push("Safe Delete…");
-  const types = parseTypeDeclarations(text);
-  if (types.length === 1) names.push("Move Class…");
-  // Pull Members Up needs a parent or an interface; Extract Interface, a class or enum.
-  if (types.some((t) => t.kind === "class" && (t.extends.length || t.implements.length))) names.push("Pull Members Up…");
-  if (types.some((t) => t.kind === "class" || t.kind === "enum")) names.push("Extract Interface…");
-  // The server's own refactorings, other than the extractions above.
+  // The server's own refactorings: Inline when it applies, and others, apart from the extractions above.
   const actions =
     (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
       range: fromRange(sel),
       context: { diagnostics: [] },
     }).catch(() => null)) ?? [];
+  if (actions.some((a) => "kind" in a && a.kind === "refactor.inline")) names.push("Inline…");
+  if (found) names.push("Safe Delete…");
+  const types = parseTypeDeclarations(text);
+  if (types.length === 1) names.push("Move Class…");
+  // Pull Members Up needs a parent or an interface; Extract Interface, a class or enum.
+  if (types.some((t) => t.kind === "class" && (t.extends.length || t.implements.length))) names.push("Pull Members Up…");
+  if (types.some((t) => t.kind === "class" || t.kind === "enum")) names.push("Extract Interface…");
   const more = actions
     .filter((a): a is L.CodeAction => "kind" in a && !!a.kind?.startsWith("refactor") && !(a.kind in interactive))
     .map((a) => ({ label: a.title, run: () => runTuskAction(a) }));
@@ -344,7 +366,7 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
 
 // ---- The light bulb ----
 
-/** The server's code actions that run here instead, interactively, by kind. */
+/** The server's code actions that run here instead, interactively, by kind. refactor.ts adds Inline and Introduce Parameter. */
 export const interactive: Record<string, (editor: Editor) => unknown> = {
   "refactor.extract.method": extractMethod,
   "refactor.extract.variable": extractVariable,

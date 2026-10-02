@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { outsideStrings, abstractMethods, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
+import { outsideStrings, abstractMethods, inlinedValue, componentClassPath, constructorCalls, shortenNames, deletionLines, laravelNames, methodLine, parseTypeDeclaration, parseTypeDeclarations, routeTarget, docblockHasParam, formatHoverMarkdown, formRequestParameter, methodBody, validationRules } from "./phptypes.ts";
 
 test("resolves parents and interfaces through use statements", () => {
   const source = `<?php
@@ -212,4 +212,15 @@ test("leaves strings alone when rewriting names", () => {
 
 test("leaves heredocs and comments alone when rewriting names", () => {
   assert.equal(outsideStrings("<<<EOT\nit's A\nEOT . A // A's\n", (c) => c.replace(/A/g, "B")), "<<<EOT\nit's A\nEOT . B // A's\n");
+});
+
+test("writes a default value for a call elsewhere", () => {
+  const owner = "<?php\nnamespace App;\nuse App\\Enums\\Status;\nclass Order {\n    const BASE = 10;\n}";
+  assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", false), "(\\App\\Order::BASE * 2)");
+  assert.equal(inlinedValue("self::BASE * 2", owner, "App\\Order", true), "(self::BASE * 2)");
+  assert.equal(inlinedValue("Status::Open", owner, "App\\Order", false), "\\App\\Enums\\Status::Open");
+  assert.equal(inlinedValue("-1", owner, "App\\Order", false), "(-1)");
+  assert.equal(inlinedValue("1", owner, "App\\Order", false), "1");
+  assert.equal(inlinedValue("'Helper::format'", owner, "App\\Order", false), "'Helper::format'");
+  assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
 });
