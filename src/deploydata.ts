@@ -35,13 +35,26 @@ export type DeployServer = {
 };
 
 /** A `Host` alias from ~/.ssh/config, as sshconfig.rs resolves it. */
-export type SshAlias = { alias: string; hostName: string | null; port: number | null; user: string | null; identityFiles: string[]; identitiesOnly: boolean; proxyJump: string[] };
+export type SshAlias = {
+  alias: string;
+  hostName: string | null;
+  port: number | null;
+  user: string | null;
+  identityFiles: string[];
+  identitiesOnly: boolean;
+  proxyJump: string[];
+  proxyCommand?: string | null;
+  hostKeyAlias?: string | null;
+  /** A `Match exec` block would have applied; Tusk doesn't run its command. */
+  matchExecSkipped?: boolean;
+};
 
 /** What an alias connects to, in words: `forge@203.0.113.5:2222 · through bastion · key ~/.ssh/staging`. */
 export function describeAlias(a: SshAlias, home = ""): string {
   const tilde = (p: string) => (home && p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
   const where = `${a.user ? `${a.user}@` : ""}${a.hostName ?? a.alias}${a.port && a.port !== 22 ? `:${a.port}` : ""}`;
-  return [where, a.proxyJump.length ? `through ${a.proxyJump.join(", ")}` : "", a.identityFiles.length ? `key ${a.identityFiles.map(tilde).join(", ")}` : ""].filter(Boolean).join(" · ");
+  const through = a.proxyJump.length ? `through ${a.proxyJump.join(", ")}` : a.proxyCommand ? `through ${a.proxyCommand}` : "";
+  return [where, through, a.identityFiles.length ? `key ${a.identityFiles.map(tilde).join(", ")}` : "", a.hostKeyAlias ? `host key as ${a.hostKeyAlias}` : ""].filter(Boolean).join(" · ");
 }
 
 /** When a saved file goes to the default server: never, on ⌘S (an explicit save), or on every save, auto-save too. */
@@ -209,18 +222,45 @@ export function webUrlFor(s: DeployServer, remote: string): string | null {
   return `${s.webUrl.replace(/\/+$/, "")}/${rest.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** Why the server's key wasn't trusted, from deploy.rs's `host-key:{…}` error. */
-export type HostKeyProblem = { kind: "unknown" | "changed"; host: string; port: number; algorithm: string; fingerprint: string; key: string; line: number | null };
+/**
+ * Why the server's key wasn't trusted, from deploy.rs's `host-key:{…}` error. `host` and `port` are what
+ * known_hosts keeps it under: a HostKeyAlias (`alias`) with port 22, or the server's; `shown` names the server.
+ */
+export type HostKeyProblem = { kind: "unknown" | "changed"; host: string; port: number; shown?: string; alias?: string | null; algorithm: string; fingerprint: string; key: string; line: number | null };
 
-export function hostKeyProblem(error: string): HostKeyProblem | null {
-  const at = error.indexOf("host-key:");
+/** The JSON after `tag` in an error, such as deploy.rs's `host-key:{…}`. */
+function tagged(error: string, tag: string): Record<string, unknown> | null {
+  const at = error.indexOf(tag);
   if (at < 0) return null;
   try {
-    const p = JSON.parse(error.slice(at + "host-key:".length));
-    return p && (p.kind === "unknown" || p.kind === "changed") && typeof p.key === "string" ? p : null;
+    const p = JSON.parse(error.slice(at + tag.length));
+    return p && typeof p === "object" ? p : null;
   } catch {
     return null;
   }
+}
+
+export function hostKeyProblem(error: string): HostKeyProblem | null {
+  const p = tagged(error, "host-key:");
+  return p && (p.kind === "unknown" || p.kind === "changed") && typeof p.key === "string" ? (p as HostKeyProblem) : null;
+}
+
+/** What a jump host asks for that Tusk doesn't have saved, or that it refused, from deploy.rs's `ssh-login:{…}`. */
+export type LoginNeeded = { target: string; hop: string; host: string; port: number; user: string; account: string; kind: "password" | "passphrase"; key: string | null; wrong: boolean };
+
+export function loginNeeded(error: string): LoginNeeded | null {
+  const p = tagged(error, "ssh-login:");
+  return p && (p.kind === "password" || p.kind === "passphrase") && typeof p.account === "string" ? (p as LoginNeeded) : null;
+}
+
+/** The folders between `stop` and each path, deepest first, each once: the ones deleting the paths may empty. */
+export function foldersBetween(paths: string[], stop: string): string[] {
+  const folders = new Set<string>();
+  for (const path of paths) {
+    if (path !== stop && !path.startsWith(stop === "/" ? "/" : `${stop}/`)) continue;
+    for (let dir = path.slice(0, path.lastIndexOf("/")); dir.length > stop.length; dir = dir.slice(0, dir.lastIndexOf("/"))) folders.add(dir);
+  }
+  return [...folders].sort((a, b) => b.split("/").length - a.split("/").length || a.localeCompare(b));
 }
 
 /** A file as deploy.rs lists it: its path below a folder, size, and modification time in seconds. */

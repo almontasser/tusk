@@ -2927,6 +2927,13 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .deploy-fingerprint dt { color: var(--muted); }
 .deploy-fingerprint dd { margin: 0; font-family: var(--mono); word-break: break-all; -webkit-user-select: text; user-select: text; }
 .deploy-hostkey .buttons button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, transparent); }
+.deploy-login { width: min(480px, calc(100vw - 32px)); }
+.deploy-login h2 { display: flex; align-items: center; gap: 8px; }
+.deploy-login h2 .codicon-key { color: var(--accent); }
+.deploy-login p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.deploy-login p.ds-problem { color: var(--red); display: flex; gap: 6px; align-items: baseline; }
+.deploy-login .field input { width: 100%; }
+.deploy-alias-warning { flex-basis: 100%; display: flex; gap: 4px; align-items: baseline; color: var(--orange); }
 
 #deploy-status { gap: 6px; }
 #deploy-status.deploy-failed { color: var(--orange); }
@@ -2985,7 +2992,8 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .deploy-delete-list li { padding: 2px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: text; user-select: text; }
 .deploy-delete-list li.muted { font-family: inherit; color: var(--muted); }
 .deploy-delete .buttons button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, transparent); display: inline-flex; align-items: center; gap: 6px; }
-.deploy-alias { display: flex; align-items: center; gap: 4px; margin-top: -4px; }
+.deploy-alias { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; margin-top: -4px; overflow-wrap: anywhere; }
+.deploy-alias-text { flex: 1; min-width: 0; }
 .deploy-alias[hidden] { display: none; }
 .deploy-check-hint:empty { display: none; }
 .pane-notice[hidden] { display: none; }

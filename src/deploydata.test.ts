@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeAlias, hostKeyProblem, joinRemote, listSome, localFor, newServer, readServers, remoteFor, serverProblem, transient, webUrlFor, writeServer } from "./deploydata.ts";
+import { describeAlias, foldersBetween, hostKeyProblem, joinRemote, listSome, localFor, loginNeeded, newServer, readServers, remoteFor, serverProblem, transient, webUrlFor, writeServer } from "./deploydata.ts";
 
 const server = (over = {}) => ({ ...newServer("staging"), host: "example.com", rootPath: "/var/www/app", ...over });
 
@@ -95,6 +95,20 @@ test("describes ~/.ssh/config aliases", () => {
   const a = { alias: "staging", hostName: "203.0.113.5", port: 2222, user: "forge", identityFiles: ["/Users/me/.ssh/staging"], identitiesOnly: true, proxyJump: ["bastion"] };
   assert.equal(describeAlias(a, "/Users/me"), "forge@203.0.113.5:2222 · through bastion · key ~/.ssh/staging");
   assert.equal(describeAlias({ ...a, hostName: null, port: 22, user: null, identityFiles: [], proxyJump: [] }), "staging");
+  assert.equal(describeAlias({ ...a, proxyJump: [], proxyCommand: "cloudflared access ssh --hostname %h", identityFiles: [], hostKeyAlias: "web-key" }), "forge@203.0.113.5:2222 · through cloudflared access ssh --hostname %h · host key as web-key");
+});
+
+test("reads what a jump host asks for from deploy.rs's errors", () => {
+  const p = loginNeeded(`Can't connect: ssh-login:{"hop":"bastion","host":"10.0.0.1","port":22,"user":"me","account":"ssh:me@10.0.0.1:22","kind":"passphrase","key":"/k","wrong":true}`);
+  assert.deepEqual([p?.hop, p?.kind, p?.key, p?.wrong], ["bastion", "passphrase", "/k", true]);
+  assert.equal(loginNeeded(`ssh-login:{"kind":"otp","account":"a"}`), null);
+  assert.equal(loginNeeded("host-key:{}"), null);
+});
+
+test("lists the folders a deletion may empty, deepest first", () => {
+  assert.deepEqual(foldersBetween(["/www/app/a/b/x.php", "/www/app/a/y.php", "/www/app/z.php", "/elsewhere/q"], "/www/app"), ["/www/app/a/b", "/www/app/a"]);
+  assert.deepEqual(foldersBetween(["/a/b.txt"], "/"), ["/a"]);
+  assert.deepEqual(foldersBetween(["site/a/b.txt"], "site"), ["site/a"]);
 });
 
 test("lists some paths and counts the rest", () => {
