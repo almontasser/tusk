@@ -1231,82 +1231,37 @@ lines to the docblock, attributes, and one blank line.
 
 ### Change signature
 
-`src/refactorparse.ts` holds the text work, tested in Node: `matchBracket` and
-`splitTopLevel` scan brackets and strings (not heredocs), and `rewriteArgs`
-maps a call's arguments to a new parameter list by name. `src/refactor.ts`
-applies them: a signature change becomes a `WorkspaceEdit` for
-`applyWorkspaceEdit`, which edits and saves each file.
-
-Calls of a method come from Tusk's server, `tusk/memberReferences` with the
-class and method: every call in the project, through subclasses too, without
-the declarations. Safe Delete uses the same search for methods. Functions use
-`textDocument/references`.
-
-Change Signature also changes overrides. `descendantsOf` searches project
-files for the class's short name as a whole word, keeps the types whose parsed
-declaration really extends or implements it, and repeats for each one found,
-to reach grandchildren. Searching for the name alone, rather than for
-`extends … Name` on one line, finds headers split over several lines; the
-search is line by line, so a pattern can't span them. `overridesOf` then
-takes the method from each type's text. Go to Implementation would include
-`vendor`, but the text search keeps Change Signature to files you can edit.
-Each override's parameter list gets the new text, and calls through the
-override (`tusk/memberReferences` on its class) are rewritten too,
-without duplicates. References that are declarations (`function name(`) are
-skipped, since they have their own edit.
-
-Constructors differ: a method search doesn't report `new`, and
-a subclass's constructor isn't an override, since it may take different
-parameters. So `callsOf` sends `__construct` to `constructorCallsOf`, which
-collects the class and each descendant that inherits the constructor (no
-`__construct` of its own, and its parent in the set), searches for `new` with
-one of their short names, and reads those files, the class's, and the
-descendants' with `constructorCalls` in `src/phptypes.ts`. That resolves each
-`new Name(` through the file's `use` statements, `new self` and `new static`
-to the enclosing type, and `new parent` and `parent::__construct(` to its
-parent. Call Hierarchy and Safe Delete share `callsOf`, so they see these
-calls too.
-
-### Change Signature's dialog and preview
-
-`declarationParts` in `src/refactorparse.ts` reads a declaration's modifiers,
+Tusk's server writes Change Signature (see "Change Signature" under the
+server); `src/refactor.ts` is its UI. `changeSignature` asks `tusk/signature`
+for the method or function around the caret: its kind, title, modifiers,
 name, parameters (each split into everything before the name, `&`, `...`, the
-name, and the default), and return type, and whether the parameters sit one per
-line. `src/signaturedialog.ts` edits that as a `Signature`, where each parameter
+name, the default, and its code as written), and return type.
+`src/signaturedialog.ts` edits that as a `Signature`, where each parameter
 remembers its old name in `from`, so renames and reorders stay tied to the old
-position; `signatureProblem` and `signatureWarning` check it as you type.
-
-`plan` in `src/refactor.ts` then builds one `WorkspaceEdit`: the header from the
-modifiers to the return type, parameter renames in the docblock and body
-(`renameParams`), each override's header with `forOverride`, which matches its
-parameters by position so it keeps its own names, and each call's name and
-arguments. `rewriteArgs` fills a new parameter with its value for calls (or its
-default only when a later positional argument needs the slot) and, once an
-argument has to be named, names the rest, since a positional one after it
-would take a named one's place. Calls whose arguments don't change keep their
-text, and arguments one per line are written back one per line.
-
-Edits must not overlap, but a call's arguments can hold other edits: a
-renamed parameter in a recursive call, or a nested call to the same method.
-So calls are collected first and rewritten innermost first (by the offset of
-their `(`, descending), each applying the edits inside its arguments to their
-text before splitting it, and replacing them with one edit. `matchBracket`,
-and `splitTopLevel` skip comments as well as strings, so a
-`// don't` doesn't open a string that swallows the rest of the body.
+position; `signatureProblem` and `signatureWarning` in `src/refactorparse.ts`
+check it as you type, and the server checks it again. The dialog's result goes
+to `tusk/changeSignature`, and its `WorkspaceEdit` to `applyWorkspaceEdit`,
+which edits and saves each file as one undo step.
 
 Introduce Parameter reuses the dialog: `changeSignature` adds the parameter
-without text, which the dialog treats as new. When the dialog changes nothing
-else (`onlyAdded`), Tusk's server writes the edit (`tusk/introduceParameter`,
-see "Introduce Parameter" under the server). Otherwise `plan` makes the other
-changes too, and also replaces the expression's uses in the body with the
-parameter. `inlinedValue` in `src/phptypes.ts` writes a default for a call in
-another file.
+without text, which the dialog treats as new, and sends the expression's range
+and the new parameter's name with the change, so the server also replaces the
+expression's uses with the parameter.
+
+Safe Delete and Call Hierarchy still find calls in the editor: `callsOf` asks
+Tusk's server (`tusk/memberReferences`) for a method, `textDocument/references`
+for a function, and sends `__construct` to `constructorCallsOf`. That collects
+the class and each descendant that inherits the constructor (`descendantsOf`, a
+text search for the short name, then each file's parsed declarations), searches
+for `new` with one of their short names, and reads those files with
+`constructorCalls` in `src/phptypes.ts`, which resolves `new self`, `new
+static`, `new parent`, and `parent::__construct(` too.
 
 `src/refactorpreview.ts` shows the edit before it's applied. `changedLines`
 applies each file's edits line by line, and each row marks the part between
 the text the old and new line share at both ends, as VS Code's Refactor
-Preview does. The preview opens on its own when calls were left unchanged,
-since those need a look.
+Preview does. The preview opens on its own when the server left calls
+unchanged or listed other places to look at, since those need a look.
 
 ### Extract Variable, Extract Constant, Introduce Field, and Extract Method
 
@@ -5996,24 +5951,51 @@ occurrence with the suggested name.
   (`runs_only_in_function`), since every call would compute it. A constant, and
   a field or parameter whose default it becomes, run no code, so they have none.
 
-### Introduce Parameter
+### Change Signature
 
-`introduce_parameter` in `introduce.rs` answers `tusk/introduceParameter` and
-the `refactor.extract.parameter` code action, which takes the suggested name
-and type, and a constant expression as the default. It adds the parameter at
-`position` (`parameter_insert`, on its own line in a list with one parameter
-per line, keeping a trailing comma last), replaces the uses with the variable,
-and adds the parameter, with its default, to overriding methods. A parameter
-without a default is refused when the method overrides or is overridden by
-another, whose signatures must still match.
+`features/actions/signature.rs` answers `tusk/signature`, which reads the
+method or function around the caret for the dialog, and `tusk/changeSignature`,
+which writes a new signature into it, the methods that override it, and every
+call. Introduce Parameter's code action goes through it too (`add_parameter`),
+with the suggested name and type, and a constant expression as the default.
 
-Calls come from Call Hierarchy's `calls_of`, which counts `new` for a
-constructor, and change only when the parameter has no default or the call
-passes arguments after it (`argument_insert`): positionally when the call
-passes every argument before it, else by name, which needs PHP 8. The
-expression goes through `moved` (see "Inline Variable, Constant, and Method"),
-so its class names get imports in the call's file. A spread call or a
-first-class callable is left, with why.
+- **Declarations:** `read_decl` takes the header's span, from the modifiers to
+  the return type, and each parameter's code. The header is written whole:
+  parameters that don't change keep their code, the others are written from
+  their parts, one per line when the declaration had them so. Renamed
+  parameters change in the body (closures that `use` them included, arrow
+  functions' own parameters of the name not) and in the docblock. Code that
+  reads its variables by name (`compact()`, `func_get_args()`, `$$`) is refused
+  when parameters move or are renamed, and so is a new name the body already
+  uses.
+- **Overrides:** each project method that overrides it gets the change by
+  position (`for_override`): it keeps its own parameter names, types,
+  defaults, modifiers, and return type, unless the change set new ones. The
+  method it overrides, such as an interface's, keeps its signature, and is
+  listed with the calls left as they were, as is a removed parameter the body
+  still reads.
+- **Calls:** Call Hierarchy's `calls_of` for the method and each override, so
+  `new`, `new static`, and `parent::__construct()` count for a constructor.
+  Each call is rewritten against the parameters of the most specific
+  declaration it reaches, overrides first. `rewrite_args` matches arguments
+  to parameters by name: positional ones move to the new place, named ones
+  stay named, a new parameter gets its value for calls, a default is written
+  only when a later positional argument needs its place, and once one
+  argument must be named, the rest are too. A call that spreads its arguments,
+  passes more than the parameters, or would need named arguments before PHP 8
+  is left, with why. A first-class callable keeps its arguments.
+- **Values:** a value from the dialog is code of the declaration's file. Each
+  group's values are inserted before the class or function around the
+  declaration, the copy is parsed, and `moved` (see below) writes each value for
+  each call, with `self` as the class and imports in the call's file. A value
+  that doesn't parse as one expression is refused.
+- **Edits inside arguments:** calls are rewritten innermost first, by the
+  offset of their `(`, and a call whose arguments change takes in the edits
+  inside them (a renamed parameter in a recursive call, a nested call) and
+  replaces them with one edit, so no two edits overlap. Arguments one per line
+  stay so, and a comment after an argument on its line moves with it; a call
+  with a comment elsewhere between its arguments is left, since moving them
+  would lose it.
 
 ### Inline Variable, Constant, and Method
 
@@ -6055,6 +6037,19 @@ file; a constant or method only for being declared in the project.
   a loop's or `elseif`'s condition, or a side effect earlier in the statement
   says they'd run at another time. A recursive method, or one that implements
   another class's method, stays.
+- **Traits and `static`:** a trait's method runs as a copy in the class that
+  uses it, so `trait_user` finds that class from the class of the object a
+  call runs on (the analyzer's type of the receiver; the class around the call
+  for `$this`): where the method appears in it, through a parent too. `self`
+  in the body then means that class. A receiver whose class can't be told, one
+  that can be classes that each use the trait, or a class whose subclass has a
+  method of its own is skipped. `static` becomes what the call runs on
+  (`StaticAs`): it stays for `$this->`, `self::`, `static::`, and `parent::`
+  calls, which forward the class; a named class (`User::make()`) or an object
+  (`$order->total()`, `$order::make()`) is written in its place, as `User` or
+  `$order`, which PHP reads as the object's class. An object from an expression
+  gets a temporary first. `static` inside a closure on another object is
+  skipped, since the closure can't see the variable.
 
 Three helpers do the writing. `placed` and `Placement` decide parentheses from
 Mago's `Precedence` of the value and of the parent node (`-` next to a sign,
@@ -6062,8 +6057,8 @@ the object of `->`, `new`, and `instanceof` included), and braces in a string,
 where only a value starting with `$` can go. `moved` writes code for another
 place: class names through `imports::reference`, with imports, namespaced
 functions and constants in full when they exist, `self` and `__CLASS__` as the
-owner outside it, and `static` and `parent` refused where they'd mean another
-class. `reindent` moves lines to the new indentation from the first line's,
+owner outside it, `static` as the `Dest` says, and `parent` refused where it'd
+mean another class. `reindent` moves lines to the new indentation from the first line's,
 leaving multi-line strings alone, except a heredoc every line of which is
 indented that far, which moves whole. `shape_of_code` reads a rewritten result
 again, so a parameter replaced by its argument gets the argument's precedence.
@@ -8301,3 +8296,38 @@ takes precedence over what its `render()`'s `view()` call passes, as
 `View::with()` does in Laravel. A name the data leaves out stays untyped rather
 than falling back to the components around the tag, which would need the stack
 of every render.
+
+### 2026-10-02: Change Signature runs in Tusk's server
+
+Change Signature read declarations and calls with `src/refactorparse.ts`, a
+scanner for brackets, strings, and commas, and wrote defaults into other files
+with `inlinedValue`'s regexes. Heredocs, comments between arguments, and
+names in values were where it went wrong. The server already had what it
+needs: Mago's syntax tree, Call Hierarchy's `calls_of` (with `new` and
+`parent::__construct()`), the codebase for overrides, and `moved`, which writes
+code for another file. So `tusk/signature` reads the declaration for the
+dialog, `tusk/changeSignature` writes the change, and the editor keeps only the
+dialog, its checks, and the preview. `declarationParts`, `rewriteArgs`,
+`formatArgs`, `plan`, `inlinedValue`, and `shortenNames` are deleted.
+
+Introduce Parameter had its own server edit for when the dialog changed only
+the new parameter. It's now Change Signature with the expression's uses, so
+there's one way calls are rewritten. One behavior changed: a parameter without
+a default is no longer refused for a method that's overridden; the overrides
+take it too, and their calls pass the value.
+
+Values typed in the dialog are read as code of the declaration's file by
+parsing a copy with the values inserted before the class, rather than by
+reading names out of the text. That gives `moved` real nodes, so `self::RATE`
+and an imported `Money::ZERO` are written correctly at each call, with
+imports, and a value that isn't one expression is refused before anything
+changes.
+
+Inline Method now inlines a trait's method called on another object, and
+writes `static` as the class the call runs on, instead of refusing both.
+PHP's late static binding forwards the class through `$this->`, `self::`,
+`static::`, and `parent::`, so those keep `static`; a named class or an object
+fixes it, and `$order::` means the object's own class exactly, so no guess
+about subclasses is needed. A static method called by its own class's name
+used to keep `static` even from another class, which then meant the caller's
+class; it's written as the class now.

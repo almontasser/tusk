@@ -8,6 +8,7 @@ pub mod inline;
 pub mod introduce;
 pub mod mago;
 pub mod organize;
+pub mod signature;
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse, ExecuteCommandParams, Range,
