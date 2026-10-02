@@ -42,7 +42,7 @@ import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, 
 import { initLocalHistory, putLabel, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { initLocalHistoryView } from "./localhistoryview";
 import { cancelQueries, chooseConnection, connectOverSsh, copyName, dataSources, generate as generateSql, initDatabase, loadTables, openConsole, openTable, selectedTable, showHistory } from "./database";
-import { afterSave as deployAfterSave, remoteFileLabel, compareWithDeployed, deploymentMenu, deploymentProjectOpened, download, editServers, initDeployment, remoteHostShown, showTransfers, syncWithDeployed, upload } from "./deploy";
+import { afterSave as deployAfterSave, filesDeleted as deployFilesDeleted, remoteFileLabel, compareWithDeployed, deploymentMenu, deploymentProjectOpened, download, editServers, initDeployment, remoteHostShown, showTransfers, syncWithDeployed, upload } from "./deploy";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
@@ -84,7 +84,9 @@ installErrorHandlers();
 // panes that show it. `editor` and `active` are the focused pane's editor and file. Panes nest in
 // `.split.row` and `.split.col` groups inside #editor, which is itself a row.
 
-type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; bar: HTMLElement; paths: string[]; active: string };
+type Pane = { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; bar: HTMLElement; notice: HTMLElement; paths: string[]; active: string };
+/** Bars shown above a file's editor, such as "changed on the server", made anew for each pane that shows it. */
+const notices = new Map<string, () => HTMLElement>();
 const panes: Pane[] = [];
 // Panel tabs dragged into a pane, such as a terminal, are tabs there too, under a `view:N` path that
 // no file has. The pane shows the tab's element over its editor, which has no model meanwhile.
@@ -97,11 +99,11 @@ const activeFile = () => (isView(active) ? "" : active);
 function addPane(): Pane {
   const el = document.createElement("div");
   el.className = "pane";
-  el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-editor"></div><div class="pane-sash-x"></div><div class="pane-sash-y"></div>`;
+  el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-notice" hidden></div><div class="pane-editor"></div><div class="pane-sash-x"></div><div class="pane-sash-y"></div>`;
   const ed = createEditor(el.querySelector<HTMLElement>(".pane-editor")!);
   // The code's context menu is the app's (codeMenu), with PhpStorm's actions and shortcuts rather than VS Code's.
   ed.updateOptions({ contextmenu: false });
-  const pane: Pane = { editor: ed, el, bar: el.querySelector("nav")!, paths: [], active: "" };
+  const pane: Pane = { editor: ed, el, bar: el.querySelector("nav")!, notice: el.querySelector(".pane-notice")!, paths: [], active: "" };
   panes.push(pane);
   addEditor(ed);
   trackEditor(ed);
@@ -1249,6 +1251,9 @@ function showDirty(path: string) {
 function renderTabs() {
   for (const pane of panes) {
     const shown = pane === currentPane() ? active : pane.active;
+    const notice = notices.get(shown);
+    pane.notice.hidden = !notice;
+    pane.notice.replaceChildren(...(notice ? [notice()] : []));
     // Two files with one name get their folder beside it, so the tabs tell them apart.
     const names = new Map<string, number>();
     for (const p of pane.paths) if (!views.has(p)) names.set(nameOf(p), (names.get(nameOf(p)) ?? 0) + 1);
@@ -1352,6 +1357,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     }
     // Files without a model weren't open, so the loop above kept no version of them.
     recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
+    void deployFilesDeleted([...paths]);
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     projectFilesChanged(paths);
     aiFilesChanged([...paths]);
@@ -2022,7 +2028,24 @@ initLayout({ focusEditor: () => editor.focus(), status });
 initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
-initDeployment({ root: () => root, openFile, dirty: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!), openText: (path) => tabs.get(path)?.model.getValue(), showView });
+initDeployment({
+  root: () => root,
+  openFile,
+  dirty: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!),
+  openText: (path) => tabs.get(path)?.model.getValue(),
+  showView,
+  openPaths: () => [...tabs.keys()],
+  // Replaces the text as one edit, so undo brings back what was there, and marks it saved.
+  reload: async (path) => {
+    const tab = tabs.get(path);
+    const text = await readText(path);
+    if (!tab || text === tab.model.getValue()) return;
+    tab.model.pushEditOperations([], [{ range: tab.model.getFullModelRange(), text }], () => null);
+    tab.saved = tab.model.getAlternativeVersionId();
+    showDirty(path);
+  },
+  notice: (path, make) => (make ? notices.set(path, make) : notices.delete(path), renderTabs()),
+});
 initRebase({ root: () => root, status });
 initStash({ showView });
 initBranches({ commit: focusCommit, push, update: updateProject });

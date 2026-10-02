@@ -30,7 +30,19 @@ export type DeployServer = {
   mappings: Mapping[];
   /** Paths that are never uploaded or downloaded, relative to a mapping's folder (deploy.rs's `Excludes`). */
   excludes: string[];
+  /** Whether deleting a project file deletes it from the server too, when saved files upload to this server. */
+  deleteRemote: boolean;
 };
+
+/** A `Host` alias from ~/.ssh/config, as sshconfig.rs resolves it. */
+export type SshAlias = { alias: string; hostName: string | null; port: number | null; user: string | null; identityFiles: string[]; identitiesOnly: boolean; proxyJump: string[] };
+
+/** What an alias connects to, in words: `forge@203.0.113.5:2222 · through bastion · key ~/.ssh/staging`. */
+export function describeAlias(a: SshAlias, home = ""): string {
+  const tilde = (p: string) => (home && p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
+  const where = `${a.user ? `${a.user}@` : ""}${a.hostName ?? a.alias}${a.port && a.port !== 22 ? `:${a.port}` : ""}`;
+  return [where, a.proxyJump.length ? `through ${a.proxyJump.join(", ")}` : "", a.identityFiles.length ? `key ${a.identityFiles.map(tilde).join(", ")}` : ""].filter(Boolean).join(" · ");
+}
 
 /** When a saved file goes to the default server: never, on ⌘S (an explicit save), or on every save, auto-save too. */
 export type UploadOnSave = "never" | "explicit" | "always";
@@ -63,6 +75,7 @@ export const newServer = (name: string): DeployServer => ({
   webUrl: "",
   mappings: [{ local: "", remote: "" }],
   excludes: [...DEFAULT_EXCLUDES],
+  deleteRemote: false,
 });
 
 const str = (v: unknown, fallback = "") => (typeof v === "string" ? v : fallback);
@@ -89,6 +102,7 @@ export function readServers(value: unknown): DeployServer[] {
       webUrl: str(v.webUrl),
       mappings: Array.isArray(v.mappings) ? v.mappings.filter((m: unknown) => m && typeof m === "object").map((m: Record<string, unknown>) => ({ local: str(m.local), remote: str(m.remote) })) : [{ local: "", remote: "" }],
       excludes: Array.isArray(v.excludes) ? v.excludes.filter((e: unknown): e is string => typeof e === "string") : [...DEFAULT_EXCLUDES],
+      deleteRemote: v.deleteRemote === true,
     });
   }
   return servers;
@@ -110,6 +124,7 @@ export function writeServer(s: DeployServer): Record<string, unknown> {
   if (s.webUrl) out.webUrl = s.webUrl;
   out.mappings = s.mappings;
   out.excludes = s.excludes;
+  if (s.deleteRemote) out.deleteRemote = true;
   return out;
 }
 
@@ -221,6 +236,11 @@ export const formatTime = (secs: number, now = Date.now()) => {
   const sameDay = new Date(now).toDateString() === d.toDateString();
   return sameDay ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) + ` ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 };
+
+/** A list of paths for a confirmation: all of them up to `max`, then how many more. */
+export function listSome(paths: string[], max = 12): { shown: string[]; more: number } {
+  return paths.length <= max ? { shown: paths, more: 0 } : { shown: paths.slice(0, max - 1), more: paths.length - max + 1 };
+}
 
 /** Errors worth retrying on their own: the network's, not the server's refusals. */
 export const transient = (error: string) => /timed out|didn't answer|reset|broken pipe|closed|disconnect|eof|connection (aborted|lost)|not connected|channel/i.test(error) && !/permission|refused the|denied|doesn't exist|550/i.test(error);

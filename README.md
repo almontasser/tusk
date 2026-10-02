@@ -70,7 +70,7 @@ file to change when you add it.
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
 | Split editors | Up to four panes. |
-| Deployment | Uploads, downloads, and comparisons go file by file over SFTP, FTP, or FTPS; there's no WebDAV, no rsync, and no automatic deletion of server files that the project no longer has (delete them in Remote Host). SFTP reads `~/.ssh/known_hosts` and your keys, but not `~/.ssh/config`, so a host alias, `ProxyJump`, or a certificate login isn't used: type the real host, user, and port. A key file has to be in OpenSSH or PEM format; a PuTTY `.ppk` key isn't read. A replaced file on the server keeps its permissions, but not its owner or group, since the upload writes a new file and renames it into place; on FTP, permissions carry over only where the server allows `SITE CHMOD`. Sync with Deployed compares by size and modification time, and reads both copies only for files of the same size whose times differ (up to 4 MB each). Server files opened from Remote Host upload on save, but don't reload when the server's copy changes. |
+| Deployment | Uploads, downloads, and comparisons go file by file over SFTP, FTP, or FTPS; there's no WebDAV and no rsync. SFTP reads `~/.ssh/config`'s `Host`, `HostName`, `Port`, `User`, `IdentityFile`, `IdentitiesOnly`, `ProxyJump`, and `Include`, but not `Match` blocks, `ProxyCommand`, `HostKeyAlias`, or certificate logins. A `ProxyJump` host logs in with your SSH agent or its key files, without a passphrase or password. A replaced file on the server keeps its permissions, and on SFTP its group, and its owner where the server lets you change it (as root); on FTP, permissions carry over only where the server allows `SITE CHMOD`. Deleting files on the server as you delete them in the project covers the default server, while saved files upload to it, and files deleted while Tusk is closed aren't noticed. Sync with Deployed compares by size and modification time, and reads both copies only for files of the same size whose times differ (up to 4 MB each). Server files opened from Remote Host check for changes on the server when Tusk gets focus and every 30 seconds, by size and time. |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
@@ -3515,7 +3515,13 @@ the left and shows the selected one's settings on the right:
   with implicit TLS (port 990). **Host**, **Port**, and **User**.
 - For SFTP, **Log in with**: your **SSH agent**, a **Key pair** (a key file, or
   `~/.ssh/id_ed25519`, `id_ecdsa`, and `id_rsa` when you leave it empty, with
-  its passphrase if it has one), or a **Password**.
+  its passphrase if it has one), or a **Password**. Key files can be OpenSSH,
+  PEM, or PuTTY `.ppk` keys (versions 2 and 3).
+- An SFTP **Host** can be a `Host` alias from `~/.ssh/config`, which the field
+  suggests. The alias connects as `ssh` would: to its `HostName`, `Port`, and
+  `User`, with its `IdentityFile` keys, through its `ProxyJump` hosts. Under
+  the field, Tusk shows what the alias connects to. A user, port, or key file
+  you type here wins over the file's.
 - For FTP and FTPS, a **Password** (empty with no user logs in anonymously),
   **Passive mode** (on by default, for firewalls and NAT), and for FTPS, **Don't
   check the server's certificate**, for a self-signed one.
@@ -3527,6 +3533,12 @@ the left and shows the selected one's settings on the right:
   the whole project to the root path. A server path that starts with `/` is
   absolute; one that doesn't is inside the root path. The resolved path shows
   under each one.
+- **Delete files from the server when you delete them in the project**: off
+  by default. While saved files upload to this server as the default, deleting
+  a file or folder in the project deletes the server's copy, and a moved or
+  renamed file uploads under its new name. More than 20 deletions at once, as
+  from a branch switch, ask first with a list. Excluded paths and a mapping's
+  own folder are never deleted.
 - **Excluded paths**, one per line, are never uploaded or downloaded. A name,
   such as `node_modules` or `*.log`, matches at any depth, as in `.gitignore`;
   a path with `/`, such as `storage/logs`, matches from the mapping's folder.
@@ -3561,6 +3573,7 @@ Right-click a file or folder in the Project tree, or in the editor, and choose
 | **Download from staging**, **Download from…** | Replaces the local copy with the server's, or downloads the folder's files |
 | **Sync with Deployed to staging…** | Compares the file or folder with the server's, see below |
 | **Compare with Deployed Version on staging** | Shows the server's copy and yours in the diff view, with **Upload to staging** |
+| **Delete from staging…** | Deletes the server's copy of the file or folder, after listing what goes. The project keeps its own |
 | **Open on staging in the Browser** | Opens the file's page on the server's web URL |
 
 ⌘⇧A has the same actions for the open file, and **Deployment: Upload Project
@@ -3572,7 +3585,8 @@ progress; click it, or run **Deployment: File Transfer**, to see every file
 with its progress, size, and state, and to cancel one or all of them. A file
 replaces the server's copy only once it's complete: Tusk uploads it under a
 temporary name beside it and renames it into place, keeping the old file's
-permissions and the local file's modification time. A dropped connection is
+permissions (and on SFTP its group, and its owner where the server allows) and
+the local file's modification time. A dropped connection is
 retried twice on its own. Other failures, such as a permission the server
 refuses, show in a notification with **Retry** and **Show Transfers**. A
 download asks first when it would replace unsaved changes in an open file.
@@ -3585,12 +3599,15 @@ only on the server. Each row shows both copies' sizes and times, with a dot on
 the newer one. Files whose sizes match but times differ are read on both sides
 and compared, so a file another tool uploaded doesn't show as changed.
 
-Each row has an action: **←** downloads, **–** skips, and **→** uploads. By
-default, Tusk uploads what's newer in the project, downloads what's newer on
-the server, and skips files that are only on the server, such as uploads and
-logs. In the list, ← and → change the selected row's action, Space skips it,
-and ⏎ opens it in the diff view. **Set all** changes every row. **Synchronize**
-runs the transfers, then compares again.
+Each row has an action: **←** downloads, **–** skips, **→** uploads, and for a
+file on one side only, the trash deletes it there: from the server, or from
+the project to the Trash, where Local History keeps it too. By default, Tusk
+uploads what's newer in the project, downloads what's newer on the server, and
+skips files that are only on the server, such as uploads and logs; it never
+deletes unless you choose it. In the list, ← and → change the selected row's
+action, Space skips it, ⌦ deletes it, and ⏎ opens it in the diff view. **Set
+all** changes every row. **Synchronize** lists the files it will delete and
+asks first, runs the transfers and deletions, then compares again.
 
 ### Remote Host
 
@@ -3599,6 +3616,12 @@ server's files as a tree, starting at the root path. Click the server line to
 browse another server.
 
 - Double-click a file to open it in the editor. Saving it uploads it back.
+  When the server's copy changes, such as when a teammate uploads it, the file
+  reloads when you come back to Tusk. With unsaved changes, a bar above the
+  editor asks instead: **Compare** shows both, **Keep Mine** lets your next
+  save replace the server's, and **Load Server's** replaces your changes,
+  which ⌘Z brings back. A file deleted on the server gets a bar with
+  **Upload to staging**.
 - Drag files or folders from the Project tree onto a folder to upload them
   there.
 - Right-click for **Download to** (the project file a mapping matches),

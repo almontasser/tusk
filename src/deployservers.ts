@@ -5,7 +5,7 @@ import { mod, open, passwordStore, shortcutText } from "./platform.ts";
 import { h, icon } from "./dom";
 import { listNav } from "./listnav";
 import { errorText } from "./status";
-import { type Auth, DEFAULT_EXCLUDES, DEFAULT_PORTS, type DeployServer, type HostKeyProblem, mappingRemote, newServer, PROTOCOLS, type Protocol, serverProblem, SUGGESTED_EXCLUDES, type UploadOnSave } from "./deploydata";
+import { type Auth, DEFAULT_EXCLUDES, DEFAULT_PORTS, type DeployServer, describeAlias, type HostKeyProblem, mappingRemote, newServer, PROTOCOLS, type Protocol, serverProblem, type SshAlias, SUGGESTED_EXCLUDES, type UploadOnSave } from "./deploydata";
 
 /** A server being edited. `previous` is its saved name; `secret` a password or passphrase typed here. */
 type Draft = { server: DeployServer; key: string; previous?: string; dirty: boolean; secret?: string; hasSecret: boolean };
@@ -35,6 +35,10 @@ type Options = {
   test(server: DeployServer, previous: string | undefined, secret: string | undefined): Promise<string>;
   /** The server's login folder, for an empty root path. */
   home(server: DeployServer, previous: string | undefined, secret: string | undefined): Promise<string>;
+  /** The Host aliases in ~/.ssh/config, offered as SFTP hosts. */
+  sshHosts(): Promise<SshAlias[]>;
+  /** The home folder, to show key files as ~/…. */
+  homeDir: string;
 };
 
 const AUTHS: [Auth, string][] = [
@@ -115,7 +119,17 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
   };
   const name = input("Name", { placeholder: "Such as staging or production" });
   const protocol = h("select", { ariaLabel: "Type" }, ...PROTOCOLS.map(([v, l]) => h("option", { value: v }, l)));
-  const host = input("Host", { placeholder: "example.com or 203.0.113.5" });
+  const host = input("Host", { placeholder: "example.com, 203.0.113.5, or a ~/.ssh/config Host" });
+  // Aliases from ~/.ssh/config, as the host field's suggestions; read once, in the background.
+  let aliases: SshAlias[] = [];
+  const aliasList = h("datalist", { id: "deploy-ssh-hosts" });
+  host.el.setAttribute("list", aliasList.id);
+  const aliasHint = h("p", { class: "deploy-hint deploy-alias", hidden: true });
+  o.sshHosts().then((list) => {
+    aliases = list;
+    aliasList.replaceChildren(...list.map((a) => h("option", { value: a.alias }, describeAlias(a, o.homeDir))));
+    if (current) shape();
+  }, () => {});
   const port = input("Port", { inputMode: "numeric" });
   const user = input("User", { placeholder: "forge" });
   const auth = h("select", { ariaLabel: "Log in with" }, ...AUTHS.map(([v, l]) => h("option", { value: v }, l)));
@@ -139,6 +153,14 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
   const rootPath = input("Root path", { placeholder: "Empty: the folder you log in to" });
   const detect = h("button", { type: "button", class: "ds-browse", title: "Fill in the folder you log in to", onclick: () => detectRoot() }, "Detect");
   const webUrl = input("Web URL", { placeholder: "https://staging.example.com" });
+  const deleteRemote = h("input", { type: "checkbox" });
+  const deleteRemoteRow = h(
+    "label",
+    { class: "ds-check", title: "Files you delete in the project, or that a branch switch removes, are deleted from the server too: quietly for a few at a time, after asking for more. Excluded paths and the mappings' own folders are never deleted." },
+    deleteRemote,
+    "Delete files from the server when you delete them in the project",
+  );
+  const deleteRemoteHint = h("p", { class: "deploy-hint deploy-check-hint" });
   const testResult = h("span", { class: "ds-test", role: "status" });
   const testButton = h("button", { type: "button", onclick: () => test() }, icon("plug"), "Test Connection");
   const problem = h("div", { class: "ds-problem", role: "alert" });
@@ -154,13 +176,15 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     "",
     h("div", { class: "ds-row" }, h("label", { class: "field" }, "Type", protocol), authRow),
     h("div", { class: "ds-row" }, host.row, port.row),
+    aliasHint,
+    aliasList,
     h("div", { class: "ds-row" }, user.row, secret.row),
     keyRow,
     h("div", { class: "deploy-checks" }, passiveRow, insecureRow),
     h("div", { class: "ds-test-row" }, testButton, testResult),
   );
   const paths = section("Paths", "", h("div", { class: "field-with-button" }, rootPath.row, detect), webUrl.row);
-  const mappings = section("Mappings", "Where project folders go on the server. A server path without a leading / is inside the root path.", mappingRows, addMapping);
+  const mappings = section("Mappings", "Where project folders go on the server. A server path without a leading / is inside the root path.", mappingRows, addMapping, h("div", { class: "deploy-checks" }, deleteRemoteRow), deleteRemoteHint);
   const exclusions = section("Excluded paths", "Never uploaded or downloaded. A name matches at any depth, as in .gitignore; a path with / matches from the mapping's folder.", excludes, suggestions);
   const empty = h("div", { class: "deploy-empty-form" }, icon("cloud-upload"), h("p", {}, "Add a server to upload the project over SFTP, FTP, or FTPS."), h("button", { type: "button", class: "primary", onclick: () => add() }, icon("add"), "Add Server"));
   const form = h("div", { class: "ds-form" }, name.row, connection, paths, mappings, exclusions);
@@ -198,6 +222,7 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     insecure.checked = s.insecureTls;
     rootPath.el.value = s.rootPath;
     webUrl.el.value = s.webUrl;
+    deleteRemote.checked = s.deleteRemote;
     excludes.value = s.excludes.join("\n");
     defaultButton.replaceChildren(icon(s.name === defaultServer ? "star-full" : "star-empty"));
     defaultButton.title = s.name === defaultServer ? "The default server" : "Use as the default server";
@@ -218,7 +243,19 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     passiveRow.hidden = sftp;
     insecureRow.hidden = s.protocol === "sftp" || s.protocol === "ftp";
     (passiveRow.parentElement as HTMLElement).hidden = sftp;
-    user.el.placeholder = sftp ? "forge" : "Empty for anonymous";
+    // A ~/.ssh/config alias: say what it connects to, and leave its user, port, and keys to the file.
+    if (sftp) host.el.setAttribute("list", aliasList.id);
+    else host.el.removeAttribute("list");
+    const alias = sftp ? aliases.find((a) => a.alias === s.host) : undefined;
+    aliasHint.hidden = !alias;
+    // The alias's port applies while the field is empty or 22, as deploy.rs reads it.
+    const aliasPort = alias?.port && alias.port !== 22 && s.port === 22 ? alias.port : 0;
+    if (aliasPort && document.activeElement !== port.el) port.el.value = "";
+    port.el.placeholder = aliasPort ? `${aliasPort} from ~/.ssh/config` : "";
+    if (alias) aliasHint.replaceChildren(icon("file-code"), ` From ~/.ssh/config: ${describeAlias(alias, o.homeDir)}`);
+    user.el.placeholder = sftp ? (alias?.user ?? "forge") : "Empty for anonymous";
+    keyFile.el.placeholder = alias?.identityFiles.length ? `Empty: ${alias.identityFiles.map((f) => (o.homeDir && f.startsWith(`${o.homeDir}/`) ? `~${f.slice(o.homeDir.length)}` : f)).join(", ")} from ~/.ssh/config` : "Empty: ~/.ssh/id_ed25519, id_ecdsa, or id_rsa";
+    deleteRemoteHint.textContent = s.deleteRemote && uploadOnSave.value === "never" ? "Takes effect when saved files upload, below, to this server as the default (★)." : "";
     placeholders();
     renderSuggestions();
   }
@@ -281,6 +318,7 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     s.insecureTls = insecure.checked;
     s.rootPath = rootPath.el.value.trim();
     s.webUrl = webUrl.el.value.trim();
+    s.deleteRemote = deleteRemote.checked;
     if (target === excludes) s.excludes = excludes.value.split("\n").map((l) => l.trim()).filter(Boolean);
     if (target === secret.el) current!.secret = secret.el.value;
     if (target === rootPath.el) for (const el of mappingRows.querySelectorAll<HTMLInputElement>(".deploy-mapping-remote input")) el.dispatchEvent(new Event("input"));
@@ -352,6 +390,7 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     h("option", { value: "always" }, "On every save, auto-save too"),
   );
   uploadOnSave.value = o.uploadOnSave;
+  uploadOnSave.onchange = () => current && shape();
   const shareBox = h("input", { type: "checkbox", checked: o.shared });
   const saveButton = h("button", { type: "button", class: "primary" }, "Save");
   saveButton.onclick = () => {
