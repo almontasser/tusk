@@ -265,7 +265,7 @@ class EnumDesigner {
       this.updatePreview();
     };
     name.onchange = () => this.render();
-    name.onkeydown = (e) => e.key === "Enter" && (e.preventDefault(), this.addCase());
+    name.onkeydown = (e) => void (e.key === "Enter" && (e.preventDefault(), this.addCase()));
     const cells: HTMLElement[] = [];
     for (const a of attrs) {
       if (!readable(a)) {

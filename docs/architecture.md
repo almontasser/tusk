@@ -8331,3 +8331,12 @@ fixes it, and `$order::` means the object's own class exactly, so no guess
 about subclasses is needed. A static method called by its own class's name
 used to keep `static` even from another class, which then meant the caller's
 class; it's written as the class now.
+
+### 2026-10-02: Key handler properties never return `false`
+
+A handler property that returns `false` cancels its event, so
+`input.onkeydown = (e) => e.key === "Enter" && go()` dropped every key but
+Enter, and inputs such as the Automations designer's condition value and the
+New notification name couldn't be typed in. Such handlers now wrap their
+expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
+handler property whose expression body could return `false`.

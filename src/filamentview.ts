@@ -278,7 +278,7 @@ export async function loadFilament() {
           r.relations.length ? h("span", { class: "fv-badge", title: `${r.relations.length} relation managers` }, icon("references"), String(r.relations.length)) : null,
         );
         row.onclick = () => file && void openDesigner(file);
-        row.onkeydown = (e) => e.key === "Enter" && file && void openDesigner(file);
+        row.onkeydown = (e) => void (e.key === "Enter" && file && void openDesigner(file));
         row.oncontextmenu = (e) => {
           e.preventDefault();
           void import("./files").then(({ showMenu }) =>
@@ -306,7 +306,7 @@ export async function loadFilament() {
       const file = `${root}/${pg.file}`;
       const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: pg.class }, pg.navigationIcon ? heroicon(iconsDir, pg.navigationIcon) : icon("file"), h("span", { class: "fv-name" }, pg.label ?? shortClass(pg.class)), h("span", { class: "fv-detail" }, pg.navigationGroup ?? ""));
       row.onclick = () => void openDesigner(file);
-      row.onkeydown = (e) => e.key === "Enter" && void openDesigner(file);
+      row.onkeydown = (e) => void (e.key === "Enter" && void openDesigner(file));
       // A settings page: its spatie/laravel-settings class opens in the settings designer.
       const settings = pg.settings;
       if (settings) {
@@ -348,7 +348,7 @@ export async function loadFilament() {
       const path = `${root}/${f.file}`;
       const row = h("li", { class: "fv-resource", role: "treeitem", tabIndex: 0, title: f.file }, icon("symbol-structure"), h("span", { class: "fv-name" }, shortClass(f.class)), h("span", { class: "fv-detail" }, f.file.replace(/^app\/Filament\//, "").split("/")[0].replace(/^Resources$/, "")));
       row.onclick = () => void openDesigner(path);
-      row.onkeydown = (ev) => ev.key === "Enter" && void openDesigner(path);
+      row.onkeydown = (ev) => void (ev.key === "Enter" && void openDesigner(path));
       rows.push(row);
     }
   } else if (!app.panels.length) rows.push(h("li", { class: "fv-none muted" }, "No panels. Filament needs a panel provider."));

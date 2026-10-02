@@ -390,7 +390,7 @@ export function initCommitView(hst: Host) {
   onSettings(() => render());
   $("commit").onclick = () => commit(false);
   $("commit-push").onclick = () => commit(true);
-  $("commit-message").onkeydown = (e) => e.key === "Enter" && mod(e) && (e.preventDefault(), commit(false));
+  $("commit-message").onkeydown = (e) => void (e.key === "Enter" && mod(e) && (e.preventDefault(), commit(false)));
   refreshListeners.push(render, () => {
     const n = gitStatus()?.files.length ?? 0;
     document.querySelector<HTMLElement>('#activitybar [data-view="commit"]')!.dataset.count = n > 99 ? "99+" : n ? String(n) : "";

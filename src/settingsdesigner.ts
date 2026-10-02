@@ -325,7 +325,7 @@ class SettingsDesigner {
     const name = h("input", { class: "ed-name fd-mono", value: r.name, spellcheck: false });
     name.oninput = () => ((r.name = propName(name.value)), this.updatePreview());
     name.onchange = () => this.render();
-    name.onkeydown = (e) => e.key === "Enter" && (e.preventDefault(), this.addProp());
+    name.onkeydown = (e) => void (e.key === "Enter" && (e.preventDefault(), this.addProp()));
     const retype = (type: SettingType, cls?: string) => {
       r.type = type;
       r.cls = type === "date" ? (cls ?? DATE_CLASS) : type === "enum" ? (cls ?? this.enums[0]?.class) : undefined;

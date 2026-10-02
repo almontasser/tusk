@@ -65,7 +65,7 @@ export async function newPage(anchor: HTMLElement | { x: number; y: number }, pa
       showError("Can't create the page", e);
     }
   };
-  name.onkeydown = (e) => e.key === "Enter" && void create();
+  name.onkeydown = (e) => void (e.key === "Enter" && void create());
   const p = popover(
     anchor,
     h(

@@ -448,7 +448,7 @@ class AutomationsView {
     if (!choices.some(([k]) => k === current)) choices.unshift([current, this.describe(v)]);
     const input = h("input", { class: "fd-mono", type: kind === "number" ? "number" : "text", value: v.kind === "string" || v.kind === "number" ? String(v.value) : "", spellcheck: false, placeholder: kind === "date" ? "2026-01-31" : "" }) as HTMLInputElement;
     input.onchange = () => change(kind === "number" && input.value.trim() !== "" ? { kind: "number", value: Number(input.value) } : { kind: "string", value: input.value });
-    input.onkeydown = (ev) => ev.key === "Enter" && input.blur();
+    input.onkeydown = (ev) => void (ev.key === "Enter" && input.blur());
     if (choices.length === 1 && current === "typed") return input;
     const sel = h("select", {}, ...choices.map(([k, l]) => h("option", { value: k, textContent: l, selected: k === current })));
     sel.onchange = () => (sel.value === "typed" ? change(kind === "number" ? { kind: "number", value: 0 } : { kind: "string", value: "" }) : change(options.find(([k]) => k === sel.value)![2]));

@@ -119,7 +119,7 @@ export async function newNotification(anchor: HTMLElement | { x: number; y: numb
       showError("Can't create the notification", e);
     }
   };
-  name.onkeydown = (e) => e.key === "Enter" && void create();
+  name.onkeydown = (e) => void (e.key === "Enter" && void create());
   const check = (box: HTMLInputElement, label: string) => h("label", { class: "fd-check-label" }, box, label);
   const p = popover(
     anchor,

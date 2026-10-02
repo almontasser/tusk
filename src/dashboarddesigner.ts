@@ -332,7 +332,7 @@ export function askNewWidget(anchor: HTMLElement, o: { dir: string; namespace: s
         showError("Can't create the widget", e);
       }
     };
-    name.onkeydown = (e) => e.key === "Enter" && void create();
+    name.onkeydown = (e) => void (e.key === "Enter" && void create());
     const p = popover(
       anchor,
       h(

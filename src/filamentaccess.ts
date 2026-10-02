@@ -127,7 +127,7 @@ function conditions(d: AccessHost, r: Pick<ReadAbility, "ability">, rule: Extrac
       const input = h("input", { class: "fd-mono", value: c.name, spellcheck: false, placeholder: c.kind === "role" ? "admin" : "update_post" }) as HTMLInputElement;
       input.setAttribute("list", id);
       input.onchange = () => input.value.trim() && set({ ...rule, conds: rule.conds.map((x, j) => (j === i ? { kind: c.kind, name: input.value.trim() } : x)) });
-      input.onkeydown = (e) => e.key === "Enter" && input.blur();
+      input.onkeydown = (e) => void (e.key === "Enter" && input.blur());
       value = h("span", { class: "fd-access-value" }, input, h("datalist", { id }, ...options.map((o) => h("option", { value: o }))));
     }
     list.append(

@@ -309,7 +309,7 @@ export function listEditor(o: { label: string; items: string[]; placeholder: str
     if (items.includes(v)) return (input.value = ""), void toast(`${o.label} already has ${v}.`, { kind: "info", timeout: 3000 });
     run(() => o.add(v), `add ${v}`).then(() => ((input.value = ""), input.focus()));
   };
-  input.onkeydown = (e) => e.key === "Enter" && (e.preventDefault(), add());
+  input.onkeydown = (e) => void (e.key === "Enter" && (e.preventDefault(), add()));
   draw();
   return h("div", { class: "setting-list-editor" }, h("div", { class: "setting-control" }, input, h("button", { type: "button", onclick: add }, "Add")), list);
 }
