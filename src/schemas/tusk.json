@@ -93,7 +93,8 @@
               "additionalProperties": false
             }
           },
-          "excludes": { "type": "array", "items": { "type": "string" }, "description": "Paths never uploaded or downloaded. A name matches at any depth; a path with / matches from the mapping's folder." }
+          "excludes": { "type": "array", "items": { "type": "string" }, "description": "Paths never uploaded or downloaded. A name matches at any depth; a path with / matches from the mapping's folder." },
+          "deleteRemote": { "type": "boolean", "description": "Delete a project file from the server when you delete it, while saved files upload to this server." }
         },
         "required": ["name", "protocol", "host"],
         "additionalProperties": false

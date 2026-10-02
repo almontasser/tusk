@@ -4,9 +4,10 @@
 #   sh scripts/deploy-test-servers.sh <folder>
 #   TUSK_DEPLOY_TEST=<folder> cargo test --manifest-path src-tauri/Cargo.toml --lib deploy -- --ignored
 #
-# SFTP is the system's OpenSSH (sshd on port 2222, run as you, with keys made in <folder>). FTP (port 2121) and
-# explicit FTPS (port 2990, with a self-signed certificate) are pyftpdlib in a virtual environment in <folder>,
-# with user `tusk` and password `tusk`. All serve <folder>/www. Stop them with `kill $(cat <folder>/*.pid)`.
+# SFTP is the system's OpenSSH (sshd on port 2222, run as you, with keys made in <folder>). FTP (port 2121),
+# explicit FTPS (port 2990), and implicit FTPS (port 2991), both with a self-signed certificate, are pyftpdlib in a
+# virtual environment in <folder>, with user `tusk` and password `tusk`. All serve <folder>/www. Stop them with
+# `kill $(cat <folder>/*.pid)`.
 set -e
 mkdir -p "${1:?Usage: deploy-test-servers.sh <folder>}"
 dir=$(cd "$1" && pwd)
@@ -38,18 +39,25 @@ import sys
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler, TLS_FTPHandler
 from pyftpdlib.servers import FTPServer
-folder, tls = sys.argv[1], sys.argv[2] == "1"
+folder, mode = sys.argv[1], sys.argv[2]
+
+class ImplicitTLS(TLS_FTPHandler):
+    # Implicit FTPS: TLS starts as the client connects, before the banner, rather than after AUTH TLS.
+    def handle(self):
+        self.secure_connection(self.ssl_context)
+        super().handle()
+
 auth = DummyAuthorizer()
 auth.add_user("tusk", "tusk", folder + "/www", perm="elradfmwMT")
-handler = TLS_FTPHandler if tls else FTPHandler
-if tls:
+handler = {"0": FTPHandler, "1": TLS_FTPHandler, "2": ImplicitTLS}[mode]
+if mode != "0":
     handler.certfile = folder + "/ftps.pem"
     handler.tls_control_required = handler.tls_data_required = True
 handler.authorizer = auth
-FTPServer(("127.0.0.1", 2990 if tls else 2121), handler).serve_forever()
+FTPServer(("127.0.0.1", {"0": 2121, "1": 2990, "2": 2991}[mode]), handler).serve_forever()
 EOF
-for tls in 0 1; do
+for tls in 0 1 2; do
   venv/bin/python ftp.py "$dir" "$tls" > "ftp$tls.log" 2>&1 &
   echo $! > "ftp$tls.pid"
 done
-echo "SFTP on 127.0.0.1:2222 (key $dir/sshd/client_key), FTP on 2121, explicit FTPS on 2990 (tusk/tusk), serving $dir/www"
+echo "SFTP on 127.0.0.1:2222 (key $dir/sshd/client_key), FTP on 2121, explicit FTPS on 2990, implicit FTPS on 2991 (tusk/tusk), serving $dir/www"

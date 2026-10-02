@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hostKeyProblem, joinRemote, localFor, newServer, readServers, remoteFor, serverProblem, transient, webUrlFor, writeServer } from "./deploydata.ts";
+import { describeAlias, hostKeyProblem, joinRemote, listSome, localFor, newServer, readServers, remoteFor, serverProblem, transient, webUrlFor, writeServer } from "./deploydata.ts";
 
 const server = (over = {}) => ({ ...newServer("staging"), host: "example.com", rootPath: "/var/www/app", ...over });
 
@@ -81,4 +81,23 @@ test("retries the network's errors, not the server's refusals", () => {
   assert.ok(transient("example.com:22 didn't answer within 20 seconds."));
   assert.ok(!transient("The server refused the connection. Check the host and port."));
   assert.ok(!transient("/x: the server refused it (550: no such file, or permission denied)"));
+});
+
+test("keeps deleting from the server off unless it's set", () => {
+  assert.equal(readServers([{ name: "a", host: "h" }])[0].deleteRemote, false);
+  const on = readServers([{ name: "a", host: "h", deleteRemote: true }])[0];
+  assert.equal(on.deleteRemote, true);
+  assert.equal(writeServer(on).deleteRemote, true);
+  assert.equal("deleteRemote" in writeServer(server()), false);
+});
+
+test("describes ~/.ssh/config aliases", () => {
+  const a = { alias: "staging", hostName: "203.0.113.5", port: 2222, user: "forge", identityFiles: ["/Users/me/.ssh/staging"], identitiesOnly: true, proxyJump: ["bastion"] };
+  assert.equal(describeAlias(a, "/Users/me"), "forge@203.0.113.5:2222 · through bastion · key ~/.ssh/staging");
+  assert.equal(describeAlias({ ...a, hostName: null, port: 22, user: null, identityFiles: [], proxyJump: [] }), "staging");
+});
+
+test("lists some paths and counts the rest", () => {
+  assert.deepEqual(listSome(["a", "b"], 3), { shown: ["a", "b"], more: 0 });
+  assert.deepEqual(listSome(["a", "b", "c", "d"], 3), { shown: ["a", "b"], more: 2 });
 });

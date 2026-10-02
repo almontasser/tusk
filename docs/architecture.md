@@ -4534,21 +4534,47 @@ counts the same way when it removes the replaced one. Tests point
 **Logins.** Passwords and key passphrases are in the password store under
 "Tusk deployment", by project and server name, and Rust reads them itself, so
 they never reach the web view; the settings dialog sends a typed password
-only to test it before saving. A key login without a key file tries
-`id_ed25519`, `id_ecdsa`, and `id_rsa`, as `ssh` does. RSA keys sign with the
+only to test it before saving. A key login without a key file tries the host's
+`IdentityFile` keys from `~/.ssh/config`, then `id_ed25519`, `id_ecdsa`, and
+`id_rsa` unless `IdentitiesOnly` says not to, as `ssh` does (`key_files`).
+`load_key` reads OpenSSH, PEM, and PuTTY `.ppk` keys: russh's
+`decode_secret_key` hands `.ppk` text to `ssh-key`'s `ppk` feature, which
+reads versions 2 and 3 (Argon2). A key that needs a passphrase that wasn't
+given is skipped, and named if no other key gets in. RSA keys sign with the
 best hash the server offers (`best_supported_rsa_hash`). The agent is
 `SSH_AUTH_SOCK`'s on macOS and Linux, and OpenSSH's named pipe or Pageant on
 Windows.
 
+**~/.ssh/config.** `sshconfig.rs` reads the file as `ssh` does: the first
+value for a keyword wins, `Host` patterns take `*`, `?`, and `!` (through
+`globset`, case-insensitive), `Include` reads other files in place (globs,
+relative to `~/.ssh`, 16 deep), and `IdentityFile` collects every value with
+`%h`, `%u`, `%r`, `%p`, `%d`, and `~` expanded. `Match` blocks are skipped, not
+evaluated. `connect_sftp` resolves the server's host: `HostName` replaces it,
+the file's `Port` applies while the settings' port is 22, and its `User` while
+the settings have none. `ProxyJump` hosts connect one through the other with
+`channel_open_direct_tcpip`, and `russh::client::connect_stream` runs the next
+handshake over that channel; `Conn::Sftp` keeps the jump connections open
+beside the session. A jump host logs in with the agent, then its own key
+files, since there's nowhere to ask for its password. Host keys are checked
+against the resolved name, as `ssh` does without `HostKeyAlias`.
+`deploy_ssh_hosts` lists the aliases without wildcards for the Servers
+dialog's suggestions. Tests point `TUSK_SSH_CONFIG` at their own file.
+
 **Uploads.** `Conn::upload` creates the missing folders, writes
 `.name.tusk-upload` beside the file, sets the local file's modification time
-and the old file's permissions on it, and renames it into place. SFTP's
+and the old file's permissions on it, and on SFTP the old file's owner and
+group (`set_attrs`: both when the server allows, else the group alone, which
+any user can set to one of their own groups), and renames it into place. SFTP's
 rename (protocol version 3) won't replace a file, and `russh-sftp` doesn't
 send OpenSSH's `posix-rename`, so when the rename fails the old file moves to
 `.name.tusk-old` first, and back if the second rename fails. A folder that
 allows changing its files but not creating new ones gets the file written in
 place. FTP sets the time with `MFMT` and permissions with `SITE CHMOD`, where
-the server has them. Downloads write a temporary file beside the target and
+the server has them. Implicit FTPS sends `PBSZ 0` and `PROT P` after the
+greeting: suppaftp's `connect_secure_implicit` wraps data connections in TLS
+without telling the server, which then refuses them or sends them in plain
+text. Downloads write a temporary file beside the target and
 rename it, keep the local file's permissions, and take the server's time.
 
 **Listing.** SFTP's `readdir` has sizes, times, and permissions. FTP uses
@@ -4566,19 +4592,53 @@ Those are read on both sides and compared, up to 4 MB each. Since uploads set
 the server's time to the local file's, a project uploaded by Tusk compares by
 size and time alone.
 
+**Deleting.** `deploy_delete` stats each path and removes what's there, a
+folder with everything in it, so a path already gone isn't an error.
+`deleteFromServer` asks with `confirmDeletion`, a dialog that lists the paths
+with Cancel focused, and never takes a mapping's own folder. Sync with
+Deployed offers deleting for files on one side only: the server's through
+`deploy_delete`, the project's to the trash after `recordBeforeDelete`, all
+listed in one confirmation. For the server setting `deleteRemote`,
+`filesDeleted` runs on every watcher burst (main.ts passes the paths): while
+saved files upload to the default server and it has the setting, paths in its
+mappings that no longer exist and that `deploy_excluded` doesn't leave out are
+deleted there, a folder taking its files' entries with it. Paths in the same
+burst that do exist upload, so a move or rename leaves the server with the
+new name. More than 20 deletions in one burst, as a branch switch makes, show
+a toast whose **Review…** opens the confirmation instead.
+
 **Remote Host.** The tree loads a folder when you open it. Its paths are
 absolute (a relative root path is resolved against the login folder), so a
 file opened from it is kept at `<app cache>/remote/<server>/<path>`, and
 `afterSave` reads the server and path back from that location and uploads it.
+`synced` keeps each open server file's size and time on the server, from
+`deploy_stat` after each download and upload. `checkRemoteFiles` runs when
+the window gets focus (at most every 5 seconds) and every 30 seconds while
+it's visible: a file whose stat differs reloads when it has no unsaved
+changes, and otherwise gets a bar above its editor (`host.notice`, which
+main.ts shows in each pane's `.pane-notice` for the pane's file) with
+Compare, Keep Mine, and Load Server's; a file that's gone gets one with
+Upload. A file restored with the session has no record, so its cache file's
+own time, which its download set to the server's, stands in. The check
+doesn't use `reach`, so it never asks about a host key in the background, and
+errors, such as being offline, are skipped. `host.reload` replaces the text
+with one `pushEditOperations`, so undo brings back what was there.
 
 **Tests.** Rust unit tests cover exclusions, local listing, the diff, known_hosts
-numbering, paths, and MFMT times; `deploydata.test.ts` covers mappings, web
-URLs, stored servers, and errors. `scripts/deploy-test-servers.sh` starts the
-system's `sshd` as you on port 2222 and pyftpdlib for FTP (2121) and explicit
-FTPS (2990, self-signed), and the ignored tests upload, replace (checking
+numbering, paths, MFMT times, `.ppk` keys of both versions with and without
+their passphrase (fixtures from `ssh-key`'s tests, passphrase `123`), key file
+order, and `sshconfig.rs`'s matching, first values, `Include`, tokens, and
+jump specs; `deploydata.test.ts` covers mappings, web URLs, stored servers,
+alias descriptions, and errors. `scripts/deploy-test-servers.sh` starts the
+system's `sshd` as you on port 2222 and pyftpdlib for FTP (2121), explicit
+FTPS (2990), and implicit FTPS (2991, a handler that starts TLS before its
+greeting), both self-signed. The ignored tests upload, replace (checking
 permissions), list, walk, download, read, cancel, rename, and delete on each,
 check the trust flow for unknown and changed keys, a missing passphrase, a
-refused user, a refused FTP password, and a refused self-signed certificate.
+refused user, a refused FTP password, and a refused self-signed certificate,
+that a replaced SFTP file keeps another group of yours, and that an alias in
+a test ssh config connects directly and through a `ProxyJump` host (the same
+sshd, through itself).
 
 ## Bookmarks, snippets, and other small tools
 
@@ -7895,7 +7955,8 @@ for each platform. `russh` and `russh-sftp` are pure Rust and run on the tokio
 runtime Tauri already has; with the `ring` feature they share the crypto
 library rustls already uses here, so the build adds no C. `suppaftp` covers
 FTP and both kinds of FTPS through `tokio-rustls`. The cost is that
-`~/.ssh/config` isn't read; the Known gaps list it.
+`~/.ssh/config` isn't read for free; `sshconfig.rs` reads the part deployment
+needs (see 2026-10-02: Deployment reads ~/.ssh/config itself).
 
 Transfers are one file per call, queued in the frontend, rather than a folder
 per call in Rust: progress, cancel, retry, and the File Transfer panel then
@@ -7950,3 +8011,28 @@ lists of names; anything else makes the component's names untyped rather than
 guessed. `ComponentSlot`, `ComponentAttributeBag`, and
 `InvokableComponentVariable` load at every build, since lazy loading left them
 out of apps whose PHP never names them.
+
+### 2026-10-02: Deployment reads ~/.ssh/config itself
+
+Servers that people already reach with `ssh staging` are aliases in
+`~/.ssh/config`, often behind a bastion, and typing their real host, user,
+port, and key again was the most common setup step. No crate on crates.io
+parses the file with `Include` and token expansion without pulling in a C
+`ssh`, so `sshconfig.rs` reads it in about 200 lines, for the keywords a
+connection needs. `Match` isn't evaluated, since its conditions (`exec`,
+`localnetwork`, canonical names) need ssh's own state; its settings are
+skipped rather than guessed at. `ProxyJump` runs inside russh through
+`direct-tcpip` channels, so it needs no `ssh` binary; `ProxyCommand` would, and
+isn't read.
+
+Deleting on the server follows PhpStorm's "Delete remote files when local are
+deleted": off by default, per server, and only for the default server while
+uploads on save are on, since that's when the server follows the project. It
+reads the file watcher rather than Tusk's own delete actions, so files that a
+refactoring, Local History, or `git checkout` remove count too; the watcher
+can't tell those apart, so bursts of more than 20 ask. A file deleted while
+Tusk is closed isn't noticed; Sync with Deployed finds it.
+
+PuTTY keys needed no code: russh already decodes `.ppk` through `ssh-key`'s
+`ppk` feature, versions 2 and 3, so the change is clearer errors and tests.
+

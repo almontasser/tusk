@@ -1,19 +1,22 @@
 // Deployment, as PhpStorm has it: servers reached over SFTP, FTP, or FTPS (src-tauri/src/deploy.rs), with
 // mappings from project folders to server folders (deploydata.ts). This module has the actions (Upload to,
-// Download from, Sync with Deployed, Compare with Deployed Version), uploads on save, the transfer queue and its
-// File Transfer panel and status bar item, and the Remote Host tool window. Servers are edited in deployservers.ts.
+// Download from, Delete from, Sync with Deployed, Compare with Deployed Version), uploads and deletions on save, the
+// transfer queue and its File Transfer panel and status bar item, and the Remote Host tool window, whose files
+// reload when the server's copy changes. Servers are edited in deployservers.ts.
 //
 // Transfers run in the background, one file each, at most a few at a time per server, so the window never waits on
 // the network. A network error is retried twice on its own; other failures stay in the queue with Retry, and a
 // toast says what failed. Uploads replace a server's file only once the new one is complete (deploy.rs).
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { appCacheDir } from "@tauri-apps/api/path";
+import { appCacheDir, homeDir } from "@tauri-apps/api/path";
 import { h, icon, iconButton, toast } from "./dom";
-import { type DeployServer, type FileInfoLike, formatBytes, formatTime, hostKeyProblem, joinRemote, localFor, type Placed, readServers, remoteFor, transient, type UploadOnSave, webUrlFor, writeServer } from "./deploydata";
+import { type DeployServer, type FileInfoLike, formatBytes, formatTime, hostKeyProblem, joinRemote, listSome, localFor, type Placed, readServers, remoteFor, type SshAlias, transient, type UploadOnSave, webUrlFor, writeServer } from "./deploydata";
 import { openDeploymentServers, trustHostKey } from "./deployservers";
 import { type MenuItem, showMenu } from "./files";
 import { showDiff } from "./git";
 import { listNav } from "./listnav";
+import { keyText, trash } from "./platform.ts";
+import { recordBeforeDelete } from "./localhistory";
 import { confirm, pick, rank, type Item } from "./palette";
 import { onProjectValue, projectScope, projectValue, setProjectScope, setProjectValue } from "./projectstate";
 import { errorText, showError, status } from "./status";
@@ -27,6 +30,12 @@ type Host = {
   /** An open file's text, or undefined when it isn't open. */
   openText(path: string): string | undefined;
   showView(name: string): void;
+  /** Every open file. */
+  openPaths(): string[];
+  /** Reads an open file from disk again, as one edit that undo reverts. */
+  reload(path: string): Promise<void>;
+  /** Shows a bar above a file's editor, or removes it for null. */
+  notice(path: string, make: (() => HTMLElement) | null): void;
 };
 
 let host: Host;
@@ -114,6 +123,8 @@ export async function editServers(selected?: string) {
     hasSecret: (name) => invoke<boolean>("deploy_has_secret", { account: account(name) }),
     test: (s, previous, secret) => reach(() => invoke<string>("deploy_test", { server: wire(s, secret, previous ?? s.name), root: s.rootPath })),
     home: (s, previous, secret) => reach(() => invoke<string>("deploy_home", { server: wire(s, secret, previous ?? s.name) })),
+    sshHosts: () => invoke<SshAlias[]>("deploy_ssh_hosts"),
+    homeDir: (await homeDir().catch(() => "")).replace(/\/+$/, ""),
   });
   if (!result) return;
   try {
@@ -224,7 +235,7 @@ function finishBatch(b: Batch) {
   }
   if (done.length) b.after?.();
   // Remote Host shows what was uploaded.
-  if (b.up && done.length) remote.uploaded(b.server);
+  if (b.up && done.length) remote.changedOn(b.server);
 }
 
 function retry(list: Transfer[]) {
@@ -386,6 +397,85 @@ async function safeToReplace(locals: string[]) {
   return confirm(`Replace unsaved changes in ${dirty.length === 1 ? nameOf(dirty[0]) : `${dirty.length} open files`} with the server's copy?`, "Download and Replace");
 }
 
+/** Asks before deleting, listing what goes. Cancel is the default. Resolves to true to delete. */
+function confirmDeletion(title: string, intro: string, paths: string[], action: string): Promise<boolean> {
+  const { shown, more } = listSome(paths);
+  let yes = false;
+  const go = h("button", { type: "button", class: "danger", onclick: () => ((yes = true), dialog.close()) }, icon("trash"), action);
+  const cancel = h("button", { type: "button", class: "primary", onclick: () => dialog.close() }, "Cancel");
+  const dialog = h(
+    "dialog",
+    { class: "refactor-dialog deploy-delete", ariaLabel: title },
+    h(
+      "form",
+      { method: "dialog" },
+      h("h2", {}, icon("warning"), title),
+      h("p", {}, intro),
+      h("ul", { class: "deploy-delete-list" }, ...shown.map((p) => h("li", { title: p }, p)), more ? h("li", { class: "muted" }, `and ${more} more`) : null),
+      h("div", { class: "buttons" }, cancel, go),
+    ),
+  );
+  dialog.addEventListener("keydown", (e) => e.stopPropagation());
+  document.body.append(dialog);
+  return new Promise((resolve) => {
+    dialog.onclose = () => (dialog.remove(), resolve(yes));
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
+/**
+ * Deletes the server's copies of project files and folders, asking first unless `ask` is false. A mapping's own
+ * folder is never deleted this way: that would take the whole site.
+ */
+export async function deleteFromServer(paths: string[], server?: DeployServer | "choose", o: { ask?: boolean } = {}) {
+  const s = await serverFor(server, "Delete from");
+  if (!s) return;
+  const placed = paths.map((p) => remoteFor(s, host.root(), p)).filter((p): p is Placed => !!p && p.local !== p.localRoot);
+  if (!placed.length) return status(paths.length === 1 && remoteFor(s, host.root(), paths[0]) ? `${relative(paths[0])} is a mapping's folder; delete what's in it on Remote Host instead.` : `${paths.length === 1 ? relative(paths[0]) : "Those files"} aren't in ${s.name}'s mappings.`, "deploy", "info");
+  const remotes = placed.map((p) => p.remote);
+  const what = remotes.length === 1 ? nameOf(remotes[0]) : `${remotes.length} items`;
+  if (o.ask !== false && !(await confirmDeletion(`Delete ${what} from ${s.name}?`, `This deletes the server's ${remotes.length === 1 ? "copy" : "copies"} in ${placed[0].remoteRoot || "the login folder"}, and everything inside a folder. The project keeps its own. This can't be undone.`, placed.map((p) => relative(p.local)), `Delete from ${s.name}`))) return;
+  try {
+    status(`Deleting ${what} from ${s.name}…`, "deploy:progress");
+    const deleted = await reach(() => invoke<number>("deploy_delete", { server: wire(s), paths: remotes }));
+    status(deleted ? `Deleted ${deleted === remotes.length ? what : `${deleted} of ${remotes.length} items`} from ${s.name}` : `${what} ${remotes.length === 1 ? "wasn't" : "weren't"} on ${s.name}`, "deploy", "info");
+  } catch (e) {
+    toast(`Couldn't delete ${what} from ${s.name}: ${errorText(e)}`, { action: { label: "Retry", run: () => deleteFromServer(paths, s, { ask: false }) } });
+  } finally {
+    status("", "deploy:progress");
+  }
+  remote.changedOn(s);
+}
+
+/** How many files one burst of deletions may take from the server without asking, as a branch switch would exceed. */
+const QUIET_DELETES = 20;
+
+/**
+ * Project files changed on disk: when the default server deletes what you delete, and saved files upload to it,
+ * deletes the server's copies of files that are gone. Files that appeared in the same burst, as a move or rename
+ * makes, upload, so the server doesn't lose them. More than a few deletions at once ask first.
+ */
+export async function filesDeleted(paths: string[]) {
+  const s = defaultServer();
+  if (!s?.deleteRemote || uploadOnSave() === "never" || !host?.root()) return;
+  const placed = paths.filter((p) => !/\.tusk-(download|upload|old)$/.test(p)).map((p) => remoteFor(s, host.root(), p)).filter((p): p is Placed => !!p && p.local !== p.localRoot);
+  if (!placed.length) return;
+  const exists = await invoke<boolean[]>("paths_exist", { paths: placed.map((p) => p.local) });
+  let gone = placed.filter((_, i) => !exists[i]);
+  if (!gone.length) return;
+  const excluded = await invoke<boolean[]>("deploy_excluded", { excludes: s.excludes, paths: gone.map((p) => p.local.slice(p.localRoot.length + 1)) });
+  gone = gone.filter((_, i) => !excluded[i]);
+  // A folder deleted with its files: deleting the folder deletes them.
+  gone = gone.filter((p) => !gone.some((o) => o !== p && p.remote.startsWith(`${o.remote}/`)));
+  if (!gone.length) return;
+  const added = placed.filter((_, i) => exists[i]).map((p) => p.local);
+  if (added.length) void upload(added, s, { quiet: true });
+  if (gone.length > QUIET_DELETES)
+    return toast(`${gone.length} files in ${s.name}'s mappings were deleted here, such as by a branch switch. Delete them from ${s.name} too?`, { kind: "info", action: { label: "Review…", run: () => deleteFromServer(gone.map((p) => p.local), s) } });
+  void deleteFromServer(gone.map((p) => p.local), s, { ask: false });
+}
+
 /** Runs a listing with a spinner in the status bar and Cancel, which stops deploy.rs's walk by `id`. */
 async function withSpinner<T>(label: string, task: (id: number) => Promise<T>): Promise<T> {
   const id = ids++;
@@ -403,7 +493,8 @@ export function afterSave(path: string, explicit: boolean) {
   const origin = remoteOrigin(path);
   if (origin) {
     const s = named(origin.server);
-    if (s) enqueue(s, true, [{ local: path, remote: origin.remote, size: 0 }], { quiet: true, title: `Upload to ${s.name}` });
+    // Saving answers a "changed on the server" bar: yours replaces the server's.
+    if (s) enqueue(s, true, [{ local: path, remote: origin.remote, size: 0 }], { quiet: true, title: `Upload to ${s.name}`, after: () => (host.notice(path, null), void remember(s, origin.remote, path)) });
     return;
   }
   const mode = uploadOnSave();
@@ -437,7 +528,7 @@ export async function compareWithDeployed(path: string, server?: DeployServer | 
 }
 
 type Difference = { path: string; kind: "local" | "remote" | "changed"; newer: "local" | "remote" | ""; local: FileInfoLike | null; remote: FileInfoLike | null };
-type Choice = "upload" | "download" | "skip";
+type Choice = "upload" | "download" | "skip" | "delete";
 
 /** The Sync with Deployed tab: what differs between a project folder and the server, and what to do with each. */
 class SyncView {
@@ -458,7 +549,7 @@ class SyncView {
     this.list.addEventListener("keydown", (e) => {
       const key = this.nav.selected();
       if (!key) return;
-      const choice = e.key === "ArrowRight" ? "upload" : e.key === "ArrowLeft" ? "download" : e.key === " " || e.key === "Backspace" ? "skip" : null;
+      const choice = e.key === "ArrowRight" ? "upload" : e.key === "ArrowLeft" ? "download" : e.key === " " || e.key === "Backspace" ? "skip" : e.key === "Delete" ? "delete" : null;
       if (!choice) return;
       e.preventDefault();
       e.stopPropagation();
@@ -511,7 +602,7 @@ class SyncView {
 
   private set(path: string, choice: Choice) {
     const d = this.differences.find((x) => x.path === path);
-    if (!d || (choice === "upload" && !d.local) || (choice === "download" && !d.remote)) return;
+    if (!d || (choice === "upload" && !d.local) || (choice === "download" && !d.remote) || (choice === "delete" && d.kind === "changed")) return;
     this.choices.set(path, choice);
     this.render();
   }
@@ -551,12 +642,36 @@ class SyncView {
     const list = (only ?? this.differences).filter((d) => this.choices.get(d.path) !== "skip");
     const ups = list.filter((d) => this.choices.get(d.path) === "upload").map((d) => ({ local: this.localPath(d), remote: this.remotePath(d), size: d.local?.size ?? 0 }));
     const downs = list.filter((d) => this.choices.get(d.path) === "download").map((d) => ({ local: this.localPath(d), remote: this.remotePath(d), size: d.remote?.size ?? 0 }));
+    const deletes = list.filter((d) => this.choices.get(d.path) === "delete");
+    const remoteDeletes = deletes.filter((d) => d.kind === "remote").map((d) => this.remotePath(d));
+    const localDeletes = deletes.filter((d) => d.kind === "local").map((d) => this.localPath(d));
     if (downs.length && !(await safeToReplace(downs.map((d) => d.local)))) return;
-    let left = (ups.length ? 1 : 0) + (downs.length ? 1 : 0);
+    if (deletes.length) {
+      const listed = deletes.map((d) => `${d.kind === "remote" ? this.server.name : "Project"}: ${d.path}`);
+      const where = remoteDeletes.length && localDeletes.length ? `from ${this.server.name} and the project` : remoteDeletes.length ? `from ${this.server.name}` : "from the project";
+      const intro = `${remoteDeletes.length ? `Deleting from ${this.server.name} can't be undone.` : ""}${localDeletes.length ? ` Project files go to the ${trash}, and Local History keeps them.` : ""}`.trim();
+      if (!(await confirmDeletion(`Delete ${deletes.length} file${deletes.length === 1 ? "" : "s"} ${where}?`, intro, listed, "Delete and Synchronize"))) return;
+    }
+    let left = (ups.length ? 1 : 0) + (downs.length ? 1 : 0) + (deletes.length ? 1 : 0);
     const after = () => --left <= 0 && void this.compare();
     if (ups.length) enqueue(this.server, true, ups, { title: `Upload to ${this.server.name}`, after });
     if (downs.length) enqueue(this.server, false, downs, { title: `Download from ${this.server.name}`, after });
-    if (left) (this.state = "comparing"), (this.progress = `Transferring ${ups.length + downs.length} file${ups.length + downs.length === 1 ? "" : "s"}…`), this.render();
+    if (deletes.length) void this.remove(remoteDeletes, localDeletes).finally(after);
+    if (left) (this.state = "comparing"), (this.progress = `Synchronizing ${list.length} file${list.length === 1 ? "" : "s"}…`), this.render();
+  }
+
+  /** Deletes the chosen files: the server's with deploy_delete, the project's to the trash, kept in Local History. */
+  private async remove(remotes: string[], locals: string[]) {
+    try {
+      if (remotes.length) await reach(() => invoke("deploy_delete", { server: wire(this.server), paths: remotes }));
+      for (const path of locals) {
+        await recordBeforeDelete(path, false);
+        await invoke("trash_path", { path });
+      }
+      if (remotes.length) remote.changedOn(this.server);
+    } catch (e) {
+      showError(`Couldn't delete every file`, e);
+    }
   }
 
   render() {
@@ -574,6 +689,7 @@ class SyncView {
     if (!this.differences.length) return this.el.replaceChildren(head, h("div", { class: "deploy-sync-wait same" }, icon("pass-filled"), h("p", {}, `Everything in ${relative(this.at.local)} matches ${this.server.name}.`)));
     const count = (k: Difference["kind"]) => this.differences.filter((d) => d.kind === k).length;
     const chosen = this.differences.filter((d) => this.choices.get(d.path) !== "skip").length;
+    const deleting = this.differences.filter((d) => this.choices.get(d.path) === "delete").length;
     const summary = h(
       "div",
       { class: "deploy-sync-summary" },
@@ -583,7 +699,7 @@ class SyncView {
       count("remote") ? h("span", { class: "chip remote" }, `${count("remote")} only on ${this.server.name}`) : null,
       h("span", { class: "spacer" }),
       h("span", { class: "deploy-hint" }, "Set all:"),
-      h("button", { onclick: () => this.setAll("newer"), title: "Upload what's newer here, download what's newer there; skip files only on the server" }, "By Date"),
+      h("button", { onclick: () => this.setAll("newer"), title: "Upload what's newer here, download what's newer there; skip files only on the server. Nothing is deleted unless you choose it." }, "By Date"),
       h("button", { onclick: () => this.setAll("upload") }, icon("arrow-up"), "Upload"),
       h("button", { onclick: () => this.setAll("download") }, icon("arrow-down"), "Download"),
       h("button", { onclick: () => this.setAll("skip") }, "Skip"),
@@ -597,8 +713,15 @@ class SyncView {
         const side = (f: FileInfoLike | null, newer: boolean) => h("span", { class: `deploy-side${newer ? " newer" : ""}` }, f ? `${formatBytes(f.size)} · ${formatTime(f.mtime)}` : "—");
         return h(
           "li",
-          { role: "option", data: { key: d.path, label: d.path }, class: `deploy-sync-row ${d.kind}`, ondblclick: () => void this.diff(d.path) },
-          h("span", { class: "deploy-choices" }, toggle("download", "arrow-left", `Download (←)`, !d.remote), toggle("skip", "dash", "Skip (Space)", false), toggle("upload", "arrow-right", `Upload (→)`, !d.local)),
+          { role: "option", data: { key: d.path, label: d.path }, class: `deploy-sync-row ${d.kind}${choice === "delete" ? " deleting" : ""}`, ondblclick: () => void this.diff(d.path) },
+          h(
+            "span",
+            { class: "deploy-choices" },
+            toggle("download", "arrow-left", `Download (←)`, !d.remote),
+            toggle("skip", "dash", "Skip (Space)", false),
+            toggle("upload", "arrow-right", `Upload (→)`, !d.local),
+            toggle("delete", "trash", d.kind === "changed" ? "Only files on one side can be deleted here" : d.kind === "remote" ? `Delete from ${this.server.name} (${keyText("⌦")})` : `Delete from the project (${keyText("⌦")})`, d.kind === "changed"),
+          ),
           h("span", { class: "deploy-kind", title: d.kind === "local" ? "Only in the project" : d.kind === "remote" ? `Only on ${this.server.name}` : "Changed" }, icon(d.kind === "local" ? "diff-added" : d.kind === "remote" ? "cloud" : "diff-modified")),
           h("span", { class: "deploy-sync-path" }, d.path),
           side(d.local, d.newer === "local"),
@@ -608,8 +731,8 @@ class SyncView {
       }),
     );
     const columns = h("div", { class: "deploy-sync-columns" }, h("span", {}, "Action"), h("span", {}), h("span", {}, "File"), h("span", {}, "In the project"), h("span", {}, `On ${this.server.name}`), h("span", {}));
-    const go = h("button", { class: "primary", disabled: !chosen, onclick: () => void this.synchronize() }, icon("sync"), chosen ? `Synchronize ${chosen} File${chosen === 1 ? "" : "s"}` : "Nothing to Synchronize");
-    this.el.replaceChildren(head, summary, columns, this.list, h("footer", { class: "deploy-sync-foot" }, h("span", { class: "deploy-hint" }, "← download · Space skip · → upload · ⏎ compare"), h("span", { class: "spacer" }), go));
+    const go = h("button", { class: "primary", disabled: !chosen, onclick: () => void this.synchronize() }, icon("sync"), chosen ? `Synchronize ${chosen} File${chosen === 1 ? "" : "s"}${deleting ? ` (${deleting} to Delete)` : ""}` : "Nothing to Synchronize");
+    this.el.replaceChildren(head, summary, columns, this.list, h("footer", { class: "deploy-sync-foot" }, h("span", { class: "deploy-hint" }, `← download · Space skip · → upload · ${keyText("⌦")} delete · ⏎ compare`), h("span", { class: "spacer" }), go));
     this.list.scrollTop = scrolled;
     if (!this.nav.selected() && this.differences.length) this.nav.select(this.differences[0].path, { scroll: false });
   }
@@ -651,6 +774,7 @@ export function deploymentMenu(path: string, isDir: boolean): MenuItem[] {
     "-",
     ...(mapped ? [{ label: `Sync with Deployed to ${s.name}…`, run: () => syncWithDeployed(path, s) }] : [{ label: "Sync with Deployed to…", run: () => syncWithDeployed(path, "choose") }]),
     ...(isDir ? [] : [{ label: mapped ? `Compare with Deployed Version on ${s.name}` : "Compare with Deployed Version…", run: () => compareWithDeployed(path, mapped ? s : "choose") }]),
+    ...(mapped && mapped.local !== mapped.localRoot ? [{ label: `Delete from ${s.name}…`, run: () => deleteFromServer([path], s) }] : []),
     ...(!isDir && mapped && webUrlFor(s, remoteFor(s, host.root(), path)!.remote) ? [{ label: `Open on ${s.name} in the Browser`, run: () => invoke("open_url", { url: webUrlFor(s, remoteFor(s, host.root(), path)!.remote) }) }] : []),
     "-",
     { label: "Remote Host", run: () => showRemoteHost() },
@@ -683,13 +807,115 @@ async function openRemote(s: DeployServer, remote: string, size: number) {
     status(`Opening ${nameOf(remote)} from ${s.name}…`, "deploy:progress");
     const progress = new Channel<[number, number]>();
     await reach(() => invoke("deploy_download", { server: wire(s), remote, local, id: ids++, progress }));
+    await remember(s, remote, local);
+    host.notice(local, null);
     host.openFile(local);
+    await host.reload(local);
     status(`Opened ${nameOf(remote)} from ${s.name}. Saving it uploads it back.`, "deploy", "info");
   } catch (e) {
     showError(`Can't open ${nameOf(remote)}`, e);
   } finally {
     status("", "deploy:progress");
   }
+}
+
+// ---- Server files that change on the server ----
+
+/** The server's size and time of each server file open in the editor, as last downloaded or uploaded. */
+const synced = new Map<string, { mtime: number; size: number }>();
+
+async function remember(s: DeployServer, remote: string, local: string) {
+  const e = await invoke<Entry | null>("deploy_stat", { server: wire(s), path: remote }).catch(() => null);
+  if (e) synced.set(local, { mtime: e.mtime, size: e.size });
+}
+
+/** Times this close count as the same, as in deploy.rs: servers round them. */
+const sameState = (a: { mtime: number; size: number }, b: { mtime: number; size: number }) => a.size === b.size && Math.abs(a.mtime - b.mtime) <= 2;
+
+let checking = false;
+let lastCheck = 0;
+
+/**
+ * Looks for server files open in the editor that changed on the server: with a stat each, when the window gets
+ * focus and every half minute. One without unsaved changes reloads; one with them gets a bar that asks.
+ */
+async function checkRemoteFiles(force = false) {
+  if (checking || !cacheDir || (!force && Date.now() - lastCheck < 5000)) return;
+  const open = host.openPaths().filter((p) => remoteOrigin(p));
+  if (!open.length) return;
+  checking = true;
+  lastCheck = Date.now();
+  try {
+    for (const path of open) {
+      const o = remoteOrigin(path)!;
+      const s = named(o.server);
+      if (!s || transfers.some((t) => t.local === path && (t.state === "queued" || t.state === "running"))) continue;
+      // In the background: no host key prompt, and a server that's offline isn't reported.
+      let e: Entry | null;
+      try {
+        e = await invoke<Entry | null>("deploy_stat", { server: wire(s), path: o.remote });
+      } catch {
+        continue;
+      }
+      // A file restored with the session has no record yet: its download gave it the server's time.
+      const known = synced.get(path) ?? (await invoke<FileInfoLike[]>("deploy_local_files", { root: parentOf(path), paths: [path], excludes: [] }).then((f) => f[0], () => undefined));
+      if (e && known && sameState(e, known)) {
+        synced.set(path, { mtime: e.mtime, size: e.size });
+        continue;
+      }
+      if (!e) host.notice(path, () => goneBar(path, s, o.remote));
+      else if (!host.dirty(path)) await reloadRemote(path, s, o.remote, true);
+      else host.notice(path, () => changedBar(path, s, o.remote, e));
+    }
+  } finally {
+    checking = false;
+  }
+}
+
+/** Downloads a server file open in the editor again, replacing its text. */
+async function reloadRemote(path: string, s: DeployServer, file: string, quiet = false) {
+  try {
+    await reach(() => invoke("deploy_download", { server: wire(s), remote: file, local: path, id: ids++, progress: new Channel() }));
+    await remember(s, file, path);
+    host.notice(path, null);
+    await host.reload(path);
+    remote.changedOn(s);
+    status(quiet ? `Reloaded ${nameOf(file)}: it changed on ${s.name}` : `Loaded ${nameOf(file)} from ${s.name}`, "deploy", "info");
+  } catch (e) {
+    showError(`Can't reload ${nameOf(file)} from ${s.name}`, e);
+  }
+}
+
+const noticeButton = (label: string, run: () => unknown, primary = false) => h("button", { type: "button", class: primary ? "primary" : "", onclick: run }, label);
+
+function changedBar(path: string, s: DeployServer, remote: string, e: Entry) {
+  return h(
+    "div",
+    { class: "deploy-notice", role: "alert" },
+    icon("cloud"),
+    h("span", {}, `${nameOf(remote)} changed on ${s.name} (${formatTime(e.mtime)}) while you were editing it.`),
+    noticeButton("Compare", async () => {
+      try {
+        const theirs = (await reach(() => invoke<string | null>("deploy_read", { server: wire(s), path: remote }))) ?? "";
+        showDiff(nameOf(remote), theirs, host.openText(path) ?? "", `${s.name} ↔ Yours`, { label: "Load Server's", title: "Replace your unsaved changes with the server's copy", run: () => reloadRemote(path, s, remote) });
+      } catch (err) {
+        showError(`Can't read ${nameOf(remote)} from ${s.name}`, err);
+      }
+    }),
+    noticeButton("Keep Mine", () => (synced.set(path, { mtime: e.mtime, size: e.size }), host.notice(path, null), status(`Saving ${nameOf(remote)} replaces ${s.name}'s copy.`, "deploy", "info"))),
+    noticeButton("Load Server's", () => reloadRemote(path, s, remote), true),
+  );
+}
+
+function goneBar(path: string, s: DeployServer, remote: string) {
+  return h(
+    "div",
+    { class: "deploy-notice", role: "alert" },
+    icon("warning"),
+    h("span", {}, `${nameOf(remote)} isn't on ${s.name} anymore: it was deleted or renamed there.`),
+    noticeButton("Dismiss", () => host.notice(path, null)),
+    noticeButton(`Upload to ${s.name}`, () => (host.notice(path, null), enqueue(s, true, [{ local: path, remote, size: 0 }], { title: `Upload to ${s.name}`, after: () => void remember(s, remote, path) })), true),
+  );
 }
 
 // ---- Remote Host ----
@@ -809,8 +1035,8 @@ class RemoteHost {
     await this.start();
   }
 
-  /** Lists the open folders again after an upload to the server it shows. */
-  uploaded(s: DeployServer) {
+  /** Lists the open folders again after a change to the server it shows. */
+  changedOn(s: DeployServer) {
     if (s.name === this.server?.name && this.root && !$("view-remote").hidden) void this.refresh();
   }
 
@@ -1050,6 +1276,8 @@ export function initDeployment(h: Host) {
   $("deploy-status").onclick = showTransfers;
   appCacheDir().then((dir) => (cacheDir = `${dir}/remote`));
   onProjectValue(SERVERS, () => remote.serversChanged());
+  window.addEventListener("focus", () => void checkRemoteFiles());
+  setInterval(() => document.visibilityState === "visible" && void checkRemoteFiles(true), 30_000);
 }
 
 /** A project opened: forget the last one's servers and connections; transfers already running finish. */

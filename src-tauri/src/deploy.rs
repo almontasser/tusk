@@ -81,6 +81,9 @@ pub struct Entry {
     size: u64,
     mtime: i64,
     mode: Option<u32>,
+    /// The owner and group, on SFTP, so a replaced file keeps them.
+    #[serde(skip)]
+    owner: Option<(u32, u32)>,
 }
 
 /// A file found under a mapping's folder, on either side, by its path relative to that folder.
@@ -247,7 +250,8 @@ fn without_entry(text: &str, line: usize) -> String {
 // ---- Connections ----
 
 enum Conn {
-    Sftp { ssh: russh::client::Handle<Client>, sftp: SftpSession },
+    /// `_jumps` keeps the ProxyJump hosts' connections open, which the session's runs through.
+    Sftp { ssh: russh::client::Handle<Client>, sftp: SftpSession, _jumps: Vec<russh::client::Handle<Client>> },
     Ftp { ftp: AsyncRustlsFtpStream, mlsd: Option<bool> },
 }
 
@@ -308,18 +312,32 @@ async fn connect(server: &Server) -> Result<Conn, String> {
 }
 
 async fn connect_sftp(server: &Server) -> Result<Conn, String> {
-    let config = russh::client::Config { keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() };
-    let refusal = Arc::new(std::sync::Mutex::new(None));
-    let client = Client { host: server.host.clone(), port: server.port, refusal: refusal.clone() };
-    let mut ssh = match russh::client::connect(Arc::new(config), (server.host.as_str(), server.port), client).await {
-        Ok(ssh) => ssh,
-        Err(e) => return Err(refusal.lock().unwrap().take().unwrap_or_else(|| friendly(e))),
-    };
-    let user = if server.user.is_empty() { whoami() } else { server.user.clone() };
+    // A host that's an alias in ~/.ssh/config connects as ssh would: to its HostName, port, and user, with its
+    // keys, through its jump hosts. Settings typed here win over the file's.
+    let cfg = crate::sshconfig::resolve(&server.host);
+    let host = cfg.host_name.clone().unwrap_or_else(|| server.host.clone());
+    let port = if server.port == 22 { cfg.port.unwrap_or(22) } else { server.port };
+    let user = if server.user.is_empty() { cfg.user.clone().unwrap_or_else(whoami) } else { server.user.clone() };
+    let mut jumps: Vec<russh::client::Handle<Client>> = Vec::new();
+    for spec in &cfg.proxy_jump {
+        let (jump_user, alias, jump_port) = crate::sshconfig::parse_jump(spec);
+        let jump = crate::sshconfig::resolve(&alias);
+        let jump_host = jump.host_name.clone().unwrap_or_else(|| alias.clone());
+        let jump_user = jump_user.or_else(|| jump.user.clone()).unwrap_or_else(whoami);
+        let mut handle = handshake(&jump_host, jump_port.or(jump.port).unwrap_or(22), jumps.last()).await.map_err(|e| if e.starts_with("host-key:") { e } else { format!("Can't reach the jump host {alias}: {e}") })?;
+        // A jump host logs in as ssh would without asking: with the agent's keys, then its own key files.
+        let ok = agent_auth(&mut handle, &jump_user).await.unwrap_or(false) || files_auth(&mut handle, &jump_user, &key_files(&jump, ""), "").await?;
+        if !ok {
+            return Err(format!("The jump host {alias} refused every key for {jump_user}. Add a key for it to your SSH agent or to ~/.ssh/config."));
+        }
+        jumps.push(handle);
+    }
+    let mut ssh = handshake(&host, port, jumps.last()).await?;
     let ok = match server.auth.as_str() {
         "password" => ssh.authenticate_password(&user, server.secret()).await.map_err(friendly)?.success(),
-        "agent" => agent_auth(&mut ssh, &user).await?,
-        _ => key_auth(&mut ssh, &user, server).await?,
+        // As ssh does, the config's key files follow the agent's keys.
+        "agent" => agent_auth(&mut ssh, &user).await? || (!cfg.identity_files.is_empty() && files_auth(&mut ssh, &user, &key_files(&cfg, ""), "").await?),
+        _ => files_auth(&mut ssh, &user, &key_files(&cfg, &server.key_file), &server.secret()).await?,
     };
     if !ok {
         return Err(match server.auth.as_str() {
@@ -332,41 +350,85 @@ async fn connect_sftp(server: &Server) -> Result<Conn, String> {
     channel.request_subsystem(true, "sftp").await.map_err(friendly)?;
     let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| format!("The server has no SFTP: {e}"))?;
     sftp.set_timeout(60);
-    Ok(Conn::Sftp { ssh, sftp })
+    Ok(Conn::Sftp { ssh, sftp, _jumps: jumps })
 }
 
-fn whoami() -> String {
+/// Opens an SSH connection to `host`, directly or through the jump host `via`, and checks the server's key.
+async fn handshake(host: &str, port: u16, via: Option<&russh::client::Handle<Client>>) -> Result<russh::client::Handle<Client>, String> {
+    let config = Arc::new(russh::client::Config { keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() });
+    let refusal = Arc::new(std::sync::Mutex::new(None));
+    let client = Client { host: host.to_string(), port, refusal: refusal.clone() };
+    let result = match via {
+        None => russh::client::connect(config, (host, port), client).await,
+        Some(jump) => {
+            let channel = jump.channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0).await.map_err(|e| format!("The jump host couldn't reach {host}:{port}: {}", friendly(e)))?;
+            russh::client::connect_stream(config, channel.into_stream(), client).await
+        }
+    };
+    result.map_err(|e| refusal.lock().unwrap().take().unwrap_or_else(|| friendly(e)))
+}
+
+pub(crate) fn whoami() -> String {
     std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default()
 }
 
-/// Logs in with a key file, or with ~/.ssh's usual keys when none is set, as `ssh` tries them.
-async fn key_auth(ssh: &mut russh::client::Handle<Client>, user: &str, server: &Server) -> Result<bool, String> {
+/// The key files to try, as ssh tries them: the one chosen in the settings; else the config's IdentityFile ones,
+/// then ~/.ssh's usual keys unless IdentitiesOnly says not to. `true` marks a file that must be readable.
+fn key_files(cfg: &crate::sshconfig::HostConfig, chosen: &str) -> Vec<(PathBuf, bool)> {
     let home = std::env::home_dir().unwrap_or_default();
-    let files: Vec<PathBuf> = if server.key_file.is_empty() {
-        ["id_ed25519", "id_ecdsa", "id_rsa"].iter().map(|n| home.join(".ssh").join(n)).filter(|p| p.exists()).collect()
-    } else {
-        vec![PathBuf::from(server.key_file.replacen('~', &home.to_string_lossy(), 1))]
-    };
-    if files.is_empty() {
-        return Err("There's no key in ~/.ssh. Choose a key file, or log in with your SSH agent.".into());
+    if !chosen.is_empty() {
+        return vec![(PathBuf::from(chosen.replacen('~', &home.to_string_lossy(), 1)), true)];
     }
-    let passphrase = server.secret();
-    for file in files {
-        let key = match russh::keys::load_secret_key(&file, (!passphrase.is_empty()).then_some(passphrase.as_str())) {
+    let mut files: Vec<(PathBuf, bool)> = cfg.identity_files.iter().map(|f| (PathBuf::from(f), false)).collect();
+    if !cfg.identities_only {
+        files.extend(["id_ed25519", "id_ecdsa", "id_rsa"].iter().map(|n| (home.join(".ssh").join(n), false)));
+    }
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|(p, must)| (*must || p.exists()) && seen.insert(p.clone()));
+    files
+}
+
+/// Logs in with key files: OpenSSH keys, or PuTTY's .ppk (versions 2 and 3). A key that needs a passphrase
+/// that wasn't given is skipped, and named if nothing else gets in.
+async fn files_auth(ssh: &mut russh::client::Handle<Client>, user: &str, files: &[(PathBuf, bool)], passphrase: &str) -> Result<bool, String> {
+    if files.is_empty() {
+        return Err("There's no key in ~/.ssh or in ~/.ssh/config for this host. Choose a key file, or log in with your SSH agent.".into());
+    }
+    let mut locked = None;
+    for (file, must) in files {
+        let key = match load_key(file, passphrase) {
             Ok(key) => key,
-            Err(russh::keys::Error::KeyIsEncrypted) => return Err(format!("{} has a passphrase. Type it in the server's settings.", file.display())),
-            Err(e) if server.key_file.is_empty() => {
+            Err(e) if e.contains("has a passphrase") => {
+                locked.get_or_insert(e);
+                continue;
+            }
+            Err(e) if !must => {
                 eprintln!("deploy: skipping {}: {e}", file.display());
                 continue;
             }
-            Err(e) => return Err(format!("Can't read {}: {e}. A wrong passphrase reads as a corrupt key.", file.display())),
+            Err(e) => return Err(e),
         };
         let hash = if key.algorithm().is_rsa() { ssh.best_supported_rsa_hash().await.map_err(friendly)?.flatten() } else { None };
         if ssh.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await.map_err(friendly)?.success() {
             return Ok(true);
         }
     }
-    Ok(false)
+    match locked {
+        Some(e) => Err(e),
+        None => Ok(false),
+    }
+}
+
+/// A private key from a file, with errors in words.
+fn load_key(file: &Path, passphrase: &str) -> Result<russh::keys::PrivateKey, String> {
+    let ppk = std::fs::read(file).is_ok_and(|b| b.starts_with(b"PuTTY-User-Key-File-"));
+    match russh::keys::load_secret_key(file, (!passphrase.is_empty()).then_some(passphrase)) {
+        Ok(key) => Ok(key),
+        Err(russh::keys::Error::KeyIsEncrypted) => Err(format!("{} has a passphrase. Type it in the server's settings.", file.display())),
+        Err(e) if passphrase.is_empty() && e.to_string().to_lowercase().contains("encrypted") => Err(format!("{} has a passphrase. Type it in the server's settings.", file.display())),
+        Err(e) if ppk => Err(format!("Can't read the PuTTY key {}: {e}. A wrong passphrase reads as a corrupt key; otherwise, convert it with PuTTYgen's Conversions > Export OpenSSH key.", file.display())),
+        Err(e) => Err(format!("Can't read {}: {e}. A wrong passphrase reads as a corrupt key.", file.display())),
+    }
 }
 
 /// Logs in with each key the SSH agent holds: SSH_AUTH_SOCK's, or on Windows, OpenSSH's agent or Pageant.
@@ -423,7 +485,15 @@ async fn connect_ftp(server: &Server) -> Result<Conn, String> {
         Ok(AsyncRustlsConnector::from(tokio_rustls::TlsConnector::from(Arc::new(config))))
     };
     let mut ftp = match server.protocol.as_str() {
-        "ftps-implicit" => AsyncRustlsFtpStream::connect_secure_implicit(address, tls()?, &server.host).await.map_err(friendly)?,
+        "ftps-implicit" => {
+            let mut ftp = AsyncRustlsFtpStream::connect_secure_implicit(address, tls()?, &server.host).await.map_err(friendly)?;
+            // suppaftp wraps data connections in TLS but, unlike after AUTH TLS, doesn't tell the server to: without
+            // PROT P, servers send listings and files in plain text, or refuse them.
+            for command in ["PBSZ 0", "PROT P"] {
+                ftp.custom_command(command, &[suppaftp::Status::CommandOk]).await.map_err(|e| format!("The server didn't accept {command} for encrypted transfers: {}", friendly(e)))?;
+            }
+            ftp
+        }
         "ftps" => {
             let plain = AsyncRustlsFtpStream::connect(address).await.map_err(friendly)?;
             plain.into_secure(tls()?, &server.host).await.map_err(|e| format!("The server didn't start TLS: {}. If it has no FTPS, choose FTP.", friendly(e)))?
@@ -507,7 +577,7 @@ impl Conn {
                 Ok(entries
                     .map(|e| {
                         let m = e.metadata();
-                        Entry { name: e.file_name(), dir: m.is_dir(), link: m.is_symlink(), size: m.size.unwrap_or(0), mtime: m.mtime.unwrap_or(0) as i64, mode: m.permissions.map(|p| p & 0o7777) }
+                        Entry { name: e.file_name(), dir: m.is_dir(), link: m.is_symlink(), size: m.size.unwrap_or(0), mtime: m.mtime.unwrap_or(0) as i64, mode: m.permissions.map(|p| p & 0o7777), owner: m.uid.zip(m.gid) }
                     })
                     .filter(|e| e.name != "." && e.name != "..")
                     .collect())
@@ -534,7 +604,7 @@ impl Conn {
     async fn stat(&mut self, path: &str) -> Result<Option<Entry>, String> {
         match self {
             Conn::Sftp { sftp, .. } => match sftp.metadata(path).await {
-                Ok(m) => Ok(Some(Entry { name: name_of(path).into(), dir: m.is_dir(), link: m.is_symlink(), size: m.size.unwrap_or(0), mtime: m.mtime.unwrap_or(0) as i64, mode: m.permissions.map(|p| p & 0o7777) })),
+                Ok(m) => Ok(Some(Entry { name: name_of(path).into(), dir: m.is_dir(), link: m.is_symlink(), size: m.size.unwrap_or(0), mtime: m.mtime.unwrap_or(0) as i64, mode: m.permissions.map(|p| p & 0o7777), owner: m.uid.zip(m.gid) })),
                 Err(e) if e.to_string().contains("No such file") => Ok(None),
                 Err(e) => Err(sftp_err(path)(e)),
             },
@@ -597,14 +667,26 @@ impl Conn {
         }
     }
 
-    /// Sets a file's modification time and permissions, where the server allows it. Failures don't matter: a
-    /// later comparison reads the contents when the times differ.
-    async fn set_attrs(&mut self, path: &str, mtime: i64, mode: Option<u32>) {
+    /// Sets a file's modification time and permissions, and on SFTP its owner and group, where the server allows
+    /// it. Failures don't matter: a later comparison reads the contents when the times differ, and a server that
+    /// doesn't let you give a file away keeps you as its owner.
+    async fn set_attrs(&mut self, path: &str, mtime: i64, mode: Option<u32>, owner: Option<(u32, u32)>) {
         match self {
             Conn::Sftp { sftp, .. } => {
                 let attrs = FileAttributes { atime: Some(mtime as u32), mtime: Some(mtime as u32), permissions: mode, ..FileAttributes::empty() };
                 if sftp.set_metadata(path, attrs).await.is_err() && mode.is_some() {
                     let _ = sftp.set_metadata(path, FileAttributes { permissions: mode, ..FileAttributes::empty() }).await;
+                }
+                let Some((uid, gid)) = owner else { return };
+                let Ok(now) = sftp.metadata(path).await else { return };
+                if now.uid == Some(uid) && now.gid == Some(gid) {
+                    return;
+                }
+                // Only root can change the owner; anyone can change the group to one of their own.
+                if sftp.set_metadata(path, FileAttributes { uid: Some(uid), gid: Some(gid), ..FileAttributes::empty() }).await.is_err() && now.gid != Some(gid) {
+                    if let Some(me) = now.uid {
+                        let _ = sftp.set_metadata(path, FileAttributes { uid: Some(me), gid: Some(gid), ..FileAttributes::empty() }).await;
+                    }
                 }
             }
             Conn::Ftp { ftp, .. } => {
@@ -642,7 +724,7 @@ impl Conn {
             }
         };
         let mode = existing.as_ref().and_then(|e| e.mode);
-        self.set_attrs(&target, mtime, mode).await;
+        self.set_attrs(&target, mtime, mode, existing.as_ref().and_then(|e| e.owner)).await;
         if target == remote {
             return Ok(());
         }
@@ -854,7 +936,7 @@ fn ftp_entry(f: suppaftp::list::File) -> Entry {
     use suppaftp::list::PosixPexQuery::{Group, Others, Owner};
     let bits = |who| u32::from(f.can_read(who)) << 2 | u32::from(f.can_write(who)) << 1 | u32::from(f.can_execute(who));
     let mode = bits(Owner) << 6 | bits(Group) << 3 | bits(Others);
-    Entry { name: f.name().to_string(), dir: f.is_directory(), link: f.is_symlink(), size: f.size() as u64, mtime: secs(f.modified()), mode: (mode != 0).then_some(mode) }
+    Entry { name: f.name().to_string(), dir: f.is_directory(), link: f.is_symlink(), size: f.size() as u64, mtime: secs(f.modified()), mode: (mode != 0).then_some(mode), owner: None }
 }
 
 // ---- Exclusions ----
@@ -1054,6 +1136,29 @@ pub async fn deploy_remove(server: Server, path: String, dir: bool) -> Result<()
     with_conn!(&server, |conn| conn.remove(&path, dir).await)
 }
 
+/// A file or folder's details on the server, or None when it isn't there.
+#[tauri::command]
+pub async fn deploy_stat(server: Server, path: String) -> Result<Option<Entry>, String> {
+    with_conn!(&server, |conn| conn.stat(&path).await)
+}
+
+/// Deletes files and folders (with what's in them) from the server, leaving out ones already gone. Returns how
+/// many were there to delete; stops at the first that can't be.
+#[tauri::command]
+pub async fn deploy_delete(server: Server, paths: Vec<String>) -> Result<usize, String> {
+    with_conn!(&server, |conn| async {
+        let mut deleted = 0;
+        for path in &paths {
+            if let Some(e) = conn.stat(path).await? {
+                conn.remove(path, e.dir && !e.link).await?;
+                deleted += 1;
+            }
+        }
+        Ok(deleted)
+    }
+    .await)
+}
+
 /// Uploads one file. `id` lets `deploy_cancel` stop it; progress goes to `progress` as (done, total) bytes.
 #[tauri::command]
 pub async fn deploy_upload(server: Server, local: String, remote: String, id: u32, progress: Channel<(u64, u64)>) -> Result<(), String> {
@@ -1083,6 +1188,13 @@ pub async fn deploy_read(server: Server, path: String) -> Result<Option<String>,
         }
     }
     .await)
+}
+
+/// Which of `paths` (relative to a mapping's folder) its exclusions leave out.
+#[tauri::command]
+pub fn deploy_excluded(excludes: Vec<String>, paths: Vec<String>) -> Vec<bool> {
+    let excludes = Excludes::new(&excludes);
+    paths.iter().map(|p| excludes.matches(p)).collect()
 }
 
 /// The local files to upload for `paths` under a mapping's folder, relative to it.
@@ -1262,6 +1374,28 @@ mod tests {
     }
 
     #[test]
+    fn putty_keys_load_with_their_passphrase() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let plain = dir.join("deploy.fixture.plain.ppk");
+        let (v2, v3) = (dir.join("deploy.fixture.v2.ppk"), dir.join("deploy.fixture.v3.ppk"));
+        assert!(load_key(&plain, "").unwrap().algorithm().is_ed25519());
+        assert!(load_key(&v2, "123").unwrap().algorithm().is_rsa());
+        assert!(load_key(&v3, "123").unwrap().algorithm().is_ed25519());
+        for file in [&v2, &v3] {
+            assert!(load_key(file, "").unwrap_err().contains("has a passphrase"), "{}", load_key(file, "").unwrap_err());
+            assert!(load_key(file, "wrong").unwrap_err().contains("PuTTYgen"));
+        }
+    }
+
+    #[test]
+    fn key_files_follow_ssh_config() {
+        let home = std::env::home_dir().unwrap();
+        let cfg = crate::sshconfig::HostConfig { identity_files: vec!["/nonexistent/key".into()], identities_only: true, ..Default::default() };
+        assert!(key_files(&cfg, "").is_empty());
+        assert_eq!(key_files(&cfg, "~/k.ppk"), [(home.join("k.ppk"), true)]);
+    }
+
+    #[test]
     fn mfmt_times_are_utc() {
         assert_eq!(chrono_utc(0), None);
         assert_eq!(chrono_utc(1_700_000_000).unwrap(), "20231114221320");
@@ -1364,6 +1498,48 @@ mod tests {
         deploy_trust_host("127.0.0.1".into(), 2222, problem["key"].as_str().unwrap().into(), problem["line"].as_u64().map(|l| l as usize)).unwrap();
         assert!(connect(&server).await.is_ok());
         assert_eq!(std::fs::read_to_string(&known).unwrap().lines().count(), 2);
+
+        // A replaced file keeps its group, when it's one of yours other than the one a new file gets.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let www = folder.join("www");
+            let local = folder.join("group.txt");
+            std::fs::write(&local, "v1").unwrap();
+            let remote = crate::slash(www.join("group.txt"));
+            let mut conn = connect(&server).await.unwrap();
+            conn.upload(&local, &remote, &|_, _| {}, &AtomicBool::new(false)).await.unwrap();
+            let given = std::fs::metadata(www.join("group.txt")).unwrap().gid();
+            let groups = String::from_utf8(std::process::Command::new("id").arg("-G").output().unwrap().stdout).unwrap();
+            if let Some(other) = groups.split_whitespace().filter_map(|g| g.parse::<u32>().ok()).find(|&g| g != given) {
+                std::os::unix::fs::chown(www.join("group.txt"), None, Some(other)).unwrap();
+                std::fs::write(&local, "v2, longer").unwrap();
+                conn.upload(&local, &remote, &|_, _| {}, &AtomicBool::new(false)).await.unwrap();
+                assert_eq!(std::fs::read_to_string(www.join("group.txt")).unwrap(), "v2, longer");
+                assert_eq!(std::fs::metadata(www.join("group.txt")).unwrap().gid(), other);
+            }
+            std::fs::remove_file(www.join("group.txt")).unwrap();
+        }
+
+        // A host alias from ~/.ssh/config connects to its HostName, port, user, and key, through its ProxyJump host.
+        let config = folder.join("ssh_config");
+        std::fs::write(
+            &config,
+            format!(
+                "Host tusk-jump\n  HostName 127.0.0.1\n  Port 2222\n  IdentityFile {key}\n  IdentitiesOnly yes\n\
+                 Host tusk-target\n  HostName 127.0.0.1\n  Port 2222\n  User {user}\n  IdentityFile {key}\n  IdentitiesOnly yes\n  ProxyJump tusk-jump\n\
+                 Host tusk-direct\n  HostName 127.0.0.1\n  Port 2222\n  IdentityFile {key}\n",
+                user = whoami()
+            ),
+        )
+        .unwrap();
+        std::env::set_var("TUSK_SSH_CONFIG", &config);
+        let direct = test_server("sftp", 22, "", "key", String::new(), "");
+        let mut conn = connect(&Server { host: "tusk-direct".into(), ..direct.clone() }).await.unwrap();
+        assert!(conn.stat(&crate::slash(folder.join("www"))).await.unwrap().is_some_and(|e| e.dir));
+        let Conn::Sftp { _jumps, .. } = connect(&Server { host: "tusk-target".into(), ..direct }).await.unwrap() else { unreachable!() };
+        assert_eq!(_jumps.len(), 1);
+        std::env::remove_var("TUSK_SSH_CONFIG");
     }
 
     #[tokio::test]
@@ -1380,6 +1556,16 @@ mod tests {
         std::env::var("TUSK_DEPLOY_TEST").expect("Run scripts/deploy-test-servers.sh and set TUSK_DEPLOY_TEST");
         // The test server's certificate is self-signed: refused unless the settings say not to check it.
         let mut server = test_server("ftps", 2990, "tusk", "", String::new(), "tusk");
+        assert!(connect(&server).await.err().unwrap().contains("certificate"));
+        server.insecure_tls = true;
+        round_trip(server, "/").await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn implicit_ftps_round_trip() {
+        std::env::var("TUSK_DEPLOY_TEST").expect("Run scripts/deploy-test-servers.sh and set TUSK_DEPLOY_TEST");
+        let mut server = test_server("ftps-implicit", 2991, "tusk", "", String::new(), "tusk");
         assert!(connect(&server).await.err().unwrap().contains("certificate"));
         server.insecure_tls = true;
         round_trip(server, "/").await;

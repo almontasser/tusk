@@ -7,6 +7,7 @@ mod lsp;
 mod profile;
 mod pty;
 mod search;
+mod sshconfig;
 mod tools;
 mod toolpaths;
 mod ws;
@@ -284,6 +285,10 @@ pub fn run() {
             deploy::deploy_has_secret,
             deploy::deploy_move_secret,
             deploy::deploy_disconnect,
+            deploy::deploy_stat,
+            deploy::deploy_delete,
+            deploy::deploy_excluded,
+            sshconfig::deploy_ssh_hosts,
             db::db_password,
             db::db_set_password,
             fs::read_dir,

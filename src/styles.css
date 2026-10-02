@@ -2962,7 +2962,7 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .deploy-sync-summary .chip.changed { color: var(--blue); }
 .deploy-sync-summary .chip.local { color: var(--green); }
 .deploy-sync-summary .chip.remote { color: var(--purple); }
-.deploy-sync-columns, .deploy-sync-row { display: grid; grid-template-columns: 84px 18px minmax(0, 1fr) 170px 170px 28px; align-items: center; gap: 8px; padding: 0 16px; }
+.deploy-sync-columns, .deploy-sync-row { display: grid; grid-template-columns: 112px 18px minmax(0, 1fr) 170px 170px 28px; align-items: center; gap: 8px; padding: 0 16px; }
 .deploy-sync-columns { font-size: 11.5px; color: var(--muted); font-weight: 500; padding-bottom: 4px; border-bottom: 1px solid var(--border-subtle); }
 .deploy-sync-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; }
 .deploy-sync-row { height: 28px; }
@@ -2973,6 +2973,27 @@ button.fd-access-join:hover { background: color-mix(in srgb, var(--text) 8%, tra
 .deploy-choice:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .deploy-choice.on { background: var(--accent); color: var(--on-accent); }
 .deploy-choice:disabled { opacity: 0.25; }
+.deploy-sync-row.deleting .deploy-choice.on { background: var(--red); }
+.deploy-sync-row.deleting .deploy-sync-path { color: var(--red); text-decoration: line-through; }
+.deploy-delete { width: min(560px, calc(100vw - 32px)); }
+.deploy-delete h2 { display: flex; align-items: center; gap: 8px; }
+.deploy-delete h2 .codicon-warning { color: var(--orange); }
+.deploy-delete p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.deploy-delete-list { list-style: none; margin: 0; padding: 6px 0; max-height: 240px; overflow: auto; border-radius: 8px; background: var(--bg); font-family: var(--mono); font-size: 12px; }
+.deploy-delete-list li { padding: 2px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: text; user-select: text; }
+.deploy-delete-list li.muted { font-family: inherit; color: var(--muted); }
+.deploy-delete .buttons button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, transparent); display: inline-flex; align-items: center; gap: 6px; }
+.deploy-alias { display: flex; align-items: center; gap: 4px; margin-top: -4px; }
+.deploy-alias[hidden] { display: none; }
+.deploy-check-hint:empty { display: none; }
+.pane-notice[hidden] { display: none; }
+.deploy-notice { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; background: color-mix(in srgb, var(--orange) 12%, transparent); border-bottom: 1px solid var(--border-subtle); }
+.deploy-notice > .codicon { color: var(--orange); }
+.deploy-notice > span:not(.codicon) { flex: 1; min-width: 0; }
+.deploy-notice button { padding: 3px 10px; border: 1px solid var(--input-border); border-radius: var(--radius); white-space: nowrap; }
+.deploy-notice button:hover { background: var(--hover); }
+.deploy-notice button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.deploy-notice button.primary:hover { background: var(--accent-hover); }
 .deploy-kind .codicon-diff-added { color: var(--green); }
 .deploy-kind .codicon-diff-modified { color: var(--blue); }
 .deploy-kind .codicon-cloud { color: var(--purple); }
