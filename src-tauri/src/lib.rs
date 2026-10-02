@@ -1,5 +1,6 @@
 pub mod askpass;
 mod db;
+mod deploy;
 mod fs;
 mod grpc;
 mod lsp;
@@ -265,6 +266,23 @@ pub fn run() {
             db::db_cancel,
             db::redis_call,
             db::db_tunnel,
+            deploy::deploy_test,
+            deploy::deploy_home,
+            deploy::deploy_list,
+            deploy::deploy_mkdir,
+            deploy::deploy_rename,
+            deploy::deploy_remove,
+            deploy::deploy_upload,
+            deploy::deploy_download,
+            deploy::deploy_read,
+            deploy::deploy_local_files,
+            deploy::deploy_remote_files,
+            deploy::deploy_compare,
+            deploy::deploy_cancel,
+            deploy::deploy_trust_host,
+            deploy::deploy_set_secret,
+            deploy::deploy_has_secret,
+            deploy::deploy_disconnect,
             db::db_password,
             db::db_set_password,
             fs::read_dir,
