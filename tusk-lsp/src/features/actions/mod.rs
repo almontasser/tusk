@@ -60,6 +60,7 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
     let fix_all = only.is_some() && wanted(&only, &CodeActionKind::from(mago::FIX_ALL.to_string()));
     let (candidates, complete) = with_ctx(snap, &uri, |ctx| {
         let mut complete = crate::framework::laravel::actions::code_actions(ctx, range);
+        complete.extend(crate::framework::filament::code_actions(ctx, range));
         if fix_all || wanted(&only, &CodeActionKind::QUICKFIX) {
             complete.extend(mago::code_actions(ctx, &params, fix_all));
         }

@@ -64,7 +64,7 @@ file to change when you add it.
 | PHPStan | It checks a PHP file as it opens and each time you save it (about 2 seconds with Larastan), so its problems describe the saved text and keep their lines until the next save. **Run PHPStan on Project** replaces the problems it found before; a Mago scan doesn't include PHPStan's. |
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | In Pest tests, setting a property the test case doesn't declare isn't checked. PHPStan doesn't know which test case runs a test, so on lines that use `$this`, its problems about PHPUnit's `TestCase`, Pest's `TestCall`, or `mixed` values are hidden; Mago still checks those lines. Vite assets complete from `resources/` only, though any existing file in the project checks as found. |
-| Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` suggest every field name in the file, not only those in the same form, and don't resolve `../` paths. Options from a closure or a query aren't suggested. |
+| Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` know the fields of schemas written in the same file; a schema that spreads in fields from elsewhere (`...self::fields()`), or a component a method returns, completes only what the file shows, and isn't checked. A read of a missing field is reported in a repeater's or builder's items, and in a resource's form when the field isn't one of the model's columns; not in a repeater filled from a relationship, an action's form, or a Livewire component's own form, whose state can hold other keys. Absolute paths (`/data.title`, `isAbsolute: true`) aren't resolved. Options from a query, such as `Category::pluck('name', 'id')`, show in hover but aren't suggested, since their values are rows. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
@@ -2551,17 +2551,35 @@ Eloquent models:
   values of its enum (from `->options(…::class)`, `->enum(…::class)`, or the
   model's cast), or the keys of a literal `->options([...])` array. Without
   quotes, `->default(` suggests the enum's cases, such as
-  `PostStatus::Published`. In `$get('…')` and `$set('…')`, it suggests the
-  names of the fields in the file.
+  `PostStatus::Published`.
+- **`$get()` and `$set()`.** In `$get('…')`, `$set('…')`, and `Get`'s
+  methods such as `$get->string('…')`, it suggests the fields the closure's
+  schema reaches, as Filament resolves them: the fields beside it first, then
+  the form's other fields with the `../` they need. In a repeater's item,
+  `'../../total'` reaches the form's `total`. Each suggestion shows the
+  field's type and label. Hover shows the field's code, label, state path, and
+  options, and ⌘B goes to its `::make()`. A path that leaves the form, such
+  as `'../../../x'` at the top, hovers as a Livewire property.
+- **Compared values.** In `$get('status') === '…'`, `match ($get('status'))`,
+  and `in_array($get('status'), ['…'])`, it suggests the field's option keys
+  or enum values. On Filament 4, a field with `->options(PostStatus::class)`
+  holds a `PostStatus` case, so it suggests `PostStatus::Draft` and the other
+  cases instead.
 - **Go to declaration.** ⌘B on `'author'` in `->relationship('author')` or
   `'author.name'` opens the model's `author()` method.
 - **Warnings.** A relationship name that the model doesn't define is
-  underlined as you type.
+  underlined as you type. So is a `$get('…')` of a field the schema surely
+  doesn't have, such as `$get('total')` in a repeater's item when `total` is
+  the form's: the warning suggests `../../total`, or a field with a close
+  name, and a quick fix (⌥⏎) writes it. On Filament 4, comparing an enum
+  field's state with a string, as in `$get('status') === 'draft'`, is never
+  true, so it's underlined with a quick fix to `PostStatus::Draft`.
 - **Links between files.** A resource shows links to its model, pages, and
   relation managers above the class. Pages, schemas, tables, and relation
   managers link back to their resource, and a model links to its resources.
 
-Forms and tables in a relation manager use the related model. For example,
+Forms and tables in a relation manager or a related records page
+(`ManageRelatedRecords`) use the related model. For example,
 fields in `PostsRelationManager` on `AuthorResource` complete `Post` columns.
 
 Columns come from the database when the app can boot and connect. Otherwise

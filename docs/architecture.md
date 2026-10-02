@@ -3474,7 +3474,7 @@ It makes a network call, so it doesn't run on every refresh.
 
 Tusk's server completes Filament's fluent methods, such as
 `TextInput::make()->required()`, because they are ordinary typed PHP. Its
-Filament features (`tusk-lsp/src/framework/filament.rs`, see "Filament" under
+Filament features (`tusk-lsp/src/framework/filament/`, see "Filament" under
 "Tusk's language server") cover what no general PHP server knows: the strings
 Filament resolves against Eloquent models at run time. Until September 2026 a
 separate server written in PHP (`filament-lsp/server.php`) did this; the Rust
@@ -3497,8 +3497,8 @@ call takes about 0.3 seconds on the test app.
    tables, and relation managers in subfolders of the resource's folder.
 2. `introspect.php` calls `Resource::getModel()`, `getPages()`, and
    `getRelations()`.
-3. For a relation manager, the subject is the related model of its
-   `$relationship` on the resource's model.
+3. For a relation manager or a `ManageRelatedRecords` page, the subject is
+   the related model of its `$relationship` on the resource's model.
 
 ### Models
 
@@ -3519,7 +3519,54 @@ dotted `::make()` paths), because plain field names can be virtual attributes
 that aren't columns. For `->options(`, `->enum(`, and `->default(`, the enum
 comes from `->options(X::class)` or `->enum(X::class)` before the cursor in
 the chain, or else from the model's cast of the field, and its cases from the
-index. `$get('…')` and `$set('…')` offer every `::make()` name in the file.
+index. A dotted `::make('value.key')` whose first segment is a column or a
+cast reads a JSON key, so it isn't checked as a relationship.
+
+### State paths
+
+`filament/schema.rs` reads the file's schemas into components, each with the
+state path of the schema it's in, as a list of segments from its root:
+
+- A root is an array of components that isn't another component's children,
+  or a component chain outside any array, such as one a method returns. A
+  root passed to `->components()` or `->schema()` is complete; on a variable
+  (`$schema->components([...])`) it's a page's or resource's form.
+- Children come from `->schema()`, `->components()`, `->childComponents()`,
+  `->tabs()`, `->steps()`, `->blocks()`, `->simple()`, and an array passed to
+  `::make()` (`Group::make([...])`), as arrays, closures that return them, or
+  single components. A child that isn't a component chain, such as a spread or
+  a method call, leaves its schema open: not every field is known.
+- Layouts add nothing to the path, unless `->statePath('x')` or
+  `->relationship('x')` adds `x`. A repeater's items are at `[name, "*"]`,
+  since Filament adds the item's key. A builder block's fields are at
+  `[name, "*block", "data"]`, so two blocks' fields don't mix.
+- Fields are components the index says extend `Field` or `Entry`. For classes
+  the index lacks, a list of Filament's layouts decides.
+
+A `$get` belongs to the component passing the closure that declares it, not
+to the innermost component around the call: in `->schema(function (Get $get)
+{ return [Select::make('a')->options(fn () => $get('b'))]; })`, `$get('b')` is
+the repeater's. `schema::resolve` then follows Filament's
+`resolveRelativeStatePath()`: each `../` drops one segment of the schema's
+path, and a path that drops more than the root has leaves the form, into the
+Livewire component's properties.
+
+A read is reported only when it's certain to find nothing: its schema is
+complete, isn't filled from a relationship (whose records bring other
+attributes), and no field, schema, or `$set()` holds the path or a part of it.
+At a form's root it also mustn't be a column, relationship, or cast of the
+model, since an edit page fills the form with the record's attributes; an
+action's or a Livewire component's own form isn't checked there. Suggestions
+are the same name further up (`../../total`) or a reachable field within two
+edits (a swap counts as one), and the quick fix writes them.
+
+Compared values come from the parse of the whole text, since the cursor's
+parse ends inside an unfinished `match`. Filament 4 casts the state of a field
+with `->options(Enum::class)` or `->enum(Enum::class)` to a case
+(`EnumStateCast`), so the server offers cases there, and reports a comparison
+with a string. A model's cast doesn't change a field's state, so a field typed
+only by the cast compares with strings. The server checks for
+`vendor/filament/schemas` to tell Filament 4.
 
 ### Links
 
@@ -5504,7 +5551,7 @@ about 9 ms (`examples/inlay_bench.rs`).
 
 ### Filament
 
-`framework/filament.rs` ports the PHP Filament server, `filament-lsp/server.php`,
+`framework/filament/mod.rs` ports the PHP Filament server, `filament-lsp/server.php`,
 now deleted, with the same
 completion items, relationship definitions and diagnostics (source
 `filament`), and code lenses (`phpEditor.open`). Its features run only
@@ -5522,14 +5569,23 @@ when `vendor/filament/filament` exists.
   the index doesn't know offers nothing.
 - **Relationship calls:** a `relationship` or `::make` call counts when the
   analyzer types its receiver as a Filament class, or can't type it at all.
-- **`$get` and `$set`:** these read field names from the whole text,
-  because the parse for completion ends at the cursor.
+- **`$get` and `$set`:** `filament/state.rs` resolves their paths through
+  the schemas `filament/schema.rs` reads (see "State paths" under "Filament
+  intelligence"). Completion reads the whole text's parse, because the parse
+  for completion ends at the cursor, and falls back to that parse when the
+  code around the cursor doesn't parse without it.
+- **Stack:** indexing a nested schema in a debug build needs more than a test
+  thread's 2 MB, so the schema tests run through `testing::on_server_stack`,
+  with the 64 MB the server's request threads have.
 - **Triggers:** `'`, `"`, and `.` trigger completion. `(` doesn't, because
   named arguments would show at every call, so `->options(` completes when
   you ask for it.
 - **Demo app test:** a test marked `#[ignore]` mirrors the old PHP tests on
   the demo app. Build the app with `scripts/make-fixture.sh`, then run
   `TUSK_FILAMENT_FIXTURE=fixtures/demo cargo test -- --ignored filament`.
+  `TUSK_FILAMENT_APP=<root> cargo test -- --ignored --nocapture
+  state_paths_in_a_real_app` prints every `$get` and `$set` in a real app
+  that doesn't resolve to a field, and every problem reported, to review.
 
 ### Formatting
 
@@ -7660,3 +7716,24 @@ Signature's dialog for the call sites, with the server's checks, name, and type.
 
 Inline Variable, Inline Constant, and Inline Method still use what's left of
 `src/extractparse.ts`. Moving them to the server would drop the tokenizer.
+
+### 2026-10-02: `$get()` resolves through the file's schemas
+
+`$get('…')` and `$set('…')` offered every `::make()` name in the file:
+section headings too, fields of other forms, and repeater items' fields
+outside their repeater, and `../` paths weren't understood. The server now
+reads each schema in the file into components with state paths and resolves a
+path the way Filament's `resolveRelativeStatePath()` does, so completion
+offers what the closure reaches, nearest first, with the `../` each needs.
+
+Resolving at run time through `introspect.php` was rejected: a schema's
+closures need a record and a Livewire component to run, and a form is often
+spread over several methods, which the file shows as they're written anyway.
+What the file doesn't show (a spread, a field named by a variable, a method's
+components) makes a schema open, so reads in it are never reported; only a
+read that surely finds nothing is a warning. On two local Filament apps with 85
+state paths, the check found one real bug, a repeater item reading the form's `select_all`
+without `../../`, and nothing else. It also showed relationship warnings on
+dotted JSON keys and on `ManageRelatedRecords` pages, which now use the
+column list and the related model.
+

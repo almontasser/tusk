@@ -240,9 +240,10 @@ function describeResource(string $resource, ?string $context): array
         }
     }
 
-    // A relation manager's forms and tables work with the related model.
+    // A relation manager's or a related records page's forms and tables work with the related model.
     $subject = $model;
-    if ($context && is_a($context, Filament\Resources\RelationManagers\RelationManager::class, true)) {
+    $related = ['Filament\\Resources\\RelationManagers\\RelationManager', 'Filament\\Resources\\Pages\\ManageRelatedRecords'];
+    if ($context && array_filter($related, fn ($base) => is_a($context, $base, true))) {
         $relationship = (new ReflectionClass($context))->getStaticPropertyValue('relationship');
         $subject = get_class((new $model())->{$relationship}()->getRelated());
     }
