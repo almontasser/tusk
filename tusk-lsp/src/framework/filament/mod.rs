@@ -509,7 +509,9 @@ fn value_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     {
         return Some(options.into_iter().map(|(k, v)| item(&k, CompletionItemKind::ENUM_MEMBER, v.as_deref().unwrap_or("option"), range, None)).collect());
     }
-    if let Some((options, more)) = query_options(ctx, &field.chain, None, OPTIONS_FRESH) {
+    // A relationship's options come from the form's model, which a call after the cursor can name.
+    let model = state::with_schema(ctx, Some(offset), |schema, _| state::form_model(ctx, schema, schema.owner(offset)?));
+    if let Some((options, more)) = query_options(ctx, &field.chain, model.as_deref(), OPTIONS_FRESH) {
         return Some(option_items(options, more, quoted.is_some(), range, |label| label.to_string()));
     }
     Some(vec![])
@@ -953,6 +955,24 @@ mod tests {
             let fx = fixture(&form(&format!("{status}match ($get('status')) {{ '<|>' => true, default => false }})")));
             fx.snap.framework.seed("filament:v4", Value::Bool(false));
             assert_eq!(labels(&complete(&fx)), vec!["draft", "published"]);
+            // Before anything is typed: after the operator, in a new arm, and in a list or `match` left open.
+            let cases = vec!["\\App\\Enums\\PostStatus::Draft", "\\App\\Enums\\PostStatus::Published"];
+            for body in [
+                "$get('status') === <|>)",
+                "$get('status') !==<|>)",
+                "match ($get('status')) { \\App\\Enums\\PostStatus::Draft => 1, <|> })",
+                "match ($get('status')) { <|>",
+                "match ($get('status')) {\n <|>\n",
+            ] {
+                let fx = fixture(&form(&format!("{status}{body}")));
+                fx.snap.framework.seed("filament:v4", Value::Bool(true));
+                assert_eq!(labels(&complete(&fx)), cases, "{body}");
+            }
+            let fx = fixture(&form("Select::make('size')->options(['s' => 'Short']), Select::make('x')->visible(fn ($get) => in_array($get('size'), ['<|>"));
+            assert_eq!(labels(&complete(&fx)), vec!["s"]);
+            // Not in an arm's result.
+            let fx = fixture(&form(&format!("{status}match ($get('status')) {{ 'a' => <|> }})")));
+            assert!(complete(&fx).is_empty());
             let fx = fixture(&form(&format!("{status}$get('status') === 'draft')")));
             fx.snap.framework.seed("filament:v4", Value::Bool(true));
             let found = diagnose(&fx);
@@ -1010,7 +1030,17 @@ mod tests {
             assert!(hover_text(&fx).contains("Options from the database: `1` Hello, `2` World"), "{}", hover_text(&fx));
             // A relationship's records, by its title column.
             let related = json!({ "model": "App\\Models\\Post", "relationship": "author", "title": "name" });
-            let fx = with_options("Select::make('author_id')->relationship('author', 'name'), Select::make('x')->visible(fn ($get) => $get('author_id') == '<|>')", related, json!([[7, "Ann"]]));
+            let fx = with_options("Select::make('author_id')->relationship('author', 'name'), Select::make('x')->visible(fn ($get) => $get('author_id') == '<|>')", related.clone(), json!([[7, "Ann"]]));
+            assert_eq!(labels(&complete(&fx)), vec!["7"]);
+            // `->default()` on a relationship's field, in a resource's form or a Livewire form naming its model.
+            let fx = with_options("Select::make('author_id')->relationship('author', 'name')->default(<|>)", related.clone(), json!([[7, "Ann"]]));
+            assert_eq!(labels(&complete(&fx)), vec!["7"]);
+            let class = INVITE
+                .replace("TextInput::make('name'),", "\\Filament\\Forms\\Components\\Select::make('author_id')->relationship('author', 'name')->default(<|>),")
+                .replace("->statePath('data')", "->statePath('data')->model(\\App\\Models\\Post::class)");
+            let fx = Fixture::new(&[("vendor/livewire/Component.php", LIVEWIRE), ("app/Livewire/Invite.php", &class)]);
+            fx.snap.framework.seed("filament:active", Value::Bool(true));
+            fx.snap.framework.seed(&format!("filament:options|{related}"), json!({ "rows": [[7, "Ann"]], "more": false }));
             assert_eq!(labels(&complete(&fx)), vec!["7"]);
             // Nothing until they've been read.
             let fx = fixture(&form(&format!("{select}, Select::make('x')->visible(fn ($get) => $get('post_id') === '<|>')")));
@@ -1067,6 +1097,11 @@ mod tests {
             assert!(action_problems(&format!("Action::make('invite')->schema({fields})->fillForm(fn ($record) => $record->toArray())")).is_empty());
             assert!(action_problems(&format!("Action::make('invite')->schema({fields})->mountUsing(fn ($schema) => $schema->fill())")).is_empty());
             assert!(action_problems(&format!("$a = Action::make('invite')->schema({fields})")).is_empty());
+            // Filament 3's table, form, and bulk actions mount the same way; its `EditAction` fills from the record.
+            for class in ["Tables\\Actions\\Action", "Tables\\Actions\\BulkAction", "Forms\\Components\\Actions\\Action", "Tables\\Actions\\CreateAction"] {
+                assert_eq!(action_problems(&format!("\\Filament\\{class}::make('a')->form({fields})")).len(), 2, "{class}");
+            }
+            assert!(action_problems(&format!("\\Filament\\Tables\\Actions\\EditAction::make()->form({fields})")).is_empty());
         });
     }
 
@@ -1102,6 +1137,10 @@ mod tests {
                 assert!(livewire_problems(class, view).is_empty(), "{class}");
             }
             assert!(livewire_problems(INVITE, "<input wire:model=\"data.nope\">").is_empty());
+            assert!(livewire_problems(INVITE, "<input wire:model=\"data.{{ $k }}\">").is_empty());
+            // A binding of another key, reads, and text that only looks like a path don't.
+            let view = "<p>metadata.nope 'data'</p> {{ $data['name'] }} <input wire:model=\"data.other\">";
+            assert_eq!(livewire_problems(INVITE, view), vec!["The form has no field `nope`."]);
         });
     }
 

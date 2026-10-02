@@ -116,6 +116,8 @@ pub struct Root {
     /// resource's form, a Livewire form's `->statePath()`, or nothing when its fields are properties themselves.
     /// `None` when the file doesn't show it, as for an action's modal (`mountedActions.0.data`).
     pub state_path: Option<Vec<String>>,
+    /// The model a Livewire form names with `->model(X::class)`, whose relationships its fields use.
+    pub model: Option<String>,
 }
 
 /// What a root schema's state holds besides its fields' state.
@@ -365,7 +367,7 @@ impl<'c, 'a> Builder<'c, 'a> {
     }
 
     fn root(&mut self, complete: bool, fill: Fill, state_path: Option<Vec<String>>) -> usize {
-        self.schema.roots.push(Root { complete, fill, state_path });
+        self.schema.roots.push(Root { complete, fill, state_path, model: None });
         let root = self.schema.roots.len() - 1;
         self.schema.containers.insert((root, vec![]));
         if !complete {
@@ -388,6 +390,7 @@ impl<'c, 'a> Builder<'c, 'a> {
             Node::MethodCall(c) => Some((i, c)),
             _ => None,
         });
+        let mut model = None;
         let (complete, fill, state_path, filled) = match call {
             Some((i, c)) if ["components", "schema", "form"].contains(&self.method_name(c)) => {
                 let chain = self.whole_chain(&path[..i], c);
@@ -397,6 +400,7 @@ impl<'c, 'a> Builder<'c, 'a> {
                 }
                 match base {
                     Expression::Variable(_) => {
+                        model = chain.0.iter().find(|m| self.method_name(m) == "model").and_then(|m| self.class_argument(&m.argument_list));
                         let (fill, state_path, filled) = self.form_root(path, &chain);
                         (true, fill, state_path, filled)
                     }
@@ -410,6 +414,7 @@ impl<'c, 'a> Builder<'c, 'a> {
             _ => (false, Fill::Unknown, None, vec![]),
         };
         let root = self.root(complete, fill, state_path);
+        self.schema.roots[root].model = model;
         self.filled.extend(filled.into_iter().map(|k| (root, vec![k])));
         self.arrays.insert(start);
         for e in elements {
@@ -538,6 +543,23 @@ impl<'c, 'a> Builder<'c, 'a> {
         };
         let (start, end) = (s.span.start.offset + 1, s.span.end.offset.saturating_sub(1));
         (start <= end).then(|| (self.text(start, end).to_string(), start, end))
+    }
+
+    /// The class a call's only argument names: `X::class`.
+    fn class_argument(&self, list: &'a mago_syntax::cst::ArgumentList<'a>) -> Option<String> {
+        let [Argument::Positional(p)] = list.arguments.as_slice() else { return None };
+        let Expression::Access(mago_syntax::cst::Access::ClassConstant(access)) = p.value else { return None };
+        let (Expression::Identifier(id), mago_syntax::cst::ClassLikeConstantSelector::Identifier(constant)) = (access.class, &access.constant) else {
+            return None;
+        };
+        if !constant.value.eq_ignore_ascii_case(b"class") {
+            return None;
+        }
+        let class = match self.parsed.names.resolve(&id.span()) {
+            Some(fqn) => String::from_utf8_lossy(fqn).into_owned(),
+            None => resolve_class(&scope_at(self.parsed.program, id.span().start.offset), &String::from_utf8_lossy(id.value())),
+        };
+        Some(class.trim_start_matches('\\').to_string())
     }
 
     fn method_name(&self, c: &MethodCall<'_>) -> &str {
@@ -786,29 +808,33 @@ impl<'c, 'a> Builder<'c, 'a> {
                 _ => {}
             }
         });
-        (closed && self.view_leaves_alone(node, property)).then_some(keys)
+        if !closed {
+            return None;
+        }
+        keys.extend(self.view_keys(node, property)?);
+        Some(keys)
     }
 
-    /// Whether the component's view, named by a Filament page's `$view` or `render()`'s `view('…')`, binds
-    /// nothing in `property`, such as `wire:model="data.extra"`. A view that can't be found might.
-    fn view_leaves_alone(&self, node: &'a mago_syntax::cst::Class<'a>, property: &str) -> bool {
+    /// The keys that the component's view, named by a Filament page's `$view` or `render()`'s `view('…')`, binds
+    /// in `property`, such as `extra` for `wire:model="data.extra"`; see [`view_keys`]. `None` when the view can't
+    /// be found, or may write keys it doesn't name.
+    fn view_keys(&self, node: &'a mago_syntax::cst::Class<'a>, property: &str) -> Option<Vec<String>> {
         let body = self.text(node.left_brace.start.offset, node.right_brace.end.offset);
         let named = |marker: &str| {
             let at = body.find(marker)? + marker.len();
             let rest = body[at..].trim_start().strip_prefix(['\'', '"'])?;
             Some(rest[..rest.find(['\'', '"'])?].to_string())
         };
-        let Some(view) = named("$view =").or_else(|| named("view(")) else { return false };
+        let view = named("$view =").or_else(|| named("view("))?;
         if view.contains("::") {
-            return false;
+            return None;
         }
         let file = self.ctx.snap.root.join("resources/views").join(format!("{}.blade.php", view.replace('.', "/")));
-        let Some(text) = self.ctx.snap.read(&file) else { return false };
-        ![format!("{property}."), format!("'{property}'"), format!("\"{property}\"")].iter().any(|p| text.contains(p.as_str()))
+        view_keys(&self.ctx.snap.read(&file)?, property)
     }
 
-    /// An action's modal schema: its state holds only its fields when Filament's own `Action` or
-    /// `CreateAction` fills it with nothing, or a literal `fillForm([...])` replaces what any of Filament's
+    /// An action's modal schema: its state holds only its fields when one of [`EMPTY_FILLED_ACTIONS`] fills it
+    /// with nothing, or a literal `fillForm([...])` replaces what any of Filament's
     /// actions fills it with. A chain kept in a variable may be changed later.
     fn action_root(&self, chain: &(Vec<&'a MethodCall<'a>>, Option<Node<'a, 'a>>), make: &'a StaticMethodCall<'a>) -> (Fill, Vec<String>) {
         let unknown = (Fill::Unknown, vec![]);
@@ -837,7 +863,7 @@ impl<'c, 'a> Builder<'c, 'a> {
         }
         match keys {
             Some(keys) if class.starts_with("Filament\\") => (Fill::Fields, keys),
-            None if ["Filament\\Actions\\Action", "Filament\\Actions\\CreateAction"].contains(&class) => (Fill::Fields, vec![]),
+            None if EMPTY_FILLED_ACTIONS.contains(&class) => (Fill::Fields, vec![]),
             _ => unknown,
         }
     }
@@ -905,6 +931,143 @@ impl<'c, 'a> Builder<'c, 'a> {
         }
     }
 }
+
+/// The keys a Livewire view binds in the component's `property`: `wire:model="data.extra"` on any element or
+/// component, `$wire.set('data.extra', …)`, `$wire.$set`, a `wire:click`'s `$set`, `$wire.entangle`,
+/// `$wire.$entangle`, `@entangle`, and `$wire.data.extra`. `None` when it may write keys it doesn't name: a binding
+/// of the whole property or of a path built at runtime, `$wire.data` itself, or PHP that writes
+/// `$this->{property}` or passes it on. Reads in PHP, such as `{{ $data['x'] }}`, change nothing, and neither do
+/// comments or the text of the page.
+pub fn view_keys(view: &str, property: &str) -> Option<Vec<String>> {
+    // Blade's and HTML's comments bind nothing.
+    let mut text = view.to_string();
+    for (open, close) in [("{{--", "--}}"), ("<!--", "-->")] {
+        let mut from = 0;
+        while let Some(start) = text[from..].find(open).map(|i| i + from) {
+            let end = text[start..].find(close).map_or(text.len(), |i| start + i + close.len());
+            let blank: String = text[start..end].chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
+            text.replace_range(start..end, &blank);
+            from = start + blank.len();
+        }
+    }
+    let checked = crate::framework::laravel::blade::checked_php(&text, &[]);
+    let php = checked.php.as_bytes();
+    // A byte of the view's markup, rather than its PHP: blanked in the PHP Mago checks.
+    let markup = |i: usize| php.get(checked.php_offset(i)) == Some(&b' ');
+    let mut keys = vec![];
+    // A path that a binding names: a key in the property, nothing (another property's), or `None` for the
+    // property itself or a key that isn't written out.
+    let mut path = |p: &str| -> Option<()> {
+        let Some(rest) = p.strip_prefix(property) else { return Some(()) };
+        let Some(rest) = rest.strip_prefix('.') else {
+            // The property itself, or another one whose name starts with it.
+            return (!rest.is_empty()).then_some(());
+        };
+        let key: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        if key.is_empty() {
+            return None;
+        }
+        keys.push(key);
+        Some(())
+    };
+    let bytes = text.as_bytes();
+    // `wire:model` and its modifiers, in markup.
+    for (at, _) in text.match_indices("wire:model") {
+        if !markup(at) || at.checked_sub(1).is_some_and(|b| bytes[b].is_ascii_alphanumeric() || bytes[b] == b'-') {
+            continue;
+        }
+        let rest = text[at + "wire:model".len()..].trim_start_matches(|c: char| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'));
+        let Some(rest) = rest.trim_start().strip_prefix('=') else { continue };
+        let rest = rest.trim_start();
+        // An unquoted value isn't read: it may be the property's.
+        let quote = rest.chars().next().filter(|q| *q == '"' || *q == '\'')?;
+        let value = &rest[1..rest[1..].find(quote)? + 1];
+        if value.contains("{{") || value.contains("{!!") {
+            // A path built in PHP: unknown if it can be in the property.
+            if value.starts_with(property) {
+                return None;
+            }
+            continue;
+        }
+        path(value.trim())?;
+    }
+    // JavaScript and directives: calls that take a path, and `$wire`'s properties.
+    for call in ["$wire.set(", "$wire.$set(", "$set(", "$wire.entangle(", "$wire.$entangle(", "@entangle(", "$wire.$get(", "$wire.get("] {
+        for (at, _) in text.match_indices(call) {
+            // `$set(` also matches inside `$wire.$set(`, read already.
+            if call == "$set(" && text[..at].ends_with("$wire.") {
+                continue;
+            }
+            let rest = text[at + call.len()..].trim_start();
+            let Some(quote) = rest.chars().next().filter(|q| *q == '"' || *q == '\'') else {
+                // A path in a variable: it may be the property's.
+                if call.starts_with("$wire.$get") || call.starts_with("$wire.get") {
+                    continue;
+                }
+                return None;
+            };
+            path(&rest[1..rest[1..].find(quote)? + 1])?;
+        }
+    }
+    let member = format!("$wire.{property}");
+    for (at, _) in text.match_indices(&member) {
+        let rest = &text[at + member.len()..];
+        if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let key: String = rest.strip_prefix('.')?.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        if key.is_empty() {
+            return None;
+        }
+        keys.push(key);
+    }
+    // PHP that writes the property or passes it on; reads of its keys are fine.
+    let arena = mago_allocator::LocalArena::new();
+    let parsed = Parsed::exact(&arena, std::path::Path::new("view.php"), &checked.php);
+    let mut safe = true;
+    walk(&parsed, |n, ancestors| {
+        let Node::PropertyAccess(pa) = n else { return };
+        if !is_this(pa.object) || !selects(&pa.property, property) {
+            return;
+        }
+        let mut current = pa.span();
+        let mut keyed = false;
+        for a in ancestors.iter().rev() {
+            match a {
+                Node::ArrayAccess(aa) if aa.array.span() == current => {
+                    keyed = true;
+                    current = aa.span();
+                }
+                Node::Assignment(x) if x.lhs.span() == current => {
+                    keyed = false;
+                    break;
+                }
+                other if other.span() == current => {}
+                _ => break,
+            }
+        }
+        safe &= keyed;
+    });
+    keys.sort();
+    keys.dedup();
+    safe.then_some(keys)
+}
+
+/// Filament's actions that mount with an empty `fill()`, so that their modal's state holds only its fields:
+/// each version's `Action`, `CreateAction`, and `BulkAction`, which keep `CanBeMounted`'s default. `EditAction`,
+/// `ViewAction`, and `ReplicateAction` fill it from the record instead.
+const EMPTY_FILLED_ACTIONS: &[&str] = &[
+    "Filament\\Actions\\Action",
+    "Filament\\Actions\\CreateAction",
+    "Filament\\Actions\\BulkAction",
+    // Filament 3's, whose tables, forms, and infolists have their own.
+    "Filament\\Tables\\Actions\\Action",
+    "Filament\\Tables\\Actions\\CreateAction",
+    "Filament\\Tables\\Actions\\BulkAction",
+    "Filament\\Forms\\Components\\Actions\\Action",
+    "Filament\\Infolists\\Components\\Actions\\Action",
+    "Filament\\Pages\\Actions\\Action",
+];
 
 fn is_this(e: &Expression<'_>) -> bool {
     matches!(e, Expression::Variable(mago_syntax::cst::Variable::Direct(v)) if v.name == b"$this")
@@ -975,6 +1138,30 @@ mod tests {
 
     fn p(s: &str) -> Vec<String> {
         segments(s)
+    }
+
+    #[test]
+    fn reads_the_keys_a_livewire_view_binds() {
+        let keys = |view: &str| view_keys(view, "data");
+        assert_eq!(keys("<div>{{ $this->form }} {{ $data['name'] }} metadata.x 'data' {{-- wire:model=\"data\" --}}</div>"), Some(vec![]));
+        assert_eq!(
+            keys("<input wire:model.live.debounce=\"data.extra\"><x-input wire:model='other.x' /><button wire:click=\"$set('data.flag', 1)\" x-on:click=\"$wire.set('data.more', 2); $wire.data.seen\">"),
+            Some(vec!["extra".into(), "flag".into(), "more".into(), "seen".into()])
+        );
+        assert_eq!(keys("<div x-data=\"{ open: @entangle('data.open') }\"></div>"), Some(vec!["open".into()]));
+        // Anything that may write keys it doesn't name.
+        for view in [
+            "<input wire:model=\"data\">",
+            "<input wire:model=\"data.{{ $key }}\">",
+            "<div x-init=\"$wire.set(name, 1)\">",
+            "<div x-data=\"{ s: $wire.$entangle('data') }\">",
+            "<div x-init=\"$wire.data = {}\">",
+            "@php $this->data['x'] = 1; @endphp",
+            "{{ data_set($this->data, 'x', 1) }}",
+        ] {
+            assert_eq!(keys(view), None, "{view}");
+        }
+        assert_eq!(keys("{{ $this->data['name'] ?? '' }}"), Some(vec![]));
     }
 
     #[test]

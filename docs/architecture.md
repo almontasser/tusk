@@ -3539,10 +3539,20 @@ state path of the schema it's in, as a list of segments from its root:
     written, the state property is only read by key and has no attribute,
     the parent is Filament's `Page` or `SimplePage` or Livewire's
     `Component`, the traits are the framework's, and the view, named by
-    `$view` or `render()`'s `view('…')`, never mentions the property.
+    `$view` or `render()`'s `view('…')`, writes only keys it names.
+    `schema::view_keys` reads the view's markup through Blade's
+    `checked_php`, so text and comments don't count: `wire:model` on any tag,
+    `$wire.set()`, `$wire.$set()`, `$set()`, `$wire.entangle()`,
+    `@entangle()`, and `$wire.data.x` add their key to the written ones. A
+    binding of the whole property or of a path built at runtime, `$wire.data`
+    itself, or PHP that writes `$this->data` or passes it on leave the form
+    `Fill::Unknown`. Reads such as `{{ $data['x'] }}` change nothing: the
+    view's `$data` is a copy.
   - On an action's chain (`Action::make('x')->schema([...])`) it's the
-    action's modal. Filament's own `Action` and `CreateAction` fill it with
-    nothing (`CanBeMounted::getMountUsing()`), and a literal `fillForm()`
+    action's modal. `EMPTY_FILLED_ACTIONS`, each version's `Action`,
+    `CreateAction`, and `BulkAction` (in Filament 3 also those of tables,
+    forms, and infolists), fill it with nothing
+    (`CanBeMounted::getMountUsing()`), and a literal `fillForm()`
     replaces what any of Filament's actions fills it with. `mountUsing()`, a
     `fillForm()` of code, a subclass, or a chain kept in a variable leave it
     `Fill::Unknown`.
@@ -3584,7 +3594,16 @@ are the same name further up (`../../total`) or a reachable field within two
 edits (a swap counts as one), and the quick fix writes them.
 
 Compared values come from the parse of the whole text, since the cursor's
-parse ends inside an unfinished `match`. Filament 4 casts the state of a field
+parse ends inside an unfinished `match`. Before anything is typed, the
+cursor's parse needs help: `repair::at_cursor` puts a `0` after a comparison
+operator that has no right side yet, and closes a `match`'s arms without the
+`;` it puts before other blocks' `}`, so `$get('status') === ` and
+`match ($get('status')) {` parse. Between arms counts as a condition. A
+`->relationship()` field's options need the form's model:
+`state::form_model` takes a Livewire form's `->model(X::class)`
+(`Root::model`), or the record's model in a resource's or relation manager's
+form, read from the whole text, since `->model()` usually comes after the
+cursor. Filament 4 casts the state of a field
 with `->options(Enum::class)` or `->enum(Enum::class)` to a case
 (`EnumStateCast`), so the server offers cases there, and reports a comparison
 with a string. A model's cast doesn't change a field's state, so a field typed
@@ -8115,3 +8134,28 @@ PhpStorm makes silently. Refusing would block a common, safe extraction, such as
 a pure expression after `&&`, so the occurrences popup and the naming hint warn
 instead.
 
+### 2026-10-02: Values before typing, Filament 3's actions, and views read as Blade
+
+Compared values were offered only after one typed character, since
+`$get('status') === ` doesn't parse. The cursor's repair now completes a
+comparison with a `0` and leaves a `match`'s arms without `;`, which every
+completion shares; general completion offers nothing at an empty word outside
+named arguments, so the placeholder changes nothing else. Inserting a
+placeholder only for Filament's completion was rejected: the whole request
+works on one parse, and a second, patched one would mean a second context.
+
+Filament 3's actions were left unchecked for lack of a v3 vendor to read.
+Filament 3.3's `CanBeMounted` mounts with an empty `fill()` unless `EditAction`,
+`ViewAction`, or `ReplicateAction` replace it, the same as Filament 4 and 5, so
+their `Action`, `CreateAction`, and `BulkAction`, and v3's table, form, and
+infolist actions, now count as filling only their fields.
+
+A Livewire view that mentioned the property at all, even as text such as
+`metadata.x`, kept its form unchecked. The view's markup is now told from its
+PHP by Blade's `checked_php`, and a binding with a written-out key adds that key
+instead of giving up, so only bindings that can write any key do. PHP that
+reads the view's `$data` never reaches the component, but `$this->data` does,
+so only writes through `$this` count.
+
+On lamah-sms-gateway and municipality, the same 85 paths, 80 resolved, and the
+one real problem were found as before.
