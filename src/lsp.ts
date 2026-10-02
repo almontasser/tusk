@@ -788,8 +788,8 @@ async function startServer(
               // A bare Command has no kind. The hover's Quick Fix link lists only `quickfix` actions, so a command
               // answering problems here counts as one.
               const action = typeof a.command === "string" ? { title: a.title, kind: overlapping.length ? "quickfix" : undefined, diagnostics: overlapping } : (a as L.CodeAction);
-              // Tusk's extractions run as their shortcuts do, choosing occurrences and naming in place (extract.ts).
-              const interactive = name === "tusk" && /^refactor\.extract\.(method|variable|constant|field)$/.test(action.kind ?? "");
+              // Tusk's extractions and Inline run as their shortcuts do, choosing occurrences and naming in place (extract.ts).
+              const interactive = name === "tusk" && /^refactor\.(extract\.(method|variable|constant|field|parameter)|inline)$/.test(action.kind ?? "");
               return {
                 title: a.title,
                 kind: action.kind,

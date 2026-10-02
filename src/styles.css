@@ -483,6 +483,7 @@ button.status-item:hover { background: var(--hover); color: var(--text); }
 #palette.popup { width: auto; min-width: 260px; max-width: min(620px, calc(100vw - 32px)); border-radius: 8px; }
 #palette.popup:not(.dropdown) { top: max(56px, calc(50vh - 200px)); }
 #palette.chooser input { position: absolute; opacity: 0; pointer-events: none; height: 0; padding: 0; border: 0; }
+#palette .popup-note { padding: 6px 12px; font-size: 12px; line-height: 1.4; color: var(--yellow); border-bottom: 1px solid var(--border-subtle); white-space: normal; max-width: 520px; }
 #palette .popup-title { display: flex; align-items: center; gap: 8px; padding: 7px 12px 6px; font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
 #palette:not(.chooser) .popup-search { display: none; }
 /* A question (confirm, choose): the whole sentence, wrapped, in the text's color. */
@@ -1905,6 +1906,7 @@ button.link:hover { text-decoration: underline; }
 .monaco-editor .view-overlays .finish-snippet-placeholder { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .naming-hint { display: flex; align-items: center; gap: 4px; padding: 2px 7px; margin-bottom: 3px; font: 11px var(--ui-family); color: var(--muted); background: var(--panel); border: 1px solid var(--popover-border); border-radius: 5px; box-shadow: 0 2px 8px #0005; white-space: nowrap; pointer-events: none; }
 .naming-hint.refactor-refusal { color: var(--text); white-space: normal; width: max-content; max-width: 460px; border-left: 3px solid var(--yellow); }
+.naming-hint .naming-warning { color: var(--yellow); }
 .naming-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--hover); color: var(--text); }
 .refactor-preview .hierarchy-row { cursor: pointer; }
 .refactor-preview .hierarchy-row.group .name { font-weight: 500; }

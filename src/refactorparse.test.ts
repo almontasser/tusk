@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classProperties, declarationParts, formatArgs, formatParams, matchBracket, paramText, parseParams, planInline, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
+import { classProperties, declarationParts, formatArgs, formatParams, matchBracket, paramText, parseParams, rewriteArgs, splitTopLevel } from "./refactorparse.ts";
 
 test("splits arguments at top-level commas", () => {
   assert.deepEqual(splitTopLevel(`$a, foo($b, [1, 2]), 'x, y', "q\\", r"`), ["$a", "foo($b, [1, 2])", "'x, y'", `"q\\", r"`]);
@@ -22,28 +22,6 @@ test("rewrites call arguments for a new signature", () => {
   assert.deepEqual(rewriteArgs(["1", "'y'"], old, added), { args: ["1", "false", "'y'"] });
   assert.ok("error" in rewriteArgs(["...$all"], old, reordered));
   assert.ok("error" in rewriteArgs(["1"], old, parseParams("int $a, int $d")));
-});
-
-test("plans inlining a variable", () => {
-  const lines = ["function x() {", "    $total = $a + $b;", "    echo $total;", "    return $total * 2;", "}"];
-  assert.deepEqual(planInline(lines, "total", 1, 5), { assignment: 2, assignmentEnd: 2, value: "($a + $b)", uses: [{ line: 3, column: 10 }, { line: 4, column: 12 }] });
-  const call = ["$user = User::find(1);", "$user->name;"];
-  assert.deepEqual(planInline(call, "user", 1, 2), { assignment: 1, assignmentEnd: 1, value: "User::find(1)", uses: [{ line: 2, column: 1 }] });
-  assert.ok("error" in planInline(["$a = 1;", "$a++;"], "a", 1, 2));
-  assert.ok("error" in planInline(["$a = 1;", "$a[] = 2;"], "a", 1, 2));
-  assert.ok("error" in planInline(["$a = 1;", "$a = 2;"], "a", 1, 2));
-  assert.ok("error" in planInline(["echo $a;", "$a = 1;"], "a", 1, 2));
-  assert.ok("error" in planInline(["$a = 1;", "foreach ($xs as $a) {}"], "a", 1, 2));
-  assert.ok("error" in planInline(["$a = 1;", "$f = function () use ($b, $a) { return $a; };"], "a", 1, 2));
-  // An assignment over several lines, with a ";" inside a closure and a string.
-  const chain = ["$posts = Post::query()", "    ->where('t', ';')", "    ->get(); // all", "return $posts;"];
-  assert.deepEqual(planInline(chain, "posts", 1, 4), { assignment: 1, assignmentEnd: 3, value: "Post::query()\n    ->where('t', ';')\n    ->get()", uses: [{ line: 4, column: 8 }] });
-  const closure = ["$f = function () {", "    return 1;", "};", "$f();"];
-  assert.equal((planInline(closure, "f", 1, 4) as { assignmentEnd: number }).assignmentEnd, 3);
-  assert.ok("error" in planInline(["$a = 1; $b = 2;", "echo $a;"], "a", 1, 2));
-  assert.ok("error" in planInline(["$a = foo(", "echo $a;"], "a", 1, 2));
-  // $ab isn't $a.
-  assert.deepEqual(planInline(["$a = 1;", "$ab = $a;"], "a", 1, 2), { assignment: 1, assignmentEnd: 1, value: "1", uses: [{ line: 2, column: 7 }] });
 });
 
 test("reads a class's properties", () => {

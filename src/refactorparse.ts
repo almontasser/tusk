@@ -1,5 +1,6 @@
-// Text-level PHP helpers for Inline Variable and Change Signature. Free of editor imports so Node
-// can test it. ponytail: a scanner for brackets and strings, not a PHP parser; heredocs aren't handled.
+// Text-level PHP helpers for Change Signature. Free of editor imports so Node can test it. ponytail: a scanner
+// for brackets and strings, not a PHP parser; heredocs aren't handled. Moving Change Signature to Tusk's server,
+// as the inline and extract refactorings moved, would drop it.
 import { commentMask } from "./comments.ts";
 
 /**
@@ -229,73 +230,6 @@ export function signatureWarning(s: Signature): string | null {
   if (optional < 0) return null;
   const required = s.params.slice(optional + 1).find(isRequired)!;
   return `$${s.params[optional].name} is optional but comes before the required $${required.name}, so PHP treats it as required.`;
-}
-
-export type InlinePlan = { error: string } | { assignment: number; assignmentEnd: number; value: string; uses: { line: number; column: number }[] };
-
-/** The index of the first ";" in `text` outside brackets and strings, or -1. */
-function statementEnd(text: string): number {
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    const skip = skipQuoted(text, i);
-    if (skip >= 0) i = skip;
-    else if ("([{".includes(c)) {
-      const end = matchBracket(text, i);
-      if (end < 0) return -1;
-      i = end;
-    } else if (c === ";") return i;
-  }
-  return -1;
-}
-
-/**
- * Plans inlining `$name` within lines [from, to] (1-based): exactly one plain assignment starting its line,
- * possibly continuing over the lines after it, no other writes, and uses only after it. Columns are
- * 1-based offsets of the `$`. `assignment` to `assignmentEnd` are the lines the assignment takes.
- */
-export function planInline(lines: string[], name: string, from: number, to: number): InlinePlan {
-  const word = new RegExp(`\\$${name}(?![\\w])`, "g");
-  let assignment = 0;
-  let assignmentEnd = 0;
-  let value = "";
-  const uses: { line: number; column: number }[] = [];
-  for (let n = from; n <= to; n++) {
-    const text = lines[n - 1] ?? "";
-    for (const m of text.matchAll(word)) {
-      const after = text.slice(m.index! + m[0].length);
-      const before = text.slice(0, m.index);
-      const plain = /^\s*=(?!=|>)/.test(after);
-      if (plain && !assignment && /^\s*$/.test(before)) {
-        // The statement runs to the first ";" outside brackets and strings, on this line or a later one.
-        const full = lines.slice(n - 1, to).join("\n");
-        const valueStart = m.index! + m[0].length + after.match(/^\s*=\s*/)![0].length;
-        const semicolon = statementEnd(full.slice(valueStart));
-        if (semicolon < 0) return { error: `the assignment on line ${n} doesn't end` };
-        const end = valueStart + semicolon;
-        const lineEnd = full.indexOf("\n", end);
-        if (!/^\s*(\/\/.*)?$/.test(full.slice(end + 1, lineEnd < 0 ? undefined : lineEnd))) return { error: `there's more code after the assignment to $${name}` };
-        const lastLine = n + (full.slice(0, end).match(/\n/g)?.length ?? 0);
-        value = full.slice(valueStart, end).trim();
-        assignment = n;
-        assignmentEnd = lastLine;
-        n = lastLine; // Skip the assignment's own lines.
-        break;
-      }
-      if (plain || /^\s*(\[[^\]]*\]|->\w+)*\s*([-+*/.%&|^]|\?\?|<<|>>|\*\*)?=(?!=|>)/.test(after) || /^\s*(\+\+|--)/.test(after) || /(\+\+|--|&)\s*$/.test(before) || /\bas\s+(\$\w+\s*=>\s*)?$/.test(before) || /\b(global|static|unset)\b/.test(before))
-        return { error: `$${name} is changed on line ${n}` };
-      if (!assignment) return { error: `$${name} is used on line ${n}, before it's assigned` };
-      // A closure's use list takes a variable, not a value.
-      if (/\buse\s*\([^)]*$/.test(before)) return { error: `a closure on line ${n} captures $${name}` };
-      uses.push({ line: n, column: m.index! + 1 });
-    }
-  }
-  if (!assignment) return { error: `there's no assignment to $${name}` };
-  if (!uses.length) return { error: `$${name} isn't used after its assignment` };
-  // Parentheses keep the meaning where the value is an expression, such as $a + $b.
-  // A method chain broken over lines counts as one simple value.
-  const flat = value.replace(/\s*\n\s*/g, "");
-  const simple = /^(\$?[\w\\]+|'[^']*'|"[^"]*"|\d+(\.\d+)?)((->|\?->|::)\$?\w+)*(\([^()]*\))?((->|\?->|::)\w+(\([^()]*\))?)*$/.test(flat) || /^\[.*\]$/s.test(flat);
-  return { assignment, assignmentEnd, value: simple ? value : `(${value})`, uses };
 }
 
 export type Property = { name: string; type: string; isStatic: boolean; readonly: boolean; hasDefault: boolean; promoted: boolean; end: number };
