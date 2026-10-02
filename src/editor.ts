@@ -47,12 +47,22 @@ export function createEditor(el: HTMLElement) {
   });
 }
 
+/** Monaco's PHP grammar, with `#[` starting an attribute, as in PHP 8, rather than a `#` comment. */
+async function phpGrammar() {
+  const php = await import("monaco-editor/languages/definitions/php/php.js");
+  const root = php.language.tokenizer.phpRoot;
+  if (!root.some((rule) => Array.isArray(rule) && String(rule[0]) === String(/#\[/))) root.unshift([/#\[/, "delimiter.array.php"]);
+  return php;
+}
+// Runs after Monaco's own loader, which sets the unchanged grammar.
+monaco.languages.onLanguage("php", async () => monaco.languages.setMonarchTokensProvider("php", (await phpGrammar()).language));
+
 // Blade templates get their own language, so PHP-only servers skip them. The grammar is Monaco's
 // PHP/HTML grammar with Blade states in front: echoes, directive arguments, and @php blocks hold PHP,
 // highlighted by the PHP grammar's own phpRoot rules, and they work inside tags and attribute values too.
 monaco.languages.register({ id: "blade", extensions: [".blade.php"], aliases: ["Blade"] });
 monaco.languages.onLanguage("blade", async () => {
-  const php = await import("monaco-editor/languages/definitions/php/php.js");
+  const php = await phpGrammar();
   const t = php.language.tokenizer;
   type Rule = monaco.languages.IMonarchLanguageRule;
   // Blade that can appear anywhere: in text, in tags, and in attribute values.
