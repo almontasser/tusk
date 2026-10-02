@@ -24,6 +24,12 @@ pub const PEST: &[(&str, &str)] = &[
 /// Laravel's trait for tests that use the database, as a library file.
 pub const REFRESH_DATABASE: &str = "<?php\nnamespace Illuminate\\Foundation\\Testing;\ntrait RefreshDatabase { public function refreshDatabase(): void {} }\n";
 
+/// Laravel's auth helper, contracts, manager, and facade, as Laravel 12 declares them, as a library file.
+pub const LARAVEL_AUTH: (&str, &str) = (
+    "vendor/auth.php",
+    "<?php\nnamespace Illuminate\\Contracts\\Auth {\n    interface Authenticatable { public function getAuthIdentifier(); }\n    interface Guard {\n        /** @return bool */\n        public function check();\n        /** @return int|string|null */\n        public function id();\n        /** @return \\Illuminate\\Contracts\\Auth\\Authenticatable|null */\n        public function user();\n    }\n    interface StatefulGuard extends Guard {\n        /** @return void */\n        public function login(Authenticatable $user, $remember = false);\n        /** @return void */\n        public function logout();\n    }\n    interface Factory {\n        /** @return \\Illuminate\\Contracts\\Auth\\Guard|\\Illuminate\\Contracts\\Auth\\StatefulGuard */\n        public function guard($name = null);\n    }\n}\nnamespace Illuminate\\Auth {\n    /**\n     * @mixin \\Illuminate\\Contracts\\Auth\\Guard\n     * @mixin \\Illuminate\\Contracts\\Auth\\StatefulGuard\n     */\n    class AuthManager implements \\Illuminate\\Contracts\\Auth\\Factory {\n        public function guard($name = null) { return null; }\n        public function __call($method, $parameters) { return null; }\n    }\n}\nnamespace Illuminate\\Support\\Facades {\n    /** @method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user() */\n    class Auth { public static function __callStatic($method, $args) {} }\n}\nnamespace {\n    use Illuminate\\Contracts\\Auth\\Factory as AuthFactory;\n    use Illuminate\\Contracts\\Auth\\Guard;\n    /** @return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory : \\Illuminate\\Contracts\\Auth\\Guard) */\n    function auth($guard = null): AuthFactory|Guard {}\n}\n",
+);
+
 pub struct Fixture {
     pub snap: Snapshot,
     /// The file and position of the cursor marker, if a file had one.

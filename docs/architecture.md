@@ -707,6 +707,19 @@ its patch applies, so another Laravel version keeps its own files. The patches:
   (`is_array($columns) ? $columns : func_get_args()`, as `loadMissing()`).
   Others only pass their arguments on, so they keep their count.
 
+Tusk's server types `auth()` itself too, since the copies are made only for a
+project without its own `mago.toml`, once the app boots. `AuthHelper` in
+`tusk-lsp/src/analysis.rs`, a function return type provider, types `auth()` and
+`auth(null)` as the `AuthManager` intersected with its `@mixin`s: Laravel's
+`Guard` and `StatefulGuard`, or the copies' `DefaultGuard`. So `user()`
+returns what `Auth::user()` does, still nullable, and `id()`, `check()`,
+`login()`, and the guard's other methods are known. Completion, hover, and
+definitions read each part of an intersection, so they list the guard's methods
+on `auth()->` without knowing about mixins. `auth('web')` keeps Laravel's
+`Guard`. The index loads the `AuthManager` with anything that names the auth
+`Factory` contract (`dependencies` in `index.rs`), since the project rarely
+names it.
+
 The settings also get `php-version`: the lowest version composer.json allows
 (`config.platform.php`, or else `require.php`), as PhpStorm sets its language
 level. Mago otherwise assumes its newest (8.5). `magoConfigText` in
@@ -7420,3 +7433,18 @@ test lays out random orders of directives and checks the PHP parses. Other
 "possibly" problems in views, such as on a union of the types two places pass,
 stay dropped: reporting them is a separate change, with its own risk of false
 problems.
+
+### 2026-10-02: `auth()` is the auth manager and its default guard
+
+`auth()->user()`, `auth()->id()`, and the guard's other methods were reported
+as missing whenever Mago didn't get the corrected copy of Laravel's
+`helpers.php`: in a project with its own `mago.toml`, an app that doesn't boot,
+or the first start, before the copies exist. Laravel declares `auth()` as the
+`Factory` contract, which only has `guard()` and `shouldUse()`. A function
+return type provider in Tusk's server now types `auth()` and `auth(null)` as the
+`AuthManager` intersected with its `@mixin`s, read from the index, so `user()`
+matches `Auth::user()` with or without the copies. An intersection rather than
+the manager alone, which Mago already reads through its mixins, because
+completion and hover read a type's classes and know nothing of mixins. Patching
+`helpers.php`'s text as it's scanned was rejected: the longer docblock moves
+every later function's position, so definitions in the file would land wrong.

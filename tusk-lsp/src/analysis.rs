@@ -11,11 +11,12 @@ use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
 use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_analyzer::code::IssueCode;
-use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, HookContext, HookResult, PluginRegistry, Provider, ProviderMeta};
+use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, FunctionReturnTypeProvider, FunctionTarget, HookContext, HookResult, InvocationInfo, PluginRegistry, Provider, ProviderContext, ProviderMeta};
 use mago_analyzer::settings::Settings;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::atomic::object::TObject;
+use mago_codex::ttype::atomic::object::named::TNamedObject;
 use mago_codex::ttype::union::TUnion;
 use mago_database::file::{File, FileType};
 use mago_names::ResolvedNames;
@@ -48,6 +49,7 @@ static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
     let mut plugins = PluginRegistry::with_library_providers();
     plugins.register_expression_hook(PestHook);
     plugins.register_expression_hook(AuthHook);
+    plugins.register_function_provider(AuthHelper);
     plugins
 });
 
@@ -97,6 +99,39 @@ impl ExpressionHook for AuthHook {
             context.set_expression_type(expr, t);
         }
         Ok(())
+    }
+}
+
+/// Laravel's auth manager, which `auth()` returns and passes the default guard's calls on to through its `@mixin`s.
+pub const AUTH_MANAGER: &str = "Illuminate\\Auth\\AuthManager";
+
+/// Types `auth()` and `auth(null)` as what they return at runtime, the auth manager, rather than the
+/// `Illuminate\Contracts\Auth\Factory` Laravel declares, which has no `user()`. The manager is intersected with
+/// its mixins, the default guard's contracts, so the guard's methods are known, and listed and described where the
+/// manager is. A guard's name, as in `auth('admin')`, keeps Laravel's type.
+struct AuthHelper;
+
+impl Provider for AuthHelper {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-auth-helper", "auth()", "Types auth() as the auth manager and its default guard.");
+        &META
+    }
+}
+
+impl FunctionReturnTypeProvider for AuthHelper {
+    fn targets() -> FunctionTarget {
+        FunctionTarget::exact(b"auth")
+    }
+
+    fn get_return_type(&self, context: &ProviderContext<'_, '_, '_>, invocation: &InvocationInfo<'_, '_, '_>) -> Option<TUnion> {
+        if let Some(guard) = invocation.get_argument(0, &[b"guard"]) {
+            context.get_expression_type(guard).filter(|t| t.is_null())?;
+        }
+        let manager = context.codebase().get_class_like(AUTH_MANAGER.as_bytes())?;
+        let mixins: Vec<TAtomic> = manager.mixins.iter().flat_map(|m| m.type_union.types.iter().cloned()).filter(|a| matches!(a, TAtomic::Object(TObject::Named(_)))).collect();
+        let mut named = TNamedObject::new(manager.original_name);
+        named.intersection_types = (!mixins.is_empty()).then_some(mixins);
+        Some(TUnion::from_atomic(TAtomic::Object(TObject::Named(named))))
     }
 }
 
