@@ -89,7 +89,7 @@ fn deletion(text: &str, s: Span) -> Span {
 }
 
 /// `s` with the docblock right before it.
-fn with_docblock(parsed: &Parsed<'_>, text: &str, s: Span) -> Span {
+pub(super) fn with_docblock(parsed: &Parsed<'_>, text: &str, s: Span) -> Span {
     let before = parsed.program.trivia.iter().rfind(|t| t.kind != TriviaKind::WhiteSpace && span(*t).1 <= s.0);
     match before {
         Some(t) if t.kind == TriviaKind::DocBlockComment && slice(text, (span(t).1, s.0)).trim().is_empty() => (span(t).0, s.1),
@@ -146,7 +146,7 @@ fn reindent(parsed: &Parsed<'_>, text: &str, s: Span, indent: &str) -> Vec<(Span
 }
 
 /// Applies `edits` (spans in `text`, not overlapping) to the part of `text` in `s`.
-fn rewrite(text: &str, s: Span, mut edits: Vec<(Span, String)>) -> String {
+pub(super) fn rewrite(text: &str, s: Span, mut edits: Vec<(Span, String)>) -> String {
     edits.retain(|(e, _)| contains(s, *e));
     edits.sort_by_key(|(e, _)| *e);
     let mut out = String::new();
@@ -364,7 +364,7 @@ fn occurrences<'a>(parsed: &Parsed<'a>, name: &str, scope: Span) -> Vec<(Span, V
 }
 
 /// Whether the scope reads its variables by name, so no variable in it can be renamed or removed.
-fn reads_by_name(parsed: &Parsed<'_>, scope: Span) -> Option<String> {
+pub(super) fn reads_by_name(parsed: &Parsed<'_>, scope: Span) -> Option<String> {
     let mut found = None;
     walk(parsed, |node, _| {
         if found.is_some() || !contains(scope, span(&node)) {
@@ -474,6 +474,7 @@ fn placed(value: &str, s: Shape, path: &[Node<'_, '_>], text: &str) -> Result<(S
 // ---- Moving code ----
 
 /// Where code comes from: its file's syntax and text, and the class it's in.
+#[derive(Clone, Copy)]
 pub(super) struct Source<'s, 'a> {
     pub parsed: &'s Parsed<'a>,
     pub text: &'s str,
@@ -488,8 +489,23 @@ pub(super) struct Dest<'s, 'a> {
     pub offset: u32,
     /// The class around the place is the owner, so `self` and `parent` mean the same.
     pub same_class: bool,
-    /// The code runs on the same object or class, so `static` means the same.
-    pub same_object: bool,
+    /// What `static` becomes there.
+    pub statik: StaticAs,
+}
+
+/// What `static` in moved code becomes: kept where it means the same class, written as the class or object it
+/// means (`Sub`, `$order`), or refused with the reason.
+pub(super) enum StaticAs {
+    Keep,
+    Write(String),
+    Unknown(String),
+}
+
+impl StaticAs {
+    /// Kept in the owner's own class, and else unknown.
+    pub(super) fn in_class(same_class: bool) -> Self {
+        if same_class { StaticAs::Keep } else { StaticAs::Unknown("it uses static::, which means the object's own class".into()) }
+    }
 }
 
 /// The text of `s` in `src`, written to mean the same at `dest`: class names as the file there writes them (the
@@ -507,6 +523,7 @@ pub(super) fn moved(src: &Source<'_, '_>, s: Span, dest: &Dest<'_, '_>, codebase
     };
     let mut error = None;
     let mut keyword_edits = vec![];
+    let mut static_edits = vec![];
     walk(src.parsed, |node, ancestors| {
         if error.is_some() || !contains(s, span(&node)) {
             return;
@@ -514,19 +531,25 @@ pub(super) fn moved(src: &Source<'_, '_>, s: Span, dest: &Dest<'_, '_>, codebase
         let n = span(&node);
         match node {
             Node::Expression(Expression::Self_(_)) if !dest.same_class => keyword_edits.push((n, None)),
-            Node::Expression(Expression::Static(_)) if !dest.same_object && !dest.same_class => {
-                error = Some("it uses static::, which means the object's own class".to_string());
-            }
+            Node::Expression(Expression::Static(_)) => match &dest.statik {
+                StaticAs::Keep => {}
+                // A closure sees no outer variable it doesn't `use`; an arrow function sees them all.
+                StaticAs::Write(v) if v.starts_with('$') && ancestors.iter().any(|a| matches!(a, Node::Closure(_)) && contains(s, span(a))) => {
+                    error = Some(format!("it uses static:: inside a closure, which can't see {v}"));
+                }
+                StaticAs::Write(v) => static_edits.push((n, v.clone())),
+                StaticAs::Unknown(why) => error = Some(why.clone()),
+            },
             Node::Expression(Expression::Parent(_)) if !dest.same_class => error = Some("it uses parent::, which means another class there".to_string()),
             Node::MagicConstant(MagicConstant::Class(_)) if !dest.same_class => keyword_edits.push((n, Some("::class"))),
             Node::MagicConstant(MagicConstant::Function(_) | MagicConstant::Method(_)) => error = Some("it uses __FUNCTION__ or __METHOD__, which would name another function there".to_string()),
             _ => {}
         }
-        let _ = ancestors;
     });
     if let Some(e) = error {
         return Err(e);
     }
+    extra.extend(static_edits);
     for (n, suffix) in keyword_edits {
         let name = owner_name(imports).ok_or("it uses self outside a class")?;
         extra.push((n, format!("{name}{}", suffix.unwrap_or(""))));
@@ -980,7 +1003,7 @@ fn inline_constant(ctx: &Ctx<'_>, found: &crate::symbol::Found, asked: Asked) ->
             let Some(at) = path_to(&parsed, s) else { continue };
             let enclosing = resolver.enclosing_class(&at);
             let same_class = matches!((&enclosing, &owner), (Some(e), Some(o)) if e.eq_ignore_ascii_case(o));
-            let dest = Dest { doc: &doc, parsed: &parsed, offset: s.0, same_class, same_object: same_class };
+            let dest = Dest { doc: &doc, parsed: &parsed, offset: s.0, same_class, statik: StaticAs::in_class(same_class) };
             let result = constant_visible(codebase, &src, value_span, owner.as_deref(), enclosing.as_deref())
                 .and_then(|()| moved(&src, value_span, &dest, codebase, vec![], &mut imports))
                 .and_then(|v| placed(&v, value_shape, &at, &text));
@@ -1065,8 +1088,6 @@ enum Receiver {
     This,
     /// A static method, or a function.
     None,
-    /// A static method called on its own class by name, where `static` means that class.
-    Owner,
     /// Another object in a variable.
     Variable(String),
     /// Another object from an expression.
@@ -1278,9 +1299,12 @@ fn inline_method(ctx: &Ctx<'_>, found: &crate::symbol::Found, asked: Asked) -> R
         let mut imports = vec![];
         let mut file_edits: Vec<(Span, String)> = vec![];
         let spans_start = spans[0].0;
+        // A trait's method needs the class of the object it's called on, which the analyzer knows.
+        let analysis = (is_trait && path != ctx.doc.path).then(|| crate::analysis::analyze(&parsed, &arena, &ctx.index));
+        let analysis = if !is_trait { None } else if path == ctx.doc.path { Some(ctx.analysis()) } else { analysis.as_ref() };
         for s in spans {
             let call = Call_ { owner: owner.as_deref(), is_trait, name: &name, src: &src, facts: &facts, result, body_code, params: &param_list, codebase };
-            match call.inline(&doc, &parsed, s, &mut imports) {
+            match call.inline(&doc, &parsed, analysis, s, &mut imports) {
                 Ok(list) => {
                     if list.iter().any(|(e, _)| file_edits.iter().any(|(o, _)| e.0 < o.1 && o.0 < e.1 || (e.0 == o.0 && e.1 == o.1 && e.0 != e.1))) {
                         skipped.push((path.clone(), line_of(&text, s.0), "it's inside another call being inlined".into()));
@@ -1324,6 +1348,8 @@ struct BodyFacts {
     this_in_closure: bool,
     /// Members reached through `$this`, `self::`, or `static::`, as (kind, name).
     members: Vec<(&'static str, String)>,
+    /// `static` in the body, which means the class the call runs on.
+    statics: bool,
     /// Where the first code with side effects in the body ends, for the one argument that may stay in place: a
     /// use before that runs first.
     first_impure: Option<u32>,
@@ -1501,6 +1527,7 @@ impl BodyFacts {
         let mut this = vec![];
         let mut this_in_closure = false;
         let mut members = vec![];
+        let mut statics = false;
         let mut first_impure = None;
         walk(decl, |node, ancestors| {
             let n = span(&node);
@@ -1508,6 +1535,7 @@ impl BodyFacts {
                 return;
             }
             let in_closure = inside(ancestors, scope).any(|a| matches!(a, Node::Closure(_) | Node::ArrowFunction(_)));
+            statics |= matches!(node, Node::Expression(Expression::Static(_)));
             match node {
                 Node::DirectVariable(v) if v.name == b"$this" => {
                     this.push(n);
@@ -1535,7 +1563,7 @@ impl BodyFacts {
             }
         });
         let _ = text;
-        Self { params, locals, this, this_in_closure, members, first_impure }
+        Self { params, locals, this, this_in_closure, members, statics, first_impure }
     }
 }
 
@@ -1593,8 +1621,41 @@ struct Call_<'s, 'a> {
 }
 
 impl Call_<'_, '_> {
+    /// The class whose copy of the trait's method a call runs: where the method appears in the class of the object
+    /// it's called on. Refused where that class can't be told, or where a subclass has a method of its own.
+    fn trait_user(&self, resolver: &Resolver<'_, '_>, call: Node<'_, '_>, path: &[Node<'_, '_>]) -> Result<String, String> {
+        let t = self.owner.unwrap_or_default();
+        let classes = match call {
+            Node::MethodCall(c) => resolver.classes_of(c.object),
+            Node::StaticMethodCall(c) => resolver.classes_of_class_expr(c.class, path),
+            _ => vec![],
+        };
+        let lower = mago_word::word(self.name.to_ascii_lowercase().as_bytes());
+        let runs_trait = |class: &str| self.codebase.get_declaring_method_class(class.as_bytes(), self.name.as_bytes()).is_some_and(|d| d.as_str_lossy().eq_ignore_ascii_case(t));
+        let mut users: Vec<String> = vec![];
+        for class in &classes {
+            let Some(meta) = self.codebase.get_class_like(class.as_bytes()) else { continue };
+            if !runs_trait(class) {
+                return Err(format!("the object can be {}, whose {}() is another method", short(class), self.name));
+            }
+            if let Some(child) = super::super::navigation::descendants(self.codebase, class).into_iter().find(|d| !runs_trait(d)) {
+                return Err(format!("{}::{}() overrides it, so this call may run that one", short(&child), self.name));
+            }
+            let Some(appears) = meta.appearing_method_ids.get(&lower).map(|id| id.get_class_name()) else { continue };
+            let user = self.codebase.get_class_like(appears.as_bytes()).map_or_else(|| appears.as_str_lossy().into_owned(), |m| m.original_name.as_str_lossy().into_owned());
+            if !users.iter().any(|u| u.eq_ignore_ascii_case(&user)) {
+                users.push(user);
+            }
+        }
+        match users.as_slice() {
+            [] => Err("it's a trait's method, and the class of the object it's called on can't be told".into()),
+            [one] => Ok(one.clone()),
+            [a, b, ..] => Err(format!("it's a trait's method, and the object can be {} or {}, which each use the trait", short(a), short(b))),
+        }
+    }
+
     /// The edits that inline the call whose name is at `s` in `parsed`, or why it can't be.
-    fn inline(&self, doc: &Document, parsed: &Parsed<'_>, s: Span, imports: &mut Vec<String>) -> Result<Vec<(Span, String)>, String> {
+    fn inline(&self, doc: &Document, parsed: &Parsed<'_>, analysis: Option<&crate::analysis::Analysis>, s: Span, imports: &mut Vec<String>) -> Result<Vec<(Span, String)>, String> {
         let text = parsed.text();
         let path = parsed.path_at(s.0);
         let at = path
@@ -1621,15 +1682,7 @@ impl Call_<'_, '_> {
             }
             Node::StaticMethodCall(c) => {
                 let instance = self.codebase.get_method(self.owner.unwrap_or_default().as_bytes(), self.name.as_bytes()).and_then(|m| m.method_metadata.as_ref()).is_some_and(|m| !m.is_static);
-                // `Owner::of()` runs a static method on the owner itself, so `static` there is the owner.
-                let names_owner = matches!(c.class, Expression::Identifier(_)) && parsed.names.resolve(&c.class.span()).is_some_and(|n| self.owner.is_some_and(|o| String::from_utf8_lossy(n).eq_ignore_ascii_case(o)));
-                let receiver = if instance && matches!(c.class, Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)) {
-                    Receiver::This
-                } else if names_owner {
-                    Receiver::Owner
-                } else {
-                    Receiver::None
-                };
+                let receiver = if instance && matches!(c.class, Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)) { Receiver::This } else { Receiver::None };
                 (receiver, &c.argument_list)
             }
             Node::NullSafeMethodCall(_) => return Err("it's a nullsafe call (?->)".into()),
@@ -1639,18 +1692,23 @@ impl Call_<'_, '_> {
         let call_span = span(&call_node);
         let outermost = path[..=at].iter().position(|n| span(n) == call_span).unwrap_or(at);
         let call_path: Vec<Node<'_, '_>> = path[..=outermost].to_vec();
-        let resolver = Resolver::new(parsed, None, self.codebase);
+        let resolver = Resolver::new(parsed, analysis, self.codebase);
         let enclosing = resolver.enclosing_class(&path[..=at]);
-        let same_class = match (self.owner, &enclosing) {
-            (Some(o), Some(e)) if self.is_trait => self.codebase.get_class_like(e.as_bytes()).is_some_and(|m| m.used_traits.iter().any(|t| t.as_str_lossy().eq_ignore_ascii_case(o))) || e.eq_ignore_ascii_case(o),
-            (Some(o), Some(e)) => e.eq_ignore_ascii_case(o),
-            _ => false,
+        // A keyword call (`self::`, `static::`, `parent::`) forwards the class it runs on, as `$this->` keeps the object.
+        let keyword = matches!(call_node, Node::StaticMethodCall(c) if matches!(c.class, Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)));
+        // A trait's method runs as a copy in the class that uses the trait, so `self` there means that class.
+        let owner: Option<String> = match self.owner {
+            Some(t) if self.is_trait => {
+                let in_trait = enclosing.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(t));
+                if in_trait && (matches!(receiver, Receiver::This) || keyword) { Some(t.to_string()) } else { Some(self.trait_user(&resolver, call_node, &path[..=at])?) }
+            }
+            o => o.map(str::to_string),
         };
-        let same_object = matches!(receiver, Receiver::This | Receiver::Owner);
-        if self.is_trait && !same_class {
-            return Err("it's a trait's method, called from outside the classes that use the trait".into());
-        }
-        if let Some(owner) = self.owner
+        let owner = owner.as_deref();
+        let same_class = matches!((owner, &enclosing), (Some(o), Some(e)) if e.eq_ignore_ascii_case(o));
+        let same_object = matches!(receiver, Receiver::This);
+        let src = Source { owner, ..*self.src };
+        if let Some(owner) = owner
             && !same_class
         {
             for (kind, member) in &self.facts.members {
@@ -1703,23 +1761,36 @@ impl Call_<'_, '_> {
             taken.insert(n.clone());
             n
         };
-        let dest = Dest { doc, parsed, offset: call_span.0, same_class, same_object };
-
         // `$this`: the object the call ran on.
+        let mut object = None;
         match &receiver {
             Receiver::Variable(v) => extra.extend(self.facts.this.iter().map(|s| (*s, v.clone()))),
             Receiver::Expression(e) => {
                 let receiver_text = slice(text, *e).to_string();
-                if !self.facts.this.is_empty() {
+                if !self.facts.this.is_empty() || self.facts.statics {
                     let temp = format!("${}", fresh("object", &mut taken));
                     before.push(format!("{temp} = {receiver_text};"));
                     extra.extend(self.facts.this.iter().map(|s| (*s, temp.clone())));
+                    object = Some(temp);
                 } else if path_to(parsed, *e).and_then(|p| p.last().copied()).is_some_and(impure) {
                     before.push(format!("{receiver_text};"));
                 }
             }
             _ => {}
         }
+        // `static`: the class the call runs on, which a keyword call or `$this->` forwards.
+        let statik = match (&receiver, call_node) {
+            (Receiver::This, _) => StaticAs::Keep,
+            _ if keyword => StaticAs::Keep,
+            (_, Node::StaticMethodCall(c)) => match c.class {
+                Expression::Identifier(_) | Expression::Variable(Variable::Direct(_)) => StaticAs::Write(slice(text, span(c.class)).to_string()),
+                _ => StaticAs::Unknown("it uses static::, and the class it's called on can't be told".into()),
+            },
+            (Receiver::Variable(v), _) => StaticAs::Write(v.clone()),
+            (Receiver::Expression(_), _) => object.map_or(StaticAs::Keep, StaticAs::Write),
+            (Receiver::None, _) => StaticAs::Keep,
+        };
+        let dest = Dest { doc, parsed, offset: call_span.0, same_class, statik };
         // The locals, apart from the caller's variables, before the parameters take their temporaries' names.
         let param_names: HashSet<&str> = self.params.iter().map(|(p, _)| p.as_str()).collect();
         for (l, spans) in &self.facts.locals {
@@ -1738,12 +1809,12 @@ impl Call_<'_, '_> {
             let uses = &self.facts.params[i];
             let (value, is_impure) = match (values[i], default) {
                 (Some((v, imp)), _) => (slice(text, v).to_string(), imp),
-                (None, Some(d)) => (moved(self.src, *d, &dest, self.codebase, vec![], imports)?, false),
+                (None, Some(d)) => (moved(&src, *d, &dest, self.codebase, vec![], imports)?, false),
                 (None, None) => return Err(format!("it doesn't pass ${pname}, which has no default")),
             };
             let value_shape = match values[i] {
                 Some((v, _)) => path_to(parsed, v).and_then(|p| expression_of(&p).map(|e| shape(unparenthesized(e), text))),
-                None => default.and_then(|d| path_to(self.src.parsed, d)).and_then(|p| expression_of(&p).map(|e| shape(unparenthesized(e), self.src.text))),
+                None => default.and_then(|d| path_to(src.parsed, d)).and_then(|p| expression_of(&p).map(|e| shape(unparenthesized(e), src.text))),
             };
             let Some(value_shape) = value_shape else { return Err(format!("its argument for ${pname} can't be read")) };
             if uses.uses.is_empty() {
@@ -1780,15 +1851,15 @@ impl Call_<'_, '_> {
         let code = match self.body_code {
             Some(b) => {
                 let mut list = extra.clone();
-                list.extend(reindent(self.src.parsed, self.src.text, b, &indent));
-                Some(moved(self.src, b, &dest, self.codebase, list, imports)?)
+                list.extend(reindent(src.parsed, src.text, b, &indent));
+                Some(moved(&src, b, &dest, self.codebase, list, imports)?)
             }
             None => None,
         };
         let result = match self.result {
-            Some(r) => Some(moved(self.src, r, &dest, self.codebase, {
+            Some(r) => Some(moved(&src, r, &dest, self.codebase, {
                 let mut list = extra.clone();
-                list.extend(reindent(self.src.parsed, self.src.text, r, &indent));
+                list.extend(reindent(src.parsed, src.text, r, &indent));
                 list
             }, imports)?),
             None => None,
@@ -1801,7 +1872,7 @@ impl Call_<'_, '_> {
         if alone {
             let mut lines = lead;
             if let (Some(r), Some(rp)) = (&result, self.result) {
-                let returned = path_to(self.src.parsed, rp).and_then(|p| p.last().copied());
+                let returned = path_to(src.parsed, rp).and_then(|p| p.last().copied());
                 if returned.is_some_and(impure) || returned.is_none() {
                     lines.push(format!("{r};"));
                 }
@@ -2151,6 +2222,50 @@ mod tests {
         assert_eq!(skipped, ["2:it uses Order::$cents, which is private there"]);
         assert!(files["Order.php"].contains("public function show(): int { return $this->cents; }"), "{}", files["Order.php"]);
         assert!(files["Order.php"].contains("function total"), "kept: {}", files["Order.php"]);
+    }
+
+    #[test]
+    fn inlines_a_traits_method_on_another_object_as_the_class_that_uses_it() {
+        let files = [
+            ("app/HasTotal.php", "<?php\ntrait HasTotal\n{\n    public function total(): int\n    {\n        return $this->cents * self::RATE + static::BONUS;\n    }\n}\n"),
+            ("app/Base.php", "<?php\nclass Base\n{\n    use HasTotal;\n\n    const RATE = 2;\n    const BONUS = 1;\n    public int $cents = 0;\n}\nclass Order extends Base {}\n"),
+            ("app/use.php", "<?php\nfunction f(Order $o) { return $o->to<|>tal(); }\nfunction g(Base $b) { return $b->total(); }\n"),
+        ];
+        let (files, skipped) = inline(&files, Mode::All).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        // `self` is the class that uses the trait; `static` is the object's own class.
+        assert_eq!(files["use.php"], "<?php\nfunction f(Order $o) { return $o->cents * Base::RATE + $o::BONUS; }\nfunction g(Base $b) { return $b->cents * Base::RATE + $b::BONUS; }\n");
+        assert!(!files["HasTotal.php"].contains("function total"), "{}", files["HasTotal.php"]);
+    }
+
+    #[test]
+    fn skips_a_traits_method_where_the_class_cant_be_told() {
+        let files = [
+            ("app/T.php", "<?php\ntrait T\n{\n    public function label(): string\n    {\n        return self::class;\n    }\n}\nclass A { use T; }\nclass B { use T; }\nclass C { use T; public function show() { return $this->lab<|>el(); } }\n"),
+            ("app/use.php", "<?php\nfunction g(A|B $ab) { return $ab->label(); }\n"),
+        ];
+        let (files, skipped) = inline(&files, Mode::All).unwrap();
+        assert_eq!(skipped, ["2:it's a trait's method, and the object can be A or B, which each use the trait"]);
+        assert!(files["T.php"].contains("public function show() { return self::class; }"), "{}", files["T.php"]);
+        assert!(files["T.php"].contains("function label"), "kept: {}", files["T.php"]);
+    }
+
+    #[test]
+    fn writes_static_as_the_class_the_call_runs_on() {
+        let text = "<?php\nclass Model\n{\n    public static function make(): static\n    {\n        return new static();\n    }\n\n    public static function fresh(): static\n    {\n        return static::make();\n    }\n}\nclass User extends Model\n{\n    public static function again(): static\n    {\n        return self::make();\n    }\n}\n$u = User::ma<|>ke();\n$m = Model::make();\n$c = $u->make();\n";
+        let out = one(text, Mode::All).unwrap();
+        // A keyword call forwards the class it runs on, so `static` stays; a named class or an object is written.
+        assert!(out.contains("        return new static();\n    }\n}\nclass User"), "{out}");
+        assert!(out.contains("    public static function again(): static\n    {\n        return new static();"), "{out}");
+        assert!(out.contains("$u = new User();\n$m = new Model();\n$c = new $u();\n"), "{out}");
+        assert!(!out.contains("function make"), "{out}");
+    }
+
+    #[test]
+    fn skips_static_in_a_closure_on_another_object() {
+        let text = "<?php\nclass A\n{\n    public function each(): \\Closure\n    {\n        return function () { return static::class; };\n    }\n}\nfunction f(A $a) { return $a->ea<|>ch(); }\n";
+        let (_, skipped) = inline(&[("test.php", text)], Mode::All).unwrap();
+        assert_eq!(skipped, ["9:it uses static:: inside a closure, which can't see $a"]);
     }
 
     #[test]
