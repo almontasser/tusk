@@ -7,7 +7,8 @@
 # SFTP is the system's OpenSSH (sshd on port 2222, run as you, with keys made in <folder>). FTP (port 2121),
 # explicit FTPS (port 2990), and implicit FTPS (port 2991), both with a self-signed certificate, are pyftpdlib in a
 # virtual environment in <folder>, with user `tusk` and password `tusk`. All serve <folder>/www. Stop them with
-# `kill $(cat <folder>/*.pid)`.
+# `kill $(cat <folder>/*.pid)`. The SFTP test also starts jump hosts of its own, in the test, that ask for a password
+# or a key with a passphrase, and reaches the sshd through `nc` as a ProxyCommand.
 set -e
 mkdir -p "${1:?Usage: deploy-test-servers.sh <folder>}"
 dir=$(cd "$1" && pwd)
