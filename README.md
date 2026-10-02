@@ -3713,8 +3713,10 @@ problems whose message, rule, or path contains every word you type. Files with
 errors come first, each with its error and warning counts. The problem under the
 cursor is selected in the panel. In the panel, ↑ and ↓ move the selection, ← and
 → collapse and expand a file, Enter opens the problem, and ⌘C copies it as
-`path:line:column severity rule message`. Right-click a problem to copy it or
-its message, or to show its details.
+`path:line:column severity rule message`; on a file, ⌘C copies all its
+problems, one per line. Right-click a problem to copy it or its message, or to
+show its details. Right-click a file to copy all its problems or only their
+messages.
 A file with errors shows its name in red with a wavy underline in the file
 tree and on its tab, and the folders that contain it show their names in red.
 The Problems button in the activity bar shows the error count.

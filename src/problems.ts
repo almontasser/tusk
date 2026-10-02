@@ -133,7 +133,7 @@ const collapsed = new Set<string>();
 /** The file in the editor and its cursor, which the Current File toggle and the selection follow. */
 let caret: { path: string; position: monaco.IPosition | null } = { path: "", position: null };
 /** The rows on screen, by key: a file's path, or a problem's path, position, and message. */
-let rows: { key: string; path: string; problem?: Problem; row: HTMLElement }[] = [];
+let rows: { key: string; path: string; problem?: Problem; problems?: Problem[]; row: HTMLElement }[] = [];
 // Enter opens a problem or folds a file, → and ← fold files and go from a problem to its file.
 const nav = listNav(list);
 const keyOf = (path: string, p: Problem) => `${path}:${p.range.startLineNumber}:${p.range.startColumn}:${p.message}`;
@@ -183,13 +183,18 @@ const select = (key: string, scroll = true) => nav.select(key, { scroll });
 /** A problem as one line of text: `path:line:column severity rule message`. */
 const problemText = (path: string, p: Problem) =>
   [`${path.slice(host.root().length + 1)}:${p.range.startLineNumber}:${p.range.startColumn}`, level(p.severity), ruleLabel(p.source, p.code), p.message].filter(Boolean).join(" ");
-const copy = (text: string) => navigator.clipboard.writeText(text).then(() => host.status("Copied the problem"));
+const copy = (text: string, what = "the problem") => navigator.clipboard.writeText(text).then(() => host.status(`Copied ${what}`));
+/** A file's problems in the order the panel lists them: errors first, then by line. */
+const sortProblems = (problems: Problem[]) => [...problems].sort((a, b) => b.severity - a.severity || a.range.startLineNumber - b.range.startLineNumber);
+const copyAll = (problems: Problem[], line: (p: Problem) => string) =>
+  copy(sortProblems(problems).map(line).join("\n"), `${problems.length} ${problems.length === 1 ? "problem" : "problems"}`);
 
-// ⌘C copies the selected problem.
+// ⌘C copies the selected problem, or every problem of the selected file.
 list.addEventListener("keydown", (e) => {
   const r = rows.find((r) => r.key === nav.selected());
-  if (!(e.key === "c" && mod(e) && r?.problem)) return;
-  copy(problemText(r.path, r.problem));
+  if (!(e.key === "c" && mod(e) && r)) return;
+  if (r.problem) copy(problemText(r.path, r.problem));
+  else copyAll(r.problems ?? [], (p) => problemText(r.path, p));
   e.preventDefault();
   e.stopPropagation();
 });
@@ -245,7 +250,7 @@ function render() {
       row.ariaExpanded = String(open);
       row.ariaLevel = "1";
       row.dataset.key = path;
-      rows.push({ key: path, path, row });
+      rows.push({ key: path, path, problems, row });
       const name = path.slice(root.length + 1);
       const icon = fileIcon(name.split("/").pop()!);
       row.innerHTML = `<span class="codicon codicon-chevron-${open ? "down" : "right"}"></span><span class="codicon codicon-${icon.codicon} ${icon.color}"></span>`;
@@ -263,10 +268,18 @@ function render() {
       ].filter(Boolean).join(" ");
       row.append(label, dir, count);
       row.onclick = () => (select(path), collapsed.has(path) ? collapsed.delete(path) : collapsed.add(path), render());
+      row.oncontextmenu = (e) => {
+        e.preventDefault();
+        select(path);
+        showMenu(e.clientX, e.clientY, [
+          { label: "Copy All", run: () => copyAll(problems, (p) => problemText(path, p)) },
+          { label: "Copy All Messages", run: () => copyAll(problems, (p) => p.message) },
+        ]);
+      };
       item.append(row);
       if (open) {
         const children = document.createElement("ul");
-        const sorted = [...problems].sort((a, b) => b.severity - a.severity || a.range.startLineNumber - b.range.startLineNumber);
+        const sorted = sortProblems(problems);
         children.append(
           ...sorted.map((p) => {
             const li = document.createElement("li");
