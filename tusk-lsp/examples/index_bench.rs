@@ -17,6 +17,7 @@ fn main() {
     let t = Instant::now();
     let paths = idx.discover();
     println!("discover: {} files in {:?}", paths.len(), t.elapsed());
+    rss("after discover");
     let t = Instant::now();
     idx.build(paths, |p| std::fs::read(p).ok(), |_, _| {});
     println!("build: {:?} ({} class-likes)", t.elapsed(), idx.codebase.class_likes.len());

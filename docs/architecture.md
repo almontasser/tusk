@@ -5177,13 +5177,14 @@ The server also accepts `phpVersion` (otherwise from `mago.toml` or
 what the project reaches; see Index below), which the editor doesn't send.
 
 The server indexes the project each time it starts, with `$/progress` titled
-"Indexing", and keeps a cache of what library files declare in `cacheDir`
-(see Index below). Without `cacheDir`, it uses
+"Indexing", and keeps a cache of what library files declare and what each
+folder holds in `cacheDir` (see Index below). Without `cacheDir`, it uses
 `~/Library/Caches/tusk-lsp/<hash of the root>` on macOS, or the XDG cache
 folder elsewhere. `tusk/reindex` indexes it again with its
 configuration read again, which the editor asks for when the alias stubs or its
 `mago.toml` change. The server also does it by itself when `composer.lock` or
-the project's `mago.toml` changes.
+the project's `mago.toml` changes. A reindex reads every folder again rather
+than trust the folder cache.
 
 ### Diagnostics
 
@@ -5238,16 +5239,41 @@ returns.
   file's `Declared` list with the file's modification time (in nanoseconds)
   and size. At the next start, a file whose time and size match isn't read or
   parsed. On the Laravel and Filament app, that cuts the build from about
-  0.6 s to 0.23 s, and peak memory from about 620 MB to 415 MB. Walking the
-  folders (0.2 s), loading the reached classes (0.09 s), and populating
-  (0.08 s) remain. The cache has a key of its own format version, the PHP
-  version, and the server binary's time and size, which pin Mago's version
-  and Tusk's scanning; another key, or a file that can't be read or parsed,
-  means a full scan. Entries depend only on their file, so a change of
-  exclusions or `loadAllLibraries` only changes which entries are used. The
-  server writes the cache when a file was parsed or is gone, to a temporary
-  file that it renames over the old one, so another instance never reads half
-  of it.
+  0.6 s to 0.23 s, and peak memory from about 620 MB to 415 MB. The cache has
+  a key of its own format version, the PHP version, and the server binary's
+  time and size, which pin Mago's version and Tusk's scanning; another key, or
+  a file that can't be read or parsed, means a full scan. Entries depend only
+  on their file, so a change of exclusions or `loadAllLibraries` only changes
+  which entries are used. The server writes the cache when a file was parsed
+  or is gone, to a temporary file that it renames over the old one, so another
+  instance never reads half of it. Names are stored as text (format 2), not as
+  Mago's list of byte values, which cuts the file by a fifth.
+- **The folder cache:** `folders.json` beside it keeps, for each folder the
+  walk entered, its modification time, the names of the files the index takes
+  from it, and the subfolders it walks into, each with whether it's a link
+  (`Walk` in `index.rs`). Adding, removing, or renaming an entry changes a
+  folder's time, so a folder whose time matches is listed from the cache
+  without being read; a file's own edits don't change its folder, and the
+  declaration cache compares each file's time and size. The walk still reads
+  each folder's time, about 7,900 calls on the Laravel and Filament app,
+  which takes 0.02 s instead of the 0.2 s a full walk takes. Folders are
+  walked in parallel on the scan pool, without the index's lock. Each walk
+  pushes into one list, and only folders read from the disk make new entries:
+  merging each folder's results into its parent's, and copying every entry
+  each start, kept about 10 MB more in the process. Paths are allocated at
+  their size, since `Path::join` leaves room to spare and the index keeps every
+  path. The list is sorted by bytes, since comparing paths part by part cost
+  more than the warm walk. Safeguards:
+  - The key adds the root, the exclusions, and the stubs to the declaration
+    cache's key, so other exclusions (including a `mago.toml` with other
+    excludes) or another server build walk everything again.
+  - A folder changed in the 5 s before the walk isn't cached, since a change
+    in the same tick of a coarse clock (2 s on FAT) would keep its time.
+  - Under a link read again, which may now point elsewhere, the cache isn't
+    trusted. A link to a folder above it isn't followed.
+  - A folder with a name that isn't UTF-8 isn't cached; JSON can't hold it.
+  - A reindex deletes the folder cache first (`Index::forget_folders`), for
+    file systems that don't change a folder's time.
 - **Building in chunks:** files are scanned 1,024 at a time, and each scan is
   cloned into the index and dropped before the next chunk: the allocator keeps
   what the process peaks at, and holding every scan until the end doubled the
@@ -5270,7 +5296,11 @@ returns.
   else is passed to the populator as safe.
 - **Measurements** on a Laravel and Filament project with 23,000 PHP files,
   on an M-series Mac: indexing takes 0.8 s, a model's update 10 ms, and
-  memory 370 MB.
+  memory 370 MB. A warm start takes 0.23 s: the walk 0.02 s, the declaration
+  cache 0.05 s, project files 0.01 s, loading the reached classes 0.07 s, and
+  populating 0.08 s. Analyzing the first open file takes about 3 ms.
+  `examples/index_bench.rs` times the walk and the build, with `CACHE=<file>`
+  for the caches.
 
 ### Threads
 
@@ -7296,3 +7326,24 @@ GitHub Actions would build natively and faster, but the updater key would then
 have to leave Bitwarden for a repository secret. Release files drop the version
 from their names so the website can link to `releases/latest/download/`.
 
+### 2026-10-02: Cache each folder's listing, keyed by its time
+
+A warm start took 0.43 s on the Laravel and Filament app with 23,000 PHP
+files. Walking the folders took 0.2 s of that. Loading the classes the project
+reaches (0.07 s) and populating them (0.08 s) took most of the rest. Walking
+in parallel saved only about a quarter, since listing folders is most of the
+cost. So the server now caches each folder's listing, keyed by its
+modification time, and reads only the folders whose time changed: 0.02 s. A
+warm start now takes 0.23 s, and the process keeps 354 MB instead of 357 MB.
+
+A folder's time changes when an entry is added, removed, or renamed, on APFS,
+ext4, and NTFS. Some file systems, such as FAT on Windows, don't change it, so
+a reindex walks every folder. Skipping `vendor` while `composer.lock` is
+unchanged would miss a file added to `vendor` by hand, and the project's own
+folders need walking anyway.
+
+The reached classes aren't cached. Caching each loaded file's scan would mean
+serializing Mago's metadata and keeping it in step with Mago's versions, to
+save part of 0.07 s. Seeding the loading with last start's set would save at
+most a few hundredths of a second of its waves. Populating is Mago's own work,
+and a populated index can't be saved without serializing it.
