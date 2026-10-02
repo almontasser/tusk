@@ -7,8 +7,8 @@ import { applyWorkspaceEdit, tuskRequest, typeSymbol } from "./lsp";
 import { constructorCalls, deletionLines, nameResolver, outsideStrings, parseTypeDeclarations, shortenNames, type TypeDeclaration } from "./phptypes";
 import { declarationParts, formatArgs, formatParams, matchBracket, planInline, rewriteArgs, splitTopLevel, type Param, type Signature } from "./refactorparse";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { constantAt, constantDeclaration, constantRefs, declarationPoint, enclosingFunctionName, expressionsAt, functionScope, inlineCall, reindentCode, inlinedValue, literalType, methodToInline, occurrences, variableName, type Expr, type Inlinable } from "./extractparse";
-import { chosenExpression, chosenUses, pickAtCaret } from "./extract";
+import { constantDeclaration, constantRefs, declarationPoint, expressionsAt, functionScope, inlineCall, reindentCode, inlinedValue, methodToInline, type Expr, type Inlinable } from "./extractparse";
+import { chosenAll, chosenTarget, extraction, pickAtCaret } from "./extract";
 import { move } from "./files";
 import { pick, rank, type Item } from "./palette";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
@@ -330,7 +330,7 @@ export const textOf = async (path: string) => monaco.editor.getModel(monaco.Uri.
  * Opens the Change Signature dialog for the method or function at the cursor, then rewrites its declaration, its
  * overrides in classes that extend or implement its class, and every call Tusk's server finds.
  */
-export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: { expr: Expr; uses: Expr[] }) {
+export async function changeSignature(editor: monaco.editor.ICodeEditor, introduce?: { expr: Expr; uses: Expr[]; name: string; type: string; constant: boolean }) {
   const model = editor.getModel();
   const pos = introduce ? editor.getModel()?.getPositionAt(introduce.expr.start) : editor.getPosition();
   if (!model || !pos || model.getLanguageId() !== "php") return host.status("Change Signature works in PHP files.");
@@ -348,14 +348,11 @@ export async function changeSignature(editor: monaco.editor.ICodeEditor, introdu
   if (introduce) {
     // Introduce Parameter: a new last parameter holding the expression, as its default when it's a constant, or
     // else as the value passed in existing calls.
-    const { expr } = introduce;
-    const constant = !!constantAt(text, expr.start, expr.end);
-    // The body's variables too, so the parameter doesn't take a local's name.
-    const [from, to] = functionScope(text, expr.start);
-    const taken = new Set([...params.map((p) => p.name), ...[...text.slice(from, to).matchAll(/\$(\w+)/g)].map((m) => m[1])]);
+    // The server names it apart from the function's variables, and types it.
+    const { expr, name, type, constant } = introduce;
     const at = params.findIndex((p) => p.variadic);
     focus = at < 0 ? params.length : at;
-    params.splice(focus, 0, { text: "", type: literalType(expr.text), name: variableName(expr.text, taken), byRef: false, variadic: false, defaultValue: constant ? expr.text : undefined, callValue: constant ? undefined : expr.text });
+    params.splice(focus, 0, { text: "", type, name, byRef: false, variadic: false, defaultValue: constant ? expr.text : undefined, callValue: constant ? undefined : expr.text });
   }
   const chosen = await editSignature({ title, kind, heading: introduce ? "Introduce Parameter" : "Change Signature", focus, signature: { modifiers: parts.modifiers, name: parts.name, returnType: parts.returnType, params } });
   editor.focus();
@@ -630,22 +627,24 @@ async function plan(model: monaco.editor.ITextModel, symbol: L.DocumentSymbol, c
 /**
  * Introduce Parameter (⌥⌘P): turns an expression in a method into a new parameter, through the Change Signature
  * dialog, so the name and position can be set there. Calls pass the expression, which must not use the method's
- * variables, since they don't exist at the call.
+ * variables, since they don't exist at the call; Tusk's server checks that, and names and types the parameter.
  */
 export async function introduceParameter(editor: monaco.editor.ICodeEditor) {
   const model = editor.getModel();
   if (!model || model.getLanguageId() !== "php") return host.status("Introduce Parameter works in PHP files.");
-  const expr = await chosenExpression(editor, "make it a parameter");
-  if (!expr) return;
-  const text = model.getValue();
-  const [from, to] = functionScope(text, expr.start);
-  if (from === 0) return host.status("Introduce Parameter works inside a method or function.");
-  // In a closure, the parameter would belong to the method around it, which the closure can't see.
-  if (!enclosingFunctionName(text, expr.start)) return host.status("Introduce Parameter works in a method or function's own body, not in a closure.");
-  if (/\$(?!this\b)\w/.test(expr.text.replace(/'(?:[^'\\]|\\.)*'/g, ""))) return host.status("The expression uses the method's variables, which calls can't pass. Extract a variable instead (⌥⌘V).");
-  if (/\$this\b/.test(expr.text)) return host.status("The expression uses $this, which calls outside the class can't pass.");
-  const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
-  if (uses) await changeSignature(editor, { expr, uses });
+  const version = model.getVersionId();
+  const target = await chosenTarget(editor, "parameter");
+  if (!target) return;
+  const all = await chosenAll(editor, target);
+  if (all === null) return;
+  const x = await extraction(editor, "parameter", target, all);
+  if (!x || model.getVersionId() !== version) return;
+  const expr = (r: L.Range): Expr => {
+    const [start, end] = [model.getOffsetAt({ lineNumber: r.start.line + 1, column: r.start.character + 1 }), model.getOffsetAt({ lineNumber: r.end.line + 1, column: r.end.character + 1 })];
+    return { start, end, text: model.getValue().slice(start, end) };
+  };
+  const uses = (all ? target.occurrences : [target.range]).map(expr);
+  await changeSignature(editor, { expr: expr(target.range), uses, name: x.name, type: x.type ?? "", constant: x.constant });
 }
 
 // ---- Move class ----

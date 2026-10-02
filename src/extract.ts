@@ -1,7 +1,7 @@
-// Extract Variable (⌥⌘V), Extract Constant (⌥⌘C), and Extract Method (⌥⌘M), as in PhpStorm: with nothing
-// selected, choose among the expressions around the caret; choose whether to replace every occurrence; then
-// type the new name in place, with every use following it. Tusk's server writes the extracted method; the rest
-// is done here.
+// Extract Variable (⌥⌘V), Extract Constant (⌥⌘C), Introduce Field (⌥⌘F), and Extract Method (⌥⌘M), as in
+// PhpStorm: with nothing selected, choose among the expressions around the caret; choose whether to replace every
+// occurrence; then type the new name in place, with every use following it. Tusk's server reads the code and
+// writes the edits (`tusk/extractTargets`, `tusk/extract`, and Extract Method's command); this is the UI.
 import type * as L from "vscode-languageserver-protocol";
 import { monaco } from "./editor";
 import { h } from "./dom";
@@ -9,9 +9,7 @@ import { runTuskAction, tuskRequest } from "./lsp";
 import { pick, type Item } from "./palette";
 import { parseTypeDeclarations } from "./phptypes";
 import { snippetText } from "./postfix";
-import { classProperties, matchBracket } from "./refactorparse";
 import { symbolAt } from "./safedelete";
-import { constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, functionScope, literalType, occurrences, variableName, type Expr } from "./extractparse";
 
 type Host = { status(text: string): void };
 let host: Host;
@@ -19,8 +17,16 @@ let host: Host;
 type Editor = monaco.editor.ICodeEditor;
 type Snippets = { insert(template: string, opts?: object): void; cancel(): void; isInSnippet(): boolean };
 
+/** What the server can extract into: `tusk/extractTargets`' and `tusk/extract`'s `kind`. */
+export type ExtractKind = "variable" | "constant" | "field" | "parameter";
+/** An expression the server offers, with the occurrences the same extraction could replace, itself included. */
+export type Target = { range: L.Range; text: string; occurrences: L.Range[] };
+/** The server's edit: `\0` marks each place the new name goes, `name` is its suggestion. */
+export type Extraction = { edits: L.TextEdit[]; name: string; type: string | null; constant: boolean };
+
 const snippets = (editor: Editor) => editor.getContribution("snippetController2") as unknown as Snippets;
-const rangeOf = (model: monaco.editor.ITextModel, e: { start: number; end: number }) => monaco.Range.fromPositions(model.getPositionAt(e.start), model.getPositionAt(e.end));
+const toRange = (r: L.Range) => new monaco.Range(r.start.line + 1, r.start.character + 1, r.end.line + 1, r.end.character + 1);
+const fromRange = (r: monaco.IRange): L.Range => ({ start: { line: r.startLineNumber - 1, character: r.startColumn - 1 }, end: { line: r.endLineNumber - 1, character: r.endColumn - 1 } });
 const oneLine = (text: string) => (text.length > 80 ? `${text.slice(0, 77)}…` : text).replace(/\s*\n\s*/g, " ");
 
 /** Opens a picker below the caret, as PhpStorm's refactoring popups open. */
@@ -36,10 +42,12 @@ export function pickAtCaret(editor: Editor, title: string, items: Item[] | ((q: 
 }
 
 /** Asks in a popup at the caret, highlighting in the editor what each option would change. Null for Escape. */
-function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; value: T; highlight: Expr[] }[], code = false): Promise<T | null> {
-  const model = editor.getModel()!;
+function ask<T>(editor: Editor, title: string, options: { label: string; detail?: string; value: T; highlight: L.Range[] }[], code = false): Promise<T | null> {
   const marks = editor.createDecorationsCollection();
-  const show = (h: Expr[]) => marks.set(h.map((e) => ({ range: rangeOf(model, e), options: { className: "refactor-highlight" } })));
+  const show = (ranges: L.Range[]) => {
+    marks.set(ranges.map((r) => ({ range: toRange(r), options: { className: "refactor-highlight", overviewRuler: { color: "#4a9eff99", position: monaco.editor.OverviewRulerLane.Center } } })));
+    if (ranges[0]) editor.revealRangeInCenterIfOutsideViewport(toRange(ranges[0]));
+  };
   return new Promise((resolve) => {
     const finish = (value: T | null) => {
       marks.clear();
@@ -51,17 +59,18 @@ function ask<T>(editor: Editor, title: string, options: { label: string; detail?
   });
 }
 
-// ---- Naming in place ----
+// ---- Hints at the caret ----
 
-const naming = new WeakMap<Editor, monaco.editor.IContextKey<boolean>>();
 const hints = new WeakMap<Editor, () => void>();
 
-/** A hint above the name being typed, as PhpStorm shows one, until naming ends. */
-function showNamingHint(editor: Editor) {
+/**
+ * A hint above the selection's start, as PhpStorm shows one, following it as it moves, until `until` fires or
+ * another hint replaces it.
+ */
+function showHint(editor: Editor, node: HTMLElement, until: (hide: () => void) => monaco.IDisposable[]) {
   hints.get(editor)?.();
-  const node = h("div", { class: "naming-hint" }, h("kbd", {}, "⏎"), " or ", h("kbd", {}, "Esc"), " to finish");
   const widget: monaco.editor.IContentWidget = {
-    getId: () => "tusk.namingHint",
+    getId: () => "tusk.refactorHint",
     getDomNode: () => node,
     getPosition: () => ({
       position: editor.getSelection()?.getStartPosition() ?? null,
@@ -70,12 +79,31 @@ function showNamingHint(editor: Editor) {
   };
   editor.addContentWidget(widget);
   const moved = editor.onDidChangeCursorSelection(() => editor.layoutContentWidget(widget));
-  hints.set(editor, () => {
+  const hide = () => {
     moved.dispose();
+    disposables.forEach((d) => d.dispose());
     editor.removeContentWidget(widget);
-    hints.delete(editor);
+    if (hints.get(editor) === hide) hints.delete(editor);
+  };
+  const disposables = until(hide);
+  hints.set(editor, hide);
+}
+
+/** Why a refactoring can't run here: a hint at the caret until the caret moves or the text changes, and in the status bar. */
+function refuse(editor: Editor, message: string) {
+  host.status(message);
+  showHint(editor, h("div", { class: "naming-hint refactor-refusal", role: "alert" }, message), (hide) => {
+    const timer = setTimeout(hide, 6000);
+    return [editor.onDidChangeCursorPosition(hide), editor.onDidChangeModelContent(hide), editor.onDidBlurEditorText(hide), { dispose: () => clearTimeout(timer) }];
   });
 }
+
+// ---- Naming in place ----
+
+const naming = new WeakMap<Editor, monaco.editor.IContextKey<boolean>>();
+
+/** A hint above the name being typed, until naming ends. */
+const showNamingHint = (editor: Editor) => showHint(editor, h("div", { class: "naming-hint" }, h("kbd", {}, "⏎"), " or ", h("kbd", {}, "Esc"), " to finish"), () => []);
 const hideNamingHint = (editor: Editor) => hints.get(editor)?.();
 
 /** Enter and Escape finish the name, as in PhpStorm, instead of adding a line at every copy of it. */
@@ -100,56 +128,90 @@ function namingKey(editor: Editor): monaco.editor.IContextKey<boolean> {
 }
 
 /**
- * Applies `edits` (offsets in the model's text, `\0` marking where the name goes) as one undoable snippet over
- * the text they span, the name a placeholder in every place. Typing then renames them all at once.
+ * Applies `edits` (`\0` marking where the name goes) as one undoable step, the name a placeholder in every place.
+ * Typing then renames them all at once. Edits without the name before the first one with it, such as an import,
+ * are applied plainly, so the snippet spans only the code that changes.
  */
-function applyNamed(editor: Editor, edits: { start: number; end: number; text: string }[], name: string) {
+function applyNamed(editor: Editor, edits: L.TextEdit[], name: string) {
   const model = editor.getModel()!;
+  const offsets = edits.map((e) => ({ start: model.getOffsetAt(toRange(e.range).getStartPosition()), end: model.getOffsetAt(toRange(e.range).getEndPosition()), text: e.newText }));
+  offsets.sort((a, b) => a.start - b.start || a.end - b.end);
+  const firstNamed = offsets.findIndex((e) => e.text.includes("\0"));
+  if (firstNamed < 0) return;
+  const plain = offsets.slice(0, firstNamed);
+  const named = offsets.slice(firstNamed);
+  editor.pushUndoStop();
+  let shift = 0;
+  if (plain.length) {
+    model.pushEditOperations(editor.getSelections(), plain.map((e) => ({ range: monaco.Range.fromPositions(model.getPositionAt(e.start), model.getPositionAt(e.end)), text: e.text })), () => null);
+    shift = plain.reduce((n, e) => n + e.text.length - (e.end - e.start), 0);
+  }
   const text = model.getValue();
-  edits.sort((a, b) => a.start - b.start || a.end - b.end);
-  const [from, to] = [edits[0].start, Math.max(...edits.map((e) => e.end))];
+  const [from, to] = [named[0].start + shift, Math.max(...named.map((e) => e.end)) + shift];
   let template = "";
   let at = from;
-  for (const e of edits) {
-    template += snippetText(text.slice(at, e.start)) + snippetText(e.text).replace(/\0/g, `\${1:${name}}`);
-    at = e.end;
+  for (const e of named) {
+    template += snippetText(text.slice(at, e.start + shift)) + snippetText(e.text).replace(/\0/g, `\${1:${name}}`);
+    at = e.end + shift;
   }
   template += snippetText(text.slice(at, to));
-  editor.setSelection(rangeOf(model, { start: from, end: to }));
+  editor.setSelection(monaco.Range.fromPositions(model.getPositionAt(from), model.getPositionAt(to)));
   editor.focus();
-  snippets(editor).insert(template, { adjustWhitespace: false, undoStopBefore: true, undoStopAfter: true });
+  snippets(editor).insert(template, { adjustWhitespace: false, undoStopBefore: false, undoStopAfter: true });
   namingKey(editor).set(true);
   showNamingHint(editor);
 }
 
-// ---- Shared ----
+// ---- Choosing ----
 
-const symbolsOf = async (model: monaco.editor.ITextModel) =>
-  (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
+const errorText = (e: unknown) => (e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 
-/** The selected expression, or one chosen among those around the caret. A status explains when there's none. */
-export async function chosenExpression(editor: Editor, what: string): Promise<Expr | null> {
+/** The server's targets for `kind` at the selection, or null after explaining why there are none. */
+export async function targetsAt(editor: Editor, kind: ExtractKind, quiet = false): Promise<{ targets: Target[]; snapped: boolean } | null> {
   const model = editor.getModel()!;
-  const text = model.getValue();
-  const sel = editor.getSelection()!;
-  if (!sel.isEmpty()) {
-    const expr = expressionIn(text, model.getOffsetAt(sel.getStartPosition()), model.getOffsetAt(sel.getEndPosition()));
-    if (!expr) host.status(`Select a whole expression to ${what}, such as $a + $b or $user->name.`);
-    return expr;
+  try {
+    const found = await tuskRequest<{ targets: Target[]; snapped: boolean }>("tusk/extractTargets", { textDocument: { uri: model.uri.toString() }, range: fromRange(editor.getSelection()!), kind });
+    if (!found && !quiet) refuse(editor, "Tusk's PHP server isn't running yet. Try again once it has started.");
+    return found;
+  } catch (e) {
+    if (!quiet) refuse(editor, errorText(e));
+    return null;
   }
-  const list = expressionsAt(text, model.getOffsetAt(sel.getPosition()));
-  if (!list.length) return host.status(`Put the cursor in an expression to ${what}.`), null;
-  if (list.length === 1) return list[0];
-  return ask(editor, "Expressions", list.map((e) => ({ label: oneLine(e.text), value: e, highlight: [e] })), true);
 }
 
-/** Every occurrence, or only `expr`, as chosen when there are several. Null for Escape. */
-export async function chosenUses(editor: Editor, expr: Expr, all: Expr[]): Promise<Expr[] | null> {
-  if (all.length < 2) return [expr];
-  return ask(editor, `${all.length} occurrences found`, [
-    { label: `Replace all ${all.length} occurrences`, value: all, highlight: all },
-    { label: "Replace this occurrence only", value: [expr], highlight: [expr] },
+/** The selected expression, or one chosen among those around the caret, for `kind`. Null after a refusal or Escape. */
+export async function chosenTarget(editor: Editor, kind: ExtractKind): Promise<Target | null> {
+  const found = await targetsAt(editor, kind);
+  if (!found) return null;
+  const { targets, snapped } = found;
+  if (targets.length === 1) {
+    if (snapped) host.status(`Extended the selection to the whole expression: ${oneLine(targets[0].text)}`);
+    return targets[0];
+  }
+  return ask(editor, "Expressions", targets.map((t) => ({ label: oneLine(t.text), value: t, highlight: [t.range] })), true);
+}
+
+/** Whether to replace every occurrence or only the target, as chosen when there are several. Null for Escape. */
+export async function chosenAll(editor: Editor, target: Target): Promise<boolean | null> {
+  const n = target.occurrences.length;
+  if (n < 2) return false;
+  return ask(editor, `${n} occurrences found`, [
+    { label: `Replace all ${n} occurrences`, value: true, highlight: target.occurrences },
+    { label: "Replace this occurrence only", value: false, highlight: [target.range] },
   ]);
+}
+
+/** The server's edit for `target`. Null after a refusal. */
+export async function extraction(editor: Editor, kind: ExtractKind, target: Target, all: boolean): Promise<Extraction | null> {
+  const model = editor.getModel()!;
+  try {
+    const found = await tuskRequest<Extraction>("tusk/extract", { textDocument: { uri: model.uri.toString() }, range: target.range, kind, all });
+    if (!found) refuse(editor, "Tusk's PHP server isn't running yet. Try again once it has started.");
+    return found;
+  } catch (e) {
+    refuse(editor, errorText(e));
+    return null;
+  }
 }
 
 const phpEditor = (editor: Editor, what: string) => {
@@ -159,106 +221,29 @@ const phpEditor = (editor: Editor, what: string) => {
   return null;
 };
 
-// ---- Extract Variable ----
-
-export async function extractVariable(editor: Editor) {
-  const model = phpEditor(editor, "Extract Variable");
+/** Choose an expression and its occurrences, then have the server extract them, and type the name in place. */
+async function extractInto(editor: Editor, kind: Exclude<ExtractKind, "parameter">, what: string) {
+  const model = phpEditor(editor, what);
   if (!model) return;
   const version = model.getVersionId();
-  const expr = await chosenExpression(editor, "extract it into a variable");
-  if (!expr) return;
-  const text = model.getValue();
-  const [from, to] = functionScope(text, expr.start);
-  const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
-  if (!uses || model.getVersionId() !== version) return;
-  const point = declarationPoint(text, uses);
-  if ("error" in point) return host.status(`Can't extract ${oneLine(expr.text)}: ${point.error}.`);
-  const taken = new Set([...text.slice(from, to).matchAll(/\$(\w+)/g)].map((m) => m[1]));
-  const name = variableName(expr.text, taken);
-  const edits = point.replace
-    ? [{ start: point.replace.start, end: point.replace.end, text: `$\0 = ${expr.text}` }]
-    : [{ start: point.offset, end: point.offset, text: `$\0 = ${expr.text};\n${point.indent}` }, ...uses.map((u) => ({ ...u, text: "$\0" }))];
-  applyNamed(editor, edits, name);
+  const target = await chosenTarget(editor, kind);
+  if (!target) return;
+  const all = await chosenAll(editor, target);
+  if (all === null) return;
+  if (model.getVersionId() !== version) return host.status(`The file changed while choosing. Run ${what} again.`);
+  const x = await extraction(editor, kind, target, all);
+  if (!x || model.getVersionId() !== version) return;
+  applyNamed(editor, x.edits, x.name);
 }
 
-// ---- Extract Constant ----
-
-export async function extractConstant(editor: Editor) {
-  const model = phpEditor(editor, "Extract Constant");
-  if (!model) return;
-  const version = model.getVersionId();
-  const text = model.getValue();
-  const sel = editor.getSelection()!;
-  const expr = constantAt(text, model.getOffsetAt(sel.getStartPosition()), model.getOffsetAt(sel.getEndPosition()));
-  if (!expr) return host.status("Put the cursor on a string or number, or select an expression of literals, to extract a constant.");
-  const type = parseTypeDeclarations(text).filter((t) => t.offset <= expr.start).at(-1);
-  const open = type ? text.indexOf("{", type.offset) : -1;
-  const close = open >= 0 ? matchBracket(text, open) : -1;
-  if (!type || close < expr.end) return host.status("Extract Constant works inside a class, trait, interface, or enum.");
-  // Constants read the same anywhere in the class, closures included.
-  const uses = await chosenUses(editor, expr, occurrences(text, expr, open, close, false));
-  if (!uses || model.getVersionId() !== version) return;
-  const point = constantPoint(text, open);
-  const { insertSpaces, indentSize } = model.getOptions();
-  const lineStart = text.lastIndexOf("\n", type.offset) + 1;
-  const indent = text.slice(lineStart).match(/^[ \t]*/)![0] + (insertSpaces ? " ".repeat(indentSize) : "\t");
-  const next = text.slice(point.offset).split("\n")[0].trim();
-  const visibility = type.kind === "interface" ? "public" : "private";
-  const declaration = `${point.gapBefore ? "\n" : ""}${indent}${visibility} const \0 = ${expr.text};\n${point.gap && next && next !== "}" ? "\n" : ""}`;
-  const taken = new Set([...text.slice(open, close).matchAll(/\bconst\s+(?:[\w\\|?]+\s+)?(\w+)\s*=/g)].map((m) => m[1]));
-  applyNamed(editor, [{ start: point.offset, end: point.offset, text: declaration }, ...uses.map((u) => ({ ...u, text: "self::\0" }))], constantName(expr.text, taken));
-}
-
-// ---- Introduce Field ----
-
+export const extractVariable = (editor: Editor) => extractInto(editor, "variable", "Extract Variable");
+export const extractConstant = (editor: Editor) => extractInto(editor, "constant", "Extract Constant");
 /**
  * Introduce Field (⌥⌘F): puts an expression in a new private property. A constant expression becomes the
  * property's default; anything else is assigned before its first use in the method, as PhpStorm's
- * "initialize in current method". The property's type comes from a literal or `new`, when the text tells it.
+ * "initialize in current method". The property's type comes from the analyzer.
  */
-export async function introduceField(editor: Editor) {
-  const model = phpEditor(editor, "Introduce Field");
-  if (!model) return;
-  const version = model.getVersionId();
-  const expr = await chosenExpression(editor, "put it in a field");
-  if (!expr) return;
-  const text = model.getValue();
-  const type = parseTypeDeclarations(text).filter((t) => t.offset <= expr.start).at(-1);
-  const open = type ? text.indexOf("{", type.offset) : -1;
-  const close = open >= 0 ? matchBracket(text, open) : -1;
-  const [from, to] = functionScope(text, expr.start);
-  if (!type || close < expr.end || from === 0) return host.status("Introduce Field works in a method of a class or trait.");
-  if (type.kind === "interface" || type.kind === "enum") return host.status(`An ${type.kind} can't have properties.`);
-  // The method's header, before its body's `{`.
-  const isStatic = /\bstatic\s+(?:(?:public|protected|private|final|abstract)\s+)*function\b[^{;]*$|\b(?:public|protected|private)\s+static\s+function\b[^{;]*$/.test(text.slice(0, from - 1));
-  const uses = await chosenUses(editor, expr, occurrences(text, expr, from, to));
-  if (!uses || model.getVersionId() !== version) return;
-  const ref = isStatic ? "self::$\0" : "$this->\0";
-  const constant = !!constantAt(text, expr.start, expr.end);
-  const edits = uses.map((u) => ({ ...u, text: ref }));
-  if (!constant) {
-    const point = declarationPoint(text, uses);
-    if ("error" in point) return host.status(`Can't introduce a field for ${oneLine(expr.text)}: ${point.error}.`);
-    if (point.replace) edits.splice(0, edits.length, { start: point.replace.start, end: point.replace.end, text: `${ref} = ${expr.text}` });
-    else edits.push({ start: point.offset, end: point.offset, text: `${ref} = ${expr.text};\n${point.indent}` });
-  }
-  // The property goes after the class's other properties, or else after its constants and trait uses.
-  const { insertSpaces, indentSize } = model.getOptions();
-  const indent = text.slice(text.lastIndexOf("\n", type.offset) + 1).match(/^[ \t]*/)![0] + (insertSpaces ? " ".repeat(indentSize) : "\t");
-  const props = classProperties(text.slice(open + 1, close)).filter((p) => !p.promoted);
-  const kind = literalType(expr.text);
-  let declaration = `${indent}private ${isStatic ? "static " : ""}${kind ? `${kind} ` : ""}$\0${constant ? ` = ${expr.text}` : ""};\n`;
-  let at: number;
-  if (props.length) at = text.indexOf("\n", open + 1 + Math.max(...props.map((p) => p.end))) + 1;
-  else {
-    const point = constantPoint(text, open);
-    at = point.offset;
-    const next = text.slice(at).split("\n")[0].trim();
-    declaration = `${point.gapBefore || !point.gap ? "\n" : ""}${declaration}${next && next !== "}" ? "\n" : ""}`;
-  }
-  const taken = new Set(classProperties(text.slice(open + 1, close)).map((p) => p.name));
-  applyNamed(editor, [{ start: at, end: at, text: declaration }, ...edits], variableName(expr.text, taken));
-}
+export const introduceField = (editor: Editor) => extractInto(editor, "field", "Introduce Field");
 
 // ---- Extract Method ----
 
@@ -268,32 +253,42 @@ export async function extractMethod(editor: Editor) {
   const sel = editor.getSelection()!;
   let range: monaco.IRange = sel;
   if (sel.isEmpty()) {
-    const expr = await chosenExpression(editor, "extract it into a method");
-    if (!expr) return;
-    range = rangeOf(model, expr);
+    const target = await chosenTarget(editor, "variable");
+    if (!target) return;
+    range = toRange(target.range);
   }
   const before = model.getValue();
   const actions =
     (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
-      range: { start: { line: range.startLineNumber - 1, character: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, character: range.endColumn - 1 } },
+      range: fromRange(range),
       context: { diagnostics: [], only: ["refactor.extract.method"] },
     }).catch(() => null)) ?? [];
   const action = actions.find((a) => "kind" in a && a.kind === "refactor.extract.method") as L.CodeAction | undefined;
-  if (!action?.command) return host.status("Select whole statements or an expression to extract a method. Tusk's PHP server must be running.");
+  if (!action?.command) return refuse(editor, "Select whole statements or an expression to extract a method.");
   // The server sends its edit back as workspace/applyEdit, and waits for the editor to apply it before the command returns.
-  await tuskRequest("workspace/executeCommand", { command: action.command.command, arguments: action.command.arguments });
+  try {
+    await tuskRequest("workspace/executeCommand", { command: action.command.command, arguments: action.command.arguments });
+  } catch (e) {
+    return refuse(editor, errorText(e));
+  }
   const after = model.getValue();
-  if (after === before) return host.status("Couldn't extract a method from this selection.");
+  if (after === before) return refuse(editor, "Couldn't extract a method from this selection.");
   const had = new Set([...before.matchAll(/\bfunction\s+&?(\w+)\s*\(/g)].map((m) => m[1]));
   const name = [...after.matchAll(/\bfunction\s+&?(\w+)\s*\(/g)].map((m) => m[1]).find((n) => !had.has(n));
   if (!name) return;
-  // The call and the declaration the server wrote, renamed together.
-  const places = [...after.matchAll(new RegExp(`(?:->|::|\\bfunction\\s+&?)(${name})\\s*\\(`, "dg"))].map((m) => ({ start: m.indices![1]![0], end: m.indices![1]![1], text: "\0" }));
+  // The call and the declaration the server wrote, renamed together, in the same undo step as the extraction.
+  const places = [...after.matchAll(new RegExp(`(?:->|::|\\bfunction\\s+&?)(${name})\\s*\\(`, "dg"))].map((m) => ({
+    range: fromRange(monaco.Range.fromPositions(model.getPositionAt(m.indices![1]![0]), model.getPositionAt(m.indices![1]![1]))),
+    newText: "\0",
+  }));
   applyNamed(editor, places, name);
 }
 
 // ---- Refactor This ----
+
+const symbolsOf = async (model: monaco.editor.ITextModel) =>
+  (await tuskRequest<L.DocumentSymbol[] | null>("textDocument/documentSymbol", { textDocument: { uri: model.uri.toString() } }).catch(() => null)) ?? [];
 
 /**
  * The refactorings that apply at the caret or selection, by action name, and the server's other refactoring
@@ -306,16 +301,21 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   if (model.getLanguageId() !== "php") return { names, more: [] };
   const text = model.getValue();
   const sel = editor.getSelection()!;
-  const [start, end] = [model.getOffsetAt(sel.getStartPosition()), model.getOffsetAt(sel.getEndPosition())];
   const pos = sel.getPosition();
-  const found = symbolAt(await symbolsOf(model), pos.lineNumber - 1, pos.column - 1);
-  const expression = sel.isEmpty() ? expressionsAt(text, start).length > 0 : !!expressionIn(text, start, end);
+  const offers = (kind: ExtractKind) => targetsAt(editor, kind, true).then((t) => !!t?.targets.length);
+  const [found, variable, constant, field, parameter] = await Promise.all([
+    symbolsOf(model).then((s) => symbolAt(s, pos.lineNumber - 1, pos.column - 1)),
+    offers("variable"),
+    offers("constant"),
+    offers("field"),
+    offers("parameter"),
+  ]);
   if (found && [6, 12].includes(found.symbol.kind)) names.push("Change Signature…");
-  if (expression) names.push("Extract Variable…");
-  if (constantAt(text, start, end)) names.push("Extract Constant…");
-  if (expression || !sel.isEmpty()) names.push("Extract Method…");
-  if (expression && found?.container) names.push("Introduce Field…");
-  if (expression && found && [6, 12].includes(found.symbol.kind)) names.push("Introduce Parameter…");
+  if (variable) names.push("Extract Variable…");
+  if (constant) names.push("Extract Constant…");
+  if (variable || !sel.isEmpty()) names.push("Extract Method…");
+  if (field) names.push("Introduce Field…");
+  if (parameter) names.push("Introduce Parameter…");
   const line = model.getLineContent(pos.lineNumber);
   const onVariable = [...line.matchAll(/\$(\w+)/g)].some((m) => pos.column >= m.index! + 1 && pos.column <= m.index! + m[0].length + 1 && m[1] !== "this");
   const word = model.getWordAtPosition(pos);
@@ -333,15 +333,30 @@ export async function refactorings(editor: Editor): Promise<{ names: string[]; m
   const actions =
     (await tuskRequest<(L.CodeAction | L.Command)[] | null>("textDocument/codeAction", {
       textDocument: { uri: model.uri.toString() },
-      range: { start: { line: sel.startLineNumber - 1, character: sel.startColumn - 1 }, end: { line: sel.endLineNumber - 1, character: sel.endColumn - 1 } },
+      range: fromRange(sel),
       context: { diagnostics: [] },
     }).catch(() => null)) ?? [];
   const more = actions
-    .filter((a): a is L.CodeAction => "kind" in a && !!a.kind?.startsWith("refactor") && !/^refactor\.extract\.(method|expression|constant)/.test(a.kind))
+    .filter((a): a is L.CodeAction => "kind" in a && !!a.kind?.startsWith("refactor") && !(a.kind in interactive))
     .map((a) => ({ label: a.title, run: () => runTuskAction(a) }));
   return { names, more };
 }
 
+// ---- The light bulb ----
+
+/** The server's code actions that run here instead, interactively, by kind. */
+export const interactive: Record<string, (editor: Editor) => unknown> = {
+  "refactor.extract.method": extractMethod,
+  "refactor.extract.variable": extractVariable,
+  "refactor.extract.constant": extractConstant,
+  "refactor.extract.field": introduceField,
+};
+
 export function initExtract(h: Host) {
   host = h;
+  // Chosen from the light bulb (⌥⏎): the same flow as the shortcut, in the editor that asked.
+  monaco.editor.registerCommand("tusk.extract", (_, kind: string, uri: string) => {
+    const editor = monaco.editor.getEditors().find((e) => e.hasTextFocus() && e.getModel()?.uri.toString() === uri) ?? monaco.editor.getEditors().find((e) => e.getModel()?.uri.toString() === uri);
+    if (editor) void interactive[kind]?.(editor);
+  });
 }
