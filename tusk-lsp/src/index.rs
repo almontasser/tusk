@@ -10,7 +10,9 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use foldhash::HashSet;
@@ -106,11 +108,26 @@ pub enum DeclKind {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Declared {
     /// The name as declared, fully qualified.
+    #[serde(with = "word_text")]
     pub name: Word,
     pub kind: DeclKind,
     pub is_abstract: bool,
     /// The span of the name.
     pub span: Span,
+}
+
+/// A name as text in the cache, rather than as Mago's list of numbers, one per byte.
+mod word_text {
+    use mago_word::Word;
+
+    pub fn serialize<S: serde::Serializer>(word: &Word, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&word.as_str_lossy())
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Word, D::Error> {
+        let text: String = serde::Deserialize::deserialize(d)?;
+        Ok(Word::new(text.as_bytes()))
+    }
 }
 
 /// Where a declaration comes from.
@@ -469,36 +486,53 @@ impl Index {
         if vendor || !path.starts_with(&self.config.root) { FileType::Vendored } else { FileType::Host }
     }
 
-    /// Every PHP file the index covers, found on disk.
+    /// Every PHP file the index covers, found on disk. A folder whose modification time is the one the cache has
+    /// is listed from the cache without reading it; see [`FolderCache`]. Folders are walked on the scan pool.
     pub fn discover(&self) -> Vec<PathBuf> {
-        let mut roots = vec![self.config.root.clone()];
-        roots.extend(self.config.stubs.iter().cloned());
-        let mut out = vec![];
-        for root in roots {
-            let walker = ignore::WalkBuilder::new(&root)
-                .standard_filters(false)
-                .follow_links(true)
-                .filter_entry({
-                    let excluded = self.excluded.clone();
-                    let project = self.config.root.clone();
-                    move |e| {
-                        let Ok(rel) = e.path().strip_prefix(&project) else { return true };
-                        let hidden = e.depth() > 0 && e.file_name().to_string_lossy().starts_with('.');
-                        !hidden && !(!rel.as_os_str().is_empty() && excluded.is_match(rel))
-                    }
-                })
-                .build();
-            out.extend(
-                walker
-                    .flatten()
-                    .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-                    .map(|e| e.into_path())
-                    .filter(|p| self.includes(p)),
-            );
+        let key = self.folder_cache_key();
+        let cache_path = self.config.cache.as_deref().map(|p| p.with_file_name("folders.json"));
+        let cached = cache_path.as_deref().map(|p| FolderCache::load(p, &key)).unwrap_or_default();
+        // A folder changed in the last moments may change again within the same tick of its clock, so it's
+        // read again next time rather than kept.
+        let settled = now_nanos().saturating_sub(5_000_000_000);
+        let walk = Walk { index: self, cached: &cached.entries, settled, files: Default::default(), read: Default::default() };
+        for root in std::iter::once(&self.config.root).chain(&self.config.stubs) {
+            if root.is_file() {
+                walk.files.lock().extend(self.includes(root).then(|| root.clone()));
+                continue;
+            }
+            let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+            scan_pool().install(|| walk.folder(root, true, &[real]));
         }
-        out.sort();
+        let (mut out, read) = (walk.files.into_inner(), walk.read.into_inner());
+        // Written again only when something changed: a folder read, or one gone. Folders found unchanged stay, and
+        // those read replace theirs.
+        let gone = cached.entries.values().any(|f| !f.seen.load(Ordering::Relaxed));
+        if let Some(path) = &cache_path
+            && (!read.is_empty() || gone)
+        {
+            let mut fresh = FolderCache { key, entries: cached.entries };
+            fresh.entries.retain(|_, f| f.seen.load(Ordering::Relaxed));
+            fresh.entries.extend(read.into_iter().filter_map(|(dir, f)| Some((dir, f?))));
+            fresh.save(path);
+        }
+        // By bytes: comparing paths part by part costs more than the warm walk.
+        out.sort_unstable_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
         out.dedup();
         out
+    }
+
+    /// Drops the folder cache, so the next [`Index::discover`] reads every folder. For a reindex, in case the file
+    /// system doesn't change a folder's time when its entries change, as on FAT drives.
+    pub fn forget_folders(&self) {
+        if let Some(cache) = &self.config.cache {
+            let _ = std::fs::remove_file(cache.with_file_name("folders.json"));
+        }
+    }
+
+    /// What the folder cache depends on besides each folder: the server binary and what the walk skips.
+    fn folder_cache_key(&self) -> String {
+        format!("{} {:?} {:?} {:?}", cache_key(self.config.php_version), self.config.root, self.config.exclude, self.config.stubs)
     }
 
     /// Indexes `paths`: every project file in full, and of the library files, the names they declare, then in
@@ -524,41 +558,51 @@ impl Index {
         // the build's memory stays near what the index keeps, which is what the process keeps after it.
         let key = cache_key(php_version);
         let cached = self.config.cache.as_deref().map(|p| DeclCache::load(p, &key)).unwrap_or_default();
-        let mut fresh = DeclCache { key, files: HashMap::new() };
-        let mut hits = 0;
+        // Each library file's stamp, and how many were parsed, for writing the cache again.
+        let mut stamps: Vec<(PathBuf, Stamp)> = vec![];
+        let mut parsed = 0;
         for chunk in library.chunks(1024) {
-            let found: Vec<(PathBuf, FileType, Vec<Declared>, Option<Stamp>)> = scan_pool().install(|| chunk
+            let found: Vec<_> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let file_type = self.file_type(path);
                     let stamp = stamp(path);
-                    if let Some((_, declared)) = cached.files.get(path).filter(|(s, _)| Some(*s) == stamp) {
+                    if cached.entries.get(path).is_some_and(|(s, _)| Some(*s) == stamp) {
                         tick();
-                        return Some((path.clone(), file_type, declared.clone(), stamp));
+                        return Some((path.clone(), file_type, None, stamp));
                     }
                     let contents = read(path)?;
                     let (meta, ..) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
                     tick();
-                    Some((path.clone(), file_type, declarations_of(&meta), stamp))
+                    Some((path.clone(), file_type, Some(declarations_of(&meta)), stamp))
                 })
                 .collect());
             for (path, file_type, declared, stamp) in found {
-                hits += cached.files.get(&path).is_some_and(|(s, _)| Some(*s) == stamp) as usize;
+                // Cloned, not moved: a clone is allocated with the index's other data, not among the cache's.
+                let declared = match declared {
+                    Some(declared) => {
+                        parsed += 1;
+                        declared
+                    }
+                    None => cached.entries.get(&path).map(|(_, declared)| declared.clone()).unwrap_or_default(),
+                };
                 // ponytail: an open library file's unsaved text is cached under the disk's stamp; it lasts until the
                 // file changes on disk. Have `read` say where text came from if editing `vendor` becomes common.
-                if let (Some(stamp), true) = (stamp, self.config.cache.is_some()) {
-                    fresh.files.insert(path.clone(), (stamp, declared.clone()));
-                }
+                stamps.extend(stamp.map(|stamp| (path.clone(), stamp)));
                 self.add_library_file(path, file_type, declared);
             }
         }
         // Written again only when something changed: a file parsed, or one gone.
         if let Some(path) = &self.config.cache
-            && (hits != fresh.files.len() || hits != cached.files.len())
+            && (parsed > 0 || stamps.len() != cached.entries.len())
         {
-            fresh.save(path);
+            let files = stamps.into_iter().map(|(p, stamp)| {
+                let declared = self.declared.get(&file_id(&p)).cloned().unwrap_or_default();
+                (p, (stamp, declared))
+            });
+            DeclCache { key, entries: files.collect() }.save(path);
         }
-        drop((cached, fresh));
+        drop(cached);
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
@@ -645,16 +689,17 @@ impl Index {
             let php_version = self.config.php_version;
             let jobs: Vec<(PathBuf, FileType)> =
                 wave.iter().filter_map(|id| self.library.get(id)).map(|f| (f.path.clone(), f.file_type)).collect();
-            let scans: Vec<(PathBuf, FileType, CodebaseMetadata)> = scan_pool().install(|| jobs
+            let scans: Vec<(PathBuf, FileType, CodebaseMetadata, Vec<String>)> = scan_pool().install(|| jobs
                 .into_par_iter()
                 .filter_map(|(path, file_type)| {
                     let contents = read(&path)?;
                     let (meta, ..) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
-                    Some((path, file_type, meta))
+                    let needs = dependencies(&meta);
+                    Some((path, file_type, meta, needs))
                 })
                 .collect());
-            for (path, file_type, meta) in scans {
-                names.extend(dependencies(&meta));
+            for (path, file_type, meta, needs) in scans {
+                names.extend(needs);
                 loaded.extend(meta.class_likes.keys().copied());
                 self.merge(path, file_type, meta);
             }
@@ -950,18 +995,17 @@ fn stamp(path: &Path) -> Option<Stamp> {
 /// Mago's version and Tusk's own scanning.
 fn cache_key(php_version: PHPVersion) -> String {
     let exe = std::env::current_exe().ok().and_then(|p| stamp(&p));
-    format!("1 {php_version:?} {exe:?}")
+    format!("2 {php_version:?} {exe:?}")
 }
 
-/// What each library file declares, by path, as of its [`Stamp`]. Entries depend only on their file, so a change of
-/// exclusions or of `load_all` only changes which entries are used.
+/// A cache file: what it holds, and the key it was written for.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-struct DeclCache {
+struct Cache<T> {
     key: String,
-    files: HashMap<PathBuf, (Stamp, Vec<Declared>)>,
+    entries: T,
 }
 
-impl DeclCache {
+impl<T: Default + serde::Serialize + serde::de::DeserializeOwned> Cache<T> {
     /// The cache at `path`, or an empty one if it's missing, unreadable, or for another key.
     fn load(path: &Path, key: &str) -> Self {
         let cache: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
@@ -976,6 +1020,118 @@ impl DeclCache {
         if !written || std::fs::rename(&tmp, path).is_err() {
             let _ = std::fs::remove_file(&tmp);
         }
+    }
+}
+
+/// What each library file declares, by path, as of its [`Stamp`]. Entries depend only on their file, so a change of
+/// exclusions or of `load_all` only changes which entries are used.
+type DeclCache = Cache<HashMap<PathBuf, (Stamp, Vec<Declared>)>>;
+
+/// What each folder held when it was last walked, by path; see [`Folder`]. Adding, removing, or renaming an entry
+/// changes a folder's time, so a folder whose time is unchanged holds the same names. A file's own changes don't
+/// change its folder; the build compares each file's [`Stamp`].
+type FolderCache = Cache<HashMap<PathBuf, Folder>>;
+
+/// A folder as of its modification time: the names of the files the index takes from it, and of the subfolders
+/// the walk enters, each with whether it's a link.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Folder {
+    time: u128,
+    files: Vec<String>,
+    folders: Vec<(String, bool)>,
+    /// Whether this walk found the folder unchanged.
+    #[serde(skip)]
+    seen: AtomicBool,
+}
+
+/// `dir/name`, allocated at its size: `join` leaves room to spare, and the index keeps every path.
+fn join(dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
+    let mut path = PathBuf::with_capacity(dir.as_os_str().len() + 1 + name.len());
+    path.push(dir);
+    path.push(name);
+    path
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+}
+
+/// A walk of the folders, with the cache it lists unchanged folders from.
+struct Walk<'a> {
+    index: &'a Index,
+    cached: &'a HashMap<PathBuf, Folder>,
+    /// Folders changed after this time aren't cached.
+    settled: u128,
+    /// The files found.
+    files: parking_lot::Mutex<Vec<PathBuf>>,
+    /// The folders read from the disk, each with what to cache of it, if anything.
+    read: parking_lot::Mutex<Vec<(PathBuf, Option<Folder>)>>,
+}
+
+impl Walk<'_> {
+    /// Walks `dir`. `trust` is false under a link that may point elsewhere than when the cache was written. `real`
+    /// holds the real paths of `dir` and the folders above it, so a link back to one of them isn't followed in
+    /// circles.
+    fn folder(&self, dir: &Path, trust: bool, real: &[PathBuf]) {
+        let modified = std::fs::metadata(dir).and_then(|m| m.modified());
+        let Some(time) = modified.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()) else { return };
+        if let Some(f) = self.cached.get(dir).filter(|f| trust && f.time == time) {
+            f.seen.store(true, Ordering::Relaxed);
+            return self.enter(dir, &f.files, &f.folders, trust, false, real);
+        }
+        let (files, folders) = self.list(dir);
+        // A name that isn't UTF-8 can't be cached, and neither can its folder.
+        let text = |name: &OsString| name.to_str().map(str::to_owned);
+        let folder = (time < self.settled)
+            .then(|| {
+                let files = files.iter().map(text).collect::<Option<_>>()?;
+                let folders = folders.iter().map(|(name, link)| Some((text(name)?, *link))).collect::<Option<_>>()?;
+                Some(Folder { time, files, folders, seen: AtomicBool::new(true) })
+            })
+            .flatten();
+        self.read.lock().push((dir.to_path_buf(), folder));
+        self.enter(dir, &files, &folders, trust, true, real);
+    }
+
+    /// Adds `dir`'s files and walks its folders. `read` is whether `dir` was read from the disk.
+    fn enter<N: AsRef<std::ffi::OsStr> + Sync>(&self, dir: &Path, files: &[N], folders: &[(N, bool)], trust: bool, read: bool, real: &[PathBuf]) {
+        self.files.lock().extend(files.iter().map(|name| join(dir, name.as_ref())));
+        folders.par_iter().for_each(|(name, link)| {
+            let path = join(dir, name.as_ref());
+            let mut real = real.to_vec();
+            let Some(here) = (if *link { std::fs::canonicalize(&path).ok() } else { real.last().map(|r| r.join(name.as_ref())) }) else { return };
+            if real.contains(&here) {
+                return;
+            }
+            real.push(here);
+            // A link read again may point somewhere new, whose folders the cache knows nothing of.
+            self.folder(&path, trust && !(read && *link), &real);
+        });
+    }
+
+    /// The names of the files the index takes from `dir` and of the folders the walk enters, each with whether
+    /// it's a link, read from the disk.
+    fn list(&self, dir: &Path) -> (Vec<OsString>, Vec<(OsString, bool)>) {
+        let (mut files, mut folders) = (vec![], vec![]);
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let (name, path) = (entry.file_name(), entry.path());
+            // Hidden folders (`.git`, `.idea`, …) hold no project code. Stubs outside the project are taken whole.
+            let skipped = path
+                .strip_prefix(&self.index.config.root)
+                .is_ok_and(|rel| name.to_string_lossy().starts_with('.') || self.index.excluded.is_match(rel));
+            if skipped {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else { continue };
+            let link = kind.is_symlink();
+            let Ok(kind) = (if link { std::fs::metadata(&path).map(|m| m.file_type()) } else { Ok(kind) }) else { continue };
+            if kind.is_dir() {
+                folders.push((name, link));
+            } else if kind.is_file() && self.index.includes(&path) {
+                files.push(name);
+            }
+        }
+        (files, folders)
     }
 }
 
@@ -1213,6 +1369,172 @@ mod tests {
         assert_eq!(names(false), [false, false]);
         assert_eq!(names(true), [false, true]);
         assert_eq!(names(false), [false, true]);
+        // A cache cut short, as a crash while writing could leave one if it weren't renamed into place.
+        let whole = std::fs::read(root.join(".cache/index.json")).unwrap();
+        std::fs::write(root.join(".cache/index.json"), &whole[..whole.len() / 2]).unwrap();
+        assert_eq!(names(false), [false, false]);
+        assert_eq!(names(true), [false, true]);
+        // A cache another version of the server wrote is ignored.
+        let text = String::from_utf8(std::fs::read(root.join(".cache/index.json")).unwrap()).unwrap();
+        std::fs::write(root.join(".cache/index.json"), text.replacen("\"key\":\"2 ", "\"key\":\"1 ", 1)).unwrap();
+        assert_eq!(names(false), [false, false]);
+        assert_eq!(names(true), [false, true]);
+        // A file added is parsed; a file deleted is gone.
+        std::fs::write(root.join("vendor/lib/New.php"), "<?php namespace Lib; class A {}").unwrap();
+        assert_eq!(names(true), [true, true]);
+        std::fs::remove_file(&lib).unwrap();
+        assert_eq!(names(false), [true, false]);
+    }
+
+    /// A library file changed between starts is loaded as it is now, though what it declares came from the cache
+    /// before.
+    #[test]
+    fn a_changed_library_file_loads_as_it_is_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("vendor/lib")).unwrap();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::write(root.join("vendor/lib/A.php"), "<?php namespace Lib; class A { function one() {} }").unwrap();
+        std::fs::write(root.join("app/B.php"), "<?php namespace App; class B extends \\Lib\\A {}").unwrap();
+        let mut config = IndexConfig::new(&root);
+        config.cache = Some(root.join(".cache/index.json"));
+        let build = || {
+            let mut idx = Index::empty(config.clone());
+            let paths = idx.discover();
+            idx.build(paths, |p| std::fs::read(p).ok(), |_, _| {});
+            ["one", "two"].map(|m| idx.codebase.method_exists(b"App\\B", m.as_bytes()))
+        };
+        assert_eq!(build(), [true, false]);
+        std::fs::write(root.join("vendor/lib/A.php"), "<?php namespace Lib; class A { function one() {} function two() {} }").unwrap();
+        assert_eq!(build(), [true, true]);
+    }
+
+    /// Sets a folder's modification time, as `touch` does.
+    #[cfg(unix)]
+    fn set_time(dir: &Path, time: std::time::SystemTime) {
+        std::fs::File::open(dir).unwrap().set_modified(time).unwrap();
+    }
+
+    fn time_of(path: &Path) -> std::time::SystemTime {
+        std::fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    /// The walk lists an unchanged folder from the cache, and reads a folder again when an entry is added,
+    /// removed, or renamed, when the exclusions change, or when the cache is unreadable or from another version.
+    /// Folders changed in the last seconds aren't cached, so the test dates them back.
+    #[cfg(unix)]
+    #[test]
+    fn walks_unchanged_folders_from_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for file in ["app/A.php", "app/Sub/B.php", "vendor/lib/src/C.php", "vendor/lib/tests/T.php", "vendor/lib/readme.md"] {
+            std::fs::create_dir_all(root.join(file).parent().unwrap()).unwrap();
+            std::fs::write(root.join(file), "<?php").unwrap();
+        }
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        let backdate = || {
+            for e in ignore::WalkBuilder::new(&root).hidden(false).build().flatten().filter(|e| e.path().is_dir()) {
+                set_time(e.path(), past);
+            }
+        };
+        let mut config = IndexConfig::new(&root);
+        // A hidden folder, which the walk skips.
+        config.cache = Some(root.join(".cache/index.json"));
+        let found = |config: &IndexConfig| -> Vec<String> {
+            let idx = Index::empty(config.clone());
+            idx.discover().iter().map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned()).collect()
+        };
+        let all = ["app/A.php", "app/Sub/B.php", "vendor/lib/src/C.php"];
+        backdate();
+        assert_eq!(found(&config), all);
+        assert!(root.join(".cache/folders.json").exists());
+        // A file added to a folder whose time doesn't change, as no file system does, shows when the cache is used.
+        let app = root.join("app");
+        let sneaked = |found: Vec<String>| found.contains(&"app/Sneaked.php".to_string());
+        let sneak = || {
+            let time = time_of(&app);
+            std::fs::write(app.join("Sneaked.php"), "<?php").unwrap();
+            set_time(&app, time);
+        };
+        // Removing it changes the folder's time, as removing a file does, so the walk reads the folder again.
+        let mut ticks = 0;
+        let mut unsneak = || {
+            std::fs::remove_file(app.join("Sneaked.php")).unwrap();
+            ticks += 1;
+            set_time(&app, past + std::time::Duration::from_secs(ticks));
+        };
+        sneak();
+        assert!(!sneaked(found(&config)));
+        // A cache another version wrote, or one that can't be read, is read again from the disk.
+        let cache = root.join(".cache/folders.json");
+        let text = std::fs::read_to_string(&cache).unwrap();
+        std::fs::write(&cache, text.replacen("\"key\":\"2 ", "\"key\":\"1 ", 1)).unwrap();
+        assert!(sneaked(found(&config)));
+        unsneak();
+        assert_eq!(found(&config), all);
+        sneak();
+        assert!(!sneaked(found(&config)));
+        let text = std::fs::read_to_string(&cache).unwrap();
+        std::fs::write(&cache, &text[..text.len() / 2]).unwrap();
+        assert!(sneaked(found(&config)));
+        unsneak();
+        assert_eq!(found(&config), all);
+        // A reindex forgets the folders.
+        sneak();
+        assert!(!sneaked(found(&config)));
+        Index::empty(config.clone()).forget_folders();
+        assert!(sneaked(found(&config)));
+        unsneak();
+        assert_eq!(found(&config), all);
+        // Other exclusions walk again.
+        sneak();
+        let mut other = config.clone();
+        other.exclude = vec!["app/Sub".into()];
+        assert_eq!(found(&other), ["app/A.php", "app/Sneaked.php", "vendor/lib/src/C.php"]);
+        unsneak();
+        assert_eq!(found(&config), all);
+        // Files and folders added, renamed, and removed, in the project and in `vendor`.
+        std::fs::write(root.join("app/Sub/New.php"), "<?php").unwrap();
+        std::fs::create_dir_all(root.join("vendor/new/pkg")).unwrap();
+        std::fs::write(root.join("vendor/new/pkg/D.php"), "<?php").unwrap();
+        std::fs::remove_file(root.join("app/A.php")).unwrap();
+        assert_eq!(found(&config), ["app/Sub/B.php", "app/Sub/New.php", "vendor/lib/src/C.php", "vendor/new/pkg/D.php"]);
+        backdate();
+        assert_eq!(found(&config), ["app/Sub/B.php", "app/Sub/New.php", "vendor/lib/src/C.php", "vendor/new/pkg/D.php"]);
+        std::fs::rename(root.join("vendor/lib"), root.join("vendor/old")).unwrap();
+        std::fs::rename(root.join("app/Sub/New.php"), root.join("app/Sub/Newer.php")).unwrap();
+        std::fs::remove_dir_all(root.join("vendor/new")).unwrap();
+        assert_eq!(found(&config), ["app/Sub/B.php", "app/Sub/Newer.php", "vendor/old/src/C.php"]);
+    }
+
+    /// A link to a folder is followed, a link back up isn't followed in circles, and a link pointed elsewhere is
+    /// walked where it now points.
+    #[cfg(unix)]
+    #[test]
+    fn follows_folder_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("p");
+        for file in ["p/app/A.php", "one/X.php", "two/Y.php"] {
+            std::fs::create_dir_all(base.join(file).parent().unwrap()).unwrap();
+            std::fs::write(base.join(file), "<?php").unwrap();
+        }
+        std::os::unix::fs::symlink(base.join("one"), root.join("app/lib")).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("app/up")).unwrap();
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        for d in ["p", "p/app", "one", "two"] {
+            set_time(&base.join(d), past);
+        }
+        let mut config = IndexConfig::new(&root);
+        config.cache = Some(root.join(".cache/index.json"));
+        let found = || -> Vec<String> {
+            Index::empty(config.clone()).discover().iter().map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned()).collect()
+        };
+        assert_eq!(found(), ["app/A.php", "app/lib/X.php"]);
+        assert_eq!(found(), ["app/A.php", "app/lib/X.php"]);
+        std::fs::remove_file(root.join("app/lib")).unwrap();
+        std::os::unix::fs::symlink(base.join("two"), root.join("app/lib")).unwrap();
+        assert_eq!(found(), ["app/A.php", "app/lib/Y.php"]);
     }
 
     #[test]

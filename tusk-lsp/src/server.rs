@@ -634,8 +634,13 @@ fn rebuild(index: &SharedIndex, docs: &Arc<RwLock<Documents>>, client: &Client, 
         percentage: Some(0),
     }));
     let started = Instant::now();
+    let reindex = config.is_some();
     let config = config.unwrap_or_else(|| index.read().config.clone());
     let mut fresh = Index::empty(config);
+    // A reindex reads every folder, which costs a tenth of a second, rather than trust the folders' times.
+    if reindex {
+        fresh.forget_folders();
+    }
     let paths = fresh.discover();
     let open = docs.read().clone();
     let last = Mutex::new(Instant::now());
