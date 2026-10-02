@@ -231,6 +231,9 @@ export function rules(c: Roles): Rule[] {
     r("keyword.md", "heading"),
     r("emphasis", "text", "italic"),
     r("strong", "text", "bold"),
+    r("inserted.diff", c.inserted ? "inserted" : "string"),
+    r("deleted.diff", "deleted"),
+    r("meta.diff", "comment"),
   ].filter((rule): rule is Rule => !!rule);
 }
 
@@ -251,6 +254,8 @@ const ROLE_SCOPES: Record<string, string[]> = {
   attribute: ["entity.other.attribute-name.html", "entity.other.attribute-name"],
   field: ["support.type.property-name.json", "support.type.property-name", "variable.other.property", "variable.other.object.property"],
   heading: ["markup.heading", "entity.name.section"],
+  inserted: ["markup.inserted.diff", "markup.inserted"],
+  deleted: ["markup.deleted.diff", "markup.deleted"],
 };
 
 export type Converted = {

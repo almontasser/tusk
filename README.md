@@ -3754,7 +3754,8 @@ the checker's notes as paragraphs, and the checker and rule below it, such as
 and the line and column. **Show Details** in that popup, or the button at the
 end of a row in the Problems panel, shows the problem on a page of its own: the
 whole message, with long types such as array shapes laid out one key per line,
-the code around the problem, and **Go to Code**. The page opens as an editor
+the code around the problem, and **Go to Code**. When Mago shows how two types
+differ as a diff, the popup and the page show it as a colored diff. The page opens as an editor
 tab, and Escape closes it. For a Mago lint problem, the page
 also shows Mago's explanation of the rule under **About this rule**.
 

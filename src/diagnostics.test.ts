@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatType, inlineProblem, matchesFilter, magoConfigText, magoExpect, problemMarkdown, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
+import { formatType, splitDiff, inlineProblem, matchesFilter, magoConfigText, magoExpect, problemMarkdown, realProblems, ruleLabel, severityOf, withFolders, type Diagnostic, type Facts } from "./diagnostics.ts";
 
 const facts: Facts = {
   isModelProperty: (c, p) => (c === "App\\Models\\License" ? ["expired_at"].includes(p) : undefined),
@@ -129,6 +129,16 @@ test("formats messages for hovers and the problem page", () => {
   assert.equal(
     problemMarkdown('Method "App\\Models\\Post::save" is <wrong>.\nUse `array<int>` or *this*.'),
     "**Method `App\\Models\\Post::save` is \\<wrong\\>.**\n\nUse `array<int>` or \\*this\\*.",
+  );
+  const message = "Invalid return type.\n--- original\n+++ modified\n@@ -1,2 +1,2 @@\n-array<\n-  int,\n+list{\n   'a': string,\n\nHelp: Change it.";
+  assert.deepEqual(splitDiff(message), {
+    before: "Invalid return type.\n",
+    diff: "--- original\n+++ modified\n@@ -1,2 +1,2 @@\n-array<\n-  int,\n+list{\n   'a': string,",
+    after: "\nHelp: Change it.",
+  });
+  assert.equal(
+    problemMarkdown(message),
+    "**Invalid return type.**\n\n```diff\n--- original\n+++ modified\n@@ -1,2 +1,2 @@\n-array<\n-  int,\n+list{\n   'a': string,\n```\n\nHelp: Change it.",
   );
   assert.equal(ruleLabel("mago-lint", "no-redundant-use"), "mago-lint(no-redundant-use)");
   assert.equal(ruleLabel("typos", undefined), "typos");

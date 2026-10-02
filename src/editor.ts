@@ -146,6 +146,12 @@ monaco.languages.setLanguageConfiguration("php", {
   ],
 });
 
+// Unified diffs, such as the one Mago adds to a type mismatch to show where two types differ.
+monaco.languages.register({ id: "diff", extensions: [".diff", ".patch"], aliases: ["Diff"] });
+monaco.languages.setMonarchTokensProvider("diff", {
+  tokenizer: { root: [[/^(---|\+\+\+|@@).*$/, "meta.diff"], [/^\+.*$/, "inserted.diff"], [/^-.*$/, "deleted.diff"], [/.*$/, ""]] },
+});
+
 // `.env` files get a language of their own, so Tusk's server can complete keys and offer fixes in them. The
 // grammar reads them as phpdotenv does: `#` comments, `export`, quoted values that span lines, and `${VAR}` references.
 monaco.languages.register({ id: "dotenv", filenames: [".env"], filenamePatterns: [".env.*"], aliases: ["Environment"] });

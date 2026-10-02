@@ -14,6 +14,7 @@ function defineBuiltIns() {
     rules: rules({
       text: "#bcbec4", comment: "#7a7e85", docComment: "#5f826b", keyword: "#cf8e6d", string: "#6aab73", number: "#2aacb8",
       variable: "#bcbec4", type: "#bcbec4", tag: "#d5b778", attribute: "#bababa", field: "#c77dbb",
+      inserted: "#6aab73", deleted: "#e06c75",
     }),
     colors: {
       "editor.background": "#1e1f22",
@@ -69,6 +70,7 @@ function defineBuiltIns() {
     rules: rules({
       text: "#080808", comment: "#8c8c8c", docComment: "#8c8c8c", keyword: "#0033b3", string: "#067d17", number: "#1750eb",
       variable: "#080808", type: "#000000", tag: "#0033b3", attribute: "#174ad4", field: "#871094",
+      inserted: "#067d17", deleted: "#c7222d",
     }),
     colors: {
       "editor.background": "#ffffff",

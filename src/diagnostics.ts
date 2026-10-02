@@ -318,17 +318,32 @@ export function messageParts(line: string): { text: string; code: boolean }[] {
 }
 
 /**
+ * A message split around Mago's unified diff of two types, from `--- original` and `+++ modified` to the first line
+ * that isn't part of it, so the diff can show as a diff, with its indentation, and not as lines of prose.
+ */
+export function splitDiff(message: string): { before: string; diff?: string; after: string } {
+  const diff = message.match(/^--- .*\n\+\+\+ .*\n(?:[-+ @].*(?:\n|$))*/m);
+  if (!diff) return { before: message, after: "" };
+  return { before: message.slice(0, diff.index), diff: diff[0].trimEnd(), after: message.slice(diff.index! + diff[0].length) };
+}
+
+/** A message's text lines, trimmed, without blank ones. */
+export const messageLines = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+/**
  * A problem's message as Markdown for its hover: the first line in bold, and the checker's notes and advice as
- * paragraphs after it. Code stays code, cut short past 100 characters (the problem page shows it whole), and the
- * rest is escaped, so backslashes and generics such as `array<int>` show as written.
+ * paragraphs after it, with a diff as a diff. Code stays code, cut short past 60 characters so it fits on a line
+ * (the problem page shows it whole), and the rest is escaped, so backslashes and generics such as `array<int>` show
+ * as written.
  */
 export function problemMarkdown(message: string): string {
   const format = (line: string) =>
     messageParts(line)
-      .map((p) => (p.code ? `\`${p.text.length > 100 ? `${p.text.slice(0, 100)}…` : p.text}\`` : p.text.replace(/[\\`*_{}[\]<>()#+!|~]/g, "\\$&")))
+      .map((p) => (p.code ? `\`${p.text.length > 60 ? `${p.text.slice(0, 60)}…` : p.text}\`` : p.text.replace(/[\\`*_{}[\]<>()#+!|~-]/g, "\\$&")))
       .join("");
-  const [first, ...rest] = message.split("\n").map((l) => l.trim()).filter(Boolean);
-  return [`**${format(first ?? "")}**`, ...rest.map(format)].join("\n\n");
+  const { before, diff, after } = splitDiff(message);
+  const [first, ...rest] = messageLines(before);
+  return [`**${format(first ?? "")}**`, ...rest.map(format), ...(diff ? ["```diff\n" + diff + "\n```"] : []), ...messageLines(after).map(format)].join("\n\n");
 }
 
 /** Which checker and rule reported a problem, as VS Code shows it: `mago-lint(no-redundant-use)`, or whichever is known. */

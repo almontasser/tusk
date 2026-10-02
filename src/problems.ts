@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { monaco } from "./editor";
 import { facts, readModels } from "./eloquent";
-import { formatType, inlineProblem, matchesFilter, messageParts, realProblems, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
+import { formatType, inlineProblem, matchesFilter, messageLines, messageParts, realProblems, splitDiff, ruleLabel, severityOf, type Diagnostic } from "./diagnostics";
 import { showMenu } from "./files";
 import { fileIcon } from "./icons";
 import { diagnosed, magoConfigPath, toolPath, tuskRequest } from "./lsp";
@@ -578,10 +578,15 @@ export async function showProblemPage(p: Problem & { path: string }) {
 
   const body = document.createElement("div");
   body.className = "problem-page-body";
-  const [title, ...notes] = p.message.split("\n").map((l) => l.trim()).filter(Boolean);
+  const { before, diff, after } = splitDiff(p.message);
+  const [title, ...notes] = messageLines(before);
   const code = document.createElement("div");
   code.className = "problem-page-code";
-  body.append(messageLine(title ?? "", "problem-page-title"), code, ...notes.map((n) => messageLine(n, "problem-page-note")));
+  const note = (n: string) => messageLine(n, "problem-page-note");
+  const diffBlock = document.createElement("pre");
+  diffBlock.className = "problem-page-diff";
+  if (diff) monaco.editor.colorize(diff, "diff", {}).then((html) => (diffBlock.innerHTML = html));
+  body.append(messageLine(title ?? "", "problem-page-title"), code, ...notes.map(note), ...(diff ? [diffBlock] : []), ...messageLines(after).map(note));
   // Mago's explanation of a linter rule. Its paragraphs are wrapped, so join each one's lines.
   if (p.source === "mago-lint" && p.code)
     ruleDescription(p.code).then((about) => {
