@@ -4,27 +4,48 @@ use lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind};
 use mago_codex::metadata::CodebaseMetadata;
 use mago_span::Span;
 
-use super::{Ctx, with_ctx};
+use super::{Ctx, is_blade, with_blade_php, with_ctx};
 use crate::server::Snapshot;
 use crate::symbol::Symbol;
 use crate::types::display;
 
 pub fn hover(snap: &Snapshot, params: HoverParams) -> Result<Option<Hover>, String> {
     let at = params.text_document_position_params;
-    Ok(with_ctx(snap, &at.text_document.uri, |ctx| {
-        let Some(found) = ctx.symbol_at(at.position) else {
-            return crate::framework::hover(ctx, ctx.offset(at.position));
-        };
-        let parts: Vec<String> = found.symbols.iter().filter_map(|s| describe(ctx, s, found.start, found.end)).collect();
-        if parts.is_empty() {
-            return None;
+    let uri = &at.text_document.uri;
+    let found = with_ctx(snap, uri, |ctx| {
+        // A Blade view's names come first, then its PHP.
+        if is_blade(&ctx.doc) {
+            return crate::framework::hover(ctx, ctx.offset(at.position)).map(Some).ok_or(ctx.offset(at.position));
         }
-        Some(Hover {
-            contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: parts.join("\n\n---\n\n") }),
-            range: Some(ctx.doc.range(found.start, found.end)),
+        let Some(found) = ctx.symbol_at(at.position) else {
+            return Ok(crate::framework::hover(ctx, ctx.offset(at.position)));
+        };
+        Ok(symbol_hover(ctx, &found))
+    });
+    Ok(match found {
+        Some(Ok(hover)) => hover,
+        Some(Err(offset)) => with_blade_php(snap, uri, offset, false, |ctx, blade| {
+            if !blade.in_php(&ctx.doc, offset) {
+                return None;
+            }
+            let found = ctx.resolver().at(blade.php_offset(offset))?;
+            let hover = symbol_hover(ctx, &found)?;
+            Some(Hover { range: blade.view_range(&ctx.doc, hover.range?), ..hover })
         })
+        .flatten(),
+        None => None,
     })
-    .flatten())
+}
+
+fn symbol_hover(ctx: &Ctx<'_>, found: &crate::symbol::Found) -> Option<Hover> {
+    let parts: Vec<String> = found.symbols.iter().filter_map(|s| describe(ctx, s, found.start, found.end)).collect();
+    if parts.is_empty() {
+        return None;
+    }
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: parts.join("\n\n---\n\n") }),
+        range: Some(ctx.doc.range(found.start, found.end)),
+    })
 }
 
 fn code(text: &str) -> String {

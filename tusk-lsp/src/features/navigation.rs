@@ -19,17 +19,35 @@ fn response(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
 
 pub fn definition(snap: &Snapshot, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>, String> {
     let at = params.text_document_position_params;
-    Ok(with_ctx(snap, &at.text_document.uri, |ctx| {
+    let uri = &at.text_document.uri;
+    let found = with_ctx(snap, uri, |ctx| {
         // A `.env` key leads to the code that reads it.
         if ctx.doc.language == "dotenv" {
-            return response(crate::framework::laravel::env_key_usages(ctx, ctx.offset(at.position)));
+            return Ok(response(crate::framework::laravel::env_key_usages(ctx, ctx.offset(at.position))));
+        }
+        // A Blade view's names come first, then its PHP.
+        if super::is_blade(&ctx.doc) {
+            return response(crate::framework::definition(ctx, ctx.offset(at.position))).map(Some).ok_or(ctx.offset(at.position));
         }
         let Some(found) = ctx.symbol_at(at.position) else {
-            return response(crate::framework::definition(ctx, ctx.offset(at.position)));
+            return Ok(response(crate::framework::definition(ctx, ctx.offset(at.position))));
         };
-        response(definitions(ctx, &found))
+        Ok(response(definitions(ctx, &found)))
+    });
+    Ok(match found {
+        Some(Ok(found)) => found,
+        Some(Err(offset)) => super::with_blade_php(snap, uri, offset, false, |ctx, blade| {
+            if !blade.in_php(&ctx.doc, offset) {
+                return None;
+            }
+            let found = ctx.resolver().at(blade.php_offset(offset))?;
+            // A place in the view itself is at the view's position.
+            let locations = definitions(ctx, &found).into_iter().filter_map(|l| if l.uri == *uri { Some(Location { range: blade.view_range(&ctx.doc, l.range)?, ..l }) } else { Some(l) }).collect();
+            response(locations)
+        })
+        .flatten(),
+        None => None,
     })
-    .flatten())
 }
 
 fn definitions(ctx: &Ctx<'_>, found: &Found) -> Vec<Location> {

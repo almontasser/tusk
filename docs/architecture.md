@@ -2405,7 +2405,24 @@ leaves unknown directives; `{{-- --}}`, `@{{`, `@@`, and `@verbatim` are
 skipped. Echo delimiters are found as Blade's own regex finds them, without
 reading strings. `virtual_php` in the same file serves completion and the
 framework's checks instead: it reads only the directives that name views,
-translations, or abilities, and needs no first line.
+translations, or abilities, and needs no first line. A view that starts with
+one, such as `@extends('layouts.app')` at its first byte, has no room for
+`virtual_php`'s `<? ` before it, so the tag takes the directive's first three
+bytes and the directive gets a one-letter name, `_f` for `@extends`, which
+`directive_name` maps back; a three-letter directive there, such as `@can`, has
+no room for one and is skipped.
+
+The view's PHP also answers hover, completion, and Go to Definition
+(`with_blade_php` in `tusk-lsp/src/features/mod.rs`), after the framework's
+answers for view names, translation keys, and component tags. The request runs
+on `checked_php`'s text with the view's variables from `view_types`, as a
+document of its own language (`blade-php`) at the view's path, and maps its
+ranges back with `view_offset`. Where the view's character is blanked text, its
+HTML, nothing is asked. Completion is cut at the cursor with its brackets
+closed, as in PHP files, and leaves out names that would import a class, since
+a view imports with `@use`. So `{{ $` lists the view's variables with their
+types, `$post->` the members, and hovering `$post->title` shows the property.
+Inside `@auth`, the user is logged in, as when the view is checked.
 
 `view_types` in `tusk-lsp/src/framework/laravel/views.rs` finds the view's
 variables. It reads each project PHP file that has the view's name in quotes,
@@ -2415,7 +2432,16 @@ variables, since Mago types both `compact('post')` and `['post' => $post]` as
 keyed arrays, and `->with()` calls chained on the call add more. A string inside
 a `Livewire\Component` subclass, such as `render()`'s view or a Filament page's
 `$view`, adds the class's public properties, and so does one inside an
-`Illuminate\View\Component` subclass, a class component, with `$slot`. Then it
+`Illuminate\View\Component` subclass, a class component, with `$slot` and its
+public methods, as `Component::data()` gives them (`component_methods`): one
+without parameters as an `InvokableComponentVariable`, which Laravel calls when
+the view echoes, invokes, or iterates it, and one with parameters as a
+`\Closure` with its signature, such as `\Closure(string, int=): list<string>`.
+Static methods count, as Laravel's reflection lists them, so every class
+component's view gets `$ignoredParameterNames`. Properties and methods whose
+names start with `__`, Laravel's own (`data`, `render`, `resolveView`, and the
+rest of `ignoredMethods()`), and the names in the component's `$except`
+default are left out. Then it
 reads each Blade view in `resources/views` that has the name in quotes or a tag
 for it (`sites_in`). An `@include`, `@includeIf`, `@includeWhen`,
 `@includeUnless`, or `@includeFirst` of the view passes its data array's entries
@@ -2448,9 +2474,12 @@ passes its attributes by their camel-case names (`tag_attrs`): a bound one,
 lays out as an array at the attribute; a plain one as `string`; and one with no
 value as `true`. With `@props`, only the props are variables (`tag_site`): a
 prop the tag leaves out gets its default's type, and one passed a nullable value
-gets the default in place of `null`, as `@props` compiles to `??`. A tag that
-passes `{{ $attributes }}`, or a prop as a `<x-slot>`, leaves those props
-untyped. `$attributes` and `$slot` are typed when the project has
+gets the default in place of `null`, as `@props` compiles to `??`. A prop
+passed as a `<x-slot:name>` or `<x-slot name="…">` is a `ComponentSlot`; a slot
+inside another component tag in the content is that component's. A tag that
+passes `{{ $attributes }}` or another echo among its attributes may pass any
+prop through it, so the props it doesn't name are untyped, and those it names
+keep their types. `$attributes` and `$slot` are typed when the project has
 `ComponentAttributeBag` and `ComponentSlot`.
 
 A component's `@aware` variables follow Laravel's lookup (the `Aware` struct in
@@ -2458,10 +2487,14 @@ A component's `@aware` variables follow Laravel's lookup (the `Aware` struct in
 component's own view, each of that component's tags must have passed it, which
 the view's variables show for a prop without a default or, without `@props`, for
 any variable; in other views, the nearest component tag around the tag gives
-its type when it's an anonymous component's and passes it. Anything else, such
-as a class component around the tag, a tag with another prefix such as
-`<flux:card>`, or a default that applies only when no component further out
-passes the variable, leaves it untyped.
+its type when it's an anonymous component's and passes it, and with no
+component tag around it at all, the variable gets its `@aware` default's type,
+as `getConsumableComponentData()` finds no component data to take it from.
+Anything else, such as a class component around the tag, a tag with another
+prefix such as `<flux:card>`, a tag around it that leaves the variable out
+(one further out may pass it), or a tag that passes `{{ $attributes }}`, leaves
+it untyped. A view included inside a component's slot reads as a page, so its
+tags can get a default where Laravel would find a component further out.
 
 A view that renders itself, such as a comment that includes itself for its
 replies, starts from the types the other places pass, then adds the places in
@@ -5658,8 +5691,15 @@ an `artisan` file.
   - Positions are UTF-16.
   - `HomeController@index` matches a route's full action name by its end.
   - A class name passed to `app()` isn't reported as a missing binding.
-  - `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`, and
-    `@livewire` are recognized.
+  - `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
+    `@extendsFirst`, `@componentFirst`, and `@livewire` are recognized, and so
+    are `view()->make()`, `view()->first()`, and `view()->exists()`, on the
+    `Factory` contract that `view()` returns.
+  - A list of views, as `View::first()` and `@includeFirst` take, renders the
+    first that exists, so its missing views are reported only when none of
+    them exists. Each view in the list still hovers, completes, and links.
+  - A view whose first byte starts a directive, such as `@extends(…)`, still
+    has its view name read.
   - `@vite(...)` and `Vite::asset()` complete files under `resources/`, link
     to them, and report a file that doesn't exist (code `vite`).
   - A gate's model can come from a typed variable, not only `X::class`.
@@ -7499,3 +7539,48 @@ serializing Mago's metadata and keeping it in step with Mago's versions, to
 save part of 0.07 s. Seeding the loading with last start's set would save at
 most a few hundredths of a second of its waves. Populating is Mago's own work,
 and a populated index can't be saved without serializing it.
+
+### 2026-10-02: A list of views is checked as a whole
+
+`View::first(['custom', 'default'])`, `view()->first()`, `@includeFirst`,
+`@extendsFirst`, and `@componentFirst` render the first view in the list that
+exists, so a missing one before it is a fallback, not a mistake. The server
+reported each missing view in a list. It now reports them only when no view in
+the list exists. `Route::view()` takes one view, which already hovered; the
+Known gaps line that said otherwise was stale. Reading a directive at a view's
+first byte needed a short name for it, since the PHP open tag takes those
+bytes: a one-letter name per directive keeps the arguments at their offsets,
+where shifting the whole text by three bytes would have meant mapping every
+offset in every framework feature.
+
+### 2026-10-02: Class components' methods, slots, and `@aware` defaults are typed
+
+A class component's view gets its public methods as variables, typed as
+Laravel's `Component::data()` makes them: `InvokableComponentVariable` for a
+method without parameters, and a `\Closure` with the method's signature for one
+with. Typing the first as `\Closure(): T` would type `$method()` as `T`, but
+the view can also echo, iterate, or read properties through it, which a
+closure would report as problems; Laravel's own class allows all of them, at
+the cost of `$method()` being `mixed`. The `$except` list is read from the
+property's default as Mago types it, so a list built in the constructor isn't
+seen.
+
+A prop passed as a slot is now a `ComponentSlot`, which needed slots inside
+nested component tags to stop counting for the outer tag. A tag with
+`{{ $attributes }}` keeps the types of the props it names. An `@aware`
+variable gets its default where no component tag is open around the tag, the
+one place where Laravel's lookup is known to find nothing; a view included
+into a component's slot can't be seen from the view, so that case reads as a
+page, as `@aware` already did.
+
+### 2026-10-02: Hover, completion, and Go to Definition in Blade's PHP
+
+The checked PHP of a view already had the view's variables typed for Mago's
+problems. Hover, completion, and Go to Definition now run on the same text and
+map their ranges back, so a view gets PHP's own features rather than a second
+implementation for Blade. A document language of its own, `blade-php`, keeps
+the framework from reading that text as a Blade view by its path. Completion
+leaves out class names that need an import, since a PHP `use` edit doesn't fit
+a view; offering `@use` edits is a follow-up. The requests do nothing on the
+view's HTML, where the PHP is blank, so hovering markup doesn't run the
+analyzer.

@@ -435,6 +435,22 @@ mod tests {
     }
 
     #[test]
+    fn checks_a_class_components_methods_in_its_view() {
+        let view = "<?php\nnamespace Illuminate\\View;\nclass InvokableComponentVariable implements \\IteratorAggregate, \\Stringable {\n    public function getIterator(): \\Traversable { return new \\ArrayIterator([]); }\n    /** @return mixed */\n    public function __get($key) { return null; }\n    /** @return mixed */\n    public function __call($method, $parameters) { return null; }\n    /** @return mixed */\n    public function __invoke() { return null; }\n    public function __toString(): string { return ''; }\n}\nabstract class Component {}\n";
+        let alert = "<?php\nnamespace App;\nclass Alert extends \\Illuminate\\View\\Component {\n    public function render() { return view('components.alert'); }\n    public function isActive(): bool { return true; }\n    public function label(string $prefix, int $count = 1): string { return ''; }\n}\n";
+        let fx = Fixture::new(&[("vendor/View.php", view), ("app/Alert.php", alert)]);
+        let check = |blade: &str| {
+            let doc = Document::new(crate::testing::uri("resources/views/components/alert.blade.php"), crate::testing::path("resources/views/components/alert.blade.php"), "blade".into(), 1, blade.into());
+            blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p), None).into_iter().map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line)).collect::<Vec<_>>()
+        };
+        // A method without parameters is echoed, invoked, or iterated as Laravel's invokable variable.
+        assert!(check("{{ $isActive }} {{ $isActive() }} @foreach ($isActive as $x) @endforeach {{ $isActive->anything }}\n").is_empty());
+        // One with parameters is a closure with its signature.
+        let found = check("{{ $label('a') }} {{ $label('a', 2) }}\n{{ $label(1) }}\n{{ $label('a')->nope }}\n");
+        assert_eq!(found.iter().map(|f| f.1).collect::<Vec<_>>(), vec![1, 2], "{found:?}");
+    }
+
+    #[test]
     fn drops_problems_about_a_views_variables() {
         let d = |code: &str, message: &str| Diagnostic { code: Some(NumberOrString::String(code.into())), message: message.into(), ..Default::default() };
         let noise = ["undefined-variable", "possibly-undefined-variable", "unused-statement", "no-value", "non-documented-method", "mixed-property-access", "redundant-condition", "possibly-non-existent-method"];

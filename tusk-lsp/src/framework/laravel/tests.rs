@@ -11,6 +11,7 @@ namespace Illuminate\Routing { class Redirector { public function route($name, $
 namespace Illuminate\Http { class Request { public function routeIs(...$patterns) {} public function validate(array $rules) {} } }
 namespace Illuminate\Support\Facades { class Route {} class Config {} class Lang {} class View {} class Gate {} class Storage {} class App {} class Vite {} }
 namespace Illuminate\Foundation\Http { class FormRequest {} }
+namespace Illuminate\Contracts\View { interface Factory { public function make($view, $data = []); public function exists($view); } interface View {} }
 namespace Illuminate\Database\Eloquent {
     abstract class Model {
         /** @return \Illuminate\Database\Eloquent\Builder<static> */
@@ -46,6 +47,7 @@ namespace App\Models {
 namespace {
     function route($name, $parameters = [], $absolute = true) {}
     function redirect($to = null): \Illuminate\Routing\Redirector {}
+    /** @return ($view is null ? \Illuminate\Contracts\View\Factory : \Illuminate\Contracts\View\View) */
     function view($view = null, $data = []) {}
     function config($key = null, $default = null) {}
     function env($key, $default = null) {}
@@ -411,4 +413,34 @@ fn env_files_complete_keys_other_env_files_and_config_name() {
     );
     let line = "'url' => env( 'APP_URL'),";
     assert_eq!(env_calls(line).iter().map(|(at, k, _)| &line[*at..*at + k.len()]).collect::<Vec<_>>(), vec!["APP_URL"]);
+}
+
+#[test]
+fn reads_each_view_in_a_list_of_views() {
+    let sources = [
+        ("t.php", "<?php \\Illuminate\\Support\\Facades\\Route::view('/x', 'wel<|>come');"),
+        ("t.php", "<?php \\Illuminate\\Support\\Facades\\View::first(['nope', 'wel<|>come']);"),
+        ("t.php", "<?php view()->first(['nope', 'wel<|>come']);"),
+        ("t.php", "<?php view()->make('wel<|>come');"),
+        ("resources/views/t.blade.php", "<div>@includeFirst(['nope', 'wel<|>come'])</div>"),
+        ("resources/views/t.blade.php", "@extendsFirst(['nope', 'wel<|>come'])"),
+        ("resources/views/t.blade.php", "@componentFirst(['nope', 'wel<|>come']) @endcomponent"),
+    ];
+    for (file, src) in sources {
+        let fx = fixture(file, src);
+        let at = fx.at();
+        let (hover, defs, found) = with_ctx(&fx.snap, &at.text_document.uri, |ctx| {
+            let offset = ctx.offset(at.position);
+            (super::hover(ctx, offset), definition(ctx, offset), diagnostics(ctx))
+        })
+        .unwrap();
+        assert!(hover.is_some(), "{src}");
+        assert!(defs[0].uri.as_str().ends_with("/resources/views/welcome.blade.php"), "{src}");
+        // The first view that exists renders, so a missing one before it is a fallback, not a problem.
+        assert!(found.is_empty(), "{src}: {found:?}");
+        let typed = src.replace("wel<|>come", "<|>");
+        assert!(labels(&complete(file, &typed)).contains(&"welcome".to_string()), "{src}");
+    }
+    let found = problems("t.php", "<?php view()->first(['nope', 'gone']); view()->first([$x, 'gone']);");
+    assert_eq!(found, vec![("view".into(), "View [nope] not found.".into()), ("view".into(), "View [gone] not found.".into()), ("view".into(), "View [gone] not found.".into())]);
 }

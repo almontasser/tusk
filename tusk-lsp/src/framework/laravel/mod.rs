@@ -130,7 +130,8 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
         return (!in_array).then_some(Kind::ControllerAction);
     }
     let view = s.method(&["view"], &["Illuminate\\Contracts\\Routing\\ResponseFactory", "Illuminate\\Routing\\ResponseFactory"], &[0])
-        || s.method(&["make"], &["Illuminate\\Contracts\\View\\Factory", "Illuminate\\View\\Factory"], &[0])
+        // `view()` is typed as the contract, which leaves out the factory's `first()` that it returns.
+        || s.method(&["make", "first", "exists"], &["Illuminate\\Contracts\\View\\Factory"], &[0])
         || s.facade(&["make", "first", "renderEach", "exists"], "View", &["Illuminate\\View\\Factory"], &[0])
         || s.facade(&["renderWhen", "renderUnless"], "View", &["Illuminate\\View\\Factory"], &[1])
         || s.facade(&["view"], "Route", ROUTERS, &[1])
@@ -139,7 +140,7 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
         || (s.object("Illuminate\\Mail\\Mailables\\Content", &[0, 3]) && arg.name.is_none())
         || (s.object("Illuminate\\Mail\\Mailables\\Content", &[0, 1, 2, 3, 4, 5, 6]) && matches!(arg.name.as_deref(), Some("view" | "markdown" | "html" | "text")))
         || s.function(&["view", "markdown", "links", "assertViewIs"], &[0])
-        || s.function(&["@each", "@extends", "@include", "@includeIf", "@includeFirst", "@component"], &[0])
+        || s.function(&["@each", "@extends", "@extendsFirst", "@include", "@includeIf", "@includeFirst", "@component", "@componentFirst"], &[0])
         || s.function(&["@includeWhen", "@includeUnless"], &[1]);
     if view {
         return list_ok(Kind::View);
@@ -681,7 +682,7 @@ fn looks_like_translation_key(v: &str) -> bool {
 }
 
 fn is_blade(ctx: &Ctx<'_>) -> bool {
-    ctx.doc.language == "blade" || ctx.doc.path.to_string_lossy().ends_with(".blade.php")
+    crate::features::is_blade(&ctx.doc)
 }
 
 /// Runs `f` on the file's string arguments: a PHP file's own, or a Blade view's echoes and directives.
@@ -1331,6 +1332,12 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
                 cache.push((kind, entries(kind, &data)));
             }
             let Some((_, Some(entries))) = cache.iter().find(|(k, _)| *k == kind) else { continue };
+            // A list of views, as `View::first()` and `@includeFirst` take, renders the first that exists, so its
+            // missing views are reported only when none of them exists.
+            let listed = |a: &&StringArg| a.call.span == arg.call.span && a.index == arg.index && a.in_array == Some(InArray::Value(None));
+            if kind == Kind::View && listed(&arg) && args.iter().filter(listed).any(|a| find(kind, entries, &a.value).is_some()) {
+                continue;
+            }
             if let Some((code, message)) = problem(kind, arg, entries, &data, codebase) {
                 out.push(Diagnostic {
                     range: ctx.doc.range(arg.start, arg.end),

@@ -204,7 +204,7 @@ impl Walk<'_> {
         let components = self.components;
         let tags = component_tags(index, read, components, view);
         let props = if tags.is_empty() { None } else { self::props(index, &child_text, "@props") };
-        let names_aware: Vec<String> = if tags.is_empty() { vec![] } else { self::props(index, &child_text, "@aware").into_iter().flatten().map(|(n, _)| n).collect() };
+        let names_aware: Props = if tags.is_empty() { vec![] } else { self::props(index, &child_text, "@aware").unwrap_or_default() };
         let anonymous = |tag: &str| match component_files(components, tag) {
             Some(files) => files.iter().all(|f| f.ends_with(".blade.php")),
             None => components.is_none() && default_view(index, read, tag).is_some(),
@@ -330,15 +330,18 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
         if let Some(class) = class.filter(|c| component || index.codebase.is_instance_of(c.as_bytes(), b"Livewire\\Component")) {
             renders = true;
             let meta = index.codebase.get_class_like(class.as_bytes());
+            let ignored = if component { component_ignored(index, &class) } else { vec![] };
             for (name, declaring) in meta.iter().flat_map(|m| m.declaring_property_ids.iter()) {
                 let Some(p) = index.codebase.get_property(declaring.as_bytes(), name.as_bytes()) else { continue };
-                if p.read_visibility.is_public() && !p.flags.is_static() {
+                let name = name.as_str_lossy().trim_start_matches('$').to_string();
+                if p.read_visibility.is_public() && !p.flags.is_static() && !skipped(&ignored, &name) {
                     let t = p.type_metadata.as_ref().or(p.type_declaration_metadata.as_ref()).and_then(|t| docblock_type(&t.type_union));
-                    vars.entry(name.as_str_lossy().trim_start_matches('$').to_string()).or_insert(t);
+                    vars.entry(name).or_insert(t);
                 }
             }
             if component {
                 vars.entry("slot".into()).or_insert_with(|| known_class(index, SLOT));
+                vars.extend(component_methods(index, &class, &ignored));
             }
         }
         if renders {
@@ -350,6 +353,58 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
 
 const BAG: &str = "Illuminate\\View\\ComponentAttributeBag";
 const SLOT: &str = "Illuminate\\View\\ComponentSlot";
+
+/// The names a class component keeps from its view, as `Component::ignoredMethods()` lists them: Laravel's own
+/// methods and the component's `$except`.
+fn component_ignored(index: &Index, class: &str) -> Vec<String> {
+    let own = ["data", "render", "resolve", "resolveView", "shouldRender", "view", "withName", "withAttributes", "flushCache", "forgetFactory", "forgetComponentsResolver", "resolveComponentsUsing"];
+    let mut names: Vec<String> = own.map(String::from).to_vec();
+    let default = index.codebase.get_declaring_property(class.as_bytes(), b"$except").and_then(|p| p.default_type_metadata.as_ref());
+    for atomic in default.into_iter().flat_map(|t| t.type_union.types.iter()) {
+        let TAtomic::Array(TArray::List(list)) = atomic else { continue };
+        names.extend(list.known_elements.iter().flatten().filter_map(|(_, (_, t))| t.get_single_literal_string_value()).map(|v| String::from_utf8_lossy(v).into_owned()));
+    }
+    names
+}
+
+/// Whether Laravel keeps a class component's public property or method `name` from its view ([`component_ignored`]).
+fn skipped(ignored: &[String], name: &str) -> bool {
+    name.starts_with("__") || ignored.iter().any(|i| i == name)
+}
+
+/// A class component's public methods, as its view gets them: one without parameters as an
+/// `InvokableComponentVariable`, which calls it when it's echoed, invoked, or iterated, and one with parameters as a
+/// closure with its signature, as `Component::createVariableFromMethod()` makes them.
+fn component_methods(index: &Index, class: &str, ignored: &[String]) -> Vec<(String, Option<String>)> {
+    let codebase = &index.codebase;
+    let Some(meta) = codebase.get_class_like(class.as_bytes()) else { return vec![] };
+    let mut out = vec![];
+    for id in meta.appearing_method_ids.values() {
+        let Some(m) = codebase.get_method_by_id(&codebase.get_declaring_method_identifier(id)) else { continue };
+        let name = m.original_name.as_str_lossy().into_owned();
+        if !m.method_metadata.as_ref().is_some_and(|mm| mm.visibility.is_public()) || skipped(ignored, &name) {
+            continue;
+        }
+        let t = if m.parameters.is_empty() {
+            known_class(index, "Illuminate\\View\\InvokableComponentVariable")
+        } else {
+            let written = |t: Option<&mago_codex::metadata::ttype::TypeMetadata>| t.and_then(|t| docblock_type(&t.type_union)).unwrap_or_else(|| "mixed".into());
+            let params: Vec<String> = m
+                .parameters
+                .iter()
+                .map(|p| {
+                    let t = written(p.type_metadata.as_ref().or(p.type_declaration_metadata.as_ref()));
+                    let suffix = if p.flags.is_variadic() { "..." } else if p.flags.has_default() { "=" } else { "" };
+                    format!("{t}{suffix}")
+                })
+                .collect();
+            let returns = written(m.return_type_metadata.as_ref().or(m.return_type_declaration_metadata.as_ref()));
+            Some(format!("\\Closure({}): {returns}", params.join(", ")))
+        };
+        out.push((name, t));
+    }
+    out
+}
 
 /// `class` as a docblock type, when the project has it.
 fn known_class(index: &Index, class: &str) -> Option<String> {
@@ -461,19 +516,25 @@ enum Attr {
 }
 
 /// A component tag's attributes from `at`, past its name, by their camelCase names, with the names of the slots
-/// between it and its closing tag, `<x-slot:footer>`, or `None` when it passes attributes whose names aren't
-/// known, `{{ $attributes }}`, or a slot with a bound name.
+/// between it and its closing tag, `<x-slot:footer>`, and whether it also passes attributes whose names aren't
+/// known, as `{{ $attributes }}` does; or `None` when it passes a slot with a bound name.
 #[allow(clippy::type_complexity)]
-fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)>, Vec<String>)> {
+fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)>, Vec<String>, bool)> {
     let src = text.as_bytes();
+    let start = at;
     let mut attrs = vec![];
+    let mut spread = false;
     let closed = loop {
         at += src[at..].iter().take_while(|b| b.is_ascii_whitespace()).count();
         match src.get(at) {
             None => break true,
             Some(b'>') => break false,
             Some(b'/') if src.get(at + 1) == Some(&b'>') => break true,
-            Some(b'{') => return None,
+            Some(b'{') => {
+                spread = true;
+                at = src[at..].windows(2).position(|w| w == b"}}").map_or(src.len(), |e| at + e + 2);
+                continue;
+            }
             _ => {}
         }
         let name_end = at + src[at..].iter().take_while(|b| !b.is_ascii_whitespace() && !matches!(b, b'=' | b'>' | b'/' | b'"' | b'\'')).count().max(1);
@@ -501,7 +562,7 @@ fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)
         attrs.push((camel(attr.0), attr.1));
     };
     if closed {
-        return Some((attrs, vec![]));
+        return Some((attrs, vec![], spread));
     }
     // The tag's content, to its closing tag, past those of the same component inside it.
     let opens = |i: usize| ["<x-", "<x:"].iter().any(|p| text[i..].starts_with(p) && text[i + 3..].starts_with(tag) && !text[i + 3 + tag.len()..].starts_with(|c: char| c.is_alphanumeric() || "_-:.".contains(c)));
@@ -520,6 +581,10 @@ fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)
     }
     let mut slots = vec![];
     for (i, _) in text[at..end].match_indices("<x-slot") {
+        // One inside another component's tag is that component's.
+        if enclosing(text, at + i, &[]).flatten().is_none_or(|(_, open)| open != start) {
+            continue;
+        }
         let rest = &text[at + i + 7..end];
         let name = if let Some(inline) = rest.strip_prefix(':') {
             inline[..inline.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-')).unwrap_or(inline.len())].to_string()
@@ -530,7 +595,7 @@ fn tag_attrs(text: &str, mut at: usize, tag: &str) -> Option<(Vec<(String, Attr)
         };
         slots.push(camel(&name));
     }
-    Some((attrs, slots))
+    Some((attrs, slots, spread))
 }
 
 /// The offset past the `>` that ends a tag whose attributes start at `at`, and whether it closes itself.
@@ -613,8 +678,9 @@ fn camel(name: &str) -> String {
 /// What a component tag passes to its view: each of its `props` that the tag passes, with its type, or that it
 /// leaves out and has a default, with the default's type, and `$attributes` and `$slot`. A prop with a default
 /// that's passed `null` gets the default. Without `@props`, it's each attribute. `tag` is `None` when what the
-/// tag passes isn't known.
-fn tag_site(index: &Index, tag: Option<Site>, props: Option<&Props>) -> Site {
+/// tag passes isn't known, and `spread` when it also passes attributes whose names aren't known, which may pass
+/// the props it leaves out.
+fn tag_site(index: &Index, tag: Option<Site>, props: Option<&Props>, spread: bool) -> Site {
     let mut site = Site::from([("attributes".to_string(), known_class(index, BAG)), ("slot".to_string(), known_class(index, SLOT))]);
     let Some(props) = props else {
         site.extend(tag.into_iter().flatten().filter(|(name, _)| identifier(name)));
@@ -622,7 +688,7 @@ fn tag_site(index: &Index, tag: Option<Site>, props: Option<&Props>) -> Site {
     };
     for (name, default) in props {
         let t = match (tag.as_ref().map(|t| t.get(name)), default) {
-            // `{{ $attributes }}` may pass it.
+            (None, _) | (Some(None), _) if spread => None,
             (None, _) => None,
             (Some(Some(Some(t))), Some(default)) if parts(t).contains(&"null") => {
                 let mut kept: Vec<&str> = parts(t).into_iter().filter(|p| *p != "null").collect();
@@ -661,7 +727,9 @@ fn parts(t: &str) -> Vec<&str> {
 /// A component's `@aware` variables, and where its tags in a view that leave one out get it, as Laravel looks
 /// for it: in the data of the component whose view it is, then in that of the component tags around the tag.
 struct Aware<'a> {
-    names: &'a [String],
+    /// Each variable, with its default's type when it has a default, which it gets when no component tag around
+    /// the tag passes it.
+    names: &'a Props,
     /// In a component's own view, its `@props` (`None` without them): its variables that are props without a
     /// default, or all of them without `@props`, are what every one of its tags passed. A class component's view
     /// has no props here, since what its tags pass isn't known. `None` in other views, where a variable comes from
@@ -744,11 +812,17 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
                     if !dynamic_name(text, after).is_some_and(|name| tags.contains(&name)) {
                         continue;
                     }
-                    if let Some((attrs, _)) = &mut attrs {
+                    if let Some((attrs, _, _)) = &mut attrs {
                         attrs.retain(|(name, _)| name != "component");
                     }
                 }
-                let around = (!aware.names.is_empty() && aware.own.is_none()).then(|| enclosing(text, at, &comments)).flatten().flatten().filter(|(tag, _)| (aware.anonymous)(tag));
+                // `None` when no component tag is open around it, so an `@aware` variable that it doesn't pass gets
+                // its default, and `Some(None)` when what the tag around it passes isn't known.
+                let around = if aware.names.is_empty() || aware.own.is_some() {
+                    Some(None)
+                } else {
+                    enclosing(text, at, &comments).map(|open| open.filter(|(tag, _)| (aware.anonymous)(tag)))
+                };
                 uses.push((attrs, around));
             }
         }
@@ -839,20 +913,25 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
                 .collect()
         };
         for (used, around) in uses {
-            let tag = used.map(|(attrs, slots)| {
+            let spread = used.as_ref().is_some_and(|(_, _, spread)| *spread);
+            let tag = used.map(|(attrs, slots, _)| {
                 let mut site = typed(attrs);
                 // A prop may be passed as a slot.
-                site.extend(slots.into_iter().map(|s| (s, None)));
+                site.extend(slots.into_iter().map(|s| (s, known_class(index, SLOT))));
                 site
             });
-            let mut site = tag_site(index, tag.clone(), props);
-            let around = around.and_then(|(name, at)| tag_attrs(text, at, &name)).map(|(attrs, _)| typed(attrs));
-            for name in aware.names {
+            let mut site = tag_site(index, tag.clone(), props, spread);
+            let around = around.map(|around| around.and_then(|(name, at)| tag_attrs(text, at, &name)).map(|(attrs, _, _)| typed(attrs)));
+            for (name, default) in aware.names {
                 let t = tag.as_ref().and_then(|tag| match (tag.get(name), &aware.own) {
                     (Some(t), _) => t.clone(),
+                    // `{{ $attributes }}` may pass it.
+                    (None, _) if spread => None,
                     (None, Some(own)) if own.as_ref().is_none_or(|props| props.contains(&(name.clone(), None))) => vars.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()),
                     (None, Some(_)) => None,
-                    (None, None) => around.as_ref().and_then(|around| around.get(name).cloned().flatten()),
+                    // No component around it passes it, so it gets its default.
+                    (None, None) if around.is_none() => default.clone().flatten(),
+                    (None, None) => around.as_ref().and_then(Option::as_ref).and_then(|around| around.get(name).cloned().flatten()),
                 });
                 site.insert(name.clone(), t);
             }
@@ -989,8 +1068,8 @@ mod tests {
     #[test]
     fn types_a_components_props_from_the_tags_that_use_it() {
         let models = "<?php\nnamespace App;\nclass Comment { /** @var list<Comment> */ public array $replies = []; }\nclass Post { /** @var list<Comment> */ public array $comments = []; }\n";
-        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nabstract class Component {}\n";
-        let alert = "<?php\nnamespace App\\View\\Components;\nclass Alert extends \\Illuminate\\View\\Component { public string $type = 'info'; public static int $count = 0; public function render() { return view('components.alert'); } }\n";
+        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nclass InvokableComponentVariable {}\nabstract class Component { public function data() {} public function resolveView() {} }\n";
+        let alert = "<?php\nnamespace App\\View\\Components;\nclass Alert extends \\Illuminate\\View\\Component {\n    public string $type = 'info';\n    public static int $count = 0;\n    public int $hidden = 0;\n    protected $except = ['hidden', 'secret'];\n    public function __construct() {}\n    public function render() { return view('components.alert'); }\n    public function isActive(): bool { return true; }\n    /** @return list<string> */\n    public function labels(string $prefix, int $count = 1, \\App\\Post ...$posts): array { return []; }\n    public function secret(): int { return 1; }\n    protected function inner(): int { return 1; }\n}\n";
         let controller = "<?php\nnamespace App;\nclass PostController {\n    public function show(Post $post, ?string $size) { return view('show', compact('post', 'size')); }\n}\n";
         let show = "<x-card :post=\"$post\" title=\"Hi\" data-x=\"1\" />\n<x-card :$post title=\"Hi\" size=\"lg\" disabled>body</x-card>\n<x-card :post=\"$post\" :size=\"$size\" title=\"Hi\"><x-card :post=\"$post\" title=\"x\"></x-card><x-slot:footer>f</x-slot></x-card>\n{{-- <x-card :post=\"1\" /> --}}\n<x-alert type=\"x\" />\n<x-forms.input :value=\"$post->comments\" wire:model=\"v\" />\n@foreach ($post->comments as $c) <x-tree :node=\"$c\" /> @endforeach\n<x-spread {{ $attributes }} :post=\"$post\" />\n<x-cards :post=\"1\" />\n";
         let views = [
@@ -1012,15 +1091,20 @@ mod tests {
         let owned = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect::<Vec<_>>();
         let (bag, slot) = (("attributes", "\\Illuminate\\View\\ComponentAttributeBag"), ("slot", "\\Illuminate\\View\\ComponentSlot"));
         // Bound and plain attributes, `:$post`, defaults where a tag leaves a prop out or passes null, and a prop
-        // passed as a slot, which isn't typed.
-        assert_eq!(types_of("components.card"), owned(&[bag, ("disabled", "false|true"), ("post", "\\App\\Post"), ("size", "string"), slot, ("title", "string")]));
-        // A class component's view gets its public properties, not the tag's attributes.
-        assert_eq!(types_of("components.alert"), owned(&[slot, ("type", "string")]));
+        // passed as a slot, though not one inside another component's tag.
+        let footer = ("footer", "null|\\Illuminate\\View\\ComponentSlot");
+        assert_eq!(types_of("components.card"), owned(&[bag, ("disabled", "false|true"), footer, ("post", "\\App\\Post"), ("size", "string"), slot, ("title", "string")]));
+        // A class component's view gets its public properties and methods, not the tag's attributes, leaving out
+        // Laravel's own and the `$except` ones. A method without parameters is invoked as it's used.
+        let labels = ("labels", "\\Closure(string, int=, \\App\\Post...): list<string>");
+        let active = ("isActive", "\\Illuminate\\View\\InvokableComponentVariable");
+        assert_eq!(types_of("components.alert"), owned(&[active, labels, slot, ("type", "string")]));
         // Without `@props`, each attribute is a variable; `index.blade.php` answers to its folder's name.
         assert_eq!(types_of("components.forms.input.index"), owned(&[bag, slot, ("value", "list<\\App\\Comment>")]));
         // A component that renders itself, and one passed attributes whose names aren't known.
         assert_eq!(types_of("components.tree"), owned(&[bag, ("node", "\\App\\Comment"), slot]));
-        assert_eq!(types_of("components.spread"), owned(&[bag, slot]));
+        // `{{ $attributes }}` may pass the props a tag leaves out, but not those it passes.
+        assert_eq!(types_of("components.spread"), owned(&[bag, ("post", "\\App\\Post"), slot]));
     }
 
     #[test]
@@ -1029,7 +1113,7 @@ mod tests {
         let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nabstract class Component {}\n";
         let select = "<?php\nnamespace App\\View\\Components\\Forms;\nclass Select extends \\Illuminate\\View\\Component { public array $options = []; public function render() { return view('components.forms.select'); } }\n";
         let controller = "<?php\nnamespace App;\nclass PageController {\n    public function show(Post $post, string $name) { return view('page', compact('post', 'name')); }\n}\n";
-        let page = "<x-dynamic-component component=\"alert\" :post=\"$post\" />\n<x-dynamic-component :component=\"'alert'\" :post=\"$post\"></x-dynamic-component>\n<x-dynamic-component :component=\"$name\" :post=\"1\" />\n<x-ui::button :size=\"5\" />\n<x-card title=\"x\" />\n<x-menu color=\"red\"><div><x-menu.item /></div></x-menu>\n<x-menu><x-menu.dot /></x-menu>\n<x-menu color=\"red\"><x-menu.dot /></x-menu>\n<x-nav :color=\"$post\" />\n";
+        let page = "<x-dynamic-component component=\"alert\" :post=\"$post\" />\n<x-dynamic-component :component=\"'alert'\" :post=\"$post\"></x-dynamic-component>\n<x-dynamic-component :component=\"$name\" :post=\"1\" />\n<x-ui::button :size=\"5\" />\n<x-card title=\"x\" />\n<x-menu color=\"red\"><div><x-menu.item /></div></x-menu>\n<x-menu><x-menu.dot /></x-menu>\n<x-menu color=\"red\"><x-menu.dot /></x-menu>\n<x-nav :color=\"$post\" />\n<x-badge />\n<x-menu><x-chip /></x-menu>\n<x-chip />\n";
         let views = [
             ("resources/views/page.blade.php", page),
             ("resources/views/components/alert.blade.php", "@props(['post'])"),
@@ -1041,6 +1125,8 @@ mod tests {
             ("resources/views/components/menu/dot.blade.php", "@aware(['color' => 'gray'])"),
             ("resources/views/components/nav.blade.php", "@props(['color'])\n<x-nav.link />"),
             ("resources/views/components/nav/link.blade.php", "@aware(['color'])"),
+            ("resources/views/components/badge.blade.php", "@aware(['tone' => 1])"),
+            ("resources/views/components/chip.blade.php", "@aware(['tone' => 1])"),
         ];
         let mut files = vec![("app/Models.php", models), ("vendor/View.php", laravel), ("app/View/Components/Forms/Select.php", select), ("app/PageController.php", controller)];
         files.extend(views);
@@ -1049,7 +1135,7 @@ mod tests {
         let index = fx.snap.index.read();
         let read = |p: &Path| fx.snap.read(p);
         let anonymous = |tag: &str| (tag.to_string(), serde_json::json!({"paths": [format!("resources/views/components/{}.blade.php", tag.replace('.', "/"))]}));
-        let mut listed: serde_json::Map<String, Value> = ["alert", "menu", "menu.item", "menu.dot", "nav", "nav.link"].into_iter().map(anonymous).collect();
+        let mut listed: serde_json::Map<String, Value> = ["alert", "menu", "menu.item", "menu.dot", "nav", "nav.link", "badge", "chip"].into_iter().map(anonymous).collect();
         listed.insert("ui::button".into(), serde_json::json!({"paths": ["resources/views/ui/button.blade.php"]}));
         listed.insert("card".into(), serde_json::json!({"paths": ["app/View/Components/Card.php", "resources/views/components/card.blade.php"]}));
         let components = serde_json::json!({"components": listed});
@@ -1067,5 +1153,35 @@ mod tests {
         assert_eq!(types_of("components.menu.item"), owned(&[bag, ("color", "string"), slot]));
         assert_eq!(types_of("components.menu.dot"), owned(&[bag, slot]));
         assert_eq!(types_of("components.nav.link"), owned(&[bag, ("color", "\\App\\Post"), slot]));
+        // Its default where no component tag is around it, but not where one is that leaves it out.
+        assert_eq!(types_of("components.badge"), owned(&[bag, slot, ("tone", "int")]));
+        assert_eq!(types_of("components.chip"), owned(&[bag, slot]));
+    }
+
+    /// Types a class component's view with Laravel's own `Component`, from a real app's `vendor`. Run with
+    /// `TUSK_LARAVEL_APP=<root> cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn types_a_class_components_view_with_laravels_component() {
+        let Ok(root) = std::env::var("TUSK_LARAVEL_APP") else { return };
+        let view = Path::new(&root).join("vendor/laravel/framework/src/Illuminate/View");
+        let read = |name: &str| std::fs::read_to_string(view.join(name)).unwrap();
+        let laravel: Vec<(String, String)> = ["Component.php", "ComponentAttributeBag.php", "ComponentSlot.php", "InvokableComponentVariable.php"].iter().map(|f| (format!("vendor/{f}"), read(f))).collect();
+        let alert = "<?php\nnamespace App\\View\\Components;\nclass Alert extends \\Illuminate\\View\\Component {\n    public string $type = 'info';\n    protected $except = ['secret'];\n    public function render() { return view('components.alert'); }\n    public function isActive(): bool { return true; }\n    public function secret(): int { return 1; }\n    /** @return list<string> */\n    public function labels(string $prefix): array { return []; }\n}\n";
+        let mut files: Vec<(&str, &str)> = laravel.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        // Laravel's view factory reaches `ComponentSlot` in an app, so it's loaded.
+        let slot = "<?php\nfunction slot(\\Illuminate\\View\\ComponentSlot $s) {}\n";
+        files.extend([("app/View/Components/Alert.php", alert), ("app/slot.php", slot), ("resources/views/components/alert.blade.php", "{{ $type }}")]);
+        let fx = Fixture::new(&files);
+        let index = fx.snap.index.read();
+        let types = types_among(&index, &|p| fx.snap.read(p), None, &[path("resources/views/components/alert.blade.php")], "components.alert");
+        let names: Vec<&str> = types.iter().map(|(n, _)| n.as_str()).collect();
+        eprintln!("{types:?}");
+        // Laravel's public static `ignoredParameterNames()` isn't on its ignore list, so views get it too.
+        assert_eq!(names, vec!["attributes", "componentName", "ignoredParameterNames", "isActive", "labels", "slot", "type"]);
+        let type_of = |name: &str| types.iter().find(|(n, _)| n == name).map(|(_, t)| t.as_str());
+        assert_eq!(type_of("attributes"), Some("\\Illuminate\\View\\ComponentAttributeBag"));
+        assert_eq!(type_of("isActive"), Some("\\Illuminate\\View\\InvokableComponentVariable"));
+        assert_eq!(type_of("labels"), Some("\\Closure(string): list<string>"));
     }
 }
