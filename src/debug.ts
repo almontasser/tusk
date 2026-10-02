@@ -18,7 +18,7 @@ import { errorText, showError, status } from "./status";
 import { onProjectValue, projectScope, projectValue, type Scope, setProjectValue, shareItem } from "./projectstate";
 import { projectRelative } from "./projectstatedata";
 import { showPanelView } from "./terminal";
-import { isAbsolute, keyText, mod } from "./platform.ts";
+import { isAbsolute, keyText, mod, thisComputer } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
 type Frame = { id: number; name: string; line: number; source?: { path?: string; name?: string } };
@@ -443,19 +443,19 @@ function parseMappings(text: string): Record<string, string> {
 
 export async function setServerRoot() {
   pick(
-    "Server paths, such as /var/www/html, or /server/path=/local/path for other folders, separated by commas (empty when PHP runs on this Mac)",
+    `Server paths, such as /var/www/html, or /server/path=/local/path for other folders, separated by commas (empty when PHP runs on ${thisComputer})`,
     (q) => {
       const mappings = Object.entries(parseMappings(q));
       const shared = projectScope("debugPathMappings") === "shared";
       const save = (scope?: Scope) => setProjectValue("debugPathMappings", q.trim(), scope).catch(saveError("the server paths"));
       return [
         {
-          label: mappings.length ? mappings.map(([from, to]) => `${from} → ${to}`).join(", ") : "No mapping: PHP runs on this Mac",
-          detail: shared ? "Saves in tusk.json, shared with the project" : "Saves on this Mac",
+          label: mappings.length ? mappings.map(([from, to]) => `${from} → ${to}`).join(", ") : `No mapping: PHP runs on ${thisComputer}`,
+          detail: shared ? "Saves in tusk.json, shared with the project" : `Saves on ${thisComputer}`,
           run: () => save(),
         },
         shared
-          ? { label: "Save on this Mac only", detail: "Moves the paths out of tusk.json", run: () => save("local") }
+          ? { label: `Save on ${thisComputer} only`, detail: "Moves the paths out of tusk.json", run: () => save("local") }
           : { label: "Save and share in tusk.json", detail: "Your team gets the same paths when you commit the file", run: () => save("shared") },
       ];
     },

@@ -9,6 +9,12 @@ export const isWindows = /Windows/.test(agent);
 // For styles that differ, such as the title bar's room for the Mac's window buttons.
 globalThis.document?.documentElement.classList.toggle("mac", isMac);
 
+// What the system calls its places, for text that names them.
+export const [thisComputer, ThisComputer] = isMac ? ["this Mac", "This Mac"] : ["this computer", "This Computer"];
+export const fileManager = isMac ? "Finder" : isWindows ? "File Explorer" : "File Manager";
+export const trash = isWindows ? "Recycle Bin" : "Trash";
+export const passwordStore = isMac ? "the Keychain" : isWindows ? "Credential Manager" : "the system keyring";
+
 /** Whether the platform's command modifier is held: ⌘ on a Mac, Ctrl elsewhere. */
 export const mod = (e: { metaKey: boolean; ctrlKey: boolean }) => (isMac ? e.metaKey : e.ctrlKey);
 

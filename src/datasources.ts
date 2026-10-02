@@ -1,6 +1,6 @@
 // The Data Sources dialog: the project's database connections in a list, and the selected one's settings in a form,
 // as PhpStorm's has them. Nothing is saved until you click Save; database.ts writes what changed.
-import { open, isAbsolute, mod } from "./platform.ts";
+import { isAbsolute, mod, open, passwordStore, thisComputer, ThisComputer } from "./platform.ts";
 import { type Connection, connectionFromUrl, connectionUrl, describe, destinationOf, parseDestination } from "./dbconfig";
 import { h, icon } from "./dom";
 import { listNav } from "./listnav";
@@ -204,7 +204,7 @@ export function openDataSources(o: Options): Promise<{ edits: SourceEdit[]; remo
     port.el.value = c.port ? String(c.port) : "";
     user.el.value = c.username;
     pass.el.value = d.typedPassword ? c.password : "";
-    pass.el.placeholder = d.keychain ? "Leave empty to keep the Keychain's password" : c.password ? (d.overridden ? "Saved in the Keychain" : "From the project") : "No password";
+    pass.el.placeholder = d.keychain ? `Leave empty to keep the password in ${passwordStore}` : c.password ? (d.overridden ? `Saved in ${passwordStore}` : "From the project") : "No password";
     database.el.value = c.database;
     sslMode.value = c.ssl_mode;
     ca.el.value = c.ssl_ca;
@@ -223,8 +223,8 @@ export function openDataSources(o: Options): Promise<{ edits: SourceEdit[]; remo
     note.replaceChildren(
       ...(d.origin === "env"
         ? d.overridden
-          ? ["Overrides the project's .env on this Mac. ", act("Use .env's Values", () => override(false))]
-          : ["From the project's .env, as Laravel reads it. ", act("Override on This Mac", () => override(true))]
+          ? [`Overrides the project's .env on ${thisComputer}. `, act("Use .env's Values", () => override(false))]
+          : ["From the project's .env, as Laravel reads it. ", act(`Override on ${ThisComputer}`, () => override(true))]
         : d.origin === "config"
           ? ["From config/database.php. ", act("Copy to a New Data Source", () => add(d))]
           : d.origin === "redis"
@@ -395,7 +395,7 @@ export function openDataSources(o: Options): Promise<{ edits: SourceEdit[]; remo
         "div",
         { class: "buttons" },
         h("label", { class: "ds-share", title: `${o.root}/tusk.json` }, shareBox, "Share saved connections in tusk.json"),
-        h("span", { class: "dialog-hint" }, "Passwords stay in your Mac's Keychain."),
+        h("span", { class: "dialog-hint" }, `Passwords stay in ${passwordStore}.`),
         h("button", { type: "button", onclick: () => dialog.close() }, "Cancel"),
         saveButton,
       ),

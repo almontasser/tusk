@@ -6,7 +6,8 @@ export type FileLink = { start: number; end: number; path: string; line: number;
 
 // A path with a file extension, then a line in one of the forms tools print it:
 //   app/Foo.php:12  app/Foo.php:12:5  /var/www/html/app/Foo.php(12)  Foo.php on line 12  Foo.php line 12
-const PATTERN = /((?:~|\.{1,2})?\/?(?:[\w.@-]+\/)*[\w.@-]*\w\.[A-Za-z][\w]*)(?::(\d+)(?::(\d+))?|\((\d+)\)| on line (\d+)|, line (\d+))/g;
+// On Windows, a path can start with a drive and use \, such as C:\app\Foo.php:12.
+const PATTERN = /((?:[A-Za-z]:(?=[\\/])|~|\.{1,2})?[\\/]?(?:[\w.@-]+[\\/])*[\w.@-]*\w\.[A-Za-z][\w]*)(?::(\d+)(?::(\d+))?|\((\d+)\)| on line (\d+)|, line (\d+))/g;
 
 /** The file references in one line of terminal output. URLs are left to the web-links addon. */
 export function fileLinks(text: string): FileLink[] {
@@ -57,12 +58,13 @@ export function candidatePaths(path: string, cwd: string, root: string, containe
   return [...new Set([normalize(`${cwd}/${path}`), normalize(`${root}/${path}`)])];
 }
 
-/** An absolute path without `.` and `..` segments. */
+/** An absolute path without `.` and `..` segments, written the app's way: `/`, and a lowercase drive on Windows. */
 function normalize(path: string) {
+  const drive = /^([A-Za-z]):[\\/]/.exec(path)?.[1].toLowerCase();
   const parts: string[] = [];
-  for (const part of path.split("/")) {
+  for (const part of (drive ? path.slice(2) : path).split(/[\\/]/)) {
     if (part === "..") parts.pop();
     else if (part && part !== ".") parts.push(part);
   }
-  return `/${parts.join("/")}`;
+  return `${drive ? `${drive}:` : ""}/${parts.join("/")}`;
 }

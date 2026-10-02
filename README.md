@@ -572,7 +572,11 @@ In a terminal:
   stack trace, or `on line 7` open the file at that line when you click them,
   from test failures, Mago, PHPStan, and PHP errors. Relative paths resolve
   from the terminal's folder, then the project's, and Sail and Docker paths
-  under `/var/www/html` map to the project. Only files that exist are links.
+  under `/var/www/html` map to the project. On Windows, paths such as
+  `C:\app\Models\User.php:42` are links too. Only files that exist are links.
+- Shortcuts with ⌃ or ⌥ go to the shell, such as ⌃R to search its history.
+  On Windows and Linux, Ctrl with a letter and no Shift goes to the shell, so
+  Ctrl+W deletes a word; Ctrl+Shift shortcuts still go to Tusk.
 - Double-click a terminal's tab, or right-click it and choose **Rename…**, to
   rename it. With a tab focused, ← and → move between tabs.
 

@@ -11,7 +11,7 @@ import { openMerge } from "./merge";
 import { confirm } from "./palette";
 import { onSettings, registerSettings, updateSetting } from "./settings";
 import { showError, status, withProgress } from "./status";
-import { keyText, mod } from "./platform.ts";
+import { keyText, mod, trash } from "./platform.ts";
 
 type Host = { root(): string; openFile(path: string): unknown; push(): unknown; showHistory(path: string): unknown };
 let host: Host;
@@ -225,7 +225,7 @@ async function bulk(action: Bulk, keys: string[]) {
   const toHead = items.filter((x) => x.g === "s" && x.f.index !== "A").map((x) => x.f.path);
   const toIndex = items.filter((x) => x.g === "c" && x.f.worktree !== "?").map((x) => x.f.path).filter((p) => !toHead.includes(p));
   const what = paths.length === 1 ? paths[0] : plural(paths.length, "file");
-  const extra = [untracked.length && `${plural(untracked.length, "new file")} ${untracked.length === 1 ? "goes" : "go"} to the Trash`, added.length && `${plural(added.length, "added file")} ${added.length === 1 ? "is" : "are"} unstaged and kept`].filter(Boolean).join("; ");
+  const extra = [untracked.length && `${plural(untracked.length, "new file")} ${untracked.length === 1 ? "goes" : "go"} to the ${trash}`, added.length && `${plural(added.length, "added file")} ${added.length === 1 ? "is" : "are"} unstaged and kept`].filter(Boolean).join("; ");
   if (!(await confirm(`Roll back your changes to ${what}? You can't undo this${extra ? `; ${extra}` : ""}.`, "Rollback"))) return;
   let ok = true;
   if (toHead.length) ok = (await change("restore", "--staged", "--worktree", "--source=HEAD", "--", ...toHead)) && ok;
@@ -236,7 +236,7 @@ async function bulk(action: Bulk, keys: string[]) {
       await invoke("trash_path", { path: `${host.root()}/${path}` });
     } catch (e) {
       ok = false;
-      showError(`Can't move ${path} to the Trash`, e);
+      showError(`Can't move ${path} to the ${trash}`, e);
     }
   }
   await refreshGit();

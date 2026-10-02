@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isMac, keyText, open, shortcutText } from "./platform.ts";
+import { fileManager, isMac, keyText, open, shortcutText, thisComputer, ThisComputer, trash } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
@@ -889,7 +889,7 @@ function showWelcome() {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [
           { label: "Open", run: () => openFolder(dir) },
-          { label: "Reveal in Finder", run: () => revealInFinder(dir) },
+          { label: `Reveal in ${fileManager}`, run: () => revealInFinder(dir) },
           "-",
           { label: "Remove from Recent Projects", run: () => (forgetProject(dir), showWelcome()) },
         ]);
@@ -1283,7 +1283,7 @@ function renderTabs() {
                   "-" as const,
                   { label: "Copy Path", run: () => copyPath(path) },
                   { label: "Copy Relative Path", run: () => copyPath(path, true) },
-                  { label: "Reveal in Finder", run: () => revealInFinder(path) },
+                  { label: `Reveal in ${fileManager}`, run: () => revealInFinder(path) },
                   { label: "Show Local History", run: () => showLocalHistory(path) },
                 ]),
           ]);
@@ -1472,10 +1472,10 @@ const actions: Action[] = [
   { label: "New File…", keys: "Meta+N", run: () => root && newFile() },
   { label: "New Folder…", run: () => root && newFolder() },
   { label: "Rename File…", run: () => rename() },
-  { label: "Move File to Trash", run: () => remove() },
+  { label: `Move File to ${trash}`, run: () => remove() },
   { label: "Copy Path", keys: "Meta+Shift+C", run: () => copyPath() },
   { label: "Copy Reference", keys: "Alt+Shift+Meta+C", run: () => (activeFile() ? copyReference(active, editor.getPosition()?.lineNumber ?? 1) : status("Open a file to copy a reference to its line.")) },
-  { label: "Reveal in Finder", run: () => revealInFinder() },
+  { label: `Reveal in ${fileManager}`, run: () => revealInFinder() },
   { label: "Select Opened File in Project", keys: "Alt+F1", run: selectOpenedFile },
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
@@ -1735,11 +1735,11 @@ function toggleCase() {
 async function chooseDockerService() {
   forgetComposeServices(root);
   const services = await composeServices(root);
-  if (!services.length) return status("No Docker Compose service mounts this project, so commands run on this Mac.");
+  if (!services.length) return status(`No Docker Compose service mounts this project, so commands run on ${thisComputer}.`);
   const current = (await composeService(root))?.name ?? "";
   pick("Run tests, Artisan, and Tinker in", () => [
     ...services.map((s) => ({ label: s.name, detail: `${s.workdir}${s.name === current ? " · current" : ""}`, icon: "codicon-vm", run: () => chooseService(root, s.name) })),
-    { label: "This Mac", detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
+    { label: ThisComputer, detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
     shareItem("dockerService", "Docker service choice"),
   ]);
 }
@@ -1886,9 +1886,12 @@ window.addEventListener(
     if (!action) return;
     // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
     if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
-    // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
+    // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the terminal's own actions.
+    // Off a Mac, Ctrl also plays ⌘'s part, so the shell gets Ctrl with a letter and no Shift, as readline uses it
+    // (Ctrl+W deletes a word there, not the tab), and Ctrl+Shift keys stay the app's.
     const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
-    if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
+    const shellKey = isMac ? /Ctrl|Alt/.test(combo) : e.altKey || (e.ctrlKey && !e.shiftKey && /^Key/.test(e.code));
+    if (inTerminal && shellKey && action.label !== "Terminal" && action.when !== terminalFocused) return;
     e.preventDefault();
     e.stopPropagation();
     action.run();

@@ -2855,7 +2855,13 @@ is read when its rows first show, so collapsed files cost nothing. Rendering
 again keeps each file group open or closed, by the `data-path` on its row.
 
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
-⌃R searches shell history), except ⌥F12, which hides the panel.
+⌃R searches shell history), except ⌥F12, which hides the panel, and the
+terminal's own actions (`when: terminalFocused`). Off a Mac, Ctrl is also ⌘, so
+the global key handler checks the keys pressed rather than the combination:
+Alt, and Ctrl with a letter and no Shift (readline's keys, such as Ctrl+W), go
+to the shell. File references in the output also match Windows paths, with a
+drive and `\`, and `candidatePaths` writes them with `/` and a lowercase
+drive, as the rest of the app does.
 
 ## Git (milestone 5)
 
@@ -7340,6 +7346,15 @@ shows your data, such as a file's content or a database value, which must stay
 as it is. So shared helpers that show only the app's text (`iconButton`,
 `toast`, `status`, context menus, settings help) convert, and each panel wraps
 its other hints.
+
+### 2026-10-02: Windows and Linux name the system's places
+
+Labels and messages name the system's own places: Finder, File Explorer, or
+the file manager; the Trash or the Recycle Bin; the Keychain, Credential
+Manager, or the system keyring; and this Mac or this computer.
+`platform.ts` exports each name. **Reveal in Finder** and **Move File to
+Trash** are action labels, which the keymap saves changed shortcuts by, so
+a shortcut you changed for them on Windows or Linux before 0.1.15 resets.
 
 ### 2026-10-02: A Windows terminal's folder comes from its process
 

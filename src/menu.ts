@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
 import { commandsIn } from "./editorcommands.ts";
-import { isMac, isWindows, shortcutText } from "./platform.ts";
+import { fileManager, isMac, isWindows, shortcutText, trash } from "./platform.ts";
 
 type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean; when?: () => boolean };
 type Native = { native: "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll" | "Services" | "Hide" | "HideOthers" | "ShowAll" | "Quit" | "Minimize" | "Maximize" | "Fullscreen" };
@@ -15,7 +15,7 @@ const MAC_ONLY: Native["native"][] = ["Services", "Hide", "HideOthers", "ShowAll
 
 const LAYOUT: [string, Entry[]][] = [
   ["Tusk", ["About", "Check for Updates…", "-", "Settings…", "Keymap…", "-", native("Services"), "-", native("Hide"), native("HideOthers"), native("ShowAll"), "-", "Quit Tusk"]],
-  ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", "Move File to Trash", "Copy Path", "Copy Reference", "Reveal in Finder", "Change File Encoding…", "-",
+  ["File", ["New File…", "New Folder…", "Open Folder…", "Recent Files", "-", "Save All", "Close Tab", "-", "Rename File…", `Move File to ${trash}`, "Copy Path", "Copy Reference", `Reveal in ${fileManager}`, "Change File Encoding…", "-",
     ["Compare", ["Compare with Clipboard", "Compare with File…"]],
     ["Local History", ["Show Local History", "Show Project Local History", "Put Label…", "Local History: Deleted Files…"]]]],
   ["Edit", [native("Undo"), native("Redo"), "-", native("Cut"), native("Copy"), native("Paste"), native("SelectAll"), "-",
