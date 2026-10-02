@@ -11,7 +11,7 @@ import type { Replacement } from "./replacedata";
 import type { Match, Query } from "./search";
 import { errorText, showError } from "./status";
 import { closeView, showPanelView } from "./terminal";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, range: monaco.IRange): unknown };
 let host: Host;
@@ -48,7 +48,7 @@ export async function showReplacePreview(o: PreviewOptions) {
   const files = new Map<string, typeof items>();
   for (const it of items) if (it.text !== null) files.set(it.m.path, [...(files.get(it.m.path) ?? []), it]);
 
-  const replaceButton = h("button", { class: "primary", title: "Replace the checked matches (⌘⏎)" });
+  const replaceButton = h("button", { class: "primary", title: keyText("Replace the checked matches (⌘⏎)") });
   const summary = h("span", { class: "hierarchy-title" });
   const tree = h("ul", { class: "hierarchy-tree", role: "tree", ariaLabel: "Replacements" });
   const update = () => {

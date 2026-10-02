@@ -49,7 +49,7 @@ import { usesSail } from "./sail";
 import { registerSettings } from "./settings";
 import { errorText, showError, status } from "./status";
 import { showPanelView } from "./terminal";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Result = { columns: string[]; rows: Cell[][]; affected: number; truncated: boolean; total: number; binary?: number[] };
 type Host = { root(): string; openFile(path: string): Promise<unknown>; status(text: string): void };
@@ -485,8 +485,8 @@ export async function openConsole() {
   if (!(await invoke<boolean>("path_exists", { path }))) {
     await invoke("create_dir", { path: dir });
     const hint = isRedis()
-      ? "# ⌘⏎ runs the command on the caret's line, or each line of the selection. Completion suggests commands and keys."
-      : "-- ⌘⏎ runs the statement under the caret, or each statement in the selection. Execute All Statements runs the file.";
+      ? keyText("# ⌘⏎ runs the command on the caret's line, or each line of the selection. Completion suggests commands and keys.")
+      : keyText("-- ⌘⏎ runs the statement under the caret, or each statement in the selection. Execute All Statements runs the file.");
     await invoke("write_file", { path, contents: `${hint}\n\n` });
   }
   await host.openFile(path);

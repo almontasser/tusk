@@ -10,6 +10,7 @@ import type { Item } from "./palette";
 import { projectRelative } from "./projectstatedata";
 import { splitter } from "./splitter";
 import { showPanelView } from "./terminal";
+import { keyText } from "./platform.ts";
 
 type Api = {
   root(): string;
@@ -99,7 +100,7 @@ export function breakpointsView(api: Api) {
     const files = api.list();
     const count = files.reduce((n, [, list]) => n + list.length, 0);
     const rows: HTMLElement[] = [twisty(row(LINES, 1, "Line Breakpoints", h("span", { class: "bp-group" }, "Line Breakpoints"), h("span", { class: "bp-faint" }, String(count))), LINES)];
-    if (!files.length && !folded.has(LINES)) rows.push(h("li", { class: "bp-note" }, "No breakpoints. Click the gutter left of a line, or press ⌘F8, to add one."));
+    if (!files.length && !folded.has(LINES)) rows.push(h("li", { class: "bp-note" }, keyText("No breakpoints. Click the gutter left of a line, or press ⌘F8, to add one.")));
     if (!folded.has(LINES))
       for (const [path, list] of files) {
         const rel = projectRelative(api.root(), path);

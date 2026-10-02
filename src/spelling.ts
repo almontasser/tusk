@@ -11,6 +11,7 @@ import { h } from "./dom";
 import { redrawSpelling, restartSpelling, spelling, SPELLING_LANGUAGES, spellingRoot, spellingServer } from "./lsp";
 import { listEditor, onSettings, openPath, registerSettings, registerSettingsSection, settings as allSettings, updateSetting } from "./settings";
 import { showError, status } from "./status";
+import { thisComputer } from "./platform.ts";
 
 const settings = registerSettings("Spelling", { spellingSeverity: "typo", spellingSkip: "" }, [
   {
@@ -168,7 +169,7 @@ registerSettingsSection({
           listEditor({ label: "the project dictionary", items: project, placeholder: "Add a word", empty: "No words yet.", add: (w) => addWord(w, "project"), remove: (w) => removeWord(w, "project") }),
           hasFile && h("button", { type: "button", class: "setting-open", onclick: () => (document.querySelector<HTMLDialogElement>("#settings")?.close(), openPath(projectPath)) }, `Open ${projectFile}`),
         ),
-      h("p", { class: "setting-subhead" }, "User dictionary (every project on this Mac)"),
+      h("p", { class: "setting-subhead" }, `User dictionary (every project on ${thisComputer})`),
       listEditor({ label: "your dictionary", items: user, placeholder: "Add a word", empty: "No words yet.", add: (w) => addWord(w, "user"), remove: (w) => removeWord(w, "user") }),
     );
   },

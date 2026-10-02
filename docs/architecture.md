@@ -300,6 +300,17 @@ do nothing within 500 ms of a key press: a key the page passed on is the only
 way the menu runs it that soon, since picking an item takes longer. Both are
 tested in `menu.test.ts`.
 
+Windows and Linux work the other way: the menu sees a key first, so a menu
+shortcut would take keys the page runs itself. There the menu shows its
+shortcuts but doesn't run them. `accelerator()` turns `Meta` into Ctrl and
+`Ctrl` into the Windows key (`Super`), as `comboOf` reads them. On Windows, an
+item's text gets a tab and `shortcutText` (`Save All\tCtrl+S`), which Windows
+draws as the shortcut. On Linux, the item gets the accelerator, and
+`menu_shortcuts_shown_only` in `lib.rs` makes GTK's `can-activate-accel`
+answer false for every menu item, so GTK draws the shortcut and passes the key
+on to the page. An accelerator that GTK can't take leaves its item without
+one.
+
 ### Monaco's commands as actions
 
 `src/editorcommands.ts` is a table of Monaco's editing commands: label, Monaco
@@ -535,18 +546,22 @@ the rest of the code doesn't ask which system it's on.
   file, so paths from the editor match those the index finds on disk.
 - **Keys.** Off a Mac, `comboOf` reads Ctrl as the keymap's `Meta` and the
   Windows key as its `Ctrl`, so one keymap serves every system, and
-  `symbolsFor` shows keys as words (`Ctrl+Shift+F`). Handlers that check ⌘ use
-  `mod(e)`. Hints written with the Mac's symbols (`⌥⌘Z`) go through `keyText`:
-  the page's static `<kbd>`s and tooltips at startup, context menus' keys, and
-  status messages. The menu bar gets no accelerators there: the page handles every
-  shortcut, and an accelerator could run an action twice. macOS-only menu
-  items are left out.
+  `shortcutText` in `platform.ts` shows keys as words (`Ctrl+Shift+F`).
+  Handlers that check ⌘ use `mod(e)`. Hints written with the Mac's symbols
+  (`⌥⌘Z`) go through `keyText`: the page's static `<kbd>`s and tooltips at
+  startup, context menus' keys, status messages, toasts, `iconButton`
+  tooltips, and each panel's own hints, tooltips, and placeholders where they
+  are made. `keyText` also names a key on its own (`⏎` reads Enter) and a
+  click (`⌘-click` reads Ctrl+click). A hint that names modifiers in a list,
+  such as the shortcut recorder's, has its own text off a Mac. The menu bar
+  shows the shortcuts but leaves them to the page (see "Menu bar"). macOS-only
+  menu items are left out.
 - **The rest.** Database passwords go through the `keyring` crate: the
   Keychain, Windows' Credential Manager, or Linux's Secret Service. The askpass
   helper talks to the app over a local TCP port with a 128-bit secret, since
   Rust has no Unix sockets on Windows. `open_url` and `reveal_path` use `open`,
-  `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux;
-  on Windows a restored terminal starts in its first folder. A terminal tab
+  `rundll32` and `explorer`, or `xdg-open`. `pty_cwd` reads `/proc` on Linux
+  and the process's memory on Windows (see "Sessions"). A terminal tab
   listens on a channel before its process starts and holds the output until
   xterm's input is connected, because Windows' ConPTY first asks for the cursor
   position (`ESC[6n`) and waits for the answer. The terminal's
@@ -2840,7 +2855,13 @@ is read when its rows first show, so collapsed files cost nothing. Rendering
 again keeps each file group open or closed, by the `data-path` on its row.
 
 While a terminal has focus, shortcuts with ⌃ or ⌥ go to the shell (for example,
-⌃R searches shell history), except ⌥F12, which hides the panel.
+⌃R searches shell history), except ⌥F12, which hides the panel, and the
+terminal's own actions (`when: terminalFocused`). Off a Mac, Ctrl is also ⌘, so
+the global key handler checks the keys pressed rather than the combination:
+Alt, and Ctrl with a letter and no Shift (readline's keys, such as Ctrl+W), go
+to the shell. File references in the output also match Windows paths, with a
+drive and `\`, and `candidatePaths` writes them with `/` and a lowercase
+drive, as the rest of the app does.
 
 ## Git (milestone 5)
 
@@ -3550,8 +3571,16 @@ and reopens the terminals, after the language servers start.
 A shell reopens in its last folder. `terminal.ts` can't see `cd`, so 500 ms
 after you press Enter in a shell, it asks for the shell process's working
 directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
-`PROC_PIDVNODEPATHINFO` (no subprocess). A folder that no longer exists falls
-back to the project folder.
+`PROC_PIDVNODEPATHINFO` (no subprocess). On Linux, it reads
+`/proc/<pid>/cwd`. On Windows, it reads the folder from the shell's process
+parameters with `NtQueryInformationProcess` and `ReadProcessMemory`. cmd and
+Git Bash move their process's folder when you `cd`, but PowerShell moves only
+its own location, on every system. So when the terminal starts PowerShell
+without a command or script of its own, `follow_location` in `pty.rs` adds
+`-NoExit -EncodedCommand` with a prompt that sets
+`[Environment]::CurrentDirectory` to the location and then runs your
+profile's prompt. A folder that no longer exists falls back to the project
+folder.
 
 Each reopened terminal writes its earlier output before its process starts,
 followed by a dimmed `[Restored from the last session]` line. `scrollbackText`
@@ -7295,4 +7324,47 @@ and on newer distributions; it emulates x64, since most Linux desktops are x64.
 GitHub Actions would build natively and faster, but the updater key would then
 have to leave Bitwarden for a repository secret. Release files drop the version
 from their names so the website can link to `releases/latest/download/`.
+
+### 2026-10-02: Menu shortcuts on Windows and Linux show but don't run
+
+The page runs every shortcut itself, with checks the menu can't make, such as
+leaving ⌃ keys to a terminal's shell. On a Mac, the page sees a key first, so
+menu accelerators are safe. On Windows and Linux, the menu sees it first and
+would take it from the page, so the menu there only shows the shortcuts.
+Windows menus draw any text after a tab as the shortcut, so no accelerator is
+set. GTK has no such text, so Linux gets real accelerators that GTK is told
+not to run. Taking the accelerator group off the window would also stop them,
+but muda takes the group off again when the menu changes, which would release
+it twice.
+
+### 2026-10-02: Key hints convert where they're made
+
+Hints in panels, such as "⌘⏎ sends" or a toolbar button's "(⌥⌘Z)", are written
+with the Mac's symbols and pass through `keyText` where the page builds them.
+Converting all text that `h()` builds would be one change, but `h()` also
+shows your data, such as a file's content or a database value, which must stay
+as it is. So shared helpers that show only the app's text (`iconButton`,
+`toast`, `status`, context menus, settings help) convert, and each panel wraps
+its other hints.
+
+### 2026-10-02: Windows and Linux name the system's places
+
+Labels and messages name the system's own places: Finder, File Explorer, or
+the file manager; the Trash or the Recycle Bin; the Keychain, Credential
+Manager, or the system keyring; and this Mac or this computer.
+`platform.ts` exports each name. **Reveal in Finder** and **Move File to
+Trash** are action labels, which the keymap saves changed shortcuts by, so
+a shortcut you changed for them on Windows or Linux before 0.1.15 resets.
+
+### 2026-10-02: A Windows terminal's folder comes from its process
+
+A restored shell on Windows starts in the folder its process was last in, as
+on macOS and Linux. Shell integration that prints the folder (OSC 7 or
+Windows Terminal's OSC 9;9) would need each shell configured, and Windows'
+built-in ConPTY can drop sequences it doesn't know before xterm.js sees them.
+Reading the process's folder needs nothing from the shell and works for cmd
+and Git Bash as they are. PowerShell is the exception, since `cd` there doesn't
+move the process, so its prompt moves it. The prompt is passed as
+`-EncodedCommand`, because PowerShell's command-line parsing of quotes differs
+between versions.
 

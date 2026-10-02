@@ -11,6 +11,7 @@ import { projectRelative } from "./projectstatedata";
 import { showError } from "./status";
 import { showPanelView } from "./terminal";
 import { type Bookmark, MNEMONICS, moveBookmark, moveFile, parseBookmarks } from "./bookmarksdata";
+import { keyText } from "./platform.ts";
 
 let root = () => "";
 let openAt: (path: string, line: number) => unknown = () => {};
@@ -240,7 +241,7 @@ function renderView() {
   if (!viewShown) return;
   for (const path of new Set(bookmarks.map((b) => b.path))) syncLines(path);
   removeAllButton.disabled = !bookmarks.length;
-  if (!bookmarks.length) return tree.replaceChildren(h("li", { class: "muted bm-empty" }, "No bookmarks. Press F3 on a line to add one, or ⌥F3 to add one with a digit or letter, which ⌃1-9 jumps to."));
+  if (!bookmarks.length) return tree.replaceChildren(h("li", { class: "muted bm-empty" }, keyText("No bookmarks. Press F3 on a line to add one, or ⌥F3 to add one with a digit or letter, which ⌃1-9 jumps to.")));
   const rows: HTMLElement[] = [];
   for (const path of new Set(bookmarks.map((b) => b.path))) {
     const k = fileKey(path);

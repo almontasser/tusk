@@ -8,7 +8,7 @@ import { newFileContent, psr4From } from "./psr4";
 import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
 import { hideInTree } from "./treehidden";
-import { keyText, mod } from "./platform.ts";
+import { fileManager, keyText, mod, trash } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -120,13 +120,13 @@ export async function move(from: string, to: string) {
 export async function remove(path = selected || host.active()) {
   if (!path || path === host.root()) return;
   const what = isDir(path) ? "folder" : "file";
-  if (!(await confirm(`Move the ${what} ${relative(path)} to the Trash? Unsaved changes in it are lost.`, "Move to Trash"))) return;
+  if (!(await confirm(`Move the ${what} ${relative(path)} to the ${trash}? Unsaved changes in it are lost.`, `Move to ${trash}`))) return;
   await attempt("Delete", async () => {
     await recordBeforeDelete(path, isDir(path));
     host.forget(path);
     await invoke("trash_path", { path });
     selected = "";
-    host.status(`Moved ${relative(path)} to the Trash.`);
+    host.status(`Moved ${relative(path)} to the ${trash}.`);
   });
 }
 
@@ -231,7 +231,7 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     { label: "New Folder…", run: () => newFolder(dir) },
   ];
   if (path !== host.root()) {
-    items.push("-", { label: "Rename…", run: () => rename(path) }, { label: "Move to Trash", run: () => remove(path) }, { label: "Hide in Project Tree", run: () => hideInTree(rel) });
+    items.push("-", { label: "Rename…", run: () => rename(path) }, { label: `Move to ${trash}`, run: () => remove(path) }, { label: "Hide in Project Tree", run: () => hideInTree(rel) });
   }
   items.push(
     "-",
@@ -242,7 +242,7 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     { label: "Show Local History", run: () => showLocalHistory(path, isDir(path)) },
     { label: "Copy Path", run: () => copyPath(path) },
     { label: "Copy Relative Path", run: () => copyPath(path, true) },
-    { label: "Reveal in Finder", run: () => revealInFinder(path) },
+    { label: `Reveal in ${fileManager}`, run: () => revealInFinder(path) },
   );
   if (exclusion !== "covered") items.push("-", { label: exclusion === "entry" ? "Include in Index" : "Exclude from Index", run: () => excludeFolder(root, rel, exclusion === "no") });
   return items;

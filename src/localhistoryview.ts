@@ -14,7 +14,7 @@ import { confirm } from "./palette";
 import { splitter } from "./splitter";
 import { errorText, showError, withProgress } from "./status";
 import { showPanelView } from "./terminal";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Host = { root(): string; openFile(path: string): unknown };
 let host: Host;
@@ -260,7 +260,7 @@ async function showSelected() {
       return showMessage(`${files.length} ${files.length === 1 ? "file" : "files"} under ${relative(target.path)} have a version from before this label. Revert sets them back to how they were then.`);
     }
     diffLabel.textContent = "";
-    showMessage("Select a version to compare it with the file now. Mark a second one with Space or ⌘-click to compare the two.");
+    showMessage(keyText("Select a version to compare it with the file now. Mark a second one with Space or ⌘-click to compare the two."));
   } catch (e) {
     if (id !== loadId) return;
     diffLabel.textContent = "";

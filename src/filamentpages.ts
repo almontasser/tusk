@@ -14,7 +14,7 @@ import { addMember, type Edit, findCall, insertItem, methodNamed, nodeValue, typ
 import { historySettings } from "./historyview";
 import { confirm } from "./palette";
 import { showError } from "./status";
-import { isAbsolute } from "./platform.ts";
+import { isAbsolute, keyText, trash } from "./platform.ts";
 
 const HEROICON = "Filament\\Support\\Icons\\Heroicon";
 
@@ -102,10 +102,10 @@ async function moveRelation(d: Designer, doc: Doc, i: number, by: number) {
 async function removeRelation(d: Designer, doc: Doc, i: number, file: string | null) {
   const { array } = relationsInCode(d.cls!);
   if (!array) return;
-  const choice = file ? await (await import("./palette")).choose("Remove the relation manager from the resource?", ["Remove it", "Remove it and move its file to the Trash", "Cancel"]) : "Remove it";
+  const choice = file ? await (await import("./palette")).choose("Remove the relation manager from the resource?", ["Remove it", `Remove it and move its file to the ${trash}`, "Cancel"]) : "Remove it";
   if (!choice || choice === "Cancel") return;
   await d.apply(doc, () => [removeItem(doc.text, array, i)], "Removed the relation manager");
-  if (choice.includes("Trash") && file) await (await import("@tauri-apps/api/core")).invoke("trash_path", { path: file }).catch((e) => showError("Can't move the file to the Trash", e));
+  if (choice.includes(trash) && file) await (await import("@tauri-apps/api/core")).invoke("trash_path", { path: file }).catch((e) => showError(`Can't move the file to the ${trash}`, e));
   fapp.forget(["app"]);
   await d.load();
 }
@@ -624,7 +624,7 @@ export function renderRootSettings(d: Designer, ref: { kind: RootKind; doc: Doc;
       h("h4", {}, "Tips"),
       h("p", {}, "Drag components from the left onto the canvas, or click one to add it after the selection."),
       h("p", {}, "Drag a model column to get the component that suits it, already configured."),
-      h("p", {}, h("kbd", {}, "⌫"), " deletes, ", h("kbd", {}, "⌘D"), " duplicates, ", h("kbd", {}, "⌥↑"), h("kbd", {}, "⌥↓"), " move, and ", h("kbd", {}, "⌘Z"), " undoes."),
+      h("p", {}, h("kbd", {}, keyText("⌫")), " deletes, ", h("kbd", {}, keyText("⌘D")), " duplicates, ", h("kbd", {}, keyText("⌥↑")), h("kbd", {}, keyText("⌥↓")), " move, and ", h("kbd", {}, keyText("⌘Z")), " undoes."),
     ),
   );
 

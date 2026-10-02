@@ -3,7 +3,7 @@
 // is listed too, for profiles you made yourself.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
-import { open } from "./platform.ts";
+import { fileManager, open } from "./platform.ts";
 import { type Call, type CallNode, fromRaw, groupQueries, hotSpots, parseSqlTrace, type Profile, type RawProfile, type ProfiledFunction, type Query, type QueryGroup, withBindings } from "./cachegrind";
 import { pick, rank } from "./palette";
 import { monaco } from "./editor";
@@ -481,7 +481,7 @@ panel.innerHTML = `
   <div class="tests-toolbar">
     <button data-action="open" title="Open another profile"><span class="codicon codicon-folder-opened"></span></button>
     <button data-action="compare" title="Compare with another profile, such as one from before your change"><span class="codicon codicon-diff"></span></button>
-    <button data-action="reveal" title="Reveal the profile file in Finder"><span class="codicon codicon-file-symlink-file"></span></button>
+    <button data-action="reveal" title="Reveal the profile file in ${fileManager}"><span class="codicon codicon-file-symlink-file"></span></button>
     <div class="segmented" role="group" aria-label="View">
       <button data-view="functions" aria-pressed="true">Functions</button>
       <button data-view="tree" aria-pressed="false">Call tree</button>

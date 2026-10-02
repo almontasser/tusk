@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isMac, keyText, open } from "./platform.ts";
+import { fileManager, isMac, keyText, open, shortcutText, thisComputer, ThisComputer, trash } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
@@ -123,7 +123,7 @@ function addPane(): Pane {
 
 /** Menu rows for the actions with these labels that apply now, with their shortcuts from the keymap. */
 const menuActions = (...labels: string[]) =>
-  actions.filter((a) => labels.includes(a.label) && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+  actions.filter((a) => labels.includes(a.label) && (!a.when || a.when())).map((a) => ({ label: a.label, keys: shortcutText(a.keys), run: a.run }));
 
 /** The context menu of the code: the actions for the caret, as PhpStorm's editor menu has them. */
 function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
@@ -200,7 +200,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     "-",
     ...blameMenu(ed, line, e.event.posx, e.event.posy),
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
-    { label: "Copy Reference", keys: symbolsFor(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
+    { label: "Copy Reference", keys: shortcutText(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
   return true;
@@ -826,7 +826,7 @@ function updateProblems() {
   const { project, errors, warnings, errorFiles } = problemCounts();
   $("error-count").textContent = String(errors);
   $("warning-count").textContent = String(warnings);
-  $("problems").title = project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)";
+  $("problems").title = keyText(project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)");
   document.querySelector<HTMLElement>('#activitybar [data-panel="problems"]')!.dataset.count = errors > 99 ? "99+" : errors ? String(errors) : "";
   errorPaths = withFolders(errorFiles, root);
   markErrors();
@@ -889,7 +889,7 @@ function showWelcome() {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [
           { label: "Open", run: () => openFolder(dir) },
-          { label: "Reveal in Finder", run: () => revealInFinder(dir) },
+          { label: `Reveal in ${fileManager}`, run: () => revealInFinder(dir) },
           "-",
           { label: "Remove from Recent Projects", run: () => (forgetProject(dir), showWelcome()) },
         ]);
@@ -1283,7 +1283,7 @@ function renderTabs() {
                   "-" as const,
                   { label: "Copy Path", run: () => copyPath(path) },
                   { label: "Copy Relative Path", run: () => copyPath(path, true) },
-                  { label: "Reveal in Finder", run: () => revealInFinder(path) },
+                  { label: `Reveal in ${fileManager}`, run: () => revealInFinder(path) },
                   { label: "Show Local History", run: () => showLocalHistory(path) },
                 ]),
           ]);
@@ -1292,7 +1292,7 @@ function renderTabs() {
         el.ondragstart = (e) => ((draggedTab = { path, from: pane }), e.dataTransfer?.setData("application/x-editor-tab", path));
         const close = document.createElement("span");
         close.className = "close";
-        close.title = "Close (⌘W)";
+        close.title = keyText("Close (⌘W)");
         close.onclick = (e) => (e.stopPropagation(), closeTab(path, pane));
         el.append(close);
         return el;
@@ -1472,10 +1472,10 @@ const actions: Action[] = [
   { label: "New File…", keys: "Meta+N", run: () => root && newFile() },
   { label: "New Folder…", run: () => root && newFolder() },
   { label: "Rename File…", run: () => rename() },
-  { label: "Move File to Trash", run: () => remove() },
+  { label: `Move File to ${trash}`, run: () => remove() },
   { label: "Copy Path", keys: "Meta+Shift+C", run: () => copyPath() },
   { label: "Copy Reference", keys: "Alt+Shift+Meta+C", run: () => (activeFile() ? copyReference(active, editor.getPosition()?.lineNumber ?? 1) : status("Open a file to copy a reference to its line.")) },
-  { label: "Reveal in Finder", run: () => revealInFinder() },
+  { label: `Reveal in ${fileManager}`, run: () => revealInFinder() },
   { label: "Select Opened File in Project", keys: "Alt+F1", run: selectOpenedFile },
   editorAction("Go to Declaration", "Meta+B", "editor.action.revealDefinition"),
   editorAction("Go to Implementation", "Alt+Meta+B", "editor.action.goToImplementation"),
@@ -1735,30 +1735,16 @@ function toggleCase() {
 async function chooseDockerService() {
   forgetComposeServices(root);
   const services = await composeServices(root);
-  if (!services.length) return status("No Docker Compose service mounts this project, so commands run on this Mac.");
+  if (!services.length) return status(`No Docker Compose service mounts this project, so commands run on ${thisComputer}.`);
   const current = (await composeService(root))?.name ?? "";
   pick("Run tests, Artisan, and Tinker in", () => [
     ...services.map((s) => ({ label: s.name, detail: `${s.workdir}${s.name === current ? " · current" : ""}`, icon: "codicon-vm", run: () => chooseService(root, s.name) })),
-    { label: "This Mac", detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
+    { label: ThisComputer, detail: current ? "" : "current", icon: "codicon-device-desktop", run: () => chooseService(root, "") },
     shareItem("dockerService", "Docker service choice"),
   ]);
 }
 
-// Keys shown as the Mac draws them; elsewhere as words, such as `Ctrl+Shift+F`.
-const KEY_SYMBOLS: Record<string, string> = {
-  Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
-  Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
-};
-const symbolsFor = (keys?: string) => keys && keyText(macSymbols(keys)!);
-const macSymbols = (keys?: string) =>
-  keys
-    ?.replace(/^(\w+) \1$/, "$1+$1+")
-    .replace(/Ctrl\+/g, "⌃")
-    .replace(/Alt\+/g, "⌥")
-    .replace(/Shift\+/g, "⇧")
-    .replace(/Meta\+/g, "⌘")
-    .replace(/[A-Z][a-z]+[A-Za-z]*$/, (key) => KEY_SYMBOLS[key] ?? key);
-const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
+const actionItems = () => actions.map((a) => ({ label: a.label, detail: shortcutText(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
 
@@ -1799,7 +1785,7 @@ function editKeymap() {
       q,
       actions.map((a) => ({
         label: a.label,
-        detail: `${symbolsFor(a.keys) || "No shortcut"}${a.label in settings.keymap ? " (changed)" : ""}`,
+        detail: `${shortcutText(a.keys) || "No shortcut"}${a.label in settings.keymap ? " (changed)" : ""}`,
         run: () => recordShortcut(a),
       })),
     ),
@@ -1813,7 +1799,7 @@ function recordShortcut(action: Action) {
   recording = true;
   const overlay = document.createElement("div");
   overlay.id = "shortcut-recorder";
-  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
+  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">${isMac ? "Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice." : "Use Ctrl or Alt with a key, a function key, or tap Shift, Ctrl, or Alt twice."} Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
   overlay.querySelector("h2")!.textContent = action.label;
   document.body.append(overlay);
   const save = (keys: string | undefined) => {
@@ -1824,7 +1810,7 @@ function recordShortcut(action: Action) {
     const taken = keys && actions.find((a) => a !== action && a.keys && canonical(a.keys) === keys);
     if (taken) keymap[taken.label] = "";
     updateSetting("keymap", keymap);
-    status(`${action.label}: ${symbolsFor(action.keys) || "no shortcut"}${taken ? `. Removed it from ${taken.label}.` : ""}`);
+    status(`${action.label}: ${shortcutText(action.keys) || "no shortcut"}${taken ? `. Removed it from ${taken.label}.` : ""}`);
   };
   const finish = () => {
     recording = false;
@@ -1900,9 +1886,12 @@ window.addEventListener(
     if (!action) return;
     // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
     if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
-    // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the panel toggle.
+    // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the terminal's own actions.
+    // Off a Mac, Ctrl also plays ⌘'s part, so the shell gets Ctrl with a letter and no Shift, as readline uses it
+    // (Ctrl+W deletes a word there, not the tab), and Ctrl+Shift keys stay the app's.
     const inTerminal = document.activeElement?.closest("#terminals, .docked.term");
-    if (inTerminal && /Ctrl|Alt/.test(combo) && action.label !== "Terminal") return;
+    const shellKey = isMac ? /Ctrl|Alt/.test(combo) : e.altKey || (e.ctrlKey && !e.shiftKey && /^Key/.test(e.code));
+    if (inTerminal && shellKey && action.label !== "Terminal" && action.when !== terminalFocused) return;
     e.preventDefault();
     e.stopPropagation();
     action.run();

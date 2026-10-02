@@ -6,6 +6,7 @@ import { formattersChanged, formatterTools } from "./format";
 import { projectScope, projectValue, setProjectValue } from "./projectstate";
 import { settings } from "./settings";
 import { showError } from "./status";
+import { keyText } from "./platform.ts";
 
 /** What a formatter option says about whether it can run in this project. */
 function note(id: FormatterId, group: string) {
@@ -61,7 +62,7 @@ export function openFormatters() {
       "form",
       { method: "dialog" },
       h("h2", {}, "Formatters"),
-      h("p", { class: "muted" }, "How Reformat Code (⌥⌘L) and format on save format each language in this project. Default follows Settings > Editor > Format files when saving."),
+      h("p", { class: "muted" }, keyText("How Reformat Code (⌥⌘L) and format on save format each language in this project. Default follows Settings > Editor > Format files when saving.")),
       h("div", { class: "exclusions-table" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Language"), h("th", {}, "Formatter"), h("th", {}, "On save"))), h("tbody", {}, ...rows.map((r) => r.tr)))),
       h(
         "div",

@@ -7,6 +7,7 @@ import { appDataDir } from "@tauri-apps/api/path";
 import { toast } from "./dom";
 import { type Item, pick } from "./palette";
 import { changedKeys, localFileName, migrate, parseShared, type Values, writeShared } from "./projectstatedata";
+import { passwordStore, thisComputer } from "./platform.ts";
 
 export type Scope = "shared" | "local";
 
@@ -170,7 +171,7 @@ export const SHAREABLE: { label: string; keys: string[]; detail: string }[] = [
   { label: "Formatters", keys: ["formatters"], detail: "The formatter and format on save for each language" },
   { label: "PHP analysis settings", keys: ["phpAnalysis"], detail: "Extra stub folders, and whether to index every library file" },
   { label: "PHPStan settings", keys: ["phpstan"], detail: "When it runs, its configuration file, level, memory limit, and timeout" },
-  { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: "Names, URLs, SSH tunnels, and read-only choices; passwords stay in the Keychain" },
+  { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: `Names, URLs, SSH tunnels, and read-only choices; passwords stay in ${passwordStore}` },
 ];
 
 const isShared = (keys: string[]) => keys.some((k) => projectScope(k) === "shared");
@@ -181,7 +182,7 @@ async function toggleShared(keys: string[], what: string) {
   if (!keys.some((k) => projectScope(k))) return toast(`Set the ${what} first, then share it.`, { kind: "info" });
   try {
     for (const k of keys) await setProjectScope(k, sharing ? "shared" : "local");
-    toast(sharing ? `Moved the ${what} to tusk.json. Commit the file to share it with your team.` : `Moved the ${what} out of tusk.json, to this Mac only.`, { kind: "info", timeout: 4000 });
+    toast(sharing ? `Moved the ${what} to tusk.json. Commit the file to share it with your team.` : `Moved the ${what} out of tusk.json, to ${thisComputer} only.`, { kind: "info", timeout: 4000 });
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
   }
@@ -193,7 +194,7 @@ export function shareItem(keys: string | string[], what: string): Item {
   const shared = isShared(list);
   return {
     label: shared ? `Stop sharing the ${what}` : `Share the ${what} in tusk.json`,
-    detail: shared ? "Shared with the project now; keep it on this Mac only" : "On this Mac only now; share it with your team",
+    detail: shared ? `Shared with the project now; keep it on ${thisComputer} only` : `On ${thisComputer} only now; share it with your team`,
     icon: shared ? "codicon-device-desktop" : "codicon-organization",
     run: () => toggleShared(list, what),
   };
@@ -208,7 +209,7 @@ export function chooseSharedState() {
       const set = s.keys.some((k) => projectScope(k));
       return {
         label: `${shared ? "✓ " : ""}${s.label}`,
-        detail: `${shared ? "Shared in tusk.json" : set ? "On this Mac only" : "Not set"} · ${s.detail}`,
+        detail: `${shared ? "Shared in tusk.json" : set ? `On ${thisComputer} only` : "Not set"} · ${s.detail}`,
         icon: shared ? "codicon-organization" : "codicon-device-desktop",
         run: () => toggleShared(s.keys, s.label.toLowerCase()).then(chooseSharedState),
       };

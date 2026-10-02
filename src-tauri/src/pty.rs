@@ -33,7 +33,7 @@ pub fn pty_spawn(
     cols: u16,
     channel: Option<String>,
 ) -> Result<u32, String> {
-    let command = command.filter(|c| !c.is_empty()).unwrap_or_else(crate::toolpaths::shell);
+    let command = command.filter(|c| !c.is_empty()).unwrap_or_else(|| follow_location(crate::toolpaths::shell()));
     crate::toolpaths::check(&command)?;
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
@@ -151,10 +151,68 @@ fn process_cwd(pid: u32) -> Option<String> {
     Some(std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?.to_string_lossy().into_owned())
 }
 
-/// Windows doesn't let one process read another's folder simply, so a restored shell starts where it first did.
+/// Windows keeps a process's folder in its process parameters, which only the process itself has an API for, so this
+/// reads them from its memory: the PEB, its `ProcessParameters` (at 0x20), and their `CurrentDirectory` (at 0x38), a
+/// counted UTF-16 string. The offsets are the 64-bit layout's, which every Windows the app runs on uses.
 #[cfg(windows)]
-fn process_cwd(_pid: u32) -> Option<String> {
-    None
+fn process_cwd(pid: u32) -> Option<String> {
+    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let read = |address: usize, buf: &mut [u8]| ReadProcessMemory(process, address as _, buf.as_mut_ptr().cast(), buf.len(), std::ptr::null_mut()) != 0;
+        let cwd = (|| {
+            let mut info = PROCESS_BASIC_INFORMATION::default();
+            let size = std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32;
+            if NtQueryInformationProcess(process, ProcessBasicInformation, (&mut info as *mut PROCESS_BASIC_INFORMATION).cast(), size, std::ptr::null_mut()) != 0 {
+                return None;
+            }
+            let mut params = [0u8; 8];
+            read(info.PebBaseAddress as usize + 0x20, &mut params).then_some(())?;
+            let mut dir = [0u8; 16];
+            read(usize::from_le_bytes(params) + 0x38, &mut dir).then_some(())?;
+            // Length in bytes, then the buffer's address after 4 bytes of padding. A folder is under 32,767 characters.
+            let len = u16::from_le_bytes([dir[0], dir[1]]) as usize;
+            let mut text = vec![0u8; len];
+            read(usize::from_le_bytes(dir[8..].try_into().ok()?), &mut text).then_some(())?;
+            let wide: Vec<u16> = text.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            Some(String::from_utf16_lossy(&wide))
+        })();
+        CloseHandle(process);
+        cwd.map(|dir| without_trailing_separator(&dir).to_string())
+    }
+}
+
+/// A Windows folder as its process keeps it, `C:\Users\me\`, without the separator at the end, which a drive's root keeps.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn without_trailing_separator(dir: &str) -> &str {
+    let trimmed = dir.trim_end_matches('\\');
+    if trimmed.ends_with(':') { dir } else { trimmed }
+}
+
+/// PowerShell's `cd` moves PowerShell's own location, not its process's folder, which is what `pty_cwd` reads. So the
+/// terminal's PowerShell gets a prompt that moves the folder along, wrapping the prompt from your profile. A shell from
+/// Settings that runs its own command or script keeps its arguments.
+fn follow_location(mut shell: Vec<String>) -> Vec<String> {
+    const PROMPT: &str = "$global:TuskPrompt = $function:prompt\n\
+        function global:prompt { if ($PWD.Provider.Name -eq 'FileSystem') { [Environment]::CurrentDirectory = $PWD.ProviderPath }; & $global:TuskPrompt }";
+    let name = std::path::Path::new(&shell[0]).file_stem().map(|s| s.to_string_lossy().to_lowercase());
+    // -Command, -File, -EncodedCommand, or -NoExit, by any prefix PowerShell takes (not -ExecutionPolicy), or a script.
+    let own = shell[1..].iter().any(|a| {
+        let a = a.to_lowercase();
+        ["-c", "-f", "-noe", "-ec", "-en"].iter().any(|p| a.starts_with(p)) || a == "-e" || !a.starts_with('-')
+    });
+    if matches!(name.as_deref(), Some("powershell" | "pwsh")) && !own {
+        use base64::Engine;
+        let utf16: Vec<u8> = PROMPT.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        shell.extend(["-NoExit".into(), "-EncodedCommand".into(), base64::engine::general_purpose::STANDARD.encode(utf16)]);
+    }
+    shell
 }
 
 /// Takes the longest valid UTF-8 prefix from `buf`, leaving a character that was split
@@ -172,7 +230,31 @@ fn take_utf8(buf: &mut Vec<u8>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::take_utf8;
+    use super::{follow_location, take_utf8, without_trailing_separator};
+
+    #[test]
+    fn powershell_moves_its_folder_with_its_location() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let shell = follow_location(args(&["powershell.exe", "-NoLogo"]));
+        assert_eq!(shell[1..4], args(&["-NoLogo", "-NoExit", "-EncodedCommand"]));
+        assert!(shell[4].len() > 100);
+        assert_eq!(follow_location(args(&[r"C:\Program Files\PowerShell\7\pwsh.exe", "-ExecutionPolicy", "Bypass"])).len(), 3);
+        assert_eq!(follow_location(args(&["pwsh", "-ExecutionPolicy", "RemoteSigned"]))[1..], args(&["-ExecutionPolicy", "RemoteSigned"]));
+        assert_eq!(follow_location(args(&["pwsh", "-NoLogo"])).len(), 5);
+        // Its own command, script, or -NoExit: left as it is.
+        for own in [&["pwsh", "-Command", "Get-Date"][..], &["pwsh", "-c", "x"], &["powershell", "-File", "a.ps1"], &["pwsh", "-NoExit"], &["pwsh", "a.ps1"]] {
+            assert_eq!(follow_location(args(own)), args(own));
+        }
+        assert_eq!(follow_location(args(&["cmd.exe"])), args(&["cmd.exe"]));
+        assert_eq!(follow_location(args(&["bash", "-l"])), args(&["bash", "-l"]));
+    }
+
+    #[test]
+    fn a_windows_folder_loses_its_trailing_separator() {
+        assert_eq!(without_trailing_separator(r"C:\Users\me\"), r"C:\Users\me");
+        assert_eq!(without_trailing_separator(r"C:\"), r"C:\");
+        assert_eq!(without_trailing_separator(r"\\server\share\dir\"), r"\\server\share\dir");
+    }
 
     #[test]
     fn keeps_split_characters_for_the_next_read() {

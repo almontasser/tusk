@@ -20,7 +20,7 @@ import { onSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
 import { errorText, showError } from "./status";
 import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
-import { isWindows } from "./platform.ts";
+import { isWindows, keyText, thisComputer } from "./platform.ts";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
@@ -201,7 +201,7 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
   // On this Mac, Composer is the bundled composer.phar; in a container, the container's own.
   if (c.type === "composer" && !container) argv = ["php", await toolPath("composer/composer.phar"), ...argv.slice(1)];
   // The profile would be written inside the container, where the editor can't find it.
-  if (mode === "profile" && container) return showError(`Profiling runs tests on this Mac, not in a container. Stop the ${container.label} containers, or turn off Docker in “${c.name}”, to profile.`), null;
+  if (mode === "profile" && container) return showError(`Profiling runs tests on ${thisComputer}, not in a container. Stop the ${container.label} containers, or turn off Docker in “${c.name}”, to profile.`), null;
   const title = `${prefixes[mode]}${c.name}${container ? ` (${container.label})` : ""}`;
   if (debug) await startDebugging();
 
@@ -400,7 +400,7 @@ function renderWidget() {
   const c = current?.config;
   const running = c ? runsOf(c.name).length : 0;
   const button = (name: string, title: string, onclick: () => unknown, disabled = false, cls = "") =>
-    h("button", { class: `tb-icon ${cls}`, title, ariaLabel: title, disabled, onclick }, icon(name));
+    h("button", { class: `tb-icon ${cls}`, title: keyText(title), ariaLabel: keyText(title), disabled, onclick }, icon(name));
   el.hidden = !getRoot?.();
   el.replaceChildren(
     h(

@@ -1,4 +1,6 @@
 // Builds DOM elements in one expression: h("button", { class: "primary", onclick }, "Save").
+import { keyText } from "./platform.ts";
+
 type Child = Node | string | null | undefined | false;
 type Props<K extends keyof HTMLElementTagNameMap> = Omit<Partial<HTMLElementTagNameMap[K]>, "style"> & { class?: string; style?: string; data?: Record<string, string> };
 
@@ -27,7 +29,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props<K>
 }
 
 export const icon = (name: string) => h("span", { class: `codicon codicon-${name}` });
-export const iconButton = (name: string, title: string, onclick: () => unknown) => h("button", { class: "icon-button", title, onclick }, icon(name));
+// Tooltips name keys as the Mac draws them (⌘W); keyText names them as this platform does.
+export const iconButton = (name: string, title: string, onclick: () => unknown) => h("button", { class: "icon-button", title: keyText(title), onclick }, icon(name));
 
 /**
  * Shows a message in the corner. An error closes itself after 6 seconds; a hint with an action stays until
@@ -40,7 +43,7 @@ export function toast(text: string, { kind = "error", action, timeout }: { kind?
   if (kind === "error") console.warn(`[toast] ${text}`); // So an error can be traced after the toast closes.
   const close = () => el.remove();
   // Git's "hint:" lines repeat advice; the first lines carry the error.
-  const message = text.split("\n").filter((l) => l.trim() && !l.startsWith("hint:")).join(" ");
+  const message = keyText(text.split("\n").filter((l) => l.trim() && !l.startsWith("hint:")).join(" "));
   // The same message twice, such as from a failure that repeats, shows once while its toast is up.
   const shown = [...document.querySelectorAll<HTMLElement>(`#toasts .toast.${kind} p`)].some((p) => p.textContent === message);
   if (shown) return;

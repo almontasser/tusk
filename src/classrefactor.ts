@@ -32,7 +32,7 @@ import { readText } from "./projectfiles";
 import { namespaceFor, pathsFor, psr4From } from "./psr4";
 import { descendantsOf, textOf } from "./refactor";
 import { showRefactorPreview, type Skipped } from "./refactorpreview";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Host = { root(): string; status(text: string): void; openAt(path: string, line: number): Promise<unknown> };
 let host: Host;
@@ -264,7 +264,7 @@ function memberDialog(spec: DialogSpec) {
       h(
         "div",
         { class: "buttons" },
-        h("span", { class: "dialog-hint" }, "↑↓ move · Space selects · ⌘A selects all · ⏎ refactors"),
+        h("span", { class: "dialog-hint" }, keyText("↑↓ move · Space selects · ⌘A selects all · ⏎ refactors")),
         h("button", { type: "button", textContent: "Cancel", onclick: () => dialog.close() }),
         previewButton,
         refactorButton,

@@ -3,7 +3,7 @@
 // so the file stays the one copy of each request, and edits in the editor show in the form.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save, isAbsolute, mod } from "./platform.ts";
+import { isAbsolute, keyText, mod, open, save } from "./platform.ts";
 import { monaco } from "./editor";
 import { showMenu } from "./files";
 import { attachSchema, schemaFor } from "./graphqleditor";
@@ -547,7 +547,7 @@ function renderRequestTabs() {
       const dirty = tab.draft !== null;
       // The file tells apart tabs with the same name.
       const clash = labels.some((l, j) => j !== i && l === labels[i] && requestTabs[j].path !== tab.path);
-      const close = h("span", { class: "close", role: "button", title: dirty ? "Close (unsaved changes: ⌘S saves them)" : "Close (⌘W)" });
+      const close = h("span", { class: "close", role: "button", title: keyText(dirty ? "Close (unsaved changes: ⌘S saves them)" : "Close (⌘W)") });
       const el = h(
         "div",
         {
@@ -695,7 +695,7 @@ const panel = h("div", { class: "http-client" });
 const methodSelect = h("select", { class: "http-method", title: "Method" }, ...METHODS.map((m) => h("option", { value: m, textContent: m })));
 const urlInput = h("input", { class: "http-url", placeholder: "{{host}}/api/posts", spellcheck: false, title: "URL. Use {{name}} for variables" });
 const urlPreview = h("div", { class: "http-url-preview" });
-const sendButton = h("button", { class: "primary http-send", title: "Send (⌘⏎)" }, icon("play"), "Send");
+const sendButton = h("button", { class: "primary http-send", title: keyText("Send (⌘⏎)") }, icon("play"), "Send");
 const envSelect = h("select", { class: "http-env", title: "Environment" });
 const moreButton = iconButton("ellipsis", "More", () => {
   const r = sendButton.getBoundingClientRect();
@@ -773,12 +773,12 @@ function renderRequest() {
   methodSelect.dataset.method = r.method;
   if (current?.sending) {
     sendButton.replaceChildren(icon("close"), "Cancel");
-    sendButton.title = "Cancel the request (⌘⏎)";
+    sendButton.title = keyText("Cancel the request (⌘⏎)");
   } else {
     const ws = r.method === "WEBSOCKET";
     const connected = ws && socket?.tab === current;
     sendButton.replaceChildren(icon(ws ? (connected ? "debug-disconnect" : "plug") : "play"), ws ? (connected ? "Disconnect" : "Connect") : "Send");
-    sendButton.title = ws ? "" : "Send (⌘⏎)";
+    sendButton.title = ws ? "" : keyText("Send (⌘⏎)");
   }
   renderTabLabels();
   renderReqTab();
@@ -1458,7 +1458,7 @@ function connectWebSocket(r: HttpRequest) {
     const messages = websocketMessages(resolve(r.body, lookup));
     const log = h("div", { class: "http-ws-log" });
     const state = h("span", { class: "http-status" }, "Connecting");
-    const input = h("textarea", { class: "http-ws-input", placeholder: "Message (⌘⏎ sends)", spellcheck: false });
+    const input = h("textarea", { class: "http-ws-input", placeholder: keyText("Message (⌘⏎ sends)"), spellcheck: false });
     const headers = r.headers.filter((x) => x.enabled).map((x) => [x.name, resolve(x.value, lookup)]);
     const channel = `ws-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     let open = false;
@@ -1588,7 +1588,7 @@ function renderResponse() {
   const x = shown;
   if (!x) {
     resTabs.replaceChildren();
-    resBody.replaceChildren(h("p", { class: "http-hint" }, "Send the request to see the response. ⌘⏎ sends from anywhere in this tab."));
+    resBody.replaceChildren(h("p", { class: "http-hint" }, keyText("Send the request to see the response. ⌘⏎ sends from anywhere in this tab.")));
     return;
   }
   const final = x.heads.at(-1);

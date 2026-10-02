@@ -40,7 +40,7 @@ import {
 } from "./redisdata";
 import { withProgress } from "./status";
 import { showPanelView } from "./terminal";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 export type RedisHost = {
   connection(): Connection | null;
@@ -591,7 +591,7 @@ async function textView(key: string, type: string, header: HTMLElement, summary:
         toast(`Not valid JSON: ${message(e)}`);
       }
     });
-  const hint = el("span", "", " ⌘S saves");
+  const hint = el("span", "", keyText(" ⌘S saves"));
   summary.append(hint);
   host.results.append(container);
   valueEditor = monaco.editor.create(container, { ...EDITOR, model: monaco.editor.createModel(original, kind === "json" ? "json" : "plaintext") });

@@ -4,6 +4,7 @@
 import { showMenu } from "./files";
 import { splitter } from "./splitter";
 import { hidePanel, revealPanel } from "./terminal";
+import { keyText } from "./platform.ts";
 
 const $ = (id: string) => document.getElementById(id)!;
 const FULL_WIDTH_KEY = "panelFullWidth";
@@ -37,7 +38,7 @@ export const togglePanelFullWidth = () => setPanelFullWidth(!panelFullWidth());
 function setMaximized(on: boolean) {
   $("workbench").classList.toggle("panel-maximized", on);
   const button = $("panel-maximize");
-  button.title = on ? "Restore (⇧⌘')" : "Maximize (⇧⌘')";
+  button.title = keyText(on ? "Restore (⇧⌘')" : "Maximize (⇧⌘')");
   button.ariaPressed = String(on);
   button.firstElementChild!.className = `codicon codicon-${on ? "screen-normal" : "screen-full"}`;
 }
