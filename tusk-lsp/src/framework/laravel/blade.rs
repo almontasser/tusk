@@ -661,9 +661,73 @@ pub fn tags(line: &str, prefixes: &[String]) -> Vec<(usize, usize, String, bool)
     out
 }
 
+/// The text to insert, and where, to import `fqn` in a view with `@use('fqn')`, or `None` when a `@use` imports it
+/// already. It goes among the `@use` lines at the view's top, in order, or else after the `@props` and `@aware`
+/// lines that start the view, or else first. `@use` compiles to a `use` statement, which PHP refuses inside a
+/// block, so the top is where it works.
+pub fn use_insert(text: &str, fqn: &str) -> Option<(usize, String)> {
+    let fqn = fqn.trim_start_matches('\\');
+    let src = text.as_bytes();
+    let blank = |from: usize| from + src[from..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+    // The class a `@use` imports, as written: `@use('App\Models\Post', 'P')` imports `App\Models\Post`.
+    let imported = |open: usize, close: usize| {
+        let first = text[open + 1..close].split(',').next().unwrap_or_default().trim().trim_matches(['\'', '"']);
+        first.trim_start_matches('\\').to_string()
+    };
+    for (at, _) in text.match_indices("@use") {
+        let open = blank(at + 4);
+        if (at == 0 || !src[at - 1].is_ascii_alphanumeric())
+            && src.get(open) == Some(&b'(')
+            && let Some(close) = matching_paren(src, open)
+            && imported(open, close).eq_ignore_ascii_case(fqn)
+        {
+            return None;
+        }
+    }
+    // The lines at the top that are `@use`, `@props`, or `@aware`, each with where it starts and ends, and the
+    // class a `@use` imports.
+    let mut lead: Vec<(usize, usize, Option<String>)> = vec![];
+    let mut at = 0;
+    loop {
+        let start = blank(at);
+        let Some(name) = ["@use", "@props", "@aware"].into_iter().find(|d| text[start..].starts_with(d)) else { break };
+        let open = blank(start + name.len());
+        let Some(close) = (src.get(open) == Some(&b'(')).then(|| matching_paren(src, open)).flatten() else { break };
+        let end = text[close..].find('\n').map_or(text.len(), |n| close + n + 1);
+        lead.push((at, end, (name == "@use").then(|| imported(open, close))));
+        at = end;
+    }
+    let lower = fqn.to_ascii_lowercase();
+    let uses: Vec<&(usize, usize, Option<String>)> = lead.iter().filter(|l| l.2.is_some()).collect();
+    let at = match uses.iter().find(|(_, _, class)| class.as_ref().is_some_and(|c| c.to_ascii_lowercase() > lower)) {
+        Some((start, _, _)) => *start,
+        None => uses.last().copied().or(lead.last()).map_or(0, |(_, end, _)| *end),
+    };
+    // After a last line without a line break.
+    if at == text.len() && at > 0 && !text.ends_with('\n') {
+        return Some((at, format!("\n@use('{fqn}')")));
+    }
+    Some((at, format!("@use('{fqn}')\n")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_a_class_with_use_at_the_views_top() {
+        let insert = |text: &str, fqn: &str| use_insert(text, fqn).map(|(at, new)| format!("{}{new}{}", &text[..at], &text[at..]));
+        // First, after the lines that start a component, and among the imports in order.
+        assert_eq!(insert("<div>{{ $a }}</div>\n", "App\\Post").unwrap(), "@use('App\\Post')\n<div>{{ $a }}</div>\n");
+        assert_eq!(insert("@props([\n  'a' => 1,\n])\n<div></div>", "App\\Post").unwrap(), "@props([\n  'a' => 1,\n])\n@use('App\\Post')\n<div></div>");
+        let uses = "@use('App\\Models\\A')\n@use('App\\Models\\C', 'C')\n@aware(['x'])\n<p></p>\n";
+        assert_eq!(insert(uses, "App\\Models\\B").unwrap(), "@use('App\\Models\\A')\n@use('App\\Models\\B')\n@use('App\\Models\\C', 'C')\n@aware(['x'])\n<p></p>\n");
+        assert_eq!(insert(uses, "\\Zed").unwrap(), "@use('App\\Models\\A')\n@use('App\\Models\\C', 'C')\n@use('Zed')\n@aware(['x'])\n<p></p>\n");
+        assert_eq!(insert("@props(['a'])", "App\\Post").unwrap(), "@props(['a'])\n@use('App\\Post')");
+        // Never twice, wherever the view imports it, and whatever its alias.
+        assert!(use_insert(uses, "app\\models\\c").is_none());
+        assert!(use_insert("<p>\n@use(\"\\App\\Post\")\n</p>", "App\\Post").is_none());
+    }
 
     #[test]
     fn lays_out_echoes_and_directives_at_their_offsets() {

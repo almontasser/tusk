@@ -68,7 +68,7 @@ fn types_among(index: &Index, read: &dyn Fn(&Path) -> Option<String>, components
             named.entry(name).or_default().push(i);
         }
     }
-    Walk { index, read, components, views: &views, named: &named, code: code_mentions(index, read), stack: vec![], known: HashMap::new(), cut: false }.types(view)
+    Walk { index, read, components, views: &views, named: &named, code: code_mentions(index, read), stack: vec![], known: HashMap::new(), cut: false, contexts: HashMap::new(), including: vec![] }.types(view)
 }
 
 /// The names `text` mentions: its quoted strings without spaces, `'posts.show'` as `posts.show`, and its
@@ -136,13 +136,23 @@ struct Walk<'a> {
     known: HashMap<String, Vec<(String, String)>>,
     /// Whether such a view was left out since the last view on `stack` started.
     cut: bool,
+    /// The views [`Walk::contexts`] answered so far.
+    contexts: HashMap<String, Vec<Around>>,
+    /// The views [`Walk::contexts`] is answering, each included by the one before it.
+    including: Vec<String>,
 }
+
+/// What a component tag that leaves out an `@aware` variable is inside, where Laravel looks for it: `None` for no
+/// component, so it gets its default, `Some(None)` for a component whose data isn't known, and `Some(Some(site))`
+/// for an anonymous component's tag that passes `site`.
+type Around = Option<Option<Site>>;
 
 /// What [`code_sites`] and [`sites_in`] found, by a hash of what they read, for the index's
 /// [`generation`](Index::generation), since every view check reads them for each view that includes it. Each
 /// edit of a view adds an entry until the project's code changes, so a cache past [`CACHED`] entries starts over.
 static CODE_SITES: Cache<Arc<HashMap<String, Vec<Site>>>> = LazyLock::new(Default::default);
 static VIEW_SITES: Cache<Vec<Site>> = LazyLock::new(Default::default);
+static AROUND_SITES: Cache<Vec<Option<Site>>> = LazyLock::new(Default::default);
 type Cache<T> = LazyLock<Mutex<(u64, HashMap<u64, T>)>>;
 const CACHED: usize = 4096;
 
@@ -205,10 +215,7 @@ impl Walk<'_> {
         let tags = component_tags(index, read, components, view);
         let props = if tags.is_empty() { None } else { self::props(index, &child_text, "@props") };
         let names_aware: Props = if tags.is_empty() { vec![] } else { self::props(index, &child_text, "@aware").unwrap_or_default() };
-        let anonymous = |tag: &str| match component_files(components, tag) {
-            Some(files) => files.iter().all(|f| f.ends_with(".blade.php")),
-            None => components.is_none() && default_view(index, read, tag).is_some(),
-        };
+        let anonymous = |tag: &str| anonymous(index, read, components, tag);
         let aware = |parent: &str, text: &str| {
             // A component's own view: an anonymous one's tags pass what it reads, and a class component's aren't known.
             // ponytail: a class component's view outside `components`, or a view included from a component's view,
@@ -237,7 +244,9 @@ impl Walk<'_> {
                 continue;
             }
             let aware = aware(&parent, text);
-            sites.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware, &names, &mut || self.types(&parent)));
+            // Where a tag with no component around it in the view is, through the views that include that view.
+            let outer = if aware.names.is_empty() || aware.own.is_some() { vec![] } else { self.contexts(&parent) };
+            sites.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware, &outer, &names, &mut || self.types(&parent)));
         }
         let mut vars = merge(&sites);
         let Some((path, text)) = own.filter(|_| !sites.is_empty()) else { return vars };
@@ -245,7 +254,7 @@ impl Walk<'_> {
         // other places pass, and add what it passes itself with those types, until they don't change.
         for _ in 0..4 {
             let mut all = sites.clone();
-            all.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware(view, text), &names, &mut || vars.clone()));
+            all.extend(sites_in(index, path, text, &quoted, &tags, props.as_ref(), &aware(view, text), &[], &names, &mut || vars.clone()));
             let next = merge(&all);
             if next == vars {
                 return vars;
@@ -254,6 +263,138 @@ impl Walk<'_> {
         }
         vec![]
     }
+
+    /// The components `view`'s content is inside where Laravel renders it ([`Around`]), as `@aware` looks for its
+    /// variables: for each include of it, the component tag open around the include, or if none, what the view
+    /// that includes it is inside, in turn, and no component where the project's code renders it. A view included
+    /// in a component's own view, or in itself, is inside a component whose data isn't known.
+    fn contexts(&mut self, view: &str) -> Vec<Around> {
+        if let Some(known) = self.contexts.get(view) {
+            return known.clone();
+        }
+        if self.including.iter().any(|v| v == view) {
+            return vec![Some(None)];
+        }
+        self.including.push(view.to_string());
+        let (index, read, components, views) = (self.index, self.read, self.components, self.views);
+        let quoted = [format!("'{view}'"), format!("\"{view}\"")];
+        let mut out: Vec<Around> = vec![];
+        if self.code.get(view).is_some_and(|files| files.iter().any(|f| !f.to_string_lossy().ends_with(".blade.php"))) {
+            out.push(None);
+        }
+        for i in self.named.get(view).cloned().unwrap_or_default() {
+            let (path, text) = &views[i];
+            let Some(parent) = view_name(index, path).filter(|p| p != view) else { continue };
+            let component = parent.starts_with("components.") || !component_tags(index, read, components, &parent).is_empty();
+            let comments = comments(text);
+            let mut tags = vec![];
+            for at in includes(text, &quoted).into_iter().filter(|at| !comments.iter().any(|c| c.contains(at))) {
+                match enclosing(text, at, &comments) {
+                    Some(Some((tag, attrs))) if anonymous(index, read, components, &tag) => tags.push((tag, attrs)),
+                    Some(_) => out.push(Some(None)),
+                    None if component => out.push(Some(None)),
+                    None => out.extend(self.contexts(&parent)),
+                }
+            }
+            if !tags.is_empty() {
+                let vars = self.types(&parent);
+                out.extend(around_sites(index, path, text, &vars, &tags).into_iter().map(Some));
+            }
+        }
+        if out.is_empty() {
+            out.push(None);
+        }
+        let mut unique: Vec<Around> = vec![];
+        for around in out {
+            if !unique.contains(&around) {
+                unique.push(around);
+            }
+        }
+        self.including.pop();
+        self.contexts.insert(view.to_string(), unique.clone());
+        unique
+    }
+}
+
+/// Whether `<x-{tag}>` is an anonymous component's, whose attributes are what it passes.
+fn anonymous(index: &Index, read: &dyn Fn(&Path) -> Option<String>, components: Option<&Value>, tag: &str) -> bool {
+    match component_files(components, tag) {
+        Some(files) => files.iter().all(|f| f.ends_with(".blade.php")),
+        None => components.is_none() && default_view(index, read, tag).is_some(),
+    }
+}
+
+/// Where each `{{-- --}}` comment in `text` is.
+fn comments(text: &str) -> Vec<std::ops::Range<usize>> {
+    text.match_indices("{{--").map(|(at, _)| at..text[at..].find("--}}").map_or(text.len(), |e| at + e)).collect()
+}
+
+/// Where each directive in `text` that includes the view `quoted` names starts: `@include` and its variants, and
+/// `@each`.
+fn includes(text: &str, quoted: &[String; 2]) -> Vec<usize> {
+    let src = text.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut found = vec![];
+    for (at, _) in text.match_indices('@').filter(|(at, _)| *at == 0 || !word(src[at - 1])) {
+        let name_end = at + 1 + src[at + 1..].iter().take_while(|b| word(**b)).count();
+        if !matches!(&text[at + 1..name_end], "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst" | "each") {
+            continue;
+        }
+        let open = name_end + src[name_end..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
+        let Some(close) = (src.get(open) == Some(&b'(')).then(|| blade::matching_paren(src, open)).flatten() else { continue };
+        if quoted.iter().any(|q| text[open..close].contains(q.as_str())) {
+            found.push(at);
+        }
+    }
+    found
+}
+
+/// What each of `tags`, component tags in `text`, the Blade view at `path` whose variables `vars` gives, passes:
+/// each by its name and where its attributes start, as [`enclosing`] gives them, or `None` when its attributes
+/// can't be read.
+fn around_sites(index: &Index, path: &Path, text: &str, vars: &[(String, String)], tags: &[(String, usize)]) -> Vec<Option<Site>> {
+    cached(&AROUND_SITES, index, (path, text, vars, tags), || {
+        let checked = blade::checked_php(text, vars);
+        let arena = LocalArena::new();
+        let parsed = Parsed::new(&arena, path, &checked.php);
+        let analysis = analyze(&parsed, &arena, index);
+        let mut arrays = HashMap::new();
+        walk(&parsed, |node, _| {
+            if let Node::Array(a) = node
+                && let offset = a.left_bracket.start.offset as usize
+                && offset >= checked.head
+                && let Ok(at) = checked.view_offset(offset)
+            {
+                arrays.insert(at, a);
+            }
+        });
+        let bound = |at: usize| bound_type(arrays.get(&at).copied(), &analysis);
+        tags.iter().map(|(tag, at)| tag_attrs(text, *at, tag).map(|(attrs, _, _)| attr_types(attrs, &bound))).collect()
+    })
+}
+
+/// The type of a bound attribute, which [`blade::checked_php`] reads as an array of its value.
+fn bound_type(array: Option<&mago_syntax::cst::Array<'_>>, analysis: &crate::analysis::Analysis) -> Option<String> {
+    match array?.elements.first() {
+        Some(ArrayElement::Value(v)) => analysis.type_of(v.value.span().start.offset, v.value.span().end.offset).and_then(|t| docblock_type(&t)),
+        _ => None,
+    }
+}
+
+/// A tag's attributes with their types, a bound one's from `bound`, by where its value starts.
+fn attr_types(attrs: Vec<(String, Attr)>, bound: &dyn Fn(usize) -> Option<String>) -> Site {
+    attrs
+        .into_iter()
+        .map(|(name, attr)| {
+            let t = match attr {
+                Attr::Bound(at) => bound(at),
+                Attr::Text => Some("string".into()),
+                Attr::Flag => Some("true".into()),
+                Attr::Unknown => None,
+            };
+            (name, t)
+        })
+        .collect()
 }
 
 /// The variables every one of `sites` passes with a known type, with the union of their types.
@@ -285,6 +426,7 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
     let resolver = Resolver::new(&parsed, Some(&analysis), &index.codebase);
     let type_of = |e: &Expression<'_>| analysis.type_of(e.span().start.offset, e.span().end.offset);
     let source = |span: mago_span::Span| &text[span.start.offset as usize..span.end.offset as usize];
+    let except = if text.contains("except") { except_changes(&parsed, &resolver) } else { ExceptChanges::new() };
     walk(&parsed, |node, path| {
         let Node::LiteralString(lit) = node else { return };
         let Some(view) = lit.value.and_then(|v| std::str::from_utf8(v).ok()).filter(|v| !v.is_empty() && !v.contains(char::is_whitespace)) else { return };
@@ -330,18 +472,21 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
         if let Some(class) = class.filter(|c| component || index.codebase.is_instance_of(c.as_bytes(), b"Livewire\\Component")) {
             renders = true;
             let meta = index.codebase.get_class_like(class.as_bytes());
-            let ignored = if component { component_ignored(index, &class) } else { vec![] };
+            // `None` when the constructor changes `$except` in a way that isn't read, so any of them may be left out.
+            let ignored = if component { component_ignored(index, &except, &class) } else { Some(vec![]) };
+            let unsure = ignored.is_none();
+            let ignored = ignored.unwrap_or_default();
             for (name, declaring) in meta.iter().flat_map(|m| m.declaring_property_ids.iter()) {
                 let Some(p) = index.codebase.get_property(declaring.as_bytes(), name.as_bytes()) else { continue };
                 let name = name.as_str_lossy().trim_start_matches('$').to_string();
                 if p.read_visibility.is_public() && !p.flags.is_static() && !skipped(&ignored, &name) {
                     let t = p.type_metadata.as_ref().or(p.type_declaration_metadata.as_ref()).and_then(|t| docblock_type(&t.type_union));
-                    vars.entry(name).or_insert(t);
+                    vars.entry(name).or_insert(t.filter(|_| !unsure));
                 }
             }
             if component {
                 vars.entry("slot".into()).or_insert_with(|| known_class(index, SLOT));
-                vars.extend(component_methods(index, &class, &ignored));
+                vars.extend(component_methods(index, &class, &ignored).into_iter().map(|(name, t)| (name, t.filter(|_| !unsure))));
             }
         }
         if renders {
@@ -355,16 +500,88 @@ const BAG: &str = "Illuminate\\View\\ComponentAttributeBag";
 const SLOT: &str = "Illuminate\\View\\ComponentSlot";
 
 /// The names a class component keeps from its view, as `Component::ignoredMethods()` lists them: Laravel's own
-/// methods and the component's `$except`.
-fn component_ignored(index: &Index, class: &str) -> Vec<String> {
+/// methods and the component's `$except`, as its default sets it and then `changes`, its constructor's
+/// ([`except_changes`]), change it. `None` when one of them isn't read.
+fn component_ignored(index: &Index, changes: &ExceptChanges, class: &str) -> Option<Vec<String>> {
     let own = ["data", "render", "resolve", "resolveView", "shouldRender", "view", "withName", "withAttributes", "flushCache", "forgetFactory", "forgetComponentsResolver", "resolveComponentsUsing"];
     let mut names: Vec<String> = own.map(String::from).to_vec();
+    let mut except = vec![];
     let default = index.codebase.get_declaring_property(class.as_bytes(), b"$except").and_then(|p| p.default_type_metadata.as_ref());
     for atomic in default.into_iter().flat_map(|t| t.type_union.types.iter()) {
         let TAtomic::Array(TArray::List(list)) = atomic else { continue };
-        names.extend(list.known_elements.iter().flatten().filter_map(|(_, (_, t))| t.get_single_literal_string_value()).map(|v| String::from_utf8_lossy(v).into_owned()));
+        except.extend(list.known_elements.iter().flatten().filter_map(|(_, (_, t))| t.get_single_literal_string_value()).map(|v| String::from_utf8_lossy(v).into_owned()));
     }
-    names
+    for change in changes.get(&class.to_ascii_lowercase()).into_iter().flatten() {
+        except = match change.as_ref()? {
+            Change::Add(name) => [except, vec![name.clone()]].concat(),
+            Change::Set(lists) => lists.iter().map(|list| list.clone().unwrap_or_else(|| except.clone())).collect::<Vec<_>>().concat(),
+        };
+    }
+    names.extend(except);
+    Some(names)
+}
+
+/// A change to a component's `$except` in its constructor ([`except_changes`]).
+enum Change {
+    /// `$this->except[] = 'name'`.
+    Add(String),
+    /// `$this->except = [...]`, or `array_merge()` of such lists and, as `None`, `$this->except`.
+    Set(Vec<Option<Vec<String>>>),
+}
+
+/// Each class's changes to `$except`, by its lowercase name, in order, with `None` for one that isn't read.
+type ExceptChanges = HashMap<String, Vec<Option<Change>>>;
+
+/// The changes to `$this->except` in `parsed`, which [`component_ignored`] reads: assignments of a list of strings,
+/// of `array_merge()` of such lists and `$this->except`, and `$this->except[] = 'name'`, unconditionally in a
+/// constructor. Any other change, or one elsewhere, isn't read. Walked before [`code_sites`]' walk, not inside it,
+/// so the two walks' depths don't add up.
+fn except_changes(parsed: &Parsed<'_>, resolver: &Resolver<'_, '_>) -> ExceptChanges {
+    let string = |e: &Expression<'_>| match e {
+        Expression::Literal(Literal::String(s)) => s.value.and_then(|v| std::str::from_utf8(v).ok()).map(str::to_string),
+        _ => None,
+    };
+    let strings = |e: &Expression<'_>| match e {
+        Expression::Array(a) => a.elements.iter().map(|el| if let ArrayElement::Value(v) = el { string(v.value) } else { None }).collect::<Option<Vec<_>>>(),
+        _ => None,
+    };
+    let mut changes = ExceptChanges::new();
+    walk(parsed, |node, path| {
+        let Node::Assignment(a) = node else { return };
+        let (append, target) = match a.lhs {
+            Expression::ArrayAppend(append) => (true, append.array),
+            lhs => (false, lhs),
+        };
+        if crate::analysis::this_property(target) != Some(b"except") {
+            return;
+        }
+        let Some(class) = resolver.enclosing_class(path) else { return };
+        // The constructor, with nothing between it and the assignment that may skip or repeat it.
+        let method = path.iter().rposition(|n| matches!(n, Node::Method(m) if m.name.value.eq_ignore_ascii_case(b"__construct")));
+        let plain = method.is_some_and(|m| {
+            !path[m + 1..].iter().any(|n| {
+                matches!(n, Node::If(_) | Node::Match(_) | Node::Switch(_) | Node::Conditional(_) | Node::Binary(_) | Node::Foreach(_) | Node::For(_) | Node::While(_) | Node::DoWhile(_) | Node::Try(_) | Node::Closure(_) | Node::ArrowFunction(_))
+            })
+        });
+        let change = match (plain && a.operator.is_assign(), append, a.rhs) {
+            (false, ..) => None,
+            (true, true, value) => string(value).map(Change::Add),
+            (true, false, Expression::Call(mago_syntax::cst::Call::Function(call))) if matches!(call.function, Expression::Identifier(id) if id.value().eq_ignore_ascii_case(b"array_merge")) => call
+                .argument_list
+                .arguments
+                .iter()
+                .map(|arg| match arg {
+                    Argument::Positional(p) if crate::analysis::this_property(p.value) == Some(b"except") => Some(None),
+                    Argument::Positional(p) => strings(p.value).map(Some),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(Change::Set),
+            (true, false, value) => strings(value).map(|list| Change::Set(vec![Some(list)])),
+        };
+        changes.entry(class.to_ascii_lowercase()).or_default().push(change);
+    });
+    changes
 }
 
 /// Whether Laravel keeps a class component's public property or method `name` from its view ([`component_ignored`]).
@@ -746,7 +963,7 @@ struct Aware<'a> {
 /// `@include` and `@includeIf` take the view first, `@includeWhen` and `@includeUnless` after their condition, and
 /// `@includeFirst` in its list of views. Other directives that name it, such as `@extends`, pass nothing known.
 #[allow(clippy::too_many_arguments)]
-fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: &[String], props: Option<&Props>, aware: &Aware<'_>, names: &BTreeSet<String>, vars: &mut dyn FnMut() -> Vec<(String, String)>) -> Vec<Site> {
+fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: &[String], props: Option<&Props>, aware: &Aware<'_>, outer: &[Around], names: &BTreeSet<String>, vars: &mut dyn FnMut() -> Vec<(String, String)>) -> Vec<Site> {
     let src = text.as_bytes();
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     let mut sites = vec![];
@@ -794,10 +1011,7 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
     // An offset in the view as one in `probed`.
     let shift = |offset: usize| offset + inserted.iter().filter(|(at, _)| *at <= offset).map(|(_, len)| len).sum::<usize>();
     // Each component tag that renders the view, outside comments.
-    let mut comments = vec![];
-    for (at, _) in text.match_indices("{{--") {
-        comments.push(at..text[at..].find("--}}").map_or(text.len(), |e| at + e));
-    }
+    let comments = comments(text);
     let mut uses = vec![];
     for tag in tags.iter().map(String::as_str).chain(["dynamic-component"]) {
         for prefix in ["<x-", "<x:"] {
@@ -832,7 +1046,7 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
     }
     let vars = vars();
     let arounds: Vec<_> = uses.iter().map(|(_, around)| around.clone()).collect();
-    let key = (path, text, quoted, tags, props, names, &vars, (aware.names, &aware.own, arounds));
+    let key = (path, text, quoted, tags, props, names, &vars, (aware.names, &aware.own, arounds, outer));
     let found_sites = cached(&VIEW_SITES, index, key, || {
         let mut sites = vec![];
         let checked = blade::checked_php(&probed, &vars);
@@ -895,23 +1109,8 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
             }
             sites.push(vars);
         }
-        let typed = |attrs: Vec<(String, Attr)>| -> Site {
-            attrs
-                .into_iter()
-                .map(|(name, attr)| {
-                    let t = match attr {
-                        Attr::Bound(at) => arrays.get(&shift(at)).and_then(|a| match a.elements.first() {
-                            Some(ArrayElement::Value(v)) => type_of(v.value).and_then(|t| docblock_type(&t)),
-                            _ => None,
-                        }),
-                        Attr::Text => Some("string".into()),
-                        Attr::Flag => Some("true".into()),
-                        Attr::Unknown => None,
-                    };
-                    (name, t)
-                })
-                .collect()
-        };
+        let bound = |at: usize| bound_type(arrays.get(&shift(at)).copied(), &analysis);
+        let typed = |attrs: Vec<(String, Attr)>| attr_types(attrs, &bound);
         for (used, around) in uses {
             let spread = used.as_ref().is_some_and(|(_, _, spread)| *spread);
             let tag = used.map(|(attrs, slots, _)| {
@@ -920,22 +1119,30 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
                 site.extend(slots.into_iter().map(|s| (s, known_class(index, SLOT))));
                 site
             });
-            let mut site = tag_site(index, tag.clone(), props, spread);
-            let around = around.map(|around| around.and_then(|(name, at)| tag_attrs(text, at, &name)).map(|(attrs, _, _)| typed(attrs)));
-            for (name, default) in aware.names {
-                let t = tag.as_ref().and_then(|tag| match (tag.get(name), &aware.own) {
-                    (Some(t), _) => t.clone(),
-                    // `{{ $attributes }}` may pass it.
-                    (None, _) if spread => None,
-                    (None, Some(own)) if own.as_ref().is_none_or(|props| props.contains(&(name.clone(), None))) => vars.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()),
-                    (None, Some(_)) => None,
-                    // No component around it passes it, so it gets its default.
-                    (None, None) if around.is_none() => default.clone().flatten(),
-                    (None, None) => around.as_ref().and_then(Option::as_ref).and_then(|around| around.get(name).cloned().flatten()),
-                });
-                site.insert(name.clone(), t);
+            let site = tag_site(index, tag.clone(), props, spread);
+            // With no component tag around it in the view, it's inside what the view is included in.
+            let arounds: Vec<Around> = match around {
+                None if !outer.is_empty() => outer.to_vec(),
+                None => vec![None],
+                Some(around) => vec![Some(around.and_then(|(name, at)| tag_attrs(text, at, &name)).map(|(attrs, _, _)| typed(attrs)))],
+            };
+            for around in arounds {
+                let mut site = site.clone();
+                for (name, default) in aware.names {
+                    let t = tag.as_ref().and_then(|tag| match (tag.get(name), &aware.own) {
+                        (Some(t), _) => t.clone(),
+                        // `{{ $attributes }}` may pass it.
+                        (None, _) if spread => None,
+                        (None, Some(own)) if own.as_ref().is_none_or(|props| props.contains(&(name.clone(), None))) => vars.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()),
+                        (None, Some(_)) => None,
+                        // No component around it passes it, so it gets its default.
+                        (None, None) if around.is_none() => default.clone().flatten(),
+                        (None, None) => around.as_ref().and_then(Option::as_ref).and_then(|around| around.get(name).cloned().flatten()),
+                    });
+                    site.insert(name.clone(), t);
+                }
+                sites.push(site);
             }
-            sites.push(site);
         }
         sites
     });
@@ -1108,6 +1315,70 @@ mod tests {
     }
 
     #[test]
+    fn types_aware_variables_through_the_views_that_include_a_tag() {
+        let models = "<?php\nnamespace App;\nclass Post {}\n";
+        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nabstract class Component {}\n";
+        let controller = "<?php\nnamespace App;\nclass PageController {\n    public function show(Post $post) { return view('page', compact('post')) ?: view('plain'); }\n}\n";
+        let views = [
+            // Included in a component's slot, directly and through another view.
+            ("resources/views/page.blade.php", "<x-menu :color=\"$post\">\n  @include('partials.items')\n  @include('partials.wrap')\n</x-menu>\n<x-menu :color=\"$post\">@include('partials.mixed')</x-menu>\n"),
+            ("resources/views/partials/items.blade.php", "<x-menu.item />"),
+            ("resources/views/partials/wrap.blade.php", "@include('partials.deep')"),
+            ("resources/views/partials/deep.blade.php", "<x-menu.link />"),
+            // Also included outside any component, where it gets the default.
+            ("resources/views/plain.blade.php", "@include('partials.mixed')"),
+            ("resources/views/partials/mixed.blade.php", "<x-menu.dot />"),
+            // Included in a component's own view, whose data isn't known.
+            ("resources/views/components/panel.blade.php", "@include('partials.inner')"),
+            ("resources/views/partials/inner.blade.php", "<x-menu.tip />"),
+            ("resources/views/components/menu.blade.php", "@props(['color' => 'gray'])"),
+            ("resources/views/components/menu/item.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/link.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/dot.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/tip.blade.php", "@aware(['color' => 'gray'])"),
+        ];
+        let mut files = vec![("app/Models.php", models), ("vendor/View.php", laravel), ("app/PageController.php", controller)];
+        files.extend(views);
+        let fx = Fixture::new(&files);
+        let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
+        let index = fx.snap.index.read();
+        let read = |p: &Path| fx.snap.read(p);
+        let color = |view: &str| types_among(&index, &read, None, &paths, view).into_iter().find(|(n, _)| n == "color").map(|(_, t)| t);
+        assert_eq!(color("components.menu.item").as_deref(), Some("\\App\\Post"));
+        assert_eq!(color("components.menu.link").as_deref(), Some("\\App\\Post"));
+        assert_eq!(color("components.menu.dot").as_deref(), Some("\\App\\Post|string"));
+        assert_eq!(color("components.menu.tip"), None);
+    }
+
+    #[test]
+    fn reads_what_a_components_constructor_does_to_except() {
+        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nclass InvokableComponentVariable {}\nabstract class Component {}\n";
+        let component = |name: &str, constructor: &str| {
+            format!("<?php\nnamespace App\\View\\Components;\nclass {name} extends \\Illuminate\\View\\Component {{\n    public string $type = 'info';\n    public int $count = 0;\n    protected $except = ['count'];\n    public function __construct(bool $flag = false) {{ {constructor} }}\n    public function render() {{ return view('components.{}'); }}\n    public function label(): string {{ return ''; }}\n}}\n", name.to_lowercase())
+        };
+        // Added to, merged, and replaced in order; anything else, or a change that may not run, isn't known.
+        let added = component("Added", "$this->except[] = 'label'; $this->except = array_merge($this->except, ['type']);");
+        let replaced = component("Replaced", "$this->except = ['type'];");
+        let unknown = component("Unknown", "$this->except = $flag ? ['type'] : [];");
+        let conditional = component("Conditional", "if ($flag) { $this->except[] = 'type'; }");
+        let views = ["added", "replaced", "unknown", "conditional"].map(|v| (format!("resources/views/components/{v}.blade.php"), "{{ $type }}"));
+        let mut files: Vec<(&str, &str)> = vec![("vendor/View.php", laravel)];
+        for (name, text) in [("Added", &added), ("Replaced", &replaced), ("Unknown", &unknown), ("Conditional", &conditional)] {
+            files.push((Box::leak(format!("app/View/Components/{name}.php").into_boxed_str()), text));
+        }
+        files.extend(views.iter().map(|(p, t)| (p.as_str(), *t)));
+        let fx = Fixture::new(&files);
+        let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
+        let index = fx.snap.index.read();
+        let read = |p: &Path| fx.snap.read(p);
+        let names = |view: &str| types_among(&index, &read, None, &paths, view).into_iter().map(|(n, _)| n).collect::<Vec<_>>();
+        assert_eq!(names("components.added"), vec!["slot"]);
+        assert_eq!(names("components.replaced"), vec!["count", "label", "slot"]);
+        assert_eq!(names("components.unknown"), vec!["slot"]);
+        assert_eq!(names("components.conditional"), vec!["slot"]);
+    }
+
+    #[test]
     fn types_registered_dynamic_and_aware_components() {
         let models = "<?php\nnamespace App;\nclass Post {}\n";
         let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nabstract class Component {}\n";
@@ -1169,9 +1440,7 @@ mod tests {
         let laravel: Vec<(String, String)> = ["Component.php", "ComponentAttributeBag.php", "ComponentSlot.php", "InvokableComponentVariable.php"].iter().map(|f| (format!("vendor/{f}"), read(f))).collect();
         let alert = "<?php\nnamespace App\\View\\Components;\nclass Alert extends \\Illuminate\\View\\Component {\n    public string $type = 'info';\n    protected $except = ['secret'];\n    public function render() { return view('components.alert'); }\n    public function isActive(): bool { return true; }\n    public function secret(): int { return 1; }\n    /** @return list<string> */\n    public function labels(string $prefix): array { return []; }\n}\n";
         let mut files: Vec<(&str, &str)> = laravel.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
-        // Laravel's view factory reaches `ComponentSlot` in an app, so it's loaded.
-        let slot = "<?php\nfunction slot(\\Illuminate\\View\\ComponentSlot $s) {}\n";
-        files.extend([("app/View/Components/Alert.php", alert), ("app/slot.php", slot), ("resources/views/components/alert.blade.php", "{{ $type }}")]);
+        files.extend([("app/View/Components/Alert.php", alert), ("resources/views/components/alert.blade.php", "{{ $type }}")]);
         let fx = Fixture::new(&files);
         let index = fx.snap.index.read();
         let types = types_among(&index, &|p| fx.snap.read(p), None, &[path("resources/views/components/alert.blade.php")], "components.alert");

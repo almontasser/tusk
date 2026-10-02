@@ -125,6 +125,16 @@ impl BladePhp {
         &self.view.text
     }
 
+    /// The view, for its positions.
+    pub fn view(&self) -> &Document {
+        &self.view
+    }
+
+    /// The view's offset of `offset` in the PHP, unless that's PHP Laravel adds.
+    pub fn view_offset(&self, offset: u32) -> Option<u32> {
+        self.checked.view_offset(offset as usize).ok().map(|o| o as u32)
+    }
+
     /// The view's range for `range` in the PHP, unless that's PHP Laravel adds, such as the variables' declarations.
     pub fn view_range(&self, php: &Document, range: lsp_types::Range) -> Option<lsp_types::Range> {
         let at = |pos| self.checked.view_offset(php.offset(pos) as usize).ok().map(|o| self.view.position(o as u32));

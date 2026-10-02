@@ -53,8 +53,8 @@ pub fn completion(snap: &Snapshot, params: CompletionParams) -> Result<Option<Co
 }
 
 /// The PHP completions in a Blade view, at `offset` in the view, when that's in its PHP: names, variables with the
-/// types the places that render it pass, and members. Ones that would import a class are left out, since a view
-/// imports with `@use`.
+/// types the places that render it pass, and members. A class that needs an import is imported with `@use`, and a
+/// function that needs one, or a class without `@use` in the project's Laravel, is written in full.
 fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     // In PHP when the last character before the cursor, other than spaces, is the view's PHP, not blanked text.
     let view = &blade.view_text()[..offset as usize];
@@ -65,8 +65,22 @@ fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option
     let (items, incomplete) = complete(ctx, blade.php_offset(offset))?;
     let items = items
         .into_iter()
-        .filter(|item| item.additional_text_edits.as_ref().is_none_or(Vec::is_empty))
         .filter_map(|mut item| {
+            // The PHP's import goes in its first line, which isn't the view's.
+            if item.additional_text_edits.take().is_some_and(|e| !e.is_empty()) {
+                let (fqn, class) = match item.data.as_ref().and_then(|d| serde_json::from_value::<Data>(d.clone()).ok())? {
+                    Data::Class { name } => (name, true),
+                    Data::Function { name } => (name, false),
+                    _ => return None,
+                };
+                let Some(CompletionTextEdit::Edit(edit)) = &mut item.text_edit else { return None };
+                if class {
+                    let edits = crate::framework::laravel::blade_import(&ctx.index, blade.view(), &fqn, &mut edit.new_text, &item.label);
+                    item.additional_text_edits = (!edits.is_empty()).then_some(edits);
+                } else if let Some(rest) = edit.new_text.strip_prefix(item.label.as_str()) {
+                    edit.new_text = format!("\\{}{rest}", fqn.trim_start_matches('\\'));
+                }
+            }
             match &mut item.text_edit {
                 Some(CompletionTextEdit::Edit(edit)) => edit.range = blade.view_range(&ctx.doc, edit.range)?,
                 Some(CompletionTextEdit::InsertAndReplace(edit)) => {
@@ -821,6 +835,27 @@ mod tests {
         assert!(labels(&complete_at(&alert_view("<div {{ $attributes-><|> }}></div>"))).contains(&"merge".to_string()));
         // Not in the view's HTML.
         assert!(complete_at(&alert_view("<div>tit<|></div>")).is_empty());
+    }
+
+    #[test]
+    fn imports_what_a_blade_view_completes() {
+        let lib = ("app/Models/Report.php", "<?php\nnamespace App\\Models;\nclass Report {}\nfunction reportHelper(int $n): int { return $n; }\n");
+        let blade_use = ("vendor/laravel/CompilesUseStatements.php", "<?php\nnamespace Illuminate\\View\\Compilers\\Concerns;\ntrait CompilesUseStatements {}\n");
+        let view = ("resources/views/v.blade.php", "@use('App\\Models\\Zed')\n<p>{{ Repor<|> }}</p>\n");
+        let edit_of = |items: &[CompletionItem], label: &str| {
+            let item = items.iter().find(|i| i.label == label).unwrap_or_else(|| panic!("{label}: {:?}", labels(items)));
+            let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else { panic!("{item:?}") };
+            (edit.new_text.clone(), item.additional_text_edits.clone().unwrap_or_default())
+        };
+        // A class gets a `@use`, in order among the view's, and a function is written in full.
+        let items = complete_at(&[lib, blade_use, view]);
+        let (text, extra) = edit_of(&items, "Report");
+        assert_eq!(text, "Report");
+        assert_eq!(extra.len(), 1);
+        assert_eq!((extra[0].range.start.line, extra[0].range.start.character, extra[0].new_text.as_str()), (0, 0, "@use('App\\Models\\Report')\n"));
+        assert_eq!(edit_of(&items, "reportHelper"), ("\\App\\Models\\reportHelper($0)".to_string(), vec![]));
+        // Without `@use` in the project's Laravel, a class is written in full too.
+        assert_eq!(edit_of(&complete_at(&[lib, view]), "Report"), ("\\App\\Models\\Report".to_string(), vec![]));
     }
 
     #[test]

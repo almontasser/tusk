@@ -221,7 +221,7 @@ fn in_class(context: &HookContext<'_, '_>, class: Word) -> bool {
 }
 
 /// `user` in `$this->user`.
-fn this_property<'a>(expr: &Expression<'a>) -> Option<&'a [u8]> {
+pub(crate) fn this_property<'a>(expr: &Expression<'a>) -> Option<&'a [u8]> {
     let Expression::Access(Access::Property(a)) = expr else { return None };
     match (a.object, &a.property) {
         (Expression::Variable(Variable::Direct(v)), ClassLikeMemberSelector::Identifier(id)) if v.name == b"$this" => Some(id.value),

@@ -74,6 +74,13 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
         (out, complete)
     })
     .unwrap_or_default();
+    // A Blade view's PHP: importing a class it names, when the cursor is at a name.
+    let mut candidates = candidates;
+    let name = |b: &u8| b.is_ascii_alphanumeric() || *b == b'_';
+    let at_name = |d: &crate::documents::Document, at: usize| d.text.as_bytes().get(at).is_some_and(name) || at.checked_sub(1).and_then(|a| d.text.as_bytes().get(a)).is_some_and(name);
+    if let Some(offset) = snap.doc(&uri).filter(|d| super::is_blade(d) && at_name(d, d.offset(range.start) as usize)).map(|d| d.offset(range.start)) {
+        candidates.extend(super::with_blade_php(snap, &uri, offset, false, |ctx, blade| fixes::blade_candidates(ctx, blade, offset)).unwrap_or_default());
+    }
     let complete = complete.into_iter().filter(|a| a.kind.as_ref().is_some_and(|k| wanted(&only, k))).map(CodeActionOrCommand::CodeAction);
     let actions: Vec<CodeActionOrCommand> = candidates
         .into_iter()
@@ -96,7 +103,12 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
 /// Computes an action's edit.
 pub fn resolve(snap: &Snapshot, mut action: CodeAction) -> Result<CodeAction, String> {
     let Some(data) = action.data.clone().and_then(|d| serde_json::from_value::<Data>(d).ok()) else { return Ok(action) };
-    let edit = with_ctx(snap, &data.uri, |ctx| edit_for(ctx, &data.id, data.range, &data.arg)).flatten();
+    let edit = if data.id == "fixes.blade_import" {
+        let offset = snap.doc(&data.uri).map(|d| d.offset(data.range.start)).unwrap_or_default();
+        super::with_blade_php(snap, &data.uri, offset, false, |ctx, blade| fixes::blade_resolve(ctx, blade, offset, &data.arg)).flatten()
+    } else {
+        with_ctx(snap, &data.uri, |ctx| edit_for(ctx, &data.id, data.range, &data.arg)).flatten()
+    };
     match edit {
         Some(edit) => action.edit = Some(edit),
         None => return Err(format!("“{}” no longer applies here.", action.title)),

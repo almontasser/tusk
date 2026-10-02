@@ -2419,8 +2419,17 @@ on `checked_php`'s text with the view's variables from `view_types`, as a
 document of its own language (`blade-php`) at the view's path, and maps its
 ranges back with `view_offset`. Where the view's character is blanked text, its
 HTML, nothing is asked. Completion is cut at the cursor with its brackets
-closed, as in PHP files, and leaves out names that would import a class, since
-a view imports with `@use`. So `{{ $` lists the view's variables with their
+closed, as in PHP files. A name that needs an import gets the view's own edit
+in place of the PHP's `use` line (`blade_import` in
+`tusk-lsp/src/framework/laravel/mod.rs`): a class gets a `@use('…')` line from
+`blade::use_insert`, among the `@use` lines at the view's top in order, or after
+its leading `@props` and `@aware` lines, or first, never twice; a namespaced
+function, or a class when the project's Laravel has no
+`CompilesUseStatements`, is written in full instead. `@use` compiles to PHP's
+`use`, which PHP refuses inside a block, so it goes at the top. **Import
+class** on an unknown class name in a view (`fixes::blade_candidates`) offers
+the classes of that name with the same edit; it's computed only when the cursor
+is at a name, since the editor asks for code actions on every move. So `{{ $` lists the view's variables with their
 types, `$post->` the members, and hovering `$post->title` shows the property.
 Inside `@auth`, the user is logged in, as when the view is checked.
 
@@ -2440,8 +2449,14 @@ the view echoes, invokes, or iterates it, and one with parameters as a
 Static methods count, as Laravel's reflection lists them, so every class
 component's view gets `$ignoredParameterNames`. Properties and methods whose
 names start with `__`, Laravel's own (`data`, `render`, `resolveView`, and the
-rest of `ignoredMethods()`), and the names in the component's `$except`
-default are left out. Then it
+rest of `ignoredMethods()`), and the names in the component's `$except` are
+left out: its default, then the constructor's changes (`except_changes`), read
+in order, of a list of strings, `array_merge()` of such lists and
+`$this->except`, and `$this->except[] = 'name'`. Any other change, one under a
+condition, or one in another method makes every property and method untyped,
+since any of them may be left out. Those changes are read in a walk of their
+own before the file's walk for view names, not inside it, so the two walks'
+stack depths don't add up. Then it
 reads each Blade view in `resources/views` that has the name in quotes or a tag
 for it (`sites_in`). An `@include`, `@includeIf`, `@includeWhen`,
 `@includeUnless`, or `@includeFirst` of the view passes its data array's entries
@@ -2479,8 +2494,11 @@ passed as a `<x-slot:name>` or `<x-slot name="…">` is a `ComponentSlot`; a slo
 inside another component tag in the content is that component's. A tag that
 passes `{{ $attributes }}` or another echo among its attributes may pass any
 prop through it, so the props it doesn't name are untyped, and those it names
-keep their types. `$attributes` and `$slot` are typed when the project has
-`ComponentAttributeBag` and `ComponentSlot`.
+keep their types. `$attributes` and `$slot` are typed with
+`ComponentAttributeBag` and `ComponentSlot`, which the index loads at every
+build with `InvokableComponentVariable` (`BLADE_CLASSES` in `index.rs`), since
+the project's PHP may never name them and library code loads only as far as the
+project reaches.
 
 A component's `@aware` variables follow Laravel's lookup (the `Aware` struct in
 `views.rs`): a tag that passes one gives its type; otherwise, in an anonymous
@@ -2493,8 +2511,16 @@ as `getConsumableComponentData()` finds no component data to take it from.
 Anything else, such as a class component around the tag, a tag with another
 prefix such as `<flux:card>`, a tag around it that leaves the variable out
 (one further out may pass it), or a tag that passes `{{ $attributes }}`, leaves
-it untyped. A view included inside a component's slot reads as a page, so its
-tags can get a default where Laravel would find a component further out.
+it untyped. A tag with no component tag around it in its view is inside what
+that view is included in (`Walk::contexts`): for each `@include` or `@each` of
+the view, the component tag open around it, typed by analyzing the including
+view with its own variables (`around_sites`), or if there's none, what the
+including view is inside, in turn. Where the project's PHP renders a view in
+that chain, it's inside no component, and the default applies. Each context
+gives the tag its own site, so a view included both in a component's slot and
+on a page gets the union of the passed type and the default. A view included
+from a component's own view, or through a cycle of includes, is inside a
+component whose data isn't read, which leaves the variable untyped.
 
 A view that renders itself, such as a comment that includes itself for its
 replies, starts from the types the other places pass, then adds the places in
@@ -7839,3 +7865,27 @@ Transfers are one file per call, queued in the frontend, rather than a folder
 per call in Rust: progress, cancel, retry, and the File Transfer panel then
 work per file with no protocol of their own between Rust and the web view, and
 a failure costs one file, not the batch.
+
+### 2026-10-02: Blade imports with `@use`, and `@aware` follows includes
+
+Completion in a view's PHP left out names that needed an import, since the
+PHP's `use` line goes in the first line `checked_php` adds, which isn't the
+view's. Completion and **Import class** now write a `@use` line in the view,
+because that's how a view imports, and Laravel's own `@use` is only compiled
+when `CompilesUseStatements` exists; without it, the full name is written in
+place, which works on any version. `@use` with `function` or a group, which
+newer Laravel accepts, isn't written, so functions are written in full.
+
+An `@aware` variable in a view included into a component's slot got its default,
+because the includes weren't followed. Laravel's component stack spans includes,
+so `Walk::contexts` follows each include of the view up to a component tag or
+to the code that renders the chain. A view included from a component's own view
+stays untyped rather than typed from that component's tags, which would need the
+component's data, not its props.
+
+A class component's constructor that changes `$except` left the changed names in
+its view. The constructor's changes are now read when they're unconditional
+lists of names; anything else makes the component's names untyped rather than
+guessed. `ComponentSlot`, `ComponentAttributeBag`, and
+`InvokableComponentVariable` load at every build, since lazy loading left them
+out of apps whose PHP never names them.
