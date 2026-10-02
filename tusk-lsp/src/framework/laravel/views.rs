@@ -761,16 +761,19 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
     let key = (path, text, quoted, tags, props, names, &vars, (aware.names, &aware.own, arounds));
     let found_sites = cached(&VIEW_SITES, index, key, || {
         let mut sites = vec![];
-        let (php, head, _) = blade::checked_php(&probed, &vars);
+        let checked = blade::checked_php(&probed, &vars);
+        let php = &checked.php;
         let arena = LocalArena::new();
-        let parsed = Parsed::new(&arena, path, &php);
+        let parsed = Parsed::new(&arena, path, php);
         let analysis = analyze(&parsed, &arena, index);
         let type_of = |e: &Expression<'_>| analysis.type_of(e.span().start.offset, e.span().end.offset);
         // The directives' arguments and the tags' bound attributes, which read as arrays.
         let mut arrays = HashMap::new();
         walk(&parsed, |node, _| {
             if let Node::Array(a) = node
-                && let Some(at) = (a.left_bracket.start.offset as usize).checked_sub(head)
+                && let offset = a.left_bracket.start.offset as usize
+                && offset >= checked.head
+                && let Ok(at) = checked.view_offset(offset)
             {
                 arrays.insert(at, a);
             }
@@ -807,7 +810,7 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
             if !names_it(arg(position)) {
                 continue;
             }
-            let mut vars: Site = echoes.into_iter().map(|(name, s, e)| (name, analysis.type_of((head + s) as u32, (head + e) as u32).and_then(|t| docblock_type(&t)))).collect();
+            let mut vars: Site = echoes.into_iter().map(|(name, s, e)| (name, analysis.type_of(checked.php_offset(s) as u32, checked.php_offset(e) as u32).and_then(|t| docblock_type(&t)))).collect();
             if let Some(data) = args.get(position + 1) {
                 let t = data.and_then(|d| type_of(d));
                 // Data whose keys aren't all known may replace any variable.

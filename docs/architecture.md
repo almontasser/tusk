@@ -2342,7 +2342,10 @@ sorting classes, a PHP parser, and Linguist's language data.
 one PHP file: a first line of `<?php` and the view's `@use` imports, then the
 view with everything but its PHP replaced by spaces, one for each byte, keeping
 line breaks. So a problem's offset, less the first line's length, is the
-view's, with no position map. Each piece of PHP becomes a statement that
+view's, except for the PHP that Laravel adds around a conditional's arguments,
+such as the `if(isset` and `)` of `@isset(…)`. `Checked` keeps where each
+addition goes and its length, and `view_offset` and `php_offset` map through
+them. Each piece of PHP becomes a statement that
 starts with `;` in place of its delimiter: `{{ $a }}` reads `;[ $a ]`, a
 directive's arguments `;  [$a]` (an array, since `@include('a', [...])` is a
 list), a bound component attribute `:post="$post"` reads `;[$post]`, and
@@ -2350,17 +2353,39 @@ list), a bound component attribute `:post="$post"` reads `;[$post]`, and
 `;foreach (…)`. Its body is a block, so the loop variable keeps its type inside:
 the next statement starts with `{` instead of `;`, and `@endforeach` (or
 `@empty` in a `@forelse`) reads `;}`. Loops left open are closed at the end of
-the file. `@if` keeps its keyword too, in PHP's `if (…): … endif;` form, so it
-narrows types: the next statement starts with `:`, and `@elseif`, `@else`, and
-`@endif` read `;elseif`, `;else`, and `;endif`, which fit in their bytes where
-`;}` before them wouldn't. Every block is tracked, so `@else` goes to its own:
-any directive with a matching `@end…` later in the view opens one, as do
-`@hasSection` and `@sectionMissing`, which end with `@endif`. The bodies of
-guards, such as `@isset`, `@unless`, and `@auth`, are returned as ranges where
-"possibly null" problems can't be trusted, since the guard doesn't narrow.
-When an `@endif` or another end doesn't close the innermost block around an
-`@if`, the view is laid out again with `@if` as an expression statement, and
-the whole view is such a range. `@php …
+the file. Conditionals read as Laravel's `CompilesConditionals` and
+`CompilesAuthorizations` compile them, in PHP's `if (…): … endif;` form, so
+they narrow types: `@isset($a)` reads `;     if(isset($a))`, `@unless($a)`
+`if(!($a))`, `@auth('admin')` `if(auth()->guard('admin')->check())`, `@can`
+`if(app(Gate::class)->check(…))`, and so on for `@empty`, `@guest`,
+`@cannot`, `@canany`, `@env`, `@production`, `@hasSection`, `@sectionMissing`,
+and `@hasStack`, and their `@else…` branches. The next statement starts with
+`:`, and every conditional's end reads `;endif`, which fits in its bytes. Any
+conditional's end ends any conditional, since all compile to `endif;`, so
+`@isset … @endif` pairs as it runs. `@switch`, `@case`, `@default`, `@break`,
+and `@continue` keep their keywords; `@break($a)` reads `if($a) break;`, with
+its own `;` so a following `@else` isn't taken as the `if`'s. A `@continue`
+whose innermost loop or `@switch` is a `@switch` is left out, since PHP warns
+on it.
+
+`pair` matches the blocks before anything is laid out, from the list of
+directives that `pieces` finds. A loop's end must match its loop; any
+conditional's end ends the innermost conditional; a directive Tusk doesn't
+know with an `@end…` of its name later, such as a `Blade::if()` condition's
+`@admin` or `@unlessadmin` and `@endadmin`, opens a block of its own. An end
+pairs with the nearest open block it can end, and the blocks above that one
+are left unpaired. `@section`, `@push`, `@once`, and other directives that
+compile to calls rather than blocks aren't tracked, so inline ones such as
+`@section('title', 'Home')` don't upset the pairing. Unpaired directives read
+as their arguments only, and these ranges come back as unsure, where "possibly
+null" problems are dropped: the bodies of `@switch`, since Mago narrows a
+case's value only in part, and of directives Tusk doesn't know; from an
+unpaired block to the end that left it unpaired, or to the view's end; and
+from the start of the open block around an end that ends nothing, or the
+view's start, to that end, since the block it ends was missed. A loop still
+open at the end is paired and closed there, as one being typed, and a
+`@switch` whose first piece isn't a case is left unpaired, since PHP allows
+nothing else there. `@php …
 @endphp` and `<?php … ?>` keep their code. Only Laravel's own directives are
 read, not every `@word(`, so CSS's `@media` and text stay text, as Blade
 leaves unknown directives; `{{-- --}}`, `@{{`, `@@`, and `@verbatim` are
@@ -2455,7 +2480,17 @@ and methods, uses of `mixed` values, and the redundant and impossible problems
 that typed variables bring (`blade_noise`): a guard such as `@isset($post)` is
 there for another place that renders the view. It keeps "possibly null"
 problems outside the ranges `checked_php` marks, and drops other "possibly"
-ones. Open views get these with the framework's problems on
+ones, and any problem that starts in the PHP Laravel adds, such as an unknown
+`app()` in a project without Laravel's helpers indexed. Unreachable branches
+are dropped with the redundant ones, since `@isset($post) … @else` is there for
+another place too. `checked_php` also returns where a user is logged in: the
+body of `@auth` and `@elseauth`, and `@guest`'s `@else`. `logged_in` in
+`tusk-lsp/src/analysis.rs` hands those ranges to `AuthHook`, an expression hook
+that takes `null` out of the type of a `user()` method or static call in them,
+and of a variable that may hold an `Authenticatable`, such as a `$user` that a
+controller passes as `Auth::user()`. So `Auth::user()->name` and `$user->name`
+aren't reported there. Mago doesn't remember a call's result between calls, so narrowing
+`auth()->guard()->check()` can't do it. Open views get these with the framework's problems on
 each edit, and the project scan (`tusk/projectProblems`) checks every view in
 `resources/views`. The editor filters a view's problems with `realProblems` as
 a PHP file's, since they sit at the view's positions.
@@ -7368,3 +7403,20 @@ move the process, so its prompt moves it. The prompt is passed as
 `-EncodedCommand`, because PowerShell's command-line parsing of quotes differs
 between versions.
 
+### 2026-10-02: Blade's conditionals narrow as Laravel compiles them
+
+`@isset`, `@unless`, `@empty`, `@auth`, and the other guards didn't narrow, and
+their bodies dropped "possibly null" problems, as did a whole view whose blocks
+didn't nest. The checked PHP now adds the PHP that Laravel compiles each
+conditional to around its arguments, and maps offsets through what it adds,
+instead of fitting everything in the directive's bytes, which `!(…)` and
+`isset(…)` didn't. Problems that start in the added PHP are dropped. Blocks are
+paired before the layout, as Laravel's compiled PHP pairs them, so a block that
+doesn't nest only makes the ranges around it unsure. `@auth` narrows the user
+with an expression hook on `user()` calls and variables that may hold one,
+since Mago doesn't remember method results. `@switch` became PHP's `switch`, so `@break` binds to it, but its body
+stays unsure, since Mago narrows a case's value only in part. A fuzz
+test lays out random orders of directives and checks the PHP parses. Other
+"possibly" problems in views, such as on a union of the types two places pass,
+stay dropped: reporting them is a separate change, with its own risk of false
+problems.

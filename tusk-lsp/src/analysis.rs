@@ -14,6 +14,8 @@ use mago_analyzer::code::IssueCode;
 use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, HookContext, HookResult, PluginRegistry, Provider, ProviderMeta};
 use mago_analyzer::settings::Settings;
 use mago_codex::reference::SymbolReferences;
+use mago_codex::ttype::atomic::TAtomic;
+use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::union::TUnion;
 use mago_database::file::{File, FileType};
 use mago_names::ResolvedNames;
@@ -21,7 +23,7 @@ use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
 use mago_reporting::{AnnotationKind, IssueCollection};
 use mago_span::HasSpan;
-use mago_syntax::cst::{Access, ClassLikeMemberSelector, Expression, Node, Program, Variable};
+use mago_syntax::cst::{Access, Call, ClassLikeMemberSelector, Expression, Node, Program, Variable};
 use mago_syntax::parser::parse_file;
 use mago_word::Word;
 
@@ -45,12 +47,57 @@ pub fn parse_balanced<'a>(arena: &'a LocalArena, path: &Path, file_type: FileTyp
 static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
     let mut plugins = PluginRegistry::with_library_providers();
     plugins.register_expression_hook(PestHook);
+    plugins.register_expression_hook(AuthHook);
     plugins
 });
 
 thread_local! {
     /// While a file is analyzed for Pest, what the hook knows and learns.
     static PEST: RefCell<Option<Pest>> = const { RefCell::new(None) };
+    /// While a Blade view is analyzed, the ranges of its PHP where a user is logged in, from [`logged_in`].
+    static AUTHED: RefCell<Vec<(u32, u32)>> = const { RefCell::new(vec![]) };
+}
+
+/// Runs `f`, an analysis of a Blade view, with a user logged in over `ranges` of its PHP, such as the body of `@auth`.
+pub fn logged_in<T>(ranges: Vec<(u32, u32)>, f: impl FnOnce() -> T) -> T {
+    AUTHED.set(ranges);
+    let out = f();
+    AUTHED.take();
+    out
+}
+
+/// Takes `null` out of what a `user()` call returns where a Blade view says a user is logged in ([`logged_in`]):
+/// `Auth::user()` and a guard's `user()` return `null` only for a guest. So does a variable that may hold an
+/// `Authenticatable`, such as `$user` that a controller passes as `Auth::user()`.
+struct AuthHook;
+
+impl Provider for AuthHook {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-auth", "Auth", "Types the user as logged in inside a Blade view's @auth.");
+        &META
+    }
+}
+
+impl ExpressionHook for AuthHook {
+    fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
+        let method = match expr {
+            Expression::Call(Call::Method(c)) => Some(&c.method),
+            Expression::Call(Call::NullSafeMethod(c)) => Some(&c.method),
+            Expression::Call(Call::StaticMethod(c)) => Some(&c.method),
+            Expression::Variable(_) => None,
+            _ => return Ok(()),
+        };
+        let at = expr.span().start.offset;
+        if method.is_some_and(|m| !matches!(m, ClassLikeMemberSelector::Identifier(id) if id.value.eq_ignore_ascii_case(b"user"))) || !AUTHED.with_borrow(|r| r.iter().any(|(s, e)| *s <= at && at < *e)) {
+            return Ok(());
+        }
+        let user = |t: &TUnion| t.types.iter().any(|a| matches!(a, TAtomic::Object(TObject::Named(n)) if context.is_instance_of(n.name.as_bytes(), b"Illuminate\\Contracts\\Auth\\Authenticatable")));
+        if let Some(t) = context.get_expression_type(expr).filter(|t| t.has_null() && (method.is_some() || user(t))) {
+            let t = t.to_non_nullable();
+            context.set_expression_type(expr, t);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]

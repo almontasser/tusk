@@ -169,14 +169,18 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
 pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn Fn(&std::path::Path) -> Option<String>, components: Option<&serde_json::Value>) -> Vec<Diagnostic> {
     use crate::framework::laravel::views;
     let vars = views::view_name(index, &doc.path).map(|v| views::view_types(index, read, components, &v)).unwrap_or_default();
-    let (php, head, unsure) = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
+    let checked = crate::framework::laravel::blade::checked_php(&doc.text, &vars);
+    let authed = checked.authed.iter().map(|r| (checked.php_offset(r.start) as u32, checked.php_offset(r.end) as u32)).collect();
     let arena = LocalArena::new();
-    let (parsed, issues) = analysis_issues(index, &arena, &doc.path, &php);
+    let (parsed, issues) = crate::analysis::logged_in(authed, || analysis_issues(index, &arena, &doc.path, &checked.php));
     // The first line, `<?php` and the imports, is the view's start.
-    let at = |offset: u32| offset.saturating_sub(head as u32);
-    let guarded = |d: &Diagnostic| possibly_null(d) && unsure.iter().any(|r| r.contains(&(doc.offset(d.range.start) as usize)));
+    let at = |offset: u32| checked.view_offset(offset as usize).unwrap_or_else(|at| at) as u32;
+    // What Laravel's compiled PHP adds, such as the `isset(` of `@isset(…)`, isn't the view's to fix.
+    let added = |i: &&Issue| i.annotations.iter().find(|a| a.kind == AnnotationKind::Primary).is_some_and(|a| checked.view_offset(a.span.start.offset as usize).is_err());
+    let guarded = |d: &Diagnostic| possibly_null(d) && checked.unsure.iter().any(|r| r.contains(&(doc.offset(d.range.start) as usize)));
     issues
         .iter()
+        .filter(|i| !added(i))
         .filter_map(|i| to_diagnostic_at(doc, parsed.file.id, i, "mago", at))
         .filter(|d| !blade_noise(d) && !guarded(d))
         .collect()
@@ -196,6 +200,7 @@ fn blade_noise(d: &Diagnostic) -> bool {
         || code.starts_with("mixed-")
         // Typed variables make a view's guards look needless, but the guards are for other places that render it.
         || code.starts_with("redundant-")
+        || code.starts_with("unreachable-")
         || code.starts_with("impossible-")
         // Other "possibly" problems, such as on a union of the types two places pass, aren't checked yet.
         || ((code.starts_with("possibly-") || code.starts_with("possible-")) && !possibly_null(d))
@@ -334,23 +339,89 @@ mod tests {
         assert!(check("resources/views/other.blade.php", "{{ $post->titel }}\n").is_empty());
     }
 
-    #[test]
-    fn narrows_a_views_variables_in_if_branches() {
+    /// Laravel's auth helper, guard, and facade, as declared, with a model and a controller that renders `posts.show`
+    /// with a `Post`, a `?Post`, and the user.
+    fn narrowing_fixture() -> Fixture {
+        let auth = "<?php\nnamespace Illuminate\\Contracts\\Auth {\n    interface Authenticatable { public function getAuthIdentifier(); }\n    interface Guard {\n        /** @return bool */\n        public function check();\n        /** @return \\Illuminate\\Contracts\\Auth\\Authenticatable|null */\n        public function user();\n    }\n    interface Factory {\n        /** @return \\Illuminate\\Contracts\\Auth\\Guard */\n        public function guard($name = null);\n    }\n}\nnamespace Illuminate\\Support\\Facades {\n    /** @method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user() */\n    class Auth {}\n}\nnamespace {\n    /** @return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory : \\Illuminate\\Contracts\\Auth\\Guard) */\n    function auth($guard = null) {}\n}\n";
         let models = "<?php\nnamespace App;\nclass User { public string $name = ''; }\nclass Post { public string $title = ''; public ?User $author = null; }\n";
-        let controller = "<?php\nnamespace App;\nclass PostController {\n    public function show(Post $post, ?Post $maybe) { return view('posts.show', compact('post', 'maybe')); }\n}\n";
-        let fx = Fixture::new(&[("app/Models.php", models), ("app/PostController.php", controller)]);
-        let doc = |blade: &str| Document::new(crate::testing::uri("resources/views/posts/show.blade.php"), crate::testing::path("resources/views/posts/show.blade.php"), "blade".into(), 1, blade.into());
-        let lines = |blade: &str| {
-            blade_problems_in(&fx.snap.index.read(), &doc(blade), &|p| fx.snap.read(p), None)
-                .into_iter()
-                .map(|d| (match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }, d.range.start.line))
-                .collect::<Vec<_>>()
-        };
-        let blade = "{{ $post->author->name }}\n@if ($post->author) {{ $post->author->name }} @endif\n@if ($maybe) {{ $maybe->title }} @elseif ($post->author) {{ $maybe->title }} @endif\n@isset($post->author) {{ $post->author->name }} @endisset\n@unless(is_null($maybe)) {{ $maybe->title }} @endunless\n@auth {{ $maybe->title }} @else x @endauth\n{{ $post->author?->name }} {{ $maybe->title ?? '' }}\n";
-        // Unguarded, and `$maybe` in the `@elseif`, where it's null; `@isset`, `@unless`, and `@auth` guard without narrowing.
-        assert_eq!(lines(blade), vec![("possibly-null-property-access".into(), 0), ("null-property-access".into(), 2)]);
-        // Blocks that don't nest leave the view unnarrowed, so its "possibly null" problems aren't reported.
+        let controller = "<?php\nnamespace App;\nclass PostController {\n    public function show(Post $post, ?Post $maybe) {\n        $user = \\Illuminate\\Support\\Facades\\Auth::user();\n        return view('posts.show', compact('post', 'maybe', 'user'));\n    }\n}\n";
+        Fixture::new(&[("app/auth.php", auth), ("app/Models.php", models), ("app/PostController.php", controller)])
+    }
+
+    /// The codes of the problems in `blade` as the `posts.show` view of [`narrowing_fixture`].
+    fn view_problems(fx: &Fixture, blade: &str) -> Vec<String> {
+        let doc = Document::new(crate::testing::uri("resources/views/posts/show.blade.php"), crate::testing::path("resources/views/posts/show.blade.php"), "blade".into(), 1, blade.into());
+        blade_problems_in(&fx.snap.index.read(), &doc, &|p| fx.snap.read(p), None).into_iter().map(|d| match d.code { Some(NumberOrString::String(c)) => c, _ => String::new() }).collect()
+    }
+
+    #[test]
+    fn narrows_a_views_variables_in_conditionals() {
+        let fx = narrowing_fixture();
+        let null = "possibly-null-property-access";
+        // An access reports once: after it, Mago takes the value as not null.
+        for (blade, found) in [
+            ("{{ $post->author->name }}", vec![null]),
+            ("@if ($post->author) {{ $post->author->name }} @endif", vec![]),
+            // `$maybe` is null in the `@elseif`.
+            ("@if ($maybe) {{ $maybe->title }} @elseif ($post->author) {{ $maybe->title }} @endif", vec!["null-property-access"]),
+            ("@isset($post->author) {{ $post->author->name }} @endisset", vec![]),
+            ("@isset($maybe, $post->author) {{ $maybe->title }} {{ $post->author->name }} @endisset", vec![]),
+            ("@isset($maybe) @else {{ $maybe->title }} @endisset", vec!["null-property-access"]),
+            ("@unless(is_null($maybe)) {{ $maybe->title }} @else {{ $post->author?->name }} @endunless", vec![]),
+            ("@unless($maybe) @else {{ $maybe->title }} @endunless", vec![]),
+            ("@empty($maybe) x @else {{ $maybe->title }} @endempty", vec![]),
+            ("@isset($maybe) {{ $maybe->title }} @endif", vec![]),
+            ("@foreach ([1, 2] as $i) @continue($maybe === null) {{ $maybe->title }} @endforeach", vec![]),
+            ("@foreach ([1, 2] as $i) @if (! $post->author) @break @endif {{ $post->author->name }} @endforeach", vec![]),
+            // Mago narrows a `switch`'s cases only in part, so they aren't checked.
+            ("@switch($maybe) @case(null) @break @default {{ $maybe->title }} @endswitch", vec![]),
+            // These say nothing about the view's variables.
+            ("@can('edit', $post) {{ $post->author->name }} @endcan", vec![null]),
+            ("@env('local') {{ $post->author->name }} @endenv", vec![null]),
+            ("@auth {{ $maybe->title }} @else x @endauth", vec![null]),
+            ("@hasSection('a') x @else {{ $maybe->title }} @endif", vec![null]),
+            // Guards that typed variables make needless aren't reported: the view may be rendered elsewhere too.
+            ("@isset($post) @else {{ $post->title }} @endisset @switch(1) @case(2) @endswitch", vec![]),
+        ] {
+            assert_eq!(view_problems(&fx, blade), found, "{blade}");
+        }
+    }
+
+    #[test]
+    fn types_the_user_as_logged_in_inside_auth() {
+        let fx = narrowing_fixture();
+        let user = "{{ \\Illuminate\\Support\\Facades\\Auth::user()->getAuthIdentifier() }} {{ auth()->guard('admin')->user()->getAuthIdentifier() }}";
+        let null = "possible-method-access-on-null";
+        for (blade, found) in [
+            (format!("@auth {user} @php $u = \\Illuminate\\Support\\Facades\\Auth::user(); @endphp {{{{ $u->getAuthIdentifier() }}}} @else x @endauth"), vec![]),
+            (format!("@auth('admin') x @elseauth {user} @endauth"), vec![]),
+            (format!("@guest x @else {user} @endguest"), vec![]),
+            (format!("@guest {user} @endguest"), vec![null, null]),
+            (format!("@auth x @else {user} @endauth"), vec![null, null]),
+            (user.to_string(), vec![null, null]),
+            // So is a variable that may hold the user, as `$user` does from the controller.
+            ("@auth {{ $user->getAuthIdentifier() }} @endauth".to_string(), vec![]),
+            ("{{ $user->getAuthIdentifier() }}".to_string(), vec![null]),
+        ] {
+            assert_eq!(view_problems(&fx, &blade), found, "{blade}");
+        }
+    }
+
+    #[test]
+    fn reads_views_whose_blocks_dont_nest_without_false_problems() {
+        let fx = narrowing_fixture();
+        let lines = |blade: &str| view_problems(&fx, blade);
+        let null = vec!["possibly-null-property-access".to_string()];
+        // An `@end…` that ends nothing leaves what's before it unsure, but what's after it is checked and narrowed.
         assert!(lines("{{ $post->author->name }}\n@if ($post) @foreach ([] as $x) @endif @endforeach\n").is_empty());
+        assert_eq!(lines("@endif\n{{ $post->author->name }}\n@if ($maybe) {{ $maybe->title }} @endif\n"), null);
+        // A block left open leaves what's after it unsure.
+        assert_eq!(lines("{{ $post->author->name }}\n@if ($maybe)\n{{ $maybe->title }}\n"), null);
+        assert!(lines("@isset($maybe)\n{{ $maybe->title }}\n@endforeach\n{{ $maybe->title }}\n").is_empty());
+        // Directives Tusk doesn't know, such as a `Blade::if()`, may narrow.
+        assert!(lines("@admin {{ $maybe->title }} @endadmin @unlessadmin {{ $maybe->title }} @endadmin @error('title') {{ $maybe->title }} @enderror").is_empty());
+        // The PHP that Laravel adds, which calls helpers that aren't here, isn't the view's to fix.
+        assert!(lines("@can('x') @endcan @env('local') @endenv @production @endproduction @hasSection('a') @endif @sectionMissing('b') @endif @hasStack('c') @endif @auth('web') @endauth @guest @endguest").is_empty());
     }
 
     #[test]
