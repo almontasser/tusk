@@ -5,7 +5,7 @@ import { mod, open, passwordStore, shortcutText } from "./platform.ts";
 import { h, icon } from "./dom";
 import { listNav } from "./listnav";
 import { errorText } from "./status";
-import { type Auth, DEFAULT_EXCLUDES, DEFAULT_PORTS, type DeployServer, describeAlias, type HostKeyProblem, mappingRemote, newServer, PROTOCOLS, type Protocol, serverProblem, type SshAlias, SUGGESTED_EXCLUDES, type UploadOnSave } from "./deploydata";
+import { type Auth, DEFAULT_EXCLUDES, DEFAULT_PORTS, type DeployServer, describeAlias, type HostKeyProblem, type LoginNeeded, mappingRemote, newServer, PROTOCOLS, type Protocol, serverProblem, type SshAlias, SUGGESTED_EXCLUDES, type UploadOnSave } from "./deploydata";
 
 /** A server being edited. `previous` is its saved name; `secret` a password or passphrase typed here. */
 type Draft = { server: DeployServer; key: string; previous?: string; dirty: boolean; secret?: string; hasSecret: boolean };
@@ -252,7 +252,12 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
     const aliasPort = alias?.port && alias.port !== 22 && s.port === 22 ? alias.port : 0;
     if (aliasPort && document.activeElement !== port.el) port.el.value = "";
     port.el.placeholder = aliasPort ? `${aliasPort} from ~/.ssh/config` : "";
-    if (alias) aliasHint.replaceChildren(icon("file-code"), ` From ~/.ssh/config: ${describeAlias(alias, o.homeDir)}`);
+    if (alias)
+      aliasHint.replaceChildren(
+        icon("file-code"),
+        h("span", { class: "deploy-alias-text" }, `From ~/.ssh/config: ${describeAlias(alias, o.homeDir)}`),
+        ...(alias.matchExecSkipped ? [h("span", { class: "deploy-alias-warning" }, icon("warning"), " A Match exec block may apply to this host, but Tusk doesn't run its command, so its settings are left out.")] : []),
+      );
     user.el.placeholder = sftp ? (alias?.user ?? "forge") : "Empty for anonymous";
     keyFile.el.placeholder = alias?.identityFiles.length ? `Empty: ${alias.identityFiles.map((f) => (o.homeDir && f.startsWith(`${o.homeDir}/`) ? `~${f.slice(o.homeDir.length)}` : f)).join(", ")} from ~/.ssh/config` : "Empty: ~/.ssh/id_ed25519, id_ecdsa, or id_rsa";
     deleteRemoteHint.textContent = s.deleteRemote && uploadOnSave.value === "never" ? "Takes effect when saved files upload, below, to this server as the default (★)." : "";
@@ -457,7 +462,7 @@ export function openDeploymentServers(o: Options): Promise<ServersResult | null>
  */
 export function trustHostKey(p: HostKeyProblem): Promise<boolean> {
   const changed = p.kind === "changed";
-  const where = p.port === 22 ? p.host : `${p.host}:${p.port}`;
+  const where = p.shown ?? (p.port === 22 ? p.host : `${p.host}:${p.port}`);
   let trusted = false;
   const trust = h("button", { type: "button", class: changed ? "danger" : "primary", onclick: () => ((trusted = true), dialog.close()) }, changed ? "Replace the Key and Connect" : "Trust and Connect");
   const cancel = h("button", { type: "button", class: changed ? "primary" : "", onclick: () => dialog.close() }, "Cancel");
@@ -475,7 +480,15 @@ export function trustHostKey(p: HostKeyProblem): Promise<boolean> {
           ? "The key this server sent isn't the one it sent before. The server may have been reinstalled, or someone may be intercepting the connection. Ask the server's administrator before you replace the key."
           : "Tusk hasn't connected to this server before. Check that the fingerprint matches the server's, such as with the hosting provider's dashboard or ssh-keyscan, then trust it. Tusk adds it to ~/.ssh/known_hosts, as ssh does.",
       ),
-      h("dl", { class: "deploy-fingerprint" }, h("dt", {}, "Key type"), h("dd", {}, p.algorithm), h("dt", {}, "Fingerprint"), h("dd", {}, p.fingerprint)),
+      h(
+        "dl",
+        { class: "deploy-fingerprint" },
+        h("dt", {}, "Key type"),
+        h("dd", {}, p.algorithm),
+        h("dt", {}, "Fingerprint"),
+        h("dd", {}, p.fingerprint),
+        ...(p.alias ? [h("dt", {}, "Kept as"), h("dd", { title: "HostKeyAlias in ~/.ssh/config" }, p.alias)] : []),
+      ),
       h("div", { class: "buttons" }, cancel, trust),
     ),
   );
@@ -486,5 +499,39 @@ export function trustHostKey(p: HostKeyProblem): Promise<boolean> {
     dialog.showModal();
     // A changed key starts on Cancel, so Enter doesn't accept it.
     (changed ? cancel : trust).focus();
+  });
+}
+
+/**
+ * Asks for a jump host's password, or the passphrase of the key it takes, as ssh would ask in a terminal. Resolves
+ * to what was typed, which deploy.ts saves in the password store, or null when canceled.
+ */
+export function askJumpLogin(p: LoginNeeded): Promise<string | null> {
+  const where = `${p.user}@${p.host}${p.port === 22 ? "" : `:${p.port}`}`;
+  const passphrase = p.kind === "passphrase";
+  const field = h("input", { type: "password", autocomplete: "off", spellcheck: false, ariaLabel: passphrase ? "Passphrase" : "Password" });
+  let typed: string | null = null;
+  const go = h("button", { type: "submit", class: "primary", disabled: true }, "Connect");
+  field.oninput = () => (go.disabled = !field.value);
+  const dialog = h(
+    "dialog",
+    { class: "refactor-dialog deploy-login", ariaLabel: passphrase ? "Key passphrase" : "Jump host password" },
+    h(
+      "form",
+      { method: "dialog", onsubmit: () => (typed = field.value) },
+      h("h2", {}, icon("key"), passphrase ? `Passphrase for ${p.hop}'s key` : `Password for ${p.hop}`),
+      h("p", {}, `Tusk reaches ${p.target} through the jump host ${p.hop} (${where}), which ${passphrase ? `takes the key ${p.key ?? ""}. Type its passphrase.` : "asks for a password."}`),
+      p.wrong ? h("p", { class: "ds-problem", role: "alert" }, icon("error"), passphrase ? " That passphrase didn't open the key, or the key was refused. Try again." : ` ${p.hop} refused that password. Try again.`) : null,
+      h("label", { class: "field" }, passphrase ? "Passphrase" : "Password", field),
+      h("p", { class: "deploy-hint" }, `Saved in ${passwordStore} for ${where}, so other servers through ${p.hop} use it too.`),
+      h("div", { class: "buttons" }, h("button", { type: "button", onclick: () => dialog.close() }, "Cancel"), go),
+    ),
+  );
+  dialog.addEventListener("keydown", (e) => e.stopPropagation());
+  document.body.append(dialog);
+  return new Promise((resolve) => {
+    dialog.onclose = () => (dialog.remove(), resolve(typed));
+    dialog.showModal();
+    field.focus();
   });
 }

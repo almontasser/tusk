@@ -70,7 +70,7 @@ file to change when you add it.
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
 | Split editors | Up to four panes. |
-| Deployment | Uploads, downloads, and comparisons go file by file over SFTP, FTP, or FTPS; there's no WebDAV and no rsync. SFTP reads `~/.ssh/config`'s `Host`, `HostName`, `Port`, `User`, `IdentityFile`, `IdentitiesOnly`, `ProxyJump`, and `Include`, but not `Match` blocks, `ProxyCommand`, `HostKeyAlias`, or certificate logins. A `ProxyJump` host logs in with your SSH agent or its key files, without a passphrase or password. A replaced file on the server keeps its permissions, and on SFTP its group, and its owner where the server lets you change it (as root); on FTP, permissions carry over only where the server allows `SITE CHMOD`. Deleting files on the server as you delete them in the project covers the default server, while saved files upload to it, and files deleted while Tusk is closed aren't noticed. Sync with Deployed compares by size and modification time, and reads both copies only for files of the same size whose times differ (up to 4 MB each). Server files opened from Remote Host check for changes on the server when Tusk gets focus and every 30 seconds, by size and time. |
+| Deployment | Uploads, downloads, and comparisons go file by file over SFTP, FTP, or FTPS; there's no WebDAV and no rsync. SFTP reads `~/.ssh/config`, but not certificate logins, `Match exec` (whose command Tusk doesn't run), `Match` criteria that need the network, such as `address`, or `CanonicalizeHostname`'s lookups. A `ProxyCommand` runs with `sh` (on Windows, the one Git for Windows has). Of a server's `ProxyJump` hosts, only the first can have a `ProxyCommand` of its own, and a jump host's own `ProxyJump` isn't followed. A jump host's password or key passphrase is asked for and saved per user and host; one that asks for more than a password, such as a one-time code, can't log in. A replaced file on the server keeps its permissions, and on SFTP its group, and its owner where the server lets you change it (as root); on FTP, permissions carry over only where the server allows `SITE CHMOD`. Deleting files on the server as you delete them in the project covers the default server, while saved files upload to it. Files deleted while Tusk was closed are found only among those Tusk uploaded, downloaded, or found the same on both sides in Sync with Deployed, so a file another tool put on the server isn't; that record is kept on this computer, not shared. Sync with Deployed compares by size and modification time, and reads both copies only for files of the same size whose times differ (up to 4 MB each). Server files opened from Remote Host check for changes on the server when Tusk gets focus and every 30 seconds, by size and time. |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
@@ -3574,9 +3574,17 @@ the left and shows the selected one's settings on the right:
   PEM, or PuTTY `.ppk` keys (versions 2 and 3).
 - An SFTP **Host** can be a `Host` alias from `~/.ssh/config`, which the field
   suggests. The alias connects as `ssh` would: to its `HostName`, `Port`, and
-  `User`, with its `IdentityFile` keys, through its `ProxyJump` hosts. Under
-  the field, Tusk shows what the alias connects to. A user, port, or key file
-  you type here wins over the file's.
+  `User`, with its `IdentityFile` keys, through its `ProxyJump` hosts or its
+  `ProxyCommand` (run with `sh`, such as `cloudflared access ssh --hostname
+  %h`), with its key kept under its `HostKeyAlias` in `known_hosts`. `Match`
+  blocks apply as in `ssh`, `Match final` included, except `Match exec`, whose
+  command Tusk doesn't run: when one may apply, a warning under the field says
+  so. Under the field, Tusk shows what the alias connects to. A user, port, or
+  key file you type here wins over the file's.
+- A jump host logs in with your SSH agent, then its key files. When it asks for
+  a password, or its key has a passphrase, Tusk asks for it, naming the jump
+  host, and saves it in the system's password store for that user and host, so
+  every server through it uses it. A refused one asks again.
 - For FTP and FTPS, a **Password** (empty with no user logs in anonymously),
   **Passive mode** (on by default, for firewalls and NAT), and for FTPS, **Don't
   check the server's certificate**, for a self-signed one.
@@ -3592,8 +3600,14 @@ the left and shows the selected one's settings on the right:
   by default. While saved files upload to this server as the default, deleting
   a file or folder in the project deletes the server's copy, and a moved or
   renamed file uploads under its new name. More than 20 deletions at once, as
-  from a branch switch, ask first with a list. Excluded paths and a mapping's
-  own folder are never deleted.
+  from a branch switch, ask first with a list. Files deleted while Tusk was
+  closed are listed in one confirmation when the project opens: Tusk keeps a
+  record of the files it uploaded, downloaded, or found the same on both sides
+  in Sync with Deployed, and asks about those that are gone. **Delete from
+  staging** deletes them, and the server's folders they leave empty, when
+  those are gone from the project too; **Keep on Server** forgets them, so
+  Tusk doesn't ask again. Excluded paths and a mapping's own folder are never
+  deleted.
 - **Excluded paths**, one per line, are never uploaded or downloaded. A name,
   such as `node_modules` or `*.log`, matches at any depth, as in `.gitignore`;
   a path with `/`, such as `storage/logs`, matches from the mapping's folder.

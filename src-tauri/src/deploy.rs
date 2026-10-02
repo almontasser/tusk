@@ -152,10 +152,13 @@ fn ftp_err(path: &str) -> impl Fn(suppaftp::FtpError) -> String + '_ {
 // ---- Host keys ----
 
 /// The SSH client's side of the handshake: it checks the server's key against ~/.ssh/known_hosts, and records why
-/// it refused one, for `connect` to report.
+/// it refused one, for `connect` to report. `host` and `port` are what known_hosts keeps the key under: the
+/// server's, or its HostKeyAlias with no port, as ssh does; `shown` names the server for the trust dialog.
 struct Client {
     host: String,
     port: u16,
+    shown: String,
+    alias: Option<String>,
     refusal: Arc<std::sync::Mutex<Option<String>>>,
 }
 
@@ -166,6 +169,8 @@ struct HostKeyProblem {
     kind: &'static str,
     host: String,
     port: u16,
+    shown: String,
+    alias: Option<String>,
     algorithm: String,
     fingerprint: String,
     key: String,
@@ -185,6 +190,8 @@ impl russh::client::Handler for Client {
                 kind,
                 host: self.host.clone(),
                 port: self.port,
+                shown: self.shown.clone(),
+                alias: self.alias.clone(),
                 algorithm: key.algorithm().to_string(),
                 fingerprint: key.fingerprint(Default::default()).to_string(),
                 key: key.to_openssh().unwrap_or_default(),
@@ -250,8 +257,9 @@ fn without_entry(text: &str, line: usize) -> String {
 // ---- Connections ----
 
 enum Conn {
-    /// `_jumps` keeps the ProxyJump hosts' connections open, which the session's runs through.
-    Sftp { ssh: russh::client::Handle<Client>, sftp: SftpSession, _jumps: Vec<russh::client::Handle<Client>> },
+    /// `_jumps` keeps the ProxyJump hosts' connections open, which the session's runs through, and `_proxy` the
+    /// ProxyCommand that carries it, which stops when the connection is dropped.
+    Sftp { ssh: russh::client::Handle<Client>, sftp: SftpSession, _jumps: Vec<russh::client::Handle<Client>>, _proxy: Option<tokio::process::Child> },
     Ftp { ftp: AsyncRustlsFtpStream, mlsd: Option<bool> },
 }
 
@@ -312,29 +320,41 @@ async fn connect(server: &Server) -> Result<Conn, String> {
 }
 
 async fn connect_sftp(server: &Server) -> Result<Conn, String> {
+    use crate::sshconfig::{expand, parse_jump, resolve, Tokens};
     // A host that's an alias in ~/.ssh/config connects as ssh would: to its HostName, port, and user, with its
-    // keys, through its jump hosts. Settings typed here win over the file's.
-    let cfg = crate::sshconfig::resolve(&server.host);
+    // keys, through its jump hosts or its ProxyCommand. Settings typed here win over the file's.
+    let cfg = resolve(&server.host);
     let host = cfg.host_name.clone().unwrap_or_else(|| server.host.clone());
     let port = if server.port == 22 { cfg.port.unwrap_or(22) } else { server.port };
     let user = if server.user.is_empty() { cfg.user.clone().unwrap_or_else(whoami) } else { server.user.clone() };
     let mut jumps: Vec<russh::client::Handle<Client>> = Vec::new();
+    let mut proxy = None;
     for spec in &cfg.proxy_jump {
-        let (jump_user, alias, jump_port) = crate::sshconfig::parse_jump(spec);
-        let jump = crate::sshconfig::resolve(&alias);
+        let (jump_user, alias, jump_port) = parse_jump(spec);
+        let jump = resolve(&alias);
         let jump_host = jump.host_name.clone().unwrap_or_else(|| alias.clone());
         let jump_user = jump_user.or_else(|| jump.user.clone()).unwrap_or_else(whoami);
-        let mut handle = handshake(&jump_host, jump_port.or(jump.port).unwrap_or(22), jumps.last()).await.map_err(|e| if e.starts_with("host-key:") { e } else { format!("Can't reach the jump host {alias}: {e}") })?;
-        // A jump host logs in as ssh would without asking: with the agent's keys, then its own key files.
-        let ok = agent_auth(&mut handle, &jump_user).await.unwrap_or(false) || files_auth(&mut handle, &jump_user, &key_files(&jump, ""), "").await?;
-        if !ok {
-            return Err(format!("The jump host {alias} refused every key for {jump_user}. Add a key for it to your SSH agent or to ~/.ssh/config."));
-        }
+        let jump_port = jump_port.or(jump.port).unwrap_or(22);
+        // Later hops go through the one before; the first can have a ProxyCommand of its own.
+        let via = match (jumps.last(), &jump.proxy_command) {
+            (Some(previous), _) => Via::Jump(previous),
+            (None, Some(command)) => Via::Command(expand(command, &Tokens { host_name: &jump_host, original: &alias, user: &jump_user, port: jump_port })),
+            (None, None) => Via::Direct,
+        };
+        let (mut handle, child) = handshake(&jump_host, jump_port, jump.host_key_alias.as_deref(), via).await.map_err(|e| if e.starts_with("host-key:") { e } else { format!("Can't reach the jump host {alias}: {e}") })?;
+        proxy = child.or(proxy);
+        hop_login(&mut handle, &server.host, &alias, &jump_host, jump_port, &jump_user, &jump).await?;
         jumps.push(handle);
     }
-    let mut ssh = handshake(&host, port, jumps.last()).await?;
+    let via = match (jumps.last(), &cfg.proxy_command) {
+        (Some(jump), _) => Via::Jump(jump),
+        (None, Some(command)) => Via::Command(expand(command, &Tokens { host_name: &host, original: &server.host, user: &user, port })),
+        (None, None) => Via::Direct,
+    };
+    let (mut ssh, child) = handshake(&host, port, cfg.host_key_alias.as_deref(), via).await?;
+    proxy = child.or(proxy);
     let ok = match server.auth.as_str() {
-        "password" => ssh.authenticate_password(&user, server.secret()).await.map_err(friendly)?.success(),
+        "password" => password_auth(&mut ssh, &user, &server.secret()).await?,
         // As ssh does, the config's key files follow the agent's keys.
         "agent" => agent_auth(&mut ssh, &user).await? || (!cfg.identity_files.is_empty() && files_auth(&mut ssh, &user, &key_files(&cfg, ""), "").await?),
         _ => files_auth(&mut ssh, &user, &key_files(&cfg, &server.key_file), &server.secret()).await?,
@@ -350,22 +370,179 @@ async fn connect_sftp(server: &Server) -> Result<Conn, String> {
     channel.request_subsystem(true, "sftp").await.map_err(friendly)?;
     let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| format!("The server has no SFTP: {e}"))?;
     sftp.set_timeout(60);
-    Ok(Conn::Sftp { ssh, sftp, _jumps: jumps })
+    Ok(Conn::Sftp { ssh, sftp, _jumps: jumps, _proxy: proxy })
 }
 
-/// Opens an SSH connection to `host`, directly or through the jump host `via`, and checks the server's key.
-async fn handshake(host: &str, port: u16, via: Option<&russh::client::Handle<Client>>) -> Result<russh::client::Handle<Client>, String> {
+/// How an SSH connection reaches its server: over the network, through a jump host, or through a ProxyCommand's
+/// input and output.
+enum Via<'a> {
+    Direct,
+    Jump(&'a russh::client::Handle<Client>),
+    Command(String),
+}
+
+/// Opens an SSH connection to `host` and checks the server's key, under `alias` in known_hosts when there's a
+/// HostKeyAlias. A ProxyCommand's process comes back with it, to keep while the connection lives.
+async fn handshake(host: &str, port: u16, alias: Option<&str>, via: Via<'_>) -> Result<(russh::client::Handle<Client>, Option<tokio::process::Child>), String> {
     let config = Arc::new(russh::client::Config { keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() });
     let refusal = Arc::new(std::sync::Mutex::new(None));
-    let client = Client { host: host.to_string(), port, refusal: refusal.clone() };
-    let result = match via {
-        None => russh::client::connect(config, (host, port), client).await,
-        Some(jump) => {
+    let shown = if port == 22 { host.to_string() } else { format!("{host}:{port}") };
+    let (key_host, key_port) = alias.map_or((host, port), |a| (a, 22));
+    let client = Client { host: key_host.to_string(), port: key_port, shown, alias: alias.map(String::from), refusal: refusal.clone() };
+    let refused = |e: russh::Error| refusal.lock().unwrap().take().unwrap_or_else(|| friendly(e));
+    match via {
+        Via::Direct => russh::client::connect(config, (host, port), client).await.map(|h| (h, None)).map_err(refused),
+        Via::Jump(jump) => {
             let channel = jump.channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0).await.map_err(|e| format!("The jump host couldn't reach {host}:{port}: {}", friendly(e)))?;
-            russh::client::connect_stream(config, channel.into_stream(), client).await
+            russh::client::connect_stream(config, channel.into_stream(), client).await.map(|h| (h, None)).map_err(refused)
         }
+        Via::Command(command) => {
+            let (mut child, stream, stderr) = spawn_proxy(&command)?;
+            match russh::client::connect_stream(config, stream, client).await {
+                Ok(handle) => Ok((handle, Some(child))),
+                Err(e) => {
+                    // The command's own words say more than the SSH error, such as nc's "Connection refused".
+                    let _ = tokio::time::timeout(Duration::from_millis(300), child.wait()).await;
+                    let said = stderr.lock().unwrap().trim().to_string();
+                    let error = refused(e);
+                    Err(if error.starts_with("host-key:") { error } else if said.is_empty() { format!("The ProxyCommand ({command}) didn't connect to {host}: {error}") } else { format!("The ProxyCommand ({command}) failed: {said}") })
+                }
+            }
+        }
+    }
+}
+
+/// Starts a ProxyCommand as ssh does, with the shell, and gives its output and input as one stream. What it prints
+/// to its error output is kept, up to a few lines, to say why it failed.
+fn spawn_proxy(command: &str) -> Result<(tokio::process::Child, impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static, Arc<std::sync::Mutex<String>>), String> {
+    use std::process::Stdio;
+    let mut shell = crate::toolpaths::command("/bin/sh");
+    shell.args(["-c", &format!("exec {command}")]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut shell = tokio::process::Command::from(shell);
+    shell.kill_on_drop(true);
+    let mut child = shell.spawn().map_err(|e| format!("Can't start the ProxyCommand {command}: {e}"))?;
+    let (Some(stdout), Some(stdin), Some(mut stderr)) = (child.stdout.take(), child.stdin.take(), child.stderr.take()) else { return Err("The ProxyCommand has no input or output".into()) };
+    let said = Arc::new(std::sync::Mutex::new(String::new()));
+    let keep = said.clone();
+    tokio::spawn(async move {
+        let mut buf = [0; 1024];
+        while let Ok(n) = stderr.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            let mut said = keep.lock().unwrap();
+            if said.len() < 2000 {
+                said.push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+        }
+    });
+    Ok((child, tokio::io::join(stdout, stdin), said))
+}
+
+/// Logs in with a key, with RSA's best hash the server supports.
+async fn try_key(ssh: &mut russh::client::Handle<Client>, user: &str, key: russh::keys::PrivateKey) -> Result<bool, String> {
+    let hash = if key.algorithm().is_rsa() { ssh.best_supported_rsa_hash().await.map_err(friendly)?.flatten() } else { None };
+    Ok(ssh.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await.map_err(friendly)?.success())
+}
+
+/// Logs in with a password: SSH's `password` method, or keyboard-interactive, which servers that check passwords
+/// with PAM often offer instead, answering each of its prompts with the password.
+async fn password_auth(ssh: &mut russh::client::Handle<Client>, user: &str, password: &str) -> Result<bool, String> {
+    use russh::client::{AuthResult, KeyboardInteractiveAuthResponse as Reply};
+    let methods = match ssh.authenticate_password(user, password).await.map_err(friendly)? {
+        AuthResult::Success => return Ok(true),
+        AuthResult::Failure { remaining_methods, .. } => remaining_methods,
     };
-    result.map_err(|e| refusal.lock().unwrap().take().unwrap_or_else(|| friendly(e)))
+    if !methods.contains(&russh::MethodKind::KeyboardInteractive) {
+        return Ok(false);
+    }
+    let mut reply = ssh.authenticate_keyboard_interactive_start(user, None::<String>).await.map_err(friendly)?;
+    // A server asks a round or two of questions; more than a few means it wants more than a password.
+    for _ in 0..4 {
+        reply = match reply {
+            Reply::Success => return Ok(true),
+            Reply::Failure { .. } => return Ok(false),
+            Reply::InfoRequest { prompts, .. } => ssh.authenticate_keyboard_interactive_respond(prompts.iter().map(|_| password.to_string()).collect()).await.map_err(friendly)?,
+        };
+    }
+    Ok(false)
+}
+
+/// What a jump host needs that Tusk doesn't have, as JSON the frontend reads to ask for it: `ssh-login:{…}`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginNeeded {
+    /// The server the connection is for.
+    target: String,
+    /// The jump host's name in ProxyJump, and where it connects.
+    hop: String,
+    host: String,
+    port: u16,
+    user: String,
+    /// Where the secret is saved in the password store.
+    account: String,
+    /// "password", or "passphrase" for the key file `key`.
+    kind: &'static str,
+    key: Option<String>,
+    /// Whether the saved secret was refused.
+    wrong: bool,
+}
+
+/// Logs in to a jump host as ssh would: with the agent's keys, then its key files. A key with a passphrase, or a
+/// host that asks for a password, takes the secret saved for this user and host; without one, or when it's
+/// refused, the error asks the frontend for it (`ssh-login:{…}`), which saves it and connects again.
+async fn hop_login(ssh: &mut russh::client::Handle<Client>, target: &str, hop: &str, host: &str, port: u16, user: &str, cfg: &crate::sshconfig::HostConfig) -> Result<(), String> {
+    use russh::client::AuthResult;
+    use russh::MethodKind;
+    let account = format!("ssh:{user}@{host}:{port}");
+    let saved = stored_secret(&account);
+    let methods = match ssh.authenticate_none(user).await.map_err(friendly)? {
+        AuthResult::Success => return Ok(()),
+        AuthResult::Failure { remaining_methods, .. } => remaining_methods,
+    };
+    let mut locked = Vec::new();
+    if methods.contains(&MethodKind::PublicKey) {
+        if agent_auth(ssh, user).await.unwrap_or(false) {
+            return Ok(());
+        }
+        for (file, _) in key_files(cfg, "") {
+            match load_key(&file, "") {
+                Ok(key) => {
+                    if try_key(ssh, user, key).await? {
+                        return Ok(());
+                    }
+                }
+                Err(e) if e.contains("has a passphrase") => locked.push(file),
+                Err(_) => {}
+            }
+        }
+        if let Some(secret) = &saved {
+            for file in &locked {
+                if let Ok(key) = load_key(file, secret) {
+                    if try_key(ssh, user, key).await? {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    let takes_password = methods.contains(&MethodKind::Password) || methods.contains(&MethodKind::KeyboardInteractive);
+    if takes_password {
+        if let Some(secret) = &saved {
+            if password_auth(ssh, user, secret).await? {
+                return Ok(());
+            }
+        }
+    }
+    let kind = if !locked.is_empty() {
+        "passphrase"
+    } else if takes_password {
+        "password"
+    } else {
+        return Err(format!("The jump host {hop} refused every key for {user}. Add a key for it to your SSH agent or to ~/.ssh/config."));
+    };
+    let needed = LoginNeeded { target: target.into(), hop: hop.into(), host: host.into(), port, user: user.into(), account, kind, key: locked.first().map(crate::slash), wrong: saved.is_some() };
+    Err(format!("ssh-login:{}", serde_json::to_string(&needed).unwrap_or_default()))
 }
 
 pub(crate) fn whoami() -> String {
@@ -408,8 +585,7 @@ async fn files_auth(ssh: &mut russh::client::Handle<Client>, user: &str, files: 
             }
             Err(e) => return Err(e),
         };
-        let hash = if key.algorithm().is_rsa() { ssh.best_supported_rsa_hash().await.map_err(friendly)?.flatten() } else { None };
-        if ssh.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await.map_err(friendly)?.success() {
+        if try_key(ssh, user, key).await? {
             return Ok(true);
         }
     }
@@ -1142,10 +1318,11 @@ pub async fn deploy_stat(server: Server, path: String) -> Result<Option<Entry>, 
     with_conn!(&server, |conn| conn.stat(&path).await)
 }
 
-/// Deletes files and folders (with what's in them) from the server, leaving out ones already gone. Returns how
-/// many were there to delete; stops at the first that can't be.
+/// Deletes files and folders (with what's in them) from the server, leaving out ones already gone, then the
+/// folders in `prune` that are left empty, deepest first. Returns how many were there to delete; stops at the
+/// first that can't be.
 #[tauri::command]
-pub async fn deploy_delete(server: Server, paths: Vec<String>) -> Result<usize, String> {
+pub async fn deploy_delete(server: Server, paths: Vec<String>, prune: Option<Vec<String>>) -> Result<usize, String> {
     with_conn!(&server, |conn| async {
         let mut deleted = 0;
         for path in &paths {
@@ -1154,9 +1331,102 @@ pub async fn deploy_delete(server: Server, paths: Vec<String>) -> Result<usize, 
                 deleted += 1;
             }
         }
+        let mut prune = prune.unwrap_or_default();
+        prune.sort_by_key(|d| std::cmp::Reverse(d.len()));
+        for dir in prune {
+            // A folder with anything else in it, such as files the server made, stays.
+            if conn.list(&dir).await.is_ok_and(|entries| entries.is_empty()) {
+                let _ = conn.remove(&dir, true).await;
+            }
+        }
         Ok(deleted)
     }
     .await)
+}
+
+// ---- What Tusk put on each server ----
+
+/// The project files Tusk last uploaded to or downloaded from a server, or found the same on both sides, by path
+/// in the project, with their size and time then. A file listed here that's gone from the project was deleted
+/// since, such as while Tusk was closed. Kept per project and server in the app's data folder.
+type Snapshot = std::collections::BTreeMap<String, (u64, i64)>;
+
+static SNAPSHOTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn snapshot_file(app: &tauri::AppHandle, root: &str, server: &str) -> Result<PathBuf, String> {
+    use sha2::Digest;
+    use tauri::Manager;
+    let hash = sha2::Sha256::digest(format!("{root}\n{server}"));
+    let name: String = hash[..12].iter().map(|b| format!("{b:02x}")).collect();
+    Ok(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("deployment").join(format!("{name}.json")))
+}
+
+fn read_snapshot(file: &Path) -> Snapshot {
+    std::fs::read(file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+fn write_snapshot(file: &Path, files: &Snapshot) -> Result<(), String> {
+    let dir = file.parent().ok_or("No folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let temp = file.with_extension("tmp");
+    std::fs::write(&temp, serde_json::to_vec(files).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, file).map_err(|e| e.to_string())
+}
+
+/// Whether `path` is `dir` or inside it; every path is inside "".
+fn inside(path: &str, dir: &str) -> bool {
+    dir.is_empty() || path == dir || path.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Forgets what's under `under` and each of `remove` (files or folders), then records `add` as they are on disk now.
+fn update_snapshot(files: &mut Snapshot, root: &Path, under: Option<&str>, add: &[String], remove: &[String]) {
+    if let Some(dir) = under {
+        files.retain(|p, _| !inside(p, dir));
+    }
+    for r in remove.iter().filter(|r| !r.is_empty()) {
+        files.retain(|p, _| !inside(p, r));
+    }
+    for rel in add {
+        if let Some(meta) = std::fs::metadata(root.join(rel)).ok().filter(|m| m.is_file()) {
+            files.insert(rel.clone(), (meta.len(), meta.modified().map(secs).unwrap_or(0)));
+        }
+    }
+}
+
+/// The recorded files that are gone from the project.
+fn missing_files(files: &Snapshot, root: &Path) -> Vec<FileInfo> {
+    files.iter().filter(|(rel, _)| std::fs::symlink_metadata(root.join(rel)).is_err()).map(|(rel, &(size, mtime))| FileInfo { path: rel.clone(), size, mtime }).collect()
+}
+
+/// Records what changed on the server: paths are relative to the project `root`.
+#[tauri::command(async)]
+pub fn deploy_snapshot_update(app: tauri::AppHandle, root: String, server: String, under: Option<String>, add: Vec<String>, remove: Vec<String>) -> Result<(), String> {
+    let _lock = SNAPSHOTS.lock().unwrap();
+    let file = snapshot_file(&app, &root, &server)?;
+    let mut files = read_snapshot(&file);
+    update_snapshot(&mut files, Path::new(&root), under.as_deref(), &add, &remove);
+    write_snapshot(&file, &files)
+}
+
+/// The files Tusk put on `server` that are gone from the project.
+#[tauri::command(async)]
+pub fn deploy_snapshot_missing(app: tauri::AppHandle, root: String, server: String) -> Result<Vec<FileInfo>, String> {
+    let _lock = SNAPSHOTS.lock().unwrap();
+    Ok(missing_files(&read_snapshot(&snapshot_file(&app, &root, &server)?), Path::new(&root)))
+}
+
+/// Moves a server's record to its new name, or deletes it with the server when `to` is None.
+#[tauri::command(async)]
+pub fn deploy_snapshot_move(app: tauri::AppHandle, root: String, from: String, to: Option<String>) -> Result<(), String> {
+    let _lock = SNAPSHOTS.lock().unwrap();
+    let old = snapshot_file(&app, &root, &from)?;
+    if !old.exists() {
+        return Ok(());
+    }
+    match to {
+        Some(to) => std::fs::rename(&old, snapshot_file(&app, &root, &to)?).map_err(|e| e.to_string()),
+        None => std::fs::remove_file(&old).map_err(|e| e.to_string()),
+    }
 }
 
 /// Uploads one file. `id` lets `deploy_cancel` stop it; progress goes to `progress` as (done, total) bytes.
@@ -1302,6 +1572,14 @@ fn keychain(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, account).map_err(|e| e.to_string())
 }
 
+/// A saved password or passphrase, or None when there's none. Tests keep theirs out of the password store.
+fn stored_secret(account: &str) -> Option<String> {
+    #[cfg(test)]
+    return tests::SECRETS.lock().unwrap().get(account).cloned();
+    #[cfg(not(test))]
+    keychain(account).ok().and_then(|e| e.get_password().ok()).filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1353,6 +1631,39 @@ mod tests {
         assert_eq!(kinds, [("bigger.php", "changed", "remote"), ("gone.php", "remote", "remote"), ("new.php", "local", "local")]);
         // Same size, times apart: the contents decide.
         assert_eq!(unsure.iter().map(|d| (d.path.as_str(), d.newer)).collect::<Vec<_>>(), [("touched.php", "local")]);
+    }
+
+    #[test]
+    fn snapshots_record_and_find_deleted_files() {
+        let dir = std::env::temp_dir().join(format!("tusk-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for p in ["app/A.php", "app/B.php", "app/Http/C.php", "public/index.php", "apple.txt"] {
+            std::fs::create_dir_all(dir.join(p).parent().unwrap()).unwrap();
+            std::fs::write(dir.join(p), "x").unwrap();
+        }
+        let mut files = Snapshot::new();
+        let all: Vec<String> = ["app/A.php", "app/B.php", "app/Http/C.php", "public/index.php", "apple.txt", "not-there.php"].map(String::from).into();
+        update_snapshot(&mut files, &dir, None, &all, &[]);
+        // Only files on disk are recorded, with their size.
+        assert_eq!(files.len(), 5);
+        assert_eq!(files["app/A.php"].0, 1);
+        std::fs::remove_file(dir.join("app/B.php")).unwrap();
+        std::fs::remove_dir_all(dir.join("app/Http")).unwrap();
+        let gone: Vec<_> = missing_files(&files, &dir).into_iter().map(|f| f.path).collect();
+        assert_eq!(gone, ["app/B.php", "app/Http/C.php"]);
+        // Removing a folder forgets what's in it, not files whose names start the same.
+        update_snapshot(&mut files, &dir, None, &[], &["app".into()]);
+        assert_eq!(files.keys().collect::<Vec<_>>(), ["apple.txt", "public/index.php"]);
+        // A comparison replaces what's under its folder.
+        update_snapshot(&mut files, &dir, Some("public"), &["app/A.php".into()], &[]);
+        assert_eq!(files.keys().collect::<Vec<_>>(), ["app/A.php", "apple.txt"]);
+        update_snapshot(&mut files, &dir, Some(""), &[], &[]);
+        assert!(files.is_empty());
+        let file = dir.join("state/x.json");
+        update_snapshot(&mut files, &dir, None, &["apple.txt".into()], &[]);
+        write_snapshot(&file, &files).unwrap();
+        assert_eq!(read_snapshot(&file), files);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -1537,9 +1848,104 @@ mod tests {
         let direct = test_server("sftp", 22, "", "key", String::new(), "");
         let mut conn = connect(&Server { host: "tusk-direct".into(), ..direct.clone() }).await.unwrap();
         assert!(conn.stat(&crate::slash(folder.join("www"))).await.unwrap().is_some_and(|e| e.dir));
-        let Conn::Sftp { _jumps, .. } = connect(&Server { host: "tusk-target".into(), ..direct }).await.unwrap() else { unreachable!() };
+        let Conn::Sftp { _jumps, .. } = connect(&Server { host: "tusk-target".into(), ..direct.clone() }).await.unwrap() else { unreachable!() };
         assert_eq!(_jumps.len(), 1);
+
+        // Jump hosts that want a password, or a key's passphrase: in-process servers that forward to the sshd.
+        let host_key = russh::keys::load_secret_key(folder.join("sshd/host_key"), None).unwrap();
+        let pw_public = load_key(Path::new(&pw_key), "secret phrase").unwrap().public_key().clone();
+        let password_jump = start_jump(host_key.clone(), Some("jump pw"), None).await;
+        let key_jump = start_jump(host_key, None, Some(pw_public)).await;
+        let target = |jump: &str| format!("  HostName 127.0.0.1\n  Port 2222\n  User {}\n  IdentityFile {key}\n  IdentitiesOnly yes\n  ProxyJump {jump}\n", whoami());
+        std::fs::write(
+            &config,
+            format!(
+                "Host tusk-pw-jump\n  HostName 127.0.0.1\n  Port {password_jump}\n  User jumper\n  IdentitiesOnly yes\n\
+                 Host tusk-key-jump\n  HostName 127.0.0.1\n  Port {key_jump}\n  User jumper\n  IdentityFile {pw_key}\n  IdentitiesOnly yes\n\
+                 Host tusk-via-pw\n{}Host tusk-via-key\n{}\
+                 Host tusk-proxy\n  HostName 127.0.0.1\n  Port 2222\n  IdentityFile {key}\n  IdentitiesOnly yes\n  ProxyCommand nc %h %p\n  HostKeyAlias tusk-test-alias\n\
+                 Host tusk-proxy-broken\n  HostName 127.0.0.1\n  Port 2222\n  IdentityFile {key}\n  ProxyCommand nc %h 1\n",
+                target("tusk-pw-jump"),
+                target("tusk-key-jump"),
+            ),
+        )
+        .unwrap();
+        let named = |host: &str| Server { host: host.into(), ..direct.clone() };
+        let login = |e: String| -> serde_json::Value { serde_json::from_str(e.strip_prefix("ssh-login:").expect(&e)).unwrap() };
+        // Each new jump host's key is trusted first, as the frontend's dialog would.
+        for (host, port) in [("tusk-via-pw", password_jump), ("tusk-via-key", key_jump)] {
+            let Err(e) = connect(&named(host)).await else { panic!("connected through an unknown jump host") };
+            let problem: serde_json::Value = serde_json::from_str(e.strip_prefix("host-key:").expect(&e)).unwrap();
+            assert_eq!(problem["port"], port);
+            deploy_trust_host("127.0.0.1".into(), port, problem["key"].as_str().unwrap().into(), None).unwrap();
+        }
+        // No password saved: the error asks for one; a wrong one says so; the right one connects.
+        let asked = login(connect(&named("tusk-via-pw")).await.err().unwrap());
+        assert_eq!((asked["kind"].as_str(), asked["hop"].as_str(), asked["wrong"].as_bool()), (Some("password"), Some("tusk-pw-jump"), Some(false)));
+        let account = asked["account"].as_str().unwrap().to_string();
+        assert_eq!(account, format!("ssh:jumper@127.0.0.1:{password_jump}"));
+        SECRETS.lock().unwrap().insert(account.clone(), "not it".into());
+        assert_eq!(login(connect(&named("tusk-via-pw")).await.err().unwrap())["wrong"], true);
+        SECRETS.lock().unwrap().insert(account, "jump pw".into());
+        assert!(connect(&named("tusk-via-pw")).await.is_ok());
+        // A jump host's key with a passphrase asks for the passphrase, naming the key.
+        let asked = login(connect(&named("tusk-via-key")).await.err().unwrap());
+        assert_eq!((asked["kind"].as_str(), asked["key"].as_str()), (Some("passphrase"), Some(pw_key.as_str())));
+        SECRETS.lock().unwrap().insert(asked["account"].as_str().unwrap().into(), "secret phrase".into());
+        let Conn::Sftp { _jumps, .. } = connect(&named("tusk-via-key")).await.unwrap() else { unreachable!() };
+        assert_eq!(_jumps.len(), 1);
+
+        // A ProxyCommand carries the connection; HostKeyAlias keeps the server's key under its own name, no port.
+        let Err(e) = connect(&named("tusk-proxy")).await else { panic!("connected with an unknown alias") };
+        let problem: serde_json::Value = serde_json::from_str(e.strip_prefix("host-key:").expect(&e)).unwrap();
+        assert_eq!((problem["host"].as_str(), problem["port"].as_u64(), problem["shown"].as_str()), (Some("tusk-test-alias"), Some(22), Some("127.0.0.1:2222")));
+        deploy_trust_host("tusk-test-alias".into(), 22, problem["key"].as_str().unwrap().into(), None).unwrap();
+        assert!(std::fs::read_to_string(&known).unwrap().lines().any(|l| l.starts_with("tusk-test-alias ")));
+        let mut conn = connect(&named("tusk-proxy")).await.unwrap();
+        assert!(matches!(&conn, Conn::Sftp { _proxy: Some(_), .. }));
+        assert!(conn.stat(&crate::slash(folder.join("www"))).await.unwrap().is_some_and(|e| e.dir));
+        let e = connect(&named("tusk-proxy-broken")).await.err().unwrap();
+        assert!(e.contains("ProxyCommand"), "{e}");
         std::env::remove_var("TUSK_SSH_CONFIG");
+    }
+
+    pub(super) static SECRETS: LazyLock<std::sync::Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
+
+    /// A jump host for the tests, on a free port: it takes `password` or `key`, and forwards connections.
+    async fn start_jump(host_key: russh::keys::PrivateKey, password: Option<&'static str>, key: Option<PublicKey>) -> u16 {
+        struct Jump {
+            password: Option<&'static str>,
+            key: Option<PublicKey>,
+        }
+        impl russh::server::Handler for Jump {
+            type Error = russh::Error;
+            async fn auth_password(&mut self, _: &str, password: &str) -> Result<russh::server::Auth, Self::Error> {
+                Ok(if Some(password) == self.password { russh::server::Auth::Accept } else { russh::server::Auth::reject() })
+            }
+            async fn auth_publickey(&mut self, _: &str, key: &PublicKey) -> Result<russh::server::Auth, Self::Error> {
+                Ok(if self.key.as_ref().is_some_and(|k| k.key_data() == key.key_data()) { russh::server::Auth::Accept } else { russh::server::Auth::reject() })
+            }
+            async fn channel_open_direct_tcpip(&mut self, channel: russh::Channel<russh::server::Msg>, host: &str, port: u32, _: &str, _: u32, reply: russh::server::ChannelOpenHandle, _: &mut russh::server::Session) -> Result<(), Self::Error> {
+                let mut target = tokio::net::TcpStream::connect((host, port as u16)).await?;
+                reply.accept().await;
+                tokio::spawn(async move {
+                    let _ = tokio::io::copy_bidirectional(&mut channel.into_stream(), &mut target).await;
+                });
+                Ok(())
+            }
+        }
+        let methods: &[russh::MethodKind] = if password.is_some() { &[russh::MethodKind::Password] } else { &[russh::MethodKind::PublicKey] };
+        let config = Arc::new(russh::server::Config { keys: vec![host_key], methods: methods.into(), auth_rejection_time: Duration::from_millis(10), ..Default::default() });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                if let Ok(session) = russh::server::run_stream(config.clone(), socket, Jump { password, key: key.clone() }).await {
+                    tokio::spawn(session);
+                }
+            }
+        });
+        port
     }
 
     #[tokio::test]

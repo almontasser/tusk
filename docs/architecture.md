@@ -4538,18 +4538,57 @@ Windows.
 **~/.ssh/config.** `sshconfig.rs` reads the file as `ssh` does: the first
 value for a keyword wins, `Host` patterns take `*`, `?`, and `!` (through
 `globset`, case-insensitive), `Include` reads other files in place (globs,
-relative to `~/.ssh`, 16 deep), and `IdentityFile` collects every value with
-`%h`, `%u`, `%r`, `%p`, `%d`, and `~` expanded. `Match` blocks are skipped, not
-evaluated. `connect_sftp` resolves the server's host: `HostName` replaces it,
-the file's `Port` applies while the settings' port is 22, and its `User` while
-the settings have none. `ProxyJump` hosts connect one through the other with
-`channel_open_direct_tcpip`, and `russh::client::connect_stream` runs the next
-handshake over that channel; `Conn::Sftp` keeps the jump connections open
-beside the session. A jump host logs in with the agent, then its own key
-files, since there's nowhere to ask for its password. Host keys are checked
-against the resolved name, as `ssh` does without `HostKeyAlias`.
-`deploy_ssh_hosts` lists the aliases without wildcards for the Servers
-dialog's suggestions. Tests point `TUSK_SSH_CONFIG` at their own file.
+relative to `~/.ssh`, 16 deep), and `IdentityFile` collects every value, once
+each, with `%h`, `%n`, `%u`, `%r`, `%p`, `%d`, and `~` expanded (`expand`).
+`Match` lines are checked as `ssh`'s `match_cfg_line` checks them
+(`match_line`): `host` against the `HostName` so far, else the name typed;
+`originalhost`, `user` (the `User` so far, else yours), `localuser`, `rport`,
+`tagged` (`Tag`), `all`, and `!` before any of them, all of which must hold.
+`final`, or `canonical` with `CanonicalizeHostname` on, reads the lines a
+second time with those matching, keeping the first reading's values, so a
+`Match final` block sees the user an earlier block set. `exec` never holds, nor
+does a criterion Tusk can't check, such as `address`; when a block would hold
+but for its `exec`, `match_exec_skipped` says so for the Servers dialog.
+`ProxyJump` and `ProxyCommand` share one slot, the first found winning, `none`
+included, as in `ssh`; ProxyCommand's value is the line's rest as written, so
+its quotes reach the shell. `connect_sftp` resolves the server's host:
+`HostName` replaces it, the file's `Port` applies while the settings' port is
+22, and its `User` while the settings have none. `handshake` connects `Via`
+the network, a jump host, or a command: `ProxyJump` hosts connect one through
+the other with `channel_open_direct_tcpip`, and
+`russh::client::connect_stream` runs the next handshake over that channel; a
+`ProxyCommand` (its tokens filled in with the final host, port, and user) runs
+as `sh -c 'exec …'` through `toolpaths::command`, for the login shell's PATH,
+and its output and input, joined with `tokio::io::join`, carry the handshake.
+Its error output is kept, up to 2 KB, to say why it failed, such as `nc`'s
+"Connection refused". `Conn::Sftp` keeps the jump connections and the command's
+process (`kill_on_drop`) beside the session. The first jump host can have a
+`ProxyCommand` of its own. Host keys are checked against the resolved name and
+port, or against the `HostKeyAlias` with port 22, which leaves the port out of
+`known_hosts`, as `ssh` does; the trust prompt names the server by address
+(`shown`) and the alias as **Kept as**. `deploy_ssh_hosts` lists the aliases
+without wildcards for the Servers dialog's suggestions. Tests point
+`TUSK_SSH_CONFIG` at their own file.
+
+**Jump host logins.** `hop_login` asks the jump host which methods it takes
+(`authenticate_none`), then tries the agent and its key files as `ssh` would.
+A key with a passphrase and a host that takes passwords use the secret saved
+under `ssh:<user>@<host>:<port>` in the password store (`stored_secret`), one
+per hop, so every server through it shares it: first as each locked key's
+passphrase, then as a password. When there's none, or it's refused, the error
+is `ssh-login:{…}` (`LoginNeeded`: the hop, where it connects, the account,
+`password` or `passphrase` with the key, and whether a saved one was refused).
+`reach` in deploy.ts answers it like a host key: `askJumpLogin` asks, naming the
+hop and the server it leads to, `deploy_set_secret` saves the answer, and the
+call runs again, which can ask the next question, such as the server's own
+key, up to ten rounds. Questions are shared by what they're about
+(`askOnce`), so transfers that start together ask once; a host key's answer is
+kept a second for transfers still failing, a login's isn't, so a refused
+password asks again at once. `password_auth`, for jump hosts and for servers
+set to a password, uses `password` and falls back to keyboard-interactive,
+answering each prompt with the password, as servers that check passwords with
+PAM ask. A cancel throws an error `transient` doesn't match, so the queue
+doesn't retry it into the same question.
 
 **Uploads.** `Conn::upload` creates the missing folders, writes
 `.name.tusk-upload` beside the file, sets the local file's modification time
@@ -4595,7 +4634,28 @@ mappings that no longer exist and that `deploy_excluded` doesn't leave out are
 deleted there, a folder taking its files' entries with it. Paths in the same
 burst that do exist upload, so a move or rename leaves the server with the
 new name. More than 20 deletions in one burst, as a branch switch makes, show
-a toast whose **Review…** opens the confirmation instead.
+a toast whose **Review…** opens the confirmation instead. The confirmation
+lists paths sorted, numbers in order.
+
+**What's on each server.** For deletions made while Tusk was closed, deploy.rs
+keeps a record per project and server of the project files that are on the
+server as they are here: `<app local data>/deployment/<sha256 of root and
+server>.json`, paths relative to the project with their size and time
+(`Snapshot`). deploy.ts's `record` adds the files of every finished transfer
+batch, up or down, removes what `deleteFromServer` deleted, and after each
+Sync with Deployed comparison replaces what's under the compared folder with
+every local file there that isn't only in the project. Renaming a server
+moves its record (`deploy_snapshot_move`), and removing one deletes it.
+`closedDeletions` runs 1.5 seconds after a project opens, under the same
+conditions as `filesDeleted`: `deploy_snapshot_missing` lists recorded files
+that are gone, those outside the mappings or now excluded are forgotten, and
+`confirmDeletion` lists the rest with **Keep on Server** focused. Deleting
+sends them to `deploy_delete` with `prune`, the server folders between each file
+and its mapping's folder that are gone from the project too
+(`foldersBetween`); deploy.rs removes those deepest first, only when they're
+empty, so a folder with the server's own files stays. Keep forgets them;
+closing the dialog asks again next time. Writes take one lock and replace the
+file through a rename.
 
 **Remote Host.** The tree loads a folder when you open it. Its paths are
 absolute (a relative root path is resolved against the login folder), so a
@@ -4617,9 +4677,12 @@ with one `pushEditOperations`, so undo brings back what was there.
 **Tests.** Rust unit tests cover exclusions, local listing, the diff, known_hosts
 numbering, paths, MFMT times, `.ppk` keys of both versions with and without
 their passphrase (fixtures from `ssh-key`'s tests, passphrase `123`), key file
-order, and `sshconfig.rs`'s matching, first values, `Include`, tokens, and
-jump specs; `deploydata.test.ts` covers mappings, web URLs, stored servers,
-alias descriptions, and errors. `scripts/deploy-test-servers.sh` starts the
+order, the server record, and `sshconfig.rs`'s matching, first values,
+`Include`, tokens, jump specs, `Match` (with a final reading, negation,
+`tagged`, an `exec` left out, and an unknown criterion), and which proxy wins;
+`deploydata.test.ts` covers mappings, web URLs, stored servers, alias
+descriptions, host key and login errors, and the folders a deletion may
+empty. `scripts/deploy-test-servers.sh` starts the
 system's `sshd` as you on port 2222 and pyftpdlib for FTP (2121), explicit
 FTPS (2990), and implicit FTPS (2991, a handler that starts TLS before its
 greeting), both self-signed. The ignored tests upload, replace (checking
@@ -4628,7 +4691,12 @@ check the trust flow for unknown and changed keys, a missing passphrase, a
 refused user, a refused FTP password, and a refused self-signed certificate,
 that a replaced SFTP file keeps another group of yours, and that an alias in
 a test ssh config connects directly and through a `ProxyJump` host (the same
-sshd, through itself).
+sshd, through itself). The SFTP test also starts two jump hosts in the test,
+russh servers that forward `direct-tcpip` to the sshd, one taking a password
+and one the passphrase-protected key; it checks the `ssh-login` errors (asked,
+refused, then connected; secrets come from a test map, not the password
+store), and that `nc %h %p` as a `ProxyCommand` connects with its key kept
+under a `HostKeyAlias`, and that a failing one names the command.
 
 ## Bookmarks, snippets, and other small tools
 
@@ -8159,3 +8227,34 @@ so only writes through `$this` count.
 
 On lamah-sms-gateway and municipality, the same 85 paths, 80 resolved, and the
 one real problem were found as before.
+
+### 2026-10-02: Deployment evaluates Match, runs ProxyCommand, and asks for jump host secrets
+
+The first reading of `~/.ssh/config` skipped `Match` and `ProxyCommand`, so a
+host whose settings sit in `Match host *.internal` or that's reached through
+`cloudflared access ssh` or an `ssh -W` command didn't connect as it does in a
+terminal. `Match` is now evaluated as `ssh` does, final reading included, for
+every criterion that needs only the file and the names: those are what
+configs use to pick users, keys, and proxies. `Match exec` stays out. Running a
+shell command from the file each time a server connects, including in the
+background checks, could hang or have side effects nobody expects from
+opening a project; the Servers dialog says when one would apply, so the
+difference from `ssh` isn't silent. `ProxyCommand` runs, though, because
+there's no other way to reach those hosts, and it runs only when you connect
+to that server, as `ssh` would run it.
+
+Jump hosts used to log in with keys alone, since there was nowhere to ask for a
+password. The connection now returns what it needs as a structured error, as
+host keys already did, and the frontend asks and connects again. That keeps
+the Rust side free of UI callbacks across the pooled, concurrent connections,
+and one answer serves every transfer waiting on it. The secret is saved per
+user and host, not per server, because a bastion is shared by many servers.
+
+Deletions made while Tusk was closed are found from a record of what Tusk put
+on each server, rather than by listing the server at every start: a listing
+costs a walk over the network, and couldn't tell a file Tusk deleted locally
+from one the server made, such as an upload. The record only grows from what
+Tusk saw on both sides, so it never offers to delete a file it didn't put
+there, and the confirmation is the only way anything is deleted. It's kept in
+the app's data folder, not `tusk.json`, since it describes this computer's
+copy.

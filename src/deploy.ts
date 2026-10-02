@@ -10,8 +10,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { appCacheDir, homeDir } from "@tauri-apps/api/path";
 import { h, icon, iconButton, toast } from "./dom";
-import { type DeployServer, type FileInfoLike, formatBytes, formatTime, hostKeyProblem, joinRemote, listSome, localFor, type Placed, readServers, remoteFor, type SshAlias, transient, type UploadOnSave, webUrlFor, writeServer } from "./deploydata";
-import { openDeploymentServers, trustHostKey } from "./deployservers";
+import { type DeployServer, type FileInfoLike, formatBytes, formatTime, foldersBetween, hostKeyProblem, joinRemote, listSome, localFor, loginNeeded, type Placed, readServers, remoteFor, type SshAlias, transient, type UploadOnSave, webUrlFor, writeServer } from "./deploydata";
+import { askJumpLogin, openDeploymentServers, trustHostKey } from "./deployservers";
 import { type MenuItem, showMenu } from "./files";
 import { showDiff } from "./git";
 import { listNav } from "./listnav";
@@ -59,29 +59,42 @@ const account = (name: string) => `${host.root()}#${name}`;
 /** A server as deploy.rs takes it. `secret` is a password typed in the settings and not saved yet. */
 const wire = (s: DeployServer, secret?: string, saved = s.name) => ({ protocol: s.protocol, host: s.host.trim(), port: s.port, user: s.user, auth: s.auth, keyFile: s.keyFile, passive: s.passive, insecureTls: s.insecureTls, account: account(saved), secret });
 
-/** Host keys being asked about, by host and port, so transfers that start together ask once. */
+/** Questions being asked, by what they're about, so transfers that start together ask once. */
 const asking = new Map<string, Promise<boolean>>();
 
+/** Asks once for `key` while the question is open; `grace` keeps the answer a moment for transfers still failing. */
+function askOnce(key: string, ask: () => Promise<boolean>, grace: number): Promise<boolean> {
+  if (!asking.has(key)) asking.set(key, ask().finally(() => (grace ? setTimeout(() => asking.delete(key), grace) : asking.delete(key))));
+  return asking.get(key)!;
+}
+
 /**
- * Runs a call to the server, and when the server's SSH key isn't known yet or changed, asks whether to trust it
- * and runs the call again if you do.
+ * Runs a call to the server, answering what the connection asks first: whether to trust an SSH key that isn't
+ * known yet or changed, and a jump host's password or key passphrase, saved in the password store. Each answer
+ * runs the call again, which can ask the next question, such as the server's key after a jump host's password.
  */
 async function reach<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (e) {
-    const problem = hostKeyProblem(String(e));
-    if (!problem) throw e;
-    const where = `${problem.host}:${problem.port}`;
-    if (!asking.has(where))
-      asking.set(
-        where,
-        trustHostKey(problem)
-          .then(async (yes) => (yes && (await invoke("deploy_trust_host", { host: problem.host, port: problem.port, key: problem.key, line: problem.line }), true)) || false)
-          .finally(() => setTimeout(() => asking.delete(where), 1000)),
-      );
-    if (!(await asking.get(where))) throw new Error(`Not connected: ${problem.host}'s key isn't trusted.`);
-    return run();
+  for (let round = 0; ; round++) {
+    try {
+      return await run();
+    } catch (e) {
+      const text = String(e);
+      const problem = hostKeyProblem(text);
+      const login = problem ? null : loginNeeded(text);
+      if ((!problem && !login) || round >= 10) throw e;
+      if (problem) {
+        const trusted = await askOnce(`key ${problem.host}:${problem.port}`, async () => (await trustHostKey(problem)) && (await invoke("deploy_trust_host", { host: problem.host, port: problem.port, key: problem.key, line: problem.line }), true), 1000);
+        // Not "not connected", which transient() would retry, asking again.
+        if (!trusted) throw new Error(`${problem.shown ?? problem.host}'s key isn't trusted, so Tusk didn't connect.`);
+      } else if (login) {
+        // No grace: a refused password asks again at once.
+        const typed = await askOnce(`login ${login.account}`, async () => {
+          const secret = await askJumpLogin(login);
+          return secret !== null && (await invoke("deploy_set_secret", { account: login.account, secret }), true);
+        }, 0);
+        if (!typed) throw new Error(`Tusk didn't connect: the jump host ${login.hop} needs a ${login.kind}.`);
+      }
+    }
   }
 }
 
@@ -130,6 +143,9 @@ export async function editServers(selected?: string) {
   try {
     for (const name of result.removed) await invoke("deploy_set_secret", { account: account(name), secret: "" });
     for (const [from, to] of Object.entries(result.renamed)) await invoke("deploy_move_secret", { from: account(from), to: account(to) });
+    // The record of what's on each server follows its name, and goes with it.
+    for (const name of result.removed) await invoke("deploy_snapshot_move", { root, from: name, to: null }).catch(() => {});
+    for (const [from, to] of Object.entries(result.renamed)) await invoke("deploy_snapshot_move", { root, from, to }).catch(() => {});
     for (const [name, secret] of Object.entries(result.secrets)) await invoke("deploy_set_secret", { account: account(name), secret });
     await setProjectValue(SERVERS, result.servers.length ? result.servers.map(writeServer) : undefined);
     await setProjectValue(DEFAULT, result.defaultServer || undefined, "local");
@@ -234,6 +250,8 @@ function finishBatch(b: Batch) {
     status(`${b.up ? "Uploaded" : "Downloaded"} ${done.length === 1 ? nameOf(done[0].local) : `${done.length} files`} ${where}`, "deploy", "info");
   }
   if (done.length) b.after?.();
+  // Both copies are the same now, for finding deletions made while Tusk was closed.
+  if (done.length) record(b.server, { add: done.map((t) => t.local) });
   // Remote Host shows what was uploaded.
   if (b.up && done.length) remote.changedOn(b.server);
 }
@@ -397,12 +415,16 @@ async function safeToReplace(locals: string[]) {
   return confirm(`Replace unsaved changes in ${dirty.length === 1 ? nameOf(dirty[0]) : `${dirty.length} open files`} with the server's copy?`, "Download and Replace");
 }
 
-/** Asks before deleting, listing what goes. Cancel is the default. Resolves to true to delete. */
-function confirmDeletion(title: string, intro: string, paths: string[], action: string): Promise<boolean> {
-  const { shown, more } = listSome(paths);
-  let yes = false;
+/**
+ * Asks before deleting, listing what goes. Cancel (or `keep`, its label when declining means something) is the
+ * default. Resolves to true to delete, false for Cancel or `keep`, and null when `keep` is given and the dialog is
+ * dismissed without choosing.
+ */
+function confirmDeletion(title: string, intro: string, paths: string[], action: string, keep?: string): Promise<boolean | null> {
+  const { shown, more } = listSome([...paths].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+  let yes: boolean | null = keep ? null : false;
   const go = h("button", { type: "button", class: "danger", onclick: () => ((yes = true), dialog.close()) }, icon("trash"), action);
-  const cancel = h("button", { type: "button", class: "primary", onclick: () => dialog.close() }, "Cancel");
+  const cancel = h("button", { type: "button", class: "primary", onclick: () => ((yes = false), dialog.close()) }, keep ?? "Cancel");
   const dialog = h(
     "dialog",
     { class: "refactor-dialog deploy-delete", ariaLabel: title },
@@ -439,6 +461,7 @@ export async function deleteFromServer(paths: string[], server?: DeployServer | 
   try {
     status(`Deleting ${what} from ${s.name}…`, "deploy:progress");
     const deleted = await reach(() => invoke<number>("deploy_delete", { server: wire(s), paths: remotes }));
+    record(s, { remove: placed.map((p) => p.local) });
     status(deleted ? `Deleted ${deleted === remotes.length ? what : `${deleted} of ${remotes.length} items`} from ${s.name}` : `${what} ${remotes.length === 1 ? "wasn't" : "weren't"} on ${s.name}`, "deploy", "info");
   } catch (e) {
     toast(`Couldn't delete ${what} from ${s.name}: ${errorText(e)}`, { action: { label: "Retry", run: () => deleteFromServer(paths, s, { ask: false }) } });
@@ -474,6 +497,75 @@ export async function filesDeleted(paths: string[]) {
   if (gone.length > QUIET_DELETES)
     return toast(`${gone.length} files in ${s.name}'s mappings were deleted here, such as by a branch switch. Delete them from ${s.name} too?`, { kind: "info", action: { label: "Review…", run: () => deleteFromServer(gone.map((p) => p.local), s) } });
   void deleteFromServer(gone.map((p) => p.local), s, { ask: false });
+}
+
+// ---- What Tusk put on each server ----
+
+/** A project file's path relative to the project, as deploy.rs records it; null outside the project. */
+const projectRel = (path: string) => (path === host.root() ? "" : path.startsWith(`${host.root()}/`) ? path.slice(host.root().length + 1) : null);
+
+/**
+ * Updates deploy.rs's record of the project files on a server: `add` are there now, as they are here; `remove`
+ * (files or folders) aren't; `under`, a project folder, is replaced by `add` whole. Server files opened from Remote
+ * Host aren't in the project, so they aren't recorded.
+ */
+function record(s: DeployServer, o: { add?: string[]; remove?: string[]; under?: string }) {
+  const rel = (paths: string[] = []) => paths.map(projectRel).filter((p): p is string => p !== null);
+  const add = rel(o.add);
+  const remove = rel(o.remove).filter(Boolean);
+  const under = o.under === undefined ? null : projectRel(o.under);
+  if (!add.length && !remove.length && under === null) return;
+  invoke("deploy_snapshot_update", { root: host.root(), server: s.name, under, add, remove }).catch((e) => console.warn("deploy: can't record", e));
+}
+
+/**
+ * Files Tusk put on the default server that were deleted here while it was closed, such as by a branch switch in
+ * a terminal: when that server deletes what you delete, one confirmation lists them before they go there too.
+ * **Keep on Server** forgets them, so they're not asked about again; closing the dialog asks next time.
+ */
+async function closedDeletions() {
+  const s = defaultServer();
+  const root = host?.root();
+  if (!s?.deleteRemote || uploadOnSave() === "never" || !root) return;
+  const missing = await invoke<FileInfoLike[]>("deploy_snapshot_missing", { root, server: s.name }).catch(() => []);
+  if (!missing.length) return;
+  const locals = missing.map((f) => `${root}/${f.path}`);
+  let placed = locals.map((l) => remoteFor(s, root, l)).filter((p): p is Placed => !!p && p.local !== p.localRoot);
+  const excluded = await invoke<boolean[]>("deploy_excluded", { excludes: s.excludes, paths: placed.map((p) => p.local.slice(p.localRoot.length + 1)) });
+  placed = placed.filter((_, i) => !excluded[i]);
+  // What the mappings no longer send there, or now exclude, isn't Tusk's to delete: forget it.
+  const unmapped = locals.filter((l) => !placed.some((p) => p.local === l));
+  if (unmapped.length) record(s, { remove: unmapped });
+  if (!placed.length || host.root() !== root) return;
+  const n = placed.length;
+  const files = `${n} file${n === 1 ? "" : "s"}`;
+  const choice = await confirmDeletion(
+    `Delete ${n === 1 ? nameOf(placed[0].local) : files} from ${s.name}?`,
+    `${n === 1 ? "This file was" : "These files were"} uploaded to ${s.name}, then deleted in the project, such as by a branch switch while Tusk was closed. The server still has ${n === 1 ? "it" : "them"}. Deleting from the server can't be undone.`,
+    placed.map((p) => relative(p.local)),
+    `Delete from ${s.name}`,
+    "Keep on Server",
+  );
+  if (choice === null || host.root() !== root) return;
+  if (!choice) {
+    record(s, { remove: placed.map((p) => p.local) });
+    return status(`Kept ${files} on ${s.name}. Tusk won't ask about ${n === 1 ? "it" : "them"} again.`, "deploy", "info");
+  }
+  // Folders left empty on the server go too, when they're gone here as well.
+  const folders = [...new Set(placed.flatMap((p) => foldersBetween([p.local], p.localRoot)))];
+  const exists = await invoke<boolean[]>("paths_exist", { paths: folders });
+  const prune = folders.filter((_, i) => !exists[i]).map((f) => remoteFor(s, root, f)!.remote);
+  try {
+    status(`Deleting ${files} from ${s.name}…`, "deploy:progress");
+    const deleted = await reach(() => invoke<number>("deploy_delete", { server: wire(s), paths: placed.map((p) => p.remote), prune }));
+    record(s, { remove: placed.map((p) => p.local) });
+    status(`Deleted ${deleted} file${deleted === 1 ? "" : "s"} from ${s.name}${deleted < n ? `; ${n - deleted} weren't there anymore` : ""}`, "deploy", "info");
+  } catch (e) {
+    toast(`Couldn't delete ${files} from ${s.name}: ${errorText(e)}`, { action: { label: "Retry", run: () => void closedDeletions() } });
+  } finally {
+    status("", "deploy:progress");
+  }
+  remote.changedOn(s);
 }
 
 /** Runs a listing with a spinner in the status bar and Cancel, which stops deploy.rs's walk by `id`. */
@@ -592,12 +684,21 @@ class SyncView {
       this.differences = differences;
       this.choices = new Map(differences.map((d) => [d.path, defaultChoice(d)]));
       this.state = "ready";
+      void this.recordServerFiles(differences);
     } catch (e) {
       if (id !== this.compareId) return;
       this.state = "failed";
       this.error = errorText(e);
     }
     this.render();
+  }
+
+  /** After a comparison, every project file here that isn't only in the project is on the server: record them. */
+  private async recordServerFiles(differences: Difference[]) {
+    const found = await invoke<FileInfoLike[]>("deploy_local_files", { root: this.at.localRoot, paths: [this.at.local], excludes: this.server.excludes }).catch(() => null);
+    if (!found) return;
+    const onlyHere = new Set(differences.filter((d) => d.kind === "local").map((d) => this.localPath(d)));
+    record(this.server, { under: this.at.local, add: found.map((f) => `${this.at.localRoot}/${f.path}`).filter((p) => !onlyHere.has(p)) });
   }
 
   private set(path: string, choice: Choice) {
@@ -1284,6 +1385,8 @@ export function initDeployment(h: Host) {
 export function deploymentProjectOpened() {
   void invoke("deploy_disconnect");
   remote?.serversChanged();
+  // Once the window has settled, not in the way of the project opening.
+  setTimeout(() => void closedDeletions(), 1500);
 }
 
 export const isRemoteFile = (path: string) => !!remoteOrigin(path);
