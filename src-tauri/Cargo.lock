@@ -4485,6 +4485,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "grep",
+ "gtk",
  "ignore",
  "keyring",
  "libc",

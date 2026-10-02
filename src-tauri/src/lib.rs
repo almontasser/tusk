@@ -181,6 +181,32 @@ fn restart(app: tauri::AppHandle) {
     app.request_restart();
 }
 
+/// GTK runs a menu item's shortcut before the page sees the key, so the menu would take keys that the page runs
+/// itself, such as ⌘F in a terminal. This leaves the menu bar's shortcuts on Linux showing but not running.
+#[tauri::command]
+fn menu_shortcuts_shown_only(_window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        fn walk(widget: &gtk::Widget) {
+            if let Some(item) = widget.downcast_ref::<gtk::MenuItem>() {
+                // Stopping the signal skips GTK's own answer, so false holds and the key goes on to the page.
+                item.connect_can_activate_accel(|item, _| {
+                    item.stop_signal_emission_by_name("can-activate-accel");
+                    false
+                });
+                if let Some(menu) = item.submenu() {
+                    walk(&menu);
+                }
+            } else if let Some(container) = widget.downcast_ref::<gtk::Container>() {
+                container.children().iter().for_each(walk);
+            }
+        }
+        walk(_window.default_vbox().map_err(|e| e.to_string())?.upcast_ref());
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::thread::spawn(login_path);
@@ -292,6 +318,7 @@ pub fn run() {
             grpc::grpc_methods,
             check_update,
             restart,
+            menu_shortcuts_shown_only,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

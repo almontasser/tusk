@@ -29,6 +29,22 @@ export const keyText = (text: string, mac = isMac) =>
         return [...names, KEY_NAMES[key] ?? key].filter(Boolean).join("+");
       });
 
+// Keys as the keymap writes them (`Meta+Shift+F`), drawn as a Mac does (`⇧⌘F`); keyText turns them into words elsewhere.
+const KEY_SYMBOLS: Record<string, string> = {
+  Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
+  Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
+};
+const macSymbols = (keys: string) =>
+  keys
+    .replace(/^(\w+) \1$/, "$1+$1+")
+    .replace(/Ctrl\+/g, "⌃")
+    .replace(/Alt\+/g, "⌥")
+    .replace(/Shift\+/g, "⇧")
+    .replace(/Meta\+/g, "⌘")
+    .replace(/[A-Z][a-z]+[A-Za-z]*$/, (key) => KEY_SYMBOLS[key] ?? key);
+/** A keymap shortcut as this platform names it: `⇧⌘F` on a Mac, `Ctrl+Shift+F` elsewhere. */
+export const shortcutText = (keys?: string, mac = isMac) => keys && keyText(macSymbols(keys), mac);
+
 /** Whether a path is absolute: `/…`, or `c:/…` on Windows. */
 export const isAbsolute = (path: string) => path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 

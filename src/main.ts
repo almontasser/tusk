@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isMac, keyText, open } from "./platform.ts";
+import { isMac, keyText, open, shortcutText } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
 import { iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
@@ -123,7 +123,7 @@ function addPane(): Pane {
 
 /** Menu rows for the actions with these labels that apply now, with their shortcuts from the keymap. */
 const menuActions = (...labels: string[]) =>
-  actions.filter((a) => labels.includes(a.label) && (!a.when || a.when())).map((a) => ({ label: a.label, keys: symbolsFor(a.keys), run: a.run }));
+  actions.filter((a) => labels.includes(a.label) && (!a.when || a.when())).map((a) => ({ label: a.label, keys: shortcutText(a.keys), run: a.run }));
 
 /** The context menu of the code: the actions for the caret, as PhpStorm's editor menu has them. */
 function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEvent) {
@@ -200,7 +200,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     "-",
     ...blameMenu(ed, line, e.event.posx, e.event.posy),
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
-    { label: "Copy Reference", keys: symbolsFor(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
+    { label: "Copy Reference", keys: shortcutText(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
   ]);
   return true;
@@ -1744,21 +1744,7 @@ async function chooseDockerService() {
   ]);
 }
 
-// Keys shown as the Mac draws them; elsewhere as words, such as `Ctrl+Shift+F`.
-const KEY_SYMBOLS: Record<string, string> = {
-  Delete: "⌦", Backspace: "⌫", Enter: "⏎", Escape: "⎋", Tab: "⇥", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Space",
-  Slash: "/", Backslash: "\\", Equal: "=", Minus: "-", BracketLeft: "[", BracketRight: "]", Comma: ",", Period: ".", Backquote: "`", Semicolon: ";", Quote: "'",
-};
-const symbolsFor = (keys?: string) => keys && keyText(macSymbols(keys)!);
-const macSymbols = (keys?: string) =>
-  keys
-    ?.replace(/^(\w+) \1$/, "$1+$1+")
-    .replace(/Ctrl\+/g, "⌃")
-    .replace(/Alt\+/g, "⌥")
-    .replace(/Shift\+/g, "⇧")
-    .replace(/Meta\+/g, "⌘")
-    .replace(/[A-Z][a-z]+[A-Za-z]*$/, (key) => KEY_SYMBOLS[key] ?? key);
-const actionItems = () => actions.map((a) => ({ label: a.label, detail: symbolsFor(a.keys), run: a.run }));
+const actionItems = () => actions.map((a) => ({ label: a.label, detail: shortcutText(a.keys), run: a.run }));
 
 const findAction = () => pick("Find action", (q) => rank(q, actionItems()));
 
@@ -1799,7 +1785,7 @@ function editKeymap() {
       q,
       actions.map((a) => ({
         label: a.label,
-        detail: `${symbolsFor(a.keys) || "No shortcut"}${a.label in settings.keymap ? " (changed)" : ""}`,
+        detail: `${shortcutText(a.keys) || "No shortcut"}${a.label in settings.keymap ? " (changed)" : ""}`,
         run: () => recordShortcut(a),
       })),
     ),
@@ -1824,7 +1810,7 @@ function recordShortcut(action: Action) {
     const taken = keys && actions.find((a) => a !== action && a.keys && canonical(a.keys) === keys);
     if (taken) keymap[taken.label] = "";
     updateSetting("keymap", keymap);
-    status(`${action.label}: ${symbolsFor(action.keys) || "no shortcut"}${taken ? `. Removed it from ${taken.label}.` : ""}`);
+    status(`${action.label}: ${shortcutText(action.keys) || "no shortcut"}${taken ? `. Removed it from ${taken.label}.` : ""}`);
   };
   const finish = () => {
     recording = false;

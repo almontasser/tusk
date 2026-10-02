@@ -72,6 +72,8 @@ windows-sys = { version = "0.61", features = ["Win32_System_JobObjects", "Win32_
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+# The menu bar's widgets, the same version Tauri builds (see menu_shortcuts_shown_only in lib.rs).
+gtk = "0.18"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

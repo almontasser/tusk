@@ -75,7 +75,7 @@ file to change when you add it.
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
 | Tool paths | A shared `phpInterpreter` is a path, so it works on Macs that install PHP in the same place. Language servers keep the PHP and Node.js they started with until you restart them. |
 | Settings designer | Renaming a property renames it in the class and the stored values, but not in code that reads it, such as a settings page's field. Dates are written as `CarbonImmutable` and rely on the package's global cast for dates. An encrypted property shows its encrypted value, and the designer writes `add` rather than `addEncrypted` for new ones. A settings migration that hasn't run yet isn't seen, so run pending migrations before applying. |
-| Platform | AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. Windows and Linux are newer and less tested than macOS. There, Ctrl does what ⌘ does in the shortcuts, so a shortcut that uses ⌃ on a Mac needs the Windows key; the menus show no shortcuts, and some hints in panels still name the Mac's keys. On Windows, the app's shell commands, such as installing packages or Git with a password prompt, run in Git for Windows' `sh`, and a restored terminal tab starts in its first folder. AI completion there uses the GPU through Vulkan, or the CPU. Windows on ARM isn't supported. |
+| Platform | AI completion on Intel Macs runs on the CPU, since llama.cpp's Intel build has no Metal support. Windows and Linux are newer and less tested than macOS. There, Ctrl does what ⌘ does in the shortcuts, so a shortcut that uses ⌃ on a Mac needs the Windows key; some hints in panels still name the Mac's keys. On Windows, the app's shell commands, such as installing packages or Git with a password prompt, run in Git for Windows' `sh`, and a restored terminal tab starts in its first folder. AI completion there uses the GPU through Vulkan, or the CPU. Windows on ARM isn't supported. |
 
 ### Missing
 
@@ -272,7 +272,8 @@ The menu bar (File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
 Window, and Help) runs the same actions and shows each one's current shortcut,
 except double taps such as ⇧⇧ and two-key chords such as ⌘K ⌘X. An editor-only
 shortcut, such as ⌘D for **Duplicate Line**, still reaches text fields and the
-terminal when the editor doesn't have focus. To search the menus, use the
+terminal when the editor doesn't have focus. On Windows and Linux, the menus
+show ⌘ as Ctrl and ⌃ as the Windows key. To search the menus on a Mac, use the
 search field in Help. **Help > Keyboard Shortcuts** lists every action that has
 a shortcut; pick one to run it.
 

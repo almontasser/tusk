@@ -10,8 +10,12 @@ test("menu shortcuts for single key combinations", () => {
   assert.equal(accelerator({ keys: "Shift Shift" }, true), undefined);
   assert.equal(accelerator({ keys: "Meta+K Meta+X" }, true), undefined);
   assert.equal(accelerator({}, true), undefined);
-  // Off a Mac the page handles shortcuts, so the menu shows none.
-  assert.equal(accelerator({ keys: "Meta+D" }, false), undefined);
+  // Off a Mac, ⌘ is Ctrl and ⌃ the Windows key.
+  assert.equal(accelerator({ keys: "Meta+D" }, false), "Ctrl+D");
+  assert.equal(accelerator({ keys: "Ctrl+Shift+R" }, false), "Super+Shift+R");
+  assert.equal(accelerator({ keys: "Ctrl+Alt+Shift+ArrowUp" }, false), "Super+Alt+Shift+ArrowUp");
+  assert.equal(accelerator({ keys: "Alt+Shift+Meta+O" }, false), "Alt+Shift+Ctrl+O");
+  assert.equal(accelerator({ keys: "Shift Shift" }, false), undefined);
 });
 
 test("the menu skips a key the page passed on, for actions that only sometimes apply", () => {

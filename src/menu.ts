@@ -1,7 +1,8 @@
 // The native menu bar. Its items run the same actions as Find Action, looked up by label.
+import { invoke } from "@tauri-apps/api/core";
 import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
 import { commandsIn } from "./editorcommands.ts";
-import { isMac } from "./platform.ts";
+import { isMac, isWindows, shortcutText } from "./platform.ts";
 
 type Action = { label: string; keys?: string; run(): unknown; editorOnly?: boolean; when?: () => boolean };
 type Native = { native: "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll" | "Services" | "Hide" | "HideOthers" | "ShowAll" | "Quit" | "Minimize" | "Maximize" | "Fullscreen" };
@@ -54,13 +55,12 @@ const LAYOUT: [string, Entry[]][] = [
 ];
 
 /**
- * The menu shortcut for an action, in Tauri's accelerator format. Double taps such as ⇧⇧ and chords such as
- * ⌘K ⌘X have no menu equivalent.
+ * The menu shortcut for an action, in Tauri's accelerator format. Off a Mac, ⌘ is Ctrl and ⌃ the Windows key, as the
+ * page reads them (`comboOf` in main.ts). Double taps such as ⇧⇧ and chords such as ⌘K ⌘X have no menu equivalent.
  */
 export function accelerator(a: Pick<Action, "keys">, mac = isMac) {
-  // Off a Mac the page handles every shortcut itself (main.ts), and a menu accelerator would run some twice.
-  if (!mac || !a.keys || a.keys.includes(" ")) return undefined;
-  return a.keys.replace("Meta", "Cmd");
+  if (!a.keys || a.keys.includes(" ")) return undefined;
+  return mac ? a.keys.replace("Meta", "Cmd") : a.keys.replace("Ctrl", "Super").replace("Meta", "Ctrl");
 }
 
 /**
@@ -86,7 +86,12 @@ export async function setMenu(actions: Action[]) {
     if (!action) return void console.error(`Menu: no action named "${entry}"`);
     // Inside the HTTP Client submenu, "HTTP Client: Import…" reads as "Import…".
     const text = entry.startsWith(`${parent}: `) ? entry.slice(parent.length + 2) : entry;
-    return MenuItem.new({ text, accelerator: accelerator(action), action: () => passedOn(action) || action.run() });
+    const run = () => passedOn(action) || action.run();
+    // Off a Mac the page runs every shortcut itself, so the menu only shows them. Windows draws the text after a tab
+    // as the item's shortcut; on Linux, setMenu stops GTK from running them.
+    if (isWindows) return MenuItem.new({ text: accelerator(action) ? `${text}\t${shortcutText(action.keys)}` : text, action: run });
+    // A shortcut the menu can't take, such as a key GTK doesn't know, leaves the item without one, not the menu bar.
+    return MenuItem.new({ text, accelerator: accelerator(action), action: run }).catch(() => MenuItem.new({ text, action: run }));
   };
   const submenu = async (text: string, entries: Entry[]) =>
     Submenu.new({ text, items: (await Promise.all(entries.map((e) => build(e, text)))).filter((i) => !!i) });
@@ -96,7 +101,7 @@ export async function setMenu(actions: Action[]) {
   if (isMac) {
     await menus.at(-2)!.setAsWindowsMenuForNSApp();
     await menus.at(-1)!.setAsHelpMenuForNSApp();
-  }
+  } else if (!isWindows) await invoke("menu_shortcuts_shown_only");
   const old = current;
   current = menu;
   await old?.close();

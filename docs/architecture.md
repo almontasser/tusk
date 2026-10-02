@@ -300,6 +300,17 @@ do nothing within 500 ms of a key press: a key the page passed on is the only
 way the menu runs it that soon, since picking an item takes longer. Both are
 tested in `menu.test.ts`.
 
+Windows and Linux work the other way: the menu sees a key first, so a menu
+shortcut would take keys the page runs itself. There the menu shows its
+shortcuts but doesn't run them. `accelerator()` turns `Meta` into Ctrl and
+`Ctrl` into the Windows key (`Super`), as `comboOf` reads them. On Windows, an
+item's text gets a tab and `shortcutText` (`Save All\tCtrl+S`), which Windows
+draws as the shortcut. On Linux, the item gets the accelerator, and
+`menu_shortcuts_shown_only` in `lib.rs` makes GTK's `can-activate-accel`
+answer false for every menu item, so GTK draws the shortcut and passes the key
+on to the page. An accelerator that GTK can't take leaves its item without
+one.
+
 ### Monaco's commands as actions
 
 `src/editorcommands.ts` is a table of Monaco's editing commands: label, Monaco
@@ -535,11 +546,11 @@ the rest of the code doesn't ask which system it's on.
   file, so paths from the editor match those the index finds on disk.
 - **Keys.** Off a Mac, `comboOf` reads Ctrl as the keymap's `Meta` and the
   Windows key as its `Ctrl`, so one keymap serves every system, and
-  `symbolsFor` shows keys as words (`Ctrl+Shift+F`). Handlers that check ⌘ use
-  `mod(e)`. Hints written with the Mac's symbols (`⌥⌘Z`) go through `keyText`:
-  the page's static `<kbd>`s and tooltips at startup, context menus' keys, and
-  status messages. The menu bar gets no accelerators there: the page handles every
-  shortcut, and an accelerator could run an action twice. macOS-only menu
+  `shortcutText` in `platform.ts` shows keys as words (`Ctrl+Shift+F`).
+  Handlers that check ⌘ use `mod(e)`. Hints written with the Mac's symbols
+  (`⌥⌘Z`) go through `keyText`: the page's static `<kbd>`s and tooltips at
+  startup, context menus' keys, and status messages. The menu bar shows the
+  shortcuts but leaves them to the page (see "Menu bar"). macOS-only menu
   items are left out.
 - **The rest.** Database passwords go through the `keyring` crate: the
   Keychain, Windows' Credential Manager, or Linux's Secret Service. The askpass
@@ -7295,4 +7306,16 @@ and on newer distributions; it emulates x64, since most Linux desktops are x64.
 GitHub Actions would build natively and faster, but the updater key would then
 have to leave Bitwarden for a repository secret. Release files drop the version
 from their names so the website can link to `releases/latest/download/`.
+
+### 2026-10-02: Menu shortcuts on Windows and Linux show but don't run
+
+The page runs every shortcut itself, with checks the menu can't make, such as
+leaving ⌃ keys to a terminal's shell. On a Mac, the page sees a key first, so
+menu accelerators are safe. On Windows and Linux, the menu sees it first and
+would take it from the page, so the menu there only shows the shortcuts.
+Windows menus draw any text after a tab as the shortcut, so no accelerator is
+set. GTK has no such text, so Linux gets real accelerators that GTK is told
+not to run. Taking the accelerator group off the window would also stop them,
+but muda takes the group off again when the menu changes, which would release
+it twice.
 
