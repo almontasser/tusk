@@ -202,7 +202,7 @@ fn plan(ctx: &Ctx<'_>, range: Range) -> Result<Plan, String> {
 
 /// A Mago type as a PHP type declaration, with class names written for this file and the imports they need.
 /// `None` when it can't be written, such as `mixed` or a resource.
-fn php_type(ctx: &Ctx<'_>, t: &TUnion, imports: &mut Vec<String>) -> Option<String> {
+pub(super) fn php_type(ctx: &Ctx<'_>, t: &TUnion, imports: &mut Vec<String>) -> Option<String> {
     let mut parts: Vec<String> = vec![];
     for atomic in t.types.iter() {
         let part = match atomic {

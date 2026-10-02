@@ -51,6 +51,8 @@ pub fn find(method: &str) -> Option<Handler> {
         TypeHierarchySupertypes::METHOD => typed!(TypeHierarchySupertypes, hierarchy::supertypes),
         TypeHierarchySubtypes::METHOD => typed!(TypeHierarchySubtypes, hierarchy::subtypes),
         Formatting::METHOD => typed!(Formatting, format::formatting),
+        "tusk/extract" => actions::introduce::extract_request,
+        "tusk/extractTargets" => actions::introduce::targets_request,
         "tusk/memberReferences" => custom::member_references,
         "tusk/overrides" => navigation::overrides,
         "tusk/phpOutline" => outline::php_outline,

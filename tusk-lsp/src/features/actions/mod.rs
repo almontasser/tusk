@@ -4,6 +4,7 @@
 pub mod extract;
 pub mod fixes;
 pub mod generate;
+pub mod introduce;
 pub mod mago;
 pub mod organize;
 
@@ -67,6 +68,7 @@ pub fn code_actions(snap: &Snapshot, params: CodeActionParams) -> Result<Option<
         out.extend(generate::candidates(ctx, range));
         out.extend(organize::candidates(ctx, range));
         out.extend(extract::candidates(ctx, range));
+        out.extend(introduce::candidates(ctx, range));
         // Laravel's and Mago's fixes come with their edits: they're only offered on a problem, so they're few.
         (out, complete)
     })
@@ -107,7 +109,8 @@ fn edit_for(ctx: &Ctx<'_>, id: &str, range: Range, arg: &Value) -> Option<Worksp
         "fixes" => fixes::resolve(ctx, action, range, arg),
         "generate" => generate::resolve(ctx, action, range, arg),
         "organize" => organize::resolve(ctx, action, range, arg),
-        "extract" => extract::resolve(ctx, action, range, arg),
+        "extract" if action == "method" => extract::resolve(ctx, action, range, arg),
+        "extract" => introduce::resolve(ctx, action, range),
         _ => None,
     }
 }

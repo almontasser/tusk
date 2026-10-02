@@ -1,7 +1,8 @@
-// Text-level PHP expressions for Extract Variable and Extract Constant: the expressions around the caret,
-// their other occurrences, where the new statement goes, and names to suggest. Free of editor imports so Node
-// can test it. ponytail: a tokenizer and a precedence parser over one statement, not a PHP parser; heredocs
-// aren't tokenized, and ternaries (? :) and closures are boundaries rather than expressions.
+// Text-level PHP for Inline Variable, Inline Constant, and Inline Method: the call around a method name, where a
+// statement before it goes, and the method's body to substitute. Free of editor imports so Node can test it.
+// Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter read code in Tusk's server instead.
+// ponytail: a tokenizer and a precedence parser over one statement, not a PHP parser; heredocs aren't tokenized,
+// and ternaries (? :) and closures are boundaries rather than expressions. Move Inline to the server to drop it.
 import { commentMask } from "./comments.ts";
 import { nameResolver, outsideStrings, parseTypeDeclarations } from "./phptypes.ts";
 import { declarationParts, type Param } from "./refactorparse.ts";
@@ -192,38 +193,6 @@ export function expressionsAt(source: string, offset: number): Expr[] {
   return k < 0 ? [] : candidates(toks, k).map((r) => toExpr(source, toks, r));
 }
 
-/** The selection as an expression, trimmed, or null when it isn't one. */
-export function expressionIn(source: string, start: number, end: number): Expr | null {
-  const toks = tokenize(source);
-  const a = toks.findIndex((t) => t.start >= start);
-  let b = -1;
-  for (let i = toks.length - 1; i >= 0; i--) if (toks[i].end <= end) (b = i), (i = -1);
-  if (a < 0 || b < a) return null;
-  if (candidates(toks, a).some(([x, y]) => x === a && y === b)) return toExpr(source, toks, [a, b]);
-  return null;
-}
-
-/**
- * Occurrences of `expr` between offsets `from` and `to`, in order, including `expr` itself: the same tokens,
- * whatever the spacing, where they form a whole expression, so `$a + $b` doesn't match inside `$a + $b * $c`.
- */
-export function occurrences(source: string, expr: Expr, from = 0, to = source.length, sameScope = true): Expr[] {
-  const toks = tokenize(source);
-  const first = toks.findIndex((t) => t.start === expr.start);
-  const last = toks.findIndex((t) => t.end === expr.end);
-  if (first < 0 || last < first) return [expr];
-  const seq = toks.slice(first, last + 1).map((t) => t.text);
-  const home = scopeOpen(toks, first);
-  const found: Expr[] = [];
-  for (let i = 0; i + seq.length <= toks.length; i++) {
-    if (toks[i].start < from || toks[i + seq.length - 1].end > to || seq.some((text, j) => toks[i + j].text !== text)) continue;
-    const range: [number, number] = [i, i + seq.length - 1];
-    // A closure inside the scope has variables of its own: `$item` there isn't the one outside.
-    if (i === first || ((!sameScope || scopeOpen(toks, i) === home) && candidates(toks, i).some(([a, b]) => a === range[0] && b === range[1]))) found.push(toExpr(source, toks, range));
-  }
-  return found.length ? found : [expr];
-}
-
 /**
  * Where to declare a variable for `uses` (in order): the start of the statement holding the first one, in the
  * innermost block that holds them all. `replace` is set when that statement is the expression alone, as in
@@ -291,19 +260,6 @@ export function functionScope(source: string, offset: number): [number, number] 
   return open < 0 ? [0, source.length] : [toks[open].end, toks[toks[open].match].start];
 }
 
-/** The name of the function or method whose body holds the offset directly, or null in a closure or outside any. */
-export function enclosingFunctionName(source: string, offset: number): string | null {
-  const toks = tokenize(source);
-  let k = toks.findIndex((t) => t.end > offset);
-  if (k < 0) k = toks.length;
-  const open = scopeOpen(toks, k);
-  if (open < 0) return null;
-  let j = open - 1;
-  while (j >= 0 && toks[j].text !== ")") j--;
-  const before = toks[toks[j].match - 1];
-  return before?.type === "name" && !/^(function|use)$/i.test(before.text) ? before.text : null;
-}
-
 /** The `{` token that opens the innermost function, method, or closure body around token `k`, or -1. */
 function scopeOpen(toks: Tok[], k: number): number {
   for (let open = enclosing(toks, k); open >= 0; open = enclosing(toks, open)) {
@@ -319,92 +275,6 @@ function scopeOpen(toks: Tok[], k: number): number {
     if (/^function$/i.test(toks[j]?.text ?? "")) return open;
   }
   return -1;
-}
-
-/** The literal or constant expression for Extract Constant: the selection, or the string or number at the caret. */
-export function constantAt(source: string, start: number, end: number): Expr | null {
-  const toks = tokenize(source);
-  if (start === end) {
-    const k = tokenAt(toks, start);
-    return k >= 0 && (toks[k].type === "str" || toks[k].type === "num") && !/[$]/.test(toks[k].text.startsWith('"') ? toks[k].text : "") ? toExpr(source, toks, [k, k]) : null;
-  }
-  const expr = expressionIn(source, start, end);
-  if (!expr) return null;
-  // Only literals, operators, and other constants: no variables, calls, or interpolated strings.
-  const inside = toks.filter((t) => t.start >= expr.start && t.end <= expr.end);
-  const constant = inside.every((t, i) =>
-    t.type === "num" || (t.type === "str" && !(t.text.startsWith('"') && t.text.includes("$"))) || (t.type === "op" && t.text !== "->" && t.text !== "?->") ||
-    (t.type === "open" && t.text !== "{") || (t.type === "close" && t.text !== "}") || (t.type === "name" && inside[i + 1]?.text !== "(" && !/^static$/i.test(t.text)),
-  );
-  return constant ? expr : null;
-}
-
-/**
- * Where a class constant goes in a class body that opens at `open` (the offset of its `{`): after the class's
- * last constant, or else after its trait `use` lines, or else at the top. `gap` asks for a blank line between the
- * new constant and the code after it.
- */
-export function constantPoint(source: string, open: number): { offset: number; gap: boolean; gapBefore: boolean } {
-  const toks = tokenize(source);
-  const first = toks.findIndex((t) => t.start === open);
-  const close = first >= 0 && toks[first].match > 0 ? toks[first].match : toks.length;
-  let lastConst = -1;
-  let lastUse = -1;
-  // The body's top-level statements; nested braces are method bodies, skipped whole.
-  for (let i = first + 1; i < close; i++) {
-    const t = toks[i];
-    if (t.type === "open" && t.text === "{" && t.match > 0) i = t.match;
-    else if (t.type === "name" && /^(const|use)$/i.test(t.text)) {
-      let end = i;
-      while (end < close && toks[end].text !== ";" && toks[end].text !== "{") end++;
-      if (toks[end]?.text !== ";") continue;
-      if (/^const$/i.test(t.text)) lastConst = toks[end].end;
-      else if (lastConst < 0) lastUse = toks[end].end;
-      i = end;
-    }
-  }
-  const after = lastConst >= 0 ? lastConst : lastUse >= 0 ? lastUse : open;
-  const offset = source.indexOf("\n", after) + 1 || source.length;
-  return { offset, gap: lastConst < 0, gapBefore: lastConst < 0 && lastUse >= 0 };
-}
-
-const camel = (words: string[]) => words.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1) : w[0].toLowerCase() + w.slice(1))).join("");
-const words = (text: string) => text.replace(/([a-z\d])([A-Z])/g, "$1 $2").split(/[^A-Za-z\d]+/).filter(Boolean);
-
-/**
- * A variable name for an expression, without `$`, as PhpStorm suggests: `$user->getEmail()` gives `email`,
- * `$item['unit_price']` gives `unitPrice`, `new Invoice()` gives `invoice`, and `count($a)` gives `count`.
- * A name in `taken` gets a number.
- */
-export function variableName(expr: string, taken: Set<string> = new Set()): string {
-  const flat = expr.replace(/\s+/g, "");
-  // An operator outside strings and brackets makes a computed value, not the last operand's.
-  let outer = flat.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''");
-  while (/\([^()]*\)|\[[^[\]]*\]/.test(outer)) outer = outer.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");
-  const computed = /[-+*/%.<>=!&|^?:~]/.test(outer.replace(/\??->|::/g, "").replace(/^[!@-]/, "").replace(/\d\.\d/g, "0"));
-  let m: RegExpMatchArray | null;
-  let base = "value";
-  if (computed) base = "value";
-  else if ((m = flat.match(/^new\\?(?:[\w\\]*\\)?(\w+)/i))) base = m[1];
-  else if ((m = flat.match(/\[['"]([A-Za-z_][\w -]*)['"]\]$/))) base = m[1];
-  else if ((m = flat.match(/(?:->|::|^)\$?(\w+)(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?$/))) base = m[1].replace(/^(get|is|has)(?=[A-Z])/, "");
-  else if (/^['"]/.test(flat)) base = "string";
-  const parts = words(base);
-  let name = parts.length && !/^\d/.test(parts[0]) ? camel(parts) : "value";
-  if (/^(this|value|true|false|null)$/i.test(name) && base !== "value") name = "value";
-  let unique = name;
-  for (let n = 2; taken.has(unique); n++) unique = `${name}${n}`;
-  return unique;
-}
-
-/** A constant name for a literal: `'pending review'` gives `PENDING_REVIEW`; anything else gives `VALUE`. */
-export function constantName(expr: string, taken: Set<string> = new Set()): string {
-  const string = expr.match(/^(['"])(.*)\1$/s)?.[2] ?? "";
-  const parts = words(string).slice(0, 5);
-  let name = parts.length && !/^\d/.test(parts[0]) ? parts.join("_").toUpperCase() : "VALUE";
-  let unique = name;
-  for (let n = 2; taken.has(unique); n++) unique = `${name}_${n}`;
-  return unique;
 }
 
 // ---- Inline Constant ----
@@ -484,17 +354,6 @@ export function inlinedValue(value: string, ownerSource: string, owner: string, 
   // A sign counts too: `10 - -1` must not become `10--1`.
   if (/[-+*/%.<>=!&|^?~]/.test(outer.replace(/::/g, "").replace(/\d\.\d/g, "0"))) out = `(${out})`;
   return out;
-}
-
-/** The type of a literal or `new` expression, for a property's declaration, or "" when it can't be told from the text. */
-export function literalType(expr: string): string {
-  const t = expr.trim();
-  if (/^-?\d[\d_]*$/.test(t) || /^0[xXbBoO][\da-fA-F_]+$/.test(t)) return "int";
-  if (/^-?(\d[\d_]*)?\.\d+([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(t)) return "float";
-  if (/^('(?:[^'\\]|\\.)*'|"(?:[^"\\$]|\\.)*")$/s.test(t)) return "string";
-  if (/^(true|false)$/i.test(t)) return "bool";
-  if (/^\[[\s\S]*\]$|^array\s*\(/i.test(t)) return "array";
-  return t.match(/^new\s+(\\?[A-Za-z_][\w\\]*)\s*(\(|$)/)?.[1] ?? "";
 }
 
 // ---- Inline Method ----

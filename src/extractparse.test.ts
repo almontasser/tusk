@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { reindentCode, enclosingFunctionName, inlineCall, methodToInline, literalType, constantDeclaration, constantRefs, inlinedValue, functionScope, constantAt, constantName, constantPoint, declarationPoint, expressionIn, expressionsAt, occurrences, variableName } from "./extractparse.ts";
+import { reindentCode, inlineCall, methodToInline, constantDeclaration, constantRefs, inlinedValue, functionScope, declarationPoint, expressionsAt } from "./extractparse.ts";
 
 const texts = (source: string, at: string, delta = 1) => expressionsAt(source, source.indexOf(at) + delta).map((e) => e.text);
 
@@ -28,62 +28,21 @@ test("offers method chains, calls, and the calls that take an expression", () =>
   assert.deepEqual(texts("<?php\n$b = array_map(fn($x) => $x * 2, $xs);", "* 2", -3), ["array_map(fn($x) => $x * 2, $xs)"]);
 });
 
-test("reads a selection as an expression", () => {
-  const code = "<?php\n$x = $a + $b * $c;";
-  assert.equal(expressionIn(code, code.indexOf("$b"), code.indexOf(";"))?.text, "$b * $c");
-  assert.equal(expressionIn(code, code.indexOf("$a"), code.indexOf(" * ")), null);
-});
-
-test("finds occurrences that are whole expressions", () => {
-  const code = "<?php\n$a = $x->total() + 1;\n$b = $x->total() * 2;\n$c = $x->total()->cents;\n$d = $x->total;";
-  const expr = expressionsAt(code, code.indexOf("total"))[0];
-  assert.equal(expr.text, "$x->total()");
-  assert.deepEqual(occurrences(code, expr).map((e) => code.slice(0, e.start).split("\n").length), [2, 3, 4]);
-  const sum = "<?php\nf($a + $b);\ng($a + $b * $c);\nh( $a+$b );";
-  const first = expressionIn(sum, sum.indexOf("$a"), sum.indexOf(")"))!;
-  assert.deepEqual(occurrences(sum, first).map((e) => e.text), ["$a + $b", "$a+$b"]);
-});
-
 test("declares before the statement, in the block that holds every use", () => {
   const code = ["<?php", "function f($items) {", "    $sum = 0;", "    foreach ($items as $item) {", "        $sum += $item->price();", "    }", "    if ($ok) {", "        g();", "    } else {", "        h($item->price());", "    }", "}"].join("\n");
   const expr = expressionsAt(code, code.indexOf("price"))[0];
   const inner = declarationPoint(code, [expr]);
   assert.ok(!("error" in inner) && code.slice(inner.offset).startsWith("$sum += ") && inner.indent === "        ");
-  const both = declarationPoint(code, occurrences(code, expr));
+  const last = expressionsAt(code, code.lastIndexOf("price"))[0];
+  const both = declarationPoint(code, [expr, last]);
   assert.ok(!("error" in both) && code.slice(both.offset).startsWith("foreach") && both.indent === "    ");
   // Uses only in the else block go inside it, not before the if.
-  const last = occurrences(code, expr)[1];
   const inElse = declarationPoint(code, [last]);
   assert.ok(!("error" in inElse) && code.slice(inElse.offset).startsWith("h($item"));
   // A statement that's only the expression becomes the assignment.
   const call = "<?php\nfoo();";
   const alone = declarationPoint(call, [expressionsAt(call, call.indexOf("foo"))[0]]);
   assert.ok(!("error" in alone) && alone.replace?.text === "foo()");
-});
-
-test("reads constants and where they go", () => {
-  const code = "<?php\nclass A\n{\n    use T;\n\n    public function f() { return 'pending review' . 1; }\n}";
-  assert.equal(constantAt(code, code.indexOf("pending"), code.indexOf("pending"))?.text, "'pending review'");
-  assert.equal(constantAt(code, code.indexOf("$"), code.indexOf("$")), null);
-  const point = constantPoint(code, code.indexOf("{"));
-  assert.deepEqual([code.slice(point.offset).split("\n")[0], point.gap, point.gapBefore], ["", true, true]);
-  const withConst = "<?php\nclass A {\n    const X = 1;\n    private const Y = [1, 2];\n    function f() { $a = 1; }\n}";
-  const p2 = constantPoint(withConst, withConst.indexOf("{"));
-  assert.deepEqual([withConst.slice(p2.offset).split("\n")[0], p2.gap], ["    function f() { $a = 1; }", false]);
-});
-
-test("suggests names", () => {
-  assert.equal(variableName("$user->getEmail()"), "email");
-  assert.equal(variableName("$item['unit_price']"), "unitPrice");
-  assert.equal(variableName("new \\App\\Invoice($a)"), "invoice");
-  assert.equal(variableName("count($items)", new Set(["count"])), "count2");
-  assert.equal(variableName("$a * $b"), "value");
-  assert.equal(variableName("$item['price'] * $item['qty']"), "value");
-  assert.equal(variableName("!$user->isAdmin()"), "admin");
-  assert.equal(variableName("$user->posts()->where('a', 1)->count()"), "count");
-  assert.equal(variableName("$this->user()->name"), "name");
-  assert.equal(constantName("'pending review'"), "PENDING_REVIEW");
-  assert.equal(constantName("1.14", new Set(["VALUE"])), "VALUE_2");
 });
 
 test("finds the function or closure around an offset", () => {
@@ -114,10 +73,6 @@ test("reads a constant's declaration and references, and writes its value elsewh
   assert.equal(inlinedValue("['a' => 1]", owner, "App\\Order", false), "['a' => 1]");
 });
 
-test("tells a literal's type", () => {
-  assert.deepEqual(["42", "1.5", "'a'", '"b$c"', "true", "[1]", "new Money(5)", "$a + 1"].map(literalType), ["int", "float", "string", "", "bool", "array", "Money", ""]);
-});
-
 test("handles precedence of prefixes, for headers, class bodies, parameters, and closures", () => {
   assert.deepEqual(texts("<?php\n$y = -$x ** 2;", "$x"), ["-$x ** 2"]);
   assert.deepEqual(texts("<?php\n$y = !$a instanceof Foo;", "$a"), ["!$a instanceof Foo"]);
@@ -131,9 +86,6 @@ test("handles precedence of prefixes, for headers, class bodies, parameters, and
   const arg = "<?php\nfunction f($xs) {\n    return array_map(function ($x) { return $x; }, g(1));\n}";
   const inArg = declarationPoint(arg, [expressionsAt(arg, arg.indexOf("g(1)"))[0]]);
   assert.ok(!("error" in inArg) && arg.slice(inArg.offset).startsWith("return array_map"));
-  const closure = "<?php\nfunction f($item, $xs) {\n    $a = $item->price;\n    array_map(function ($item) { return $item->price; }, $xs);\n}";
-  const e = expressionsAt(closure, closure.indexOf("price"))[0];
-  assert.equal(occurrences(closure, e, ...functionScope(closure, e.start)).length, 1);
 });
 
 test("reads a method to inline and substitutes a call", () => {
@@ -187,17 +139,6 @@ test("reads a method to inline and substitutes a call", () => {
   const cb = methodToInline(cls, at("cb"));
   assert.ok(!("error" in cb) && cb.result?.startsWith("array_map"));
   assert.ok("error" in inlineCall(twice, [], null, new Set()));
-});
-
-test("finds a constant's occurrences in every method, and refuses static:: as a constant", () => {
-  const code = "<?php\nclass A {\n  function a() { return 'x'; }\n  function b() { return 'x'; }\n}";
-  const x = constantAt(code, code.indexOf("'x'") + 1, code.indexOf("'x'") + 1)!;
-  assert.equal(occurrences(code, x, code.indexOf("{"), code.length, false).length, 2);
-  const st = "<?php\nclass A { function f() { return static::X + 1; } }";
-  assert.equal(constantAt(st, st.indexOf("static"), st.indexOf(" + 1") + 4), null);
-  const fn = "<?php\nclass A { function run() { return array_map(function ($i) { return $i * 10; }, []); } }";
-  assert.equal(enclosingFunctionName(fn, fn.indexOf("10")), null);
-  assert.equal(enclosingFunctionName(fn, fn.indexOf("array_map")), "run");
 });
 
 test("inlines without changing what runs, or where", () => {

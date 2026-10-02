@@ -1904,6 +1904,7 @@ button.link:hover { text-decoration: underline; }
 .monaco-editor .view-overlays .snippet-placeholder { background: color-mix(in srgb, var(--accent) 16%, transparent); outline: 1px solid color-mix(in srgb, var(--accent) 65%, transparent); border-radius: 2px; }
 .monaco-editor .view-overlays .finish-snippet-placeholder { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .naming-hint { display: flex; align-items: center; gap: 4px; padding: 2px 7px; margin-bottom: 3px; font: 11px var(--ui-family); color: var(--muted); background: var(--panel); border: 1px solid var(--popover-border); border-radius: 5px; box-shadow: 0 2px 8px #0005; white-space: nowrap; pointer-events: none; }
+.naming-hint.refactor-refusal { color: var(--text); white-space: normal; width: max-content; max-width: 460px; border-left: 3px solid var(--yellow); }
 .naming-hint kbd { font: 10.5px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--hover); color: var(--text); }
 .refactor-preview .hierarchy-row { cursor: pointer; }
 .refactor-preview .hierarchy-row.group .name { font-weight: 500; }
