@@ -7,11 +7,13 @@
 //! editors get the first three as code actions on a selection, which replace every occurrence and keep the
 //! suggested name. Introduce Parameter also rewrites calls, so the editor does that part through Change Signature.
 
+use std::path::{Path, PathBuf};
+
 use lsp_types::{Range, TextEdit, Uri, WorkspaceEdit};
 use mago_names::kind::NameKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::{
-    Access, Call, ClassLikeConstantSelector, ClassLikeMember, ClassLikeMemberSelector, Expression, Literal, Node, Property,
+    Access, Argument, Call, ClassLikeConstantSelector, ClassLikeMember, ClassLikeMemberSelector, Expression, Literal, Node, Property,
     Statement, StringPart, UnaryPrefixOperator, Variable,
 };
 use serde::{Deserialize, Serialize};
@@ -19,10 +21,13 @@ use serde_json::{Value, json};
 
 use super::extract::php_type;
 use super::{Candidate, file_edit, indent_unit, line_indent};
+use crate::features::rename::Edits;
 use crate::features::{Ctx, with_ctx};
 use crate::imports::import_edits;
 use crate::locate::{variable_scope, walk};
 use crate::server::Snapshot;
+use crate::symbol::Symbol;
+use crate::text::LineIndex;
 
 /// Where the name goes in an edit's text.
 const NAME: char = '\0';
@@ -49,12 +54,12 @@ impl Kind {
 
 type Span = (u32, u32);
 
-fn span(node: &impl HasSpan) -> Span {
+pub(super) fn span(node: &impl HasSpan) -> Span {
     let s = node.span();
     (s.start.offset, s.end.offset)
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
+pub(super) fn contains(outer: Span, inner: Span) -> bool {
     outer.0 <= inner.0 && inner.1 <= outer.1
 }
 
@@ -89,7 +94,7 @@ fn members<'a>(owner: Node<'a, 'a>) -> Option<(&'a mago_syntax::cst::Sequence<'a
 }
 
 /// Nodes that hold a list of statements, before any one of which a declaration can go.
-fn holds_statements(node: &Node<'_, '_>) -> bool {
+pub(super) fn holds_statements(node: &Node<'_, '_>) -> bool {
     matches!(
         node,
         Node::Block(_)
@@ -109,7 +114,7 @@ fn holds_statements(node: &Node<'_, '_>) -> bool {
 
 /// Whether the expression at the end of `path` is written to or referenced rather than read: an assignment's
 /// target, `++`'s operand, a foreach variable, `isset()`'s argument, or the array or object such a thing reaches into.
-fn written(path: &[Node<'_, '_>]) -> bool {
+pub(super) fn written(path: &[Node<'_, '_>]) -> bool {
     let mut child = span(path.last().unwrap());
     for node in path[..path.len() - 1].iter().rev() {
         match node {
@@ -154,7 +159,7 @@ fn names_something(path: &[Node<'_, '_>]) -> bool {
 }
 
 /// Every node under `node`, itself included, with the path of its ancestors from `node` down.
-fn walk_under<'a>(node: Node<'a, 'a>, f: &mut impl FnMut(Node<'a, 'a>, &[Node<'a, 'a>])) {
+pub(super) fn walk_under<'a>(node: Node<'a, 'a>, f: &mut impl FnMut(Node<'a, 'a>, &[Node<'a, 'a>])) {
     fn go<'a>(node: Node<'a, 'a>, path: &mut Vec<Node<'a, 'a>>, f: &mut impl FnMut(Node<'a, 'a>, &[Node<'a, 'a>])) {
         f(node, path);
         path.push(node);
@@ -166,7 +171,7 @@ fn walk_under<'a>(node: Node<'a, 'a>, f: &mut impl FnMut(Node<'a, 'a>, &[Node<'a
 
 /// The variables an expression reads from around it, without `$`: those of closures and arrow functions inside
 /// it that are their own aren't.
-fn free_variables(expr: Node<'_, '_>) -> Vec<String> {
+pub(super) fn free_variables(expr: Node<'_, '_>) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     walk_under(expr, &mut |node, ancestors| {
         let Node::DirectVariable(v) = node else { return };
@@ -483,7 +488,7 @@ fn value_text(ctx: &Ctx<'_>, s: Span) -> String {
 
 // ---- Names ----
 
-fn words(text: &str) -> Vec<String> {
+pub(super) fn words(text: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     let mut word = String::new();
     let mut prev_lower = false;
@@ -602,7 +607,7 @@ fn suggested_base(ctx: &Ctx<'_>, s: Span) -> String {
     }
 }
 
-fn unique(base: &str, taken: impl Fn(&str) -> bool, sep: &str) -> String {
+pub(super) fn unique(base: &str, taken: impl Fn(&str) -> bool, sep: &str) -> String {
     (1..).map(|i| if i == 1 { base.to_string() } else { format!("{base}{sep}{i}") }).find(|n| !taken(n)).unwrap()
 }
 
@@ -812,13 +817,29 @@ pub fn targets_request(snap: &Snapshot, params: Value) -> Result<Value, String> 
         let list: Vec<Value> = found
             .iter()
             .map(|t| {
-                let occurrences: Vec<Range> = occurrences(ctx, t, p.kind).into_iter().map(|(s, e)| ctx.doc.range(s, e)).collect();
-                json!({ "range": ctx.doc.range(t.span.0, t.span.1), "text": &ctx.doc.text[t.span.0 as usize..t.span.1 as usize], "occurrences": occurrences })
+                let found = occurrences(ctx, t, p.kind);
+                let conditions: Vec<Option<String>> = found.iter().map(|s| runs_only(ctx, t, *s, p.kind)).collect();
+                let occurrences: Vec<Range> = found.into_iter().map(|(s, e)| ctx.doc.range(s, e)).collect();
+                json!({ "range": ctx.doc.range(t.span.0, t.span.1), "text": &ctx.doc.text[t.span.0 as usize..t.span.1 as usize], "occurrences": occurrences, "conditions": conditions })
             })
             .collect();
         Ok(json!({ "targets": list, "snapped": snapped }))
     })
     .unwrap_or_else(|| Err("The file is too complex to refactor, or isn't open.".into()))
+}
+
+/// When an occurrence runs only some of the times its statement does, the condition, as "when $n > 1 is true":
+/// extracted into a variable or a field set before the statement, or a parameter that calls pass, it would then
+/// run every time. A constant, or a field whose default it becomes, has no code that runs.
+fn runs_only(ctx: &Ctx<'_>, t: &Target, s: Span, kind: Kind) -> Option<String> {
+    let path = path_to(ctx, s)?;
+    match kind {
+        Kind::Constant => None,
+        Kind::Field if t.constant => None,
+        Kind::Parameter if t.constant => None,
+        Kind::Parameter => super::inline::runs_only_in_function(&ctx.doc.text, &path),
+        Kind::Variable | Kind::Field => super::inline::runs_only(&ctx.doc.text, &path),
+    }
 }
 
 /// `tusk/extract`: the edit that extracts the expression at exactly `range` and, with `all`, its occurrences.
@@ -831,22 +852,297 @@ pub fn extract_request(snap: &Snapshot, params: Value) -> Result<Value, String> 
 }
 
 fn run(snap: &Snapshot, uri: &Uri, range: Range, kind: Kind, all: bool) -> Result<Extraction, String> {
-    with_ctx(snap, uri, |ctx| {
-        let (found, _) = targets(ctx, range, kind)?;
-        let t = found.into_iter().next().ok_or("There's nothing to extract.")?;
-        let uses = if all { occurrences(ctx, &t, kind) } else { vec![t.span] };
-        extraction(ctx, &t, &uses, kind)
-    })
-    .unwrap_or_else(|| Err("The file is too complex to refactor, or isn't open.".into()))
+    with_ctx(snap, uri, |ctx| run_in(ctx, range, kind, all)).unwrap_or_else(|| Err("The file is too complex to refactor, or isn't open.".into()))
+}
+
+fn run_in(ctx: &Ctx<'_>, range: Range, kind: Kind, all: bool) -> Result<Extraction, String> {
+    let (found, _) = targets(ctx, range, kind)?;
+    let t = found.into_iter().next().ok_or("There's nothing to extract.")?;
+    let uses = if all { occurrences(ctx, &t, kind) } else { vec![t.span] };
+    extraction(ctx, &t, &uses, kind)
+}
+
+// ---- Introduce Parameter ----
+
+/// The parameter Introduce Parameter adds.
+pub struct NewParameter {
+    pub name: String,
+    pub hint: Option<String>,
+    /// Its default value, so calls needn't pass it.
+    pub default: Option<String>,
+    /// What each call passes, when not the expression itself.
+    pub value: Option<String>,
+    /// Where it goes among the parameters: at the end, before a variadic one, when not given.
+    pub position: Option<usize>,
+    /// Every occurrence of the expression reads the parameter, not only the chosen one.
+    pub all: bool,
+}
+
+/// Calls left as they were: the file, the line, and why.
+type Skipped = Vec<(PathBuf, u32, String)>;
+
+/// Adds the parameter to the method or function around the expression at `range`, and to the methods that
+/// override it; has the expression's uses read it; and has each call pass the expression, or the value given.
+/// With a default, only calls that pass arguments after the new parameter change.
+fn introduce_parameter(ctx: &Ctx<'_>, range: Range, np: &NewParameter) -> Result<(Edits, Skipped, String), String> {
+    if !crate::features::rename::is_identifier(&np.name) {
+        return Err(format!("${} isn't a valid PHP name.", np.name));
+    }
+    let (found, _) = targets(ctx, range, Kind::Parameter)?;
+    let t = found.into_iter().next().ok_or("There's nothing to make a parameter.")?;
+    let uses = if np.all { occurrences(ctx, &t, Kind::Parameter) } else { vec![t.span] };
+    let path = path_to(ctx, t.span).ok_or("The expression is no longer there.")?;
+    let host = path.iter().rev().find(|n| matches!(n, Node::Function(_) | Node::Method(_))).copied().ok_or("Introduce Parameter works inside a method or function.")?;
+    let (list, name_span) = match host {
+        Node::Function(f) => (&f.parameter_list, span(&f.name)),
+        Node::Method(m) => (&m.parameter_list, span(&m.name)),
+        _ => unreachable!(),
+    };
+    if variables_in(ctx, span(&host)).contains(&np.name) {
+        return Err(format!("${} is already a variable there. Choose another name.", np.name));
+    }
+    let symbol = ctx.resolver().at(name_span.0).and_then(|f| f.symbols.into_iter().next()).ok_or("Can't read the method's name.")?;
+    let codebase = &ctx.index.codebase;
+    let (owner, name) = match &symbol {
+        Symbol::Method { class, name } => (Some(class.clone()), name.clone()),
+        Symbol::Function(f) => (None, f.clone()),
+        _ => return Err("Introduce Parameter works inside a method or function.".into()),
+    };
+    let label = match &owner {
+        Some(o) => format!("{}::{name}()", super::inline::short(o)),
+        None => format!("{}()", super::inline::short(&name)),
+    };
+    let count = list.parameters.len();
+    let variadic = list.parameters.iter().position(|p| p.ellipsis.is_some());
+    let position = np.position.unwrap_or(variadic.unwrap_or(count)).min(count);
+    if variadic.is_some_and(|v| v < position) {
+        return Err("A parameter can't come after a variadic one.".into());
+    }
+    // Methods that override it, or that it overrides, must keep matching signatures, which a required parameter breaks.
+    let lower = name.to_ascii_lowercase();
+    let overrides: Vec<String> = owner.as_ref().map_or(vec![], |o| {
+        crate::features::navigation::descendants(codebase, o).into_iter().filter(|c| codebase.get_declaring_method_class(c.as_bytes(), lower.as_bytes()).is_some_and(|d| d.as_str_lossy().eq_ignore_ascii_case(c))).collect()
+    });
+    let overridden = owner.as_ref().and_then(|o| codebase.get_class_like(o.as_bytes())).and_then(|m| m.overridden_method_ids.get(&mago_word::word(lower.as_bytes())).and_then(|ids| ids.keys().next().map(|k| k.as_str_lossy().into_owned())));
+    if np.default.is_none() {
+        if let Some(child) = overrides.first() {
+            return Err(format!("{}::{name}() overrides {label}, so their signatures must still match. Give the parameter a default value.", super::inline::short(child)));
+        }
+        if let Some(parent) = overridden {
+            return Err(format!("{label} overrides {}::{name}(), so their signatures must still match. Give the parameter a default value.", super::inline::short(&parent)));
+        }
+    }
+    let declared = format!("{}${}{}", np.hint.as_deref().map(|h| format!("{h} ")).unwrap_or_default(), np.name, np.default.as_deref().map(|d| format!(" = {d}")).unwrap_or_default());
+
+    let mut edits = Edits::default();
+    let text = &ctx.doc.text;
+    let (at, new) = parameter_insert(text, list, position, &declared);
+    edits.add(&ctx.doc.path, TextEdit { range: ctx.doc.range(at.0, at.1), new_text: new });
+    for &u in &uses {
+        let interpolated = path_to(ctx, u).is_some_and(|p| p.len() >= 2 && matches!(p[p.len() - 2], Node::StringPart(StringPart::Expression(_))));
+        let reference = if interpolated { format!("{{${}}}", np.name) } else { format!("${}", np.name) };
+        edits.add(&ctx.doc.path, TextEdit { range: ctx.doc.range(u.0, u.1), new_text: reference });
+    }
+    // Overriding methods take it too, with its default.
+    for child in &overrides {
+        let Some(place) = crate::locate::declaration(&Symbol::Method { class: child.clone(), name: name.clone() }, codebase) else { continue };
+        let Some(path) = ctx.index.path_of(place.file).map(Path::to_path_buf) else { continue };
+        let Some(child_text) = ctx.snap.read(&path) else { continue };
+        let arena = mago_allocator::LocalArena::new();
+        let parsed = crate::analysis::Parsed::new(&arena, &path, &child_text);
+        let mut done = None;
+        walk(&parsed, |node, _| {
+            if let Node::Method(m) = node
+                && span(&m.name).0 == place.start
+            {
+                done = Some(parameter_insert(&child_text, &m.parameter_list, position.min(m.parameter_list.parameters.len()), &declared));
+            }
+        });
+        if let Some((at, new)) = done {
+            edits.add(&path, TextEdit { range: LineIndex::new(&child_text).range(&child_text, at.0, at.1), new_text: new });
+        }
+    }
+
+    // Calls pass it when there's no default, or when they pass arguments after it.
+    let mut skipped: Skipped = vec![];
+    let mut changed = 0;
+    if np.default.is_none() || position < count {
+        let target = match &owner {
+            Some(o) => crate::features::hierarchy::Target::Method { class: o.clone(), name: name.clone() },
+            None => crate::features::hierarchy::Target::Function { fqn: name.clone() },
+        };
+        let mut files = crate::features::hierarchy::calls_of(ctx.snap, &ctx.index, &target);
+        for child in &overrides {
+            files.extend(crate::features::hierarchy::calls_of(ctx.snap, &ctx.index, &crate::features::hierarchy::Target::Method { class: child.clone(), name: name.clone() }));
+        }
+        let expression = &text[t.span.0 as usize..t.span.1 as usize];
+        let src = super::inline::Source { parsed: &ctx.parsed, text, path: &ctx.doc.path, owner: owner.as_deref() };
+        let mut seen = std::collections::HashSet::new();
+        for (path, call_text, spans) in files {
+            let doc = crate::documents::Document::new(crate::text::path_to_uri(&path), path.clone(), "php".into(), 0, call_text.clone());
+            let arena = mago_allocator::LocalArena::new();
+            let parsed = crate::analysis::Parsed::new(&arena, &path, &call_text);
+            let resolver = crate::symbol::Resolver::new(&parsed, None, codebase);
+            let lines = LineIndex::new(&call_text);
+            let mut imports = vec![];
+            let first_call = spans.first().map_or(0, |s| s.0);
+            for m in spans {
+                if !seen.insert((path.clone(), m)) {
+                    continue;
+                }
+                let line = super::inline::line_of(&call_text, m.0);
+                let call_path = parsed.path_at(m.0);
+                let enclosing = resolver.enclosing_class(&call_path);
+                let same_class = matches!((&enclosing, &owner), (Some(e), Some(o)) if e.eq_ignore_ascii_case(o));
+                let dest = super::inline::Dest { doc: &doc, parsed: &parsed, offset: m.0, same_class, same_object: false };
+                let value = match &np.value {
+                    Some(v) if v != expression => Ok(v.clone()),
+                    _ => super::inline::moved(&src, t.span, &dest, codebase, vec![], &mut imports),
+                };
+                let result = value.and_then(|v| argument_insert(&call_path, m, position, &np.name, &v, np.default.is_none(), ctx.index.config.php_version.is_at_least(8, 0, 0)));
+                match result {
+                    Ok(Some((at, new))) => {
+                        if path == ctx.doc.path && uses.iter().any(|u| at.0 < u.1 && u.0 < at.1) {
+                            skipped.push((path.clone(), line, "it's inside the expression".into()));
+                            continue;
+                        }
+                        edits.add(&path, TextEdit { range: lines.range(&call_text, at.0, at.1), new_text: new });
+                        changed += 1;
+                    }
+                    Ok(None) => {}
+                    Err(why) => skipped.push((path.clone(), line, why)),
+                }
+            }
+            imports.sort();
+            imports.dedup();
+            for e in crate::imports::import_edits(&doc, parsed.program, first_call, &imports, NameKind::Default) {
+                edits.add(&path, e);
+            }
+        }
+    }
+    let message = match changed {
+        0 => format!("Added ${} to {label}.", np.name),
+        1 => format!("Added ${} to {label} and to 1 call.", np.name),
+        n => format!("Added ${} to {label} and to {n} calls.", np.name),
+    };
+    Ok((edits, skipped, message))
+}
+
+/// The edit that adds `declared` as parameter `position` of `list`: on its own line when the list puts each
+/// parameter on one.
+fn parameter_insert(text: &str, list: &mago_syntax::cst::FunctionLikeParameterList<'_>, position: usize, declared: &str) -> (Span, String) {
+    let params: Vec<Span> = list.parameters.iter().map(span).collect();
+    let (open, close) = (list.left_parenthesis.end.offset, list.right_parenthesis.start.offset);
+    if params.is_empty() {
+        return ((open, close), declared.to_string());
+    }
+    let multiline = text[open as usize..close as usize].contains('\n');
+    let indent = line_indent(text, params[0].0 as usize);
+    if position < params.len() {
+        let at = params[position].0;
+        return ((at, at), if multiline { format!("{declared},\n{indent}") } else { format!("{declared}, ") });
+    }
+    let last = params[params.len() - 1].1;
+    let after = &text[last as usize..close as usize];
+    match after.trim_start().strip_prefix(',') {
+        // A trailing comma stays last.
+        Some(_) => {
+            let comma = last + (after.len() - after.trim_start().len()) as u32 + 1;
+            ((comma, comma), if multiline { format!("\n{indent}{declared},") } else { format!(" {declared},") })
+        }
+        None => ((last, last), if multiline { format!(",\n{indent}{declared}") } else { format!(", {declared}") }),
+    }
+}
+
+/// The edit that passes `value` for the new parameter in the call whose name is at `m`: positionally when the
+/// call passes the arguments before it, else by name. None when the call needn't pass it.
+fn argument_insert(path: &[Node<'_, '_>], m: Span, position: usize, name: &str, value: &str, required: bool, named_arguments: bool) -> Result<Option<(Span, String)>, String> {
+    let call = path.iter().rev().find_map(|n| match n {
+        Node::FunctionCall(c) if contains(span(c.function), m) => Some(Ok(Some(&c.argument_list))),
+        Node::MethodCall(c) if contains(span(&c.method), m) => Some(Ok(Some(&c.argument_list))),
+        Node::NullSafeMethodCall(c) if contains(span(&c.method), m) => Some(Ok(Some(&c.argument_list))),
+        Node::StaticMethodCall(c) if contains(span(&c.method), m) => Some(Ok(Some(&c.argument_list))),
+        Node::Instantiation(i) if contains(span(i.class), m) => Some(Ok(i.argument_list.as_ref())),
+        Node::FunctionPartialApplication(_) | Node::MethodPartialApplication(_) | Node::StaticMethodPartialApplication(_) => Some(Err("it's a first-class callable, such as $this->method(...)".to_string())),
+        _ => None,
+    });
+    let args = match call {
+        Some(Ok(Some(args))) => args,
+        // `new Order` without parentheses.
+        Some(Ok(None)) => {
+            let end = path.iter().rev().find_map(|n| match n {
+                Node::Instantiation(i) if contains(span(i.class), m) => Some(span(i.class).1),
+                _ => None,
+            });
+            return Ok(required.then(|| ((end.unwrap(), end.unwrap()), format!("({value})"))));
+        }
+        Some(Err(e)) => return Err(e),
+        None => return Err("it isn't a call, such as a callable string".into()),
+    };
+    let list: Vec<&Argument<'_>> = args.arguments.iter().collect();
+    if list.iter().any(|a| matches!(a, Argument::Positional(p) if p.ellipsis.is_some())) {
+        return Err("it spreads its arguments (...)".into());
+    }
+    let positional: Vec<Span> = list.iter().filter(|a| matches!(a, Argument::Positional(_))).map(|a| span(*a)).collect();
+    let first_named = list.iter().find(|a| matches!(a, Argument::Named(_))).map(|a| span(*a));
+    if positional.len() > position {
+        let at = positional[position].0;
+        return Ok(Some(((at, at), format!("{value}, "))));
+    }
+    if !required {
+        return Ok(None);
+    }
+    if positional.len() < position && !named_arguments {
+        return Err("it leaves out arguments before the new one, which only PHP 8's named arguments can skip".into());
+    }
+    let written = if positional.len() == position { value.to_string() } else { format!("{name}: {value}") };
+    Ok(Some(match (first_named, list.last()) {
+        (Some(named), _) if positional.len() == position => ((named.0, named.0), format!("{written}, ")),
+        (_, Some(last)) => ((span(*last).1, span(*last).1), format!(", {written}")),
+        (_, None) => {
+            let at = args.left_parenthesis.end.offset;
+            ((at, at), written)
+        }
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParameterParams {
+    text_document: lsp_types::TextDocumentIdentifier,
+    range: Range,
+    #[serde(default)]
+    all: bool,
+    name: String,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    position: Option<usize>,
+}
+
+/// `tusk/introduceParameter`: the edit that adds a parameter for the expression at `range`, named `name`, with
+/// `type` and `default` when given, at `position`, and passes the expression, or `value`, at the calls; the calls
+/// it couldn't change, with why; and a message.
+pub fn parameter_request(snap: &Snapshot, params: Value) -> Result<Value, String> {
+    let p: ParameterParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+    let np = NewParameter { name: p.name.trim_start_matches('$').to_string(), hint: p.r#type.filter(|t| !t.is_empty()), default: p.default.filter(|d| !d.trim().is_empty()), value: p.value, position: p.position, all: p.all };
+    let (edits, skipped, message) = with_ctx(snap, &p.text_document.uri, |ctx| introduce_parameter(ctx, p.range, &np)).unwrap_or_else(|| Err("The file is too complex to refactor, or isn't open.".into()))?;
+    let skipped: Vec<Value> = skipped.into_iter().map(|(path, line, reason)| json!({ "uri": crate::text::path_to_uri(&path), "line": line, "reason": reason })).collect();
+    Ok(json!({ "edit": edits.into_workspace_edit(snap, vec![]), "skipped": skipped, "message": message }))
 }
 
 // ---- Code actions, for other editors ----
 
 /// Each action's kind, title, code action kind, and id.
-const ACTIONS: [(Kind, &str, &str, &str); 3] = [
+const ACTIONS: [(Kind, &str, &str, &str); 4] = [
     (Kind::Variable, "Extract variable", "refactor.extract.variable", "extract.variable"),
     (Kind::Constant, "Extract constant", "refactor.extract.constant", "extract.constant"),
     (Kind::Field, "Introduce field", "refactor.extract.field", "extract.field"),
+    (Kind::Parameter, "Introduce parameter", "refactor.extract.parameter", "extract.parameter"),
 ];
 
 /// On a selection, the extractions that apply to it, replacing every occurrence with the suggested name.
@@ -863,6 +1159,14 @@ pub fn candidates(ctx: &Ctx<'_>, range: Range) -> Vec<Candidate> {
 
 pub fn resolve(ctx: &Ctx<'_>, action: &str, range: Range) -> Option<WorkspaceEdit> {
     let kind = ACTIONS.iter().find(|(.., id)| id.strip_prefix("extract.") == Some(action))?.0;
+    if kind == Kind::Parameter {
+        let x = run_in(ctx, range, kind, true).ok()?;
+        let t = targets(ctx, range, kind).ok()?.0.into_iter().next()?;
+        let default = x.constant.then(|| value_text(ctx, t.span));
+        let p = NewParameter { name: x.name, hint: x.r#type, default, value: None, position: None, all: true };
+        let (edits, ..) = introduce_parameter(ctx, range, &p).ok()?;
+        return (!edits.is_empty()).then(|| edits.into_workspace_edit(ctx.snap, vec![]));
+    }
     let (found, _) = targets(ctx, range, kind).ok()?;
     let t = found.into_iter().next()?;
     let uses = occurrences(ctx, &t, kind);
@@ -926,6 +1230,108 @@ mod tests {
         let found = offered(&method(heredoc), Kind::Variable).unwrap();
         assert_eq!(found[0], "$this->name()");
         assert!(found[1].starts_with("<<<TXT"), "{found:?}");
+    }
+
+
+    /// Introduces a parameter for the `«selection»` in `files[0]` and returns each changed file's text.
+    fn introduce(files: &[(&str, &str)], p: Value) -> Result<(std::collections::BTreeMap<String, String>, Vec<String>), String> {
+        let mut files: Vec<(String, String)> = files.iter().map(|(n, t)| (n.to_string(), t.to_string())).collect();
+        let first = &mut files[0].1;
+        let a = first.find('«').unwrap();
+        *first = first.replacen('«', "", 1);
+        let b = first.find('»').unwrap();
+        *first = first.replacen('»', "", 1);
+        let list: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        let fx = Fixture::new(&list);
+        let doc = fx.doc(&files[0].0);
+        let mut p = p;
+        p["textDocument"] = json!({ "uri": doc.uri });
+        p["range"] = json!(Range { start: doc.position(a as u32), end: doc.position(b as u32) });
+        let v = parameter_request(&fx.snap, p)?;
+        let edit: WorkspaceEdit = serde_json::from_value(v["edit"].clone()).unwrap();
+        let mut out = std::collections::BTreeMap::new();
+        let changes = match edit.document_changes {
+            Some(lsp_types::DocumentChanges::Edits(e)) => e,
+            Some(lsp_types::DocumentChanges::Operations(ops)) => ops.into_iter().filter_map(|o| match o {
+                lsp_types::DocumentChangeOperation::Edit(e) => Some(e),
+                _ => None,
+            }).collect(),
+            None => vec![],
+        };
+        for e in changes {
+            let path = crate::text::uri_to_path(&e.text_document.uri).unwrap();
+            let doc = fx.snap.docs.get(&path).unwrap();
+            let mut text = doc.text.clone();
+            let mut edits: Vec<TextEdit> = e.edits.into_iter().map(|e| match e { lsp_types::OneOf::Left(e) => e, lsp_types::OneOf::Right(a) => a.text_edit }).collect();
+            edits.sort_by_key(|e| std::cmp::Reverse((doc.offset(e.range.start), doc.offset(e.range.end))));
+            for e in edits {
+                text.replace_range(doc.offset(e.range.start) as usize..doc.offset(e.range.end) as usize, &e.new_text);
+            }
+            out.insert(path.file_name().unwrap().to_string_lossy().into_owned(), text);
+        }
+        let skipped = v["skipped"].as_array().unwrap().iter().map(|s| format!("{}:{}", s["line"], s["reason"].as_str().unwrap())).collect();
+        Ok((out, skipped))
+    }
+
+    #[test]
+    fn introduces_a_parameter_that_calls_pass() {
+        let files = [
+            ("app/Price.php", "<?php\nnamespace App;\n\nuse App\\Support\\Tax;\n\nclass Price\n{\n    public function gross(int $net): int\n    {\n        return $net + «Tax::rate()»;\n    }\n}\n"),
+            ("app/Support/Tax.php", "<?php\nnamespace App\\Support;\nclass Tax { public static function rate(): int { return 1; } }\n"),
+            ("app/use.php", "<?php\nnamespace Shop;\n\nfunction f(\\App\\Price $p) {\n    return $p->gross(5) + $p->gross(net: 6);\n}\n"),
+        ];
+        let (out, skipped) = introduce(&files, json!({ "name": "rate", "type": "int" })).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert!(out["Price.php"].contains("public function gross(int $net, int $rate): int\n    {\n        return $net + $rate;"), "{}", out["Price.php"]);
+        assert_eq!(out["use.php"], "<?php\nnamespace Shop;\n\nuse App\\Support\\Tax;\n\nfunction f(\\App\\Price $p) {\n    return $p->gross(5, Tax::rate()) + $p->gross(net: 6, rate: Tax::rate());\n}\n");
+    }
+
+    #[test]
+    fn a_parameter_with_a_default_changes_only_calls_that_pass_later_arguments() {
+        let text = "<?php\nfunction f(int $a, int $b = 2)\n{\n    return $a * «10»;\n}\nf(1);\nf(1, 3);\n";
+        let (out, _) = introduce(&[("test.php", text)], json!({ "name": "factor", "type": "int", "default": "10", "position": 1 })).unwrap();
+        assert_eq!(out["test.php"], "<?php\nfunction f(int $a, int $factor = 10, int $b = 2)\n{\n    return $a * $factor;\n}\nf(1);\nf(1, 10, 3);\n");
+    }
+
+    #[test]
+    fn a_required_parameter_must_keep_overrides_matching() {
+        let text = "<?php\nclass A { public function f() { return «strlen('x')»; } }\nclass B extends A { public function f() { return 0; } }\n";
+        let err = introduce(&[("test.php", text)], json!({ "name": "n" })).unwrap_err();
+        assert!(err.contains("default value"), "{err}");
+        let (out, _) = introduce(&[("test.php", text)], json!({ "name": "n", "default": "1" })).unwrap();
+        assert_eq!(out["test.php"], "<?php\nclass A { public function f($n = 1) { return $n; } }\nclass B extends A { public function f($n = 1) { return 0; } }\n");
+    }
+
+    #[test]
+    fn adds_a_parameter_on_its_own_line_and_to_constructor_calls() {
+        let text = "<?php\nclass Mail\n{\n    public function __construct(\n        private string $to,\n    ) {\n        echo «strtoupper('hi')»;\n    }\n}\nnew Mail('a');\n";
+        let (out, _) = introduce(&[("test.php", text)], json!({ "name": "greeting", "type": "string" })).unwrap();
+        assert_eq!(out["test.php"], "<?php\nclass Mail\n{\n    public function __construct(\n        private string $to,\n        string $greeting,\n    ) {\n        echo $greeting;\n    }\n}\nnew Mail('a', strtoupper('hi'));\n");
+    }
+
+    #[test]
+    fn tells_which_occurrences_run_only_sometimes() {
+        let conditions = |text: &str, kind: Kind| {
+            let at = text.find("<|>").unwrap();
+            let fx = Fixture::one(&text.replace("<|>", ""));
+            let doc = fx.doc("test.php");
+            let range = Range { start: doc.position(at as u32), end: doc.position(at as u32) };
+            let v = targets_request(&fx.snap, json!({ "textDocument": { "uri": uri("test.php") }, "range": range, "kind": kind })).unwrap();
+            v["targets"][0]["conditions"].clone()
+        };
+        let c = conditions(&method("        return $n > 1 && $this->lo<|>ad() || $this->load();"), Kind::Variable);
+        assert_eq!(c, json!(["when $n > 1 is true", "when $n > 1 && $this->load() is false"]));
+        let c = conditions(&method("        return match ($n) { 1 => strlen('a<|>'), default => 0 };"), Kind::Variable);
+        assert_eq!(c, json!(["when the match picks 1"]));
+        let c = conditions(&method("        return $n ? 0 : strlen('a<|>');"), Kind::Variable);
+        assert_eq!(c, json!(["when $n is false"]));
+        // A parameter's value would be computed at every call.
+        let c = conditions(&method("        if ($n > 1) {\n            return strl<|>en('a');\n        }\n        return 0;"), Kind::Parameter);
+        assert_eq!(c, json!(["when $n > 1 is true"]));
+        let c = conditions(&method("        if ($n > 1) {\n            return strl<|>en('a');\n        }\n        return 0;"), Kind::Variable);
+        assert_eq!(c, json!([null]));
+        let c = conditions(&method("        return $n && 'x<|>';"), Kind::Constant);
+        assert_eq!(c, json!([null]));
     }
 
     #[test]
@@ -1079,7 +1485,7 @@ mod tests {
         let s = text.find("'x'").unwrap() as u32;
         let range = Range { start: doc.position(s), end: doc.position(s + 3) };
         let kinds: Vec<String> = with_ctx(&fx.snap, &uri("test.php"), |ctx| candidates(ctx, range)).unwrap().into_iter().map(|c| c.kind.as_str().to_string()).collect();
-        assert_eq!(kinds, ["refactor.extract.variable", "refactor.extract.constant", "refactor.extract.field"]);
+        assert_eq!(kinds, ["refactor.extract.variable", "refactor.extract.constant", "refactor.extract.field", "refactor.extract.parameter"]);
         let edit = with_ctx(&fx.snap, &uri("test.php"), |ctx| resolve(ctx, "constant", range)).flatten().unwrap();
         let text = serde_json::to_string(&edit).unwrap();
         assert_eq!(text.matches("self::X").count(), 2, "{text}");

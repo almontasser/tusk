@@ -1229,18 +1229,13 @@ because the symbol's line numbers would be out of date, and only one Safe
 Delete runs at a time. `deletionLines` in `src/phptypes.ts` widens the removed
 lines to the docblock, attributes, and one blank line.
 
-### Inline variable and change signature
+### Change signature
 
 `src/refactorparse.ts` holds the text work, tested in Node: `matchBracket` and
-`splitTopLevel` scan brackets and strings (not heredocs), `planInline` checks
-that a variable has exactly one plain assignment, starting its line and
-ending at the first `;` outside brackets and strings (`statementEnd`), so a
-closure or a chain over several lines counts as one, and no other writes (compound assignment, `[]`, `->prop =`, `++`, `&`, `foreach … as`)
-or closure `use` lists, which take a variable and can't take its value,
-and `rewriteArgs` maps a call's arguments to a new parameter list by name.
-`src/refactor.ts` applies them: inlining is one undoable edit in the model;
-a signature change becomes a `WorkspaceEdit` for `applyWorkspaceEdit`, which
-edits and saves each file.
+`splitTopLevel` scan brackets and strings (not heredocs), and `rewriteArgs`
+maps a call's arguments to a new parameter list by name. `src/refactor.ts`
+applies them: a signature change becomes a `WorkspaceEdit` for
+`applyWorkspaceEdit`, which edits and saves each file.
 
 Calls of a method come from Tusk's server, `tusk/memberReferences` with the
 class and method: every call in the project, through subclasses too, without
@@ -1296,12 +1291,16 @@ renamed parameter in a recursive call, or a nested call to the same method.
 So calls are collected first and rewritten innermost first (by the offset of
 their `(`, descending), each applying the edits inside its arguments to their
 text before splitting it, and replacing them with one edit. `matchBracket`,
-`splitTopLevel`, and `statementEnd` skip comments as well as strings, so a
+and `splitTopLevel` skip comments as well as strings, so a
 `// don't` doesn't open a string that swallows the rest of the body.
 
 Introduce Parameter reuses the dialog: `changeSignature` adds the parameter
-without text, which the dialog treats as new, and `plan` also replaces the
-expression's uses in the body with the parameter.
+without text, which the dialog treats as new. When the dialog changes nothing
+else (`onlyAdded`), Tusk's server writes the edit (`tusk/introduceParameter`,
+see "Introduce Parameter" under the server). Otherwise `plan` makes the other
+changes too, and also replaces the expression's uses in the body with the
+parameter. `inlinedValue` in `src/phptypes.ts` writes a default for a call in
+another file.
 
 `src/refactorpreview.ts` shows the edit before it's applied. `changedLines`
 applies each file's edits line by line, and each row marks the part between
@@ -1316,12 +1315,16 @@ Constant, Field, and Parameter" under the server); `src/extract.ts` is the UI.
 Each runs the same steps:
 
 1. `tusk/extractTargets` with the selection and the kind lists the expressions
-   to offer, innermost first, each with its occurrences. More than one opens
+   to offer, innermost first, each with its occurrences and, for each, the
+   condition it runs under when it runs only sometimes. More than one opens
    the **Expressions** popup at the caret. A refusal comes back as the
    request's error, and `refuse` shows it as a hint above the caret, which
    goes away when the caret moves or the text changes, and in the status bar.
 2. With several occurrences, the occurrences popup highlights them, with marks
-   in the scroll bar, and asks for all or this one.
+   in the scroll bar, and asks for all or this one. `runsEveryTime` turns the
+   conditions of the occurrences a choice takes into a warning, which
+   `pickNote` shows below the popup's title while that choice is highlighted,
+   or, with one occurrence, the naming hint shows.
 3. `tusk/extract` returns the edit, with `\0` where the name goes and a
    suggested name.
 
@@ -1340,7 +1343,8 @@ in the file.
 The server also lists these as code actions on a selection, for other editors.
 The ⌥⏎ menu turns Tusk's `refactor.extract.*` actions into the `tusk.extract`
 command (`src/lsp.ts`), which runs the same interactive flow instead of the
-action's plain edit. Introduce Parameter uses steps 1 to 3 for the expression,
+action's plain edit, and so do `refactor.extract.parameter` and
+`refactor.inline`, which `initRefactor` adds to `interactive`. Introduce Parameter uses steps 1 to 3 for the expression,
 its uses, and the parameter's name, type, and whether it's a constant, then
 opens Change Signature.
 
@@ -1349,52 +1353,19 @@ against the caret, so the shortcuts shown follow the keymap. The choice
 popups open below the caret (`pickAtCaret`), with a `preview` callback that
 highlights what each option would change.
 
-### Inline constant
+### Inline
 
-Inline (⌥⌘N) tries a class constant first and falls back to Inline Variable.
-`constantRefs` in `src/extractparse.ts` finds `X::NAME` tokens (so strings and
-`$obj::NAME` don't count) and resolves `X` through the file's `use` statements,
-`self` and `static` to the type around it, and `parent` to its parent.
-`inlineConstant` in `src/refactor.ts` finds the owner's file through the
-workspace symbols, reads the value with `constantDeclaration`, and searches the
-project for `::NAME`, keeping references whose class is the owner or a
-subclass that doesn't redeclare it. `inlinedValue` writes the owner's class
-names in full and `shortenNames` shortens them again where the target file
-imports them.
-
-### Inline method
-
-`methodToInline` in `src/extractparse.ts` reads the method: its parameters,
-and its body split into statements and one final `return`, counting only the
-method's own tokens (`scopeOpen`), so a closure's `return` doesn't count. It
-refuses several returns, `yield`, `static` or `global` variables, variable
-variables, `compact()` and the like, and parameters inside double-quoted
-strings.
-
-`inlineCall` maps a call's arguments (positional and named) to the parameters.
-`varUses` classifies each use of a parameter: writes (assignment, `++`,
-`unset`, `foreach` and `catch` variables, destructuring, `&`, built-ins that
-take it by reference) and places that need a variable (`isset`, a closure's
-`use`, a closure or arrow function reading it later), skipping closures that
-declare their own variable of that name. An argument replaces its parameter
-only when that can't change what runs: a caller's variable the body only
-reads, a pure value (no call, `new`, `clone`, `include`, or write) where an
-expression may stand, or the one argument with side effects, read once, first,
-and outside any block, loop, or closure. Anything else runs first into a
-variable, in argument order after the receiver, as PHP evaluates them, which
-also lets the body change it. Locals that clash with the caller's variables get
-a number. `reindentCode` moves the body to the call's indentation, leaving the
-lines of multi-line strings alone.
-
-`inlineMethod` in `src/refactor.ts` finds the declaration with Go to
-Definition, refuses methods a subclass overrides, and, for a call from another
-class, bodies that reach members not declared `public` or call `parent::`. It
-places each call's code
-with `declarationPoint`: statements before the statement holding the call,
-which it allows only for `$x = …`, `return …`, `echo …`, and the like, where
-nothing else in the statement runs first. `qualifyNames` writes the method's
-class names in full for another file (`X::`, `new X`, `instanceof X`,
-`catch (X`), and `shortenNames` shortens them where that file imports them.
+Tusk's server reads the code and writes the edits (see "Inline Variable,
+Constant, and Method" under the server); `inline` in `src/refactor.ts` is the
+UI. `tusk/inlineTarget` at the caret says what's there, the choices, the places
+in the file each changes, and warnings, for the whole and for each choice. One
+choice with no warning runs at once; otherwise `ask` opens the popup at the
+caret, highlighting each choice's places and showing its warnings below the
+title. `tusk/inline` with the chosen mode returns a `WorkspaceEdit` and the
+places it left. `applyServerEdit` applies it with `applyWorkspaceEdit`, one
+undo step in every file, or, when places were left, opens the Refactoring
+Preview with them first. Refactor This offers Inline when the server lists its
+`refactor.inline` action at the caret.
 
 ### Move class
 
@@ -5794,6 +5765,85 @@ occurrence with the suggested name.
   through Extract Method's `php_type`; a parameter's class names are written in
   full, since the dialog writes the type as it is.
 
+- **Conditions:** each occurrence comes with when it runs, if only sometimes
+  (`runs_only` in `inline.rs`): the innermost `&&`, `||`, `??`, ternary branch,
+  `match` arm, or `?->` around it in its statement, as "when $n > 1 is true".
+  For a parameter, an `if`, `elseif`, or `else` around it counts too
+  (`runs_only_in_function`), since every call would compute it. A constant, and
+  a field or parameter whose default it becomes, run no code, so they have none.
+
+### Introduce Parameter
+
+`introduce_parameter` in `introduce.rs` answers `tusk/introduceParameter` and
+the `refactor.extract.parameter` code action, which takes the suggested name
+and type, and a constant expression as the default. It adds the parameter at
+`position` (`parameter_insert`, on its own line in a list with one parameter
+per line, keeping a trailing comma last), replaces the uses with the variable,
+and adds the parameter, with its default, to overriding methods. A parameter
+without a default is refused when the method overrides or is overridden by
+another, whose signatures must still match.
+
+Calls come from Call Hierarchy's `calls_of`, which counts `new` for a
+constructor, and change only when the parameter has no default or the call
+passes arguments after it (`argument_insert`): positionally when the call
+passes every argument before it, else by name, which needs PHP 8. The
+expression goes through `moved` (see "Inline Variable, Constant, and Method"),
+so its class names get imports in the call's file. A spread call or a
+first-class callable is left, with why.
+
+### Inline Variable, Constant, and Method
+
+`features/actions/inline.rs` answers `tusk/inlineTarget` and `tusk/inline`, and
+lists a `refactor.inline` code action at the caret, which inlines every use it
+can. Listing is cheap: a variable is checked in full, which reads only its
+file; a constant or method only for being declared in the project.
+
+- **Variables:** the `DirectVariable`s of the name in its `variable_scope`,
+  without an arrow function's own parameter. Exactly one must be written, by
+  an `=` that's a statement of its own, in a list of statements that holds
+  every use, and none may be read before it. Writes are `written` (from
+  `introduce.rs`) or `by_reference`, which asks the codebase whether the
+  called function's parameter takes a reference, as `sort()`'s does. A
+  parameter, a closure's `use`, `global`, `static`, and code that reads
+  variables by name (`compact()`, `extract()`, `$$`) are refused, as is a
+  variable the value reads that's written between the assignment and the last
+  use, or anywhere in a loop holding a use.
+- **Constants:** the declaring class (the first ancestor whose constants have
+  it), refused for enum cases and when a descendant declares it again. Uses
+  come from the references `search`, widened to their `ClassConstantAccess` or
+  `ConstantAccess`. With every use inlined, the declaration goes with its
+  docblock, or, in a statement of several, the item with its comma.
+- **Methods:** refused for constructors, magic methods, abstract ones,
+  overridden ones, by-reference returns and parameters, variadics, generators,
+  `static` and `global` variables, `goto`, `__FUNCTION__` and `__METHOD__`,
+  variables read by name, and any `return` but one ending the body. `BodyFacts`
+  reads the body once: each parameter's uses with their `Placement`, the
+  locals with every use (in closures that capture them too), `$this`, the
+  members reached through `$this`, `self`, and `static`, and where the first
+  side effect ends. `Call_::inline` then works per call: the receiver, the
+  visibility of those members from the call's class, the arguments by
+  position and name, and a temporary for each argument that can't stand in
+  place (one the body writes, needs as a variable, reads later in a closure, or
+  that has side effects and isn't read once, first, outside loops and
+  conditions). Locals the caller uses get a number. A call that's its
+  statement becomes the body; one whose value is used becomes the `return`
+  expression, with the statements before its statement, unless `runs_only`,
+  a loop's or `elseif`'s condition, or a side effect earlier in the statement
+  says they'd run at another time. A recursive method, or one that implements
+  another class's method, stays.
+
+Three helpers do the writing. `placed` and `Placement` decide parentheses from
+Mago's `Precedence` of the value and of the parent node (`-` next to a sign,
+the object of `->`, `new`, and `instanceof` included), and braces in a string,
+where only a value starting with `$` can go. `moved` writes code for another
+place: class names through `imports::reference`, with imports, namespaced
+functions and constants in full when they exist, `self` and `__CLASS__` as the
+owner outside it, and `static` and `parent` refused where they'd mean another
+class. `reindent` moves lines to the new indentation from the first line's,
+leaving multi-line strings alone, except a heredoc every line of which is
+indented that far, which moves whole. `shape_of_code` reads a rewritten result
+again, so a parameter replaced by its argument gets the argument's precedence.
+
 ### Organize imports and unused imports
 
 - **What counts as used:** names in code, attributes, and docblock types (with
@@ -7839,3 +7889,33 @@ Transfers are one file per call, queued in the frontend, rather than a folder
 per call in Rust: progress, cancel, retry, and the File Transfer panel then
 work per file with no protocol of their own between Rust and the web view, and
 a failure costs one file, not the batch.
+
+### 2026-10-02: Inline runs in Tusk's server, and the editor's PHP parser is gone
+
+Inline Variable, Inline Constant, and Inline Method read code with
+`src/extractparse.ts`, a tokenizer and precedence parser over one statement,
+which treated ternaries and closures as boundaries, didn't read heredocs, and
+found constants and calls by text. They now ask the server, which has Mago's
+syntax tree, its name resolution, the references search, and the codebase for
+visibility, overrides, and by-reference parameters. `src/extractparse.ts` is
+deleted, and `planInline` with it; `inlinedValue`, still used by Change
+Signature for defaults, moved to `src/phptypes.ts`.
+
+Two requests rather than code actions alone, as for the extractions: the editor
+asks which uses before it edits, and shows what each choice changes. Warnings
+don't refuse: a call that would run three times instead of once, or only when
+`$n > 1`, is something to decide, so each choice says it and the choice stays
+yours. What would change the result, such as a variable the value reads
+changing before a use, refuses.
+
+Introduce Parameter's edit moved to the server too, so other editors get it as
+a code action, but Tusk keeps Change Signature's dialog for it. When the dialog
+changes only the new parameter, the server writes the edit; when it changes
+more, Change Signature's own `plan` does it all, rather than splitting one
+change between the two.
+
+The extractions now say when an occurrence ran only sometimes, the one change
+PhpStorm makes silently. Refusing would block a common, safe extraction, such as
+a pure expression after `&&`, so the occurrences popup and the naming hint warn
+instead.
+

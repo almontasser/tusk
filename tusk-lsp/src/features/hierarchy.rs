@@ -32,7 +32,7 @@ use crate::types::display_class;
 /// What an item stands for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-enum Target {
+pub(crate) enum Target {
     Type { fqn: String },
     Function { fqn: String },
     Method { class: String, name: String },
@@ -305,7 +305,7 @@ fn constructed_by(codebase: &CodebaseMetadata, class: &str) -> Vec<String> {
 }
 
 /// Every call of a method or function in the project, without its declaration, by file.
-fn calls_of(snap: &Snapshot, index: &Index, target: &Target) -> Vec<FileMentions> {
+pub(crate) fn calls_of(snap: &Snapshot, index: &Index, target: &Target) -> Vec<FileMentions> {
     let (symbols, constructor) = match target {
         Target::Function { fqn } => (vec![Symbol::Function(fqn.clone())], vec![]),
         Target::Method { class, name } if name.eq_ignore_ascii_case("__construct") => {
