@@ -28,7 +28,7 @@ pub struct StateCall {
 
 /// Runs `f` on the file's schemas. Completion's parse ends at the cursor, so it reads the whole text again,
 /// falling back to the repaired copy when the code around the cursor doesn't parse without it.
-fn with_schema<R>(ctx: &Ctx<'_>, completing: Option<u32>, f: impl FnOnce(&Schema<'_>, &Parsed<'_>) -> R) -> R {
+pub fn with_schema<R>(ctx: &Ctx<'_>, completing: Option<u32>, f: impl FnOnce(&Schema<'_>, &Parsed<'_>) -> R) -> R {
     let Some(offset) = completing else { return f(&schema::build(ctx, &ctx.parsed), &ctx.parsed) };
     let arena = LocalArena::new();
     let full = Parsed::new(&arena, &ctx.doc.path, &ctx.doc.text);
@@ -157,9 +157,17 @@ fn casts_enums(ctx: &Ctx<'_>) -> bool {
     state.remember("filament:v4", &["composer.lock"], || Value::Bool(root.join("vendor/filament/schemas").is_dir())).as_bool() == Some(true)
 }
 
-/// The model whose records fill a field at the top of a resource's form, for `->relationship()` options.
-fn form_model(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>) -> Option<String> {
-    if !comp.container.is_empty() || schema.roots[comp.root].fill != Fill::Record {
+/// The model whose relationships a field at the top of a form uses, for `->relationship()` options: the one a
+/// Livewire form names with `->model()`, or the record's, in a resource's form or a relation manager's.
+pub fn form_model(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>) -> Option<String> {
+    let root = &schema.roots[comp.root];
+    if !comp.container.is_empty() {
+        return None;
+    }
+    if let Some(model) = &root.model {
+        return Some(model.clone());
+    }
+    if root.fill != Fill::Record {
         return None;
     }
     context(ctx)?["model"]["class"].as_str().map(String::from)
@@ -611,9 +619,15 @@ fn compared_read(ctx: &Ctx<'_>, schema: &Schema<'_>, parsed: &Parsed<'_>, offset
                 let other = if inside(b.rhs) { b.lhs } else { b.rhs };
                 return read_of(ctx, schema, other);
             }
+            // In an arm's condition, or between arms, where a new arm starts.
             Node::Match(m) => {
-                let in_condition = path[i..].iter().any(|n| matches!(n, Node::MatchExpressionArm(arm) if offset <= arm.arrow.start.offset));
-                return if in_condition { read_of(ctx, schema, m.expression) } else { None };
+                let in_body = path[i..].iter().any(|n| match n {
+                    Node::MatchExpressionArm(arm) => offset > arm.arrow.start.offset,
+                    Node::MatchDefaultArm(_) => true,
+                    _ => false,
+                });
+                let in_braces = m.left_brace.end.offset <= offset && offset <= m.right_brace.start.offset;
+                return if in_braces && !in_body { read_of(ctx, schema, m.expression) } else { None };
             }
             Node::FunctionCall(c) => {
                 let Expression::Identifier(id) = c.function else {

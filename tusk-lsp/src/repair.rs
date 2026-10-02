@@ -16,27 +16,49 @@ use mago_syntax_core::input::Input;
 use crate::analysis::Parsed;
 
 /// What closes each bracket still open at the end of `code` (a fragment inside PHP tags, or a whole file),
-/// ending the statement inside each block.
-fn closers(code: &str, in_php: bool) -> String {
+/// ending the statement inside each block but not inside a `match`'s arms. Also whether `code` ends with a
+/// comparison still missing its right side, such as `$a === `.
+fn closers(code: &str, in_php: bool) -> (String, bool) {
     let input = Input::new(FileId::zero(), code.as_bytes());
     let mut lexer = if in_php { Lexer::scripting(input, LexerSettings::default()) } else { Lexer::new(input, LexerSettings::default()) };
-    let mut open: Vec<char> = vec![];
+    // Each closer, and whether it closes a `match`'s subject or arms.
+    let mut open: Vec<(char, bool)> = vec![];
     // A string still open at the end: its quote closes it before any bracket.
     let mut quote: Option<char> = None;
     let mut in_double = false;
+    // `match` seen, then its subject's `)`: the next `{` holds arms.
+    let (mut match_keyword, mut match_subject) = (false, false);
+    let mut comparison = false;
     while let Some(token) = lexer.advance() {
         let Ok(token) = token else { continue };
+        if token.kind.is_trivia() {
+            continue;
+        }
         quote = None;
+        let arms = std::mem::take(&mut match_subject);
+        comparison = matches!(
+            token.kind,
+            TokenKind::EqualEqual
+                | TokenKind::EqualEqualEqual
+                | TokenKind::BangEqual
+                | TokenKind::BangEqualEqual
+                | TokenKind::LessThanGreaterThan
+        );
         match token.kind {
             TokenKind::PartialLiteralString => quote = token.value.first().map(|q| *q as char),
             TokenKind::DoubleQuote => in_double = !in_double,
-            TokenKind::LeftBrace | TokenKind::DollarLeftBrace => open.push('}'),
-            TokenKind::LeftBracket | TokenKind::HashLeftBracket => open.push(']'),
-            TokenKind::LeftParenthesis => open.push(')'),
+            TokenKind::Match => match_keyword = true,
+            TokenKind::LeftBrace => open.push(('}', arms)),
+            TokenKind::DollarLeftBrace => open.push(('}', false)),
+            TokenKind::LeftBracket | TokenKind::HashLeftBracket => open.push((']', false)),
+            TokenKind::LeftParenthesis => open.push((')', std::mem::take(&mut match_keyword))),
             TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParenthesis => {
-                open.pop();
+                match_subject = open.pop().is_some_and(|(c, of_match)| c == ')' && of_match);
             }
             _ => {}
+        }
+        if token.kind != TokenKind::Match && token.kind != TokenKind::LeftParenthesis {
+            match_keyword = false;
         }
     }
     let mut out = String::new();
@@ -45,8 +67,8 @@ fn closers(code: &str, in_php: bool) -> String {
     } else if in_double {
         out.push('"');
     }
-    for closer in open.iter().rev() {
-        if *closer == '}' {
+    for (closer, of_match) in open.iter().rev() {
+        if *closer == '}' && !of_match {
             out.push(';');
         }
         out.push(*closer);
@@ -54,13 +76,13 @@ fn closers(code: &str, in_php: bool) -> String {
     if !out.is_empty() {
         out.push(';');
     }
-    out
+    (out, comparison && quote.is_none() && !in_double)
 }
 
 /// `text` with closers appended for brackets left open at its end and a `;` for an unfinished last
 /// statement, so a class being written at the end of a file still parses.
 pub fn balance_end(text: &str) -> String {
-    let closers = closers(text, false);
+    let (closers, _) = closers(text, false);
     format!("{text}{}", if closers.is_empty() { ";" } else { &closers })
 }
 
@@ -98,7 +120,11 @@ pub fn at_cursor(parsed: &Parsed<'_>, offset: u32) -> Option<String> {
     if !(open <= offset && offset <= close) || body.right_brace.is_zero() {
         return None;
     }
-    let closers = closers(&text[open..offset], true);
+    let (mut closers, comparison) = closers(&text[open..offset], true);
+    // A comparison being completed, as in `$get('status') === `, gets a right side, so that it parses.
+    if comparison {
+        closers.insert(0, '0');
+    }
     if offset + closers.len() > close {
         return None;
     }
@@ -123,6 +149,9 @@ mod tests {
         assert_eq!(balance_end("<?php f(1)"), "<?php f(1);");
         assert_eq!(balance_end("<?php route('ho"), "<?php route('ho');");
         assert_eq!(balance_end("<?php f(\"a {$b} c"), "<?php f(\"a {$b} c\");");
+        // A `match`'s arms take no `;`.
+        assert_eq!(balance_end("<?php $x = match (f($a)) { 1 => g("), "<?php $x = match (f($a)) { 1 => g()};");
+        assert_eq!(balance_end("<?php if ($a) { g("), "<?php if ($a) { g();};");
     }
 
     #[test]
