@@ -43,8 +43,42 @@ enum Data {
 
 pub fn completion(snap: &Snapshot, params: CompletionParams) -> Result<Option<CompletionResponse>, String> {
     let at = params.text_document_position;
-    let result = with_ctx_at(snap, &at.text_document.uri, at.position, |ctx| complete(ctx, ctx.offset(at.position))).flatten();
+    let uri = &at.text_document.uri;
+    let result = with_ctx_at(snap, uri, at.position, |ctx| complete(ctx, ctx.offset(at.position))).flatten();
+    let result = result.or_else(|| {
+        let offset = snap.doc(uri)?.offset(at.position);
+        super::with_blade_php(snap, uri, offset, true, |ctx, blade| blade_complete(ctx, blade, offset)).flatten()
+    });
     Ok(result.map(|(items, incomplete)| CompletionResponse::List(CompletionList { is_incomplete: incomplete, items })))
+}
+
+/// The PHP completions in a Blade view, at `offset` in the view, when that's in its PHP: names, variables with the
+/// types the places that render it pass, and members. Ones that would import a class are left out, since a view
+/// imports with `@use`.
+fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
+    // In PHP when the last character before the cursor, other than spaces, is the view's PHP, not blanked text.
+    let view = &blade.view_text()[..offset as usize];
+    let last = view.trim_end().len().checked_sub(1)?;
+    if !blade.in_php(&ctx.doc, last as u32) {
+        return None;
+    }
+    let (items, incomplete) = complete(ctx, blade.php_offset(offset))?;
+    let items = items
+        .into_iter()
+        .filter(|item| item.additional_text_edits.as_ref().is_none_or(Vec::is_empty))
+        .filter_map(|mut item| {
+            match &mut item.text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => edit.range = blade.view_range(&ctx.doc, edit.range)?,
+                Some(CompletionTextEdit::InsertAndReplace(edit)) => {
+                    edit.insert = blade.view_range(&ctx.doc, edit.insert)?;
+                    edit.replace = blade.view_range(&ctx.doc, edit.replace)?;
+                }
+                None => {}
+            }
+            Some(item)
+        })
+        .collect();
+    Some((items, incomplete))
 }
 
 fn is_name_char(c: char) -> bool {
@@ -61,7 +95,7 @@ fn complete(ctx: &Ctx<'_>, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
         return crate::framework::laravel::env_file_completion(ctx, offset as u32).map(|items| (items, false));
     }
     // A Blade view isn't PHP; only the framework completes in it.
-    if ctx.doc.language == "blade" || ctx.doc.path.to_string_lossy().ends_with(".blade.php") {
+    if super::is_blade(&ctx.doc) {
         return crate::framework::completion(ctx, offset as u32).map(|items| (items, false));
     }
     if in_string(ctx, offset as u32) {
@@ -757,5 +791,56 @@ mod tests {
         assert_eq!(labels(&items), vec!["x:"]);
         assert!(complete_at(&files("<?php // Use<|>\n")).is_empty());
         assert!(complete_at(&files("<?php $s = 'Use<|>';\n")).is_empty());
+    }
+
+    /// Laravel's view classes and a class component whose view is `components.alert`.
+    const COMPONENT: &[(&str, &str)] = &[
+        ("vendor/View.php", "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag { public function merge(array $a): static { return $this; } }\nclass ComponentSlot {}\nclass InvokableComponentVariable { public function __invoke() {} }\nabstract class Component {\n    /** @var \\Illuminate\\View\\ComponentAttributeBag */\n    public $attributes;\n    public function data() {}\n}\n"),
+        ("app/Post.php", "<?php\nnamespace App;\nclass Post { public string $title = ''; }\n"),
+        ("app/View/Components/Alert.php", "<?php\nnamespace App\\View\\Components;\nclass Alert extends \\Illuminate\\View\\Component {\n    public string $type = 'info';\n    public function render() { return view('components.alert'); }\n    public function isActive(): bool { return true; }\n    /** @return list<\\App\\Post> */\n    public function posts(int $limit): array { return []; }\n}\n"),
+    ];
+
+    /// [`COMPONENT`] with the view `components.alert` as `blade`.
+    fn alert_view(blade: &str) -> Vec<(&str, &str)> {
+        let mut files = COMPONENT.to_vec();
+        files.push(("resources/views/components/alert.blade.php", blade));
+        files
+    }
+
+    #[test]
+    fn completes_a_blade_views_php_with_its_variables_typed() {
+        // The variables, with the class component's methods, and members of their types.
+        let items = complete_at(&alert_view("<div>{{ $<|> }}</div>"));
+        for name in ["$isActive", "$posts", "$slot", "$type"] {
+            assert!(labels(&items).contains(&name.to_string()), "{name}: {:?}", labels(&items));
+        }
+        let posts = items.iter().find(|i| i.label == "$posts").unwrap();
+        let Some(CompletionTextEdit::Edit(edit)) = &posts.text_edit else { panic!("{posts:?}") };
+        assert_eq!((edit.range.start.character, edit.range.end.character), (8, 9));
+        assert_eq!(labels(&complete_at(&alert_view("@foreach ($posts(3) as $post)\n  {{ $post-><|> }}\n@endforeach"))), vec!["title"]);
+        assert!(labels(&complete_at(&alert_view("<div {{ $attributes-><|> }}></div>"))).contains(&"merge".to_string()));
+        // Not in the view's HTML.
+        assert!(complete_at(&alert_view("<div>tit<|></div>")).is_empty());
+    }
+
+    #[test]
+    fn hovers_and_goes_to_a_blade_views_php() {
+        use lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams};
+        let hover_at = |fx: &Fixture| crate::features::hover::hover(&fx.snap, HoverParams { text_document_position_params: fx.at(), work_done_progress_params: Default::default() }).unwrap().expect("a hover");
+        let fx = Fixture::new(&alert_view("@foreach ($posts(3) as $post)\n  {{ $post->ti<|>tle }}\n@endforeach"));
+        let hover = hover_at(&fx);
+        let HoverContents::Markup(m) = hover.contents else { panic!() };
+        assert!(m.value.contains("public string $title"), "{}", m.value);
+        let range = hover.range.unwrap();
+        assert_eq!((range.start.line, range.start.character, range.end.character), (1, 12, 17));
+        let params = GotoDefinitionParams { text_document_position_params: fx.at(), work_done_progress_params: Default::default(), partial_result_params: Default::default() };
+        let Some(GotoDefinitionResponse::Array(found)) = crate::features::navigation::definition(&fx.snap, params).unwrap() else { panic!() };
+        assert!(found[0].uri.as_str().ends_with("/app/Post.php"), "{found:?}");
+        // A variable's type.
+        let HoverContents::Markup(m) = hover_at(&Fixture::new(&alert_view("{{ $ty<|>pe }}"))).contents else { panic!() };
+        assert!(m.value.contains("string"), "{}", m.value);
+        // Not the view's HTML.
+        let fx = Fixture::new(&alert_view("<di<|>v>{{ $type }}</div>"));
+        assert!(crate::features::hover::hover(&fx.snap, HoverParams { text_document_position_params: fx.at(), work_done_progress_params: Default::default() }).unwrap().is_none());
     }
 }

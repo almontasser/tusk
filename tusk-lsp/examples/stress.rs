@@ -127,6 +127,8 @@ fn php_files(root: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.into_path())
         .filter(|p| p.extension().is_some_and(|e| e == "php") && !p.components().any(|c| c.as_os_str() == "node_modules"))
+        // With ONLY set, such as `ONLY=resources/views`, only the files whose path contains it.
+        .filter(|p| std::env::var("ONLY").ok().is_none_or(|only| p.to_string_lossy().contains(&only)))
         .collect();
     files.sort();
     files

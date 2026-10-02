@@ -6,9 +6,9 @@ use std::ops::Range;
 /// Directives whose arguments name views, translations, or abilities, so they're read as calls. Others are
 /// left out: `@foreach ($a as $b)` isn't a valid call and would only add parse errors.
 const CALL_DIRECTIVES: &[&str] = &[
-    "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "extends", "each", "component", "can",
-    "cannot", "canany", "lang", "livewire", "method", "error", "section", "yield", "push", "stack", "props", "env",
-    "json", "vite",
+    "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "extends", "extendsFirst", "each", "component",
+    "componentFirst", "can", "cannot", "canany", "lang", "livewire", "method", "error", "section", "yield", "push",
+    "stack", "props", "env", "json", "vite",
 ];
 
 /// A Blade view's PHP at the offsets it has in the view, so string positions in it are positions in the view.
@@ -27,7 +27,9 @@ pub fn virtual_php(text: &str, upto: usize) -> String {
     let tag = (0..first.saturating_sub(2)).find(|p| !src[*p..p + 3].contains(&b'\n')).unwrap_or(0);
     out[tag..tag + 3].copy_from_slice(b"<? ");
     let copy = |out: &mut Vec<u8>, from: usize, to: usize| out[from..to].copy_from_slice(&src[from..to]);
-    let mut i = tag + 3;
+    // A view that starts with a directive, such as `@extends('layouts.app')`, has no room for the tag before it, so
+    // the tag takes the directive's first three bytes and its name becomes a short one ([`SHORT`]).
+    let mut i = if src[0] == b'@' { 0 } else { tag + 3 };
     while i < src.len() {
         if src[i..].starts_with(b"{{--") {
             i = find(src, i + 4, b"--}}").map_or(src.len(), |e| e + 4);
@@ -53,8 +55,17 @@ pub fn virtual_php(text: &str, upto: usize) -> String {
                 i = name_end.max(i + 1);
                 continue;
             }
-            out[i] = b'_';
-            copy(&mut out, i + 1, name_end);
+            if i == 0 {
+                let short = CALL_DIRECTIVES.iter().position(|d| *d == name).and_then(|at| SHORT.get(at)).filter(|_| name_end >= 5);
+                let Some(short) = short else {
+                    i = name_end;
+                    continue;
+                };
+                out[..5].copy_from_slice(&[b'<', b'?', b' ', b'_', *short]);
+            } else {
+                out[i] = b'_';
+                copy(&mut out, i + 1, name_end);
+            }
             match matching_paren(src, paren) {
                 Some(close) => {
                     copy(&mut out, paren, close + 1);
@@ -83,7 +94,7 @@ const PHP_DIRECTIVES: &[&str] = &[
     "if", "elseif", "unless", "isset", "empty", "switch", "case", "break", "continue", "foreach", "forelse", "for",
     "while", "php", "json", "js", "class", "style", "checked", "selected", "disabled", "readonly", "required",
     "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "each", "extends", "extendsFirst",
-    "section", "yield", "hasSection", "sectionMissing", "hasStack", "push", "pushIf", "prepend", "pushOnce", "prependOnce",
+    "componentFirst", "section", "yield", "hasSection", "sectionMissing", "hasStack", "push", "pushIf", "prepend", "pushOnce", "prependOnce",
     "stack", "component", "slot", "props", "aware", "can", "cannot", "canany", "elsecan", "elsecannot",
     "elsecanany", "auth", "guest", "elseauth", "elseguest", "env", "production", "session", "context", "error",
     "method", "lang", "choice", "inject", "dd", "dump", "vite", "once", "fragment", "livewire", "use",
@@ -614,8 +625,14 @@ pub(super) fn matching_paren(src: &[u8], open: usize) -> Option<usize> {
 /// The directive a call in [`virtual_php`] stands for: `_include` is `@include`.
 pub fn directive_name(function: &str) -> Option<String> {
     let name = function.strip_prefix('_')?;
+    let short = (name.len() == 1).then(|| SHORT.iter().position(|c| name.as_bytes()[0] == *c)).flatten();
+    let name = short.map_or(name, |at| CALL_DIRECTIVES[at]);
     CALL_DIRECTIVES.contains(&name).then(|| format!("@{name}"))
 }
+
+/// The one-letter names [`virtual_php`] gives [`CALL_DIRECTIVES`], in order, to one that starts the view: `_b` for
+/// `@includeIf`. One with a three-letter name, such as `@can`, has no room for it.
+const SHORT: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /// A component or Livewire tag on a line: `(start, end, name)` for `<x-alert`, `<flux:button`, or
 /// `<livewire:counter`, where the span covers the tag name without `<` and `name` drops `x-` and `livewire:`.
@@ -661,6 +678,11 @@ mod tests {
         assert_eq!(php.lines().count(), blade.lines().count());
         assert_eq!(directive_name("_include").as_deref(), Some("@include"));
         assert_eq!(directive_name("__"), None);
+        // A view that starts with a directive gets the tag in its place, and the directive a short name.
+        let php = virtual_php("@extends('app')\n@section('x')", usize::MAX);
+        assert_eq!(php, "<? _f   ('app')\n_section('x')");
+        assert_eq!(directive_name("_f").as_deref(), Some("@extends"));
+        assert_eq!(virtual_php("@can('x')", 9), "<?       ");
     }
 
     /// The checked PHP without its first line.
