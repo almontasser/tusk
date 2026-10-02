@@ -172,6 +172,19 @@ pnpm tauri build --target universal-apple-darwin
 
 The bundle is written to `src-tauri/target/universal-apple-darwin/release/bundle/`.
 
+To build the Windows installer on a Mac, install cargo-xwin, NSIS, and LLVM
+once, then cross-build it:
+
+```sh
+cargo install cargo-xwin && brew install nsis llvm
+rustup target add x86_64-pc-windows-msvc
+pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
+```
+
+The Linux AppImage and `.deb` build in Docker on Ubuntu 22.04
+(`scripts/linux/Dockerfile`); `scripts/release.sh` shows the command. On a
+Linux computer, `pnpm tauri build` builds them directly.
+
 ### Publish new tools
 
 To upgrade a language tool, change its URL and checksum in
@@ -182,7 +195,7 @@ run:
 node scripts/publish-tools.ts
 ```
 
-The script fetches the tools for both chips, packs each tool whose files
+The script fetches the tools for each system and chip, packs each tool whose files
 changed, and uploads them to the `tools` GitHub release with a `tools.json`
 list signed with the key in Bitwarden, then deletes packages the list no longer
 uses. Installed copies check at launch and every six hours, download the
@@ -199,11 +212,16 @@ right away. To publish one, commit your changes, then run:
 scripts/release.sh 0.2.0
 ```
 
-The script sets the version, builds the universal app, signs the update
-archive with the private key from the `tusk-signing-key` note in Bitwarden
+The script sets the version, builds the universal Mac app, the Windows
+installer, and the Linux AppImage and `.deb` (in Docker, emulating x64, which
+takes the longest), signs the update files with the private key from the `tusk-signing-key` note in Bitwarden
 (through `bwnote` from your `~/.zshrc`, which unlocks the vault with Touch ID
 if it's locked), writes `latest.json`, commits and tags the version, and creates the
-GitHub release with `gh`. The key is kept only in Bitwarden: without it,
+GitHub release with `gh`. The files are uploaded without their version in the
+name (`Tusk-universal.dmg`, `Tusk-x64-setup.exe`, `Tusk-x86_64.AppImage`,
+`Tusk-amd64.deb`), so the website's download buttons link to
+`releases/latest/download/<name>`. Copies installed from the `.deb` don't update
+themselves. The key is kept only in Bitwarden: without it,
 installed copies can't verify a new version, and you must ship a new key in a
 DMG that everyone installs by hand.
 

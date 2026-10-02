@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tusk: the PHP editor for Laravel artisans</title>
-<meta name="description" content="Tusk is a fast macOS editor for PHP, Laravel, and Filament, with PhpStorm-class navigation with visual designers for Filament apps. Free, and now in alpha.">
+<meta name="description" content="Tusk is a fast editor for PHP, Laravel, and Filament on macOS, Windows, and Linux, with PhpStorm-class navigation with visual designers for Filament apps. Free, and now in alpha.">
 <meta property="og:title" content="Tusk: the PHP editor for Laravel artisans">
-<meta property="og:description" content="A fast macOS editor for PHP, Laravel, and Filament, with visual designers. Free, and now in alpha.">
+<meta property="og:description" content="A fast editor for PHP, Laravel, and Filament on macOS, Windows, and Linux, with visual designers. Free, and now in alpha.">
 <meta property="og:image" content="https://tusk.almontasser.ly/img/designer.webp">
 <meta property="og:url" content="https://tusk.almontasser.ly/">
 <meta name="twitter:card" content="summary_large_image">
@@ -95,6 +95,8 @@ code { font: .88em var(--mono); background: #f1f1ee; border: 1px solid var(--lin
 .hero-copy { padding: 96px 0 96px 48px; position: relative; z-index: 2; }
 .hero-copy .lede { max-width: 440px; margin: 22px 0 36px; }
 .actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.platforms { margin: 14px 0 0; font-size: 14.5px; color: var(--muted); }
+.platforms a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .beta-note { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; font-size: 14.5px; color: var(--muted); }
 .hero-art { position: relative; height: 100%; min-height: 660px; perspective: 2200px; }
 .iso { position: absolute; width: 860px; left: 30px; top: 120px; transform: rotateX(52deg) rotateZ(-32deg); transform-style: preserve-3d; transform-origin: 30% 30%; }
@@ -269,13 +271,14 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
     <div class="hero">
       <div class="grid-bg"></div>
       <div class="hero-copy">
-        <div class="beta-note"><span class="tag">Alpha</span> Free for macOS, and looking for testers</div>
+        <div class="beta-note"><span class="tag">Alpha</span> Free for macOS, Windows, and Linux, and looking for testers</div>
         <h1 class="display">The PHP editor for Laravel artisans.</h1>
-        <p class="lede">Tusk is a fast macOS editor that understands PHP, Laravel, and Filament, with visual designers that write your Filament code for you.</p>
+        <p class="lede">Tusk is a fast editor for macOS, Windows, and Linux that understands PHP, Laravel, and Filament, with visual designers that write your Filament code for you.</p>
         <div class="actions">
-          <a class="btn btn-accent" href="https://github.com/almontasser/tusk/releases/latest">Download for macOS <span class="arrow">↓</span></a>
+          <a class="btn btn-accent" data-download href="https://github.com/almontasser/tusk/releases/latest">Download <span class="arrow">↓</span></a>
           <a class="btn btn-outline" href="https://github.com/almontasser/tusk">View on GitHub <span class="arrow">↗</span></a>
         </div>
+        <p class="platforms" data-platforms></p>
       </div>
       <div class="hero-art" aria-hidden="true">
         <img class="hero-icon" src="img/icon.svg" alt="">
@@ -406,8 +409,8 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
   <div class="rail">
     <div class="duo">
       <div class="cell wash">
-        <h2 class="h4">AI completion that never leaves your Mac</h2>
-        <p class="body">Qwen2.5-Coder runs locally on your Mac's GPU. It reads the classes your file uses, so its suggestions call methods that exist. Press Tab to accept, or ⌘→ to take one word.</p>
+        <h2 class="h4">AI completion that never leaves your computer</h2>
+        <p class="body">Qwen2.5-Coder runs locally on your GPU: Metal on a Mac, Vulkan on Windows and Linux. It reads the classes your file uses, so its suggestions call methods that exist. Press Tab to accept, or ⌘→ to take one word.</p>
         <ul class="checks">
           <li>No account, no subscription, no code sent anywhere</li>
           <li>Choose a 1.5B, 3B, or 7B model</li>
@@ -484,10 +487,10 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
       <div class="beta-grid">
         <p class="lede">Tusk does a lot, and most of it has only been tested by one person on a few apps. Expect bugs, especially in the designers. Use it on code that's in git, and tell us what breaks on <a class="u" href="https://github.com/almontasser/tusk/issues">GitHub</a>. Every report helps.</p>
         <ul>
-          <li><b>Platform</b><span>macOS only, on Apple silicon and Intel Macs.</span></li>
-          <li><b>You bring</b><span>PHP 8.1 or later and git. Node.js for Tailwind CSS, TypeScript, and Vue. Tusk downloads its other tools (about 90 MB) on first launch.</span></li>
-          <li><b>Signing</b><span>The app isn't notarized yet. The first time you open it, click <strong>Open Anyway</strong> in System Settings &gt; Privacy &amp; Security.</span></li>
-          <li><b>Updates</b><span>Tusk checks GitHub for new versions and updates itself.</span></li>
+          <li><b>Platform</b><span>macOS on Apple silicon and Intel, Windows 10 and 11 on x64 (Arm PCs run it emulated), and Linux on x64 with WebKitGTK 4.1, such as Ubuntu 22.04 or later. Windows and Linux are newer and less tested.</span></li>
+          <li><b>You bring</b><span>PHP 8.1 or later and git (on Windows, Git for Windows). Node.js for Tailwind CSS, TypeScript, and Vue. Tusk downloads its other tools (about 90 MB) on first launch.</span></li>
+          <li><b>Signing</b><span>The app isn't signed yet. On a Mac, the first time you open it, click <strong>Open Anyway</strong> in System Settings &gt; Privacy &amp; Security. On Windows, click <strong>More info</strong>, then <strong>Run anyway</strong> when SmartScreen warns. On Linux, make the AppImage executable, or install the .deb.</span></li>
+          <li><b>Updates</b><span>Tusk checks GitHub for new versions and updates itself, except when installed from the .deb: download the new one then.</span></li>
           <li><b>Gaps</b><span>Some PhpStorm features are missing. The <a class="u" href="https://github.com/almontasser/tusk#known-gaps">known gaps</a> list them.</span></li>
         </ul>
       </div>
@@ -502,9 +505,10 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
       <h2 class="h2">Write less boilerplate.<br>Ship more Laravel.</h2>
       <p class="lede">Tusk is free to download. Try it on your app, and tell us what works and what doesn't.</p>
       <div class="actions" style="justify-content:center">
-        <a class="btn btn-accent" href="https://github.com/almontasser/tusk/releases/latest">Download for macOS <span class="arrow">↓</span></a>
+        <a class="btn btn-accent" data-download href="https://github.com/almontasser/tusk/releases/latest">Download <span class="arrow">↓</span></a>
         <a class="btn btn-outline" href="https://github.com/almontasser/tusk/issues/new">Report an issue <span class="arrow">↗</span></a>
       </div>
+      <p class="platforms" data-platforms style="text-align:center"></p>
     </div>
   </div>
 </div>
@@ -514,7 +518,7 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
     <div class="inner">
       <div>
         <a class="logo" href="#top"><img src="img/icon.svg" alt="">Tusk</a>
-        <p class="tagline">The fast, focused way to write PHP, Laravel, and Filament on your Mac.</p>
+        <p class="tagline">The fast, focused way to write PHP, Laravel, and Filament on macOS, Windows, and Linux.</p>
       </div>
       <div><h4>Product</h4><ul><li><a href="#laravel">Laravel</a></li><li><a href="#designers">Designers</a>
       <a href="#tools">Tools</a></li><li><a href="#features">Features</a></li><li><a href="#alpha">Alpha</a></li></ul></div>
@@ -526,6 +530,33 @@ footer .legal { border-top: 1px solid var(--line); padding: 22px 48px; color: va
 </footer>
 
 <script>
+// The download buttons get this computer's installer, and a line below links the others. Without JavaScript they open
+// the latest release. scripts/release.sh uploads the files under these names.
+const downloads = {
+  mac: ["macOS", "Tusk-universal.dmg"],
+  windows: ["Windows", "Tusk-x64-setup.exe"],
+  appimage: ["Linux (AppImage)", "Tusk-x86_64.AppImage"],
+  deb: ["Linux (.deb)", "Tusk-amd64.deb"],
+};
+const url = (file) => `https://github.com/almontasser/tusk/releases/latest/download/${file}`;
+const agent = navigator.userAgent;
+const here = /Windows/.test(agent) ? "windows" : /Linux|X11/.test(agent) && !/Android/.test(agent) ? "appimage" : /Mac/.test(agent) ? "mac" : null;
+if (here) {
+  const [name, file] = downloads[here];
+  document.querySelectorAll("[data-download]").forEach((a) => {
+    a.href = url(file);
+    a.firstChild.textContent = `Download for ${name.replace(/ \(.*\)$/, "")} `;
+  });
+}
+document.querySelectorAll("[data-platforms]").forEach((p) => {
+  p.append(here ? "Also for " : "For ");
+  Object.entries(downloads).filter(([key]) => key !== here).forEach(([, [name, file]], i, list) => {
+    if (i) p.append(i === list.length - 1 ? ", and " : ", ");
+    p.append(Object.assign(document.createElement("a"), { href: url(file), textContent: name }));
+  });
+  p.append(".");
+});
+
 document.querySelectorAll(".showcase").forEach((showcase) => {
   const tabs = showcase.querySelectorAll("[data-tab]");
   tabs.forEach((tab) => tab.addEventListener("click", () => {

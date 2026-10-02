@@ -212,7 +212,7 @@ fn lint(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoCo
 /// The linter's issues, with their fixes, and the ID of the file they're in.
 pub fn lint_issues(doc: &Document, rel: &std::path::Path, mago: &crate::mago_config::MagoConfig) -> (mago_database::file::FileId, Vec<Issue>) {
     let arena = LocalArena::new();
-    let name = rel.to_string_lossy().into_owned().into_bytes();
+    let name = crate::index::mago_name(rel);
     let file = mago_database::file::File::new(
         std::borrow::Cow::Owned(name),
         mago_database::file::FileType::Host,

@@ -169,9 +169,16 @@ pub fn prelude() -> &'static Prelude {
     })
 }
 
+/// A path as Mago names files: with `/` between folders on Windows too, since rules such as `file-name` and the
+/// excluded paths split names at `/`.
+pub fn mago_name(path: &Path) -> Vec<u8> {
+    let name = path.to_string_lossy();
+    if cfg!(windows) { name.replace('\\', "/") } else { name.into_owned() }.into_bytes()
+}
+
 /// A Mago file for `path`. Its name is the absolute path, which also makes its ID unique.
 pub fn source_file(path: &Path, file_type: FileType, contents: Vec<u8>) -> File {
-    let name = path.to_string_lossy().into_owned().into_bytes();
+    let name = mago_name(path);
     File::new(Cow::Owned(name), file_type, Some(path.to_path_buf()), Cow::Owned(contents))
 }
 

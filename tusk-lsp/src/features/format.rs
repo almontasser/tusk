@@ -25,7 +25,7 @@ pub fn formatting(snap: &Snapshot, params: DocumentFormattingParams) -> Result<O
     let settings = mago.format.clone()?;
     let arena = LocalArena::new();
     let formatter = mago_formatter::Formatter::new(&arena, version, settings);
-    let name = rel.to_string_lossy().into_owned().into_bytes();
+    let name = crate::index::mago_name(rel);
     let formatted = formatter.format_code(Cow::Owned(name), Cow::Owned(doc.text.clone().into_bytes())).map_err(|e| {
         let at = doc.position(mago_span::HasSpan::span(&e).start.offset);
         format!("The file has a syntax error at line {}: {e}", at.line + 1)

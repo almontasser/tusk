@@ -7285,3 +7285,14 @@ terminal lost ConPTY's first question and hung, Git's `sh` had no `stat`, and
 the "PHP changed" toast showed at every launch on any system once a PHP path was
 set, because the saved settings load after the defaults are sent.
 
+### 2026-10-02: Windows and Linux releases
+
+`scripts/release.sh` builds all three systems on the Mac, keeping releases
+local as before. Windows cross-builds with cargo-xwin and NSIS, which Tauri
+supports from macOS, though it can't code-sign there. Linux builds in Docker on
+Ubuntu 22.04, the oldest base with WebKitGTK 4.1, so the AppImage runs on it
+and on newer distributions; it emulates x64, since most Linux desktops are x64.
+GitHub Actions would build natively and faster, but the updater key would then
+have to leave Bitwarden for a repository secret. Release files drop the version
+from their names so the website can link to `releases/latest/download/`.
+
