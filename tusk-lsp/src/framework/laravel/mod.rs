@@ -1194,6 +1194,27 @@ pub fn blade_components(state: &crate::framework::State) -> Option<std::sync::Ar
     data.active().then(|| data.blade_components()).flatten()
 }
 
+/// Whether the project's Laravel compiles Blade's `@use` directive, so a view can import a class with it rather
+/// than writing its full name.
+pub fn has_blade_use(index: &crate::index::Index) -> bool {
+    index.find_declared("Illuminate\\View\\Compilers\\Concerns\\CompilesUseStatements").is_some()
+}
+
+/// The edits that write `fqn` in a Blade view whose PHP has `name` at `range`, the view's: `name` there and a
+/// `@use` import ([`blade::use_insert`]), or, without `@use` in the project's Laravel, `\fqn` in place of `name`
+/// in `new_text`, a completion's or a fix's text that starts with it.
+pub fn blade_import(index: &crate::index::Index, view: &crate::documents::Document, fqn: &str, new_text: &mut String, name: &str) -> Vec<lsp_types::TextEdit> {
+    let fqn = fqn.trim_start_matches('\\');
+    if has_blade_use(index) {
+        let Some((at, text)) = blade::use_insert(&view.text, fqn) else { return vec![] };
+        return vec![lsp_types::TextEdit { range: view.range(at as u32, at as u32), new_text: text }];
+    }
+    if let Some(rest) = new_text.strip_prefix(name) {
+        *new_text = format!("\\{fqn}{rest}");
+    }
+    vec![]
+}
+
 /// The component or Livewire tag at `offset`, with its span.
 fn tag_at(ctx: &Ctx<'_>, data: &Data<'_>, offset: u32) -> Option<(u32, u32, String, bool)> {
     let text = &ctx.doc.text;

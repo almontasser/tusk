@@ -8,7 +8,7 @@ use mago_syntax::cst::{NamespaceBody, Statement};
 use serde_json::{Value, json};
 
 use super::{Candidate, file_edit};
-use crate::features::Ctx;
+use crate::features::{BladePhp, Ctx};
 use crate::features::moves::{namespace_for, psr4};
 use crate::imports::import_edit;
 use crate::symbol::Symbol;
@@ -28,15 +28,49 @@ fn classes_named(ctx: &Ctx<'_>, short: &str) -> Vec<String> {
     found.into_iter().map(|(_, n)| n).take(20).collect()
 }
 
-/// A class name at `offset` that resolves to no class, with the name as written.
-fn unresolved_class(ctx: &Ctx<'_>, offset: u32) -> Option<String> {
+/// A class name at `offset` that resolves to no class: where it is, and the name as written.
+fn unresolved_class(ctx: &Ctx<'_>, offset: u32) -> Option<Named> {
     let found = ctx.resolver().at(offset)?;
     let Symbol::Class(fqn) = found.symbols.first()? else { return None };
     if ctx.index.codebase.class_like_exists(fqn.as_bytes()) {
         return None;
     }
     let written = &ctx.doc.text[found.start as usize..found.end as usize];
-    (!written.contains('\\')).then(|| written.to_string())
+    (!written.contains('\\')).then(|| (found.start, found.end, written.to_string()))
+}
+
+/// [`candidates`]' imports in a Blade view, whose PHP `ctx` has, at `offset` in the view.
+pub fn blade_candidates(ctx: &Ctx<'_>, blade: &BladePhp, offset: u32) -> Vec<Candidate> {
+    let Some((_, _, short)) = unresolved_class(ctx, blade.php_offset(offset)) else { return vec![] };
+    import_candidates(ctx, &short, "fixes.blade_import")
+}
+
+/// The edit of a Blade view that imports `fqn` for the class name at `offset` in the view: a `@use` line, or the
+/// name written in full.
+pub fn blade_resolve(ctx: &Ctx<'_>, blade: &BladePhp, offset: u32, arg: &Value) -> Option<WorkspaceEdit> {
+    let fqn = arg.get("fqn")?.as_str()?;
+    let (start, end, mut name) = unresolved_class(ctx, blade.php_offset(offset))?;
+    let written = name.clone();
+    let mut edits = crate::framework::laravel::blade_import(&ctx.index, blade.view(), fqn, &mut name, &written);
+    if name != written {
+        let range = blade.view().range(blade.view_offset(start)?, blade.view_offset(end)?);
+        edits.push(TextEdit { range, new_text: name });
+    }
+    file_edit(ctx, edits)
+}
+
+/// An "Import class" action for each class named `short`, resolved by `id`.
+fn import_candidates(ctx: &Ctx<'_>, short: &str, id: &'static str) -> Vec<Candidate> {
+    let options = classes_named(ctx, short);
+    let only = options.len() == 1;
+    options
+        .into_iter()
+        .map(|fqn| {
+            let mut c = Candidate::new(format!("Import class {fqn}"), "quickfix.import_class", id, json!({ "fqn": fqn }));
+            c.preferred = only;
+            c
+        })
+        .collect()
 }
 
 /// A name's span and text.
@@ -82,14 +116,8 @@ fn expected_namespace(ctx: &Ctx<'_>) -> Option<String> {
 pub fn candidates(ctx: &Ctx<'_>, range: Range) -> Vec<Candidate> {
     let offset = ctx.offset(range.start);
     let mut out = vec![];
-    if let Some(short) = unresolved_class(ctx, offset) {
-        let options = classes_named(ctx, &short);
-        let only = options.len() == 1;
-        for fqn in options {
-            let mut c = Candidate::new(format!("Import class {fqn}"), "quickfix.import_class", "fixes.import", json!({ "fqn": fqn }));
-            c.preferred = only;
-            out.push(c);
-        }
+    if let Some((_, _, short)) = unresolved_class(ctx, offset) {
+        out.extend(import_candidates(ctx, &short, "fixes.import"));
     }
     let (namespace, classes) = declarations(ctx);
     if let Some(expected) = expected_namespace(ctx) {
@@ -175,6 +203,47 @@ mod tests {
         let lib = "<?php\nnamespace App\\Models;\nclass User {}\nnamespace Other;\nclass User {}\n";
         let t = titles(&[("lib.php", lib), ("app/x.php", "<?php\nnamespace App;\nfunction f(Us<|>er $u) {}\n")]);
         assert_eq!(t, vec!["Import class App\\Models\\User", "Import class Other\\User"]);
+    }
+
+    /// The view at `resources/views/v.blade.php` after the only "Import class" fix, as the editor applies it.
+    fn import_in_view(files: &[(&str, &str)]) -> String {
+        use lsp_types::{CodeActionOrCommand, DocumentChangeOperation, DocumentChanges, OneOf};
+        let fx = Fixture::new(files);
+        let at = fx.at();
+        let actions = code_actions(&fx.snap, CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: at.text_document.uri.clone() },
+            range: Range { start: at.position, end: at.position },
+            context: CodeActionContext { only: Some(vec![lsp_types::CodeActionKind::QUICKFIX]), ..Default::default() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+        .unwrap_or_default();
+        let [CodeActionOrCommand::CodeAction(action)] = actions.as_slice() else { panic!("{actions:?}") };
+        assert_eq!(action.title, "Import class App\\Models\\Post");
+        let resolved = crate::features::actions::resolve(&fx.snap, action.clone()).unwrap();
+        let doc = fx.doc("resources/views/v.blade.php");
+        let Some(DocumentChanges::Operations(ops)) = resolved.edit.unwrap().document_changes else { panic!() };
+        let mut text = doc.text.clone();
+        for op in ops {
+            let DocumentChangeOperation::Edit(e) = op else { continue };
+            let mut list: Vec<_> = e.edits.into_iter().map(|e| match e { OneOf::Left(e) => e, OneOf::Right(a) => a.text_edit }).collect();
+            list.sort_by_key(|e| std::cmp::Reverse(doc.offset(e.range.start)));
+            for e in list {
+                text.replace_range(doc.offset(e.range.start) as usize..doc.offset(e.range.end) as usize, &e.new_text);
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn imports_an_unknown_class_in_a_blade_view() {
+        let post = ("app/Models/Post.php", "<?php\nnamespace App\\Models;\nclass Post { public static function count(): int { return 0; } }\n");
+        let blade_use = ("vendor/laravel/CompilesUseStatements.php", "<?php\nnamespace Illuminate\\View\\Compilers\\Concerns;\ntrait CompilesUseStatements {}\n");
+        let view = ("resources/views/v.blade.php", "@props(['a'])\n<p>{{ Po<|>st::count() }}</p>\n");
+        // With `@use` among the view's first lines, and else, on an older Laravel, written in full.
+        assert_eq!(import_in_view(&[post, blade_use, view]), "@props(['a'])\n@use('App\\Models\\Post')\n<p>{{ Post::count() }}</p>\n");
+        assert_eq!(import_in_view(&[post, view]), "@props(['a'])\n<p>{{ \\App\\Models\\Post::count() }}</p>\n");
     }
 
     #[test]

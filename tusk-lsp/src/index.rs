@@ -41,6 +41,9 @@ use crate::analysis::Parsed;
 
 /// Folders never indexed, relative to the project root. `vendor`'s tests and Composer's generated files only
 /// add duplicate or unused classes.
+/// Laravel's classes that type a Blade view's variables, lowercase, as library names are kept.
+const BLADE_CLASSES: &[&str] = &["illuminate\\view\\componentslot", "illuminate\\view\\componentattributebag", "illuminate\\view\\invokablecomponentvariable"];
+
 pub const DEFAULT_EXCLUDES: &[&str] = &[
     "vendor/**/Tests/**",
     "vendor/**/tests/**",
@@ -627,6 +630,9 @@ impl Index {
         if self.config.load_all {
             wanted.extend(self.library_names.keys().cloned());
         }
+        // Blade views get these as `$slot`, `$attributes`, and a class component's methods, though the project's PHP
+        // may never name them.
+        wanted.extend(BLADE_CLASSES.iter().map(|c| c.to_string()));
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
         break_inheritance_cycles(&mut self.codebase, None);
@@ -1314,6 +1320,7 @@ mod tests {
             ("vendor/lib/Made.php", "<?php namespace Lib; class Made {}"),
             ("vendor/lib/Used.php", "<?php namespace Lib; trait Used {}"),
             ("vendor/lib/Unused.php", "<?php namespace Lib; class Unused {} function helper() {}"),
+            ("vendor/laravel/ComponentSlot.php", "<?php namespace Illuminate\\View; class ComponentSlot {}"),
             ("app/A.php", "<?php namespace App; class A extends \\Lib\\Base { use \\Lib\\Used; }"),
         ]);
         // The parent, what its signatures name, and the trait are loaded; the rest is only named.
@@ -1321,6 +1328,8 @@ mod tests {
             assert!(idx.codebase.class_like_exists(loaded.as_bytes()), "{loaded}");
         }
         assert!(!idx.codebase.class_like_exists(b"Lib\\Unused"));
+        // Blade views' `$slot` is typed with Laravel's, which no project file names.
+        assert!(idx.codebase.class_like_exists(b"Illuminate\\View\\ComponentSlot"));
         let names: Vec<String> = idx.names().into_iter().map(|(d, _)| d.name.as_str_lossy().into_owned()).collect();
         assert!(names.contains(&"Lib\\Unused".to_string()));
         assert!(names.contains(&"Lib\\helper".to_string()));
