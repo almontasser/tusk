@@ -3529,8 +3529,26 @@ state path of the schema it's in, as a list of segments from its root:
 
 - A root is an array of components that isn't another component's children,
   or a component chain outside any array, such as one a method returns. A
-  root passed to `->components()` or `->schema()` is complete; on a variable
-  (`$schema->components([...])`) it's a page's or resource's form.
+  root passed to `->components()`, `->schema()`, or an action's `->form()` is
+  complete. Each root also records what fills its state (`Fill`) and the
+  Livewire property path it's at (`state_path`), from what it's passed to:
+  - On a variable (`$schema->components([...])`) it's a form. In a relation
+    manager it's in an action's modal, so its state path isn't known; in a
+    resource's page or schema class it's at `data` and filled from the record
+    (`Fill::Record`). In another Livewire component it's at its literal
+    `->statePath()`, or at the component itself without one, and holds only
+    its fields (`Fill::Fields`) when `livewire_fill` can see every write: the
+    form's `fill()` calls take nothing or literal arrays, whose keys count as
+    written, the state property is only read by key and has no attribute,
+    the parent is Filament's `Page` or `SimplePage` or Livewire's
+    `Component`, the traits are the framework's, and the view, named by
+    `$view` or `render()`'s `view('…')`, never mentions the property.
+  - On an action's chain (`Action::make('x')->schema([...])`) it's the
+    action's modal. Filament's own `Action` and `CreateAction` fill it with
+    nothing (`CanBeMounted::getMountUsing()`), and a literal `fillForm()`
+    replaces what any of Filament's actions fills it with. `mountUsing()`, a
+    `fillForm()` of code, a subclass, or a chain kept in a variable leave it
+    `Fill::Unknown`.
 - Children come from `->schema()`, `->components()`, `->childComponents()`,
   `->tabs()`, `->steps()`, `->blocks()`, `->simple()`, and an array passed to
   `::make()` (`Group::make([...])`), as arrays, closures that return them, or
@@ -3549,14 +3567,22 @@ to the innermost component around the call: in `->schema(function (Get $get)
 the repeater's. `schema::resolve` then follows Filament's
 `resolveRelativeStatePath()`: each `../` drops one segment of the schema's
 path, and a path that drops more than the root has leaves the form, into the
-Livewire component's properties.
+Livewire component's properties. An absolute path (`/data.title`, or
+`isAbsolute: true`) starts at the component, so it's in the schema when it
+starts with the root's state path, and resolves from the root as the rest.
 
 A read is reported only when it's certain to find nothing: its schema is
-complete, isn't filled from a relationship (whose records bring other
-attributes), and no field, schema, or `$set()` holds the path or a part of it.
-At a form's root it also mustn't be a column, relationship, or cast of the
-model, since an edit page fills the form with the record's attributes; an
-action's or a Livewire component's own form isn't checked there. Suggestions
+complete, and no field, schema, `$set()`, or literal fill holds the path or a
+part of it. At a root that holds only its fields that's enough. At a resource
+form's root the name also mustn't be a column, relationship, or cast of the
+model, since an edit page fills the form with the record's attributes. A
+schema a relationship fills (a repeater's items, or a layout's
+`->relationship('x')`) holds the related records' `attributesToArray()`:
+when it's at the top of a resource's form and no `modifyQueryUsing` or
+`mutateRelationshipDataBeforeFillUsing` closure can add keys, the name mustn't
+be one of the related model's columns, casts, or appended attributes. Model
+columns guessed from `$fillable` because the database couldn't be read
+(`columnsGuessed`) leave both cases unreported. Suggestions
 are the same name further up (`../../total`) or a reachable field within two
 edits (a swap counts as one), and the quick fix writes them.
 
@@ -3567,6 +3593,16 @@ with `->options(Enum::class)` or `->enum(Enum::class)` to a case
 with a string. A model's cast doesn't change a field's state, so a field typed
 only by the cast compares with strings. The server checks for
 `vendor/filament/schemas` to tell Filament 4.
+
+Options from the database come from `introspect.php options`, given the
+query as JSON: a model, the calls before `pluck()`, and its columns, or a
+model, a relationship, and its title column. `options_query` builds it only
+from literal arguments and a model the index knows, and the script runs only
+query builder methods from a fixed list and the model's local scopes, so
+nothing is written, and reads at most 101 rows. `State::php_soon` runs it on
+a thread of its own and returns what's cached, so no request waits for PHP:
+diagnostics start the reads when a file opens, and completion and hover read
+again when the options are over a minute old.
 
 ### Links
 
@@ -7839,3 +7875,28 @@ Transfers are one file per call, queued in the frontend, rather than a folder
 per call in Rust: progress, cancel, retry, and the File Transfer panel then
 work per file with no protocol of their own between Rust and the web view, and
 a failure costs one file, not the batch.
+
+### 2026-10-02: Absolute paths, database options, and forms the file fills
+
+`$get('/data.title')` wasn't resolved, options from a query weren't
+suggested, and a read of a missing field in an action's form, a Livewire
+form, or a relationship repeater wasn't reported. A root now records its
+state path, so absolute paths resolve from it, and what fills its state, so
+those forms are checked when the file shows every write.
+
+Running the options' query was preferred over listing nothing, since an id
+compared with `$get('author_id')` means nothing without its label. Running
+the expression as written was rejected: the server only builds the query from
+literal arguments, and the script allows query builder methods and scopes
+alone. The read never blocks a request: a request with nothing cached gets
+nothing, and the next one, a moment later, gets the options. Waiting up to
+the script's timeout, as resource introspection does, was rejected, because
+booting the app and querying takes a second or more on each change of
+`app/`.
+
+Proving a Livewire form closed takes the whole class, its parent, and its
+view. A view that writes into the state with `wire:model="data.x"` or
+`$wire.set()` is found only by text, so a view that mentions the property at
+all keeps the form unchecked; a missed warning is cheaper than a false one.
+On the two local apps, the same 85 paths and the one real problem were found
+as before, with no new warnings.

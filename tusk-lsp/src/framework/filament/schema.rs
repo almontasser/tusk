@@ -19,7 +19,7 @@
 //! the repeater's name and the item's key. A builder block's fields are at `["content", "*", "data"]`; the
 //! item key is written `*block` there so that one block's fields don't count as another's.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use mago_span::HasSpan;
 use mago_syntax::cst::{Argument, ArrayElement, Call, Expression, Literal, MethodCall, Node, StaticMethodCall};
@@ -111,8 +111,23 @@ impl Comp<'_> {
 pub struct Root {
     /// Whether the file lists every component: a literal array passed to `->components()` or `->schema()`.
     pub complete: bool,
-    /// Whether it's a page's or resource's form (`$schema->components([...])`), filled from the record.
-    pub form: bool,
+    pub fill: Fill,
+    /// The Livewire property path the schema's state is at, which absolute paths start with: `data` for a
+    /// resource's form, a Livewire form's `->statePath()`, or nothing when its fields are properties themselves.
+    /// `None` when the file doesn't show it, as for an action's modal (`mountedActions.0.data`).
+    pub state_path: Option<Vec<String>>,
+}
+
+/// What a root schema's state holds besides its fields' state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fill {
+    /// A resource's form, filled from the record: the model's attributes too.
+    Record,
+    /// Only its fields' state and the keys the file fills it with: an action modal that fills it with
+    /// nothing or with a literal array, or a Livewire form whose class fills it only that way.
+    Fields,
+    /// Something the file doesn't show, such as an `EditAction`'s record or a `fill()` of a variable.
+    Unknown,
 }
 
 /// Where a path leads from a schema.
@@ -131,8 +146,10 @@ pub struct Schema<'a> {
     pub roots: Vec<Root>,
     /// Schemas, by root and path, whose children the file doesn't fully list.
     open: HashSet<(usize, Vec<String>)>,
-    /// Schemas filled from a relationship's records, so they hold the related model's attributes too.
-    related: HashSet<(usize, Vec<String>)>,
+    /// Schemas filled from a relationship's records, so they hold the related model's attributes too. A
+    /// relationship repeater's items at the top of a form have the relationship's name, when no closure
+    /// changes its query or the records' data, so the related model's attributes tell which keys they hold.
+    related: HashMap<(usize, Vec<String>), Option<String>>,
     containers: HashSet<(usize, Vec<String>)>,
     /// Paths written with `$set`, which reads with `$get` find even without a field.
     written: HashSet<(usize, Vec<String>)>,
@@ -155,10 +172,17 @@ fn starts(path: &[String], prefix: &[String]) -> bool {
     prefix.len() <= path.len() && prefix.iter().zip(path).all(|(a, b)| same(a, b))
 }
 
-/// Resolves `path` from a schema at `container`, as Filament's `resolveRelativeStatePath()` does.
-pub fn resolve(container: &[String], path: &str, absolute: bool) -> Resolved {
-    if absolute || path.starts_with('/') {
-        return Resolved::Absolute;
+/// Resolves `path` from a schema at `container`, as Filament's `resolveRelativeStatePath()` does. An absolute
+/// path (`/data.title`, or any path with `isAbsolute: true`) starts at the Livewire component, so it's in the
+/// schema when it starts with the root's `state_path`.
+pub fn resolve(state_path: Option<&[String]>, container: &[String], path: &str, absolute: bool) -> Resolved {
+    if let Some(rest) = path.strip_prefix('/').or(absolute.then_some(path)) {
+        let Some(state_path) = state_path else { return Resolved::Absolute };
+        let rest = segments(rest);
+        return match rest.strip_prefix(state_path) {
+            Some(inside) => Resolved::Path(inside.to_vec()),
+            None => Resolved::Outside,
+        };
     }
     let mut at = container.to_vec();
     let mut rest = path;
@@ -173,6 +197,17 @@ pub fn resolve(container: &[String], path: &str, absolute: bool) -> Resolved {
 }
 
 impl<'a> Schema<'a> {
+    /// Resolves a path from a schema at `container` in `root`; see [`resolve`].
+    pub fn resolve(&self, root: usize, container: &[String], path: &str, absolute: bool) -> Resolved {
+        resolve(self.roots[root].state_path.as_deref(), container, path, absolute)
+    }
+
+    /// The relationship whose records fill the schema at `path`, if its items' keys can be known; see
+    /// `related`.
+    pub fn relationship(&self, root: usize, path: &[String]) -> Option<&str> {
+        self.related.get(&(root, path.to_vec()))?.as_deref()
+    }
+
     /// The component a closure at `offset` belongs to: the innermost one whose chain holds it.
     pub fn owner(&self, offset: u32) -> Option<&Comp<'a>> {
         self.comps.iter().filter(|c| c.span.0 <= offset && offset <= c.span.1).min_by_key(|c| c.span.1 - c.span.0)
@@ -197,14 +232,25 @@ impl<'a> Schema<'a> {
     }
 
     /// Whether the file lists every field of the schema at `path`, so a read of a missing one surely finds
-    /// nothing: a repeater's or builder's items, or a page's or resource's form when `form_ok` is true.
-    pub fn certain(&self, root: usize, path: &[String], form_ok: bool) -> bool {
+    /// nothing: a repeater's or builder's items, a root that holds only its fields, or else what `attributes_ok`
+    /// says, which the caller knows from the model: that a resource's form, or a relationship's items, have no
+    /// attribute of that name.
+    pub fn certain(&self, root: usize, path: &[String], attributes_ok: bool) -> bool {
         let key = (root, path.to_vec());
-        if !self.containers.contains(&key) || self.open.contains(&key) || self.related.contains(&key) {
+        if !self.containers.contains(&key) || self.open.contains(&key) {
             return false;
         }
+        if let Some(relationship) = self.related.get(&key) {
+            return relationship.is_some() && attributes_ok;
+        }
         let r = &self.roots[root];
-        !path.is_empty() || (r.complete && r.form && form_ok)
+        !path.is_empty()
+            || (r.complete
+                && match r.fill {
+                    Fill::Fields => true,
+                    Fill::Record => attributes_ok,
+                    Fill::Unknown => false,
+                })
     }
 
     /// Fields reachable from a schema at `container`, as each is written from there: siblings by name, the
@@ -235,6 +281,8 @@ struct Builder<'c, 'a> {
     arrays: HashSet<u32>,
     /// Chains already read, by start.
     chains: HashSet<u32>,
+    /// Keys an action's `fillForm([...])` or a Livewire form's `fill([...])` puts in a root.
+    filled: Vec<(usize, Vec<String>)>,
 }
 
 enum Chain<'a> {
@@ -246,10 +294,11 @@ enum Chain<'a> {
 
 /// Reads every schema in a parsed file.
 pub fn build<'a>(ctx: &Ctx<'_>, parsed: &Parsed<'a>) -> Schema<'a> {
-    let mut b = Builder { ctx, parsed, schema: Schema::default(), arrays: HashSet::new(), chains: HashSet::new() };
+    let mut b = Builder { ctx, parsed, schema: Schema::default(), arrays: HashSet::new(), chains: HashSet::new(), filled: vec![] };
     walk(parsed, |node, path| b.visit(node, path));
     let mut schema = b.schema;
     schema.written = written(ctx, &schema);
+    schema.written.extend(b.filled);
     schema
 }
 
@@ -262,11 +311,11 @@ impl<'c, 'a> Builder<'c, 'a> {
                 let var = String::from_utf8_lossy(p.variable.name).into_owned();
                 match hint.rsplit('\\').next() {
                     Some("Get") => {
-                    self.schema.getters.insert(var);
-                }
+                        self.schema.getters.insert(var);
+                    }
                     Some("Set") => {
-                    self.schema.setters.insert(var);
-                }
+                        self.schema.setters.insert(var);
+                    }
                     _ => {}
                 }
             }
@@ -276,7 +325,7 @@ impl<'c, 'a> Builder<'c, 'a> {
             // part of. Its chain's inner calls start where it does, so they're skipped.
             Node::Expression(e @ Expression::Call(_)) if !self.chains.contains(&e.span().start.offset) => {
                 if let Chain::Component(make, chain, class) = self.chain(e) {
-                    let root = self.root(false, false);
+                    let root = self.root(false, Fill::Unknown, None);
                     self.add(make, chain, class, (e.span().start.offset, e.span().end.offset), root, &[]);
                 }
             }
@@ -302,7 +351,7 @@ fn written(ctx: &Ctx<'_>, schema: &Schema<'_>) -> HashSet<(usize, Vec<String>)> 
             let Some(owner) = schema.owner(at as u32) else {
                 continue;
             };
-            if let Resolved::Path(p) = resolve(&owner.container, &rest[1..1 + end], false) {
+            if let Resolved::Path(p) = schema.resolve(owner.root, &owner.container, &rest[1..1 + end], false) {
                 out.insert((owner.root, p));
             }
         }
@@ -315,8 +364,8 @@ impl<'c, 'a> Builder<'c, 'a> {
         self.parsed.text().get(start as usize..end as usize).unwrap_or_default()
     }
 
-    fn root(&mut self, complete: bool, form: bool) -> usize {
-        self.schema.roots.push(Root { complete, form });
+    fn root(&mut self, complete: bool, fill: Fill, state_path: Option<Vec<String>>) -> usize {
+        self.schema.roots.push(Root { complete, fill, state_path });
         let root = self.schema.roots.len() - 1;
         self.schema.containers.insert((root, vec![]));
         if !complete {
@@ -332,25 +381,36 @@ impl<'c, 'a> Builder<'c, 'a> {
         }
         // The call it's passed to: `$schema->components([...])` lists a whole form; an action's
         // `->schema([...])` its modal's.
-        let call = path
-            .iter()
-            .rev()
-            .find(|n| !matches!(n, Node::Expression(_) | Node::Argument(_) | Node::PositionalArgument(_) | Node::NamedArgument(_) | Node::ArgumentList(_)))
-            .and_then(|n| match n {
-                Node::MethodCall(c) => Some(*c),
-                _ => None,
-            });
-        let (complete, form) = match call {
-            Some(c) if ["components", "schema"].contains(&self.text(c.method.span().start.offset, c.method.span().end.offset)) => {
+        let at = path.iter().rposition(|n| {
+            !matches!(n, Node::Expression(_) | Node::Argument(_) | Node::PositionalArgument(_) | Node::NamedArgument(_) | Node::ArgumentList(_))
+        });
+        let call = at.and_then(|i| match path[i] {
+            Node::MethodCall(c) => Some((i, c)),
+            _ => None,
+        });
+        let (complete, fill, state_path, filled) = match call {
+            Some((i, c)) if ["components", "schema", "form"].contains(&self.method_name(c)) => {
+                let chain = self.whole_chain(&path[..i], c);
                 let mut base = c.object;
                 while let Expression::Call(Call::Method(m)) = base {
                     base = m.object;
                 }
-                (true, matches!(base, Expression::Variable(_)))
+                match base {
+                    Expression::Variable(_) => {
+                        let (fill, state_path, filled) = self.form_root(path, &chain);
+                        (true, fill, state_path, filled)
+                    }
+                    Expression::Call(Call::StaticMethod(make)) => {
+                        let (fill, filled) = self.action_root(&chain, make);
+                        (true, fill, None, filled)
+                    }
+                    _ => (true, Fill::Unknown, None, vec![]),
+                }
             }
-            _ => (false, false),
+            _ => (false, Fill::Unknown, None, vec![]),
         };
-        let root = self.root(complete, form);
+        let root = self.root(complete, fill, state_path);
+        self.filled.extend(filled.into_iter().map(|k| (root, vec![k])));
         self.arrays.insert(start);
         for e in elements {
             self.element(e, root, &[]);
@@ -501,9 +561,10 @@ impl<'c, 'a> Builder<'c, 'a> {
             // A field named by a variable: its schema has a field the file doesn't name.
             self.schema.open.insert((root, container.to_vec()));
         }
+        let comp_name = name.as_ref().map(|(n, ..)| n.clone());
         let comp = Comp { class, kind, make, chain: chain.clone(), span, root, container: container.to_vec(), name };
         let path = comp.path();
-        // The schema the component's children are in.
+        // The schema the component's children are in, and whether a relationship's records fill it.
         let mut related = false;
         let children: Option<Vec<String>> = match kind {
             Kind::Repeater | Kind::Builder => path.map(|mut p| {
@@ -543,7 +604,8 @@ impl<'c, 'a> Builder<'c, 'a> {
         let Some(children) = children else { return };
         self.schema.containers.insert((root, children.clone()));
         if related {
-            self.schema.related.insert((root, children.clone()));
+            let name = self.relationship_name(&comp_name, &chain, root, container);
+            self.schema.related.insert((root, children.clone()), name);
         }
         for arg in make.argument_list.arguments.iter() {
             let (Argument::Positional(mago_syntax::cst::PositionalArgument { value, .. })
@@ -564,6 +626,245 @@ impl<'c, 'a> Builder<'c, 'a> {
                 self.children(value, root, &children);
             }
         }
+    }
+
+    /// Every call of the chain that `call` is in, first one first, and the node around the whole chain.
+    fn whole_chain(&self, ancestors: &[Node<'a, 'a>], call: &'a MethodCall<'a>) -> (Vec<&'a MethodCall<'a>>, Option<Node<'a, 'a>>) {
+        let mut chain = vec![call];
+        let mut e = call.object;
+        while let Expression::Call(Call::Method(m)) = e {
+            chain.push(m);
+            e = m.object;
+        }
+        chain.reverse();
+        let mut current = call.span();
+        for node in ancestors.iter().rev() {
+            match node {
+                Node::MethodCall(m) if m.object.span() == current => {
+                    chain.push(m);
+                    current = m.span();
+                }
+                n if n.span() == current => {}
+                n => return (chain, Some(*n)),
+            }
+        }
+        (chain, None)
+    }
+
+    /// The class around `ancestors`, by its full name, with its node.
+    fn class_of(&self, ancestors: &[Node<'a, 'a>]) -> Option<(String, &'a mago_syntax::cst::Class<'a>)> {
+        ancestors.iter().rev().find_map(|n| match n {
+            Node::Class(c) => {
+                let name = String::from_utf8_lossy(c.name.value);
+                Some((resolve_class(&scope_at(self.parsed.program, c.span().start.offset), &name).trim_start_matches('\\').to_string(), *c))
+            }
+            _ => None,
+        })
+    }
+
+    fn is_a(&self, class: &str, base: &str) -> bool {
+        self.ctx.index.codebase.is_instance_of(class.as_bytes(), base.as_bytes())
+    }
+
+    /// A form passed to a variable, as in `$schema->components([...])`: a resource's, filled from the record and
+    /// at `data`, a relation manager's, in an action's modal, or a Livewire component's own, at its
+    /// `->statePath()`.
+    fn form_root(
+        &self,
+        ancestors: &[Node<'a, 'a>],
+        chain: &(Vec<&'a MethodCall<'a>>, Option<Node<'a, 'a>>),
+    ) -> (Fill, Option<Vec<String>>, Vec<String>) {
+        let explicit =
+            chain.0.iter().find(|c| self.method_name(c) == "statePath").map(|c| self.first_string(&c.argument_list).map(|(s, ..)| segments(&s)));
+        let Some((class, node)) = self.class_of(ancestors) else { return (Fill::Record, explicit.unwrap_or(Some(vec!["data".into()])), vec![]) };
+        if ["Filament\\Resources\\RelationManagers\\RelationManager", "Filament\\Resources\\Pages\\ManageRelatedRecords"]
+            .iter()
+            .any(|b| self.is_a(&class, b))
+        {
+            return (Fill::Record, explicit.flatten(), vec![]);
+        }
+        if self.is_a(&class, "Filament\\Resources\\Pages\\Page") || !self.is_a(&class, "Livewire\\Component") {
+            return (Fill::Record, explicit.unwrap_or(Some(vec!["data".into()])), vec![]);
+        }
+        // A Livewire component's form: without `->statePath()`, its fields are the component's properties.
+        let state_path = explicit.clone().unwrap_or(Some(vec![]));
+        let form = ancestors.iter().rev().find_map(|n| match n {
+            Node::Method(m) => Some(String::from_utf8_lossy(m.name.value).into_owned()),
+            _ => None,
+        });
+        let filled = match (&explicit, form) {
+            (Some(Some(path)), Some(form)) if path.len() == 1 => self.livewire_fill(&class, node, &form, &path[0]),
+            _ => None,
+        };
+        match filled {
+            Some(keys) => (Fill::Fields, state_path, keys),
+            None => (Fill::Unknown, state_path, vec![]),
+        }
+    }
+
+    /// The keys a Livewire form at property `property` holds besides its fields, if the class shows them all:
+    /// its form `$this->{form}` is filled only with nothing or with literal arrays, the property is written
+    /// nowhere else and has no attribute such as `#[Url]`, its view binds nothing in it, and neither the
+    /// class's parent nor its traits are the app's own, which could fill it too.
+    fn livewire_fill(&self, class: &str, node: &'a mago_syntax::cst::Class<'a>, form: &str, property: &str) -> Option<Vec<String>> {
+        let codebase = &self.ctx.index.codebase;
+        let meta = codebase.get_class_like(class.as_bytes())?;
+        let parent = meta.direct_parent_class.as_ref()?.as_str_lossy().to_ascii_lowercase();
+        if !["filament\\pages\\page", "filament\\pages\\simplepage", "livewire\\component"].contains(&parent.as_str()) {
+            return None;
+        }
+        let framework = |t: &str| ["filament\\", "livewire\\", "illuminate\\"].iter().any(|p| t.to_ascii_lowercase().starts_with(p));
+        if !meta.used_traits.iter().all(|t| framework(&t.as_str_lossy())) {
+            return None;
+        }
+        let variable = format!("${property}");
+        let this_property = |e: &Expression<'_>, name: &str| match e {
+            Expression::Access(mago_syntax::cst::Access::Property(pa)) => is_this(pa.object) && selects(&pa.property, name),
+            _ => false,
+        };
+        let (start, end) = (node.span().start.offset, node.span().end.offset);
+        let mut keys = vec![];
+        let mut closed = true;
+        walk(self.parsed, |n, ancestors| {
+            if !closed || n.span().start.offset < start || n.span().end.offset > end {
+                return;
+            }
+            match n {
+                Node::MethodCall(m) if this_property(m.object, form) => match self.method_name(m) {
+                    "fill" => match m.argument_list.arguments.iter().next() {
+                        None => {}
+                        Some(Argument::Positional(p)) if m.argument_list.arguments.len() == 1 => match literal_keys(self, p.value) {
+                            Some(k) => keys.extend(k),
+                            None => closed = false,
+                        },
+                        _ => closed = false,
+                    },
+                    "fillPartially" | "rawState" | "partialRawState" | "state" | "constantState" => closed = false,
+                    _ => {}
+                },
+                // Livewire's own `$this->fill([...])` sets properties.
+                Node::MethodCall(m) if is_this(m.object) && self.method_name(m) == "fill" => closed = false,
+                Node::PropertyAccess(pa) if is_this(pa.object) && selects(&pa.property, property) => {
+                    // Only reads of keys: `$this->data['x']`, not `$this->data` itself or an assignment.
+                    let mut current = pa.span();
+                    let mut keyed = false;
+                    for a in ancestors.iter().rev() {
+                        match a {
+                            Node::ArrayAccess(aa) if aa.array.span() == current => {
+                                keyed = true;
+                                current = aa.span();
+                            }
+                            Node::Assignment(x) if x.lhs.span() == current => {
+                                closed = false;
+                                break;
+                            }
+                            other if other.span() == current => {}
+                            _ => break,
+                        }
+                    }
+                    closed &= keyed;
+                }
+                Node::Property(mago_syntax::cst::Property::Plain(p)) => {
+                    for item in p.items.iter() {
+                        let mago_syntax::cst::PropertyItem::Concrete(c) = item else { continue };
+                        if c.variable.name != variable.as_bytes() {
+                            continue;
+                        }
+                        if !p.attribute_lists.is_empty() {
+                            closed = false;
+                        }
+                        match c.value {
+                            Expression::Literal(Literal::Null(_)) => {}
+                            value => match literal_keys(self, value) {
+                                Some(k) => keys.extend(k),
+                                None => closed = false,
+                            },
+                        }
+                    }
+                }
+                Node::Property(mago_syntax::cst::Property::Hooked(p)) if p.item.variable().name == variable.as_bytes() => closed = false,
+                _ => {}
+            }
+        });
+        (closed && self.view_leaves_alone(node, property)).then_some(keys)
+    }
+
+    /// Whether the component's view, named by a Filament page's `$view` or `render()`'s `view('…')`, binds
+    /// nothing in `property`, such as `wire:model="data.extra"`. A view that can't be found might.
+    fn view_leaves_alone(&self, node: &'a mago_syntax::cst::Class<'a>, property: &str) -> bool {
+        let body = self.text(node.left_brace.start.offset, node.right_brace.end.offset);
+        let named = |marker: &str| {
+            let at = body.find(marker)? + marker.len();
+            let rest = body[at..].trim_start().strip_prefix(['\'', '"'])?;
+            Some(rest[..rest.find(['\'', '"'])?].to_string())
+        };
+        let Some(view) = named("$view =").or_else(|| named("view(")) else { return false };
+        if view.contains("::") {
+            return false;
+        }
+        let file = self.ctx.snap.root.join("resources/views").join(format!("{}.blade.php", view.replace('.', "/")));
+        let Some(text) = self.ctx.snap.read(&file) else { return false };
+        ![format!("{property}."), format!("'{property}'"), format!("\"{property}\"")].iter().any(|p| text.contains(p.as_str()))
+    }
+
+    /// An action's modal schema: its state holds only its fields when Filament's own `Action` or
+    /// `CreateAction` fills it with nothing, or a literal `fillForm([...])` replaces what any of Filament's
+    /// actions fills it with. A chain kept in a variable may be changed later.
+    fn action_root(&self, chain: &(Vec<&'a MethodCall<'a>>, Option<Node<'a, 'a>>), make: &'a StaticMethodCall<'a>) -> (Fill, Vec<String>) {
+        let unknown = (Fill::Unknown, vec![]);
+        if matches!(chain.1, Some(Node::Assignment(_))) {
+            return unknown;
+        }
+        let Expression::Identifier(id) = make.class else { return unknown };
+        let class = match self.parsed.names.resolve(&id.span()) {
+            Some(fqn) => String::from_utf8_lossy(fqn).into_owned(),
+            None => resolve_class(&scope_at(self.parsed.program, id.span().start.offset), &String::from_utf8_lossy(id.value())),
+        };
+        let class = class.trim_start_matches('\\');
+        let mut keys = None;
+        for c in &chain.0 {
+            match self.method_name(c) {
+                "mountUsing" => return unknown,
+                "fillForm" => match c.argument_list.arguments.iter().next() {
+                    Some(Argument::Positional(p)) => match literal_keys(self, p.value) {
+                        Some(k) => keys = Some(k),
+                        None => return unknown,
+                    },
+                    _ => return unknown,
+                },
+                _ => {}
+            }
+        }
+        match keys {
+            Some(keys) if class.starts_with("Filament\\") => (Fill::Fields, keys),
+            None if ["Filament\\Actions\\Action", "Filament\\Actions\\CreateAction"].contains(&class) => (Fill::Fields, vec![]),
+            _ => unknown,
+        }
+    }
+
+    /// The relationship that fills a component's children, when they're at the top of a resource's form and no
+    /// closure changes the query or the records' data: `->relationship()` names it, or a repeater's name does.
+    fn relationship_name(&self, field: &Option<String>, chain: &[&'a MethodCall<'a>], root: usize, container: &[String]) -> Option<String> {
+        if !container.is_empty() || self.schema.roots[root].fill != Fill::Record {
+            return None;
+        }
+        let mut name = None;
+        for c in chain {
+            match self.method_name(c) {
+                "relationship" => {
+                    if c.argument_list.arguments.len() > 1 || c.argument_list.arguments.iter().any(|a| matches!(a, Argument::Named(_))) {
+                        return None;
+                    }
+                    name = match c.argument_list.arguments.iter().next() {
+                        Some(_) => Some(self.first_string(&c.argument_list)?.0),
+                        None => field.clone(),
+                    };
+                }
+                "mutateRelationshipDataBeforeFillUsing" => return None,
+                _ => {}
+            }
+        }
+        name
     }
 
     /// The children passed as one argument: an array, a closure returning arrays, or a single component.
@@ -605,6 +906,42 @@ impl<'c, 'a> Builder<'c, 'a> {
     }
 }
 
+fn is_this(e: &Expression<'_>) -> bool {
+    matches!(e, Expression::Variable(mago_syntax::cst::Variable::Direct(v)) if v.name == b"$this")
+}
+
+fn selects(selector: &mago_syntax::cst::ClassLikeMemberSelector<'_>, name: &str) -> bool {
+    matches!(selector, mago_syntax::cst::ClassLikeMemberSelector::Identifier(id) if id.value == name.as_bytes())
+}
+
+/// The string keys of a literal array, or of one an arrow function or a one-statement closure returns, if
+/// every element has one.
+fn literal_keys(b: &Builder<'_, '_>, expr: &Expression<'_>) -> Option<Vec<String>> {
+    let value = match expr {
+        Expression::ArrowFunction(f) => f.expression,
+        Expression::Closure(f) => match f.body.statements.as_slice() {
+            [mago_syntax::cst::Statement::Return(r)] => r.value?,
+            _ => return None,
+        },
+        other => other,
+    };
+    let elements: Vec<&ArrayElement<'_>> = match value {
+        Expression::Array(a) => a.elements.iter().collect(),
+        Expression::LegacyArray(a) => a.elements.iter().collect(),
+        _ => return None,
+    };
+    elements
+        .into_iter()
+        .map(|e| match e {
+            ArrayElement::KeyValue(kv) => match kv.key {
+                Expression::Literal(Literal::String(s)) => Some(b.text(s.span.start.offset + 1, s.span.end.offset.saturating_sub(1)).to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
 /// The values a function body returns, outside nested functions.
 fn returned<'a>(node: Node<'a, 'a>, out: &mut Vec<&'a Expression<'a>>) {
     match node {
@@ -642,12 +979,20 @@ mod tests {
 
     #[test]
     fn resolves_paths_as_filament_does() {
-        assert_eq!(resolve(&p("items.*"), "qty", false), Resolved::Path(p("items.*.qty")));
-        assert_eq!(resolve(&p("items.*"), "../../total", false), Resolved::Path(p("total")));
-        assert_eq!(resolve(&p("items.*"), "../", false), Resolved::Path(p("items")));
-        assert_eq!(resolve(&[], "../x", false), Resolved::Outside);
-        assert_eq!(resolve(&[], "/data.x", false), Resolved::Absolute);
-        assert_eq!(resolve(&[], "x", true), Resolved::Absolute);
+        let data = p("data");
+        let at = Some(data.as_slice());
+        assert_eq!(resolve(at, &p("items.*"), "qty", false), Resolved::Path(p("items.*.qty")));
+        assert_eq!(resolve(at, &p("items.*"), "../../total", false), Resolved::Path(p("total")));
+        assert_eq!(resolve(at, &p("items.*"), "../", false), Resolved::Path(p("items")));
+        assert_eq!(resolve(at, &[], "../x", false), Resolved::Outside);
+        // Absolute paths start at the component, wherever the closure is.
+        assert_eq!(resolve(at, &p("items.*"), "/data.total", false), Resolved::Path(p("total")));
+        assert_eq!(resolve(at, &p("items.*"), "data.items.1.qty", true), Resolved::Path(p("items.1.qty")));
+        assert_eq!(resolve(at, &[], "/data", false), Resolved::Path(vec![]));
+        assert_eq!(resolve(at, &[], "/record.title", false), Resolved::Outside);
+        assert_eq!(resolve(Some(&[]), &[], "/title", false), Resolved::Path(p("title")));
+        assert_eq!(resolve(None, &[], "/data.x", false), Resolved::Absolute);
+        assert_eq!(resolve(None, &[], "x", true), Resolved::Absolute);
         assert_eq!(default_label("author_id"), "Author id");
         assert_eq!(default_label("meta.firstName"), "First name");
     }

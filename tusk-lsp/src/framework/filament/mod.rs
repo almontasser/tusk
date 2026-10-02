@@ -307,6 +307,158 @@ fn literal_options(ctx: &Ctx<'_>, chain: &[&mago_syntax::cst::MethodCall<'_>]) -
     })
 }
 
+/// How long options read from the database are used before a request reads them again.
+pub const OPTIONS_FRESH: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// One of a select's options: its key, written as PHP (`5`, `'draft'`), and its label.
+pub struct OptionValue {
+    pub key: String,
+    pub php: String,
+    pub label: Option<String>,
+}
+
+/// Options a field reads from the database: `->options(Model::pluck('name', 'id'))`, any query of literal
+/// `where`s, orders, and scopes that ends in `pluck()`, also in a closure, or `->relationship('author', 'name')`
+/// on a field of `model`'s form. `introspect.php` runs the query on its own thread, so this returns nothing
+/// until it has, and whether there are more than it read. Options older than `fresh` are read again.
+fn query_options(ctx: &Ctx<'_>, chain: &[&mago_syntax::cst::MethodCall<'_>], model: Option<&str>, fresh: std::time::Duration) -> Option<(Vec<OptionValue>, bool)> {
+    let query = options_query(ctx, chain, model)?.to_string();
+    let found = ctx.snap.framework.php_soon(&format!("filament:options|{query}"), INTROSPECT, vec![".".into(), "options".into(), query], DEPENDS_ON, fresh)?;
+    let rows = found["rows"].as_array()?;
+    let values = rows
+        .iter()
+        .filter_map(|row| {
+            let (key, php) = match &row[0] {
+                Value::Number(n) => (n.to_string(), n.to_string()),
+                Value::String(s) => (s.clone(), format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))),
+                _ => return None,
+            };
+            Some(OptionValue { key, php, label: row[1].as_str().map(String::from) })
+        })
+        .collect();
+    Some((values, found["more"] == true))
+}
+
+/// The query `introspect.php options` runs for a field's options, if they come from one it can run safely.
+fn options_query(ctx: &Ctx<'_>, chain: &[&mago_syntax::cst::MethodCall<'_>], model: Option<&str>) -> Option<Value> {
+    let text = &ctx.doc.text;
+    let name = |span: mago_span::Span| &text[span.start.offset as usize..span.end.offset as usize];
+    if let Some(c) = chain.iter().find(|c| name(c.method.span()) == "options") {
+        let Argument::Positional(p) = c.argument_list.arguments.iter().next()? else { return None };
+        return pluck_query(ctx, returned_value(p.value)?);
+    }
+    let c = chain.iter().find(|c| name(c.method.span()) == "relationship")?;
+    let args: Vec<_> = c.argument_list.arguments.iter().collect();
+    let [Argument::Positional(relationship), Argument::Positional(title)] = args.as_slice() else { return None };
+    let (Some(Value::String(relationship)), Some(Value::String(title))) = (literal_json(ctx, relationship.value), literal_json(ctx, title.value)) else {
+        return None;
+    };
+    Some(serde_json::json!({ "model": model?, "relationship": relationship, "title": title }))
+}
+
+/// The value `fn () => …` or a one-statement closure returns, or the expression itself.
+fn returned_value<'a>(e: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+    match e {
+        Expression::ArrowFunction(f) => Some(f.expression),
+        Expression::Closure(f) => match f.body.statements.as_slice() {
+            [mago_syntax::cst::Statement::Return(r)] => r.value,
+            _ => None,
+        },
+        other => Some(other),
+    }
+}
+
+/// `Model::query()->where('active', true)->pluck('name', 'id')` as the calls before `pluck()`, which must
+/// have literal arguments, and `pluck()`'s columns.
+fn pluck_query(ctx: &Ctx<'_>, e: &Expression<'_>) -> Option<Value> {
+    let text = &ctx.doc.text;
+    let name = |span: mago_span::Span| text[span.start.offset as usize..span.end.offset as usize].to_string();
+    let args = |list: &mago_syntax::cst::ArgumentList<'_>| -> Option<Vec<Value>> {
+        list.arguments
+            .iter()
+            .map(|a| match a {
+                Argument::Positional(p) => literal_json(ctx, p.value),
+                Argument::Named(_) => None,
+            })
+            .collect()
+    };
+    let mut calls = vec![];
+    let mut e = e;
+    let class = loop {
+        match e {
+            Expression::Call(mago_syntax::cst::Call::Method(m)) => {
+                calls.push((name(m.method.span()), args(&m.argument_list)?));
+                e = m.object;
+            }
+            Expression::Call(mago_syntax::cst::Call::StaticMethod(s)) => {
+                calls.push((name(s.method.span()), args(&s.argument_list)?));
+                let Expression::Identifier(id) = s.class else { return None };
+                break resolve_class(&scope_at(ctx.parsed.program, id.span().start.offset), &String::from_utf8_lossy(id.value()));
+            }
+            _ => return None,
+        }
+    };
+    let class = class.trim_start_matches('\\').to_string();
+    if !is_model(ctx, &class) {
+        return None;
+    }
+    calls.reverse();
+    // What follows `pluck()` only turns the collection into an array.
+    while calls.last().is_some_and(|(m, a)| a.is_empty() && ["toArray", "all"].contains(&m.as_str())) {
+        calls.pop();
+    }
+    let (method, pluck) = calls.pop()?;
+    if method != "pluck" || pluck.is_empty() || pluck.len() > 2 || !pluck.iter().all(Value::is_string) {
+        return None;
+    }
+    // `query()`, `all()`, and `get()` start or end the query without changing it.
+    calls.retain(|(m, a)| !(a.is_empty() && ["query", "newQuery", "all", "get"].contains(&m.as_str())));
+    let calls: Vec<Value> = calls.into_iter().map(|(m, a)| serde_json::json!([m, a])).collect();
+    Some(serde_json::json!({ "model": class, "calls": calls, "pluck": pluck }))
+}
+
+/// A literal's value: a string without escapes, a number, `true`, `false`, `null`, or an array of them.
+fn literal_json(ctx: &Ctx<'_>, e: &Expression<'_>) -> Option<Value> {
+    let text = &ctx.doc.text;
+    Some(match e {
+        Expression::Literal(Literal::String(s)) => {
+            let inner = text.get(s.span.start.offset as usize + 1..s.span.end.offset as usize - 1)?;
+            if inner.contains('\\') || inner.contains('$') {
+                return None;
+            }
+            Value::String(inner.to_string())
+        }
+        Expression::Literal(Literal::Integer(i)) => Value::from(text[i.span.start.offset as usize..i.span.end.offset as usize].replace('_', "").parse::<i64>().ok()?),
+        Expression::Literal(Literal::Float(f)) => Value::from(text[f.span.start.offset as usize..f.span.end.offset as usize].replace('_', "").parse::<f64>().ok()?),
+        Expression::Literal(Literal::True(_)) => Value::Bool(true),
+        Expression::Literal(Literal::False(_)) => Value::Bool(false),
+        Expression::Literal(Literal::Null(_)) => Value::Null,
+        Expression::Array(_) | Expression::LegacyArray(_) => {
+            let elements: Vec<&ArrayElement<'_>> = match e {
+                Expression::Array(a) => a.elements.iter().collect(),
+                Expression::LegacyArray(a) => a.elements.iter().collect(),
+                _ => unreachable!(),
+            };
+            if elements.iter().all(|el| matches!(el, ArrayElement::Value(_))) {
+                Value::Array(elements.iter().map(|el| if let ArrayElement::Value(v) = el { literal_json(ctx, v.value) } else { None }).collect::<Option<_>>()?)
+            } else {
+                let mut map = serde_json::Map::new();
+                for el in elements {
+                    let ArrayElement::KeyValue(kv) = el else { return None };
+                    let key = match literal_json(ctx, kv.key)? {
+                        Value::String(s) => s,
+                        Value::Number(n) => n.to_string(),
+                        _ => return None,
+                    };
+                    map.insert(key, literal_json(ctx, kv.value)?);
+                }
+                Value::Object(map)
+            }
+        }
+        _ => return None,
+    })
+}
+
 /// Completion for option values: `->options(` and `->enum(` offer the field's enum, `->default(` its cases or
 /// literal option keys.
 fn value_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
@@ -357,7 +509,30 @@ fn value_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     {
         return Some(options.into_iter().map(|(k, v)| item(&k, CompletionItemKind::ENUM_MEMBER, v.as_deref().unwrap_or("option"), range, None)).collect());
     }
+    if let Some((options, more)) = query_options(ctx, &field.chain, None, OPTIONS_FRESH) {
+        return Some(option_items(options, more, quoted.is_some(), range, |label| label.to_string()));
+    }
     Some(vec![])
+}
+
+/// Completion items for options read from the database, in their order: the key as typed inside a string, or
+/// as PHP outside one. `detail` describes an option by its label.
+pub fn option_items(options: Vec<OptionValue>, more: bool, quoted: bool, range: Range, detail: impl Fn(&str) -> String) -> Vec<CompletionItem> {
+    let shown = options.len();
+    options
+        .into_iter()
+        .enumerate()
+        .map(|(i, o)| {
+            let text = if quoted { o.key.clone() } else { o.php.clone() };
+            let mut it = item(&text, CompletionItemKind::ENUM_MEMBER, &detail(o.label.as_deref().unwrap_or("option")), range, Some(format!("{i:05}")));
+            // The label finds the option too: typing "Acme" offers its `5`.
+            it.filter_text = Some(format!("{text} {}", o.label.unwrap_or_default()));
+            if more && i + 1 == shown {
+                it.documentation = Some(lsp_types::Documentation::String(format!("The first {shown} options from the database.")));
+            }
+            it
+        })
+        .collect()
 }
 
 pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
@@ -738,7 +913,9 @@ mod tests {
             assert_eq!(actions[0].title, "Change to ../../total");
             assert!(diagnose(&order("$get('qyt') ? 'x' : 'y'"))[0].message.ends_with("Did you mean `qty`?"));
             // The form's fields come with the record's columns; above the form are the component's properties.
-            assert!(diagnose(&order("$get('../../id') . $get('../../../x') . $get('/data.x')")).is_empty());
+            assert!(diagnose(&order("$get('../../id') . $get('../../../x') . $get('/data.id') . $get('/record.x')")).is_empty());
+            // A resource's form is at `data`, so an absolute path is checked as one from the form.
+            assert_eq!(diagnose(&order("$get('/data.nope')"))[0].message, "The form has no field `nope`.");
             assert_eq!(diagnose(&order("$get('../../nope')"))[0].message, "The form has no field `nope`.");
             // A path a `$set` writes is state too.
             assert!(diagnose(&order("$set('../../flag', 1) . $get('../../flag')")).is_empty());
@@ -781,6 +958,173 @@ mod tests {
             let found = diagnose(&fx);
             assert_eq!(found.len(), 1, "{found:?}");
             assert!(found[0].message.ends_with("Compare with `\\App\\Enums\\PostStatus::Draft`."), "{}", found[0].message);
+        });
+    }
+
+    #[test]
+    fn resolves_absolute_paths_from_the_component() {
+        on_server_stack(|| {
+            let items = complete(&order("'/<|>'"));
+            assert_eq!(labels(&items), vec!["/data.title", "/data.items", "/data.total"]);
+            assert_eq!(items[0].filter_text, None);
+            let items = complete(&order("'<|>', 1, true"));
+            assert_eq!(labels(&items), vec!["data.title", "data.items", "data.total"]);
+            let fx = order("'/data.ti<|>tle'");
+            assert!(hover_text(&fx).contains("**Title** · TextInput"));
+            let at = fx.at();
+            let found = with_ctx(&fx.snap, &at.text_document.uri, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+            assert_eq!(found[0].range.start.line, 11);
+            assert!(hover_text(&order("'data.to<|>tal', 1, true")).contains("**Total**"));
+            assert!(hover_text(&order("'/rec<|>ord.name'")).contains("isn't in the form's state"));
+            assert!(diagnose(&order("$get('data.items', true) . $set('/data.flag', 1) . $get('/data.flag')")).is_empty());
+        });
+    }
+
+    /// A Post form whose `status` select reads its options from the database, with those `rows` read already.
+    fn with_options(body: &str, query: Value, rows: Value) -> Fixture {
+        let fx = fixture(&form(body));
+        fx.snap.framework.seed(&format!("filament:options|{query}"), json!({ "rows": rows, "more": false }));
+        fx
+    }
+
+    #[test]
+    fn suggests_options_from_the_database() {
+        on_server_stack(|| {
+            let pluck = json!({ "model": "App\\Models\\Post", "calls": [["where", ["status", "published"]]], "pluck": ["title", "id"] });
+            let rows = json!([[1, "Hello"], [2, "World"]]);
+            let select = "Select::make('post_id')->options(\\App\\Models\\Post::query()->where('status', 'published')->pluck('title', 'id'))";
+            let fx = with_options(&format!("{select}, Select::make('x')->visible(fn ($get) => $get('post_id') === Wor<|>)"), pluck.clone(), rows.clone());
+            let items = complete(&fx);
+            assert_eq!(labels(&items), vec!["1", "2"]);
+            assert_eq!(items[0].detail.as_deref(), Some("Post id · Hello"));
+            assert_eq!(items[1].filter_text.as_deref(), Some("2 World"));
+            let fx = with_options(&format!("{select}, Select::make('x')->visible(fn ($get) => in_array($get('post_id'), ['<|>']))"), pluck.clone(), rows.clone());
+            assert_eq!(labels(&complete(&fx)), vec!["1", "2"]);
+            // A string key is quoted outside a string.
+            let fx = with_options(&format!("{select}, Select::make('x')->visible(fn ($get) => $get('post_id') === Q<|>)"), pluck.clone(), json!([["a'b", "Quote"]]));
+            assert_eq!(labels(&complete(&fx)), vec!["'a\\'b'"]);
+            // `->default()` too, and hover lists them.
+            let fx = with_options(&format!("{select}->default(<|>)"), pluck.clone(), rows.clone());
+            assert_eq!(labels(&complete(&fx)), vec!["1", "2"]);
+            let fx = with_options(&format!("{select}, Select::make('x')->visible(fn ($get) => $get('post<|>_id'))"), pluck.clone(), rows.clone());
+            assert!(hover_text(&fx).contains("Options from the database: `1` Hello, `2` World"), "{}", hover_text(&fx));
+            // A relationship's records, by its title column.
+            let related = json!({ "model": "App\\Models\\Post", "relationship": "author", "title": "name" });
+            let fx = with_options("Select::make('author_id')->relationship('author', 'name'), Select::make('x')->visible(fn ($get) => $get('author_id') == '<|>')", related, json!([[7, "Ann"]]));
+            assert_eq!(labels(&complete(&fx)), vec!["7"]);
+            // Nothing until they've been read.
+            let fx = fixture(&form(&format!("{select}, Select::make('x')->visible(fn ($get) => $get('post_id') === '<|>')")));
+            fx.snap.framework.seed("filament:options|ignored", Value::Null);
+            assert!(complete(&fx).is_empty());
+        });
+    }
+
+    #[test]
+    fn reads_only_queries_it_can_run_safely() {
+        let query = |code: &str| {
+            let fx = fixture(&form(&format!("Select::make('a')->options({code})")));
+            with_ctx(&fx.snap, &uri("app/Filament/Resources/Posts/Schemas/PostForm.php"), |ctx| {
+                let schema = schema::build(ctx, &ctx.parsed);
+                let comp = schema.comps.iter().find(|c| c.name.as_ref().is_some_and(|n| n.0 == "a")).unwrap();
+                options_query(ctx, &comp.chain, None)
+            })
+            .unwrap()
+        };
+        assert_eq!(query("\\App\\Models\\Post::pluck('title', 'id')"), Some(json!({ "model": "App\\Models\\Post", "calls": [], "pluck": ["title", "id"] })));
+        assert_eq!(
+            query("fn () => \\App\\Models\\Post::query()->published()->orderBy('title')->get()->pluck('title', 'id')->toArray()"),
+            Some(json!({ "model": "App\\Models\\Post", "calls": [["published", []], ["orderBy", ["title"]]], "pluck": ["title", "id"] }))
+        );
+        assert_eq!(query("\\App\\Models\\Post::where('author_id', $this->author)->pluck('title', 'id')"), None);
+        assert_eq!(query("\\App\\Models\\Post::where('title', \"x{$y}\")->pluck('title')"), None);
+        assert_eq!(query("\\App\\Enums\\PostStatus::pluck('title')"), None);
+        assert_eq!(query("\\App\\Models\\Post::pluck('title', 'id')->map(fn ($t) => strtoupper($t))"), None);
+    }
+
+    const ACTIONS: &str = "<?php\nnamespace App\\Filament\\Pages;\nuse Filament\\Actions\\Action;\nuse Filament\\Actions\\EditAction;\nuse Filament\\Forms\\Components\\TextInput;\nclass Tools\n{\n    public function actions(): array\n    {\n        return [BODY];\n    }\n}\n";
+
+    fn action_problems(body: &str) -> Vec<String> {
+        let fx = Fixture::new(&[("app/Filament/Pages/Tools.php", &ACTIONS.replace("BODY", body))]);
+        fx.snap.framework.seed("filament:active", Value::Bool(true));
+        let found = with_ctx(&fx.snap, &uri("app/Filament/Pages/Tools.php"), diagnostics).unwrap();
+        found.into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn reports_missing_fields_in_action_forms_it_sees_filled() {
+        on_server_stack(|| {
+            let fields = "[TextInput::make('name'), TextInput::make('email')->visible(fn ($get) => $get('nmae') && $get('role'))]";
+            assert_eq!(
+                action_problems(&format!("Action::make('invite')->schema({fields})")),
+                vec!["The form has no field `nmae`. Did you mean `name`?", "The form has no field `role`."]
+            );
+            assert_eq!(action_problems(&format!("Action::make('invite')->form({fields})")).len(), 2);
+            // A literal `fillForm()` adds its keys.
+            assert_eq!(action_problems(&format!("Action::make('invite')->schema({fields})->fillForm(fn () => ['role' => 'admin'])")).len(), 1);
+            assert_eq!(action_problems(&format!("EditAction::make()->fillForm(['role' => 1, 'nmae' => 2])->schema({fields})")).len(), 0);
+            // Filled from a record, by code, or from a chain kept in a variable: anything can be there.
+            assert!(action_problems(&format!("EditAction::make()->schema({fields})")).is_empty());
+            assert!(action_problems(&format!("Action::make('invite')->schema({fields})->fillForm(fn ($record) => $record->toArray())")).is_empty());
+            assert!(action_problems(&format!("Action::make('invite')->schema({fields})->mountUsing(fn ($schema) => $schema->fill())")).is_empty());
+            assert!(action_problems(&format!("$a = Action::make('invite')->schema({fields})")).is_empty());
+        });
+    }
+
+    const LIVEWIRE: &str = "<?php\nnamespace Livewire;\nabstract class Component {}\n";
+    const INVITE: &str = "<?php\nnamespace App\\Livewire;\nuse Filament\\Forms\\Components\\TextInput;\nuse Livewire\\Component;\nclass Invite extends Component\n{\n    public ?array $data = [];\n    public function mount(): void\n    {\n        $this->form->fill(['email' => 'a@b.c']);\n    }\n    public function form($schema)\n    {\n        return $schema->components([TextInput::make('name'), TextInput::make('code')->visible(fn ($get) => $get('email') && $get('nope'))])->statePath('data');\n    }\n    public function save(): void\n    {\n        $name = $this->data['name'] ?? null;\n        $state = $this->form->getState();\n    }\n    public function render()\n    {\n        return view('livewire.invite');\n    }\n}\n";
+
+    fn livewire_problems(class: &str, view: &str) -> Vec<String> {
+        let fx = Fixture::new(&[("vendor/livewire/Component.php", LIVEWIRE), ("app/Livewire/Invite.php", class), ("resources/views/livewire/invite.blade.php", view)]);
+        fx.snap.framework.seed("filament:active", Value::Bool(true));
+        let found = with_ctx(&fx.snap, &uri("app/Livewire/Invite.php"), diagnostics).unwrap();
+        found.into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn reports_missing_fields_in_livewire_forms_it_sees_filled() {
+        on_server_stack(|| {
+            let view = "<div>{{ $this->form }}</div>";
+            assert_eq!(livewire_problems(INVITE, view), vec!["The form has no field `nope`."]);
+            // Absolute paths start with the form's state path.
+            let absolute = INVITE.replace("$get('nope')", "$get('/data.nope') . $get('/data.email') . $get('/other')");
+            assert_eq!(livewire_problems(&absolute, view), vec!["The form has no field `nope`."]);
+            // Anything else that could put keys in the state keeps it quiet.
+            let quiet = [
+                INVITE.replace("['email' => 'a@b.c']", "[...$this->defaults()]"),
+                INVITE.replace("$name = $this->data['name'] ?? null;", "$this->data['nope'] = 1;"),
+                INVITE.replace("$name = $this->data['name'] ?? null;", "data_set($this->data, 'nope', 1);"),
+                INVITE.replace("public ?array $data = [];", "#[\\Livewire\\Attributes\\Url]\n    public ?array $data = [];"),
+                INVITE.replace("->statePath('data')", ""),
+                INVITE.replace("return view('livewire.invite');", "return view($this->view);"),
+                INVITE.replace("extends Component", "extends \\App\\Livewire\\Base").replace("namespace App\\Livewire;", "namespace App\\Livewire;\nabstract class Base extends \\Livewire\\Component {}"),
+            ];
+            for class in &quiet {
+                assert!(livewire_problems(class, view).is_empty(), "{class}");
+            }
+            assert!(livewire_problems(INVITE, "<input wire:model=\"data.nope\">").is_empty());
+        });
+    }
+
+    #[test]
+    fn reports_missing_fields_in_relationship_repeaters_from_the_related_columns() {
+        on_server_stack(|| {
+            let body = "Repeater::make('comments')->relationship()->schema([TextInput::make('body'), TextInput::make('x')->visible(fn ($get) => $get('author_id') . $get('bdoy'))])";
+            let text = with_uses(&form(body), &["TextInput", "Repeater"]);
+            let mut context = context_json();
+            context["model"]["relations"].as_array_mut().unwrap().push(json!({"name": "comments", "type": "HasMany", "related": "App\\Models\\Comment", "columns": ["id", "post_id", "author_id", "body"], "appends": ["excerpt"], "casts": {}, "columnsGuessed": false, "relations": []}));
+            let seeded = |text: &str, context: &Value| {
+                let fx = fixture(text);
+                fx.snap.framework.seed("filament:resource|App\\Filament\\Resources\\Posts\\PostResource|App\\Filament\\Resources\\Posts\\Schemas\\PostForm", context.clone());
+                diagnose(&fx).into_iter().map(|d| d.message).collect::<Vec<_>>()
+            };
+            assert_eq!(seeded(&text, &context), vec!["An item of repeater `comments` has no field `bdoy`. Did you mean `body`?"]);
+            assert!(seeded(&text.replace("bdoy", "excerpt"), &context).is_empty());
+            // A query or data closure, or columns the database didn't give, can add keys.
+            assert!(seeded(&text.replace("->relationship()", "->relationship(modifyQueryUsing: fn ($q) => $q)"), &context).is_empty());
+            assert!(seeded(&text.replace("->relationship()", "->relationship()->mutateRelationshipDataBeforeFillUsing(fn ($d) => $d)"), &context).is_empty());
+            let mut guessed = context.clone();
+            guessed["model"]["relations"][1]["columnsGuessed"] = Value::Bool(true);
+            assert!(seeded(&text, &guessed).is_empty());
         });
     }
 

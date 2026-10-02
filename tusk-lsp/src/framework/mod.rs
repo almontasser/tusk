@@ -5,7 +5,7 @@ pub mod filament;
 pub mod laravel;
 pub mod php;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -368,6 +368,8 @@ pub struct State {
     cache: Mutex<HashMap<String, Cached>>,
     /// The project's PHP, found the first time a script runs.
     php: std::sync::OnceLock<php::Php>,
+    /// Keys whose scripts [`State::php_soon`] is running.
+    pending: Mutex<HashSet<String>>,
 }
 
 struct Cached {
@@ -379,7 +381,7 @@ struct Cached {
 
 impl State {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new() }
+        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new(), pending: Mutex::new(HashSet::new()) }
     }
 
     pub fn root(&self) -> &Path {
@@ -404,6 +406,25 @@ impl State {
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
         self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
         (!value.is_null()).then_some(value)
+    }
+
+    /// Like [`State::php`] without waiting, for facts that requests can do without: the cached value, if any,
+    /// while the script runs on its own thread when there's none or it's older than `fresh`, so a later request
+    /// gets it. A failed run is retried once it's older than `fresh` too.
+    pub fn php_soon(self: &Arc<Self>, key: &str, script: &'static str, args: Vec<String>, depends_on: &'static [&'static str], fresh: Duration) -> Option<Arc<Value>> {
+        let cached = self.cache.lock().get(key).map(|c| (c.value.clone(), c.at.elapsed() < fresh));
+        if !cached.as_ref().is_some_and(|(_, fresh)| *fresh) && self.pending.lock().insert(key.to_string()) {
+            let (state, key) = (self.clone(), key.to_string());
+            std::thread::spawn(move || {
+                let php = state.php.get_or_init(|| php::detect(&state.root));
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                let value = Arc::new(php::run(&state.root, php, script, &args, false).unwrap_or(Value::Null));
+                let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
+                state.cache.lock().insert(key.clone(), Cached { value, depends_on, at: Instant::now() });
+                state.pending.lock().remove(&key);
+            });
+        }
+        cached.map(|(v, _)| v).filter(|v| !v.is_null())
     }
 
     /// Stores a value computed without PHP, with the same invalidation.
@@ -481,6 +502,30 @@ mod tests {
     use crate::testing::Fixture;
 
     const LIB: &str = "<?php\nnamespace Illuminate\\Http;\nclass Request { public function routeIs(string ...$p): bool { return true; } }\n";
+
+    /// Needs `php` on `PATH`; skipped without it.
+    #[test]
+    fn runs_scripts_in_the_background_without_waiting() {
+        if std::process::Command::new("php").arg("-v").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("tusk-php-soon-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = Arc::new(State::new(dir.clone()));
+        const SCRIPT: &str = "<?php echo json_encode(['n' => (int) $argv[1]]);";
+        let soon = || state.php_soon("k", SCRIPT, vec!["7".into()], &[], Duration::from_secs(60));
+        assert!(soon().is_none());
+        let started = Instant::now();
+        let value = loop {
+            if let Some(v) = soon() {
+                break v;
+            }
+            assert!(started.elapsed() < Duration::from_secs(20), "the script never finished");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(value["n"], 7);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn finds_strings_passed_to_calls() {
