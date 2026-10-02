@@ -8,6 +8,7 @@ import { newFileContent, psr4From } from "./psr4";
 import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
 import { hideInTree } from "./treehidden";
+import { deploymentMenu } from "./deploy";
 import { fileManager, keyText, mod, trash } from "./platform.ts";
 
 type Host = {
@@ -243,6 +244,8 @@ async function menuFor(path: string): Promise<MenuItem[]> {
     { label: "Copy Path", run: () => copyPath(path) },
     { label: "Copy Relative Path", run: () => copyPath(path, true) },
     { label: `Reveal in ${fileManager}`, run: () => revealInFinder(path) },
+    "-",
+    ...deploymentMenu(path, isDir(path)),
   );
   if (exclusion !== "covered") items.push("-", { label: exclusion === "entry" ? "Include in Index" : "Exclude from Index", run: () => excludeFolder(root, rel, exclusion === "no") });
   return items;

@@ -282,6 +282,7 @@ pub fn run() {
             deploy::deploy_trust_host,
             deploy::deploy_set_secret,
             deploy::deploy_has_secret,
+            deploy::deploy_move_secret,
             deploy::deploy_disconnect,
             db::db_password,
             db::db_set_password,

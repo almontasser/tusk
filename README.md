@@ -70,6 +70,7 @@ file to change when you add it.
 | HTTP client | GraphQL highlighting shows in the Query editor only, not in `.http` files. gRPC calls ignore `# @insecure`, proxies, and client certificates, don't stress test or copy as code, and a client streaming call sends all of its messages at once. The history keeps the last 100 unpinned requests per project, without secrets, so a request from an earlier session is sent again from its file. Hiding secrets in response bodies goes by field name in JSON and form bodies only, so a token in HTML, XML, or a field with another name stays. Stress tests and monitoring run no scripts. Request bodies from validation rules come from regexes over the PHP (`validationRules` in `src/phptypes.ts`), so rules built in loops or from other methods are missed. Herd and Valet detection (`appAddresses` in `src/laraveltools.ts`) reads Valet's config layout. |
 | Project settings | Sessions (open tabs and terminals), HTTP client history and cookies, and which vendor folders the index scan already offered are still kept in the web view's storage, so a reset of the web view loses them. `tusk.json` is written as plain JSON, so comments in it make it invalid, and spacing inside a value you edited by hand isn't kept when Tusk changes the file. |
 | Split editors | Up to four panes. |
+| Deployment | Uploads, downloads, and comparisons go file by file over SFTP, FTP, or FTPS; there's no WebDAV, no rsync, and no automatic deletion of server files that the project no longer has (delete them in Remote Host). SFTP reads `~/.ssh/known_hosts` and your keys, but not `~/.ssh/config`, so a host alias, `ProxyJump`, or a certificate login isn't used: type the real host, user, and port. A key file has to be in OpenSSH or PEM format; a PuTTY `.ppk` key isn't read. A replaced file on the server keeps its permissions, but not its owner or group, since the upload writes a new file and renames it into place; on FTP, permissions carry over only where the server allows `SITE CHMOD`. Sync with Deployed compares by size and modification time, and reads both copies only for files of the same size whose times differ (up to 4 MB each). Server files opened from Remote Host upload on save, but don't reload when the server's copy changes. |
 | Keymap | Two-key chords, such as ⌘K ⌘X for **Trim Trailing Whitespace**, are Monaco's own and can't be changed or shown in the menu bar. Giving a Monaco command, **Send HTTP Request**, or **Execute Query** another shortcut adds it; Monaco's default key keeps working. |
 | Super methods | The gutter arrows show what the index knows, so right after an edit they can lag until the server has indexed it. A class shows no arrow for its own parent or interfaces; ⌘U goes there. |
 | Terminal | A shell whose profile changes `PATH`, such as with mise or Herd, can put another `php` first in shell tabs; command tabs use the paths from **Settings > Tools**. |
@@ -87,7 +88,6 @@ file to change when you add it.
 | Tools | Spell checking flags known misspellings, not every word missing from a dictionary, so rare typos can slip through. There's no comment that turns spelling off for one line: typos-lsp lets the project's ignore patterns replace a user-wide one. AI completion reads the classes PHP and Blade files use, and the project files JavaScript, TypeScript, and Vue files import, but not the types of packages in `node_modules`. It indexes at most 3,000 files. |
 | Coverage | Which tests ran a line comes from PHPUnit's XML coverage, which only records lines of the folders in `phpunit.xml`'s `<source>`. |
 | Profiler | Requests you make in a browser are named by URL from the profile's file name, where Xdebug turns `/`, `.`, `?`, and `&` into `_`, so a query string reads as more path. The table shows up to 500 functions at a time; filter to find the rest. Profiling runs on this Mac, not in Sail. |
-| Deployment | There's no remote deployment or sync over SFTP or FTP. |
 | Code signing | The app is ad-hoc signed, not notarized, so on another Mac, Gatekeeper blocks the first install until you allow it in **System Settings > Privacy & Security**. Notarizing needs a paid Apple Developer account. |
 
 ## Requirements
@@ -146,6 +146,8 @@ crashing, the status bar asks you to reopen the project.
 pnpm test                          # Frontend logic, with Node's test runner
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust
 cargo test --manifest-path src-tauri/Cargo.toml db -- --ignored   # MySQL and PostgreSQL, needs the servers in src-tauri/src/db.rs
+sh scripts/deploy-test-servers.sh <folder>   # Local SFTP, FTP, and FTPS servers for the next line
+TUSK_DEPLOY_TEST=<folder> cargo test --manifest-path src-tauri/Cargo.toml --lib deploy -- --ignored   # Deployment against them
 cargo test --manifest-path tusk-lsp/Cargo.toml   # The PHP language server
 cargo test --manifest-path tusk-lsp/Cargo.toml -- --ignored   # Against Filament's demo app and a real Laravel app
 cargo run --manifest-path tusk-lsp/Cargo.toml --release --example stress <project>   # Every request on every file, whole and cut off
@@ -3446,6 +3448,113 @@ to see what it does. `SCAN` follows its cursor to the end, so
 the whole database or server, such as `FLUSHDB`, ask first. Lines starting
 with `#` are comments.
 
+## Deployment
+
+Tusk uploads the project to servers over SFTP, FTP, or FTPS, as PhpStorm's
+Deployment does. The connections are built into the app, so there's nothing
+to install.
+
+### Servers
+
+Run **Deployment: Settings…** from ⌘⇧A, or choose **Deployment > Deployment
+Settings…** in the Project tree's context menu. The dialog lists the servers on
+the left and shows the selected one's settings on the right:
+
+- **Type**: SFTP, FTP, FTPS with explicit TLS (`AUTH TLS`, on port 21), or FTPS
+  with implicit TLS (port 990). **Host**, **Port**, and **User**.
+- For SFTP, **Log in with**: your **SSH agent**, a **Key pair** (a key file, or
+  `~/.ssh/id_ed25519`, `id_ecdsa`, and `id_rsa` when you leave it empty, with
+  its passphrase if it has one), or a **Password**.
+- For FTP and FTPS, a **Password** (empty with no user logs in anonymously),
+  **Passive mode** (on by default, for firewalls and NAT), and for FTPS, **Don't
+  check the server's certificate**, for a self-signed one.
+- **Root path**: the folder on the server that mappings are relative to, such
+  as `/var/www/shop`. **Detect** fills in the folder you log in to.
+- **Web URL**: the site's address, such as `https://staging.example.com`, for
+  **Open on … in the Browser**. Files in `public/` open at the site's root.
+- **Mappings**: which project folder goes where on the server. The default maps
+  the whole project to the root path. A server path that starts with `/` is
+  absolute; one that doesn't is inside the root path. The resolved path shows
+  under each one.
+- **Excluded paths**, one per line, are never uploaded or downloaded. A name,
+  such as `node_modules` or `*.log`, matches at any depth, as in `.gitignore`;
+  a path with `/`, such as `storage/logs`, matches from the mapping's folder.
+  New servers leave out `.git`, `.idea`, `.vscode`, `.DS_Store`,
+  `node_modules`, `.env`, `storage`, and `bootstrap/cache`; click a suggestion,
+  such as `vendor`, to add it.
+
+Click **Test Connection** to log in and see how long it took, or why it
+failed: a wrong host, a refused password or key, a timeout, an untrusted
+certificate, or a root path that doesn't exist. The first time Tusk connects
+to an SFTP server, it shows the server's key fingerprint and asks whether to
+trust it, then adds it to `~/.ssh/known_hosts`, as `ssh` does. A server whose
+key changed since is refused with a warning, and **Replace the Key and
+Connect** replaces the old entry.
+
+The star marks the **default server**, which Upload, Download, Sync, and
+uploads on save use. **Upload saved files to the default server** uploads each
+saved file that a mapping covers: **Never**, **On explicit save (⌘S)**, or **On
+every save**, auto-save included. Check **Share servers in tusk.json** to
+share them with the project. Passwords and passphrases go to the system's
+password store, never to the project.
+
+### Uploading and downloading
+
+Right-click a file or folder in the Project tree, or in the editor, and choose
+**Deployment**:
+
+| Action | What it does |
+| --- | --- |
+| **Upload to staging** (⌥⇧⌘X) | Uploads the file, or every file in the folder that isn't excluded, to the default server |
+| **Upload to…** | Asks for the server first |
+| **Download from staging**, **Download from…** | Replaces the local copy with the server's, or downloads the folder's files |
+| **Sync with Deployed to staging…** | Compares the file or folder with the server's, see below |
+| **Compare with Deployed Version on staging** | Shows the server's copy and yours in the diff view, with **Upload to staging** |
+| **Open on staging in the Browser** | Opens the file's page on the server's web URL |
+
+⌘⇧A has the same actions for the open file, and **Deployment: Upload Project
+to…** and **Deployment: Sync Project with Deployed…** for the whole project.
+
+Transfers run in the background, up to four files at a time on an SFTP server
+and two on an FTP server. The status bar shows how many are left and their
+progress; click it, or run **Deployment: File Transfer**, to see every file
+with its progress, size, and state, and to cancel one or all of them. A file
+replaces the server's copy only once it's complete: Tusk uploads it under a
+temporary name beside it and renames it into place, keeping the old file's
+permissions and the local file's modification time. A dropped connection is
+retried twice on its own. Other failures, such as a permission the server
+refuses, show in a notification with **Retry** and **Show Transfers**. A
+download asks first when it would replace unsaved changes in an open file.
+
+### Sync with Deployed
+
+**Sync with Deployed** opens a tab that lists the files that differ between
+the project and the server: changed files, files only in the project, and files
+only on the server. Each row shows both copies' sizes and times, with a dot on
+the newer one. Files whose sizes match but times differ are read on both sides
+and compared, so a file another tool uploaded doesn't show as changed.
+
+Each row has an action: **←** downloads, **–** skips, and **→** uploads. By
+default, Tusk uploads what's newer in the project, downloads what's newer on
+the server, and skips files that are only on the server, such as uploads and
+logs. In the list, ← and → change the selected row's action, Space skips it,
+and ⏎ opens it in the diff view. **Set all** changes every row. **Synchronize**
+runs the transfers, then compares again.
+
+### Remote Host
+
+The **Remote Host** tool window (the remote explorer icon) shows the default
+server's files as a tree, starting at the root path. Click the server line to
+browse another server.
+
+- Double-click a file to open it in the editor. Saving it uploads it back.
+- Drag files or folders from the Project tree onto a folder to upload them
+  there.
+- Right-click for **Download to** (the project file a mapping matches),
+  **Compare with Local Version**, **Sync with Local Folder…**, **New Folder…**,
+  **New File…**, **Rename…** (⇧F6), **Delete…** (⌦, which asks first), **Copy
+  Path**, **Open in the Browser**, and **Copy URL**.
+
 ## Diagnostics and formatting
 
 The **Problems** panel (⌘6, or click the error and warning counts in the
@@ -3761,6 +3870,8 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src/dbgrid.ts` | The results grid: drawing rows as they scroll into view, selection, sorting, copying, the value viewer, and editing, shared by SQL tables and Redis keys |
 | `src/dbgriddata.ts` | The grid's copy and export formats, sort order, and hex dump |
 | `src/datasources.ts` | The Data Sources dialog |
+| `src/deploy.ts`, `src/deploydata.ts` | Deployment: the transfer queue, File Transfer, Sync with Deployed, Remote Host, and the mappings between project and server paths |
+| `src/deployservers.ts` | The Deployment settings dialog and the server key prompt |
 | `src/redis.ts` | The Redis key browser, key view, and console completion |
 | `src/redisdata.ts` | The Redis key tree, TTLs, filters, command syntax, and the commands that apply grid edits |
 | `src/composer.ts` | The Composer tool window |
@@ -3801,6 +3912,7 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src-tauri/src/tools.rs` | Tool paths and running commands |
 | `src-tauri/src/search.rs` | Project file listing, text search, and replace |
 | `src-tauri/src/db.rs` | Database queries for SQLite, MySQL, MariaDB, PostgreSQL, and Redis, and canceling them |
+| `src-tauri/src/deploy.rs` | Deployment over SFTP, FTP, and FTPS: pooled connections, atomic uploads, listings, and comparisons |
 | `src-tauri/src/pty.rs` | Pseudo-terminals for the terminal panel |
 | `src-tauri/src/ws.rs` | WebSocket connections for the HTTP client |
 | `src-tauri/src/grpc.rs` | gRPC calls for the HTTP client, with schemas from server reflection or the project's `.proto` files |

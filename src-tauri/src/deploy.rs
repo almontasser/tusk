@@ -120,6 +120,9 @@ fn sftp_err(path: &str) -> impl Fn(russh_sftp::client::error::Error) -> String +
             format!("{path} doesn't exist on the server")
         } else if text.contains("Permission denied") {
             format!("The server doesn't allow that for {path}: permission denied")
+        } else if text.contains("Failure") {
+            // SFTP's generic failure, such as creating a folder that exists or a full disk.
+            format!("The server refused the change to {path}")
         } else {
             format!("{path}: {text}")
         }
@@ -555,9 +558,14 @@ impl Conn {
             return if e.dir || e.link { Ok(()) } else { Err(format!("{dir} is a file on the server, not a folder")) };
         }
         Box::pin(self.mkdir_all(parent(dir))).await?;
-        match self {
+        let created = match self {
             Conn::Sftp { sftp, .. } => sftp.create_dir(dir).await.map_err(sftp_err(dir)),
             Conn::Ftp { ftp, .. } => ftp.mkdir(dir).await.map_err(ftp_err(dir)),
+        };
+        // Transfers into one new folder run side by side, so another may have just created it.
+        match created {
+            Err(_) if self.stat(dir).await?.is_some_and(|e| e.dir || e.link) => Ok(()),
+            other => other,
         }
     }
 
@@ -792,9 +800,9 @@ impl Conn {
         Ok(data)
     }
 
-    /// Every file under `dir`, by path relative to it, leaving out what `excludes` matches. Symbolic links to
-    /// folders aren't followed.
-    async fn walk(&mut self, dir: &str, excludes: &Excludes, cancel: &AtomicBool) -> Result<Vec<FileInfo>, String> {
+    /// Every file under `dir`, by path relative to it, leaving out what `excludes` matches. Exclusions are relative
+    /// to a mapping's folder, which is `prefix` above `dir`. Symbolic links to folders aren't followed.
+    async fn walk(&mut self, dir: &str, excludes: &Excludes, prefix: &str, cancel: &AtomicBool) -> Result<Vec<FileInfo>, String> {
         let mut files = Vec::new();
         let mut pending = vec![String::new()];
         while let Some(rel) = pending.pop() {
@@ -808,7 +816,7 @@ impl Conn {
             };
             for e in entries {
                 let path = if rel.is_empty() { e.name.clone() } else { format!("{rel}/{}", e.name) };
-                if excludes.matches(&path) || e.name.ends_with(".tusk-upload") || e.name.ends_with(".tusk-old") {
+                if excludes.matches(&if prefix.is_empty() { path.clone() } else { format!("{prefix}/{path}") }) || e.name.ends_with(".tusk-upload") || e.name.ends_with(".tusk-old") {
                     continue;
                 }
                 if e.dir && !e.link {
@@ -1083,12 +1091,13 @@ pub fn deploy_local_files(root: String, paths: Vec<String>, excludes: Vec<String
     local_files(Path::new(&root), &paths, &Excludes::new(&excludes))
 }
 
-/// The server's files under `dir`, relative to it, for downloading a folder.
+/// The server's files under `dir`, relative to it, for downloading a folder. `prefix` is `dir`'s path below the
+/// mapping's folder, which exclusions are relative to.
 #[tauri::command]
-pub async fn deploy_remote_files(server: Server, dir: String, excludes: Vec<String>, id: u32) -> Result<Vec<FileInfo>, String> {
+pub async fn deploy_remote_files(server: Server, dir: String, excludes: Vec<String>, prefix: String, id: u32) -> Result<Vec<FileInfo>, String> {
     let cancel = CancelGuard::new(id);
     let excludes = Excludes::new(&excludes);
-    with_conn!(&server, |conn| conn.walk(&dir, &excludes, &cancel.1).await)
+    with_conn!(&server, |conn| conn.walk(&dir, &excludes, &prefix, &cancel.1).await)
 }
 
 /// How the files under `local` (a file or folder in a mapping whose folder is `root`) differ from the server's
@@ -1110,11 +1119,10 @@ pub async fn deploy_compare(server: Server, root: String, local: String, remote:
     };
     let relative = |path: &str| if is_dir { path.strip_prefix(&prefix).unwrap_or(path).trim_start_matches('/').to_string() } else { name_of(path).to_string() };
     let local_files: Vec<FileInfo> = local_files.into_iter().map(|f| FileInfo { path: relative(&f.path), ..f }).collect();
-    let in_mapping = |rel: &str| if prefix.is_empty() { rel.to_string() } else { format!("{prefix}/{rel}") };
     let report = reporter(progress);
     with_conn!(&server, |conn| async {
         let remote_files = if is_dir {
-            conn.walk(&remote, &Excludes::new(&[]), &cancel.1).await?.into_iter().filter(|f| !excludes.matches(&in_mapping(&f.path))).collect()
+            conn.walk(&remote, &excludes, &prefix, &cancel.1).await?
         } else {
             conn.stat(&remote).await?.filter(|e| !e.dir).map(|e| vec![FileInfo { path: name_of(&remote).to_string(), size: e.size, mtime: e.mtime }]).unwrap_or_default()
         };
@@ -1154,6 +1162,17 @@ pub fn deploy_set_secret(account: String, secret: String) -> Result<(), String> 
         return Ok(());
     }
     entry.set_password(&secret).map_err(|e| e.to_string())
+}
+
+/// Moves a server's password to its new name.
+#[tauri::command(async)]
+pub fn deploy_move_secret(from: String, to: String) -> Result<(), String> {
+    let old = keychain(&from)?;
+    if let Ok(secret) = old.get_password() {
+        keychain(&to)?.set_password(&secret).map_err(|e| e.to_string())?;
+        let _ = old.delete_credential();
+    }
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -1284,10 +1303,10 @@ mod tests {
 
         // The server's time is the local file's, so a comparison sees them as the same.
         let local_time = secs(std::fs::metadata(local.join("a.txt")).unwrap().modified().unwrap());
-        let walked = conn.walk(&dir, &Excludes::new(&[]), &cancel).await.unwrap();
+        let walked = conn.walk(&dir, &Excludes::new(&[]), "", &cancel).await.unwrap();
         assert_eq!(walked.iter().map(|f| (f.path.as_str(), f.size)).collect::<Vec<_>>(), [("sub/deeper/a.txt", 11)]);
         assert!((walked[0].mtime - local_time).abs() <= SAME_TIME, "{} vs {local_time}", walked[0].mtime);
-        assert_eq!(conn.walk(&dir, &Excludes::new(&["deeper".into()]), &cancel).await.unwrap(), []);
+        assert_eq!(conn.walk(&dir, &Excludes::new(&["deeper".into()]), "", &cancel).await.unwrap(), []);
 
         // Downloading writes through a temporary file and takes the server's time.
         conn.download(&remote, &local.join("down/a.txt"), &none, &cancel).await.unwrap();
