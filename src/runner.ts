@@ -20,7 +20,7 @@ import { onSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
 import { errorText, showError } from "./status";
 import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
-import { isWindows } from "./platform.ts";
+import { isWindows, keyText } from "./platform.ts";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
@@ -400,7 +400,7 @@ function renderWidget() {
   const c = current?.config;
   const running = c ? runsOf(c.name).length : 0;
   const button = (name: string, title: string, onclick: () => unknown, disabled = false, cls = "") =>
-    h("button", { class: `tb-icon ${cls}`, title, ariaLabel: title, disabled, onclick }, icon(name));
+    h("button", { class: `tb-icon ${cls}`, title: keyText(title), ariaLabel: keyText(title), disabled, onclick }, icon(name));
   el.hidden = !getRoot?.();
   el.replaceChildren(
     h(

@@ -4,7 +4,7 @@
 import { h, icon, iconButton } from "./dom";
 import { monaco } from "./editor";
 import { signatureProblem, signatureText, signatureWarning, type Param, type Signature } from "./refactorparse";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Kind = "method" | "function" | "constructor";
 /** `heading` names the refactoring; `focus` is the row whose name gets the focus, such as a parameter just added. */
@@ -58,7 +58,7 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
     s.modifiers = [visibilitySelect.value, ...otherModifiers()].filter(Boolean).join(" ");
     showSignature(signatureText(s));
     const why = signatureProblem(s, signature, kind);
-    problem.textContent = why ?? signatureWarning(s) ?? "";
+    problem.textContent = keyText(why ?? signatureWarning(s) ?? "");
     problem.classList.toggle("warning", !why);
     previewButton.disabled = refactorButton.disabled = !!why;
   };
@@ -144,7 +144,7 @@ export function editSignature({ title, kind, signature, heading = "Change Signat
         { class: "signature-params" },
         h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Type"), h("th", {}, "Name"), h("th", {}, "Default value"), h("th", {}, "Value in existing calls"), h("th"))), rows),
       ),
-      h("div", { class: "signature-tools" }, h("button", { type: "button", onclick: add }, icon("add"), "Add Parameter"), h("span", { class: "muted" }, "⌘N adds a parameter · ⌥↑ ⌥↓ move the focused one")),
+      h("div", { class: "signature-tools" }, h("button", { type: "button", onclick: add }, icon("add"), "Add Parameter"), h("span", { class: "muted" }, keyText("⌘N adds a parameter · ⌥↑ ⌥↓ move the focused one"))),
       preview,
       problem,
       h("div", { class: "buttons" }, h("button", { type: "button", textContent: "Cancel", onclick: () => dialog.close() }), previewButton, refactorButton),

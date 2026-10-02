@@ -3,7 +3,7 @@
 // Editing waits: changed cells, added rows, and deleted rows are marked in the grid until Submit applies them
 // together. SQL tables and Redis keys each turn the changes into their own commands.
 import { invoke } from "@tauri-apps/api/core";
-import { save, mod } from "./platform.ts";
+import { keyText, mod, save } from "./platform.ts";
 import { bytesOf, type Cell, FORMATS, type Format, formatRows, hexDump, sortOrder, tsv, viewerMode } from "./dbgriddata";
 import { h } from "./dom";
 import { type MenuItem, showMenu } from "./files";
@@ -134,7 +134,7 @@ export function dataGrid(o: GridOptions): Grid {
   const viewer = h(
     "aside",
     { class: "db-viewer", hidden: true, ariaLabel: "Value viewer" },
-    h("div", { class: "db-viewer-head" }, viewerTitle, modes, h("button", { class: "icon-button", title: "Close (⇧⏎)", onclick: () => toggleViewer(false) }, icon("close"))),
+    h("div", { class: "db-viewer-head" }, viewerTitle, modes, h("button", { class: "icon-button", title: keyText("Close (⇧⏎)"), onclick: () => toggleViewer(false) }, icon("close"))),
     area,
     viewerNote,
   );
@@ -149,7 +149,7 @@ export function dataGrid(o: GridOptions): Grid {
   const applyWidths = () => scroll.style.setProperty("--cols", `${indexWidth} ${widths.join(" ")}`);
   applyWidths();
 
-  const corner = h("div", { class: "db-index", role: "columnheader", title: "Select all (⌘A)", onclick: () => selectAll() }, "#");
+  const corner = h("div", { class: "db-index", role: "columnheader", title: keyText("Select all (⌘A)"), onclick: () => selectAll() }, "#");
   head.append(corner);
   const headers = columns.map((name, c) => {
     const grip = h("span", { class: "db-col-resize", title: "Drag to resize, double-click to fit" });
@@ -456,7 +456,7 @@ export function dataGrid(o: GridOptions): Grid {
   const grid: Grid = { element, pending, focus: () => scroll.focus() };
   const action = (label: string, name: string, onclick: () => unknown, title = "") => {
     const b = button(o.toolbar, label, name, onclick);
-    b.title = title;
+    b.title = keyText(title);
     return b;
   };
   const problem = el("span", "db-error");
@@ -494,7 +494,7 @@ export function dataGrid(o: GridOptions): Grid {
     submitButton!.disabled = !list.length || !!error;
     revertButton!.disabled = !n && !edits.size;
     submitButton!.lastChild!.textContent = n ? `Submit ${n} ${n === 1 ? "Change" : "Changes"}` : "Submit";
-    submitButton!.title = list.length ? `${list.join(";\n")}\n\n⌘⏎` : "Submit (⌘⏎)";
+    submitButton!.title = list.length ? `${list.join(";\n")}\n\n${keyText("⌘⏎")}` : keyText("Submit (⌘⏎)");
     // Pages change only without pending changes.
     o.toolbar.querySelectorAll<HTMLButtonElement>(".db-page").forEach((b) => (b.disabled = n > 0));
     live = n ? { grid, target: e.target } : live?.grid === grid ? null : live;

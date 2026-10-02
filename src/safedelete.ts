@@ -9,6 +9,7 @@ import { tuskRequest } from "./lsp";
 import { callsOf } from "./refactor";
 import { pick } from "./palette";
 import { deletionLines, laravelNames } from "./phptypes";
+import { keyText } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -105,7 +106,7 @@ async function check(editor: monaco.editor.ICodeEditor) {
   }
   // Confirmed in the palette rather than a native dialog, which a page reload could leave stuck on screen.
   pick(`Nothing uses ${label}. Delete it?`, () => [
-    { label: `Delete ${label}`, detail: isClass ? "Moves its file to the Trash" : "Undo with ⌘Z", run: () => remove(model, version, symbol, isClass, label) },
+    { label: `Delete ${label}`, detail: isClass ? "Moves its file to the Trash" : keyText("Undo with ⌘Z"), run: () => remove(model, version, symbol, isClass, label) },
     { label: "Cancel", run: () => {} },
   ]);
 }

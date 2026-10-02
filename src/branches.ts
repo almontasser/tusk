@@ -8,6 +8,7 @@ import { showCommits } from "./history";
 import { confirm, type Item, pick, rank } from "./palette";
 import { showStashes, stashChanges } from "./stash";
 import { errorText, showError, status } from "./status";
+import { keyText } from "./platform.ts";
 
 type Host = { commit(): unknown; push(): unknown; update(): unknown };
 let host: Host;
@@ -35,9 +36,9 @@ export async function branches(anchor = $("branch")) {
   const current = st.branch;
   const names = new Set(refs.map((r) => r.name));
   const top: Item[] = [
-    { label: "Update Project…", detail: "⌘T", icon: "codicon-arrow-down", run: host.update },
-    { label: "Commit…", detail: "⌘K", icon: "codicon-git-commit", run: host.commit },
-    { label: "Push…", detail: "⌘⇧K", icon: "codicon-arrow-up", run: host.push },
+    { label: "Update Project…", detail: keyText("⌘T"), icon: "codicon-arrow-down", run: host.update },
+    { label: "Commit…", detail: keyText("⌘K"), icon: "codicon-git-commit", run: host.commit },
+    { label: "Push…", detail: keyText("⌘⇧K"), icon: "codicon-arrow-up", run: host.push },
     { label: "Fetch", icon: "codicon-sync", run: fetchAll },
     { label: "New Branch…", detail: `from ${current}`, icon: "codicon-add", run: () => newBranch("HEAD", current) },
     { label: "Checkout Tag or Revision…", icon: "codicon-tag", run: checkoutRevision },

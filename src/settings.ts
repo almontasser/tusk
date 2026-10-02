@@ -1,7 +1,7 @@
 // User settings: stored in settings.json in the app's config folder and applied live.
 import { invoke } from "@tauri-apps/api/core";
 import { appConfigDir } from "@tauri-apps/api/path";
-import { open } from "./platform.ts";
+import { isMac, keyText, open } from "./platform.ts";
 import { monaco } from "./editor";
 import { h, icon, toast } from "./dom";
 import { choose, confirm, pick, rank } from "./palette";
@@ -92,7 +92,7 @@ const fields: Field[] = [
   { group: "Editor", key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
   { group: "Editor", key: "formatOnSave", label: "Format files when saving", type: "checkbox", help: "Code > Formatters… chooses the formatter for each language in the project, and can turn this on or off per language." },
   { group: "Editor", key: "testGutterIcons", label: "Show run buttons for tests in the gutter", type: "checkbox", help: "Otherwise, Run, Debug, and Profile links show above each test." },
-  { group: "Editor", key: "vim", label: "Vim emulation", type: "checkbox", help: "The status bar shows the mode. ⌃ keys go to Vim while you type in the editor." },
+  { group: "Editor", key: "vim", label: "Vim emulation", type: "checkbox", help: `The status bar shows the mode. ${isMac ? "⌃ keys go" : "Ctrl keys that aren't Tusk shortcuts go"} to Vim while you type in the editor.` },
   { group: "AI", key: "aiCompletion", label: "AI code completion", type: "checkbox", help: "Suggests code as you type with a model that runs on this Mac. Tab accepts a suggestion. The first time, the model is downloaded." },
   {
     group: "AI",
@@ -482,7 +482,7 @@ export function openSettings(query = "") {
     }
     if (f.type === "checkbox") row.append(input, label, reset);
     else row.append(label, h("span", { class: "setting-control" }, input, ...extra, reset));
-    if (f.help) row.append(h("small", {}, f.help));
+    if (f.help) row.append(h("small", {}, keyText(f.help)));
     row.append(note, error);
     const invalidNote = () => (!f.project && invalid.has(f.key) ? `The value in settings.json ${invalid.get(f.key)}, so the default is used.` : "");
     const sync = () => {

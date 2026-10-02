@@ -11,7 +11,7 @@ import { openMerge } from "./merge";
 import { confirm } from "./palette";
 import { onSettings, registerSettings, updateSetting } from "./settings";
 import { showError, status, withProgress } from "./status";
-import { mod } from "./platform.ts";
+import { keyText, mod } from "./platform.ts";
 
 type Host = { root(): string; openFile(path: string): unknown; push(): unknown; showHistory(path: string): unknown };
 let host: Host;
@@ -138,7 +138,7 @@ function fileRow(g: Group, f: FileStatus, level: number) {
   const fi = fileIcon(name);
   const key = keyOf(g, f.path);
   const buttons = h("span", { class: "buttons" });
-  const button = (label: string, title: string, run: () => unknown) => buttons.append(h("button", { title, ariaLabel: title, onclick: (e: Event) => (e.stopPropagation(), run()) }, label));
+  const button = (label: string, title: string, run: () => unknown) => buttons.append(h("button", { title: keyText(title), ariaLabel: keyText(title), onclick: (e: Event) => (e.stopPropagation(), run()) }, label));
   if (g === "x") {
     button("Yours", "Keep your version of the whole file", () => acceptSide(f, "ours"));
     button("Theirs", "Keep their version of the whole file", () => acceptSide(f, "theirs"));

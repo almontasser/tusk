@@ -13,6 +13,11 @@ test("Mac key symbols read as words off a Mac", () => {
   assert.equal(keyText("⇧⇧", false), "Shift Shift");
   assert.equal(keyText("⌃⌃", false), "Ctrl Ctrl");
   assert.equal(keyText("⌃⇧B", false), "Win+Shift+B");
+  assert.equal(keyText("Next match (⏎)", false), "Next match (Enter)");
+  assert.equal(keyText("⌫ deletes, ⌘D duplicates", false), "Backspace deletes, Ctrl+D duplicates");
+  assert.equal(keyText("Space or ⌘-click to compare", false), "Space or Ctrl+click to compare");
+  assert.equal(keyText("Drag, or ⌥↑ ⌥↓ · P R E S F D", false), "Drag, or Alt+↑ Alt+↓ · P R E S F D");
+  assert.equal(keyText("<button title=\"Stop (⌘F2)\">", false), '<button title="Stop (Ctrl+F2)">');
 });
 
 test("keymap shortcuts as each platform names them", () => {

@@ -826,7 +826,7 @@ function updateProblems() {
   const { project, errors, warnings, errorFiles } = problemCounts();
   $("error-count").textContent = String(errors);
   $("warning-count").textContent = String(warnings);
-  $("problems").title = project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)";
+  $("problems").title = keyText(project ? "Problems in the project (⌘6)" : "Problems in open files (⌘6)");
   document.querySelector<HTMLElement>('#activitybar [data-panel="problems"]')!.dataset.count = errors > 99 ? "99+" : errors ? String(errors) : "";
   errorPaths = withFolders(errorFiles, root);
   markErrors();
@@ -1292,7 +1292,7 @@ function renderTabs() {
         el.ondragstart = (e) => ((draggedTab = { path, from: pane }), e.dataTransfer?.setData("application/x-editor-tab", path));
         const close = document.createElement("span");
         close.className = "close";
-        close.title = "Close (⌘W)";
+        close.title = keyText("Close (⌘W)");
         close.onclick = (e) => (e.stopPropagation(), closeTab(path, pane));
         el.append(close);
         return el;
@@ -1799,7 +1799,7 @@ function recordShortcut(action: Action) {
   recording = true;
   const overlay = document.createElement("div");
   overlay.id = "shortcut-recorder";
-  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice. Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
+  overlay.innerHTML = `<div class="card"><h2></h2><p class="combo">Press a shortcut</p><p class="muted">${isMac ? "Use ⌘, ⌃, or ⌥ with a key, a function key, or tap ⇧, ⌃, ⌥, or ⌘ twice." : "Use Ctrl or Alt with a key, a function key, or tap Shift, Ctrl, or Alt twice."} Backspace removes the shortcut, and Escape cancels.</p><div class="buttons"><button type="button" data-reset>Reset to Default</button><button type="button" data-cancel>Cancel</button></div></div>`;
   overlay.querySelector("h2")!.textContent = action.label;
   document.body.append(overlay);
   const save = (keys: string | undefined) => {

@@ -9,6 +9,7 @@ import { listNav } from "./listnav";
 import { pick, rank } from "./palette";
 import { showError, status, withProgress } from "./status";
 import { openTerminal } from "./terminal";
+import { keyText } from "./platform.ts";
 
 type Host = { root(): string; status(text: string): void };
 let host: Host;
@@ -83,7 +84,7 @@ export async function interactiveRebase(base: string) {
   document.getElementById("rebase")?.remove();
   const dialog = document.createElement("dialog");
   dialog.id = "rebase";
-  dialog.innerHTML = `<form method="dialog"><h2>Interactive rebase</h2><p class="muted">Oldest first. Commits are replayed on ${base.slice(0, 7)} in this order.${merges ? " Merges are rebuilt too: Label names a point, Reset goes back to one, and Merge merges it again." : ""}</p><ol class="rebase-steps" tabindex="0" aria-label="Rebase steps"></ol><div class="buttons"><span class="dialog-hint">Drag to reorder, or ⌥↑ ⌥↓ · P R E S F D set the action</span><button type="button" data-cancel>Cancel</button><button type="button" class="primary" data-start>Start Rebase</button></div></form>`;
+  dialog.innerHTML = keyText(`<form method="dialog"><h2>Interactive rebase</h2><p class="muted">Oldest first. Commits are replayed on ${base.slice(0, 7)} in this order.${merges ? " Merges are rebuilt too: Label names a point, Reset goes back to one, and Merge merges it again." : ""}</p><ol class="rebase-steps" tabindex="0" aria-label="Rebase steps"></ol><div class="buttons"><span class="dialog-hint">Drag to reorder, or ⌥↑ ⌥↓ · P R E S F D set the action</span><button type="button" data-cancel>Cancel</button><button type="button" class="primary" data-start>Start Rebase</button></div></form>`);
   const list = dialog.querySelector("ol")!;
 
   /** A key per step that follows it when it moves. */
@@ -173,8 +174,8 @@ export async function interactiveRebase(base: string) {
           const b = document.createElement("button");
           b.type = "button";
           b.className = `icon-button codicon codicon-${icon}`;
-          b.title = label;
-          b.setAttribute("aria-label", label);
+          b.title = keyText(label);
+          b.setAttribute("aria-label", b.title);
           b.disabled = !movable(i + by);
           b.onclick = () => move(i, i + by);
           return b;

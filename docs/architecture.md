@@ -549,9 +549,13 @@ the rest of the code doesn't ask which system it's on.
   `shortcutText` in `platform.ts` shows keys as words (`Ctrl+Shift+F`).
   Handlers that check ⌘ use `mod(e)`. Hints written with the Mac's symbols
   (`⌥⌘Z`) go through `keyText`: the page's static `<kbd>`s and tooltips at
-  startup, context menus' keys, and status messages. The menu bar shows the
-  shortcuts but leaves them to the page (see "Menu bar"). macOS-only menu
-  items are left out.
+  startup, context menus' keys, status messages, toasts, `iconButton`
+  tooltips, and each panel's own hints, tooltips, and placeholders where they
+  are made. `keyText` also names a key on its own (`⏎` reads Enter) and a
+  click (`⌘-click` reads Ctrl+click). A hint that names modifiers in a list,
+  such as the shortcut recorder's, has its own text off a Mac. The menu bar
+  shows the shortcuts but leaves them to the page (see "Menu bar"). macOS-only
+  menu items are left out.
 - **The rest.** Database passwords go through the `keyring` crate: the
   Keychain, Windows' Credential Manager, or Linux's Secret Service. The askpass
   helper talks to the app over a local TCP port with a 128-bit secret, since
@@ -7318,4 +7322,14 @@ set. GTK has no such text, so Linux gets real accelerators that GTK is told
 not to run. Taking the accelerator group off the window would also stop them,
 but muda takes the group off again when the menu changes, which would release
 it twice.
+
+### 2026-10-02: Key hints convert where they're made
+
+Hints in panels, such as "⌘⏎ sends" or a toolbar button's "(⌥⌘Z)", are written
+with the Mac's symbols and pass through `keyText` where the page builds them.
+Converting all text that `h()` builds would be one change, but `h()` also
+shows your data, such as a file's content or a database value, which must stay
+as it is. So shared helpers that show only the app's text (`iconButton`,
+`toast`, `status`, context menus, settings help) convert, and each panel wraps
+its other hints.
 
