@@ -42,6 +42,7 @@ import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, 
 import { initLocalHistory, putLabel, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { initLocalHistoryView } from "./localhistoryview";
 import { cancelQueries, chooseConnection, connectOverSsh, copyName, dataSources, generate as generateSql, initDatabase, loadTables, openConsole, openTable, selectedTable, showHistory } from "./database";
+import { afterSave as deployAfterSave, remoteFileLabel, compareWithDeployed, deploymentMenu, deploymentProjectOpened, download, editServers, initDeployment, remoteHostShown, showTransfers, syncWithDeployed, upload } from "./deploy";
 import { createPullRequest, initPullRequests, loadPullRequests, updateBranchPullRequest } from "./prs";
 import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder, select as selectInTree, showMenu, type MenuItem } from "./files";
 import { initHistory, showFileHistory, showLog } from "./history";
@@ -169,6 +170,7 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
     ...(model.getLanguageId() === "markdown" ? action("Markdown Preview") : []),
     "-",
     ...(file ? submenu("Git", ["Annotate with Git Blame", "Show File History", "-", "Next Change", "Previous Change", "-", "Copy Remote URL"]) : []),
+    ...(file ? deploymentMenu(model.uri.fsPath, false) : []),
     ...(file ? [...action("Show Local History"), ...action("Compare with Clipboard")] : []),
     "-",
     ...action("Find Action"),
@@ -550,7 +552,8 @@ let currentView = "project";
 const viewStates = new Map<string, monaco.editor.ICodeEditorViewState>();
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
-const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(root.length + 1) : path);
+// A server file opened from Remote Host shows as `server:/path`, not its place in the app's cache.
+const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(root.length + 1) : remoteFileLabel(path) || path);
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const isDirty = (t: Tab) => t.model.getAlternativeVersionId() !== t.saved;
 
@@ -589,6 +592,7 @@ async function openFolder(dir: unknown = null) {
   try { localStorage.setItem("lastFolder", dir); } catch {}
   // Before anything reads the project's values, such as the breakpoints and the index exclusions.
   await openProjectState(dir);
+  deploymentProjectOpened();
   await configureTools(true);
   refreshGit();
   detectFormatters();
@@ -1178,7 +1182,8 @@ async function writeModel(path: string) {
   if (model) await writeText(path, model.getValue());
 }
 
-async function saveFile(path: string) {
+/** Saves a file. `explicit` is ⌘S, as opposed to auto-save, for uploads on explicit save. */
+async function saveFile(path: string, explicit = false) {
   const tab = tabs.get(path);
   if (!tab || !isDirty(tab)) return;
   if (formatOnSave(tab.model.getLanguageId())) await formatModel(tab.model);
@@ -1194,10 +1199,11 @@ async function saveFile(path: string) {
   afterSave(path, text);
   recordVersion(path, text);
   settingsFileSaved(path);
+  deployAfterSave(path, explicit);
 }
 
 /** Saves every tab with unsaved changes, as ⌘S does in PhpStorm. */
-const saveAll = () => Promise.all([...tabs.keys()].map(saveFile));
+const saveAll = (explicit = false) => Promise.all([...tabs.keys()].map((path) => saveFile(path, explicit)));
 
 /**
  * Saves unsaved edits (with auto-save on) or asks about them, as closing a tab does, before the app restarts or quits,
@@ -1517,7 +1523,7 @@ const actions: Action[] = [
   { label: "Previous Occurrence in Files", keys: "Meta+Alt+ArrowUp", run: () => nextMatch(-1), when: () => !$("view-search").hidden },
   ...EDITOR_COMMANDS.map(([label, id, keys]) => editorAction(label, keys, id)),
   { label: "Toggle Case", keys: "Meta+Shift+U", run: toggleCase, editorOnly: true },
-  { label: "Save All", keys: "Meta+S", run: () => saveFocusedRequest() || saveAll() },
+  { label: "Save All", keys: "Meta+S", run: () => saveFocusedRequest() || saveAll(true) },
   { label: "Settings…", keys: "Meta+Comma", run: openSettings },
   { label: "Check for Updates…", run: () => invoke("check_update") },
   { label: "Keymap…", run: () => editKeymap() },
@@ -1597,6 +1603,16 @@ const actions: Action[] = [
   { label: "Database: Copy Table Name", run: () => (selectedTable() ? copyName(selectedTable()!) : status("Select a table in the Database tool first.")) },
   { label: "Database: Generate SELECT", run: () => generateSql("select") },
   { label: "Database: Generate INSERT", run: () => generateSql("insert") },
+  { label: "Deployment: Upload to Default Server", keys: "Alt+Shift+Meta+X", run: () => (activeFile() ? upload([active]) : status("Open a file to upload it.")) },
+  { label: "Deployment: Upload to…", run: () => (activeFile() ? upload([active], "choose") : status("Open a file to upload it.")) },
+  { label: "Deployment: Upload Project to…", run: () => root && upload([root], "choose") },
+  { label: "Deployment: Download from…", run: () => (activeFile() ? download([active], "choose") : status("Open a file to download it.")) },
+  { label: "Deployment: Sync Project with Deployed…", run: () => root && syncWithDeployed(root) },
+  { label: "Deployment: Sync with Deployed…", run: () => (activeFile() ? syncWithDeployed(active) : status("Open a file to sync it.")) },
+  { label: "Deployment: Compare with Deployed Version", run: () => (activeFile() ? compareWithDeployed(active) : status("Open a file to compare it.")) },
+  { label: "Deployment: Remote Host", run: () => showView("remote") },
+  { label: "Deployment: File Transfer", run: showTransfers },
+  { label: "Deployment: Settings…", run: () => root && editServers() },
   { label: "Composer", run: () => showView("composer") },
   { label: "Filament", run: () => showView("filament") },
   { label: "Filament: Open Resource in Designer…", run: () => root && openResourcePicker() },
@@ -1966,6 +1982,7 @@ function showView(name: string) {
   if (name === "todo") loadTodos();
   if (name === "http") refreshTree();
   if (name === "filament") loadFilament();
+  if (name === "remote") remoteHostShown();
 }
 // Clicking the active tool window's icon hides the sidebar, as in PhpStorm.
 document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach(
@@ -2005,6 +2022,7 @@ initLayout({ focusEditor: () => editor.focus(), status });
 initGit({ root: () => root, openFile, status, showView, openFolder });
 initPullRequests({ root: () => root, status, showView });
 initDatabase({ root: () => root, openFile, status });
+initDeployment({ root: () => root, openFile, dirty: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!), openText: (path) => tabs.get(path)?.model.getValue(), showView });
 initRebase({ root: () => root, status });
 initStash({ showView });
 initBranches({ commit: focusCommit, push, update: updateProject });

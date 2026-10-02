@@ -4432,6 +4432,92 @@ from `pragma_table_info`.
 and skips statements that are only comments. Results use `showPanelView`, like
 the debugger.
 
+## Deployment
+
+`src-tauri/src/deploy.rs` connects to servers and moves files; `src/deploy.ts`
+decides what to move. The frontend turns a project path into a server path
+through the server's mappings (`remoteFor` in `deploydata.ts`, the mapping
+with the deepest folder wins) and queues one transfer per file. Rust lists
+folders, applies the exclusions (`Excludes`, a `globset`: a pattern without `/`
+becomes `**/pattern`, and each also matches what's inside it), and compares.
+So a folder upload calls `deploy_local_files` to list it, then queues each
+file, and every file gets its own progress, cancel, and retry.
+
+| Protocol | Crate |
+| --- | --- |
+| SFTP | `russh` with `ring`, and `russh-sftp` |
+| FTP, FTPS | `suppaftp` with `tokio-rustls` and `ring`; certificates checked by `rustls-platform-verifier` |
+
+**Connections.** A pool keeps idle connections by everything that changes how
+one logs in (`Server::key`). `take` reuses an idle one if it's alive: for SFTP,
+if the SSH session isn't closed; for FTP, if it was used in the last 15 seconds
+or answers `NOOP`. A call that fails drops its connection rather than returning
+it, since its state is unknown, such as an FTP data connection cut off by a
+cancel. The queue runs up to four transfers per SFTP server and two per FTP
+server, since FTP servers often limit logins per address. Settings changes and
+opening another project call `deploy_disconnect`. Connecting times out after
+20 seconds.
+
+**Host keys.** `Client::check_server_key` checks the key against
+`~/.ssh/known_hosts` with russh's `check_known_hosts_path`, which reads hashed
+entries too. An unknown or changed key fails the connection with
+`host-key:{json}`: the host, port, algorithm, SHA-256 fingerprint, key, and for
+a changed key, the entry's line. The frontend's `reach` wraps every call: it
+asks once per host and port (calls that fail together share the question), and
+when you trust the key, `deploy_trust_host` writes it and the call runs again.
+russh numbers known_hosts entries without comment lines, so `without_entry`
+counts the same way when it removes the replaced one. Tests point
+`TUSK_KNOWN_HOSTS` at their own file.
+
+**Logins.** Passwords and key passphrases are in the password store under
+"Tusk deployment", by project and server name, and Rust reads them itself, so
+they never reach the web view; the settings dialog sends a typed password
+only to test it before saving. A key login without a key file tries
+`id_ed25519`, `id_ecdsa`, and `id_rsa`, as `ssh` does. RSA keys sign with the
+best hash the server offers (`best_supported_rsa_hash`). The agent is
+`SSH_AUTH_SOCK`'s on macOS and Linux, and OpenSSH's named pipe or Pageant on
+Windows.
+
+**Uploads.** `Conn::upload` creates the missing folders, writes
+`.name.tusk-upload` beside the file, sets the local file's modification time
+and the old file's permissions on it, and renames it into place. SFTP's
+rename (protocol version 3) won't replace a file, and `russh-sftp` doesn't
+send OpenSSH's `posix-rename`, so when the rename fails the old file moves to
+`.name.tusk-old` first, and back if the second rename fails. A folder that
+allows changing its files but not creating new ones gets the file written in
+place. FTP sets the time with `MFMT` and permissions with `SITE CHMOD`, where
+the server has them. Downloads write a temporary file beside the target and
+rename it, keep the local file's permissions, and take the server's time.
+
+**Listing.** SFTP's `readdir` has sizes, times, and permissions. FTP uses
+`MLSD` for exact times, and `LIST` on servers without it, such as vsftpd, only
+after a 500, 502, or 504 reply: another error, such as a missing folder,
+doesn't switch a connection to `LIST`, whose times are by the minute. Some
+servers answer a missing folder with 501 rather than 550, so `missing` takes
+both.
+
+**Comparing.** `deploy_compare` lists both sides, leaving out exclusions while
+walking, so an excluded `storage` isn't listed at all. `diff` sorts files
+into the ones that differ for sure (only one side has it, or the sizes differ)
+and the ones whose sizes match but times are more than two seconds apart.
+Those are read on both sides and compared, up to 4 MB each. Since uploads set
+the server's time to the local file's, a project uploaded by Tusk compares by
+size and time alone.
+
+**Remote Host.** The tree loads a folder when you open it. Its paths are
+absolute (a relative root path is resolved against the login folder), so a
+file opened from it is kept at `<app cache>/remote/<server>/<path>`, and
+`afterSave` reads the server and path back from that location and uploads it.
+
+**Tests.** Rust unit tests cover exclusions, local listing, the diff, known_hosts
+numbering, paths, and MFMT times; `deploydata.test.ts` covers mappings, web
+URLs, stored servers, and errors. `scripts/deploy-test-servers.sh` starts the
+system's `sshd` as you on port 2222 and pyftpdlib for FTP (2121) and explicit
+FTPS (2990, self-signed), and the ignored tests upload, replace (checking
+permissions), list, walk, download, read, cancel, rename, and delete on each,
+check the trust flow for unknown and changed keys, a missing passphrase, a
+refused user, a refused FTP password, and a refused self-signed certificate.
+
 ## Bookmarks, snippets, and other small tools
 
 - **Bookmarks** (`src/bookmarks.ts`) work like breakpoints: one ordered list
@@ -7737,3 +7823,19 @@ without `../../`, and nothing else. It also showed relationship warnings on
 dotted JSON keys and on `ManageRelatedRecords` pages, which now use the
 column list and the related model.
 
+### 2026-10-02: Pure-Rust SFTP and FTP clients for deployment
+
+Database tunnels run the system's `ssh`, which brings `~/.ssh/config` along
+for free, but deployment needs a password prompt, progress, cancel, and
+pooled sessions, which a child `ssh` or `sftp` can't give without parsing
+their output. `ssh2` binds libssh2 and OpenSSL, which would have to be built
+for each platform. `russh` and `russh-sftp` are pure Rust and run on the tokio
+runtime Tauri already has; with the `ring` feature they share the crypto
+library rustls already uses here, so the build adds no C. `suppaftp` covers
+FTP and both kinds of FTPS through `tokio-rustls`. The cost is that
+`~/.ssh/config` isn't read; the Known gaps list it.
+
+Transfers are one file per call, queued in the frontend, rather than a folder
+per call in Rust: progress, cancel, retry, and the File Transfer panel then
+work per file with no protocol of their own between Rust and the web view, and
+a failure costs one file, not the batch.

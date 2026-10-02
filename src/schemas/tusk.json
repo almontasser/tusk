@@ -63,6 +63,42 @@
       "type": "string",
       "description": "The Docker Compose service that runs tests, Artisan, and Tinker. Empty runs them on the host."
     },
+    "deploymentServers": {
+      "type": "array",
+      "description": "Servers the project deploys to over SFTP, FTP, or FTPS. Passwords and key passphrases never go here: each person's stay in their Keychain.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "The server's name, such as staging." },
+          "protocol": { "enum": ["sftp", "ftp", "ftps", "ftps-implicit"], "description": "How Tusk connects: SFTP over SSH, plain FTP, or FTPS with explicit (AUTH TLS) or implicit TLS." },
+          "host": { "type": "string", "description": "The server's host name or address." },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "The port. Defaults to 22 for SFTP, 21 for FTP and explicit FTPS, and 990 for implicit FTPS." },
+          "user": { "type": "string", "description": "The user to log in as. Empty is your own user for SFTP, and anonymous for FTP." },
+          "auth": { "enum": ["agent", "key", "password"], "description": "SFTP's login: the SSH agent, a key file, or a password." },
+          "keyFile": { "type": "string", "description": "The private key for SFTP's key login. Empty tries ~/.ssh/id_ed25519, id_ecdsa, and id_rsa." },
+          "passive": { "type": "boolean", "description": "FTP's passive mode. Defaults to true." },
+          "insecureTls": { "type": "boolean", "description": "FTPS without checking the server's certificate, for a self-signed one." },
+          "rootPath": { "type": "string", "description": "The folder mappings are relative to, such as /var/www/app. Empty is the login folder." },
+          "webUrl": { "type": "string", "description": "The site's address, for opening deployed files in the browser." },
+          "mappings": {
+            "type": "array",
+            "description": "Where project folders go on the server.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "local": { "type": "string", "description": "A folder relative to the project. Empty is the whole project." },
+                "remote": { "type": "string", "description": "Where it goes: relative to the root path, or absolute." }
+              },
+              "required": ["local", "remote"],
+              "additionalProperties": false
+            }
+          },
+          "excludes": { "type": "array", "items": { "type": "string" }, "description": "Paths never uploaded or downloaded. A name matches at any depth; a path with / matches from the mapping's folder." }
+        },
+        "required": ["name", "protocol", "host"],
+        "additionalProperties": false
+      }
+    },
     "databaseConnections": {
       "type": "array",
       "description": "Saved database connections. URLs never hold passwords here: each person's password stays in their Keychain.",

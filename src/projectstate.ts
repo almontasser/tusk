@@ -172,6 +172,7 @@ export const SHAREABLE: { label: string; keys: string[]; detail: string }[] = [
   { label: "PHP analysis settings", keys: ["phpAnalysis"], detail: "Extra stub folders, and whether to index every library file" },
   { label: "PHPStan settings", keys: ["phpstan"], detail: "When it runs, its configuration file, level, memory limit, and timeout" },
   { label: "Database connections", keys: ["databaseConnections", "databaseSsh", "databaseReadOnly"], detail: `Names, URLs, SSH tunnels, and read-only choices; passwords stay in ${passwordStore}` },
+  { label: "Deployment servers", keys: ["deploymentServers"], detail: `SFTP, FTP, and FTPS servers with their mappings and excluded paths; passwords stay in ${passwordStore}` },
 ];
 
 const isShared = (keys: string[]) => keys.some((k) => projectScope(k) === "shared");

@@ -34,6 +34,7 @@
         <button data-view="search" title="Find in Files (⌘⇧F)"><span class="codicon codicon-search"></span></button>
         <button data-view="todo" title="TODO"><span class="codicon codicon-checklist"></span></button>
         <button data-view="database" title="Database"><span class="codicon codicon-database"></span></button>
+        <button data-view="remote" title="Remote Host"><span class="codicon codicon-remote-explorer"></span></button>
         <button data-view="composer" title="Composer"><span class="codicon codicon-package"></span></button>
         <button data-view="http" title="HTTP Client"><span class="codicon codicon-globe"></span></button>
         <button data-view="filament" title="Designers"><span class="codicon codicon-symbol-structure"></span></button>
@@ -182,6 +183,19 @@
           </div>
           <ul id="db-tables"></ul>
         </section>
+        <section id="view-remote" hidden>
+          <header class="view-header">
+            <span>Remote Host</span>
+            <div class="view-actions">
+              <button class="icon-button" id="remote-new-folder" title="New Folder"><span class="codicon codicon-new-folder"></span></button>
+              <button class="icon-button" id="remote-refresh" title="Refresh"><span class="codicon codicon-refresh"></span></button>
+              <button class="icon-button" id="remote-collapse" title="Collapse All"><span class="codicon codicon-collapse-all"></span></button>
+              <button class="icon-button" id="remote-settings" title="Deployment Settings…"><span class="codicon codicon-settings-gear"></span></button>
+            </div>
+          </header>
+          <p id="remote-server" class="db-connection muted" title="Click to switch servers"><span id="remote-server-name"></span><span class="codicon codicon-chevron-down"></span></p>
+          <ul id="remote-tree" role="tree" aria-label="Server files"></ul>
+        </section>
         <section id="view-filament" hidden>
           <header class="view-header">
             <span>Designers</span>
@@ -328,6 +342,7 @@
       <span id="path" class="status-item"></span>
       <span id="lsp-status" class="status-item" role="status"></span>
       <button id="status-cancel" class="status-item" hidden><span class="codicon codicon-close"></span> Cancel</button>
+      <button id="deploy-status" class="status-item" hidden></button>
       <span class="status-spacer"></span>
       <button id="status-branch" class="status-item" hidden></button>
       <button id="ai-status" class="status-item" hidden><span class="codicon codicon-sparkle"></span> AI</button>
