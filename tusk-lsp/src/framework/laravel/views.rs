@@ -218,8 +218,8 @@ impl Walk<'_> {
         let anonymous = |tag: &str| anonymous(index, read, components, tag);
         let aware = |parent: &str, text: &str| {
             // A component's own view: an anonymous one's tags pass what it reads, and a class component's aren't known.
-            // ponytail: a class component's view outside `components`, or a view included from a component's view,
-            // reads as a page, though Laravel looks in that component's data first; check the renderers if it bites.
+            // ponytail: a class component's view outside `components` reads as a page, though Laravel looks in that
+            // component's data first; check the renderers if it bites.
             let own = if names_aware.is_empty() {
                 None
             } else if component_tags(index, read, components, parent).is_empty() {
@@ -292,7 +292,7 @@ impl Walk<'_> {
                 match enclosing(text, at, &comments) {
                     Some(Some((tag, attrs))) if anonymous(index, read, components, &tag) => tags.push((tag, attrs)),
                     Some(_) => out.push(Some(None)),
-                    None if component => out.push(Some(None)),
+                    None if component => out.extend(self.component_data(&parent)),
                     None => out.extend(self.contexts(&parent)),
                 }
             }
@@ -314,6 +314,59 @@ impl Walk<'_> {
         self.contexts.insert(view.to_string(), unique.clone());
         unique
     }
+
+    /// The data of the component whose own view is `view`, for each place that renders it, which is where `@aware`
+    /// looks first in a view that `view` includes, as Laravel's `renderComponent` sets it: an anonymous
+    /// component's tag passes its attributes, and a class component its public properties and methods. A render
+    /// of the view that isn't a component's has none, and one through a dynamic component or another view isn't
+    /// known.
+    fn component_data(&mut self, view: &str) -> Vec<Around> {
+        let (index, read, views) = (self.index, self.read, self.views);
+        let mut out: Vec<Around> = vec![];
+        if self.named.contains_key(view) || self.named.contains_key("<x-dynamic-component") {
+            out.push(Some(None));
+        }
+        for path in self.code.clone().get(view).into_iter().flatten().filter(|p| !p.to_string_lossy().ends_with(".blade.php")) {
+            let Some(text) = read(path) else { continue };
+            let found = cached(&CODE_SITES, index, (path, &text), || Arc::new(code_sites(index, path, &text)));
+            let data = found.get(&format!("{COMPONENT_DATA}{view}")).cloned().unwrap_or_default();
+            if found.get(view).map_or(0, Vec::len) > data.len() {
+                out.push(None);
+            }
+            out.extend(data.into_iter().map(|d| Some(Some(d))));
+        }
+        for tag in component_tags(index, read, self.components, view) {
+            for i in self.named.get(&format!("<x-{tag}")).cloned().unwrap_or_default() {
+                let (path, text) = &views[i];
+                let Some(parent) = view_name(index, path) else { continue };
+                if parent == view || self.stack.contains(&parent) {
+                    out.push(Some(None));
+                    continue;
+                }
+                let tags: Vec<(String, usize)> = tag_opens(text, &tag, &comments(text)).map(|(_, after)| (tag.clone(), after)).collect();
+                let vars = self.types(&parent);
+                out.extend(around_sites(index, path, text, &vars, &tags).into_iter().map(Some));
+            }
+        }
+        if out.is_empty() {
+            out.push(Some(None));
+        }
+        out
+    }
+}
+
+/// Where each `<x-{tag}>` in `text` outside `comments` starts, and where its attributes do.
+fn tag_opens<'t>(text: &'t str, tag: &'t str, comments: &'t [std::ops::Range<usize>]) -> impl Iterator<Item = (usize, usize)> + 't {
+    ["<x-", "<x:"].into_iter().flat_map(move |prefix| {
+        let opening = format!("{prefix}{tag}");
+        let len = opening.len();
+        text.match_indices(&opening)
+            .map(|(at, _)| at)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(move |at| !text[at + len..].starts_with(|c: char| c.is_alphanumeric() || "_-:.".contains(c)) && !comments.iter().any(|c| c.contains(at)))
+            .map(move |at| (at, at + len))
+    })
 }
 
 /// Whether `<x-{tag}>` is an anonymous component's, whose attributes are what it passes.
@@ -476,17 +529,26 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
             let ignored = if component { component_ignored(index, &except, &class) } else { Some(vec![]) };
             let unsure = ignored.is_none();
             let ignored = ignored.unwrap_or_default();
+            let mut data = Site::new();
             for (name, declaring) in meta.iter().flat_map(|m| m.declaring_property_ids.iter()) {
                 let Some(p) = index.codebase.get_property(declaring.as_bytes(), name.as_bytes()) else { continue };
                 let name = name.as_str_lossy().trim_start_matches('$').to_string();
                 if p.read_visibility.is_public() && !p.flags.is_static() && !skipped(&ignored, &name) {
                     let t = p.type_metadata.as_ref().or(p.type_declaration_metadata.as_ref()).and_then(|t| docblock_type(&t.type_union));
-                    vars.entry(name).or_insert(t.filter(|_| !unsure));
+                    data.insert(name, t.filter(|_| !unsure));
                 }
             }
             if component {
-                vars.entry("slot".into()).or_insert_with(|| known_class(index, SLOT));
-                vars.extend(component_methods(index, &class, &ignored).into_iter().map(|(name, t)| (name, t.filter(|_| !unsure))));
+                data.insert("slot".into(), known_class(index, SLOT));
+                data.extend(component_methods(index, &class, &ignored).into_iter().map(|(name, t)| (name, t.filter(|_| !unsure))));
+                // Laravel renders the view with the component's data over what `view()` passes, and that data is
+                // where `@aware` in a view the component's view includes looks ([`Walk::component_data`]).
+                sites.entry(format!("{COMPONENT_DATA}{view}")).or_default().push(data.clone());
+                vars.extend(data);
+            } else {
+                for (name, t) in data {
+                    vars.entry(name).or_insert(t);
+                }
             }
         }
         if renders {
@@ -495,6 +557,10 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
     });
     sites
 }
+
+/// The key under which [`code_sites`] lists a class component's data for its view, after the view's name, which
+/// no view's name starts with.
+const COMPONENT_DATA: &str = "<data>";
 
 const BAG: &str = "Illuminate\\View\\ComponentAttributeBag";
 const SLOT: &str = "Illuminate\\View\\ComponentSlot";
@@ -1014,31 +1080,24 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
     let comments = comments(text);
     let mut uses = vec![];
     for tag in tags.iter().map(String::as_str).chain(["dynamic-component"]) {
-        for prefix in ["<x-", "<x:"] {
-            let opening = format!("{prefix}{tag}");
-            for (at, _) in text.match_indices(&opening) {
-                let after = at + opening.len();
-                if text[after..].starts_with(|c: char| c.is_alphanumeric() || "_-:.".contains(c)) || comments.iter().any(|c| c.contains(&at)) {
+        for (at, after) in tag_opens(text, tag, &comments) {
+            let mut attrs = tag_attrs(text, after, tag);
+            if tag == "dynamic-component" {
+                if !dynamic_name(text, after).is_some_and(|name| tags.contains(&name)) {
                     continue;
                 }
-                let mut attrs = tag_attrs(text, after, tag);
-                if tag == "dynamic-component" {
-                    if !dynamic_name(text, after).is_some_and(|name| tags.contains(&name)) {
-                        continue;
-                    }
-                    if let Some((attrs, _, _)) = &mut attrs {
-                        attrs.retain(|(name, _)| name != "component");
-                    }
+                if let Some((attrs, _, _)) = &mut attrs {
+                    attrs.retain(|(name, _)| name != "component");
                 }
-                // `None` when no component tag is open around it, so an `@aware` variable that it doesn't pass gets
-                // its default, and `Some(None)` when what the tag around it passes isn't known.
-                let around = if aware.names.is_empty() || aware.own.is_some() {
-                    Some(None)
-                } else {
-                    enclosing(text, at, &comments).map(|open| open.filter(|(tag, _)| (aware.anonymous)(tag)))
-                };
-                uses.push((attrs, around));
             }
+            // `None` when no component tag is open around it, so an `@aware` variable that it doesn't pass gets
+            // its default, and `Some(None)` when what the tag around it passes isn't known.
+            let around = if aware.names.is_empty() || aware.own.is_some() {
+                Some(None)
+            } else {
+                enclosing(text, at, &comments).map(|open| open.filter(|(tag, _)| (aware.anonymous)(tag)))
+            };
+            uses.push((attrs, around));
         }
     }
     if found.is_empty() && uses.is_empty() {
@@ -1348,6 +1407,44 @@ mod tests {
         assert_eq!(color("components.menu.link").as_deref(), Some("\\App\\Post"));
         assert_eq!(color("components.menu.dot").as_deref(), Some("\\App\\Post|string"));
         assert_eq!(color("components.menu.tip"), None);
+    }
+
+    #[test]
+    fn types_aware_variables_in_views_a_components_view_includes() {
+        let models = "<?php\nnamespace App;\nclass Post {}\n";
+        let laravel = "<?php\nnamespace Illuminate\\View;\nclass ComponentAttributeBag {}\nclass ComponentSlot {}\nclass InvokableComponentVariable {}\nabstract class Component {}\n";
+        let controller = "<?php\nnamespace App;\nclass PageController {\n    public function show(Post $post) { return view('page', compact('post')); }\n    public function bare() { return view('components.plain'); }\n}\n";
+        let card = "<?php\nnamespace App\\View\\Components;\nclass Card extends \\Illuminate\\View\\Component {\n    public function __construct(public \\App\\Post $color) {}\n    public function render() { return view('components.card', ['tone' => 1]); }\n}\n";
+        let views = [
+            // An anonymous component whose tags pass `color`, and one whose tag leaves it out.
+            ("resources/views/page.blade.php", "<x-panel :color=\"$post\" />\n<x-panel color=\"red\" />\n<x-bare />\n<x-plain :color=\"$post\" />\n<x-card :color=\"$post\" />"),
+            ("resources/views/components/panel.blade.php", "@include('partials.panel-inner')"),
+            ("resources/views/partials/panel-inner.blade.php", "<x-menu.tip />"),
+            ("resources/views/components/bare.blade.php", "@include('partials.bare-inner')"),
+            ("resources/views/partials/bare-inner.blade.php", "<x-menu.dot />"),
+            // Also rendered as a plain view, where there's no component, so it gets the default.
+            ("resources/views/components/plain.blade.php", "@include('partials.plain-inner')"),
+            ("resources/views/partials/plain-inner.blade.php", "<x-menu.link />"),
+            // A class component's data is its public properties, not what its `view()` passes.
+            ("resources/views/components/card.blade.php", "@include('partials.card-inner')"),
+            ("resources/views/partials/card-inner.blade.php", "<x-menu.item />"),
+            ("resources/views/components/menu/tip.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/dot.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/link.blade.php", "@aware(['color' => 'gray'])"),
+            ("resources/views/components/menu/item.blade.php", "@aware(['color' => 'gray', 'tone' => 'loud'])"),
+        ];
+        let mut files = vec![("app/Models.php", models), ("vendor/View.php", laravel), ("app/PageController.php", controller), ("app/View/Components/Card.php", card)];
+        files.extend(views);
+        let fx = Fixture::new(&files);
+        let paths: Vec<PathBuf> = views.iter().map(|(p, _)| path(p)).collect();
+        let index = fx.snap.index.read();
+        let read = |p: &Path| fx.snap.read(p);
+        let var = |view: &str, name: &str| types_among(&index, &read, None, &paths, view).into_iter().find(|(n, _)| n == name).map(|(_, t)| t);
+        assert_eq!(var("components.menu.tip", "color").as_deref(), Some("\\App\\Post|string"));
+        assert_eq!(var("components.menu.dot", "color"), None);
+        assert_eq!(var("components.menu.link", "color").as_deref(), Some("string|\\App\\Post"));
+        assert_eq!(var("components.menu.item", "color").as_deref(), Some("\\App\\Post"));
+        assert_eq!(var("components.menu.item", "tone"), None);
     }
 
     #[test]

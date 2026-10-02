@@ -2394,9 +2394,17 @@ closed, as in PHP files. A name that needs an import gets the view's own edit
 in place of the PHP's `use` line (`blade_import` in
 `tusk-lsp/src/framework/laravel/mod.rs`): a class gets a `@use('…')` line from
 `blade::use_insert`, among the `@use` lines at the view's top in order, or after
-its leading `@props` and `@aware` lines, or first, never twice; a namespaced
-function, or a class when the project's Laravel has no
-`CompilesUseStatements`, is written in full instead. `@use` compiles to PHP's
+its leading `@props` and `@aware` lines, or first, never twice. A function or
+constant gets `@use('function …')` or `@use('const …')`, after the classes, and
+a name whose namespace already has a group of its kind, `@use('App\{A, B}')`,
+joins the group in order, copying the separator between its names. What the
+project's `compileUse` reads comes from its source (`blade_use`): `'function '`
+for the modifiers and `'{'` for groups, which Laravel added after `@use`
+itself. Where it doesn't read them, a function or constant is written in full,
+and so is a class when the project's Laravel has no `CompilesUseStatements`.
+`blade::use_body` reads every `@use` as `compileUse` does, alias, modifier,
+and group, into the `use` statement in the view's first PHP line, so the names
+it imports resolve. `@use` compiles to PHP's
 `use`, which PHP refuses inside a block, so it goes at the top. **Import
 class** on an unknown class name in a view (`fixes::blade_candidates`) offers
 the classes of that name with the same edit; it's computed only when the cursor
@@ -2490,8 +2498,15 @@ including view is inside, in turn. Where the project's PHP renders a view in
 that chain, it's inside no component, and the default applies. Each context
 gives the tag its own site, so a view included both in a component's slot and
 on a page gets the union of the passed type and the default. A view included
-from a component's own view, or through a cycle of includes, is inside a
-component whose data isn't read, which leaves the variable untyped.
+from a component's own view is inside that component's data, which Laravel's
+`renderComponent` puts first while the view renders (`Walk::component_data`):
+each tag of an anonymous component passes its attributes (`around_sites` on the
+views with its tags), and a class component passes its public properties and
+methods, which `code_sites` lists under the view's name after `<data>`, apart
+from what its `view()` call passes, since that data isn't the component's. A
+render of the view from other code has no component, so the default applies; a
+render through another view or `<x-dynamic-component>`, a cycle of includes,
+and data that leaves the variable out leave it untyped.
 
 A view that renders itself, such as a comment that includes itself for its
 replies, starts from the types the other places pass, then adds the places in
@@ -8258,3 +8273,31 @@ Tusk saw on both sides, so it never offers to delete a file it didn't put
 there, and the confirmation is the only way anything is deleted. It's kept in
 the app's data folder, not `tusk.json`, since it describes this computer's
 copy.
+
+
+### 2026-10-02: `@use` writes functions, constants, and groups, and `@aware` reads a component's data
+
+A view imported only classes with `@use`, so a namespaced function was written
+in full and a namespaced constant was written short, which in a view's PHP
+named a global constant. Laravel's `compileUse` reads `function` and `const`
+and groups, so completion now writes those and joins an existing group of the
+same kind and namespace rather than adding a line beside it. It doesn't start
+new groups: a view's own layout of its imports is left as it is. Laravel added
+the modifiers and groups after `@use` itself, and every app here has the same
+trait, so their support is read from the trait's source rather than guessed
+from a version. Completion of a constant in a PHP file now adds its
+`use const` too. Mago names a constant with its namespace in lower case, so
+the index keeps each `const` statement's name as the file spells it
+(`declarations_of`, which `scan` now runs while it has the parsed file), and
+imports read `App\Models\LIMIT` rather than `app\models\LIMIT`. A constant from
+`define()` keeps Mago's name.
+
+An `@aware` variable in a view included from a component's own view stayed
+untyped. Laravel's `renderComponent` merges the component's data into what
+`@aware` reads while the component's view renders, so that data now types it:
+the attributes each tag of an anonymous component passes, and a class
+component's public properties and methods. A class component's data now also
+takes precedence over what its `render()`'s `view()` call passes, as
+`View::with()` does in Laravel. A name the data leaves out stays untyped rather
+than falling back to the components around the tag, which would need the stack
+of every render.

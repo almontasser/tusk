@@ -1194,19 +1194,36 @@ pub fn blade_components(state: &crate::framework::State) -> Option<std::sync::Ar
     data.active().then(|| data.blade_components()).flatten()
 }
 
-/// Whether the project's Laravel compiles Blade's `@use` directive, so a view can import a class with it rather
-/// than writing its full name.
-pub fn has_blade_use(index: &crate::index::Index) -> bool {
-    index.find_declared("Illuminate\\View\\Compilers\\Concerns\\CompilesUseStatements").is_some()
+/// What the project's Laravel reads in Blade's `@use`, from its `compileUse`: `None` without `@use`, and else
+/// whether it reads `function` and `const` imports, and groups such as `App\Models\{Post, User}`. Laravel added
+/// both after `@use` itself, so the source says rather than the version.
+#[derive(Clone, Copy)]
+pub struct BladeUse {
+    pub modifiers: bool,
+    pub groups: bool,
 }
 
-/// The edits that write `fqn` in a Blade view whose PHP has `name` at `range`, the view's: `name` there and a
-/// `@use` import ([`blade::use_insert`]), or, without `@use` in the project's Laravel, `\fqn` in place of `name`
-/// in `new_text`, a completion's or a fix's text that starts with it.
-pub fn blade_import(index: &crate::index::Index, view: &crate::documents::Document, fqn: &str, new_text: &mut String, name: &str) -> Vec<lsp_types::TextEdit> {
+pub fn blade_use(ctx: &Ctx<'_>) -> Option<BladeUse> {
+    let declared = ctx.index.find_declared("Illuminate\\View\\Compilers\\Concerns\\CompilesUseStatements")?;
+    let source = ctx.snap.text_of(&ctx.index, declared.span.file_id).unwrap_or_default();
+    Some(BladeUse { modifiers: source.contains("'function '"), groups: source.contains("'{'") })
+}
+
+/// The edits that write `fqn`, a class, function, or constant as `kind` says, in a Blade view whose PHP has
+/// `name` at `range`, the view's: `name` there and a `@use` import ([`blade::use_insert`]), or, where the
+/// project's Laravel can't import it with `@use`, `\fqn` in place of `name` in `new_text`, a completion's or a
+/// fix's text that starts with it.
+pub fn blade_import(
+    forms: Option<BladeUse>,
+    view: &crate::documents::Document,
+    fqn: &str,
+    kind: mago_names::kind::NameKind,
+    new_text: &mut String,
+    name: &str,
+) -> Vec<lsp_types::TextEdit> {
     let fqn = fqn.trim_start_matches('\\');
-    if has_blade_use(index) {
-        let Some((at, text)) = blade::use_insert(&view.text, fqn) else { return vec![] };
+    if let Some(forms) = forms.filter(|f| kind == mago_names::kind::NameKind::Default || f.modifiers) {
+        let Some((at, text)) = blade::use_insert(&view.text, fqn, kind, forms.groups) else { return vec![] };
         return vec![lsp_types::TextEdit { range: view.range(at as u32, at as u32), new_text: text }];
     }
     if let Some(rest) = new_text.strip_prefix(name) {

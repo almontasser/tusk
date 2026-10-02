@@ -3,6 +3,8 @@
 
 use std::ops::Range;
 
+use mago_names::kind::NameKind;
+
 /// Directives whose arguments name views, translations, or abilities, so they're read as calls. Others are
 /// left out: `@foreach ($a as $b)` isn't a valid call and would only add parse errors.
 const CALL_DIRECTIVES: &[&str] = &[
@@ -290,18 +292,9 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> Checked {
                         args = false;
                     }
                     "use" => {
-                        // @use('App\Models\Post', 'P') imports a class, as `use` at the top of a file.
-                        let mut quoted = vec![];
-                        let mut rest = &text[open..end.unwrap_or(open)];
-                        while let Some(q) = rest.find(['\'', '"']) {
-                            let quote = &rest[q..q + 1];
-                            let Some(len) = rest[q + 1..].find(quote) else { break };
-                            quoted.push(&rest[q + 1..q + 1 + len]);
-                            rest = &rest[q + 2 + len..];
-                        }
-                        if let Some(class) = quoted.first().filter(|c| !c.is_empty()) {
-                            let alias = quoted.get(1).filter(|a| !a.is_empty()).map(|a| format!(" as {a}")).unwrap_or_default();
-                            imports.push(format!("use {}{alias};", class.trim_start_matches('\\')));
+                        // @use('App\Models\Post', 'P') imports, as `use` at the top of a file.
+                        if let Some(body) = end.and_then(|end| use_body(&text[open..end])) {
+                            imports.push(format!("use {body};"));
                         }
                         args = false;
                     }
@@ -661,32 +654,138 @@ pub fn tags(line: &str, prefixes: &[String]) -> Vec<(usize, usize, String, bool)
     out
 }
 
-/// The text to insert, and where, to import `fqn` in a view with `@use('fqn')`, or `None` when a `@use` imports it
-/// already. It goes among the `@use` lines at the view's top, in order, or else after the `@props` and `@aware`
-/// lines that start the view, or else first. `@use` compiles to a `use` statement, which PHP refuses inside a
-/// block, so the top is where it works.
-pub fn use_insert(text: &str, fqn: &str) -> Option<(usize, String)> {
+/// The body of the `use` statement a `@use` compiles to, from its arguments with their parentheses, as Laravel's
+/// `compileUse` reads them: `('App\Models\Post', 'P')` is `App\Models\Post as P`, `('function App\f')` is
+/// `function App\f`, and `('App\Models\{Post, User}')` is a group. `None` when it isn't names, which would break
+/// the rest of the view's PHP.
+pub(super) fn use_body(args: &str) -> Option<String> {
+    let quotes: &[char] = &[' ', '\'', '"'];
+    let expr: String = args.chars().filter(|c| !matches!(c, '(' | ')')).collect();
+    let expr = expr.trim_matches(quotes);
+    // A group has no alias: its names can each have one.
+    let (path, alias) = if expr.contains('{') {
+        (expr, None)
+    } else {
+        let mut parts = expr.split(',');
+        (parts.next().unwrap_or_default().trim_matches(quotes), parts.next().map(|a| a.trim_matches(quotes)))
+    };
+    let (kind, path) = use_kind(path);
+    let path = path.trim_start_matches('\\');
+    let alias = alias.filter(|a| !a.is_empty()).map(|a| format!(" as {a}")).unwrap_or_default();
+    let body = format!("{}{path}{alias}", use_keyword(kind));
+    let name = |c: char| c.is_alphanumeric() || matches!(c, '_' | '\\' | '{' | '}' | ',') || c.is_whitespace() || !c.is_ascii();
+    (!path.is_empty() && body.chars().all(name)).then_some(body)
+}
+
+/// What a `use` names, from its `function ` or `const ` keyword, and the rest.
+fn use_kind(body: &str) -> (NameKind, &str) {
+    let body = body.trim_start();
+    match (body.strip_prefix("function "), body.strip_prefix("const ")) {
+        (Some(rest), _) => (NameKind::Function, rest.trim_start()),
+        (_, Some(rest)) => (NameKind::Constant, rest.trim_start()),
+        _ => (NameKind::Default, body),
+    }
+}
+
+fn use_keyword(kind: NameKind) -> &'static str {
+    match kind {
+        NameKind::Function => "function ",
+        NameKind::Constant => "const ",
+        _ => "",
+    }
+}
+
+/// The names a `use` statement's body imports, each with what it names: `App\{Post as P, function f}` imports the
+/// class `App\Post` and the function `App\f`.
+fn use_entries(body: &str) -> Vec<(NameKind, String)> {
+    let (kind, rest) = use_kind(body);
+    let name = |s: &str| s.split_whitespace().next().unwrap_or_default().trim_start_matches('\\').to_string();
+    match rest.split_once('{') {
+        Some((prefix, items)) => {
+            let prefix = prefix.trim().trim_start_matches('\\');
+            items
+                .trim_end()
+                .trim_end_matches('}')
+                .split(',')
+                .filter_map(|item| {
+                    let (own, item) = use_kind(item);
+                    let item = name(item);
+                    (!item.is_empty()).then(|| (if kind == NameKind::Default { own } else { kind }, format!("{prefix}{item}")))
+                })
+                .collect()
+        }
+        None => vec![(kind, name(rest))],
+    }
+}
+
+/// The text to insert, and where, to import `fqn`, a class, function, or constant as `kind` says, in a view with
+/// `@use('fqn')`, or `None` when a `@use` imports it already. With `groups`, a group of the same kind for its
+/// namespace, such as `@use('App\Models\{Post, User}')`, takes it. Otherwise it goes among the `@use` lines at the
+/// view's top, classes first, then functions and constants, each in order, or else after the `@props` and
+/// `@aware` lines that start the view, or else first. `@use` compiles to a `use` statement, which PHP refuses
+/// inside a block, so the top is where it works. The caller checks that the project's Laravel reads `function`
+/// and `const` in `@use`.
+pub fn use_insert(text: &str, fqn: &str, kind: NameKind, groups: bool) -> Option<(usize, String)> {
     let fqn = fqn.trim_start_matches('\\');
     let src = text.as_bytes();
     let blank = |from: usize| from + src[from..].iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
-    // The class a `@use` imports, as written: `@use('App\Models\Post', 'P')` imports `App\Models\Post`.
-    let imported = |open: usize, close: usize| {
-        let first = text[open + 1..close].split(',').next().unwrap_or_default().trim().trim_matches(['\'', '"']);
-        first.trim_start_matches('\\').to_string()
-    };
-    for (at, _) in text.match_indices("@use") {
-        let open = blank(at + 4);
-        if (at == 0 || !src[at - 1].is_ascii_alphanumeric())
-            && src.get(open) == Some(&b'(')
-            && let Some(close) = matching_paren(src, open)
-            && imported(open, close).eq_ignore_ascii_case(fqn)
-        {
-            return None;
-        }
+    // Every `@use` in the view: its arguments' parentheses, and what it compiles to.
+    let uses: Vec<(usize, usize, String)> = text
+        .match_indices("@use")
+        .filter_map(|(at, _)| {
+            let open = blank(at + 4);
+            let starts = (at == 0 || !src[at - 1].is_ascii_alphanumeric()) && src.get(open) == Some(&b'(');
+            let close = starts.then(|| matching_paren(src, open)).flatten()?;
+            Some((open, close, use_body(&text[open..=close])?))
+        })
+        .collect();
+    if uses.iter().any(|(_, _, body)| use_entries(body).iter().any(|(k, n)| *k == kind && n.eq_ignore_ascii_case(fqn))) {
+        return None;
     }
-    // The lines at the top that are `@use`, `@props`, or `@aware`, each with where it starts and ends, and the
-    // class a `@use` imports.
-    let mut lead: Vec<(usize, usize, Option<String>)> = vec![];
+    let (namespace, short) = fqn.rsplit_once('\\').unwrap_or(("", fqn));
+    for (open, close, body) in uses.iter().filter(|_| groups && !namespace.is_empty()) {
+        let (group_kind, rest) = use_kind(body);
+        let Some((prefix, _)) = rest.split_once('{') else { continue };
+        if group_kind != kind || !prefix.trim().trim_matches('\\').eq_ignore_ascii_case(namespace) {
+            continue;
+        }
+        // The group's names in the view, each with where it starts and ends, and the text between two of them,
+        // which a new one copies, so a group with a name on each line gets one more line.
+        let Some(left) = text[*open..*close].find('{').map(|i| open + i) else { continue };
+        let Some(right) = text[left..*close].find('}').map(|i| left + i) else { continue };
+        let mut names: Vec<(usize, usize, &str)> = vec![];
+        let mut at = left + 1;
+        for part in text[left + 1..right].split(',') {
+            let name = part.trim();
+            if !name.is_empty() {
+                let start = at + part.len() - part.trim_start().len();
+                names.push((start, start + name.len(), name));
+            }
+            at += part.len() + 1;
+        }
+        let sep = names.windows(2).next().map_or(", ", |w| &text[w[0].1..w[1].0]);
+        let lower = short.to_ascii_lowercase();
+        return Some(match (names.iter().find(|n| n.2.to_ascii_lowercase() > lower), names.last()) {
+            (Some((start, _, _)), _) => (*start, format!("{short}{sep}")),
+            (None, Some((_, end, _))) => (*end, format!("{sep}{short}")),
+            (None, None) => (left + 1, short.to_string()),
+        });
+    }
+    // Where an import goes among the others: classes, then functions, then constants, each by name.
+    let order = |kind: NameKind, name: &str| {
+        let rank: u8 = match kind {
+            NameKind::Function => 1,
+            NameKind::Constant => 2,
+            _ => 0,
+        };
+        (rank, name.to_ascii_lowercase())
+    };
+    let new = order(kind, fqn);
+    let line = format!("@use('{}{fqn}')", use_keyword(kind));
+    // The lines at the top that are `@use`, `@props`, or `@aware`, each with where it starts and ends, and where a
+    // `@use` sorts.
+    type Line = (usize, usize, Option<(u8, String)>);
+    let mut lead: Vec<Line> = vec![];
     let mut at = 0;
     loop {
         let start = blank(at);
@@ -694,20 +793,24 @@ pub fn use_insert(text: &str, fqn: &str) -> Option<(usize, String)> {
         let open = blank(start + name.len());
         let Some(close) = (src.get(open) == Some(&b'(')).then(|| matching_paren(src, open)).flatten() else { break };
         let end = text[close..].find('\n').map_or(text.len(), |n| close + n + 1);
-        lead.push((at, end, (name == "@use").then(|| imported(open, close))));
+        let sorts = (name == "@use").then(|| {
+            let body = use_body(&text[open..=close]).unwrap_or_default();
+            let (kind, rest) = use_kind(&body);
+            order(kind, rest.split(['{', ' ']).next().unwrap_or_default())
+        });
+        lead.push((at, end, sorts));
         at = end;
     }
-    let lower = fqn.to_ascii_lowercase();
-    let uses: Vec<&(usize, usize, Option<String>)> = lead.iter().filter(|l| l.2.is_some()).collect();
-    let at = match uses.iter().find(|(_, _, class)| class.as_ref().is_some_and(|c| c.to_ascii_lowercase() > lower)) {
+    let uses: Vec<&Line> = lead.iter().filter(|l| l.2.is_some()).collect();
+    let at = match uses.iter().find(|(_, _, sorts)| sorts.as_ref().is_some_and(|s| *s > new)) {
         Some((start, _, _)) => *start,
         None => uses.last().copied().or(lead.last()).map_or(0, |(_, end, _)| *end),
     };
     // After a last line without a line break.
     if at == text.len() && at > 0 && !text.ends_with('\n') {
-        return Some((at, format!("\n@use('{fqn}')")));
+        return Some((at, format!("\n{line}")));
     }
-    Some((at, format!("@use('{fqn}')\n")))
+    Some((at, format!("{line}\n")))
 }
 
 #[cfg(test)]
@@ -716,7 +819,7 @@ mod tests {
 
     #[test]
     fn imports_a_class_with_use_at_the_views_top() {
-        let insert = |text: &str, fqn: &str| use_insert(text, fqn).map(|(at, new)| format!("{}{new}{}", &text[..at], &text[at..]));
+        let insert = |text: &str, fqn: &str| use_insert(text, fqn, NameKind::Default, true).map(|(at, new)| format!("{}{new}{}", &text[..at], &text[at..]));
         // First, after the lines that start a component, and among the imports in order.
         assert_eq!(insert("<div>{{ $a }}</div>\n", "App\\Post").unwrap(), "@use('App\\Post')\n<div>{{ $a }}</div>\n");
         assert_eq!(insert("@props([\n  'a' => 1,\n])\n<div></div>", "App\\Post").unwrap(), "@props([\n  'a' => 1,\n])\n@use('App\\Post')\n<div></div>");
@@ -725,8 +828,54 @@ mod tests {
         assert_eq!(insert(uses, "\\Zed").unwrap(), "@use('App\\Models\\A')\n@use('App\\Models\\C', 'C')\n@use('Zed')\n@aware(['x'])\n<p></p>\n");
         assert_eq!(insert("@props(['a'])", "App\\Post").unwrap(), "@props(['a'])\n@use('App\\Post')");
         // Never twice, wherever the view imports it, and whatever its alias.
-        assert!(use_insert(uses, "app\\models\\c").is_none());
-        assert!(use_insert("<p>\n@use(\"\\App\\Post\")\n</p>", "App\\Post").is_none());
+        assert!(use_insert(uses, "app\\models\\c", NameKind::Default, true).is_none());
+        assert!(use_insert("<p>\n@use(\"\\App\\Post\")\n</p>", "App\\Post", NameKind::Default, true).is_none());
+    }
+
+    #[test]
+    fn imports_functions_and_constants_and_joins_groups() {
+        let insert = |text: &str, fqn: &str, kind: NameKind, groups: bool| {
+            use_insert(text, fqn, kind, groups).map(|(at, new)| format!("{}{new}{}", &text[..at], &text[at..]))
+        };
+        // Classes, then functions, then constants, each in order.
+        let uses = "@use('App\\Post')\n@use('function App\\b')\n@use('const App\\Z')\n<p></p>";
+        assert_eq!(insert(uses, "App\\a", NameKind::Function, true).unwrap(), "@use('App\\Post')\n@use('function App\\a')\n@use('function App\\b')\n@use('const App\\Z')\n<p></p>");
+        assert_eq!(insert(uses, "App\\Y", NameKind::Constant, true).unwrap(), "@use('App\\Post')\n@use('function App\\b')\n@use('const App\\Y')\n@use('const App\\Z')\n<p></p>");
+        assert_eq!(insert(uses, "Zed\\Q", NameKind::Default, true).unwrap(), "@use('App\\Post')\n@use('Zed\\Q')\n@use('function App\\b')\n@use('const App\\Z')\n<p></p>");
+        // What a view imports, of the same kind, isn't imported again, in a group or not.
+        assert!(insert(uses, "App\\b", NameKind::Function, true).is_none());
+        assert!(insert(uses, "App\\b", NameKind::Default, true).is_some());
+        let group = "@use('App\\Models\\{Post, User as U}')\n@use('function App\\{f, h}')\n@use('App\\Support\\{function s, const C}')\n<p></p>";
+        assert!(insert(group, "App\\Models\\User", NameKind::Default, true).is_none());
+        assert!(insert(group, "App\\Support\\C", NameKind::Constant, true).is_none());
+        assert!(insert(group, "App\\Support\\s", NameKind::Function, true).is_none());
+        // A group of the same kind and namespace takes it, in order, copying how its names are laid out.
+        let rest = "\n@use('function App\\{f, h}')\n@use('App\\Support\\{function s, const C}')\n<p></p>";
+        assert_eq!(insert(group, "App\\Models\\Tag", NameKind::Default, true).unwrap(), format!("@use('App\\Models\\{{Post, Tag, User as U}}'){rest}"));
+        assert_eq!(insert(group, "App\\Models\\Zone", NameKind::Default, true).unwrap(), format!("@use('App\\Models\\{{Post, User as U, Zone}}'){rest}"));
+        assert_eq!(insert(group, "App\\g", NameKind::Function, true).unwrap(), "@use('App\\Models\\{Post, User as U}')\n@use('function App\\{f, g, h}')\n@use('App\\Support\\{function s, const C}')\n<p></p>");
+        let lines = "@use('App\\Models\\{\n    Post,\n    User,\n}')\n";
+        assert_eq!(insert(lines, "App\\Models\\Tag", NameKind::Default, true).unwrap(), "@use('App\\Models\\{\n    Post,\n    Tag,\n    User,\n}')\n");
+        // Not another namespace's group, another kind's, or one the project's Laravel can't read.
+        assert_eq!(insert(group, "App\\Post", NameKind::Default, true).unwrap(), format!("@use('App\\Models\\{{Post, User as U}}')\n@use('App\\Post'){rest}"));
+        assert!(insert(group, "App\\Models\\Tag", NameKind::Default, false).unwrap().starts_with("@use('App\\Models\\{Post, User as U}')\n@use('App\\Models\\Tag')\n"));
+        assert!(insert(group, "App\\Models\\g", NameKind::Function, true).unwrap().contains("@use('function App\\Models\\g')\n"));
+    }
+
+    #[test]
+    fn reads_use_as_laravel_compiles_it() {
+        assert_eq!(use_body("('App\\Models\\Post', 'P')").as_deref(), Some("App\\Models\\Post as P"));
+        assert_eq!(use_body("(\"\\App\\Post\")").as_deref(), Some("App\\Post"));
+        assert_eq!(use_body("('function App\\helper', 'h')").as_deref(), Some("function App\\helper as h"));
+        assert_eq!(use_body("('const App\\LIMIT')").as_deref(), Some("const App\\LIMIT"));
+        assert_eq!(use_body("('App\\Models\\{Post, User as U}')").as_deref(), Some("App\\Models\\{Post, User as U}"));
+        assert_eq!(use_body("('function App\\{a, b}')").as_deref(), Some("function App\\{a, b}"));
+        assert_eq!(use_body("('')"), None);
+        assert_eq!(use_body("($class)"), None);
+        let php = |blade: &str| checked_php(blade, &[]).php;
+        assert!(php("@use('function App\\helper')").starts_with("<?php use function App\\helper;"));
+        assert!(php("@use('App\\Models\\{Post, User}')").starts_with("<?php use App\\Models\\{Post, User};"));
+        assert!(php("@use('const App\\LIMIT', 'L')").starts_with("<?php use const App\\LIMIT as L;"));
     }
 
     #[test]

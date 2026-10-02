@@ -217,11 +217,13 @@ pub fn scan_pool() -> &'static rayon::ThreadPool {
     POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("tusk-scan-{i}")).stack_size(64 << 20).build().expect("the scan pool starts"))
 }
 
-/// With `uses`, a test file's own Pest bindings too: the classes and traits its `uses()` names.
-fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>, Vec<String>) {
+/// With `uses`, a test file's own Pest bindings too: the classes and traits its `uses()` names. Also what the
+/// file declares, for the name list ([`declarations_of`]).
+fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>, Vec<String>, Vec<Declared>) {
     let (file, program) = crate::analysis::parse_balanced(arena, path, file_type, contents);
     let names = NameResolver::new(arena).resolve(program);
     let meta = scan_program(arena, &file, program, &names, php_version);
+    let declared = declarations_of(&meta, program);
     let parsed = Parsed { file, program, names };
     let names = &parsed.names;
     let pest = if uses && path.components().any(|c| c.as_os_str() == "tests") { own_pest_uses(&parsed) } else { vec![] };
@@ -242,7 +244,7 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
             }
         }
     }
-    (meta, used, pest)
+    (meta, used, pest, declared)
 }
 
 /// Pest's configuration file, relative to the project.
@@ -419,8 +421,28 @@ fn dependencies(meta: &CodebaseMetadata) -> Vec<String> {
     out
 }
 
-/// What a scan declares, for the name list.
-fn declarations_of(meta: &CodebaseMetadata) -> Vec<Declared> {
+/// What a scan of `program` declares, for the name list. A constant keeps its name as the file writes it: Mago's
+/// name for it has its namespace in lower case, which an import would copy.
+fn declarations_of(meta: &CodebaseMetadata, program: &mago_syntax::cst::Program<'_>) -> Vec<Declared> {
+    use mago_syntax::cst::Statement;
+    let mut spelled: HashMap<String, String> = HashMap::new();
+    let mut constants = |namespace: &str, statements: &mut dyn Iterator<Item = &Statement<'_>>| {
+        for statement in statements {
+            let Statement::Constant(c) = statement else { continue };
+            for item in c.items.iter() {
+                let short = String::from_utf8_lossy(item.name.value);
+                let name = if namespace.is_empty() { short.into_owned() } else { format!("{namespace}\\{short}") };
+                spelled.insert(name.to_ascii_lowercase(), name);
+            }
+        }
+    };
+    constants("", &mut program.statements.iter());
+    for statement in program.statements.iter() {
+        if let Statement::Namespace(n) = statement {
+            let namespace = n.name.as_ref().map(|n| String::from_utf8_lossy(n.value())).unwrap_or_default();
+            constants(namespace.trim_start_matches('\\'), &mut n.statements().iter());
+        }
+    }
     let mut out: Vec<Declared> = meta
         .class_likes
         .values()
@@ -437,7 +459,10 @@ fn declarations_of(meta: &CodebaseMetadata) -> Vec<Declared> {
         is_abstract: false,
         span: f.name_span.unwrap_or(f.span),
     }));
-    out.extend(meta.constants.values().map(|c| Declared { name: c.name, kind: DeclKind::Constant, is_abstract: false, span: c.span }));
+    out.extend(meta.constants.values().map(|c| {
+        let name = spelled.get(&c.name.as_str_lossy().to_ascii_lowercase()).map_or(c.name, |n| Word::new(n.as_bytes()));
+        Declared { name, kind: DeclKind::Constant, is_abstract: false, span: c.span }
+    }));
     out.extend(meta.class_like_alias_declarations().map(|(alias, _, span)| Declared {
         name: alias,
         kind: DeclKind::Class(SymbolKind::Class),
@@ -575,9 +600,9 @@ impl Index {
                         return Some((path.clone(), file_type, None, stamp));
                     }
                     let contents = read(path)?;
-                    let (meta, ..) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
+                    let (.., declared) = scan(path, file_type, contents, php_version, &LocalArena::new(), false);
                     tick();
-                    Some((path.clone(), file_type, Some(declarations_of(&meta)), stamp))
+                    Some((path.clone(), file_type, Some(declared), stamp))
                 })
                 .collect());
             for (path, file_type, declared, stamp) in found {
@@ -609,22 +634,22 @@ impl Index {
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
-            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>, Vec<String>)> = scan_pool().install(|| chunk
+            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>, Vec<String>, Vec<Declared>)> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
-                    let (meta, used, pest) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
+                    let (meta, used, pest, declared) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
                     tick();
-                    Some((path.clone(), meta, used, pest))
+                    Some((path.clone(), meta, used, pest, declared))
                 })
                 .collect());
-            for (path, meta, used, pest) in scans {
+            for (path, meta, used, pest, declared) in scans {
                 wanted.extend(used);
                 if !pest.is_empty() {
                     self.pest_own.insert(file_id(&path), pest);
                 }
                 wanted.extend(dependencies(&meta));
-                self.merge(path, FileType::Host, meta);
+                self.merge(path, FileType::Host, meta, declared);
             }
         }
         if self.config.load_all {
@@ -695,19 +720,19 @@ impl Index {
             let php_version = self.config.php_version;
             let jobs: Vec<(PathBuf, FileType)> =
                 wave.iter().filter_map(|id| self.library.get(id)).map(|f| (f.path.clone(), f.file_type)).collect();
-            let scans: Vec<(PathBuf, FileType, CodebaseMetadata, Vec<String>)> = scan_pool().install(|| jobs
+            let scans: Vec<(PathBuf, FileType, CodebaseMetadata, Vec<String>, Vec<Declared>)> = scan_pool().install(|| jobs
                 .into_par_iter()
                 .filter_map(|(path, file_type)| {
                     let contents = read(&path)?;
-                    let (meta, ..) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
+                    let (meta, _, _, declared) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
                     let needs = dependencies(&meta);
-                    Some((path, file_type, meta, needs))
+                    Some((path, file_type, meta, needs, declared))
                 })
                 .collect());
-            for (path, file_type, meta, needs) in scans {
+            for (path, file_type, meta, needs, declared) in scans {
                 names.extend(needs);
                 loaded.extend(meta.class_likes.keys().copied());
-                self.merge(path, file_type, meta);
+                self.merge(path, file_type, meta, declared);
             }
         }
     }
@@ -751,23 +776,23 @@ impl Index {
             }
             let file_type = self.file_type(&path);
             let project = file_type == FileType::Host;
-            let (meta, used, pest) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
+            let (meta, used, pest, declared) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
             if !pest.is_empty() {
                 self.pest_own.insert(id, pest);
             }
             // A library file that changes is one the editor has open, or one changed on disk while loaded; both
             // are loaded in full, so navigating inside an open library file works.
             if !project {
-                self.add_library_file(path.clone(), file_type, declarations_of(&meta));
+                self.add_library_file(path.clone(), file_type, declared.clone());
             }
             dirty.extend(meta.class_likes.keys().copied());
             dirty.extend(meta.constants.keys().copied());
             wanted.extend(used);
             wanted.extend(dependencies(&meta));
-            scans.push((path, file_type, meta));
+            scans.push((path, file_type, meta, declared));
         }
-        for (path, file_type, meta) in scans {
-            self.merge(path, file_type, meta);
+        for (path, file_type, meta, declared) in scans {
+            self.merge(path, file_type, meta, declared);
         }
         // Names the edit started to use, from the disk: library files an editor has open are loaded already.
         self.ensure_loaded(wanted, &|p: &Path| std::fs::read(p).ok());
@@ -780,7 +805,7 @@ impl Index {
     }
 
     /// Moves a file's scan into the index, remembering what it declared.
-    fn merge(&mut self, path: PathBuf, file_type: FileType, meta: CodebaseMetadata) {
+    fn merge(&mut self, path: PathBuf, file_type: FileType, meta: CodebaseMetadata, declared: Vec<Declared>) {
         let keys = CodebaseEntryKeys {
             class_like_names: meta.class_likes.keys().copied().collect(),
             class_like_aliases: meta.class_like_alias_declarations().collect(),
@@ -790,7 +815,7 @@ impl Index {
         };
         let id = file_id(&path);
         if file_type == FileType::Host {
-            self.declared.insert(id, declarations_of(&meta));
+            self.declared.insert(id, declared);
         }
         // Cloned in, not moved: clones are allocated at their size, and a scan's collections have room to spare.
         self.codebase.extend_ref(&meta);

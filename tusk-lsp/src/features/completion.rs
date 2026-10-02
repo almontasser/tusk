@@ -39,6 +39,7 @@ enum Data {
     Method { class: String, name: String },
     Property { class: String, name: String },
     Constant { class: String, name: String },
+    GlobalConstant { name: String },
 }
 
 pub fn completion(snap: &Snapshot, params: CompletionParams) -> Result<Option<CompletionResponse>, String> {
@@ -53,8 +54,8 @@ pub fn completion(snap: &Snapshot, params: CompletionParams) -> Result<Option<Co
 }
 
 /// The PHP completions in a Blade view, at `offset` in the view, when that's in its PHP: names, variables with the
-/// types the places that render it pass, and members. A class that needs an import is imported with `@use`, and a
-/// function that needs one, or a class without `@use` in the project's Laravel, is written in full.
+/// types the places that render it pass, and members. A class, function, or constant that needs an import is
+/// imported with `@use`, or written in full where the project's Laravel can't import it so.
 fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option<(Vec<CompletionItem>, bool)> {
     // In PHP when the last character before the cursor, other than spaces, is the view's PHP, not blanked text.
     let view = &blade.view_text()[..offset as usize];
@@ -63,23 +64,21 @@ fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option
         return None;
     }
     let (items, incomplete) = complete(ctx, blade.php_offset(offset))?;
+    let forms = crate::framework::laravel::blade_use(ctx);
     let items = items
         .into_iter()
         .filter_map(|mut item| {
             // The PHP's import goes in its first line, which isn't the view's.
             if item.additional_text_edits.take().is_some_and(|e| !e.is_empty()) {
-                let (fqn, class) = match item.data.as_ref().and_then(|d| serde_json::from_value::<Data>(d.clone()).ok())? {
-                    Data::Class { name } => (name, true),
-                    Data::Function { name } => (name, false),
+                let (fqn, kind) = match item.data.as_ref().and_then(|d| serde_json::from_value::<Data>(d.clone()).ok())? {
+                    Data::Class { name } => (name, NameKind::Default),
+                    Data::Function { name } => (name, NameKind::Function),
+                    Data::GlobalConstant { name } => (name, NameKind::Constant),
                     _ => return None,
                 };
                 let Some(CompletionTextEdit::Edit(edit)) = &mut item.text_edit else { return None };
-                if class {
-                    let edits = crate::framework::laravel::blade_import(&ctx.index, blade.view(), &fqn, &mut edit.new_text, &item.label);
-                    item.additional_text_edits = (!edits.is_empty()).then_some(edits);
-                } else if let Some(rest) = edit.new_text.strip_prefix(item.label.as_str()) {
-                    edit.new_text = format!("\\{}{rest}", fqn.trim_start_matches('\\'));
-                }
+                let edits = crate::framework::laravel::blade_import(forms, blade.view(), &fqn, kind, &mut edit.new_text, &item.label);
+                item.additional_text_edits = (!edits.is_empty()).then_some(edits);
             }
             match &mut item.text_edit {
                 Some(CompletionTextEdit::Edit(edit)) => edit.range = blade.view_range(&ctx.doc, edit.range)?,
@@ -630,6 +629,10 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
         let short = name.rsplit('\\').next().unwrap_or(&name).to_string();
         let mut it = item(&short, CompletionItemKind::CONSTANT, Some(name.clone()), range);
         it.sort_text = Some(format!("{s}2{short}"));
+        let r = reference(&ctx.doc, ctx.parsed.program, word_start, &name, NameKind::Constant);
+        it.text_edit = Some(CompletionTextEdit::Edit(TextEdit { range, new_text: r.name }));
+        it.additional_text_edits = r.edit.map(|e| vec![e]);
+        it.data = serde_json::to_value(Data::GlobalConstant { name }).ok();
         out.push(it);
     }
     for k in KEYWORDS.iter().filter(|k| score(k, word).is_some_and(|s| s <= 1)) {
@@ -656,11 +659,12 @@ pub fn resolve(snap: &Snapshot, mut item: CompletionItem) -> Result<CompletionIt
             .get_enum_case(class.as_bytes(), name.as_bytes())
             .map(|c| c.span)
             .or_else(|| codebase.get_class_constant(class.as_bytes(), name.as_bytes()).map(|c| c.span)),
+        Data::GlobalConstant { .. } => None,
     };
     // A library symbol the project doesn't use yet isn't loaded; its declaration is still known, by its name.
     let from_name = span.is_none();
     let span = span.or_else(|| match &data {
-        Data::Class { name } | Data::Function { name } => index.find_declared(name).map(|d| d.span),
+        Data::Class { name } | Data::Function { name } | Data::GlobalConstant { name } => index.find_declared(name).map(|d| d.span),
         _ => None,
     });
     let Some(span) = span else { return Ok(item) };
@@ -856,6 +860,36 @@ mod tests {
         assert_eq!(edit_of(&items, "reportHelper"), ("\\App\\Models\\reportHelper($0)".to_string(), vec![]));
         // Without `@use` in the project's Laravel, a class is written in full too.
         assert_eq!(edit_of(&complete_at(&[lib, view]), "Report"), ("\\App\\Models\\Report".to_string(), vec![]));
+
+        // Where `@use` reads `function` and `const`, they're imported too, after the classes, and a group of
+        // the namespace takes them.
+        let lib = ("app/Models/Report.php", "<?php\nnamespace App\\Models;\nclass Report {}\nfunction reportHelper(int $n): int { return $n; }\nconst REPORT_LIMIT = 5;\n");
+        let blade_use = (
+            "vendor/laravel/CompilesUseStatements.php",
+            "<?php\nnamespace Illuminate\\View\\Compilers\\Concerns;\ntrait CompilesUseStatements { function compileUse($e) { str_contains($e, '{'); str_starts_with($e, 'function '); } }\n",
+        );
+        let items = complete_at(&[lib, blade_use, view]);
+        let (text, extra) = edit_of(&items, "reportHelper");
+        assert_eq!((text.as_str(), extra[0].range.start.line, extra[0].new_text.as_str()), ("reportHelper($0)", 1, "@use('function App\\Models\\reportHelper')\n"));
+        let (text, extra) = edit_of(&items, "REPORT_LIMIT");
+        assert_eq!((text.as_str(), extra[0].new_text.as_str()), ("REPORT_LIMIT", "@use('const App\\Models\\REPORT_LIMIT')\n"));
+        let grouped = ("resources/views/v.blade.php", "@use('function App\\Models\\{other}')\n<p>{{ Repor<|> }}</p>\n");
+        let (_, extra) = edit_of(&complete_at(&[lib, blade_use, grouped]), "reportHelper");
+        assert_eq!((extra[0].range.start.character, extra[0].new_text.as_str()), (32, ", reportHelper"));
+        // What the view imports is written short, with no edit.
+        let imported = ("resources/views/v.blade.php", "@use('function App\\Models\\{reportHelper}')\n<p>{{ Repor<|> }}</p>\n");
+        assert_eq!(edit_of(&complete_at(&[lib, blade_use, imported]), "reportHelper"), ("reportHelper($0)".to_string(), vec![]));
+    }
+
+    #[test]
+    fn imports_a_constant_as_its_declaration_spells_it() {
+        let consts = ("app/Support/limits.php", "<?php\nnamespace App\\Support\\Limits;\nconst MAX_ITEMS = 5;\n");
+        let code = ("app/Http/Page.php", "<?php\nnamespace App\\Http;\n\nfunction f() { return MAX_IT<|>; }\n");
+        let items = complete_at(&[consts, code]);
+        let item = items.iter().find(|i| i.label == "MAX_ITEMS").unwrap_or_else(|| panic!("{:?}", labels(&items)));
+        assert_eq!(item.detail.as_deref(), Some("App\\Support\\Limits\\MAX_ITEMS"));
+        let edits = item.additional_text_edits.clone().unwrap_or_default();
+        assert_eq!(edits.iter().map(|e| e.new_text.trim()).collect::<Vec<_>>(), ["use const App\\Support\\Limits\\MAX_ITEMS;"]);
     }
 
     #[test]
