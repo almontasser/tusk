@@ -408,6 +408,16 @@ mod tests {
     }
 
     #[test]
+    fn types_auth_as_the_auth_manager_and_its_default_guard() {
+        let code = "<?php\nuse Illuminate\\Support\\Facades\\Auth;\nfunction f(): void {\n    $id = auth()->id();\n    $in = auth()->check() && auth(null)->check();\n    auth()->logout();\n    auth()->guard('web');\n    echo auth()->user()->getAuthIdentifier();\n    echo Auth::user()->getAuthIdentifier();\n    echo auth('web')->user()->getAuthIdentifier();\n    auth()->nope();\n    auth('web')->logout();\n}\n";
+        let fx = Fixture::new(&[crate::testing::LARAVEL_AUTH, ("app/f.php", code)]);
+        let found: Vec<_> = mago_codes(&fx, "app/f.php").into_iter().filter(|(c, _)| !c.starts_with("mixed")).collect();
+        // The user may be null, as from the facade; a guard's own methods are known, and others go to `__call`.
+        let null = "possible-method-access-on-null".to_string();
+        assert_eq!(found, vec![(null.clone(), 7), (null.clone(), 8), (null, 9), ("non-documented-method".into(), 10), ("non-existent-method".into(), 11)], "{found:?}");
+    }
+
+    #[test]
     fn reads_views_whose_blocks_dont_nest_without_false_problems() {
         let fx = narrowing_fixture();
         let lines = |blade: &str| view_problems(&fx, blade);

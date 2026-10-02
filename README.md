@@ -3596,7 +3596,11 @@ problem. Laravel's root aliases, such as `use DB;`, resolve too: the editor
 writes stubs for them that the PHP server and Mago read. It also gives Mago corrected
 copies of the Laravel and Pest files whose types are wider than what your code
 gets back, as Larastan does: `__()` returns a string, `auth()->user()` your
-user model, and `shouldReceive()` takes arguments. A Pest test's `$this` is
+user model, and `shouldReceive()` takes arguments. Without those copies, as in
+a project with its own `mago.toml`, `auth()` still has the default guard's
+methods, such as `user()`, `id()`, `check()`, and `login()`, in problems,
+completion, and hover, and `auth()->user()` returns what `Auth::user()` does.
+A Pest test's `$this` is
 the test case `tests/Pest.php` binds to its folder. Problems Mago can't prove, such as a value that may be null, show
 as warnings; using a value of unknown type shows as a hint.
 

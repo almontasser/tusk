@@ -706,6 +706,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_the_default_guards_methods_on_auth() {
+        let at = |code| labels(&complete_at(&[crate::testing::LARAVEL_AUTH, ("app/f.php", code)]));
+        let manager = vec!["__call", "check", "guard", "id", "login", "logout", "user"];
+        assert_eq!(at("<?php\nauth()-><|>\n"), manager);
+        assert_eq!(at("<?php\nauth(null)-><|>\n"), manager);
+        // A guard by name is only the guard contract.
+        assert_eq!(at("<?php\nauth('web')-><|>\n"), vec!["check", "id", "user"]);
+    }
+
+    #[test]
     fn completes_static_members_constants_and_enum_cases() {
         let files = |t| [("lib.php", LIB), ("t.php", t)];
         let items = complete_at(&files("<?php\nuse App\\Models\\User;\nUser::<|>\n"));

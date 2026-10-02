@@ -333,6 +333,12 @@ mod tests {
     }
 
     #[test]
+    fn shows_the_default_guards_methods_on_auth() {
+        let h = hover_text(&[crate::testing::LARAVEL_AUTH, ("app/f.php", "<?php\nauth()->us<|>er();\n")]);
+        assert!(h.starts_with("`Illuminate\\Contracts\\Auth\\Guard`") && h.contains("public function user()"), "{h}");
+    }
+
+    #[test]
     fn shows_inferred_variable_types() {
         let h = hover_text(&[("t.php", "<?php function f() { $x = [1, 2]; return $<|>x; }")]);
         assert!(h.starts_with("```php\n<?php\nlist{"), "{h}");

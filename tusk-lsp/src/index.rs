@@ -390,6 +390,10 @@ fn dependencies(meta: &CodebaseMetadata) -> Vec<String> {
             classes_in(&t.type_union, &mut out);
         }
     }
+    // `auth()` declares the auth contract but is typed as the manager behind it (see `analysis::AuthHelper`).
+    if out.iter().any(|n| n == "illuminate\\contracts\\auth\\factory") {
+        out.push(crate::analysis::AUTH_MANAGER.to_ascii_lowercase());
+    }
     out.sort();
     out.dedup();
     out
