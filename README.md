@@ -1501,6 +1501,12 @@ Bookmarks are saved in the project's local state, not in `tusk.json`, and
 bookmarks from earlier versions move there the first time you open the
 project.
 
+## Docblocks
+
+In PHP files, pressing Enter in a `/** … */` docblock starts the new line with a
+`*` lined up under the one above. Pressing Enter after `*/` goes back to the
+indentation of the `/**`.
+
 ## Snippets
 
 Snippets work like PhpStorm's live templates: type a snippet's prefix, choose

@@ -131,6 +131,21 @@ monaco.languages.onLanguage("blade", async () => {
   });
 });
 
+// Enter in a docblock continues it with a `*` under the one above, as VS Code does for TypeScript. Monaco's PHP config
+// has no Enter rules, and it merges configs field by field, so this adds to it.
+monaco.languages.setLanguageConfiguration("php", {
+  onEnterRules: [
+    // /** | */
+    { beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/, afterText: /^\s*\*\/$/, action: { indentAction: monaco.languages.IndentAction.IndentOutdent, appendText: " * " } },
+    // /** …|
+    { beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/, action: { indentAction: monaco.languages.IndentAction.None, appendText: " * " } },
+    //  * …| under a docblock line, so a line of code that starts with `*` isn't continued.
+    { beforeText: /^\s*\*(\s([^*]|\*(?!\/))*)?$/, previousLineText: /^\s*(\/\*\*|\*)/, action: { indentAction: monaco.languages.IndentAction.None, appendText: "* " } },
+    //  */| goes back to the indentation of the /**.
+    { beforeText: /^\s*\*\/\s*$/, action: { indentAction: monaco.languages.IndentAction.None, removeText: 1 } },
+  ],
+});
+
 // `.env` files get a language of their own, so Tusk's server can complete keys and offer fixes in them. The
 // grammar reads them as phpdotenv does: `#` comments, `export`, quoted values that span lines, and `${VAR}` references.
 monaco.languages.register({ id: "dotenv", filenames: [".env"], filenamePatterns: [".env.*"], aliases: ["Environment"] });
