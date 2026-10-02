@@ -1,7 +1,6 @@
 // Reads a PHP file's type declarations: their full names, and the full names of their parents, interfaces,
 // and traits. Free of editor imports so Node can test it.
 import { commentMask } from "./comments.ts";
-import { matchBracket } from "./refactorparse.ts";
 
 export type TypeDeclaration = {
   fqn: string;
@@ -290,43 +289,4 @@ export function constructorCalls(source: string, classes: Set<string>): [number,
     if (target && classes.has(target)) calls.push([start, end]);
   }
   return calls;
-}
-
-// Strings, heredocs, and comments, which name rewrites leave alone.
-const LITERALS = /'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"|<<<[ \t]*(['"]?)([A-Za-z_]\w*)\1\r?\n[\s\S]*?\n[ \t]*\2\b|\/\/[^\n]*|#(?!\[)[^\n]*|\/\*[\s\S]*?\*\//g;
-
-/** Applies `fn` to the code outside strings, heredocs, and comments, so a rewrite of names leaves `"\t"` and `'a, b'` alone. */
-export function outsideStrings(text: string, fn: (code: string) => string): string {
-  let out = "";
-  let last = 0;
-  for (const m of text.matchAll(LITERALS)) {
-    out += fn(text.slice(last, m.index)) + m[0];
-    last = m.index! + m[0].length;
-  }
-  return out + fn(text.slice(last));
-}
-
-const BUILTIN_TYPES = new Set("int float string bool array callable iterable object mixed void null never false true self static parent".split(" "));
-// A name in a type: after "(", ",", "|", "&", "?", or a return type's ":", and not a call or a constant's class.
-const TYPE_NAME = /(?<=(?:[(,|&?]|(?<!:):)\s*)\\?[A-Za-z_][\w\\]*(?![\w\\(]|\s*::)/g;
-
-/**
- * The abstract methods a file declares between offsets `from` and `to`: the name, and the declaration without
- * `abstract` and its `;`. Class names in its types are written in full (`\App\Models\User`), since the stub goes
- * into another file.
- */
-export function abstractMethods(source: string, from = 0, to = source.length): { name: string; signature: string }[] {
-  const code = commentMask(source);
-  const { resolve } = nameResolver(code);
-  const methods: { name: string; signature: string }[] = [];
-  for (const m of code.matchAll(/((?:(?:public|protected|private|static|abstract)\s+)+)function\s+&?\s*(\w+)\s*\(/g)) {
-    if (!/\babstract\b/.test(m[1]) || m.index! < from || m.index! >= to) continue;
-    const close = matchBracket(code, m.index! + m[0].length - 1);
-    const end = close < 0 ? -1 : code.indexOf(";", close);
-    if (end < 0) continue;
-    const declaration = source.slice(m.index!, end).replace(/\babstract\s+/, "");
-    const signature = outsideStrings(declaration, (code) => code.replace(TYPE_NAME, (name) => (BUILTIN_TYPES.has(name.toLowerCase()) ? name : `\\${resolve(name)}`)));
-    methods.push({ name: m[2], signature: signature.trimEnd() });
-  }
-  return methods;
 }
