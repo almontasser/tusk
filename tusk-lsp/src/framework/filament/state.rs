@@ -11,7 +11,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Argument, Call, Expression, Literal, Node};
 use serde_json::{Value, json};
 
-use super::schema::{self, Comp, GET_METHODS, Kind, Resolved, Schema, default_label};
+use super::schema::{self, Comp, Fill, GET_METHODS, Kind, Resolved, Schema, default_label};
 use super::{CallKind, StringArg, active, class_reference, context, enum_cases, item, string_arg_at, string_args};
 use crate::analysis::Parsed;
 use crate::features::Ctx;
@@ -22,6 +22,8 @@ pub struct StateCall {
     pub set: bool,
     /// `isAbsolute: true`, or a path that starts with `/`.
     pub absolute: bool,
+    /// Whether it's `isAbsolute: true`, whose path doesn't start with `/`.
+    pub absolute_flag: bool,
 }
 
 /// Runs `f` on the file's schemas. Completion's parse ends at the cursor, so it reads the whole text again,
@@ -46,7 +48,7 @@ fn is_setter(schema: &Schema<'_>, var: &str) -> bool {
 }
 
 /// Whether a string argument is the path of a `$get()`, `$get->string()`, or `$set()` call.
-pub fn state_call(ctx: &Ctx<'_>, schema: &Schema<'_>, arg: &StringArg) -> Option<StateCall> {
+pub fn state_call(ctx: &Ctx<'_>, parsed: &Parsed<'_>, schema: &Schema<'_>, arg: &StringArg) -> Option<StateCall> {
     if arg.index != 0 || arg.in_array.is_some() {
         return None;
     }
@@ -70,8 +72,8 @@ pub fn state_call(ctx: &Ctx<'_>, schema: &Schema<'_>, arg: &StringArg) -> Option
         }
         _ => return None,
     };
-    let absolute = arg.value.starts_with('/') || absolute_flag(ctx, arg, absolute_at);
-    Some(StateCall { set, absolute })
+    let absolute_flag = absolute_flag(parsed, arg, absolute_at);
+    Some(StateCall { set, absolute: absolute_flag || arg.value.starts_with('/'), absolute_flag })
 }
 
 /// The variable a state call is on: `$get` in `$get('…')` and `$get->string('…')`.
@@ -88,7 +90,8 @@ fn variable(ctx: &Ctx<'_>, arg: &StringArg) -> String {
 fn owner_of<'s, 'a>(ctx: &Ctx<'_>, schema: &'s Schema<'a>, arg: &StringArg) -> Option<&'s Comp<'a>> {
     let var = variable(ctx, arg);
     let declares = |list: &mago_syntax::cst::FunctionLikeParameterList<'_>| list.parameters.iter().any(|p| p.variable.name == var.as_bytes());
-    let uses = |c: &mago_syntax::cst::Closure<'_>| c.use_clause.as_ref().is_some_and(|u| u.variables.iter().any(|v| v.variable.name == var.as_bytes()));
+    let uses =
+        |c: &mago_syntax::cst::Closure<'_>| c.use_clause.as_ref().is_some_and(|u| u.variables.iter().any(|v| v.variable.name == var.as_bytes()));
     for node in ctx.parsed.path_at(arg.start).iter().rev() {
         match node {
             Node::ArrowFunction(f) if declares(&f.parameter_list) => return schema.owner(f.span().start.offset),
@@ -102,8 +105,8 @@ fn owner_of<'s, 'a>(ctx: &Ctx<'_>, schema: &'s Schema<'a>, arg: &StringArg) -> O
 }
 
 /// Whether the call passes `true` for `isAbsolute`, by name or at position `at`.
-fn absolute_flag(ctx: &Ctx<'_>, arg: &StringArg, at: usize) -> bool {
-    let path = ctx.parsed.path_at(arg.start);
+fn absolute_flag(parsed: &Parsed<'_>, arg: &StringArg, at: usize) -> bool {
+    let path = parsed.path_at(arg.start);
     let list = path.iter().rev().find_map(|n| match n {
         Node::FunctionCall(c) => Some(&c.argument_list),
         Node::MethodCall(c) => Some(&c.argument_list),
@@ -154,8 +157,24 @@ fn casts_enums(ctx: &Ctx<'_>) -> bool {
     state.remember("filament:v4", &["composer.lock"], || Value::Bool(root.join("vendor/filament/schemas").is_dir())).as_bool() == Some(true)
 }
 
+/// The model whose records fill a field at the top of a resource's form, for `->relationship()` options.
+fn form_model(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>) -> Option<String> {
+    if !comp.container.is_empty() || schema.roots[comp.root].fill != Fill::Record {
+        return None;
+    }
+    context(ctx)?["model"]["class"].as_str().map(String::from)
+}
+
+/// The field's options from the database, once they've been read; see [`super::query_options`].
+fn query_options(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>, fresh: std::time::Duration) -> Option<(Vec<super::OptionValue>, bool)> {
+    let text = &ctx.doc.text;
+    let related = comp.chain.iter().any(|c| &text[c.method.span().start.offset as usize..c.method.span().end.offset as usize] == "relationship");
+    let model = if related { form_model(ctx, schema, comp) } else { None };
+    super::query_options(ctx, &comp.chain, model.as_deref(), fresh)
+}
+
 /// A short description of a field's options, if it has any.
-fn options(ctx: &Ctx<'_>, comp: &Comp<'_>) -> Option<String> {
+fn options(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>) -> Option<String> {
     let text = &ctx.doc.text;
     let list = |values: Vec<String>| {
         let more = values.len().saturating_sub(8);
@@ -179,6 +198,16 @@ fn options(ctx: &Ctx<'_>, comp: &Comp<'_>) -> Option<String> {
             list(found.into_iter().map(|(k, v)| format!("`{k}` {}", v.unwrap_or_default()).trim_end().to_string()).collect())
         ));
     }
+    if let Some((found, more)) = query_options(ctx, schema, comp, super::OPTIONS_FRESH) {
+        if found.is_empty() {
+            return Some("Options from the database: none".into());
+        }
+        let mut shown = list(found.into_iter().map(|o| format!("`{}` {}", o.php, o.label.unwrap_or_default()).trim_end().to_string()).collect());
+        if more && !shown.contains(", and ") {
+            shown.push_str(", and more");
+        }
+        return Some(format!("Options from the database: {shown}"));
+    }
     for c in &comp.chain {
         let method = &text[c.method.span().start.offset as usize..c.method.span().end.offset as usize];
         let args = &text[c.argument_list.left_parenthesis.end.offset as usize..c.argument_list.right_parenthesis.start.offset as usize];
@@ -194,7 +223,7 @@ fn options(ctx: &Ctx<'_>, comp: &Comp<'_>) -> Option<String> {
 }
 
 /// Markdown describing a field, for hover and completion.
-fn describe(ctx: &Ctx<'_>, comp: &Comp<'_>) -> String {
+fn describe(ctx: &Ctx<'_>, schema: &Schema<'_>, comp: &Comp<'_>) -> String {
     let text = &ctx.doc.text;
     let make = &text[comp.make.span().start.offset as usize..comp.make.span().end.offset as usize];
     let mut out = format!("```php\n<?php\n{make}\n```\n\n**{}** · {}", label(ctx, comp), comp.short_class());
@@ -202,7 +231,7 @@ fn describe(ctx: &Ctx<'_>, comp: &Comp<'_>) -> String {
         let shown: Vec<&str> = path.iter().map(|s| if s.starts_with('*') { "*" } else { s.as_str() }).collect();
         out.push_str(&format!(" · state path `{}`", shown.join(".")));
     }
-    if let Some(o) = options(ctx, comp) {
+    if let Some(o) = options(ctx, schema, comp) {
         out.push_str("\n\n");
         out.push_str(&o);
     }
@@ -219,15 +248,21 @@ fn kind(comp: &Comp<'_>) -> CompletionItemKind {
 /// Completion of a `$get()` or `$set()` path: the fields the closure's schema reaches, nearest first.
 pub fn completion(ctx: &Ctx<'_>, offset: u32, arg: &StringArg) -> Option<Vec<CompletionItem>> {
     let typed = ctx.doc.text.get(arg.start as usize..offset as usize)?.to_string();
-    with_schema(ctx, Some(offset), |schema, _| {
-        state_call(ctx, schema, arg)?;
-        if typed.starts_with('/') {
-            return Some(vec![]);
-        }
+    with_schema(ctx, Some(offset), |schema, full| {
+        let call = state_call(ctx, full, schema, arg)?;
         let range = ctx.doc.range(arg.start, offset);
-        let candidates: Vec<(&Comp<'_>, String, usize)> = match owner_of(ctx, schema, arg) {
+        let owner = owner_of(ctx, schema, arg);
+        let candidates: Vec<(&Comp<'_>, String, usize)> = match owner {
+            // An absolute path starts at the Livewire component: the root's state path, then each field's.
+            Some(owner) if call.absolute => {
+                let Some(state_path) = &schema.roots[owner.root].state_path else { return Some(vec![]) };
+                let slash = if call.absolute_flag && !typed.starts_with('/') { "" } else { "/" };
+                let prefix: String = state_path.iter().map(|s| format!("{s}.")).collect();
+                schema.reachable(owner.root, &[]).into_iter().map(|(c, text, _)| (c, format!("{slash}{prefix}{text}"), 0)).collect()
+            }
             Some(owner) => schema.reachable(owner.root, &owner.container),
             // Outside a schema, such as in a method that builds one closure: every field by its own name.
+            None if call.absolute => return Some(vec![]),
             None => schema.comps.iter().filter_map(|c| Some((c, c.name.as_ref()?.0.clone(), 0))).collect(),
         };
         let mut candidates = candidates;
@@ -241,8 +276,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32, arg: &StringArg) -> Option<Vec<Com
                 let detail = format!("{} · {}", comp.short_class(), label(ctx, comp));
                 let mut item = item(&text, kind(comp), &detail, range, Some(format!("{up}{order:05}")));
                 // Typed without `../`, a field further up still matches by its name.
-                item.filter_text = (!typed.contains('/')).then(|| text.trim_start_matches("../").to_string());
-                item.documentation = Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: describe(ctx, comp) }));
+                item.filter_text = (!typed.contains('/') && !call.absolute).then(|| text.trim_start_matches("../").to_string());
+                item.documentation =
+                    Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: describe(ctx, schema, comp) }));
                 item
             })
             .collect();
@@ -253,13 +289,16 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32, arg: &StringArg) -> Option<Vec<Com
 pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     let arg = string_arg_at(ctx, offset)?;
     let value = with_schema(ctx, None, |schema, _| {
-        let call = state_call(ctx, schema, &arg)?;
+        let call = state_call(ctx, &ctx.parsed, schema, &arg)?;
         let owner = owner_of(ctx, schema, &arg)?;
-        match schema::resolve(&owner.container, &arg.value, call.absolute) {
-            Resolved::Path(p) => schema.fields_at(owner.root, &p).first().map(|comp| describe(ctx, comp)),
+        match schema.resolve(owner.root, &owner.container, &arg.value, call.absolute) {
+            Resolved::Path(p) => schema.fields_at(owner.root, &p).first().map(|comp| describe(ctx, schema, comp)),
             Resolved::Outside => {
-                let property = arg.value.trim_start_matches("../");
-                Some(format!("Reads `{property}` from the Livewire component: the path goes above the form's state."))
+                let property = arg.value.trim_start_matches("../").trim_start_matches('/');
+                Some(match call.absolute {
+                    true => format!("Reads `{property}` from the Livewire component: the path isn't in the form's state."),
+                    false => format!("Reads `{property}` from the Livewire component: the path goes above the form's state."),
+                })
             }
             Resolved::Absolute => None,
         }
@@ -275,13 +314,13 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         return vec![];
     };
     with_schema(ctx, None, |schema, _| {
-        let Some(call) = state_call(ctx, schema, &arg) else {
+        let Some(call) = state_call(ctx, &ctx.parsed, schema, &arg) else {
             return vec![];
         };
         let Some(owner) = owner_of(ctx, schema, &arg) else {
             return vec![];
         };
-        let Resolved::Path(p) = schema::resolve(&owner.container, &arg.value, call.absolute) else {
+        let Resolved::Path(p) = schema.resolve(owner.root, &owner.container, &arg.value, call.absolute) else {
             return vec![];
         };
         schema
@@ -356,35 +395,46 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     if schema.comps.is_empty() {
         return vec![];
     }
+    // Start reading options from the database now, so that they're there when a comparison is completed;
+    // completion and hover read them again when they're old.
+    for comp in &schema.comps {
+        query_options(ctx, &schema, comp, std::time::Duration::MAX);
+    }
     let mut out = vec![];
     // The form's own fields come with the record's attributes, so a read of a column isn't missing.
     let mut attributes: Option<Vec<String>> = None;
     for arg in &args {
-        let Some(call) = state_call(ctx, &schema, arg) else {
+        let Some(call) = state_call(ctx, &ctx.parsed, &schema, arg) else {
             continue;
         };
-        if call.set || call.absolute {
+        if call.set {
             continue;
         }
         let Some(owner) = owner_of(ctx, &schema, arg) else {
             continue;
         };
-        let Resolved::Path(path) = schema::resolve(&owner.container, &arg.value, false) else {
+        let Resolved::Path(path) = schema.resolve(owner.root, &owner.container, &arg.value, call.absolute) else {
             continue;
         };
         if path.is_empty() || schema.known(owner.root, &path) {
             continue;
         }
         let parent = &path[..path.len() - 1];
-        let form_ok = parent.is_empty() && {
+        let name = &path[path.len() - 1];
+        let attributes_ok = if parent.is_empty() {
             let attributes = attributes.get_or_insert_with(|| model_attributes(ctx));
-            !attributes.is_empty() && !attributes.contains(&path[0])
+            !attributes.is_empty() && !attributes.contains(name)
+        } else if let Some(relationship) = schema.relationship(owner.root, parent) {
+            let attributes = related_attributes(ctx, relationship);
+            !attributes.is_empty() && !attributes.contains(name)
+        } else {
+            false
         };
-        if !schema.certain(owner.root, parent, form_ok) {
+        if !schema.certain(owner.root, parent, attributes_ok) {
             continue;
         }
         let suggestions = suggestions(&schema, owner, &arg.value);
-        let mut message = format!("{} has no field `{}`.", schema_name(parent), path.last().unwrap());
+        let mut message = format!("{} has no field `{name}`.", schema_name(parent));
         match suggestions.as_slice() {
             [] => {}
             [one] => message.push_str(&format!(" Did you mean `{one}`?")),
@@ -406,15 +456,37 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     out
 }
 
-/// The model's columns, relationships, and casts, which a resource's form state holds.
+/// The model's columns, relationships, and casts, which a resource's form state holds. Nothing when the
+/// columns are only a guess, because the database couldn't be read.
 fn model_attributes(ctx: &Ctx<'_>) -> Vec<String> {
     let Some(context) = context(ctx) else {
         return vec![];
     };
     let model = &context["model"];
+    if model["columnsGuessed"] == true {
+        return vec![];
+    }
     let mut out = super::strings(&model["columns"]);
     out.extend(model["relations"].as_array().into_iter().flatten().filter_map(|r| r["name"].as_str().or_else(|| r.as_str()).map(String::from)));
     out.extend(model["casts"].as_object().into_iter().flatten().map(|(k, _)| k.clone()));
+    out
+}
+
+/// The keys a related record's `attributesToArray()` gives a relationship's schema: the related model's
+/// columns, casts, and appended attributes. Nothing unless the database told the columns.
+fn related_attributes(ctx: &Ctx<'_>, relationship: &str) -> Vec<String> {
+    let Some(context) = context(ctx) else {
+        return vec![];
+    };
+    let Some(r) = super::relation(&context["model"], relationship) else {
+        return vec![];
+    };
+    if r["columnsGuessed"] != false {
+        return vec![];
+    }
+    let mut out = super::strings(&r["columns"]);
+    out.extend(super::strings(&r["appends"]));
+    out.extend(r["casts"].as_object().into_iter().flatten().map(|(k, _)| k.clone()));
     out
 }
 
@@ -450,9 +522,9 @@ fn read_of(ctx: &Ctx<'_>, schema: &Schema<'_>, expr: &Expression<'_>) -> Option<
 /// The field a read at `offset` resolves to.
 fn read_field<'s, 'a>(ctx: &Ctx<'_>, schema: &'s Schema<'a>, at: u32) -> Option<&'s Comp<'a>> {
     let arg = string_arg_at(ctx, at)?;
-    let call = state_call(ctx, schema, &arg)?;
+    let call = state_call(ctx, &ctx.parsed, schema, &arg)?;
     let owner = owner_of(ctx, schema, &arg)?;
-    let Resolved::Path(p) = schema::resolve(&owner.container, &arg.value, call.absolute) else {
+    let Resolved::Path(p) = schema.resolve(owner.root, &owner.container, &arg.value, call.absolute) else {
         return None;
     };
     schema.fields_at(owner.root, &p).into_iter().next()
@@ -612,14 +684,17 @@ pub fn value_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem
                 _ => vec![],
             });
         }
-        quoted?;
-        let found = super::literal_options(ctx, &field.chain)?;
-        Some(
-            found
-                .into_iter()
-                .map(|(k, v)| item(&k, CompletionItemKind::ENUM_MEMBER, &detail(v.as_deref().unwrap_or("option")), range, None))
-                .collect(),
-        )
+        if let Some(found) = super::literal_options(ctx, &field.chain) {
+            quoted?;
+            return Some(
+                found
+                    .into_iter()
+                    .map(|(k, v)| item(&k, CompletionItemKind::ENUM_MEMBER, &detail(v.as_deref().unwrap_or("option")), range, None))
+                    .collect(),
+            );
+        }
+        let (found, more) = query_options(ctx, schema, field, super::OPTIONS_FRESH)?;
+        Some(super::option_items(found, more, quoted.is_some(), range, |label| detail(label)))
     })
 }
 

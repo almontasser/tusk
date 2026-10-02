@@ -21,6 +21,7 @@
  *   php introspect.php <project root> permission <create-permission|create-role|grant|revoke> <name> [<permission>]
  *   php introspect.php <project root> env-settings <config key>...
  *   php introspect.php <project root> settings
+ *   php introspect.php <project root> options <query as JSON>
  *
  * `resource` prints the resource, its pages and relation managers, and the model that
  * forms and tables in <context class> work with. For a relation manager, that's the
@@ -39,6 +40,7 @@
  * permissions of spatie/laravel-permission when the app has it; `permission` creates a permission or role, or
  * grants or revokes a role's permission. `translations` lists the strings of the app's lang files by locale.
  * `settings` lists the app's spatie/laravel-settings classes with their properties and stored values.
+ * `options` reads a Filament select's options from the database for the language server's suggestions.
  *
  * The language server runs this in a separate process, so edited classes are always
  * loaded fresh.
@@ -76,18 +78,25 @@ function location(ReflectionClass|ReflectionMethod $r): array
     return ['file' => $r->getFileName() ?: null, 'line' => $r->getStartLine() ?: 1];
 }
 
+/** The table's columns, if the database can be read. */
+function databaseColumns(Model $model): ?array
+{
+    global $booted;
+    if (!$booted) {
+        return null;
+    }
+    try {
+        return array_values($model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable())) ?: null;
+    } catch (Throwable) {
+        return null;
+    }
+}
+
 /** Columns from the database, or from $fillable, casts, and timestamps when that fails. */
 function columns(Model $model): array
 {
-    global $booted;
-    if ($booted) {
-        try {
-            $columns = $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable());
-            if ($columns) {
-                return array_values($columns);
-            }
-        } catch (Throwable) {
-        }
+    if ($columns = databaseColumns($model)) {
+        return $columns;
     }
     $columns = [$model->getKeyName(), ...$model->getFillable(), ...array_keys($model->getCasts())];
     if ($model->usesTimestamps()) {
@@ -176,9 +185,14 @@ function describeModel(string $class, bool $withRelated = true): ?array
             $related = $relation['related'] ? describeModel($relation['related'], false) : null;
             $relation['columns'] = $related['columns'] ?? [];
             $relation['relations'] = array_column($related['relations'] ?? [], 'name');
+            // What `attributesToArray()` adds besides columns, and whether the columns are only a guess, for
+            // telling which keys a relationship repeater's items hold.
+            $relation['appends'] = $related['appends'] ?? [];
+            $relation['casts'] = $related['casts'] ?? [];
+            $relation['columnsGuessed'] = $related['columnsGuessed'] ?? true;
         }
     }
-    return ['class' => $class] + location(new ReflectionClass($class)) + ['columns' => columns($model), 'casts' => $model->getCasts(), 'relations' => $relations];
+    return ['class' => $class] + location(new ReflectionClass($class)) + ['columns' => columns($model), 'columnsGuessed' => databaseColumns($model) === null, 'appends' => $model->getAppends(), 'casts' => $model->getCasts(), 'relations' => $relations];
 }
 
 /** Resource classes declared under app/Filament, found by file name. */
@@ -1741,6 +1755,63 @@ function appSettings(string $root): array
     ];
 }
 
+/** Query builder methods `options` runs: they only narrow or order a select. */
+const OPTION_QUERY_METHODS = ['where', 'orWhere', 'whereNot', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'whereBetween', 'whereKey', 'whereKeyNot', 'orderBy', 'orderByDesc', 'latest', 'oldest', 'limit', 'take', 'distinct', 'withTrashed', 'onlyTrashed', 'withoutTrashed'];
+
+/** How many options `options` reads; one more tells whether there are more. */
+const OPTION_LIMIT = 100;
+
+/**
+ * A select's options, as `[key, label]` pairs: a model query's `pluck()`, given as the calls before it, or a
+ * relationship's records by a title column, as Filament's `->relationship('author', 'name')` lists them. Only
+ * the query methods above and the model's local scopes run, so nothing is written.
+ */
+function queryOptions(array $query): array
+{
+    $model = (string) ($query['model'] ?? '');
+    if (!is_a($model, Model::class, true)) {
+        throw new InvalidArgumentException("Not a model: $model");
+    }
+    $instance = new $model();
+    if (isset($query['relationship'])) {
+        $name = (string) $query['relationship'];
+        if (!method_exists($instance, $name) || !($relation = $instance->{$name}()) instanceof Relation) {
+            throw new InvalidArgumentException("Not a relationship: $name");
+        }
+        $related = $relation->getRelated();
+        $key = $relation instanceof Illuminate\Database\Eloquent\Relations\BelongsTo ? $relation->getOwnerKeyName() : $related->getKeyName();
+        $builder = $related->newQuery();
+        $value = (string) $query['title'];
+        $limited = false;
+    } else {
+        $builder = $instance->newQuery();
+        $limited = false;
+        foreach ($query['calls'] ?? [] as [$method, $arguments]) {
+            $scope = method_exists($instance, 'hasNamedScope') ? $instance->hasNamedScope($method) : method_exists($instance, 'scope' . ucfirst($method));
+            if (!in_array($method, OPTION_QUERY_METHODS, true) && !$scope) {
+                throw new InvalidArgumentException("Not a query method: $method");
+            }
+            $limited = $limited || in_array($method, ['limit', 'take'], true);
+            $builder = $builder->{$method}(...$arguments);
+        }
+        [$value, $key] = ($query['pluck'] ?? []) + [null, null];
+    }
+    $plain = fn (mixed $v): mixed => match (true) {
+        $v instanceof BackedEnum => $v->value,
+        $v instanceof UnitEnum => $v->name,
+        $v === null || is_scalar($v) => $v,
+        $v instanceof Stringable => (string) $v,
+        default => json_encode($v),
+    };
+    $found = ($limited ? $builder : $builder->limit(OPTION_LIMIT + 1))->pluck($value, $key);
+    $rows = [];
+    foreach ($found as $k => $label) {
+        $k = $plain($k);
+        $rows[] = [is_int($k) ? $k : (string) $k, $label === null ? null : (string) $plain($label)];
+    }
+    return ['rows' => array_slice($rows, 0, OPTION_LIMIT), 'more' => count($rows) > OPTION_LIMIT];
+}
+
 try {
     $result = match ($mode) {
         'resource' => describeResource($argv[3], $argv[4] ?? null),
@@ -1776,6 +1847,7 @@ try {
         'notification-setup' => notificationSetup(),
         'activity' => activityLog($argv[3], $root),
         'settings' => appSettings($root),
+        'options' => queryOptions(json_decode($argv[3], true, flags: JSON_THROW_ON_ERROR)),
         'translations' => appTranslations($root),
         'panel-options' => panelOptions($root),
         'widgets' => panelWidgets($root, $argv[3]),
