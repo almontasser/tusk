@@ -51,7 +51,8 @@ pub fn blade_resolve(ctx: &Ctx<'_>, blade: &BladePhp, offset: u32, arg: &Value) 
     let fqn = arg.get("fqn")?.as_str()?;
     let (start, end, mut name) = unresolved_class(ctx, blade.php_offset(offset))?;
     let written = name.clone();
-    let mut edits = crate::framework::laravel::blade_import(&ctx.index, blade.view(), fqn, &mut name, &written);
+    let forms = crate::framework::laravel::blade_use(ctx);
+    let mut edits = crate::framework::laravel::blade_import(forms, blade.view(), fqn, NameKind::Default, &mut name, &written);
     if name != written {
         let range = blade.view().range(blade.view_offset(start)?, blade.view_offset(end)?);
         edits.push(TextEdit { range, new_text: name });
