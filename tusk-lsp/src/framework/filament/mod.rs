@@ -28,13 +28,16 @@ use mago_syntax::cst::{Argument, ArrayElement, Expression, Literal, Node};
 use serde_json::Value;
 
 use super::{CallKind, StringArg, string_arg_at, string_args};
+
+mod schema;
+mod state;
 use crate::features::Ctx;
 use crate::index::file_id;
 use crate::scope::{resolve_class, scope_at};
 use crate::text::path_to_uri;
 
 /// The script that describes resources and models, run in its own PHP process so edited classes load fresh.
-const INTROSPECT: &str = include_str!("../../php/introspect.php");
+const INTROSPECT: &str = include_str!("../../../php/introspect.php");
 
 /// Folders whose changes can change what introspection reports.
 const DEPENDS_ON: &[&str] = &["app/", "config/", "database/", "composer.lock"];
@@ -236,11 +239,10 @@ fn field_call<'a>(ctx: &Ctx<'a>, offset: u32) -> Option<FieldCall<'a>> {
     }
 }
 
-/// The field's enum: from `->options(X::class)` or `->enum(X::class)`, or else the model's cast of the field.
-/// Only an enum the index knows counts, not a cast such as `datetime`.
-fn field_enum(ctx: &Ctx<'_>, field: &FieldCall<'_>) -> Option<String> {
-    let text = ctx.parsed.text();
-    let from_chain = field.chain.iter().find_map(|c| {
+/// The class a chain names in `->options(X::class)` or `->enum(X::class)`.
+fn chain_class(ctx: &Ctx<'_>, chain: &[&mago_syntax::cst::MethodCall<'_>]) -> Option<String> {
+    let text = &ctx.doc.text;
+    chain.iter().find_map(|c| {
         let name = &text[c.method.span().start.offset as usize..c.method.span().end.offset as usize];
         if name != "options" && name != "enum" {
             return None;
@@ -249,27 +251,46 @@ fn field_enum(ctx: &Ctx<'_>, field: &FieldCall<'_>) -> Option<String> {
         let Expression::Access(mago_syntax::cst::Access::ClassConstant(access)) = p.value else { return None };
         let class = ctx.resolver().classes_of_class_expr(access.class, &ctx.parsed.path_at(access.span().start.offset));
         class.into_iter().next()
-    });
-    let class = match from_chain {
-        Some(c) => c,
-        None => context(ctx)?["model"]["casts"][&field.field].as_str()?.to_string(),
-    };
+    })
+}
+
+/// An enum the index knows, by its declared name; not a class or a cast such as `datetime`.
+fn known_enum(ctx: &Ctx<'_>, class: &str) -> Option<String> {
     ctx.index.codebase.get_enum(class.as_bytes()).map(|e| e.original_name.as_str_lossy().into_owned())
 }
 
-/// Keys and values of a literal `->options([...])` array in the chain.
-fn literal_options(ctx: &Ctx<'_>, field: &FieldCall<'_>) -> Option<Vec<(String, Option<String>)>> {
-    let text = ctx.parsed.text();
+/// The field's enum: from `->options(X::class)` or `->enum(X::class)`, or else the model's cast of the field.
+fn field_enum(ctx: &Ctx<'_>, field: &FieldCall<'_>) -> Option<String> {
+    let class = match chain_class(ctx, &field.chain) {
+        Some(class) => class,
+        None => context(ctx)?["model"]["casts"][&field.field].as_str()?.to_string(),
+    };
+    known_enum(ctx, &class)
+}
+
+/// Keys and values of a literal `->options([...])` array in the chain, or of one a closure returns.
+fn literal_options(ctx: &Ctx<'_>, chain: &[&mago_syntax::cst::MethodCall<'_>]) -> Option<Vec<(String, Option<String>)>> {
+    let text = &ctx.doc.text;
     let string = |e: &Expression<'_>| match e {
-        Expression::Literal(Literal::String(s)) => Some(text[s.span.start.offset as usize + 1..s.span.end.offset as usize - 1].to_string()),
+        Expression::Literal(Literal::String(s)) => text.get(s.span.start.offset as usize + 1..s.span.end.offset as usize - 1).map(String::from),
         _ => None,
     };
-    field.chain.iter().find_map(|c| {
+    chain.iter().find_map(|c| {
         if &text[c.method.span().start.offset as usize..c.method.span().end.offset as usize] != "options" {
             return None;
         }
         let Argument::Positional(p) = c.argument_list.arguments.iter().next()? else { return None };
-        let elements = match p.value {
+        let mut value = p.value;
+        // `fn () => [...]`, or a closure whose only statement returns the array.
+        match value {
+            Expression::ArrowFunction(f) => value = f.expression,
+            Expression::Closure(f) => match f.body.statements.as_slice() {
+                [mago_syntax::cst::Statement::Return(r)] => value = r.value?,
+                _ => return None,
+            },
+            _ => {}
+        }
+        let elements = match value {
             Expression::Array(a) => &a.elements,
             Expression::LegacyArray(a) => &a.elements,
             _ => return None,
@@ -332,39 +353,28 @@ fn value_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
         });
     }
     if quoted.is_some()
-        && let Some(options) = literal_options(ctx, &field)
+        && let Some(options) = literal_options(ctx, &field.chain)
     {
         return Some(options.into_iter().map(|(k, v)| item(&k, CompletionItemKind::ENUM_MEMBER, v.as_deref().unwrap_or("option"), range, None)).collect());
     }
     Some(vec![])
 }
 
-/// The names in `::make('name')` calls, in order and without repeats. Read from the whole text: the parse
-/// for completion ends at the cursor, and fields after it count too.
-fn field_names(text: &str) -> Vec<String> {
-    let mut names: Vec<String> = vec![];
-    for (at, _) in text.match_indices("::make(") {
-        let rest = text[at + "::make(".len()..].trim_start();
-        let Some(quote) = rest.chars().next().filter(|q| *q == '\'' || *q == '"') else { continue };
-        let name: String = rest[1..].chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.').collect();
-        if !name.is_empty() && rest[1 + name.len()..].starts_with(quote) && !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
 pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     if !active(ctx) {
         return None;
     }
-    let Some(arg) = string_arg_at(ctx, offset) else { return value_completion(ctx, offset) };
+    let Some(arg) = string_arg_at(ctx, offset) else { return state::value_completion(ctx, offset).or_else(|| value_completion(ctx, offset)) };
     let typed = ctx.doc.text.get(arg.start as usize..offset as usize)?.to_string();
 
-    // $get('…') and $set('…') in a form: the names of its fields.
-    if arg.call.kind == CallKind::Closure && ["$get", "$set"].contains(&arg.call.name.as_str()) && arg.index == 0 {
-        let range = ctx.doc.range(arg.start, offset);
-        return Some(field_names(&ctx.doc.text).iter().map(|n| item(n, CompletionItemKind::FIELD, "field", range, None)).collect());
+    // $get('…') and $set('…'): the fields the closure's schema reaches.
+    if state::is_state_arg(&arg)
+        && let Some(items) = state::completion(ctx, offset, &arg)
+    {
+        return Some(items);
+    }
+    if arg.call.is_function(&["in_array"]) {
+        return state::value_completion(ctx, offset);
     }
     if matches!(arg.call.name.as_str(), "default" | "options" | "enum") && arg.call.kind == CallKind::Method {
         return value_completion(ctx, offset);
@@ -434,7 +444,13 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
 
 /// Goes from a relationship name to its method on the model.
 pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
+    if !active(ctx) {
+        return vec![];
+    }
     let Some(arg) = string_arg_at(ctx, offset) else { return vec![] };
+    if state::is_state_arg(&arg) {
+        return state::definition(ctx, offset);
+    }
     let Some((start, end, name)) = relationship_name(&arg) else { return vec![] };
     if !(start <= offset && offset <= end) {
         return vec![];
@@ -446,15 +462,32 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
     vec![Location { uri: path_to_uri(Path::new(file)), range: Range { start: pos, end: pos } }]
 }
 
-pub fn hover(_ctx: &Ctx<'_>, _offset: u32) -> Option<Hover> {
-    None
+pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
+    if !active(ctx) {
+        return None;
+    }
+    state::hover(ctx, offset)
 }
 
-/// Relationship names the model doesn't have.
+/// Quick fixes for the problems [`diagnostics`] reports.
+pub fn code_actions(ctx: &Ctx<'_>, range: Range) -> Vec<lsp_types::CodeAction> {
+    if !active(ctx) || ctx.doc.language != "php" {
+        return vec![];
+    }
+    state::code_actions(ctx, range)
+}
+
+/// Relationship names the model doesn't have, and state paths no field has.
 pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     if !active(ctx) || ctx.doc.language != "php" {
         return vec![];
     }
+    let mut out = state::diagnostics(ctx);
+    out.extend(relationship_diagnostics(ctx));
+    out
+}
+
+fn relationship_diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     let names: Vec<_> = string_args(ctx).iter().filter_map(relationship_name).collect();
     if names.is_empty() {
         return vec![];
@@ -462,9 +495,11 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     let Some(context) = context(ctx) else { return vec![] };
     let model = &context["model"];
     let Some(class) = model["class"].as_str() else { return vec![] };
+    // `make('settings.theme')` on a JSON column reads a key, not a relationship.
+    let columns = strings(&model["columns"]);
     names
         .into_iter()
-        .filter(|(_, _, name)| relation(model, name).is_none())
+        .filter(|(_, _, name)| relation(model, name).is_none() && !columns.contains(name) && model["casts"].get(name).is_none())
         .map(|(start, end, name)| Diagnostic {
             range: ctx.doc.range(start, end),
             severity: Some(DiagnosticSeverity::WARNING),
@@ -527,7 +562,7 @@ pub fn document_links(_ctx: &Ctx<'_>) -> Vec<DocumentLink> {
 mod tests {
     use super::*;
     use crate::features::{with_ctx, with_ctx_at};
-    use crate::testing::{Fixture, ROOT, uri};
+    use crate::testing::{Fixture, ROOT, on_server_stack, uri};
     use serde_json::json;
 
     const POST: &str = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass Post extends Model {}\n";
@@ -629,6 +664,126 @@ mod tests {
         assert_eq!(command.arguments.as_ref().unwrap()[1], json!(3));
     }
 
+    const ORDER: &str = "TextInput::make('title'),
+            Section::make('Details')->schema([
+                Repeater::make('items')->schema([
+                    TextInput::make('qty'),
+                    TextInput::make('price')->label('Unit price')->live()->afterStateUpdated(fn ($get, $set) => $set(CURSOR, 1)),
+                ]),
+            ]),
+            TextInput::make('total')";
+
+    /// The Post form with a repeater inside a section, and `cursor` as the code a closure in the repeater runs.
+    fn order(cursor: &str) -> Fixture {
+        let body = ORDER.replace("CURSOR", cursor);
+        fixture(&with_uses(&form(&body), &["TextInput", "Repeater"]).replace("use Filament\\Forms\\Components\\Repeater;", "use Filament\\Forms\\Components\\Repeater;\nuse Filament\\Schemas\\Components\\Section;"))
+    }
+
+    fn with_uses(text: &str, components: &[&str]) -> String {
+        let uses: String = components.iter().map(|c| format!("\nuse Filament\\Forms\\Components\\{c};")).collect();
+        text.replacen("use Filament\\Forms\\Components\\Select;", &format!("use Filament\\Forms\\Components\\Select;{uses}"), 1)
+    }
+
+    fn diagnose(fx: &Fixture) -> Vec<Diagnostic> {
+        with_ctx(&fx.snap, &uri("app/Filament/Resources/Posts/Schemas/PostForm.php"), diagnostics).unwrap()
+    }
+
+    fn hover_text(fx: &Fixture) -> String {
+        let at = fx.at();
+        let shown = with_ctx(&fx.snap, &at.text_document.uri, |ctx| hover(ctx, ctx.offset(at.position))).flatten().expect("a hover");
+        let lsp_types::HoverContents::Markup(m) = shown.contents else { panic!() };
+        m.value
+    }
+
+    #[test]
+    fn completes_state_paths_from_the_closures_schema() {
+        on_server_stack(|| {
+            let items = complete(&order("'<|>'"));
+            assert_eq!(labels(&items), vec!["qty", "price", "../../title", "../../items", "../../total"]);
+            assert_eq!(items[1].detail.as_deref(), Some("TextInput · Unit price"));
+            assert_eq!(items[2].filter_text.as_deref(), Some("title"));
+            assert!(items[0].sort_text < items[2].sort_text);
+            // Typed with `../`, paths filter as written.
+            assert_eq!(complete(&order("'../<|>'"))[2].filter_text, None);
+        });
+    }
+
+    #[test]
+    fn hovers_and_goes_to_state_paths() {
+        on_server_stack(|| {
+            let fx = order("'../../ti<|>tle'");
+            let shown = hover_text(&fx);
+            assert!(shown.contains("TextInput::make('title')") && shown.contains("**Title** · TextInput"), "{shown}");
+            assert!(hover_text(&order("'pr<|>ice'")).contains("state path `items.*.price`"));
+            let at = fx.at();
+            let found = with_ctx(&fx.snap, &at.text_document.uri, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].range.start.line, 11);
+            assert!(hover_text(&order("'../../../x<|>'")).contains("Livewire component"));
+        });
+    }
+
+    #[test]
+    fn reports_reads_of_fields_the_schema_lacks() {
+        on_server_stack(|| {
+            let found = diagnose(&order("'qty'"));
+            assert!(found.is_empty(), "{found:?}");
+            // `$get('total')` in an item reads the item's own `total`, which it doesn't have.
+            let fx = order("$get('total') ? 'x' : 'y'");
+            let found = diagnose(&fx);
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert_eq!(found[0].message, "An item of repeater `items` has no field `total`. Did you mean `../../total`?");
+            let at = found[0].range;
+            let actions = with_ctx(&fx.snap, &uri("app/Filament/Resources/Posts/Schemas/PostForm.php"), |ctx| code_actions(ctx, at)).unwrap();
+            assert_eq!(actions[0].title, "Change to ../../total");
+            assert!(diagnose(&order("$get('qyt') ? 'x' : 'y'"))[0].message.ends_with("Did you mean `qty`?"));
+            // The form's fields come with the record's columns; above the form are the component's properties.
+            assert!(diagnose(&order("$get('../../id') . $get('../../../x') . $get('/data.x')")).is_empty());
+            assert_eq!(diagnose(&order("$get('../../nope')"))[0].message, "The form has no field `nope`.");
+            // A path a `$set` writes is state too.
+            assert!(diagnose(&order("$set('../../flag', 1) . $get('../../flag')")).is_empty());
+            // A schema with children the file doesn't show is never certain.
+            let open = form("Repeater::make('items')->schema([...self::fields(), TextInput::make('a')->visible(fn ($get) => $get('b'))])");
+            assert!(diagnose(&fixture(&with_uses(&open, &["TextInput", "Repeater"]))).is_empty());
+        });
+    }
+
+    #[test]
+    fn keeps_builder_blocks_apart() {
+        on_server_stack(|| {
+            let body = "Builder::make('content')->blocks([
+                Block::make('heading')->schema([TextInput::make('text'), TextInput::make('level')->visible(fn ($get) => $get('<|>'))]),
+                Block::make('image')->schema([TextInput::make('url')]),
+            ])";
+            let text = with_uses(&form(body), &["Builder", "Builder\\Block", "TextInput"]);
+            assert_eq!(labels(&complete(&fixture(&text))), vec!["text", "level", "../../../content"]);
+            let found = diagnose(&fixture(&text.replace("$get('<|>')", "$get('url')")));
+            assert_eq!(found[0].message, "Block `heading` has no field `url`.");
+        });
+    }
+
+    #[test]
+    fn completes_compared_values_and_reports_enum_comparisons() {
+        on_server_stack(|| {
+            let fx = fixture(&form("Select::make('size')->options(fn () => ['s' => 'Short', 'l' => 'Long']), Select::make('x')->visible(fn ($get) => $get('size') === '<|>')"));
+            assert_eq!(labels(&complete(&fx)), vec!["s", "l"]);
+            let fx = fixture(&form("Select::make('size')->options(['s' => 'Short']), Select::make('x')->visible(fn ($get) => in_array($get('size'), ['<|>']))"));
+            assert_eq!(labels(&complete(&fx)), vec!["s"]);
+            let status = "Select::make('status')->options(\\App\\Enums\\PostStatus::class), Select::make('x')->visible(fn ($get) => ";
+            let fx = fixture(&form(&format!("{status}$get('status') === Pu<|>)")));
+            fx.snap.framework.seed("filament:v4", Value::Bool(true));
+            assert_eq!(labels(&complete(&fx)), vec!["\\App\\Enums\\PostStatus::Draft", "\\App\\Enums\\PostStatus::Published"]);
+            let fx = fixture(&form(&format!("{status}match ($get('status')) {{ '<|>' => true, default => false }})")));
+            fx.snap.framework.seed("filament:v4", Value::Bool(false));
+            assert_eq!(labels(&complete(&fx)), vec!["draft", "published"]);
+            let fx = fixture(&form(&format!("{status}$get('status') === 'draft')")));
+            fx.snap.framework.seed("filament:v4", Value::Bool(true));
+            let found = diagnose(&fx);
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert!(found[0].message.ends_with("Compare with `\\App\\Enums\\PostStatus::Draft`."), "{}", found[0].message);
+        });
+    }
+
     /// Runs against the Filament demo app that `scripts/make-fixture.sh` builds, mirroring the old PHP server's
     /// tests: `TUSK_FILAMENT_FIXTURE=/path/to/fixtures/demo cargo test -- --ignored filament`.
     #[test]
@@ -711,5 +866,56 @@ mod tests {
         assert_eq!(titles(&form), vec!["Resource: PostResource"]);
         assert_eq!(titles(&root.join("app/Models/Post.php")), vec!["Filament: PostResource"]);
         assert!(titles(&root.join("app/Models/User.php")).is_empty());
+    }
+
+    /// Reads every `$get()` and `$set()` in a real Filament app and prints what each resolves to and the
+    /// problems reported, which should all be real: `TUSK_FILAMENT_APP=<root> cargo test -- --ignored --nocapture
+    /// state_paths_in_a_real_app`.
+    #[test]
+    #[ignore]
+    fn state_paths_in_a_real_app() {
+        use crate::documents::{Document, Documents};
+        use crate::index::{Index, IndexConfig};
+        use crate::server::Snapshot;
+        let Ok(root) = std::env::var("TUSK_FILAMENT_APP") else { return };
+        let root = PathBuf::from(root);
+        on_server_stack(|| {
+            let mut index = Index::empty(IndexConfig::new(&root));
+            let paths = index.discover();
+            index.build(paths, |p| std::fs::read(p).ok(), |_, _| {});
+            let index = Arc::new(parking_lot::RwLock::new(index));
+            let framework = Arc::new(super::super::State::new(root.clone()));
+            let files: Vec<PathBuf> = index.read().files.values().map(|f| f.path.clone()).filter(|p| p.starts_with(root.join("app"))).collect();
+            let (mut reads, mut resolved, mut reported) = (0, 0, 0);
+            for path in files {
+                let text = std::fs::read_to_string(&path).unwrap();
+                if !text.contains("$get") && !text.contains("$set") {
+                    continue;
+                }
+                let mut docs = Documents::default();
+                docs.insert(Document::new(path_to_uri(&path), path.clone(), "php".into(), 1, text.clone()));
+                let snap = Snapshot { docs, index: index.clone(), root: root.clone(), framework: framework.clone(), client: None, cancel: Default::default() };
+                let uri = path_to_uri(&path);
+                let rel = path.strip_prefix(&root).unwrap().display().to_string();
+                with_ctx(&snap, &uri, |ctx| {
+                    for arg in string_args(ctx).iter().filter(|a| state::is_state_arg(a)) {
+                        let found = definition(ctx, arg.start);
+                        let hovered = hover(ctx, arg.start).is_some();
+                        if ["$get", "$set"].contains(&arg.call.name.as_str()) || hovered {
+                            reads += 1;
+                            resolved += usize::from(!found.is_empty());
+                            if found.is_empty() {
+                                eprintln!("unresolved {rel}:{} {}('{}')", ctx.doc.position(arg.start).line + 1, arg.call.name, arg.value);
+                            }
+                        }
+                    }
+                    for d in diagnostics(ctx).iter().filter(|d| d.source.as_deref() == Some("filament")) {
+                        reported += 1;
+                        eprintln!("problem {rel}:{} {}", d.range.start.line + 1, d.message);
+                    }
+                });
+            }
+            eprintln!("{reads} paths, {resolved} resolved to a field, {reported} problems");
+        });
     }
 }

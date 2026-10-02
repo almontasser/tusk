@@ -86,3 +86,9 @@ impl Fixture {
         self.snap.docs.get(&path(name)).unwrap().clone()
     }
 }
+
+/// Runs a test on a thread with the server's stack: indexing deeply nested code, such as a Filament schema,
+/// needs more than a test thread's 2 MB in a debug build.
+pub fn on_server_stack(f: impl FnOnce() + Send) {
+    std::thread::scope(|s| std::thread::Builder::new().stack_size(64 << 20).spawn_scoped(s, f).unwrap().join().unwrap());
+}
