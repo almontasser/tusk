@@ -1309,40 +1309,40 @@ the text the old and new line share at both ends, as VS Code's Refactor
 Preview does. The preview opens on its own when calls were left unchanged,
 since those need a look.
 
-### Extract Variable, Extract Constant, and Extract Method
+### Extract Variable, Extract Constant, Introduce Field, and Extract Method
 
-Extract Variable and Extract Constant are written here, since they need the
-editor's in-place naming. `src/extractparse.ts` tokenizes the file (comments masked, PHP
-tags as `;`) and, for the token at the caret, walks out to the nearest
-boundary (`;`, `,`, `=>`, assignments, a ternary's `?` and `:`, braces, and
-keywords), splits that span into operands and binary operators, and lists the
-operand's own chain (`$this->user()`, then `->name`), the operand with its
-prefix (`!`, casts, `new`), and each enclosing binary expression, found by
-splitting at the loosest operator with PHP 8's precedence. Then it steps out to
-the brackets around the span, so `foo($a * $b)` follows `$a * $b`, stopping at
-control structures' parentheses and at blocks. Assignment targets, foreach
-variables, and an arrow function's body are skipped.
+Tusk's server reads the code and writes the edits (see "Extract Variable,
+Constant, Field, and Parameter" under the server); `src/extract.ts` is the UI.
+Each runs the same steps:
 
-`occurrences` matches the same tokens, whatever the spacing, and keeps only
-matches that are expressions of their own at their position, so `$a + $b`
-doesn't match inside `$a + $b * $c`. `declarationPoint` walks back from the
-first use to its statement's start, passing blocks that end before the last
-use and joining `else`, `catch`, and the like to their statement, so the
-declaration lands in the innermost block that holds every use.
+1. `tusk/extractTargets` with the selection and the kind lists the expressions
+   to offer, innermost first, each with its occurrences. More than one opens
+   the **Expressions** popup at the caret. A refusal comes back as the
+   request's error, and `refuse` shows it as a hint above the caret, which
+   goes away when the caret moves or the text changes, and in the status bar.
+2. With several occurrences, the occurrences popup highlights them, with marks
+   in the scroll bar, and asks for all or this one.
+3. `tusk/extract` returns the edit, with `\0` where the name goes and a
+   suggested name.
 
-The new name is typed in place: `applyNamed` in `src/extract.ts` replaces the
-text from the first edit to the last with one snippet, the name a placeholder
-at every use, so typing renames them together and ⌘Z undoes the extraction in
-one step. A `tuskNaming` context key makes ⏎ and Escape end it, as PhpStorm's
-in-place rename does, rather than add a line at every copy. Extract Method runs
-the server's `tusk.extractMethod` command (see "Tusk's language server"), which
-applies its edit through the editor before it returns, and then does the same
-with the name the server chose, found as the one new `function` in the file.
+The new name is typed in place: `applyNamed` replaces the text from the first
+named edit to the last with one snippet, the name a placeholder at every use,
+so typing renames them together and ⌘Z undoes the extraction in one step.
+Edits before the first named one, such as Introduce Field's import, are applied
+first in the same undo step, so the snippet doesn't span the file from its
+`use` lines. A `tuskNaming` context key makes ⏎ and Escape end it, as
+PhpStorm's in-place rename does, rather than add a line at every copy. Extract
+Method runs the server's `tusk.extractMethod` command (see "Tusk's language
+server"), which applies its edit through the editor before it returns, and then
+does the same with the name the server chose, found as the one new `function`
+in the file.
 
-Introduce Field uses the same expression and occurrence search. It places the
-property after the last one `classProperties` finds, or where a constant would
-go (`constantPoint`), and types it with `literalType`, which knows literals
-and `new Foo()`; anything else gets no type rather than a guess.
+The server also lists these as code actions on a selection, for other editors.
+The ⌥⏎ menu turns Tusk's `refactor.extract.*` actions into the `tusk.extract`
+command (`src/lsp.ts`), which runs the same interactive flow instead of the
+action's plain edit. Introduce Parameter uses steps 1 to 3 for the expression,
+its uses, and the parameter's name, type, and whether it's a constant, then
+opens Change Signature.
 
 Refactor This (⌃T) lists actions by name from `refactorings`, which checks each
 against the caret, so the shortcuts shown follow the keymap. The choice
@@ -5566,6 +5566,59 @@ can resolve the action's edit instead.
   names are written for the file, with imports added. A type that includes
   `mixed` is left out.
 
+### Extract Variable, Constant, Field, and Parameter
+
+`features/actions/introduce.rs` answers `tusk/extractTargets` and
+`tusk/extract`, and lists Extract variable, Extract constant, and Introduce
+field as code actions on a selection, whose resolved edit replaces every
+occurrence with the suggested name.
+
+- **Targets:** the `Expression` nodes on `path_at` the caret, innermost first,
+  so a ternary, a `match`, a heredoc, a closure, and the call around an
+  argument are all offered. A selection is trimmed and taken as the node it
+  spans exactly, or else widened to the smallest node around it
+  (`snapped`). A selection of exactly a node that's refused isn't widened, so
+  the refusal says why.
+- **Refused:** bare variables and names (a called function's name, the class
+  of `new` or `::`), assignments, `yield`, `throw`, `exit`, and anything
+  `written`: an assignment's target, `++`'s operand, foreach variables,
+  `isset()` and `unset()` arguments, and the arrays and objects such a thing
+  reaches into, since `$a['x']['y'] = 1` writes to a copy once `$a['x']` is a
+  variable. Expressions in attributes, and for all but constants in
+  declarations' defaults, are refused, as is an expression that uses an arrow
+  function's own parameters (`free_variables`). When every node at the caret
+  is refused, the error is the innermost specific reason, not "choose a value"
+  from the bare variable under the caret.
+- **Per kind:** a constant needs a class-like around it and a constant
+  expression (Mago's `is_constant`, without `new`), and isn't already a
+  constant. A field needs a method of a class or trait; a static method makes
+  it static, and a static closure in an instance method is refused. A
+  parameter needs a function's or method's own body, no free variables or
+  `$this`, and, unless it's a constant, no `self`, `static`, or `parent`.
+- **Occurrences:** expressions with the same code (`code_of`: the text without
+  the program's trivia, keeping a space between two words) that pass the same
+  checks, in the same variable scope (`variable_scope`, so a closure's copies
+  are left out), or for a constant, in the same class-like.
+- **Where the declaration goes:** before the statement holding the first use,
+  in the innermost node that holds a list of statements (a block, the file, a
+  `case`, an alternative-syntax body) and every use. A statement that's the
+  use alone becomes the assignment. A statement that doesn't start its line
+  gets the declaration on the same line. Members go after the last member of
+  their kind: constants after constants, or else trait uses and enum cases;
+  properties after properties, or else constants. A blank line separates the
+  first of a kind from what follows.
+- **Text:** the value loses parentheses around it, and keeps them for `and`,
+  `or`, and `xor`, which bind looser than `=`. A use bare in a string becomes
+  `{$name}`; a constant or static property can't be read there, so those are
+  refused.
+- **Names:** from the expression's shape (`getEmail()` gives `email`, a string
+  key gives its words, `new Invoice` gives `invoice`, a short string literal
+  its words), else the class of its analyzed type, else `value` (`VALUE` for
+  constants, from a string's words otherwise), numbered past names the scope or
+  class already has. Types for fields and parameters come from the analyzer
+  through Extract Method's `php_type`; a parameter's class names are written in
+  full, since the dialog writes the type as it is.
+
 ### Organize imports and unused imports
 
 - **What counts as used:** names in code, attributes, and docblock types (with
@@ -7499,3 +7552,26 @@ serializing Mago's metadata and keeping it in step with Mago's versions, to
 save part of 0.07 s. Seeding the loading with last start's set would save at
 most a few hundredths of a second of its waves. Populating is Mago's own work,
 and a populated index can't be saved without serializing it.
+
+### 2026-10-02: The extractions read code in Tusk's server
+
+Extract Variable, Extract Constant, Introduce Field, and Introduce Parameter
+read expressions with the editor's own tokenizer and precedence parser
+(`src/extractparse.ts`). It treated a ternary's `?` and `:` as boundaries, so a
+whole ternary was never offered, didn't read heredocs, matched closures by
+brace counting, and typed fields only from literals and `new`. The server
+already parses with Mago and runs the analyzer, so the four now ask it
+(`tusk/extractTargets`, `tusk/extract`) and keep only their UI in
+`src/extract.ts`. Every expression node is offered, occurrences compare code
+without trivia within the same variable scope, and fields and parameters get
+the analyzer's type, with an import for a field's class.
+
+Two requests rather than code actions alone: the editor's flow asks which
+expression and which occurrences before it edits, and names in place
+afterwards, so it needs the targets and occurrences first, and the places the
+name goes (`\0`) after. The code actions stay for other editors, and the ⌥⏎
+menu routes Tusk's to the interactive flow. Introduce Parameter keeps Change
+Signature's dialog for the call sites, with the server's checks, name, and type.
+
+Inline Variable, Inline Constant, and Inline Method still use what's left of
+`src/extractparse.ts`. Moving them to the server would drop the tokenizer.
