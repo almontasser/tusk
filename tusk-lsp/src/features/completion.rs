@@ -872,14 +872,24 @@ mod tests {
         let (text, extra) = edit_of(&items, "reportHelper");
         assert_eq!((text.as_str(), extra[0].range.start.line, extra[0].new_text.as_str()), ("reportHelper($0)", 1, "@use('function App\\Models\\reportHelper')\n"));
         let (text, extra) = edit_of(&items, "REPORT_LIMIT");
-        // Mago keeps a constant's namespace in lower case, which PHP reads the same.
-        assert_eq!((text.as_str(), extra[0].new_text.as_str()), ("REPORT_LIMIT", "@use('const app\\models\\REPORT_LIMIT')\n"));
+        assert_eq!((text.as_str(), extra[0].new_text.as_str()), ("REPORT_LIMIT", "@use('const App\\Models\\REPORT_LIMIT')\n"));
         let grouped = ("resources/views/v.blade.php", "@use('function App\\Models\\{other}')\n<p>{{ Repor<|> }}</p>\n");
         let (_, extra) = edit_of(&complete_at(&[lib, blade_use, grouped]), "reportHelper");
         assert_eq!((extra[0].range.start.character, extra[0].new_text.as_str()), (32, ", reportHelper"));
         // What the view imports is written short, with no edit.
         let imported = ("resources/views/v.blade.php", "@use('function App\\Models\\{reportHelper}')\n<p>{{ Repor<|> }}</p>\n");
         assert_eq!(edit_of(&complete_at(&[lib, blade_use, imported]), "reportHelper"), ("reportHelper($0)".to_string(), vec![]));
+    }
+
+    #[test]
+    fn imports_a_constant_as_its_declaration_spells_it() {
+        let consts = ("app/Support/limits.php", "<?php\nnamespace App\\Support\\Limits;\nconst MAX_ITEMS = 5;\n");
+        let code = ("app/Http/Page.php", "<?php\nnamespace App\\Http;\n\nfunction f() { return MAX_IT<|>; }\n");
+        let items = complete_at(&[consts, code]);
+        let item = items.iter().find(|i| i.label == "MAX_ITEMS").unwrap_or_else(|| panic!("{:?}", labels(&items)));
+        assert_eq!(item.detail.as_deref(), Some("App\\Support\\Limits\\MAX_ITEMS"));
+        let edits = item.additional_text_edits.clone().unwrap_or_default();
+        assert_eq!(edits.iter().map(|e| e.new_text.trim()).collect::<Vec<_>>(), ["use const App\\Support\\Limits\\MAX_ITEMS;"]);
     }
 
     #[test]

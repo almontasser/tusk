@@ -8142,7 +8142,11 @@ new groups: a view's own layout of its imports is left as it is. Laravel added
 the modifiers and groups after `@use` itself, and every app here has the same
 trait, so their support is read from the trait's source rather than guessed
 from a version. Completion of a constant in a PHP file now adds its
-`use const` too.
+`use const` too. Mago names a constant with its namespace in lower case, so
+the index keeps each `const` statement's name as the file spells it
+(`declarations_of`, which `scan` now runs while it has the parsed file), and
+imports read `App\Models\LIMIT` rather than `app\models\LIMIT`. A constant from
+`define()` keeps Mago's name.
 
 An `@aware` variable in a view included from a component's own view stayed
 untyped. Laravel's `renderComponent` merges the component's data into what
