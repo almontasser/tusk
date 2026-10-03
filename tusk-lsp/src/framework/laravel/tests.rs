@@ -28,11 +28,12 @@ namespace Illuminate\Database\Eloquent {
     }
 }
 namespace Illuminate\Database\Eloquent\Relations {
+    abstract class Relation {}
     /**
      * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
      * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
      */
-    class HasMany {
+    class HasMany extends Relation {
         /** @return $this */
         public function where($column, $operator = null, $value = null) {}
     }

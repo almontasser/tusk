@@ -175,7 +175,8 @@
       "description": "Tusk's PHP index for this project. Mago's own settings live in mago.toml.",
       "properties": {
         "loadAllLibraries": { "type": "boolean", "default": false, "description": "Read every file in vendor in full, not only the code the project reaches. Uses several times the memory." },
-        "stubs": { "type": "string", "default": "", "description": "Comma-separated folders or PHP files, relative to the project, that the index reads as library code, such as stubs for a PHP extension." }
+        "stubs": { "type": "string", "default": "", "description": "Comma-separated folders or PHP files, relative to the project, that the index reads as library code, such as stubs for a PHP extension." },
+        "lazyLoadingHints": { "type": "boolean", "default": false, "description": "Hint where a loop over a query's models reads a relationship the query doesn't eager-load, so each pass runs a query of its own. A heuristic: it only looks where the query is in the same function or Blade view." }
       },
       "additionalProperties": false
     },

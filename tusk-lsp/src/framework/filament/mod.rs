@@ -128,7 +128,8 @@ fn context(ctx: &Ctx<'_>) -> Option<Arc<Value>> {
     }
     let resource = resource_of(ctx, &ctx.doc.path)?;
     let own = classes_in(ctx, &ctx.doc.path).into_iter().next().map(|(c, _)| c).unwrap_or_default();
-    introspect(ctx, &["resource", &resource, &own])
+    let value = introspect(ctx, &["resource", &resource, &own])?;
+    Some(crate::framework::laravel::schema::fill_guessed_columns(&ctx.index.eloquent, &ctx.index.codebase, value))
 }
 
 fn relation<'v>(model: &'v Value, name: &str) -> Option<&'v Value> {

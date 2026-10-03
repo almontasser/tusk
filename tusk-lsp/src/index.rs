@@ -43,6 +43,9 @@ use crate::analysis::Parsed;
 /// add duplicate or unused classes.
 /// Laravel's classes that type a Blade view's variables, lowercase, as library names are kept.
 const BLADE_CLASSES: &[&str] = &["illuminate\\view\\componentslot", "illuminate\\view\\componentattributebag", "illuminate\\view\\invokablecomponentvariable"];
+/// The classes Eloquent's casts and timestamps give attributes, which the analysis types columns with though the
+/// project may never name them.
+const CAST_CLASSES: &[&str] = &["illuminate\\support\\carbon", "carbon\\carbonimmutable", "illuminate\\support\\collection", "illuminate\\database\\eloquent\\casts\\arrayobject", "illuminate\\support\\stringable"];
 
 pub const DEFAULT_EXCLUDES: &[&str] = &[
     "vendor/**/Tests/**",
@@ -176,6 +179,10 @@ pub struct Index {
     /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
     /// what's found with the index can be kept until it changes.
     pub generation: u64,
+    /// What each project file says about Eloquent: migrations, model declarations, and morph maps.
+    eloquent_files: HashMap<PathBuf, crate::framework::laravel::schema::FileFacts>,
+    /// Those facts combined: the tables the migrations build, and what models declare.
+    pub eloquent: Arc<crate::framework::laravel::schema::Eloquent>,
 }
 
 fn next_generation() -> u64 {
@@ -497,6 +504,8 @@ impl Index {
             pest_classes: vec![],
             validation: HashMap::new(),
             generation: next_generation(),
+            eloquent_files: HashMap::new(),
+            eloquent: Default::default(),
         }
     }
 
@@ -641,16 +650,21 @@ impl Index {
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
+            let root = &self.config.root;
             let scans: Vec<_> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
+                    let facts = crate::framework::laravel::schema::scan_file(root, path, &contents);
                     let (meta, used, pest, rules, declared) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
                     tick();
-                    Some((path.clone(), meta, used, pest, rules, declared))
+                    Some((path.clone(), meta, used, pest, rules, declared, facts))
                 })
                 .collect());
-            for (path, meta, used, pest, rules, declared) in scans {
+            for (path, meta, used, pest, rules, declared, facts) in scans {
+                if let Some(facts) = facts {
+                    self.eloquent_files.insert(path.clone(), facts);
+                }
                 wanted.extend(used);
                 if !pest.is_empty() {
                     self.pest_own.insert(file_id(&path), pest);
@@ -667,7 +681,7 @@ impl Index {
         }
         // Blade views get these as `$slot`, `$attributes`, and a class component's methods, though the project's PHP
         // may never name them.
-        wanted.extend(BLADE_CLASSES.iter().map(|c| c.to_string()));
+        wanted.extend(BLADE_CLASSES.iter().chain(CAST_CLASSES).map(|c| c.to_string()));
         self.ensure_loaded(wanted, &read);
         let mut refs = prelude().symbol_references.clone();
         break_inheritance_cycles(&mut self.codebase, None);
@@ -677,6 +691,7 @@ impl Index {
         self.pest_file = read(&self.config.root.join(PEST_FILE));
         self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();
         self.sync_pest_classes();
+        self.eloquent = Arc::new(crate::framework::laravel::schema::Eloquent::new(self.eloquent_files.iter().map(|(p, f)| (p.as_path(), f))));
         self.generation = next_generation();
         progress(total, total);
     }
@@ -762,8 +777,15 @@ impl Index {
         let mut dirty = WordSet::default();
         let mut scans = vec![];
         let mut wanted: Vec<String> = vec![];
+        let mut eloquent_changed = false;
         for (path, contents) in changes {
             let id = file_id(&path);
+            let facts = contents.as_deref().filter(|_| self.includes(&path) && self.file_type(&path) == FileType::Host).and_then(|c| crate::framework::laravel::schema::scan_file(&self.config.root, &path, c));
+            let differs = match facts {
+                Some(facts) => self.eloquent_files.insert(path.clone(), facts.clone()).filter(|old| *old == facts).is_none(),
+                None => self.eloquent_files.remove(&path).is_some(),
+            };
+            eloquent_changed |= differs;
             if let Some(old) = self.files.remove(&id) {
                 dirty.extend(old.keys.class_like_names.iter().copied());
                 dirty.extend(old.keys.constant_names.iter().copied());
@@ -811,6 +833,9 @@ impl Index {
         // Names the edit started to use, from the disk: library files an editor has open are loaded already.
         self.ensure_loaded(wanted, &|p: &Path| std::fs::read(p).ok());
         self.repopulate(dirty);
+        if eloquent_changed {
+            self.eloquent = Arc::new(crate::framework::laravel::schema::Eloquent::new(self.eloquent_files.iter().map(|(p, f)| (p.as_path(), f))));
+        }
         // Pest.php's hooks are typed against the updated index, as their types can depend on any file.
         if changed {
             self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();

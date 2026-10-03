@@ -43,6 +43,8 @@ pub struct Options {
     pub phpstan: crate::phpstan::Settings,
     /// The folder for this project's index cache. By default, a folder per project in the user's cache folder.
     pub cache_dir: Option<PathBuf>,
+    /// Hint where a loop over a query's models reads a relationship the query doesn't eager-load.
+    pub lazy_loading_hints: bool,
 }
 
 /// The index's configuration from the options and the project's files.
@@ -324,6 +326,7 @@ impl Server {
         let (tx, rx) = crossbeam_channel::unbounded();
         let applied = Arc::new((Mutex::new(0), Condvar::new()));
         let framework = Arc::new(crate::framework::State::new(root.clone()));
+        framework.set_lazy_loading_hints(options.lazy_loading_hints);
         // PHPStan and the diagnostics thread need each other: PHPStan says which files to publish again.
         let refresh = Arc::new(std::sync::OnceLock::<Sender<diagnostics::Event>>::new());
         let (to_refresh, reporter) = (refresh.clone(), client.clone());
@@ -530,7 +533,14 @@ impl Server {
                     let open: Vec<PathBuf> = self.docs.read().iter().map(|d| d.path.clone()).collect();
                     open.iter().for_each(|path| self.phpstan.check(path));
                 }
-                let without_phpstan = |o: &Options| Options { phpstan: Default::default(), ..o.clone() };
+                // Hints change what's published, not what's indexed.
+                if self.framework.set_lazy_loading_hints(options.lazy_loading_hints) {
+                    let open: Vec<PathBuf> = self.docs.read().iter().map(|d| d.path.clone()).collect();
+                    open.into_iter().for_each(|path| {
+                        let _ = self.diagnostics.send(diagnostics::Event::Refresh(path));
+                    });
+                }
+                let without_phpstan = |o: &Options| Options { phpstan: Default::default(), lazy_loading_hints: false, ..o.clone() };
                 let reindex = without_phpstan(&options) != without_phpstan(&self.options);
                 self.options = options;
                 if reindex {

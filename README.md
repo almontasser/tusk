@@ -66,7 +66,7 @@ file to change when you add it.
 | Unsaved files | The Tailwind server accepts only whole-file syncs, so it gets the full text after every 150 ms pause in typing (`track` in `src/lsp.ts`). The PHP server gets each edit as you type. |
 | Laravel | Broadcast channels work in PHP only: Echo's `Echo.private('orders.' + id)`, `.channel()`, `.join()`, and `useEcho()` in JavaScript, TypeScript, and Vue aren't completed or linked, since the PHP server doesn't serve those files. Links to where a class is dispatched or sent find the object where it's created, as in `event(new OrderShipped)`; an object created first and passed in a variable isn't found, and neither are subscribers' (`$subscribe`) events. A lens opens one place, so after four places the rest show as one lens that opens the fifth. A policy found by a custom `Gate::guessPolicyNamesUsing()` isn't linked. In Pest tests, setting a property the test case doesn't declare isn't checked. PHPStan doesn't know which test case runs a test, so on lines that use `$this`, its problems about PHPUnit's `TestCase`, Pest's `TestCall`, or `mixed` values are hidden; Mago still checks those lines. Vite assets complete from `resources/` only, though any existing file in the project checks as found. |
 | Livewire | A view's component is found from the project's own classes: Livewire components that `Livewire::component()` registers under another name, views outside `resources/views`, and classes in `vendor` aren't read. A Volt view's class block must extend `Livewire\Volt\Component`, `Livewire\Component`, or a component class the index has, and Volt's functional API (`state()`, closures) isn't read. A view that the component's view includes, such as an `@include` partial, isn't tied to the component, so its `wire:` attributes aren't completed or checked. `$wire.name` in JavaScript completes and resolves but isn't checked, since JavaScript can add to `$wire`. A computed property is typed only as `$this->name`, as Livewire 3 and 4 expose it; Volt's functional `computed()` isn't read. A dispatched event with no listener isn't reported: Alpine, bundled JavaScript, and packages' views listen in ways the project's files don't all show, such as Filament's `open-modal`. Event names are read from `resources/views` and `resources/js`, and from PHP dispatches on `$this`, `$livewire`, or `$component` (`src/framework/laravel/livewire/`). |
-| Laravel | In Pest tests, setting a property the test case doesn't declare isn't checked. PHPStan doesn't know which test case runs a test, so on lines that use `$this`, its problems about PHPUnit's `TestCase`, Pest's `TestCall`, or `mixed` values are hidden; Mago still checks those lines. Vite assets complete from `resources/` only, though any existing file in the project checks as found. Validation rules are read from one array literal; rules built in a variable, merged with `array_merge()`, or spread from a parent complete their literal keys but aren't checked or typed. Validated data types skip `file`, `date`, and other rules that don't fix a PHP type, so those keys are `mixed`. A form request's rules come from the indexed text, so changes to it reach other files as you type, but tables come from the database when `database/`, `app/Models/`, `config/database.php`, or `.env` changes, so a migration run against a MySQL or PostgreSQL server shows after one of those changes or 5 minutes. |
+| Laravel | In Pest tests, setting a property the test case doesn't declare isn't checked. PHPStan doesn't know which test case runs a test, so on lines that use `$this`, its problems about PHPUnit's `TestCase`, Pest's `TestCall`, or `mixed` values are hidden; Mago still checks those lines. Vite assets complete from `resources/` only, though any existing file in the project checks as found. Validation rules are read from one array literal; rules built in a variable, merged with `array_merge()`, or spread from a parent complete their literal keys but aren't checked or typed. Validated data types skip `file`, `date`, and other rules that don't fix a PHP type, so those keys are `mixed`. A form request's rules come from the indexed text, so changes to it reach other files as you type, but tables come from the database when `database/`, `app/Models/`, `config/database.php`, or `.env` changes, so a migration run against a MySQL or PostgreSQL server shows after one of those changes or 5 minutes. Without a database, columns come from `database/migrations` only: a package's migrations loaded from `vendor`, a schema dump, and `Schema::create()` with a table name that isn't a literal leave those tables unknown, and a model's table is named by Laravel's rules or its `$table` (pluralizing with the common English rules, not all of Doctrine's). Aggregates such as `comments_count` are known file-wide, not per query, and a `morphs()` column's `_id` type, a custom cast's, and an accessor's are left unknown. |
 | Filament | The PHP server knows Filament's field names, relationships, options, and resource structure. It doesn't check column names (virtual attributes make that unreliable). `$get()` and `$set()` know the fields of schemas written in the same file; a schema that spreads in fields from elsewhere (`...self::fields()`), or a component a method returns, completes only what the file shows, and isn't checked. A read of a missing field is reported only where the file shows every key the state can hold. That excludes an action whose class fills its form, such as `EditAction`, or that fills it with code (`fillForm(fn ($record) => …)`, `mountUsing()`); a Livewire form without a literal `->statePath()`, whose fields are properties of the component, or whose class fills it with anything but literal arrays, writes the state property, has an attribute such as `#[Url]` on it, extends or uses a class of the app's own, or has a view Tusk can't find or that may write keys it doesn't name, such as `wire:model="data"`, a path built in PHP or JavaScript, or PHP that writes `$this->data`; and a relationship repeater or layout whose query or data a closure changes, that isn't at the top of a resource's form, or whose related columns come from the model's code because the database couldn't be read. Keys a view binds by name, such as `wire:model="data.extra"` or `$wire.set('data.extra', …)`, count as fields. Filament 3's and later's `Action`, `CreateAction`, and `BulkAction`, in tables, forms, and infolists too, are checked; `EditAction`, `ViewAction`, and `ReplicateAction` fill from the record. Absolute paths resolve on resource forms (`data`) and Livewire forms; in an action's modal they aren't resolved, since its state is at `mountedActions.0.data` with an index that depends on nesting. Options from a query are read with the app's PHP on a thread of their own, so they appear a moment after the file opens and are read again after a minute; a query is read only when it's a model's `pluck()` after literal `where`s, orders, limits, and scopes, and at most 100 options are suggested. Compared values are offered right after `=== `, in a `match` arm, and in `in_array()` before anything is typed, when you open the suggestions with ⌃Space. `->default(` on a `->relationship()` field suggests its records in a resource's form, a relation manager's, and a Livewire form that names its model with `->model(Post::class)`. |
 | Database | A connection shared in `tusk.json` has no password on a teammate's Mac until they type theirs in Data Sources. Only SQLite, MySQL, MariaDB, PostgreSQL, and Redis connections work. Redis keys whose names aren't UTF-8 text aren't listed (the tree counts them), and elements that aren't text are read-only. Redis Cluster isn't supported: a key on another node fails with a MOVED error, which names the node to connect to. Keys group by `:` only. Module types other than RedisJSON, such as a time series, are read in the console. Read-only mode doesn't apply to Redis, and a Redis command can't be canceled; the Redis command timeout ends it. SSH tunnels need key or agent authentication, and `verify-full` fails through a tunnel, since the host is then `127.0.0.1`. Statements split at every semicolon outside strings and comments, so a trigger's `BEGIN … END` body runs only when you select the whole trigger. Each page runs the query again. Export reads every row into memory first. Binary values over 64 KB show only their size. |
 | Pull requests | Comments on lines outside the diff's changes are rejected by GitHub. Pending comments saved on this Mac by an earlier build aren't moved to GitHub. Resolve state loads for the first 100 threads. You can't edit a review's summary. |
@@ -678,7 +678,7 @@ An example:
 | `formatters` | The formatter (`use`) and format on save (`onSave`) for each language group: `php`, `blade`, `js`, `css`, `json`, `markdown`, and `yaml`. |
 | `treeHidden`, `treeExcluded` | Patterns the project tree hides, or shows dimmed. A name matches at any depth; a path matches from the project's folder. |
 | `phpInterpreter` | The PHP program this project uses instead of the one in **Settings > Tools**, such as `/opt/homebrew/opt/php@8.3/bin/php`. |
-| `phpAnalysis` | The PHP index: `loadAllLibraries`, and `stubs`, comma-separated folders or files read as library code. |
+| `phpAnalysis` | The PHP index: `loadAllLibraries`, `stubs`, comma-separated folders or files read as library code, and `lazyLoadingHints`. |
 | `phpstan` | PHPStan's settings: `enabled` (`auto`, `on`, `off`), `config`, `level`, `memoryLimit`, `timeout`, and `run` (`save` or `demand`). |
 
 The selected database connection, `.env`'s override, the query history, the
@@ -2599,7 +2599,55 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   complete the values of the enum the same key's rules name.
 - **Eloquent** attributes complete through query chains, such as
   `User::query()->where('`, `$user->posts()->where('`, and a closure passed
-  to `whereHas('author', …)`.
+  to `whereHas('author', …)` or `with(['posts' => fn ($q) => …])`.
+- **Relationship paths** complete segment by segment in `with()`, `load()`,
+  `loadMissing()`, `has()`, `whereHas()`, `withCount()`, and the rest:
+  after `with('posts.`, you get the relationships of `posts`'s model. Hover
+  shows each segment's method and related model, a `morphTo()`'s with the
+  models that point back to it, and ⌘B opens the method. `with('posts:id,`
+  completes the related model's columns, and so does the column of
+  `withSum('items', '…')` and `whereRelation('author', '…')`. A segment the
+  model doesn't have is reported, such as `coments` in
+  `with('posts.coments')`, but only when the booted app listed the model's
+  relationships, the class has no method of that name and no `__call()` of
+  its own, and the app adds none with `resolveRelationUsing()`.
+- **Aggregates**: `withCount('comments')` adds `comments_count` to the
+  models, `withSum('items', 'total')` adds `items_sum_total`, and an alias,
+  as in `withCount(['comments as approved_count' => …])`, names its own. The
+  chain after them completes these names, as in `->orderBy('comments_count')`,
+  and in a file that adds one, `$post->comments_count` is an `int`,
+  `$post->posts_exists` a `bool`, and a sum, average, minimum, or maximum
+  stays unknown, since the database decides its type. None of them is
+  reported as a property that may not exist.
+- **Columns from migrations**: when the app can't boot or reach its database,
+  the PHP server reads `database/migrations` itself, in file name order:
+  `Schema::create()` and `Schema::table()` blueprints with their column types,
+  `nullable()`, `change()`, `renameColumn()`, `dropColumn()`, `timestamps()`,
+  `softDeletes()`, `morphs()`, `rememberToken()`, and the rest, and
+  `Schema::rename()`. The columns complete in query strings and Filament
+  fields, and `$post->title` gets its type from the column and the model's
+  casts: a `string`, a `?string` for a nullable column, a `Carbon` for a
+  `datetime` cast or a timestamp, an enum for an enum cast. `$post->` lists
+  the columns with their types, the relationships, and the file's
+  aggregates. The columns update as soon as you save a migration. A blueprint inside an `if` or a
+  loop, a column named by a variable, a macro, or raw SQL that names the
+  table makes that table uncertain: its columns still complete and type,
+  but no warning is based on them. When the database answers, its columns
+  win.
+- **Morph maps**: the aliases `Relation::morphMap()` and `enforceMorphMap()`
+  give your models complete in `where('commentable_type', '…')`, as do the
+  classes of the models that point back through `morphMany()` or
+  `morphOne()`, and hover on an alias shows its class.
+- **Lazy-loading hints**: turn on **Hint at lazy-loaded relationships** in
+  **Settings > PHP Analysis** to mark where a loop over a query's models reads
+  a relationship the query doesn't eager-load, as in
+  `foreach (Post::all() as $post) { $post->author->name; }`, with
+  `->each(fn …)`, and in a Blade view's `@foreach`. It's a heuristic: it only
+  looks where the query is in view, in the same function or view, as the
+  loop's expression or a variable assigned once from it, and it stays quiet
+  when it can't tell what the query loads, such as `with($relations)`. A
+  model's `$with`, `load()` on the variable, and
+  `Model::automaticallyEagerLoadRelationships()` count as eager-loading.
 - **Gates** match the model you pass: `Gate::allows('update', $post)` links to
   the policy for `$post`'s class, and warns when no policy for it defines the
   ability. A project with a `Gate::before` hook, such as
@@ -4082,6 +4130,9 @@ open project:
 - **Extra stub folders**: folders or PHP files, relative to the project or
   absolute, that the index reads as library code, such as stubs for a PHP
   extension.
+- **Hint at lazy-loaded relationships**: off by default. On, a loop over a
+  query's models that reads a relationship the query doesn't eager-load gets
+  a hint (see "Laravel features").
 - **PHP version**: the version Mago checks against, from `composer.json` or
   one you choose (`php-version` in `mago.toml`).
 - The analyzer's switches, such as reporting unused parameters or missing
@@ -4091,7 +4142,7 @@ open project:
   integrations, with Mago's own name and description: filter them, turn each
   on or off, and set its level. A changed rule has a blue edge.
 
-The first two are project settings you can share in `tusk.json`
+The first three are project settings you can share in `tusk.json`
 (`phpAnalysis`). The rest live in `mago.toml`: Tusk edits the file in place,
 keeping your comments and every key the page doesn't show, and Mago uses the
 change at once. A project without a `mago.toml` uses Tusk's defaults; your
