@@ -8,7 +8,10 @@
 pub mod actions;
 pub mod blade;
 mod data;
+mod facts;
 pub mod forwarding;
+mod links;
+mod route_parameters;
 mod tables;
 pub mod views;
 
@@ -96,7 +99,7 @@ impl Site<'_> {
 }
 
 const ROUTE_FUNCTIONS: &[&str] = &["route", "signedRoute", "to_route", "temporarySignedRoute", "redirectToRoute"];
-const REDIRECTORS: &[&str] = &[
+pub(super) const REDIRECTORS: &[&str] = &[
     "Redirect",
     "URL",
     "Response",
@@ -1131,14 +1134,8 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
         return Some(items);
     }
     let first_arg = arg.call.arguments.first().and_then(|a| a.1.clone());
-    // Route parameters: `route('post.show', ['` offers the route's parameters.
-    if arg.index == 1 && arg.in_array == Some(InArray::Key) && (arg.call.is_function(&["route", "signedRoute", "to_route", "temporarySignedRoute"]) || arg.call.is_method(&["route", "signedRoute", "temporarySignedRoute"]))
-        && let Some(name) = &first_arg
-    {
-        let routes = data.routes()?;
-        let route = routes.as_array()?.iter().find(|r| r["name"].as_str() == Some(name))?;
-        let params = route["parameters"].as_array()?.iter().filter_map(|p| p.as_str().map(String::from)).collect();
-        return simple(params, CompletionItemKind::VARIABLE);
+    if let Some(items) = route_parameters::completion(ctx, data, arg, offset) {
+        return Some(items);
     }
     if is_validation(arg, codebase) {
         return Some(rule_items(range));
@@ -1603,6 +1600,9 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     }
     with_args(ctx, None, |ctx, args| {
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
+        if let Some(text) = route_parameters::hover(ctx, &data, arg) {
+            return Some(markdown(text, ctx.doc.range(arg.start, arg.end)));
+        }
         let kind = kind_of(arg, &ctx.index.codebase)?;
         let entries = match kind {
             Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
@@ -1657,6 +1657,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
                 });
             }
         }
+        out.extend(route_parameters::diagnostics(ctx, &data, &args));
         out
     })
 }
@@ -1695,9 +1696,8 @@ pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {
     out
 }
 
-#[allow(dead_code)]
-pub fn code_lenses(_ctx: &Ctx<'_>) -> Vec<lsp_types::CodeLens> {
-    vec![]
+pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<lsp_types::CodeLens> {
+    links::code_lenses(ctx)
 }
 
 #[cfg(test)]

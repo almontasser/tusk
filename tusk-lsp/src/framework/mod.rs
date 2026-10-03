@@ -488,7 +488,9 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
 }
 
 pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<CodeLens> {
-    filament::code_lenses(ctx)
+    let mut out = laravel::code_lenses(ctx);
+    out.extend(filament::code_lenses(ctx));
+    out
 }
 
 pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {

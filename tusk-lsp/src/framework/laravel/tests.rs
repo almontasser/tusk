@@ -65,8 +65,13 @@ namespace {
 }
 "#;
 
-fn fixture(file: &str, text: &str) -> Fixture {
-    let fx = Fixture::new(&[("stubs.php", STUBS), (file, text)]);
+pub(super) fn fixture(file: &str, text: &str) -> Fixture {
+    fixture_with(&[(file, text)])
+}
+
+/// The app's facts with these files besides Laravel's stubs.
+pub(super) fn fixture_with(files: &[(&str, &str)]) -> Fixture {
+    let fx = Fixture::new(&[&[("stubs.php", STUBS)], files].concat());
     let state = &fx.snap.framework;
     state.seed("laravel:active", json!(true));
     state.seed(
@@ -124,7 +129,7 @@ fn fixture(file: &str, text: &str) -> Fixture {
     fx
 }
 
-fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
+pub(super) fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
     let fx = fixture(file, text);
     let at = fx.at();
     with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| crate::framework::completion(ctx, ctx.offset(at.position)))
@@ -132,13 +137,13 @@ fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
         .unwrap_or_default()
 }
 
-fn labels(items: &[CompletionItem]) -> Vec<String> {
+pub(super) fn labels(items: &[CompletionItem]) -> Vec<String> {
     let mut l: Vec<_> = items.iter().map(|i| i.label.clone()).collect();
     l.sort();
     l
 }
 
-fn problems(file: &str, text: &str) -> Vec<(String, String)> {
+pub(super) fn problems(file: &str, text: &str) -> Vec<(String, String)> {
     let fx = fixture(file, text);
     with_ctx(&fx.snap, &uri(file), diagnostics)
         .unwrap()
