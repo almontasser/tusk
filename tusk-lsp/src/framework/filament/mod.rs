@@ -29,9 +29,12 @@ use serde_json::Value;
 
 use super::{CallKind, StringArg, string_arg_at, string_args};
 
+pub mod closures;
 pub mod colors;
+mod columns;
 mod schema;
 mod state;
+mod urls;
 use crate::features::Ctx;
 use crate::index::file_id;
 use crate::scope::{resolve_class, scope_at};
@@ -80,7 +83,11 @@ fn short(fqn: &str) -> &str {
 }
 
 fn is_resource(ctx: &Ctx<'_>, class: &str) -> bool {
-    let codebase = &ctx.index.codebase;
+    is_resource_in(&ctx.index, class)
+}
+
+fn is_resource_in(index: &crate::index::Index, class: &str) -> bool {
+    let codebase = &index.codebase;
     codebase.is_instance_of(class.as_bytes(), b"Filament\\Resources\\Resource")
         || codebase.get_class_like(class.as_bytes()).and_then(|c| c.direct_parent_class).is_some_and(|p| short(&p.as_str_lossy()).eq_ignore_ascii_case("Resource"))
 }
@@ -543,7 +550,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     if !active(ctx) {
         return None;
     }
-    let Some(arg) = string_arg_at(ctx, offset) else { return state::value_completion(ctx, offset).or_else(|| value_completion(ctx, offset)) };
+    let Some(arg) = string_arg_at(ctx, offset) else {
+        return closures::completion(ctx, offset).or_else(|| state::value_completion(ctx, offset)).or_else(|| value_completion(ctx, offset));
+    };
     let typed = ctx.doc.text.get(arg.start as usize..offset as usize)?.to_string();
 
     // $get('…') and $set('…'): the fields the closure's schema reaches.
@@ -557,6 +566,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     }
     if matches!(arg.call.name.as_str(), "default" | "options" | "enum") && arg.call.kind == CallKind::Method {
         return value_completion(ctx, offset);
+    }
+    if let Some(items) = urls::completion(ctx, offset, &arg) {
+        return Some(items);
     }
     if !filament_call(&arg) || arg.in_array.is_some() {
         return None;
@@ -630,6 +642,10 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
     if state::is_state_arg(&arg) {
         return state::definition(ctx, offset);
     }
+    let pages = urls::definition(ctx, offset);
+    if !pages.is_empty() {
+        return pages;
+    }
     let Some((start, end, name)) = relationship_name(&arg) else { return vec![] };
     if !(start <= offset && offset <= end) {
         return vec![];
@@ -645,7 +661,7 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     if !active(ctx) {
         return None;
     }
-    state::hover(ctx, offset)
+    state::hover(ctx, offset).or_else(|| columns::hover(ctx, offset)).or_else(|| urls::hover(ctx, offset))
 }
 
 /// Quick fixes for the problems [`diagnostics`] reports.
@@ -663,6 +679,9 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     }
     let mut out = state::diagnostics(ctx);
     out.extend(relationship_diagnostics(ctx));
+    out.extend(closures::diagnostics(ctx));
+    out.extend(columns::diagnostics(ctx));
+    out.extend(urls::diagnostics(ctx));
     out
 }
 
