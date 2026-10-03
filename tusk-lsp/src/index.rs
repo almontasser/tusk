@@ -171,6 +171,8 @@ pub struct Index {
     pest_own: HashMap<FileId, Vec<String>>,
     /// The classes made for the test files bound to traits, by test case and traits; see [`Index::sync_pest_classes`].
     pest_classes: Vec<((String, Vec<String>), Word)>,
+    /// The validation rules each project file's classes declare, for files that declare any.
+    pub validation: HashMap<FileId, Rules>,
     /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
     /// what's found with the index can be kept until it changes.
     pub generation: u64,
@@ -219,7 +221,7 @@ pub fn scan_pool() -> &'static rayon::ThreadPool {
 
 /// With `uses`, a test file's own Pest bindings too: the classes and traits its `uses()` names. Also what the
 /// file declares, for the name list ([`declarations_of`]).
-fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>, Vec<String>, Vec<Declared>) {
+fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVersion, arena: &LocalArena, uses: bool) -> (CodebaseMetadata, Vec<String>, Vec<String>, Rules, Vec<Declared>) {
     let (file, program) = crate::analysis::parse_balanced(arena, path, file_type, contents);
     let names = NameResolver::new(arena).resolve(program);
     let meta = scan_program(arena, &file, program, &names, php_version);
@@ -227,6 +229,7 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
     let parsed = Parsed { file, program, names };
     let names = &parsed.names;
     let pest = if uses && path.components().any(|c| c.as_os_str() == "tests") { own_pest_uses(&parsed) } else { vec![] };
+    let rules = if uses { crate::framework::laravel::validation::scan(&parsed).into_iter().map(Arc::new).collect() } else { vec![] };
     let mut used = vec![];
     if uses {
         for (_, _, name, _) in names.iter() {
@@ -244,8 +247,11 @@ fn scan(path: &Path, file_type: FileType, contents: Vec<u8>, php_version: PHPVer
             }
         }
     }
-    (meta, used, pest, declared)
+    (meta, used, pest, rules, declared)
 }
+
+/// The validation rules a project file's classes declare.
+type Rules = Vec<Arc<crate::framework::laravel::validation::ClassRules>>;
 
 /// Pest's configuration file, relative to the project.
 const PEST_FILE: &str = "tests/Pest.php";
@@ -489,6 +495,7 @@ impl Index {
             pest_file: None,
             pest_own: HashMap::new(),
             pest_classes: vec![],
+            validation: HashMap::new(),
             generation: next_generation(),
         }
     }
@@ -634,19 +641,22 @@ impl Index {
         // Project files, in full, with the names they use.
         let mut wanted: Vec<String> = vec![];
         for chunk in project.chunks(1024) {
-            let scans: Vec<(PathBuf, CodebaseMetadata, Vec<String>, Vec<String>, Vec<Declared>)> = scan_pool().install(|| chunk
+            let scans: Vec<_> = scan_pool().install(|| chunk
                 .par_iter()
                 .filter_map(|path| {
                     let contents = read(path)?;
-                    let (meta, used, pest, declared) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
+                    let (meta, used, pest, rules, declared) = scan(path, FileType::Host, contents, php_version, &LocalArena::new(), true);
                     tick();
-                    Some((path.clone(), meta, used, pest, declared))
+                    Some((path.clone(), meta, used, pest, rules, declared))
                 })
                 .collect());
-            for (path, meta, used, pest, declared) in scans {
+            for (path, meta, used, pest, rules, declared) in scans {
                 wanted.extend(used);
                 if !pest.is_empty() {
                     self.pest_own.insert(file_id(&path), pest);
+                }
+                if !rules.is_empty() {
+                    self.validation.insert(file_id(&path), rules);
                 }
                 wanted.extend(dependencies(&meta));
                 self.merge(path, FileType::Host, meta, declared);
@@ -724,7 +734,7 @@ impl Index {
                 .into_par_iter()
                 .filter_map(|(path, file_type)| {
                     let contents = read(&path)?;
-                    let (meta, _, _, declared) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
+                    let (meta, _, _, _, declared) = scan(&path, file_type, contents, php_version, &LocalArena::new(), false);
                     let needs = dependencies(&meta);
                     Some((path, file_type, meta, needs, declared))
                 })
@@ -767,6 +777,7 @@ impl Index {
             }
             self.declared.remove(&id);
             self.pest_own.remove(&id);
+            self.validation.remove(&id);
             if path == self.config.root.join(PEST_FILE) {
                 self.pest_file = contents.clone();
             }
@@ -776,9 +787,12 @@ impl Index {
             }
             let file_type = self.file_type(&path);
             let project = file_type == FileType::Host;
-            let (meta, used, pest, declared) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
+            let (meta, used, pest, rules, declared) = scan(&path, file_type, contents, self.config.php_version, &arena, project);
             if !pest.is_empty() {
                 self.pest_own.insert(id, pest);
+            }
+            if !rules.is_empty() {
+                self.validation.insert(id, rules);
             }
             // A library file that changes is one the editor has open, or one changed on disk while loaded; both
             // are loaded in full, so navigating inside an open library file works.

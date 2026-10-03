@@ -309,6 +309,10 @@ fn members(ctx: &Ctx<'_>, word_start: u32, _word: &str, range: Range, is_static:
             }
         }
     }
+    // A form request's input, which `$request->title` reads.
+    if !is_static {
+        out.extend(crate::framework::laravel::validation::member_items(ctx, &classes, &|name| seen.contains(&("p", name.to_string())) || seen.contains(&("m", name.to_ascii_lowercase())), range));
+    }
     out
 }
 
