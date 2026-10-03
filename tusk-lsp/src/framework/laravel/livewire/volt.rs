@@ -37,7 +37,9 @@ pub fn component(index: &Index, path: &Path, text: &str) -> Option<Component> {
         let Node::AnonymousClass(class) = node else { return };
         let codebase = &index.codebase;
         let parent = class.extends.as_ref().and_then(|e| e.types.first()).and_then(|t| resolve(t.span()));
-        if !parent.as_deref().is_some_and(|p| super::is_component(codebase, p)) {
+        // The index holds what the app's PHP reaches, which may leave out Volt's base class when only views use it.
+        let named = |p: &str| ["livewire\\component", "livewire\\volt\\component"].contains(&p.to_ascii_lowercase().as_str());
+        if !parent.as_deref().is_some_and(|p| named(p) || super::is_component(codebase, p)) {
             return;
         }
         let mut component = Component { classes: vec![], members: vec![], all_properties: true, all_methods: true };
@@ -116,6 +118,10 @@ mod tests {
         let livewire = "<?php\nnamespace Livewire { abstract class Component { public function __get($p) {} } }\nnamespace Livewire\\Volt { abstract class Component extends \\Livewire\\Component {} }\nnamespace Livewire\\Attributes { #[\\Attribute] class Computed {} }\nnamespace App { trait Sorts { public string $sort = ''; public function sortBy(string $c): void {} } }\n";
         let view = "<?php\nuse Livewire\\Volt\\Component;\nuse Livewire\\Attributes\\Computed;\nnew class extends Component {\n    use \\App\\Sorts;\n    public string $title = '';\n    protected int $hidden = 0;\n    public function save(int $id): void {}\n    #[Computed]\n    public function posts(): array { return []; }\n};\n?>\n<div wire:click=\"save\">{{ $title }}</div>\n";
         let fx = Fixture::new(&[("vendor/livewire.php", livewire), ("resources/views/livewire/x.blade.php", view)]);
+        // Without the index's Livewire, its base classes still count, with nothing of their own.
+        let bare = Fixture::new(&[("app/x.php", "<?php\n")]);
+        let bare_index = bare.snap.index.read();
+        assert!(component(&bare_index, &crate::testing::path("resources/views/livewire/x.blade.php"), &view.replace("use \\App\\Sorts;", "")).is_some_and(|c| c.all_methods));
         let index = fx.snap.index.read();
         let c = component(&index, &crate::testing::path("resources/views/livewire/x.blade.php"), view).expect("a Volt component");
         let names: Vec<(String, MemberKind)> = c.members.iter().map(|m| (m.name.clone(), m.kind)).collect();
