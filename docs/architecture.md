@@ -1188,8 +1188,9 @@ project's files, parsed with Mago's syntax tree as the index scans them:
   plain collection's `has('key')` isn't read as a relationship. Paths split on
   `.`, ` as ` aliases, and `:columns`; each segment walks to the related model.
   Completion, hover, and go to definition work per segment; a relationship
-  warning needs a `live` model and a class without that method, since only the
-  app's scan finds every relationship (traits in `vendor`, macros).
+  warning needs a `live` model and a class without that method or a `__call()`
+  of its own, since only the app's scan finds every relationship (traits in
+  `vendor`), and none at all when the project calls `resolveRelationUsing()`.
 - **Filament:** `fill_guessed_columns` overlays the migrations' columns on
   introspection whose `columnsGuessed` is set, for the model and each
   relationship's related model: a certain table replaces the guess and clears

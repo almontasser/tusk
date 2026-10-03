@@ -423,8 +423,18 @@ pub fn diagnostics(ctx: &Ctx<'_>, data: &Data<'_>, args: &[StringArg]) -> Vec<Di
     if relation_args.is_empty() {
         return vec![];
     }
+    // Relationships added at run time have no method to check against.
+    if ctx.index.eloquent.dynamic_relations {
+        return vec![];
+    }
     let models = Models::new(data);
     let codebase = &ctx.index.codebase;
+    // A model whose own `__call()`, or a trait's, may answer any name.
+    let own_call = |class: &str| {
+        let Some(meta) = codebase.get_class_like(class.as_bytes()) else { return false };
+        let id = codebase.get_declaring_method_identifier(&mago_codex::identifier::method::MethodIdentifier::new(meta.original_name, mago_word::ascii_lowercase_word(b"__call")));
+        codebase.method_exists(class.as_bytes(), b"__call") && !id.get_class_name().as_bytes().eq_ignore_ascii_case(MODEL.as_bytes())
+    };
     let mut out = vec![];
     for arg in relation_args {
         let Some(mut model) = model_of(ctx, &models, &arg.call, arg.start, 0) else { continue };
@@ -441,7 +451,7 @@ pub fn diagnostics(ctx: &Ctx<'_>, data: &Data<'_>, args: &[StringArg]) -> Vec<Di
                 },
                 None => {
                     // A method the app's scan didn't take for a relationship, as one defined in a way it doesn't read.
-                    if !codebase.method_exists(model.class.as_bytes(), name.as_bytes()) && codebase.class_like_exists(model.class.as_bytes()) {
+                    if !codebase.method_exists(model.class.as_bytes(), name.as_bytes()) && codebase.class_like_exists(model.class.as_bytes()) && !own_call(&model.class) {
                         out.push(Diagnostic {
                             range: ctx.doc.range(arg.start + s as u32, arg.start + e as u32),
                             severity: Some(DiagnosticSeverity::WARNING),
@@ -517,6 +527,9 @@ class Post extends Model {
     public function scopePublished($q) {}
     public function latestComment() { return $this->comments()->one(); }
 }
+class Tag extends Model {
+    public function __call($method, $parameters) { return null; }
+}
 class Comment extends Model {
     public function commentable() { return $this->morphTo(); }
     public function author() { return $this->belongsTo(User::class); }
@@ -542,6 +555,7 @@ class Comment extends Model {
             json!({"models": {
                 "App\\Models\\User": {"attributes": [{"name": "id", "fillable": false}, {"name": "name", "fillable": true}, {"name": "email", "fillable": false}], "relations": [{"name": "posts", "type": "HasMany", "related": "App\\Models\\Post"}]},
                 "App\\Models\\Post": {"attributes": [{"name": "id"}, {"name": "title"}], "relations": [{"name": "author", "type": "BelongsTo", "related": "App\\Models\\User"}, {"name": "comments", "type": "MorphMany", "related": "App\\Models\\Comment"}]},
+                "App\\Models\\Tag": {"attributes": [], "relations": []},
                 "App\\Models\\Comment": {"attributes": [{"name": "body"}, {"name": "commentable_type"}], "relations": [{"name": "commentable", "type": "MorphTo", "related": null}, {"name": "author", "type": "BelongsTo", "related": "App\\Models\\User"}]},
             }})
         } else {
@@ -607,6 +621,10 @@ class Comment extends Model {
         assert!(problems(code, false).is_empty());
         // A method the app didn't take for a relationship isn't reported.
         assert!(problems("<?php \\App\\Models\\Post::with('latestComment');", true).is_empty());
+        // Nor is anything when the app adds relationships at run time, or the model answers any call itself.
+        let dynamic = "<?php \\App\\Models\\User::resolveRelationUsing('team', fn ($u) => $u);\n\\App\\Models\\User::with('team');";
+        assert!(problems(dynamic, true).is_empty());
+        assert!(problems("<?php \\App\\Models\\Tag::with('anything');", true).is_empty());
     }
 
     #[test]

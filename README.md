@@ -2519,7 +2519,8 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   `withSum('items', '…')` and `whereRelation('author', '…')`. A segment the
   model doesn't have is reported, such as `coments` in
   `with('posts.coments')`, but only when the booted app listed the model's
-  relationships and the class has no method of that name.
+  relationships, the class has no method of that name and no `__call()` of
+  its own, and the app adds none with `resolveRelationUsing()`.
 - **Aggregates**: `withCount('comments')` adds `comments_count` to the
   models, `withSum('items', 'total')` adds `items_sum_total`, and an alias,
   as in `withCount(['comments as approved_count' => …])`, names its own. The

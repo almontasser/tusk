@@ -121,11 +121,13 @@ pub struct FileFacts {
     pub enforces_morph_map: bool,
     /// Calls `Model::automaticallyEagerLoadRelationships()`, so nothing lazy-loads.
     pub auto_eager_loads: bool,
+    /// Calls `resolveRelationUsing()`, which adds relationships no method declares.
+    pub dynamic_relations: bool,
 }
 
 impl FileFacts {
     pub fn is_empty(&self) -> bool {
-        self.migration.is_none() && self.models.is_empty() && self.morph_map.is_empty() && !self.enforces_morph_map && !self.auto_eager_loads
+        self.migration.is_none() && self.models.is_empty() && self.morph_map.is_empty() && !self.enforces_morph_map && !self.auto_eager_loads && !self.dynamic_relations
     }
 }
 
@@ -152,6 +154,7 @@ pub fn read_file(parsed: &Parsed<'_>, rel: &Path) -> Option<FileFacts> {
     if text.contains("orphMap") {
         read_morph_map(parsed, &mut facts);
     }
+    facts.dynamic_relations = text.contains("resolveRelationUsing(");
     if text.contains("automaticallyEagerLoadRelationships") {
         crate::locate::walk(parsed, |node, _| {
             if let Node::StaticMethodCall(c) = node
@@ -168,7 +171,7 @@ pub fn read_file(parsed: &Parsed<'_>, rel: &Path) -> Option<FileFacts> {
 pub fn scan_file(root: &Path, path: &Path, contents: &[u8]) -> Option<FileFacts> {
     let rel = path.strip_prefix(root).ok()?;
     let migration = rel.parent() == Some(Path::new("database/migrations"));
-    const HINTS: &[&[u8]] = &[b"$table", b"casts", b"$timestamps", b"$fillable", b"$with", b"EagerLoadRelationships", b"Table(", b"orphMap", b"$this->has", b"$this->belongs", b"$this->morph"];
+    const HINTS: &[&[u8]] = &[b"$table", b"casts", b"$timestamps", b"$fillable", b"$with", b"EagerLoadRelationships", b"resolveRelationUsing", b"Table(", b"orphMap", b"$this->has", b"$this->belongs", b"$this->morph"];
     if !migration && !HINTS.iter().any(|h| contents.windows(h.len()).any(|w| w == *h)) {
         return None;
     }
@@ -699,6 +702,8 @@ pub struct Eloquent {
     pub enforces_morph_map: bool,
     /// The app eager-loads every relationship it reads.
     pub auto_eager_loads: bool,
+    /// The app adds relationships with `resolveRelationUsing()`, so a name no method has may be one.
+    pub dynamic_relations: bool,
 }
 
 impl Eloquent {
@@ -716,6 +721,7 @@ impl Eloquent {
             out.morph_map.extend(facts.morph_map.iter().cloned());
             out.enforces_morph_map |= facts.enforces_morph_map;
             out.auto_eager_loads |= facts.auto_eager_loads;
+            out.dynamic_relations |= facts.dynamic_relations;
         }
         migrations.sort_by_key(|(name, _)| *name);
         let mut sql: Vec<String> = vec![];
