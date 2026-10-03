@@ -589,6 +589,47 @@ mod tests {
         assert_eq!(mago_codes(&fx, "tests/Feature/HomeTest.php"), vec![("non-existent-method".into(), 2)]);
     }
 
+    /// Mago's problems in `code`, a file of the project with Laravel's factories and Pest's expectations, by line.
+    fn typed_problems(code: &str) -> Vec<(String, u32)> {
+        let mut files = crate::testing::PEST.to_vec();
+        files.extend([crate::testing::LARAVEL_FACTORY, crate::testing::PEST_EXPECTATIONS, ("tests/Feature/HomeTest.php", code)]);
+        mago_codes(&Fixture::new(&files), "tests/Feature/HomeTest.php")
+    }
+
+    #[test]
+    fn types_a_factory_without_a_count_as_one_model() {
+        let one = ["User::factory()->create()", "User::factory()->state([])->make()", "User::factory(['name' => 'Ada'])->createQuietly()", "User::factory(fn () => [])->create()", "UserFactory::new()->create()"];
+        for made in one {
+            let code = format!("<?php\nuse App\\Models\\User;\nuse Database\\Factories\\UserFactory;\nfunction f(): int {{\n    $user = {made};\n    $user->psts();\n    return $user->posts();\n}}\n");
+            assert_eq!(typed_problems(&code), vec![("non-existent-method".into(), 5)], "{made}");
+        }
+        // A count, or a factory from elsewhere, may make a collection.
+        let many = ["User::factory(3)->create()", "User::factory()->count(3)->create()", "UserFactory::times(3)->create()", "User::factory()->count(3)->state([])->make()", "$factory->create()"];
+        for made in many {
+            let code = format!("<?php\nuse App\\Models\\User;\nuse Database\\Factories\\UserFactory;\nfunction f(UserFactory $factory): int {{\n    $user = {made};\n    return $user->posts();\n}}\n");
+            assert!(!typed_problems(&code).is_empty(), "{made}");
+        }
+    }
+
+    #[test]
+    fn types_pest_higher_order_expectations() {
+        let code = "<?php\nuse App\\Models\\User;\nit('names', function () {\n    $user = User::factory()->create();\n    expect($user)->name->toBe('Ada')->name->toBe('Ada')->and($user)->not->toBe(null);\n    $name = expect($user)->name->value;\n    $name->nope();\n});\n";
+        // The chain isn't reported, and the value of `->name` is the property's type, a string, which has no methods.
+        assert_eq!(typed_problems(code), vec![("invalid-method-access".into(), 6)]);
+    }
+
+    #[test]
+    fn types_artisan_in_tests_as_a_pending_command() {
+        let code = "<?php\nuse function Pest\\Laravel\\artisan;\nit('runs', function () {\n    artisan('about')->assertSuccessful();\n    artisan('about')->asertSuccessful();\n});\n";
+        assert_eq!(typed_problems(code), vec![("non-existent-method".into(), 4)]);
+    }
+
+    #[test]
+    fn types_test_without_arguments_as_the_running_test() {
+        let code = "<?php\nuse App\\Models\\User;\nbeforeEach(function () {\n    $this->user = User::factory()->create();\n});\nfunction user_posts(): int {\n    test()->get('/');\n    return test()->user->posts();\n}\nfunction misspelled(): void {\n    test()->user->psts();\n}\nit('loads', function () {});\n";
+        assert_eq!(typed_problems(code), vec![("non-existent-method".into(), 10)]);
+    }
+
     #[test]
     fn honors_expect_pragmas() {
         let code = "<?php\n\ndeclare(strict_types=1);\n\nfunction f(): int {\n    // @mago-expect analysis:invalid-return-statement\n    return 'x';\n}\n";

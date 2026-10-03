@@ -11,20 +11,22 @@ use mago_analyzer::Analyzer;
 use mago_analyzer::analysis_result::AnalysisResult;
 use mago_analyzer::artifacts::AnalysisArtifacts;
 use mago_analyzer::code::IssueCode;
+use mago_analyzer::plugin::{IssueFilterDecision, IssueFilterHook};
 use mago_analyzer::plugin::{ExpressionHook, ExpressionHookResult, FunctionReturnTypeProvider, FunctionTarget, HookContext, HookResult, InvocationInfo, PluginRegistry, Provider, ProviderContext, ProviderMeta};
 use mago_analyzer::settings::Settings;
 use mago_codex::reference::SymbolReferences;
 use mago_codex::ttype::atomic::TAtomic;
 use mago_codex::ttype::atomic::object::TObject;
 use mago_codex::ttype::atomic::object::named::TNamedObject;
+use mago_codex::ttype::get_mixed;
 use mago_codex::ttype::union::TUnion;
 use mago_database::file::{File, FileType};
 use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_php_version::PHPVersion;
-use mago_reporting::{AnnotationKind, IssueCollection};
+use mago_reporting::{AnnotationKind, Issue, IssueCollection};
 use mago_span::HasSpan;
-use mago_syntax::cst::{Access, Call, ClassLikeMemberSelector, Expression, Node, Program, Variable};
+use mago_syntax::cst::{Access, Argument, Call, ClassLikeMemberSelector, Expression, Node, Program, Variable};
 use mago_syntax::parser::parse_file;
 use mago_word::Word;
 
@@ -50,6 +52,11 @@ static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
     plugins.register_expression_hook(PestHook);
     plugins.register_expression_hook(AuthHook);
     plugins.register_function_provider(AuthHelper);
+    plugins.register_expression_hook(FactoryHook);
+    plugins.register_expression_hook(ExpectationHook);
+    plugins.register_issue_filter_hook(ExpectationHook);
+    plugins.register_expression_hook(ArtisanHook);
+    plugins.register_function_provider(PestTestHelper);
     plugins
 });
 
@@ -135,6 +142,196 @@ impl FunctionReturnTypeProvider for AuthHelper {
     }
 }
 
+/// Laravel's model factory, whose `create()`, `make()`, and `createQuietly()` return a model or a collection of them.
+const FACTORY: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
+const ELOQUENT_COLLECTION: &str = "Illuminate\\Database\\Eloquent\\Collection";
+
+/// Types `User::factory()->create()` as the one model it makes rather than the `TModel|Collection<int, TModel>`
+/// Laravel declares, as Larastan does: a factory makes a collection only when it's given a count, by
+/// `factory(3)`, `count()`, or `times()`. Only a chain that starts at `factory()` or a factory's `new()` is narrowed,
+/// since a factory in a variable may have been given a count elsewhere.
+struct FactoryHook;
+
+impl Provider for FactoryHook {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-factory", "Model factories", "Types a factory's create() and make() as one model when no count is given.");
+        &META
+    }
+}
+
+impl ExpressionHook for FactoryHook {
+    fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
+        let Expression::Call(Call::Method(c)) = expr else { return Ok(()) };
+        let ClassLikeMemberSelector::Identifier(method) = &c.method else { return Ok(()) };
+        if ![&b"create"[..], b"make", b"createQuietly"].iter().any(|m| method.value.eq_ignore_ascii_case(m)) || !makes_one(c.object, context) {
+            return Ok(());
+        }
+        let Some(t) = context.get_expression_type(expr) else { return Ok(()) };
+        let collection = |a: &TAtomic| matches!(a, TAtomic::Object(TObject::Named(n)) if context.is_instance_of(n.name.as_bytes(), ELOQUENT_COLLECTION.as_bytes()));
+        let one: Vec<TAtomic> = t.types.iter().filter(|a| !collection(a)).cloned().collect();
+        if !one.is_empty() && one.len() < t.types.len() {
+            context.set_expression_type(expr, TUnion::from_vec(one));
+        }
+        Ok(())
+    }
+}
+
+/// Whether `expr` is a factory chain that makes one model: it starts at `Model::factory()` without a count, or at a
+/// factory's `new()`, and doesn't call `count()` or `times()` on the way.
+fn makes_one(expr: &Expression<'_>, context: &HookContext<'_, '_>) -> bool {
+    let is_factory = |e: &Expression<'_>| context.get_expression_type(e).is_some_and(|t| t.types.iter().any(|a| matches!(a, TAtomic::Object(TObject::Named(n)) if context.is_instance_of(n.name.as_bytes(), FACTORY.as_bytes()))));
+    let named = |m: &ClassLikeMemberSelector<'_>, name: &[u8]| matches!(m, ClassLikeMemberSelector::Identifier(id) if id.value.eq_ignore_ascii_case(name));
+    match expr {
+        Expression::Call(Call::Method(c)) => is_factory(expr) && !named(&c.method, b"count") && !named(&c.method, b"times") && makes_one(c.object, context),
+        Expression::Call(Call::StaticMethod(c)) if named(&c.method, b"new") => is_factory(expr),
+        // `factory($count = null, $state = [])`: an int is a count; an array or a closure is state.
+        Expression::Call(Call::StaticMethod(c)) if named(&c.method, b"factory") => {
+            let count = c.argument_list.arguments.iter().find_map(|a| match a {
+                Argument::Positional(p) => Some(p.value),
+                Argument::Named(n) if n.name.value.eq_ignore_ascii_case(b"count") => Some(n.value),
+                Argument::Named(_) => None,
+            });
+            let state = |t: &TUnion| t.is_null() || t.is_array() || t.types.iter().all(|a| matches!(a, TAtomic::Callable(_) | TAtomic::Array(_) | TAtomic::Null) || matches!(a, TAtomic::Object(TObject::Named(n)) if n.name.as_bytes().eq_ignore_ascii_case(b"closure")));
+            is_factory(expr) && count.is_none_or(|e| context.get_expression_type(e).is_some_and(state))
+        }
+        _ => false,
+    }
+}
+
+const EXPECTATION: &str = "Pest\\Expectation";
+/// Pest's class that declares the expectations, such as `toBe()`, as an `@mixin` of `Pest\Expectation`.
+const EXPECTATION_MIXIN: &str = "Pest\\Mixins\\Expectation";
+
+/// Types a higher-order expectation, such as `expect($user)->name->toBe('Ada')`, as an expectation of the property:
+/// `Expectation<string>` when the value is a `User` whose `$name` is a string, else `Expectation<mixed>`.
+/// `Expectation::__get()` declares a union with the value itself, on which the next expectation reads as `mixed`,
+/// and its `HigherOrderExpectation` sends the next call to a mixin that has no properties. At runtime each
+/// expectation and property in the chain runs against the original value, as typed here. Properties the
+/// expectation declares, such as `not` and `each`, keep their types.
+struct ExpectationHook;
+
+impl Provider for ExpectationHook {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-expectation", "Pest expectations", "Types Pest's higher-order expectations.");
+        &META
+    }
+}
+
+impl ExpressionHook for ExpectationHook {
+    fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
+        // An expectation such as `toBe()` returns the expectation it's called on, but Pest declares it on the mixin
+        // as `self`, so it reads as the mixin, which has no higher-order properties.
+        if let Expression::Call(Call::Method(_)) = expr {
+            let Some(t) = context.get_expression_type(expr) else { return Ok(()) };
+            let [TAtomic::Object(TObject::Named(n))] = t.types.as_ref() else { return Ok(()) };
+            if !n.name.as_bytes().eq_ignore_ascii_case(EXPECTATION_MIXIN.as_bytes()) {
+                return Ok(());
+            }
+            let Some(expectation) = context.codebase().get_class_like(EXPECTATION.as_bytes()) else { return Ok(()) };
+            let t = TNamedObject::new_with_type_parameters(expectation.original_name, n.type_parameters.clone());
+            context.set_expression_type(expr, TUnion::from_atomic(TAtomic::Object(TObject::Named(t))));
+            return Ok(());
+        }
+        let Expression::Access(Access::Property(a)) = expr else { return Ok(()) };
+        let ClassLikeMemberSelector::Identifier(name) = &a.property else { return Ok(()) };
+        let property = [b"$", name.value].concat();
+        let codebase = context.codebase();
+        let Some(value) = context.get_expression_type(a.object).and_then(|t| match t.types.as_ref() {
+            [TAtomic::Object(TObject::Named(n))] if n.name.as_bytes().eq_ignore_ascii_case(EXPECTATION.as_bytes()) => Some(n.get_type_parameters().and_then(|p| p.first()).cloned()),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let Some(expectation) = codebase.get_class_like(EXPECTATION.as_bytes()).filter(|_| !codebase.property_exists(EXPECTATION.as_bytes(), &property)) else { return Ok(()) };
+        // The property's declared type, on a value of one class. `expect()` declares its value nullable.
+        let of = value.map(|v| v.to_non_nullable()).and_then(|v| match v.types.as_ref() {
+            [TAtomic::Object(TObject::Named(n))] => codebase.get_property_type(n.name.as_bytes(), &property).cloned(),
+            _ => None,
+        });
+        let t = TNamedObject::new_with_type_parameters(expectation.original_name, Some(vec![of.unwrap_or_else(get_mixed)]));
+        context.set_expression_type(expr, TUnion::from_atomic(TAtomic::Object(TObject::Named(t))));
+        Ok(())
+    }
+}
+
+impl IssueFilterHook for ExpectationHook {
+    /// A property or method the expectation doesn't declare is a higher-order expectation on its value, which Pest
+    /// allows, not a magic member that may not exist.
+    fn filter_issue(&self, _: &File, issue: &Issue) -> HookResult<IssueFilterDecision> {
+        let magic = [IssueCode::NonDocumentedProperty.as_str(), IssueCode::NonDocumentedMethod.as_str()].contains(&issue.code.as_deref().unwrap_or_default());
+        let on_expectation = issue.message.ends_with(&format!("on class `{EXPECTATION}`."));
+        Ok(if magic && on_expectation { IssueFilterDecision::Remove } else { IssueFilterDecision::Keep })
+    }
+}
+
+const PENDING_COMMAND: &str = "Illuminate\\Testing\\PendingCommand";
+
+/// Types a test's `artisan()`, the test case's method and Pest's function, as the `PendingCommand` it returns in
+/// tests rather than `PendingCommand|int`: it returns the exit code only when a test turns off console mocking.
+struct ArtisanHook;
+
+impl Provider for ArtisanHook {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-artisan", "Artisan in tests", "Types a test's artisan() as a PendingCommand.");
+        &META
+    }
+}
+
+impl ExpressionHook for ArtisanHook {
+    fn after_expression(&self, expr: &Expression<'_>, context: &mut HookContext<'_, '_>) -> HookResult<()> {
+        let artisan = match expr {
+            Expression::Call(Call::Method(c)) => matches!(&c.method, ClassLikeMemberSelector::Identifier(id) if id.value.eq_ignore_ascii_case(b"artisan")),
+            Expression::Call(Call::Function(f)) => matches!(f.function, Expression::Identifier(id) if id.value().rsplit(|b| *b == b'\\').next().is_some_and(|n| n.eq_ignore_ascii_case(b"artisan"))),
+            _ => false,
+        };
+        let Some(t) = context.get_expression_type(expr).filter(|_| artisan) else { return Ok(()) };
+        let pending = |a: &TAtomic| matches!(a, TAtomic::Object(TObject::Named(n)) if n.name.as_bytes().eq_ignore_ascii_case(PENDING_COMMAND.as_bytes()));
+        if t.types.iter().any(pending) && t.has_int() {
+            let command: Vec<TAtomic> = t.types.iter().filter(|a| pending(a)).cloned().collect();
+            context.set_expression_type(expr, TUnion::from_vec(command));
+        }
+        Ok(())
+    }
+}
+
+/// Types Pest's `test()` without arguments, which returns the running test, as the test case the file's closures
+/// run in, rather than the `HigherOrderTapProxy|TestCall` Pest declares. Helper functions in a test file call it
+/// for the test's properties, as in `test()->user`.
+struct PestTestHelper;
+
+impl Provider for PestTestHelper {
+    fn meta() -> &'static ProviderMeta {
+        static META: ProviderMeta = ProviderMeta::new("tusk-pest-test", "test()", "Types Pest's test() as the running test case.");
+        &META
+    }
+}
+
+impl FunctionReturnTypeProvider for PestTestHelper {
+    fn targets() -> FunctionTarget {
+        FunctionTarget::exact(b"test")
+    }
+
+    fn get_return_type(&self, _: &ProviderContext<'_, '_, '_>, invocation: &InvocationInfo<'_, '_, '_>) -> Option<TUnion> {
+        if !invocation.has_no_arguments() {
+            return None;
+        }
+        let case = PEST.with_borrow(|p| p.as_ref().and_then(|p| p.case))?;
+        Some(TUnion::from_atomic(TAtomic::Object(TObject::Named(TNamedObject::new(case)))))
+    }
+}
+
+/// `user` in `test()->user`, where `test()` without arguments is Pest's running test.
+fn running_test_property<'a>(expr: &Expression<'a>) -> Option<&'a [u8]> {
+    let Expression::Access(Access::Property(a)) = expr else { return None };
+    let Expression::Call(Call::Function(f)) = a.object else { return None };
+    let Expression::Identifier(id) = f.function else { return None };
+    let test = f.argument_list.arguments.is_empty() && id.value().rsplit(|b| *b == b'\\').next().is_some_and(|n| n.eq_ignore_ascii_case(b"test"));
+    match &a.property {
+        ClassLikeMemberSelector::Identifier(name) if test => Some(name.value),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 struct Pest {
     /// The class the file's test closures run in, or `None` to leave closures as they are.
@@ -170,6 +367,10 @@ impl ExpressionHook for PestHook {
                 && scope.class_name.is_some_and(|c| c.as_str_lossy().eq_ignore_ascii_case(PHPUNIT_TEST_CASE))
             {
                 scope.class_name = Some(*case);
+            }
+            // `test()->user` in a helper function reads what the tests set, as `$this->user` does in them.
+            if let Some(t) = running_test_property(expr).and_then(|name| props.get(name)) {
+                return Ok(ExpressionHookResult::SkipWithType(t.clone()));
             }
             let Some(name) = this_property(expr).filter(|_| in_class(context, *case)) else { return Ok(ExpressionHookResult::Continue) };
             match props.get(name) {

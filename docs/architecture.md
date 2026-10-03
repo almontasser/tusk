@@ -1056,6 +1056,44 @@ also drop Mago's issues about Pest's own classes, which answer through magic
 (`->not`, higher-order expectations such as `->name->toBe()`), and calls on null
 along an `expect()` chain: `expect()` returns an `Expectation<TValue|null>`.
 
+### Factories, expectations, and Artisan in analysis
+
+Four more of Mago's analyzer plugins in `tusk-lsp/src/analysis.rs` give tests
+the types they have at runtime, where Laravel's and Pest's declarations are
+wider. Each runs on every file, after Mago has typed the expression, and
+narrows it with `set_expression_type`, so what follows (a variable it's
+assigned to, a property set in `beforeEach()`, the next call in a chain) gets
+the narrower type. Together they cut Mago's problems in one Laravel app's Pest
+tests from 17,659 to 10,554, and its errors from 6,439 to 3,376, with no change
+in its app code.
+
+- `FactoryHook` types `create()`, `make()`, and `createQuietly()` on a model
+  factory as one model rather than the `Collection<int, TModel>|TModel` Laravel
+  declares, as Larastan does. It narrows only a chain it can see whole
+  (`makes_one`): one that starts at `Model::factory()` without an int count, or
+  at a factory's `new()`, and never calls `count()` or `times()`. A factory in a
+  variable may have been given a count elsewhere, so it keeps Laravel's type.
+- `ExpectationHook` types a higher-order expectation, `expect($user)->name`, as
+  `Expectation<T>`, where `T` is the property's declared type on the value's
+  class, or `mixed`. Pest declares `Expectation::__get()` as a union with the
+  value itself, so the next expectation read as `mixed`, and its
+  `HigherOrderExpectation` sends the next call to `Mixins\Expectation`, which
+  has no properties. Expectations such as `toBe()` are declared on that mixin
+  as returning `self`, so the hook also types a call that returns
+  `Mixins\Expectation<T>` as the `Expectation<T>` it returns at runtime. Its
+  issue filter drops Mago's `non-documented-property` and
+  `non-documented-method` on `Pest\Expectation`, which are higher-order
+  expectations.
+- `ArtisanHook` types a call named `artisan`, the test case's method or
+  `Pest\Laravel\artisan()`, as the `PendingCommand` it returns in tests, when
+  it's declared `PendingCommand|int`: it returns the exit code only when a test
+  turns off console mocking.
+- `PestTestHelper` types Pest's `test()` without arguments, which returns the
+  running test, as the class the file's closures run in (from the Pest
+  thread-local), rather than `HigherOrderTapProxy|TestCall`. `PestHook` gives
+  `test()->name` the type tests set on `$this->name`, as it does for
+  `$this->name`, so helper functions in a test file read them.
+
 ### Questions from servers
 
 A server can ask a question with `window/showMessageRequest`. The client

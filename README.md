@@ -2817,6 +2817,17 @@ as in Pest. `$this->` completes the test case's methods, and a misspelled one
 is reported. A property a test sets on `$this`, such as in `beforeEach()`, has
 the type of the value it's given, so `$this->user->` completes the user's
 methods. Setting a property the test case doesn't declare isn't reported.
+In a helper function in a test file, `test()->user` has the same type.
+
+Tests get the types their values have at runtime:
+
+- `User::factory()->create()` and `make()` are one `User`, not a user or a
+  collection of them, unless the chain gives a count with `factory(3)`,
+  `count()`, or `times()`.
+- In `expect($user)->name->toBe('Ada')`, `->name` is an expectation of the
+  user's `$name`, so the chain after it is checked and completes.
+- `artisan()` and `$this->artisan()` return a `PendingCommand`, so
+  `->assertSuccessful()` and `->expectsOutput()` complete.
 
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
