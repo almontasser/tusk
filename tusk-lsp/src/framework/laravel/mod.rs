@@ -52,6 +52,11 @@ enum Kind {
     Path,
     /// A file Vite builds or serves, relative to the root: `@vite('resources/js/app.js')`.
     Vite,
+    /// An Artisan command, with any arguments and options after its name: `Artisan::call('migrate --force')`.
+    Command,
+    /// An argument or `--option` of the command a call runs, as a key of its parameters:
+    /// `Artisan::call('migrate', ['--force' => true])`.
+    CommandParameter,
 }
 
 fn facade(name: &str) -> [String; 2] {
@@ -217,8 +222,190 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
     if s.facade(&["asset", "content"], "Vite", &["Illuminate\\Foundation\\Vite"], &[0]) {
         return (!in_array).then_some(Kind::Vite);
     }
+    if runs_command(&s, &[0]) {
+        return (!in_array).then_some(Kind::Command);
+    }
+    if runs_command(&s, &[1]) {
+        return (arg.in_array == Some(InArray::Key)).then_some(Kind::CommandParameter);
+    }
     None
 }
+
+/// Whether the string is the given argument of a call that runs an Artisan command: a test's `artisan()`,
+/// `Artisan::call()` and `queue()`, a command's `call()`, and the scheduler's `command()`.
+fn runs_command(s: &Site<'_>, indexes: &[usize]) -> bool {
+    let kernels = ["Illuminate\\Contracts\\Console\\Kernel", "Illuminate\\Foundation\\Console\\Kernel"];
+    s.function(&["Pest\\Laravel\\artisan"], indexes)
+        || s.method(&["artisan"], &["Illuminate\\Foundation\\Testing\\TestCase"], indexes)
+        || s.facade(&["call", "queue"], "Artisan", &kernels, indexes)
+        || s.method(&["call", "callSilent", "callSilently"], &["Illuminate\\Console\\Command"], indexes)
+        || s.facade(&["command"], "Schedule", &["Illuminate\\Console\\Scheduling\\Schedule"], indexes)
+}
+
+/// The command a command string runs: its first word, as in `migrate --force`.
+fn command_name(value: &str) -> &str {
+    value.split_whitespace().next().unwrap_or("")
+}
+
+#[cfg(test)]
+#[test]
+fn reads_command_strings_as_symfony_does() {
+    assert_eq!(command_words(r#"cmd "two words" 'it''s' x"#), ["cmd", "two words", "its", "x"]);
+    assert_eq!(command_words("cmd  --a=\"b c\"  "), ["cmd", "--a=b c"]);
+    let parameters = |options: &[(&str, bool)]| {
+        let mut out = vec![Entry::new("month", CompletionItemKind::VARIABLE)];
+        for (o, value) in options {
+            let mut e = Entry::new(format!("--{o}"), CompletionItemKind::PROPERTY);
+            e.detail = Some(if *value { "option, takes a value".into() } else { "option, a flag".into() });
+            out.push(e);
+        }
+        let mut short = Entry::new("-c", CompletionItemKind::PROPERTY);
+        short.detail = Some("short for --company".into());
+        out.push(short);
+        out
+    };
+    let p = parameters(&[("company", true), ("force", false)]);
+    assert!(unknown_parameters("cmd 2026-05 --company 5 -c 6 -c7 --force --company=8", &p).is_empty());
+    assert_eq!(unknown_parameters("cmd 2026-05 --force 5", &p), ["5"]);
+    assert_eq!(unknown_parameters("cmd \"a b\" -x -- --anything", &p), ["-x"]);
+}
+
+/// The command named `name`, from the commands script.
+fn command<'v>(commands: &'v Value, name: &str) -> Option<&'v Value> {
+    commands["commands"].as_array()?.iter().find(|c| c["name"].as_str() == Some(name))
+}
+
+/// What a command's signature takes, as the keys of its parameters: each argument by name, and each option,
+/// its own and the application's, as `--name`.
+fn command_parameters(data: &Data<'_>, name: &str) -> Option<Vec<Entry>> {
+    let commands = data.commands()?;
+    let c = command(&commands, command_name(name))?;
+    let mut out = vec![];
+    for (i, a) in c["arguments"].as_array().into_iter().flatten().enumerate() {
+        let Some(n) = str_of(&a["name"]) else { continue };
+        let mut e = Entry::new(n, CompletionItemKind::VARIABLE);
+        e.sort = Some(format!("0{i:03}"));
+        let required = if a["required"] == true { "required" } else { "optional" };
+        e.detail = Some(format!("{required} argument{}", if a["array"] == true { ", a list" } else { "" }));
+        e.hover = Some(format!("`{n}`, {}{}", e.detail.as_deref().unwrap_or(""), description(&a["description"])));
+        out.push(e);
+    }
+    let options = c["options"].as_array().into_iter().flatten().chain(commands["global"].as_array().into_iter().flatten());
+    for (i, o) in options.enumerate() {
+        let Some(n) = str_of(&o["name"]) else { continue };
+        let key = format!("--{n}");
+        let mut e = Entry::new(&key, CompletionItemKind::PROPERTY);
+        let takes = if o["value"] == true { if o["array"] == true { "takes values" } else { "takes a value" } } else { "a flag" };
+        e.detail = Some(format!("option, {takes}"));
+        e.hover = Some(format!("`{key}`, {takes}{}", description(&o["description"])));
+        // The command's own options before the application's.
+        e.sort = Some(format!("{}{i:03}", if i < c["options"].as_array().map_or(0, Vec::len) { '1' } else { '2' }));
+        out.push(e);
+        if let Some(short) = str_of(&o["shortcut"]) {
+            for s in short.split('|') {
+                let mut e = Entry::new(format!("-{s}"), CompletionItemKind::PROPERTY);
+                e.detail = Some(format!("short for {key}"));
+                e.sort = Some("3".into());
+                e.hover = Some(format!("`-{s}`, short for `{key}`"));
+                out.push(e);
+            }
+        }
+    }
+    Some(out)
+}
+
+fn description(v: &Value) -> String {
+    str_of(v).map(|d| format!("\n\n{d}")).unwrap_or_default()
+}
+
+/// A command's synopsis, as `artisan list` shows it: `migrate:rollback [--step=STEP] [--force]`.
+fn command_usage(c: &Value) -> String {
+    let mut out = c["name"].as_str().unwrap_or("").to_string();
+    for o in c["options"].as_array().into_iter().flatten() {
+        let n = o["name"].as_str().unwrap_or("");
+        out.push_str(&if o["value"] == true { format!(" [--{n}={}]", n.to_uppercase()) } else { format!(" [--{n}]") });
+    }
+    for a in c["arguments"].as_array().into_iter().flatten() {
+        let n = a["name"].as_str().unwrap_or("");
+        let list = if a["array"] == true { "..." } else { "" };
+        out.push_str(&if a["required"] == true { format!(" <{n}>{list}") } else { format!(" [<{n}>{list}]") });
+    }
+    out
+}
+
+/// The words of a command string, as Symfony's `StringInput` reads it: split at spaces, except inside quotes.
+fn command_words(value: &str) -> Vec<String> {
+    let mut words = vec![];
+    let mut word = String::new();
+    let mut quote = None;
+    let mut started = false;
+    for c in value.chars() {
+        match (quote, c) {
+            (None, '"' | '\'') => (quote, started) = (Some(c), true),
+            (Some(q), _) if c == q => quote = None,
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                }
+                started = false;
+            }
+            _ => (word.push(c), started = true).1,
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
+}
+
+/// The options and arguments after a command string's name that the command doesn't take: `--name` and `-x`
+/// options it doesn't declare, and words past its arguments. An option that takes a value takes the next word
+/// when it isn't given one with `=`.
+fn unknown_parameters(value: &str, parameters: &[Entry]) -> Vec<String> {
+    let entry = |k: &str| parameters.iter().find(|e| e.key == k);
+    // A shortcut's detail names its option.
+    let takes_value = |e: &Entry| {
+        let long = e.detail.as_deref().and_then(|d| d.strip_prefix("short for ")).and_then(&entry).unwrap_or(e);
+        long.detail.as_deref().is_some_and(|d| d.contains("takes"))
+    };
+    let positional = parameters.iter().filter(|e| !e.key.starts_with('-')).count();
+    let lists = parameters.iter().any(|e| !e.key.starts_with('-') && e.detail.as_deref().is_some_and(|d| d.ends_with("a list")));
+    let mut words = 0;
+    let mut out = vec![];
+    let mut tokens = command_words(value).into_iter().skip(1);
+    while let Some(word) = tokens.next() {
+        if word == "--" {
+            break;
+        }
+        let option = if let Some(long) = word.strip_prefix("--") {
+            let (name, given) = long.split_once('=').map_or((long, false), |(n, _)| (n, true));
+            Some((format!("--{name}"), given))
+        } else if let Some(short) = word.strip_prefix('-').filter(|s| !s.is_empty() && !s.starts_with(|c: char| c.is_ascii_digit())) {
+            // `-v`, flags together as `-vvv`, or a value right after, as `-c5`.
+            let first = short.chars().next().map_or(0, char::len_utf8);
+            Some((format!("-{}", &short[..first]), short.len() > first))
+        } else {
+            None
+        };
+        match option {
+            Some((name, given)) => match entry(&name) {
+                Some(e) if takes_value(e) && !given => {
+                    tokens.next();
+                }
+                Some(_) => {}
+                None => out.push(name),
+            },
+            None => {
+                words += 1;
+                if words > positional && !lists {
+                    out.push(word);
+                }
+            }
+        }
+    }
+    out
+}
+
 
 const PATH_HELPERS: &[&str] = &["base_path", "resource_path", "config_path", "app_path", "database_path", "lang_path", "public_path", "storage_path"];
 
@@ -265,6 +452,30 @@ fn line_of(v: &Value) -> u32 {
 /// no problems are reported for it.
 fn entries(kind: Kind, data: &Data<'_>) -> Option<Vec<Entry>> {
     Some(match kind {
+        Kind::Command => data
+            .commands()?["commands"]
+            .as_array()?
+            .iter()
+            .filter_map(|c| {
+                let name = str_of(&c["name"])?;
+                let mut e = Entry::new(name, CompletionItemKind::FUNCTION);
+                e.detail = Some(str_of(&c["description"]).unwrap_or("").to_string());
+                // Hidden commands and aliases after the rest.
+                e.sort = Some(format!("{}{name}", if c["hidden"] == true || c["alias"] == true { 'b' } else { 'a' }));
+                let class = str_of(&c["class"]).unwrap_or_default();
+                let mut hover = format!("`{}`{}", command_usage(c), description(&c["description"]));
+                if let Some(file) = str_of(&c["path"]) {
+                    let path = data.abs(file);
+                    let label = if class.ends_with("ClosureCommand") { file.to_string() } else { class.to_string() };
+                    hover.push_str(&format!("\n\n{}", link(&path, Some(line_of(&c["line"])), &label)));
+                    e.target = Some((path, line_of(&c["line"])));
+                }
+                e.hover = Some(hover);
+                Some(e)
+            })
+            .collect(),
+        // By command, in [`command_parameters`].
+        Kind::CommandParameter => vec![],
         Kind::Route => data
             .routes()?
             .as_array()?
@@ -539,6 +750,9 @@ fn find<'e>(kind: Kind, entries: &'e [Entry], value: &str) -> Option<&'e Entry> 
         }
         Kind::Asset => entries.iter().find(|e| e.key == value.trim_start_matches('/')),
         Kind::Mix => entries.iter().find(|e| e.key.trim_start_matches('/') == value.trim_start_matches('/')),
+        Kind::Command => entries.iter().find(|e| e.key == command_name(value)),
+        // `--step=2` as a key of the parameters is `--step`.
+        Kind::CommandParameter => entries.iter().find(|e| e.key == value.split('=').next().unwrap_or(value)),
         _ => entries.iter().find(|e| e.key == value),
     }
 }
@@ -563,6 +777,11 @@ fn target(kind: Kind, arg: &StringArg, data: &Data<'_>) -> Option<(PathBuf, u32)
             file.is_file().then_some((file, 1))
         }
         Kind::Route if arg.value.contains('*') => None,
+        // A parameter goes to the command that declares it.
+        Kind::CommandParameter => {
+            let name = arg.call.arguments.first().and_then(|a| a.1.clone())?;
+            find(Kind::Command, &entries(Kind::Command, data)?, &name)?.target.clone()
+        }
         Kind::Vite => {
             let file = data.abs(&arg.value);
             file.is_file().then_some((file, 1))
@@ -631,6 +850,16 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
     if v.is_empty() || (arg.double_quoted && v.contains('$')) {
         return None;
     }
+    if kind == Kind::Command {
+        return command_problem(v, entries, data);
+    }
+    if kind == Kind::CommandParameter {
+        let name = arg.call.arguments.first().and_then(|a| a.1.clone())?;
+        let parameters = command_parameters(data, &name)?;
+        let key = v.split('=').next().unwrap_or(v);
+        let what = if key.starts_with('-') { "Option" } else { "Argument" };
+        return find(kind, &parameters, v).is_none().then(|| ("command", format!("{what} [{key}] not found on command [{}].", command_name(&name))));
+    }
     let found = match kind {
         Kind::ControllerAction => action_route(v, data).is_some(),
         // A Vite input may be anywhere in the project, not only in `resources/`.
@@ -666,8 +895,25 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Inertia => ("inertia", format!("Inertia view [{v}] not found.")),
         Kind::Path => return None,
         Kind::Vite => ("vite", format!("Vite asset [{v}] not found.")),
+        Kind::Command | Kind::CommandParameter => return None,
     };
     (!found).then_some((code, message))
+}
+
+/// A command string's problem: a command that doesn't exist, or options and arguments it doesn't take. A class
+/// name, which the scheduler and `Artisan::call()` accept, isn't checked.
+fn command_problem(v: &str, entries: &[Entry], data: &Data<'_>) -> Option<(&'static str, String)> {
+    let name = command_name(v);
+    if name.contains('\\') {
+        return None;
+    }
+    if find(Kind::Command, entries, v).is_none() {
+        return Some(("command", format!("Command [{name}] not found.")));
+    }
+    let unknown = unknown_parameters(v, &command_parameters(data, name)?);
+    let first = unknown.first()?;
+    let what = if first.starts_with('-') { "Option" } else { "Argument" };
+    Some(("command", format!("{what} [{first}] not found on command [{name}].")))
 }
 
 /// A dotted key such as `auth.failed` or `pkg::messages.hi`, as opposed to a sentence used as its own key.
@@ -927,6 +1173,26 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
     }
 
     let kind = kind_of(arg, codebase)?;
+    // A command's parameters, as keys, or after its name in the command string.
+    let typed = &arg.value[..(offset.saturating_sub(arg.start) as usize).min(arg.value.len())];
+    if kind == Kind::CommandParameter || (kind == Kind::Command && typed.contains(char::is_whitespace)) {
+        let name = if kind == Kind::Command { arg.value.clone() } else { first_arg? };
+        let parameters = command_parameters(data, &name)?;
+        // In the command string, only options: arguments there go by position.
+        let inline = kind == Kind::Command;
+        return Some(
+            parameters
+                .into_iter()
+                .filter(|e| !inline || e.key.starts_with('-'))
+                .map(|e| {
+                    let mut item = completion_item(&e.key, Some(e.kind), range);
+                    item.detail = e.detail;
+                    item.sort_text = e.sort;
+                    item
+                })
+                .collect(),
+        );
+    }
     let mut entries = entries(kind, data)?;
     if kind == Kind::Storage {
         entries.retain(|e| !e.key.contains('.'));
@@ -1338,7 +1604,10 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     with_args(ctx, None, |ctx, args| {
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
         let kind = kind_of(arg, &ctx.index.codebase)?;
-        let entries = entries(kind, &data)?;
+        let entries = match kind {
+            Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
+            _ => entries(kind, &data)?,
+        };
         let found = find(kind, &entries, &arg.value)?;
         let text = if kind == Kind::Auth {
             let lines: Vec<String> = matching_policies(arg, &data)
@@ -1400,7 +1669,9 @@ pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {
     let mut out: Vec<DocumentLink> = with_args(ctx, None, |ctx, args| {
         args.iter()
             .filter_map(|a| {
-                let (path, line) = target(kind_of(a, &ctx.index.codebase)?, a, &data)?;
+                // A parameter's key would link to its command on every line of the array.
+                let kind = kind_of(a, &ctx.index.codebase).filter(|k| *k != Kind::CommandParameter)?;
+                let (path, line) = target(kind, a, &data)?;
                 Some(DocumentLink { range: ctx.doc.range(a.start, a.end), target: Some(target_uri(&path, Some(line))), tooltip: None, data: None })
             })
             .collect()

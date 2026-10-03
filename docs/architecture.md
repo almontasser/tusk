@@ -6210,6 +6210,20 @@ an `artisan` file.
   ⌘-click on a key (`env_key_usages`, from `definition`) lists the
   `env('KEY')` calls in the project's PHP files outside `vendor`,
   `node_modules`, `storage`, and `bootstrap`, read from disk.
+- **Artisan commands:** `php/laravel/commands.php` lists the kernel's
+  commands (`Kernel::all()`, which loads lazy ones) by name and alias, each
+  with its description, class, file and line (a `ClosureCommand`'s closure,
+  read through reflection), and its signature's arguments and options, and
+  lists the application's options, such as `--env`, as `global`. A command
+  string (`Kind::Command`) is matched by its first word; the words after it are
+  read as Symfony's `StringInput` reads them (`command_words`: quotes group,
+  an option that takes a value takes the next word unless it has `=`), and
+  `unknown_parameters` reports options the command and the application don't
+  declare and words past its arguments, unless one is a list. A key of the
+  parameters array (`Kind::CommandParameter`) is checked against the same
+  list, by the command in the call's first argument, so its entries come from
+  `command_parameters` rather than `entries`. A class name in place of the
+  command, which `Schedule::command()` takes, isn't checked.
 - **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
   pages, and controller actions (read from `app/Http/Controllers`).
 - **Blade:** a view becomes "virtual PHP" of the same length.

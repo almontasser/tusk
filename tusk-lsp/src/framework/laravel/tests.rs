@@ -44,6 +44,12 @@ namespace App\Models {
     }
     class Post extends \Illuminate\Database\Eloquent\Model {}
 }
+namespace Illuminate\Support\Facades { class Artisan {} class Schedule {} }
+namespace Illuminate\Contracts\Console { interface Kernel { public function call($command, array $parameters = []); } }
+namespace Illuminate\Console { class Command { public function call($command, array $arguments = []) {} } }
+namespace Illuminate\Console\Scheduling { class Schedule { public function command($command, array $parameters = []) {} } }
+namespace Illuminate\Foundation\Testing { abstract class TestCase { public function artisan($command, $parameters = []) {} } }
+namespace Pest\Laravel { function artisan(string $command, array $parameters = []) {} }
 namespace {
     function route($name, $parameters = [], $absolute = true) {}
     function redirect($to = null): \Illuminate\Routing\Redirector {}
@@ -102,6 +108,18 @@ fn fixture(file: &str, text: &str) -> Fixture {
             "App\\Models\\User": {"attributes": [{"name": "email", "fillable": true, "cast": null}, {"name": "full_name", "fillable": false, "cast": "accessor"}], "relations": [{"name": "posts", "related": "App\\Models\\Post"}]},
             "App\\Models\\Post": {"attributes": [{"name": "title", "fillable": true, "cast": null}], "relations": [{"name": "author", "related": "App\\Models\\User"}]},
         }}),
+    );
+    state.seed(
+        "laravel:commands",
+        json!({
+            "commands": [
+                {"name": "messages:archive", "alias": false, "description": "Archive old messages", "hidden": false, "class": "App\\Console\\Commands\\ArchiveMessages", "path": "app/Console/Commands/ArchiveMessages.php", "line": 12,
+                 "arguments": [{"name": "month", "required": true, "array": false, "description": "The month, as YYYY-MM"}],
+                 "options": [{"name": "company", "shortcut": "c", "value": true, "array": false, "description": "Only this company"}, {"name": "force", "shortcut": null, "value": false, "array": false, "description": ""}]},
+                {"name": "inspire", "alias": false, "description": "Display an inspiring quote", "hidden": false, "class": "Illuminate\\Foundation\\Console\\ClosureCommand", "path": "routes/console.php", "line": 8, "arguments": [], "options": []},
+            ],
+            "global": [{"name": "env", "shortcut": null, "value": true, "array": false, "description": "The environment"}, {"name": "verbose", "shortcut": "v|vv|vvv", "value": false, "array": false, "description": ""}],
+        }),
     );
     fx
 }
@@ -443,4 +461,71 @@ fn reads_each_view_in_a_list_of_views() {
     }
     let found = problems("t.php", "<?php view()->first(['nope', 'gone']); view()->first([$x, 'gone']);");
     assert_eq!(found, vec![("view".into(), "View [nope] not found.".into()), ("view".into(), "View [gone] not found.".into()), ("view".into(), "View [gone] not found.".into())]);
+}
+
+#[test]
+fn completes_and_checks_artisan_commands() {
+    let names = vec!["inspire".to_string(), "messages:archive".to_string()];
+    // Wherever a command runs: Artisan, a test, Pest's function, a command, and the scheduler.
+    for call in ["\\Illuminate\\Support\\Facades\\Artisan::call('<|>')", "\\Illuminate\\Support\\Facades\\Schedule::command('<|>')", "\\Pest\\Laravel\\artisan('<|>')"] {
+        assert_eq!(labels(&complete("t.php", &format!("<?php {call};"))), names, "{call}");
+    }
+    let in_class = |body: &str, parent: &str| format!("<?php class T extends {parent} {{ function f() {{ {body}; }} }}");
+    assert_eq!(labels(&complete("t.php", &in_class("$this->artisan('<|>')", "\\Illuminate\\Foundation\\Testing\\TestCase"))), names);
+    assert_eq!(labels(&complete("t.php", &in_class("$this->call('<|>')", "\\Illuminate\\Console\\Command"))), names);
+    let archive = complete("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('mess<|>');");
+    assert_eq!(archive.iter().find(|i| i.label == "messages:archive").unwrap().detail.as_deref(), Some("Archive old messages"));
+    // Options after the name, and the parameters' keys: the command's own first, then the application's.
+    let options = vec!["--company", "--env", "--force", "--verbose", "-c", "-v", "-vv", "-vvv"];
+    assert_eq!(labels(&complete("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('messages:archive 2026-05 --<|>');")), options);
+    let keys = complete("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('messages:archive', ['<|>' => 1]);");
+    let mut all = [vec!["month"], options].concat();
+    all.sort();
+    assert_eq!(labels(&keys), all);
+    // Arguments first, then the command's options, then the application's.
+    let sort = |label: &str| keys.iter().find(|i| i.label == label).unwrap().sort_text.clone();
+    assert!(sort("month") < sort("--company"));
+    let company = keys.iter().find(|i| i.label == "--company").unwrap();
+    assert_eq!(company.detail.as_deref(), Some("option, takes a value"));
+    assert!(company.sort_text < keys.iter().find(|i| i.label == "--env").unwrap().sort_text);
+
+    let found = problems(
+        "t.php",
+        "<?php\nuse Illuminate\\Support\\Facades\\Artisan;\nArtisan::call('messages:archive 2026-05 --force -v --env=testing');\nArtisan::call('messages:archvie');\nArtisan::call('messages:archive --forse');\nArtisan::call('messages:archive 2026-05 extra');\nArtisan::call('messages:archive', ['month' => '2026-05', '--company' => 1, '--company=2' => 1, '-c' => 1]);\nArtisan::call('messages:archive', ['monht' => '2026-05', '--forse' => true]);\nArtisan::call('App\\\\Console\\\\Commands\\\\Archive');\nArtisan::call(\"messages:$name\");\n",
+    );
+    assert_eq!(
+        found,
+        vec![
+            ("command".into(), "Command [messages:archvie] not found.".into()),
+            ("command".into(), "Option [--forse] not found on command [messages:archive].".into()),
+            ("command".into(), "Argument [extra] not found on command [messages:archive].".into()),
+            ("command".into(), "Argument [monht] not found on command [messages:archive].".into()),
+            ("command".into(), "Option [--forse] not found on command [messages:archive].".into()),
+        ]
+    );
+}
+
+#[test]
+fn shows_and_goes_to_artisan_commands() {
+    let fx = fixture("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('messages:arc<|>hive --force', ['--company' => 1]);");
+    let at = fx.at();
+    let hover = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| super::hover(ctx, ctx.offset(at.position))).flatten().unwrap();
+    let lsp_types::HoverContents::Markup(m) = hover.contents else { panic!() };
+    assert!(m.value.starts_with("`messages:archive [--company=COMPANY] [--force] <month>`\n\nArchive old messages\n\n[App\\Console\\Commands\\ArchiveMessages]("), "{}", m.value);
+    let found = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+    assert_eq!(found.len(), 1);
+    assert!(found[0].uri.as_str().ends_with("app/Console/Commands/ArchiveMessages.php") && found[0].range.start.line == 11, "{found:?}");
+    // A key of the parameters shows the option, and goes to its command.
+    let fx = fixture("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('messages:archive', ['--comp<|>any' => 1]);");
+    let at = fx.at();
+    let hover = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| super::hover(ctx, ctx.offset(at.position))).flatten().unwrap();
+    let lsp_types::HoverContents::Markup(m) = hover.contents else { panic!() };
+    assert_eq!(m.value, "`--company`, takes a value\n\nOnly this company");
+    let found = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+    assert!(found[0].uri.as_str().ends_with("ArchiveMessages.php"), "{found:?}");
+    // A closure command goes to its file.
+    let fx = fixture("t.php", "<?php \\Illuminate\\Support\\Facades\\Artisan::call('insp<|>ire');");
+    let at = fx.at();
+    let found = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+    assert!(found[0].uri.as_str().ends_with("routes/console.php") && found[0].range.start.line == 7, "{found:?}");
 }

@@ -2495,6 +2495,18 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   `@includeFirst([...])`, `@extendsFirst`, and `@componentFirst` take,
   hover, complete, and link each view. Laravel renders the first that exists,
   so missing views are reported only when none of the list exists.
+- **Artisan commands**, in a test's `artisan()` and `$this->artisan()`,
+  `Artisan::call()` and `queue()`, a command's `$this->call()`, and
+  `Schedule::command()`: names complete with their descriptions, and hover
+  shows the command's usage and opens its class, or its closure in
+  `routes/console.php`. After the name, `--` completes the command's options.
+  So do the keys of the parameters array, with its arguments: `['month' =>
+  …, '--force' => true]`. A command that doesn't exist, and an option or
+  argument it doesn't take, inline or as a key, are reported, so a typo such
+  as `messages:archvie` shows in the editor rather than when the test runs.
+  The list comes from the booted app, so it includes packages' commands and
+  closures, and it's read again when `app/Console`, `routes/console.php`,
+  `bootstrap/app.php`, a provider, or `composer.lock` changes.
 - **Eloquent** attributes complete through query chains, such as
   `User::query()->where('`, `$user->posts()->where('`, and a closure passed
   to `whereHas('author', …)`.

@@ -94,6 +94,12 @@ impl Data<'_> {
         self.script("models", include_str!("../../../php/laravel/models.php"), &["app/", "database/migrations/", "composer.json", "composer.lock"])
     }
 
+    /// Artisan commands: `{commands: [{name, alias, description, hidden, class, path, line, arguments, options}],
+    /// global: [options]}`, where `global` is what every command takes from the application, such as `--env`.
+    pub fn commands(&self) -> Option<Arc<Value>> {
+        self.script("commands", include_str!("../../../php/laravel/commands.php"), &["app/Console/", "routes/console.php", "bootstrap/app.php", "app/Providers/", "composer.lock"])
+    }
+
     pub fn paths(&self) -> Option<Arc<Value>> {
         self.script("paths", include_str!("../../../php/laravel/paths.php"), &["config/"])
     }
