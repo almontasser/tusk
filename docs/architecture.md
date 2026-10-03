@@ -8708,3 +8708,11 @@ string skips non-implicit rules. Wildcard keys give `array<array-key, T>`, not
 `list<T>`, since `tags[a]=x` is valid input; only the `list` rule gives a list.
 Table and column warnings need tables read from the database, since models'
 guesses leave columns out.
+
+### 2026-10-03: Reads with a default aren't reported
+
+`config('key', $default)`, `env('KEY', $default)`, and `Config::has('key')`
+expect a key that may be missing, so a missing key there isn't reported. Before,
+every `env()` with a default in `config/*.php` whose key `.env` leaves out was
+underlined, as were package config reads like
+`config('sanctum.last_used_at', true)`.

@@ -2556,6 +2556,9 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   like set complete in `Context::get()`, `has()`, `pull()`, `only()`, and the
   rest, and ⌘B opens where they're set. Unknown keys aren't reported, since
   any code can add one.
+- **Reads with a default**, such as `config('services.x.key', null)` or
+  `env('APP_URL', 'http://localhost')`, and `Config::has()` checks, aren't
+  reported when the key doesn't exist, since they expect it may be missing.
 - **Config keys being set**, in `config(['app.locale' => …])` and
   `Config::set('app.locale', …)`, complete, hover, and link like keys being
   read, but a key that doesn't exist isn't reported, since setting one adds it.

@@ -885,7 +885,10 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::ControllerAction if !v.contains('@') => return None,
         Kind::ControllerAction => ("controllerAction", format!("Controller/Method [{v}] not found.")),
         Kind::View => ("view", format!("View [{v}] not found.")),
-        Kind::Config if config_setter(arg) => return None,
+        Kind::Config if config_setter(arg) || arg.call.name.eq_ignore_ascii_case("has") => return None,
+        // A read with a default, such as `config('services.x.key', null)` or `env('APP_URL', 'http://localhost')`,
+        // expects the key may be missing.
+        Kind::Config | Kind::Env if arg.index == 0 && arg.call.arguments.len() > 1 => return None,
         Kind::Config => ("config", format!("Config [{v}] not found.")),
         Kind::Middleware if v.starts_with("can:") => return can_problem(v, data),
         Kind::Env => ("env", format!("Env [{v}] not found.")),

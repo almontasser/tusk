@@ -240,6 +240,9 @@ fn reports_unknown_names_and_skips_what_it_cant_check() {
             ("middleware".into(), "Middleware [guest] not found.".into()),
         ]
     );
+    // A read with a default, or a check, expects the key may be missing.
+    let defaults = "<?php\nconfig('app.nam', 'x'); env('NOPE', null); config(key: 'app.nam', default: 1);\n\\Illuminate\\Support\\Facades\\Config::has('app.nam');\n";
+    assert!(problems("t.php", defaults).is_empty());
     // Facts that failed to load report nothing: no assets were seeded, and asset() has no PHP behind it,
     // but auth has no data at all.
     assert!(problems("t.php", "<?php \\Illuminate\\Support\\Facades\\Gate::allows('edit');").is_empty());
