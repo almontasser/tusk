@@ -2547,6 +2547,13 @@ and Blade files. For example, ⌘-click on `view('welcome')` opens
   like set complete in `Context::get()`, `has()`, `pull()`, `only()`, and the
   rest, and ⌘B opens where they're set. Unknown keys aren't reported, since
   any code can add one.
+- **Config keys being set**, in `config(['app.locale' => …])` and
+  `Config::set('app.locale', …)`, complete, hover, and link like keys being
+  read, but a key that doesn't exist isn't reported, since setting one adds it.
+- **`can:` middleware**, such as `->middleware('can:update,post')`, completes
+  the abilities that gates and policies define after `can:`, and hover and ⌘B
+  on the ability show its policies. An unknown ability is reported, unless a
+  `Gate::before` hook decides abilities at run time.
 - **Eloquent** attributes complete through query chains, such as
   `User::query()->where('`, `$user->posts()->where('`, and a closure passed
   to `whereHas('author', …)`.

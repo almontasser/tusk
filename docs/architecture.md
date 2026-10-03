@@ -6261,6 +6261,12 @@ an `artisan` file.
   small request the editor's TypeScript side makes for the channel list) and
   a reader for `Echo.private(…)`, `.channel(…)`, `.join(…)`, and the
   `useEcho*` hooks.
+- **Setting config, and `can:` middleware:** `config([...])` keys and
+  `Config::set()` match `Kind::Config` for completion, hover, and links, and
+  `config_setter` keeps them out of the "not found" check. A middleware string
+  that starts with `can:` is still `Kind::Middleware`, but completion after
+  `can:`, and hover, links, and the check on the ability (`can_ability`), use
+  the auth script's abilities, as `Gate::allows()` does.
 - **Route parameters:** `laravel/route_parameters.rs` reads a route's
   parameters from its URI in the routes script, with the route's other
   parameter names (its domain's) as optional, for the parameters argument of

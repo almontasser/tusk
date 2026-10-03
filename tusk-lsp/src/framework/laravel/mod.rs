@@ -155,6 +155,11 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
     if view {
         return list_ok(Kind::View);
     }
+    // Setting a key: `config(['app.locale' => 'ar'])` and `Config::set('app.locale', 'ar')`, which may add one.
+    let repositories = ["Illuminate\\Contracts\\Config\\Repository", "Illuminate\\Config\\Repository"];
+    if (s.function(&["config"], &[0]) && arg.in_array == Some(InArray::Key)) || s.method(&["set"], &repositories, &[0]) || s.facade(&["set"], "Config", &[], &[0]) {
+        return (!in_array || arg.in_array == Some(InArray::Key)).then_some(Kind::Config);
+    }
     if s.function(&["config"], &[0])
         || s.object("Illuminate\\Container\\Attributes\\Config", &[0])
         || s.method(&["get", "prepend", "push", "has"], &["Illuminate\\Contracts\\Config\\Repository", "Illuminate\\Config\\Repository"], &[0])
@@ -877,7 +882,9 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::ControllerAction if !v.contains('@') => return None,
         Kind::ControllerAction => ("controllerAction", format!("Controller/Method [{v}] not found.")),
         Kind::View => ("view", format!("View [{v}] not found.")),
+        Kind::Config if config_setter(arg) => return None,
         Kind::Config => ("config", format!("Config [{v}] not found.")),
+        Kind::Middleware if v.starts_with("can:") => return can_problem(v, data),
         Kind::Env => ("env", format!("Env [{v}] not found.")),
         Kind::Translation if !looks_like_translation_key(v) => return None,
         Kind::Translation => ("translation", format!("Translation [{v}] not found.")),
@@ -902,6 +909,39 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Command | Kind::CommandParameter => return None,
     };
     (!found).then_some((code, message))
+}
+
+/// Whether a config key is set rather than read, which may add a key.
+fn config_setter(arg: &StringArg) -> bool {
+    arg.in_array == Some(InArray::Key) || arg.call.name.eq_ignore_ascii_case("set")
+}
+
+/// The ability that `can:update,post` middleware checks, with its offset in the string.
+fn can_ability(value: &str) -> Option<(u32, &str)> {
+    let rest = value.strip_prefix("can:")?;
+    Some((4, rest.split(',').next().unwrap_or(rest)))
+}
+
+/// `can:` middleware whose ability no gate or policy defines, unless a `Gate::before` hook decides abilities.
+fn can_problem(v: &str, data: &Data<'_>) -> Option<(&'static str, String)> {
+    let (_, ability) = can_ability(v)?;
+    let auth = data.auth()?;
+    if ability.is_empty() || auth["before"] == true {
+        return None;
+    }
+    auth["policies"].get(ability).is_none().then(|| ("auth", format!("Policy [{ability}] not found.")))
+}
+
+/// For a string of `can:` middleware with `offset` in its ability: the ability's span and its entry.
+fn can_entry(arg: &StringArg, data: &Data<'_>, offset: u32) -> Option<((u32, u32), Entry)> {
+    let (at, ability) = can_ability(&arg.value)?;
+    let start = arg.start + at;
+    let end = start + ability.len() as u32;
+    if offset < start || offset > end {
+        return None;
+    }
+    let entries = entries(Kind::Auth, data)?;
+    Some(((start, end), find(Kind::Auth, &entries, ability)?.clone()))
 }
 
 /// A command string's problem: a command that doesn't exist, or options and arguments it doesn't take. A class
@@ -1193,6 +1233,11 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
                 })
                 .collect(),
         );
+    }
+    // The ability of `can:` middleware.
+    if kind == Kind::Middleware && typed.starts_with("can:") && !typed.contains(',') {
+        let range = ctx.doc.range(arg.start + 4, offset);
+        return Some(entries(Kind::Auth, data)?.into_iter().map(|e| completion_item(&e.key, Some(e.kind), range)).collect());
     }
     let mut entries = entries(kind, data)?;
     if kind == Kind::Storage {
@@ -1582,7 +1627,10 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         let mut found: Vec<Location> = args
             .iter()
             .filter(|a| a.start <= offset && offset <= a.end)
-            .filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data))
+            .filter_map(|a| match kind_of(a, &ctx.index.codebase)? {
+                Kind::Middleware if can_entry(a, &data, offset).is_some() => can_entry(a, &data, offset)?.1.target,
+                kind => target(kind, a, &data),
+            })
             .map(to_location)
             .collect();
         found.extend(names::definition(ctx, &args, offset).into_iter().map(to_location));
@@ -1614,6 +1662,11 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
             return Some(markdown(text, ctx.doc.range(arg.start, arg.end)));
         }
         let kind = kind_of(arg, &ctx.index.codebase)?;
+        if kind == Kind::Middleware
+            && let Some(((start, end), entry)) = can_entry(arg, &data, offset)
+        {
+            return Some(markdown(entry.hover?, ctx.doc.range(start, end)));
+        }
         let entries = match kind {
             Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
             _ => entries(kind, &data)?,
