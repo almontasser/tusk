@@ -935,9 +935,14 @@ pub fn rules_method_hover(ctx: &Ctx<'_>, offset: u32) -> Option<(String, Range)>
 /// Tables and columns the rules name that the database doesn't have. Only when the tables were read from the
 /// database: the models' guesses leave tables and columns out.
 pub fn table_problems(ctx: &Ctx<'_>, args: &[StringArg]) -> Vec<Diagnostic> {
+    let refs = table_refs(ctx, args);
+    // Only a file with such rules asks for the tables, so a project without them never runs the script.
+    if refs.is_empty() {
+        return vec![];
+    }
     let Some(tables) = tables_of(ctx).filter(|t| t["live"] == true) else { return vec![] };
     let mut out = vec![];
-    for r in table_refs(ctx, args) {
+    for r in refs {
         let Some(table) = table_of(&tables, &r) else { continue };
         // A model's table that isn't in the database is the model's problem, not the rule's.
         let written = r.model.is_none() && !r.table.as_ref().is_some_and(|t| t.0.contains('\\'));
