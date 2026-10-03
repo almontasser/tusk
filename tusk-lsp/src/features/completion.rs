@@ -645,6 +645,9 @@ fn names(ctx: &Ctx<'_>, word_start: u32, word: &str, range: Range) -> Vec<Comple
 
 /// Adds documentation to an item.
 pub fn resolve(snap: &Snapshot, mut item: CompletionItem) -> Result<CompletionItem, String> {
+    if crate::framework::icons::resolve(&snap.framework, &mut item) {
+        return Ok(item);
+    }
     let Some(data) = item.data.clone().and_then(|d| serde_json::from_value::<Data>(d).ok()) else { return Ok(item) };
     let index = snap.index.read();
     let codebase = &index.codebase;
@@ -687,6 +690,11 @@ pub fn resolve(snap: &Snapshot, mut item: CompletionItem) -> Result<CompletionIt
             value.push_str("\n\n");
         }
         value.push_str(&doc);
+    }
+    if let Data::Constant { class, .. } = &data
+        && let Some(preview) = crate::framework::icons::heroicon_case(&snap.framework, class, declaration)
+    {
+        value = if value.is_empty() { preview } else { format!("{preview}\n\n{value}") };
     }
     if !value.is_empty() {
         item.documentation = Some(Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value }));

@@ -2,8 +2,10 @@
 //! `->relationship('author')`), fed by facts about the running app that PHP scripts report.
 
 pub mod filament;
+pub mod icons;
 pub mod laravel;
 pub mod php;
+pub mod values;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -300,23 +302,7 @@ fn string_arg(ctx: &Ctx<'_>, path: &[Node<'_, '_>], literal: &mago_syntax::cst::
             Node::ArrayElement(_) | Node::Array(_) | Node::LegacyArray(_) => {}
             Node::PositionalArgument(_) | Node::NamedArgument(_) | Node::Argument(_) | Node::PartialArgument(_) => {}
             Node::ArgumentList(_) | Node::PartialArgumentList(_) => {
-                let call_node = path[..i].iter().rev().find(|n| {
-                    matches!(n, Node::FunctionCall(_) | Node::MethodCall(_) | Node::NullSafeMethodCall(_) | Node::StaticMethodCall(_) | Node::Instantiation(_) | Node::Attribute(_))
-                })?;
-                let call = call_of(ctx, call_node, &path[..i])?;
-                // The argument's position: count arguments that start before the literal's argument.
-                let arg_node = path.get(i + 1)?;
-                let arg_start = arg_node.span().start.offset;
-                let index = match &path[i] {
-                    Node::ArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
-                    Node::PartialArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
-                    _ => 0,
-                };
-                let name = match arg_node {
-                    Node::Argument(Argument::Named(n)) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
-                    Node::NamedArgument(n) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
-                    _ => None,
-                };
+                let (call, index, name) = argument(ctx, path, i)?;
                 return Some(StringArg {
                     value: text_of(ctx, (start, end)),
                     start,
@@ -332,6 +318,28 @@ fn string_arg(ctx: &Ctx<'_>, path: &[Node<'_, '_>], literal: &mago_syntax::cst::
         }
     }
     None
+}
+
+/// The call whose argument list is `path[i]`, and the position and name of the argument at `path[i + 1]`.
+pub(crate) fn argument(ctx: &Ctx<'_>, path: &[Node<'_, '_>], i: usize) -> Option<(Call, usize, Option<String>)> {
+    let call_node = path[..i].iter().rev().find(|n| {
+        matches!(n, Node::FunctionCall(_) | Node::MethodCall(_) | Node::NullSafeMethodCall(_) | Node::StaticMethodCall(_) | Node::Instantiation(_) | Node::Attribute(_))
+    })?;
+    let call = call_of(ctx, call_node, &path[..i])?;
+    // The argument's position: count arguments that start before the literal's argument.
+    let arg_node = path.get(i + 1)?;
+    let arg_start = arg_node.span().start.offset;
+    let index = match &path[i] {
+        Node::ArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
+        Node::PartialArgumentList(l) => l.arguments.iter().take_while(|a| a.span().start.offset < arg_start).count(),
+        _ => 0,
+    };
+    let name = match arg_node {
+        Node::Argument(Argument::Named(n)) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
+        Node::NamedArgument(n) => Some(String::from_utf8_lossy(n.name.value).into_owned()),
+        _ => None,
+    };
+    Some((call, index, name))
 }
 
 /// Every string argument in the file.
@@ -466,6 +474,8 @@ impl State {
 pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     let mut items = laravel::completion(ctx, offset).unwrap_or_default();
     items.extend(filament::completion(ctx, offset).unwrap_or_default());
+    items.extend(icons::completion(ctx, offset).unwrap_or_default());
+    items.extend(filament::colors::completion(ctx, offset).unwrap_or_default());
     (!items.is_empty()).then_some(items)
 }
 
@@ -473,18 +483,26 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
 pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
     let mut out = laravel::definition(ctx, offset);
     out.extend(filament::definition(ctx, offset));
+    out.extend(icons::definition(ctx, offset));
     out
 }
 
 pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
-    laravel::hover(ctx, offset).or_else(|| filament::hover(ctx, offset))
+    laravel::hover(ctx, offset).or_else(|| filament::hover(ctx, offset)).or_else(|| icons::hover(ctx, offset)).or_else(|| filament::colors::hover(ctx, offset))
 }
 
 /// Problems with the strings passed to framework calls, such as a route name that doesn't exist.
 pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     let mut out = laravel::diagnostics(ctx);
     out.extend(filament::diagnostics(ctx));
+    out.extend(icons::diagnostics(ctx));
+    out.extend(filament::colors::diagnostics(ctx));
     out
+}
+
+/// Swatches for the colors framework calls name, such as Filament's `->color('danger')`.
+pub fn document_colors(ctx: &Ctx<'_>) -> Vec<lsp_types::ColorInformation> {
+    filament::colors::document_colors(ctx)
 }
 
 pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<CodeLens> {

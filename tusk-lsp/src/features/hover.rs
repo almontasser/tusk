@@ -303,7 +303,13 @@ fn describe(ctx: &Ctx<'_>, symbol: &Symbol, start: u32, end: u32) -> Option<Stri
         }
         Symbol::ClassConstant { class, name } => {
             if let Some(case) = codebase.get_enum_case(class.as_bytes(), name.as_bytes()) {
-                return Some(from_source(case.span, Some(format!("`{class}`")), format!("case {name}")));
+                let mut out = from_source(case.span, Some(format!("`{class}`")), format!("case {name}"));
+                // A case of Filament's `Heroicon` enum shows its icon.
+                let declaration = ctx.snap.text_of(&ctx.index, case.span.file_id).and_then(|t| t.get(case.span.start.offset as usize..case.span.end.offset as usize).map(String::from));
+                if let Some(preview) = declaration.and_then(|d| crate::framework::icons::heroicon_case(&ctx.snap.framework, class, &d)) {
+                    out = format!("{preview}\n\n{out}");
+                }
+                return Some(out);
             }
             let c = codebase.get_class_constant(class.as_bytes(), name.as_bytes())?;
             let src = source(ctx, c.span);
