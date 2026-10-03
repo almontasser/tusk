@@ -1129,6 +1129,80 @@ this took Mago's errors from 5,378 to 4,737; most of what it adds are real
 problems Mago couldn't see in `mixed` values, such as
 `Post::first()->title`, where `first()` may return `null`.
 
+### Eloquent's data without the app
+
+Laravel's model facts come from the booted app (`php/laravel/models.php`, which
+runs `model:show` and so needs the database). When the app can't boot or reach
+its database, `framework/laravel/schema.rs` reads the same facts from the
+project's files, parsed with Mago's syntax tree as the index scans them:
+
+- **Per file:** `scan_file` parses a project file only when its bytes hint at
+  something (a migration's folder, `$table`, `casts`, `$fillable`, `$with`,
+  `$this->hasMany`, `morphMap`, and the like) and keeps `FileFacts` in the
+  index by path: a migration's `up()` as `Op`s, each class's `ModelDecl`
+  (`$table` or `#[Table]`, literal casts from `$casts` and `casts()`,
+  `$timestamps`, `$fillable`, `$with`, and the relationship methods whose
+  `return` is a `$this->hasMany(Post::class)` chain), morph map entries, and
+  whether the app calls `automaticallyEagerLoadRelationships()`. After a build,
+  and after an update that changes any file's facts, the index combines them
+  into `Index::eloquent`, an `Arc<Eloquent>`, so readers cache per index
+  version and nothing scans per keystroke.
+- **Migrations:** files in `database/migrations` run in file name order. A
+  top-level `Schema::create`, `table`, `rename`, `drop`, `dropIfExists`, or
+  `dropColumns` (also through `Schema::connection()`) becomes an op; a blueprint
+  closure's statements on `$table` become column ops (add, `change()`, drop,
+  rename), with each column method's PHP type (decimals as numeric strings,
+  booleans as `bool|int`, dates as strings marked as dates) and `nullable()`.
+  Only certain things count: a statement that isn't a chain on `$table`, an
+  unknown method (a macro), a column named by a variable, or a schema call
+  inside an `if`, a loop, or a closure makes the table uncertain, and raw SQL
+  in `DB::statement()` makes the tables it names uncertain. `Schema::table()`
+  on a table the migrations didn't create (a schema dump's, a package's) starts
+  an uncertain table, and one with a name that isn't a literal makes every
+  table uncertain. Uncertain tables still complete and type; only certain ones
+  back warnings.
+- **Tables of models:** a model's `$table` from its declarations or a parent's,
+  else Laravel's name, `snake(pluralStudly(class_basename))`, with Doctrine's
+  common English rules (checked against Laravel's output for words such as
+  `EmergencySOS`, `Status`, `Settings`, and `Person`), singular for a pivot.
+- **Attributes in the analysis:** `AttributeHook` in
+  `framework/laravel/attributes.rs` types `$post->title` when Mago gives
+  `mixed` and the receiver is one model: from the migrations' column and the
+  model's casts (`schema::attribute_type`; an enum cast gives the enum, a
+  custom cast or an accessor leaves `mixed`). `created_at` and `updated_at` are
+  `Carbon|null` with Mago's `ignore_nullable_issues`, since Laravel fills them
+  on save: calls on them aren't reported as calls on null, and an
+  `instanceof Carbon` check in a `creating` observer isn't redundant. The hook
+  also stores the type as Mago's variable for `$post->title`, as Mago does for
+  a declared property, so later reads and narrowing see it. Aggregates the
+  file's queries add (`withCount`, `withExists`, `withSum`, … and the `load*`
+  forms, with aliases) are `int`, `bool`, or `mixed`. Its issue filter drops
+  `non-documented-property` for a column, a relationship, or such an
+  aggregate. `analysis::run` passes `Index::eloquent` and the file's aggregates
+  in a thread-local (`with_eloquent`).
+- **Query strings:** `framework/laravel/relations.rs` replaces the old
+  Eloquent completion. `Models` gives a `Model` from the booted app's facts
+  when it has the class (`live`), else one built from the index: the table's
+  columns, `$fillable`, and the declared relationships. A call answers only on a
+  model, its builder, a relation, or, for `load*`, a collection of models, so a
+  plain collection's `has('key')` isn't read as a relationship. Paths split on
+  `.`, ` as ` aliases, and `:columns`; each segment walks to the related model.
+  Completion, hover, and go to definition work per segment; a relationship
+  warning needs a `live` model and a class without that method, since only the
+  app's scan finds every relationship (traits in `vendor`, macros).
+- **Filament:** `fill_guessed_columns` overlays the migrations' columns on
+  introspection whose `columnsGuessed` is set, for the model and each
+  relationship's related model: a certain table replaces the guess and clears
+  the flag, so Filament's checks use it; an uncertain one only adds names.
+- **Lazy-loading hints:** `framework/laravel/lazy.rs`, behind the
+  `lazyLoadingHints` option (`Options`, kept in `framework::State` so changing
+  it republishes open files without a reindex). It finds `foreach` loops and
+  closures passed to `each()`, `map()`, and the like, whose iterated expression
+  is a query chain in view (or a variable assigned once from one in the same
+  function), collects the literal paths of `with()`, `load()`, and the model's
+  `$with`, and reports the first unloaded relationship each property chain on
+  the loop variable reads. A Blade view runs it on `checked_php`.
+
 ### Questions from servers
 
 A server can ask a question with `window/showMessageRequest`. The client
@@ -6176,8 +6250,9 @@ an `artisan` file.
   or a typed `$post`).
 - **Eloquent's model:** the receiver's class, else a model in its type
   arguments, else, inside a closure passed to a relation method
-  (`whereHas('author', fn ($q) => …)`), the relation's related model from the
-  models script.
+  (`whereHas('author', fn ($q) => …)`, or as a value of `with([...])`), the
+  relation's related model, from the models script or, without it, the index
+  (see "Eloquent's data without the app").
 - **Gates:** an ability check with a second argument (other than `has`)
   matches policies by the model class of that argument; with a known class and
   no policy for it, it's reported as `Policy/Model match [x] not found.`
@@ -8427,3 +8502,27 @@ Enter, and inputs such as the Automations designer's condition value and the
 New notification name couldn't be typed in. Such handlers now wrap their
 expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
 handler property whose expression body could return `false`.
+
+### 2026-10-03: Eloquent's columns from migrations, relationship paths, aggregates, and morph maps
+
+Without a database, the server knew a model's columns only as its `$fillable`
+and casts, so completion missed columns and Filament couldn't check against
+them. It now reads `database/migrations` with Mago's syntax tree, in the index,
+as Larastan's schema reader does. The rule is sure-only: what isn't read with
+certainty marks the table uncertain rather than guessing, and only certain
+tables back warnings. The booted app's facts still win when it has them.
+
+Columns also type `$post->title` in the analysis. Typing values Mago saw as
+`mixed` surfaces real problems, and a few Mago imprecisions: on one app,
+3 redundant casts (real), a non-numeric-string cast to float, and a shape
+mismatch on a nested array built with a string key, against 328 reports gone.
+Timestamps are typed as `Carbon|null` that ignores nullable issues: typed
+nullable, every `$post->created_at->format()` warned; typed non-null, an
+observer's `instanceof Carbon` check on an unsaved model was "redundant".
+
+Relationship warnings stay tied to the booted app's list: the index reads
+relationship methods from the project's own files, which misses those from
+packages' traits, so a warning from it would be a guess.
+
+The lazy-loading hint is off by default and a heuristic: it only looks where the
+query is visible in the same function or view.

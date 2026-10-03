@@ -6,9 +6,13 @@
 //! list the facade, its short alias, and the class behind it.
 
 pub mod actions;
+pub mod attributes;
 pub mod blade;
 mod data;
 pub mod forwarding;
+mod lazy;
+pub mod relations;
+pub mod schema;
 mod tables;
 pub mod views;
 
@@ -1127,7 +1131,7 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
     let codebase = &ctx.index.codebase;
     let simple = |labels: Vec<String>, kind| Some(labels.iter().map(|l| completion_item(l, Some(kind), range)).collect::<Vec<_>>());
 
-    if let Some(items) = eloquent_completion(ctx, data, arg, range) {
+    if let Some(items) = relations::completion(ctx, data, arg, offset) {
         return Some(items);
     }
     let first_arg = arg.call.arguments.first().and_then(|a| a.1.clone());
@@ -1303,92 +1307,6 @@ fn inertia_props(source: &str) -> Vec<String> {
         member.push(c);
     }
     out
-}
-
-/// The methods whose first argument names a relation.
-const RELATION_METHODS: &[&str] = &[
-    "doesntHave", "doesntHaveMorph", "has", "hasMorph", "orDoesntHave", "orDoesntHaveMorph", "orHas", "orHasMorph", "orWhereDoesntHave",
-    "orWhereDoesntHaveMorph", "orWhereHas", "orWhereHasMorph", "whereDoesntHave", "whereDoesntHaveMorph", "whereHas", "whereHasMorph", "with",
-    "withAggregate", "withAvg", "withCount", "withMax", "withMin", "withSum", "load", "loadMissing",
-];
-
-fn model_named<'m>(models: &'m serde_json::Map<String, Value>, class: &str) -> Option<&'m Value> {
-    let class = class.trim_start_matches('\\');
-    models.iter().find(|(k, _)| k.trim_start_matches('\\').eq_ignore_ascii_case(class)).map(|(_, v)| v)
-}
-
-/// The model a query call works on: the receiver when it's a model, the model a `Builder<User>`,
-/// `HasMany<Post, User>`, or collection is of, or, inside a closure passed to a relation method such as
-/// `whereHas('author', fn ($q) => $q->where('…'))`, the relation's related model.
-fn model_of<'m>(ctx: &Ctx<'_>, models: &'m serde_json::Map<String, Value>, call: &crate::framework::Call, at: u32, depth: u8) -> Option<&'m Value> {
-    if let Some(m) = call.classes.iter().chain(&call.type_args).find_map(|c| model_named(models, c)) {
-        return Some(m);
-    }
-    if depth > 4 {
-        return None;
-    }
-    let path = ctx.parsed.path_at(at);
-    let closure = path.iter().rposition(|n| matches!(n, Node::Closure(_) | Node::ArrowFunction(_)))?;
-    let (i, outer_node) = path[..closure].iter().enumerate().rev().find(|(_, n)| {
-        matches!(n, Node::MethodCall(_) | Node::NullSafeMethodCall(_) | Node::StaticMethodCall(_))
-    })?;
-    let outer = crate::framework::call_of(ctx, outer_node, &path[..=i])?;
-    if !outer.is_method(RELATION_METHODS) {
-        return None;
-    }
-    let relation = outer.arguments.first()?.1.clone()?;
-    let mut model = model_of(ctx, models, &outer, outer.span.0, depth + 1)?;
-    // `author.posts` walks from relation to relation.
-    for name in relation.split('.') {
-        let related = model["relations"].as_array()?.iter().find(|r| r["name"].as_str() == Some(name))?["related"].as_str()?;
-        model = model_named(models, related)?;
-    }
-    Some(model)
-}
-
-/// Attribute and relation names for Eloquent calls such as `User::where('` or `->with('`.
-fn eloquent_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, range: Range) -> Option<Vec<CompletionItem>> {
-    const RELATION: &[&str] = RELATION_METHODS;
-    const FIRST: &[&str] = &["create", "fill", "firstWhere", "make", "max", "orderBy", "orderByDesc", "orWhere", "select", "sum", "update", "where", "whereColumn", "whereIn", "whereNotIn", "whereNull", "whereNotNull", "pluck", "value", "latest", "oldest", "min", "avg", "increment", "decrement", "groupBy"];
-    const ANY: &[&str] = &["createOrFirst", "firstOrNew", "firstOrCreate", "updateOrCreate"];
-    let method = arg.call.name.as_str();
-    let relevant = matches!(arg.call.kind, CallKind::Method | CallKind::Static) && (RELATION.contains(&method) || FIRST.contains(&method) || ANY.contains(&method));
-    if !relevant {
-        return None;
-    }
-    let models = data.models()?;
-    let models = models["models"].as_object()?;
-    let model = model_of(ctx, models, &arg.call, arg.start, 0)?;
-    let attrs = |fillable_only: bool| -> Vec<String> {
-        model["attributes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|a| !fillable_only || a["fillable"].as_bool() == Some(true))
-            .filter(|a| fillable_only || !matches!(a["cast"].as_str(), Some("accessor" | "attribute")))
-            .filter_map(|a| a["name"].as_str().map(String::from))
-            .collect()
-    };
-    let (labels, kind): (Vec<String>, _) = if RELATION.contains(&method) {
-        if arg.index != 0 || matches!(arg.in_array, Some(InArray::Value(_))) {
-            return None;
-        }
-        let relations = model["relations"].as_array().into_iter().flatten().filter_map(|r| r["name"].as_str().map(String::from)).collect();
-        (relations, CompletionItemKind::VALUE)
-    } else if ANY.contains(&method) {
-        (attrs(arg.index != 0), CompletionItemKind::FIELD)
-    } else if arg.index > 0 {
-        return None;
-    } else if ["create", "make", "fill", "update"].contains(&method) {
-        if arg.in_array != Some(InArray::Key) {
-            return None;
-        }
-        (attrs(true), CompletionItemKind::FIELD)
-    } else {
-        (attrs(false), CompletionItemKind::FIELD)
-    };
-    let mut seen = std::collections::HashSet::new();
-    Some(labels.into_iter().filter(|l| seen.insert(l.clone())).map(|l| completion_item(&l, Some(kind), range)).collect())
 }
 
 /// Blade components after `<x-` or a registered prefix, Livewire components after `<livewire:`, and
@@ -1578,11 +1496,11 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         return component(&data, &name, livewire).and_then(|(t, _)| t).map(|p| vec![to_location((p, 1))]).unwrap_or_default();
     }
     with_args(ctx, None, |ctx, args| {
-        args.iter()
-            .filter(|a| a.start <= offset && offset <= a.end)
-            .filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data))
-            .map(to_location)
-            .collect()
+        let at = args.iter().filter(|a| a.start <= offset && offset <= a.end);
+        if let Some(found) = at.clone().find_map(|a| relations::definition(ctx, &data, a, offset)) {
+            return found;
+        }
+        at.filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data)).map(to_location).collect()
     })
 }
 
@@ -1603,6 +1521,9 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     }
     with_args(ctx, None, |ctx, args| {
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
+        if let Some(found) = relations::hover(ctx, &data, arg, offset) {
+            return Some(found);
+        }
         let kind = kind_of(arg, &ctx.index.codebase)?;
         let entries = match kind {
             Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
@@ -1630,10 +1551,11 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     if !data.active() {
         return vec![];
     }
-    with_args(ctx, None, |ctx, args| {
+    let lazy = lazy::diagnostics(ctx, &data);
+    let mut found = with_args(ctx, None, |ctx, args| {
         let codebase = &ctx.index.codebase;
         let mut cache: Vec<(Kind, Option<Vec<Entry>>)> = vec![];
-        let mut out = vec![];
+        let mut out = relations::diagnostics(ctx, &data, &args);
         for arg in &args {
             let Some(kind) = kind_of(arg, codebase) else { continue };
             if !cache.iter().any(|(k, _)| *k == kind) {
@@ -1658,7 +1580,9 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
             }
         }
         out
-    })
+    });
+    found.extend(lazy);
+    found
 }
 
 pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {

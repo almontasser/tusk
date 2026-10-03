@@ -17,7 +17,7 @@ import { isAbsolute } from "./platform.ts";
 const analysis = registerProjectSettings(
   "PHP Analysis",
   "phpAnalysis",
-  { loadAllLibraries: false, stubs: "" },
+  { loadAllLibraries: false, stubs: "", lazyLoadingHints: false },
   [
     {
       key: "loadAllLibraries",
@@ -32,10 +32,17 @@ const analysis = registerProjectSettings(
       placeholder: "stubs, ../shared/stubs",
       help: "Folders or PHP files, separated by commas and relative to the project, that the index reads as library code, such as stubs for a PHP extension.",
     },
+    {
+      key: "lazyLoadingHints",
+      label: "Hint at lazy-loaded relationships",
+      type: "checkbox",
+      help: "Marks where a loop over a query's models reads a relationship the query doesn't eager-load with with(), so each pass runs a query of its own. A heuristic: it only looks where the query is in the same function or Blade view.",
+    },
   ],
   () => configureTusk(),
 );
 tuskOptions.loadAllLibraries = () => analysis().loadAllLibraries;
+tuskOptions.lazyLoadingHints = () => analysis().lazyLoadingHints;
 tuskOptions.stubs = () =>
   analysis()
     .stubs.split(",")

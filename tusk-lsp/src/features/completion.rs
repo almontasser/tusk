@@ -295,6 +295,16 @@ fn members(ctx: &Ctx<'_>, word_start: u32, _word: &str, range: Range, is_static:
             }
         }
         properties(ctx, meta, class, is_static, enclosing.as_deref(), range, &mut seen, &mut out);
+        // A model's columns, relationships, and the aggregates the file adds, which Eloquent reads as properties.
+        if !is_static {
+            for (name, ty) in crate::framework::laravel::attributes::members(&ctx.index, ctx.parsed.program, class) {
+                if seen.insert(("p", name.clone())) {
+                    let mut it = item(&name, CompletionItemKind::PROPERTY, Some(ty.clone()), range);
+                    it.label_details = Some(CompletionItemLabelDetails { detail: None, description: Some(ty) });
+                    out.push(it);
+                }
+            }
+        }
         if is_static {
             constants(ctx, meta, class, range, &mut seen, &mut out);
             if seen.insert(("k", "class".into())) {

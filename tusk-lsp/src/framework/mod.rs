@@ -370,6 +370,8 @@ pub struct State {
     php: std::sync::OnceLock<php::Php>,
     /// Keys whose scripts [`State::php_soon`] is running.
     pending: Mutex<HashSet<String>>,
+    /// The `lazyLoadingHints` option: hint at relationships a loop lazy-loads.
+    lazy_loading_hints: std::sync::atomic::AtomicBool,
 }
 
 struct Cached {
@@ -381,7 +383,16 @@ struct Cached {
 
 impl State {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new(), pending: Mutex::new(HashSet::new()) }
+        Self { root, cache: Mutex::new(HashMap::new()), php: std::sync::OnceLock::new(), pending: Mutex::new(HashSet::new()), lazy_loading_hints: Default::default() }
+    }
+
+    pub fn lazy_loading_hints(&self) -> bool {
+        self.lazy_loading_hints.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sets the `lazyLoadingHints` option; true when it changed.
+    pub fn set_lazy_loading_hints(&self, on: bool) -> bool {
+        self.lazy_loading_hints.swap(on, std::sync::atomic::Ordering::Relaxed) != on
     }
 
     pub fn root(&self) -> &Path {
