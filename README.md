@@ -2829,6 +2829,11 @@ Tests get the types their values have at runtime:
 - `artisan()` and `$this->artisan()` return a `PendingCommand`, so
   `->assertSuccessful()` and `->expectsOutput()` complete.
 
+Eloquent's forwarded calls have types too, in tests and in your app:
+`Post::where('active', true)->first()` is a `Post` or `null`, `Post::count()`
+an int, and `$post->where(…)` and `Post::published()`, a scope, an Eloquent
+builder of posts, so the chain after them completes and is checked.
+
 Press ⌃⌃ and type an Artisan command with its arguments, such as
 `make:model Comment -m`. The command name is matched fuzzily, so `mk:mod`
 works. Run configurations match by name too. To run any other command, choose

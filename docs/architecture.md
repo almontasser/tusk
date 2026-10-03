@@ -1094,6 +1094,41 @@ in its app code.
   `test()->name` the type tests set on `$this->name`, as it does for
   `$this->name`, so helper functions in a test file read them.
 
+### Eloquent's forwarded calls in analysis
+
+A model passes a method it doesn't have to a new query (`Model::__call()`, and
+`__callStatic()` for `Post::where()`), and Eloquent's builder passes one it
+doesn't have to the query builder or to the model's scopes. Laravel declares
+none of it, so Mago types these calls as `mixed`. `ForwardHook` in
+`tusk-lsp/src/framework/laravel/forwarding.rs` types them after Mago has, when
+Mago's type is `mixed`:
+
+- A model's static or instance call becomes the call on the model's builder:
+  what its `newEloquentBuilder()` returns when it declares a builder of its
+  own, else `Builder<Post>`. The method is the builder's, wherever it's
+  declared, as `first()` in the `BuildsQueries` trait, or else the query
+  builder's. Its return type gets the builder's templates bound: `TModel` to
+  the model, and each template that the builder's `@extends` and `@use` tags
+  pass it, such as `BuildsQueries<TModel>`'s `TValue`. Templates are keyed by
+  Mago's lowercase class names. `static` and `$this` become the builder, and so
+  does a query builder method that returns itself. A conditional return type,
+  such as `find()`'s `($id is array ? Collection<int, TModel> : TModel|null)`,
+  takes the branch its argument's type decides, or both. The method's own
+  templates, which nothing infers here, become their constraints.
+- A scope, `scopePublished()` or a `#[Scope]` method, called on the model or on
+  its builder, returns the builder. A `#[Scope]` method is protected, so
+  outside the model a call to it is forwarded too.
+
+Hooks see a static call's class only as written, so `analysis::run` passes the
+file's resolved names to the hook in a thread-local (`with_names`). Its issue
+filter drops Mago's report that the forwarded method may not exist
+(`non-documented-method`), and for a `#[Scope]` method that it's protected and
+not static, within each call it typed. The editor's own filters for Laravel's
+magic (`src/diagnostics.ts`) still apply to what's left. On one Laravel app,
+this took Mago's errors from 5,378 to 4,737; most of what it adds are real
+problems Mago couldn't see in `mixed` values, such as
+`Post::first()->title`, where `first()` may return `null`.
+
 ### Questions from servers
 
 A server can ask a question with `window/showMessageRequest`. The client

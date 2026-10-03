@@ -592,7 +592,7 @@ mod tests {
     /// Mago's problems in `code`, a file of the project with Laravel's factories and Pest's expectations, by line.
     fn typed_problems(code: &str) -> Vec<(String, u32)> {
         let mut files = crate::testing::PEST.to_vec();
-        files.extend([crate::testing::LARAVEL_FACTORY, crate::testing::PEST_EXPECTATIONS, ("tests/Feature/HomeTest.php", code)]);
+        files.extend([crate::testing::ELOQUENT, crate::testing::LARAVEL_FACTORY, crate::testing::PEST_EXPECTATIONS, ("tests/Feature/HomeTest.php", code)]);
         mago_codes(&Fixture::new(&files), "tests/Feature/HomeTest.php")
     }
 
@@ -601,7 +601,8 @@ mod tests {
         let one = ["User::factory()->create()", "User::factory()->state([])->make()", "User::factory(['name' => 'Ada'])->createQuietly()", "User::factory(fn () => [])->create()", "UserFactory::new()->create()"];
         for made in one {
             let code = format!("<?php\nuse App\\Models\\User;\nuse Database\\Factories\\UserFactory;\nfunction f(): int {{\n    $user = {made};\n    $user->psts();\n    return $user->posts();\n}}\n");
-            assert_eq!(typed_problems(&code), vec![("non-existent-method".into(), 5)], "{made}");
+            // A model answers any call through `__call()`, so a misspelled method may exist.
+            assert_eq!(typed_problems(&code), vec![("non-documented-method".into(), 5)], "{made}");
         }
         // A count, or a factory from elsewhere, may make a collection.
         let many = ["User::factory(3)->create()", "User::factory()->count(3)->create()", "UserFactory::times(3)->create()", "User::factory()->count(3)->state([])->make()", "$factory->create()"];
@@ -627,7 +628,51 @@ mod tests {
     #[test]
     fn types_test_without_arguments_as_the_running_test() {
         let code = "<?php\nuse App\\Models\\User;\nbeforeEach(function () {\n    $this->user = User::factory()->create();\n});\nfunction user_posts(): int {\n    test()->get('/');\n    return test()->user->posts();\n}\nfunction misspelled(): void {\n    test()->user->psts();\n}\nit('loads', function () {});\n";
-        assert_eq!(typed_problems(code), vec![("non-existent-method".into(), 10)]);
+        assert_eq!(typed_problems(code), vec![("non-documented-method".into(), 10)]);
+    }
+
+    #[test]
+    fn types_eloquent_calls_a_model_forwards_to_its_builder() {
+        let post = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Attributes\\Scope;\nuse Illuminate\\Database\\Eloquent\\Builder;\nclass Post extends \\Illuminate\\Database\\Eloquent\\Model {\n    public function title(): string { return ''; }\n    public function scopePublished(Builder $query): void {}\n    #[Scope]\n    protected function recent(Builder $query): void {}\n}\n";
+        let problems = |call: &str| {
+            let code = format!("<?php\nuse App\\Models\\Post;\nfunction f(Post $post): void {{\n    $x = {call};\n    $x->nope();\n}}\n");
+            let mut files = crate::testing::PEST.to_vec();
+            files.extend([crate::testing::ELOQUENT, ("app/Models/Post.php", post), ("app/f.php", code.as_str())]);
+            php_problems(&Fixture::new(&files).snap.index, &Fixture::new(&files).doc("app/f.php"))
+                .into_iter()
+                .filter(|d| d.source.as_deref() == Some("mago") && d.range.start.line >= 3)
+                .map(|d| d.message.lines().next().unwrap_or_default().to_string())
+                .collect::<Vec<_>>()
+        };
+        // What the problem with `$x->nope()` says `$x` is.
+        let on = |class: &str| vec![format!("`nope` on `{class}`")];
+        let named = |found: Vec<String>| found.into_iter().map(|m| match m.rsplit_once(" `").and_then(|(_, c)| c.split_once('`')) { Some((c, _)) if m.contains("`nope`") => format!("`nope` on `{c}`"), _ => m }).collect::<Vec<_>>();
+        let problems = |call: &str| named(problems(call));
+        let builder = on("Illuminate\\Database\\Eloquent\\Builder");
+        // A model's static and instance calls run on a new query: the builder's methods and the query builder's.
+        for call in ["Post::where('a', 1)", "$post->where('a', 1)", "Post::orderBy('a')", "Post::where('a', 1)->orderBy('a')"] {
+            assert_eq!(problems(call), builder, "{call}");
+        }
+        // With the builder's `TModel`, including a trait's `TValue`, bound to the model.
+        assert_eq!(problems("Post::firstOrFail()"), on("App\\Models\\Post"));
+        assert_eq!(problems("Post::find([1, 2])"), on("Illuminate\\Database\\Eloquent\\Collection"));
+        assert_eq!(problems("Post::where('a', 1)->get()"), on("Illuminate\\Database\\Eloquent\\Collection"));
+        for nullable in ["Post::first()", "Post::find(1)", "Post::where('a', 1)->first()"] {
+            let mut found = problems(nullable);
+            found.sort();
+            assert_eq!(found, ["Attempting to call a method on `null`.".to_string(), on("App\\Models\\Post")[0].clone()], "{nullable}");
+        }
+        assert_eq!(problems("Post::count()"), vec!["Attempting to access a method on a non-object type (`non-negative-int`).".to_string()]);
+        // Scopes, by name or by `#[Scope]`, on the model or on its builder.
+        for call in ["Post::published()", "Post::where('a', 1)->published()", "$post->published()", "Post::recent()", "Post::where('a', 1)->recent()->published()"] {
+            assert_eq!(problems(call), builder, "{call}");
+        }
+        // The model's own methods, and what neither the model nor its builder has, are left alone.
+        assert_eq!(problems("$post->title()"), vec!["Attempting to access a method on a non-object type (`string`).".to_string()]);
+        for missing in ["Post::nothing()", "Post::hidden()"] {
+            let found = problems(missing);
+            assert!(found.iter().any(|m| m.contains("Ambiguous method call")), "{missing}: {found:?}");
+        }
     }
 
     #[test]

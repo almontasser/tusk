@@ -30,10 +30,67 @@ pub const LARAVEL_AUTH: (&str, &str) = (
     "<?php\nnamespace Illuminate\\Contracts\\Auth {\n    interface Authenticatable { public function getAuthIdentifier(); }\n    interface Guard {\n        /** @return bool */\n        public function check();\n        /** @return int|string|null */\n        public function id();\n        /** @return \\Illuminate\\Contracts\\Auth\\Authenticatable|null */\n        public function user();\n    }\n    interface StatefulGuard extends Guard {\n        /** @return void */\n        public function login(Authenticatable $user, $remember = false);\n        /** @return void */\n        public function logout();\n    }\n    interface Factory {\n        /** @return \\Illuminate\\Contracts\\Auth\\Guard|\\Illuminate\\Contracts\\Auth\\StatefulGuard */\n        public function guard($name = null);\n    }\n}\nnamespace Illuminate\\Auth {\n    /**\n     * @mixin \\Illuminate\\Contracts\\Auth\\Guard\n     * @mixin \\Illuminate\\Contracts\\Auth\\StatefulGuard\n     */\n    class AuthManager implements \\Illuminate\\Contracts\\Auth\\Factory {\n        public function guard($name = null) { return null; }\n        public function __call($method, $parameters) { return null; }\n    }\n}\nnamespace Illuminate\\Support\\Facades {\n    /** @method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user() */\n    class Auth { public static function __callStatic($method, $args) {} }\n}\nnamespace {\n    use Illuminate\\Contracts\\Auth\\Factory as AuthFactory;\n    use Illuminate\\Contracts\\Auth\\Guard;\n    /** @return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory : \\Illuminate\\Contracts\\Auth\\Guard) */\n    function auth($guard = null): AuthFactory|Guard {}\n}\n",
 );
 
-/// Laravel's model factories as Laravel 12 declares them, a model with a factory, and the model's factory.
+/// Eloquent's model, builders, and collection as Laravel 12 declares them, as a library file.
+pub const ELOQUENT: (&str, &str) = (
+    "vendor/eloquent.php",
+    r#"<?php
+namespace Illuminate\Database\Concerns {
+    /** @template TValue */
+    trait BuildsQueries {
+        /** @return TValue|null */
+        public function first($columns = ['*']) { return null; }
+    }
+}
+namespace Illuminate\Database\Query {
+    class Builder {
+        /** @return $this */
+        public function orderBy($column, $direction = 'asc') { return $this; }
+        /** @return int<0, max> */
+        public function count($columns = '*') { return 0; }
+    }
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        public function save(): bool { return true; }
+        public function __call($method, $parameters) { return null; }
+        public static function __callStatic($method, $parameters) { return null; }
+    }
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     */
+    class Collection { public function first(): mixed { return null; } }
+    /**
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     * @mixin \Illuminate\Database\Query\Builder
+     */
+    class Builder {
+        /** @use \Illuminate\Database\Concerns\BuildsQueries<TModel> */
+        use \Illuminate\Database\Concerns\BuildsQueries;
+        /** @return $this */
+        public function where($column, $operator = null, $value = null) { return $this; }
+        /** @return TModel */
+        public function firstOrFail($columns = ['*']) { return null; }
+        /** @return ($id is array ? \Illuminate\Database\Eloquent\Collection<int, TModel> : TModel|null) */
+        public function find($id, $columns = ['*']) { return null; }
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
+        public function get($columns = ['*']) { return new Collection; }
+        protected function hidden(): void {}
+        public function __call($method, $parameters) { return null; }
+    }
+}
+namespace Illuminate\Database\Eloquent\Attributes {
+    #[\Attribute]
+    final class Scope {}
+}
+"#,
+);
+
+/// Laravel's model factories as Laravel 12 declares them, a model with a factory, and the model's factory. Use with
+/// [`ELOQUENT`].
 pub const LARAVEL_FACTORY: (&str, &str) = (
     "vendor/factory.php",
-    "<?php\nnamespace Illuminate\\Database\\Eloquent {\n    abstract class Model { public function save(): bool { return true; } }\n    /**\n     * @template TKey of array-key\n     * @template TModel\n     */\n    class Collection { public function first(): mixed { return null; } }\n}\nnamespace Illuminate\\Database\\Eloquent\\Factories {\n    /** @template TModel of \\Illuminate\\Database\\Eloquent\\Model */\n    abstract class Factory {\n        /** @return static */\n        public static function new($attributes = []) { return new static; }\n        /** @return static */\n        public static function times(int $count) { return new static; }\n        /** @return static */\n        public function count(?int $count) { return $this; }\n        /** @return static */\n        public function state($state) { return $this; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function create($attributes = []) { return null; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function make($attributes = []) { return null; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function createQuietly($attributes = []) { return null; }\n    }\n    /** @template TFactory of Factory */\n    trait HasFactory {\n        /** @return TFactory */\n        public static function factory($count = null, $state = []) { return null; }\n    }\n}\nnamespace App\\Models {\n    class User extends \\Illuminate\\Database\\Eloquent\\Model {\n        /** @use \\Illuminate\\Database\\Eloquent\\Factories\\HasFactory<\\Database\\Factories\\UserFactory> */\n        use \\Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\n        public string $name = '';\n        public function posts(): int { return 0; }\n    }\n}\nnamespace Database\\Factories {\n    /** @extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory<\\App\\Models\\User> */\n    class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory {}\n}\n",
+    "<?php\nnamespace Illuminate\\Database\\Eloquent\\Factories {\n    /** @template TModel of \\Illuminate\\Database\\Eloquent\\Model */\n    abstract class Factory {\n        /** @return static */\n        public static function new($attributes = []) { return new static; }\n        /** @return static */\n        public static function times(int $count) { return new static; }\n        /** @return static */\n        public function count(?int $count) { return $this; }\n        /** @return static */\n        public function state($state) { return $this; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function create($attributes = []) { return null; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function make($attributes = []) { return null; }\n        /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */\n        public function createQuietly($attributes = []) { return null; }\n    }\n    /** @template TFactory of Factory */\n    trait HasFactory {\n        /** @return TFactory */\n        public static function factory($count = null, $state = []) { return null; }\n    }\n}\nnamespace App\\Models {\n    class User extends \\Illuminate\\Database\\Eloquent\\Model {\n        /** @use \\Illuminate\\Database\\Eloquent\\Factories\\HasFactory<\\Database\\Factories\\UserFactory> */\n        use \\Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\n        public string $name = '';\n        public function posts(): int { return 0; }\n    }\n}\nnamespace Database\\Factories {\n    /** @extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory<\\App\\Models\\User> */\n    class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory {}\n}\n",
 );
 
 /// Pest's expectations, its `test()`, and Laravel's `artisan()` for tests, as Pest 3 declares them.

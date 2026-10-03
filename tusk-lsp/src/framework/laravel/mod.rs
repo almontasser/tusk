@@ -8,6 +8,7 @@
 pub mod actions;
 pub mod blade;
 mod data;
+pub mod forwarding;
 mod tables;
 pub mod views;
 
