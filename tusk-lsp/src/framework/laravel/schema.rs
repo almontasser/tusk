@@ -833,6 +833,9 @@ impl Eloquent {
 
     /// The casts `class` declares, or `None` when they can't all be read.
     pub fn casts(&self, codebase: &CodebaseMetadata, class: &str) -> Option<Vec<(String, String)>> {
+        if !self.casts_known(codebase, class) {
+            return None;
+        }
         let mut out: Vec<(String, String)> = vec![];
         for decl in self.decls(codebase, class) {
             for (k, v) in decl.casts.as_ref()? {
@@ -842,6 +845,31 @@ impl Eloquent {
             }
         }
         Some(out)
+    }
+
+    /// Whether every cast `class` gets is in a declaration read from the project. A class the project's files don't
+    /// declare that has `$casts` or `casts()` of its own, such as Sanctum's `PersonalAccessToken` in `vendor`, or a
+    /// trait outside Eloquent with an `initialize…()` method, which may merge casts, leaves them unknown. Eloquent's own
+    /// classes and traits add none but soft deletes' `deleted_at`, which [`attribute_type`] knows.
+    fn casts_known(&self, codebase: &CodebaseMetadata, class: &str) -> bool {
+        let Some(meta) = codebase.get_class_like(class.as_bytes()) else { return true };
+        let eloquent = |name: &str| name.trim_start_matches('\\').to_ascii_lowercase().starts_with("illuminate\\database\\eloquent\\");
+        let unread = |name: &str| !eloquent(name) && self.decl(name).is_none();
+        let property = meta.declaring_property_ids.iter().find(|(k, _)| k.as_bytes() == b"$casts").map(|(_, c)| c.as_str_lossy().into_owned());
+        let method = codebase.get_declaring_method_class(class.as_bytes(), b"casts").map(|c| c.as_str_lossy().into_owned());
+        if property.iter().chain(method.iter()).any(|c| unread(c)) {
+            return false;
+        }
+        let mut traits: Vec<String> = meta.used_traits.iter().map(|t| t.as_str_lossy().into_owned()).collect();
+        for parent in meta.all_parent_classes.iter() {
+            if let Some(p) = codebase.get_class_like(parent.as_bytes()) {
+                traits.extend(p.used_traits.iter().map(|t| t.as_str_lossy().into_owned()));
+            }
+        }
+        !traits.iter().filter(|t| !eloquent(t)).any(|t| {
+            let short = t.rsplit('\\').next().unwrap_or(t);
+            codebase.method_exists(t.as_bytes(), format!("initialize{short}").as_bytes())
+        })
     }
 
     /// The class an alias stands for in morph columns, such as `post` for `App\Models\Post`.

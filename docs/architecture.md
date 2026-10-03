@@ -8929,3 +8929,15 @@ computes its types from the index and files alone, which keeps it usable in
 the project scan, where no framework state or PHP is available; a
 relationship's related model comes from the model method's
 `$this->hasMany(X::class)`, not from introspection.
+
+### 2026-10-03: Columns stay untyped when casts are declared outside the project
+
+Casts are read only from the project's own model files, so a model that gets
+casts from `vendor`, such as Sanctum's `PersonalAccessToken` with
+`'expires_at' => 'datetime'`, had its timestamp typed as the migration's
+`string`, and `$token->expires_at->isPast()` was reported as a method call on a
+string. `Eloquent::casts()` now returns nothing when `$casts` or `casts()`
+comes from a class the project doesn't declare, outside Eloquent's own, or when
+a trait outside Eloquent has an `initialize…()` method, which may merge casts.
+Such a model's columns then keep Mago's own types, as before migrations were
+read.

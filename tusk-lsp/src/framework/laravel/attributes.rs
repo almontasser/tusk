@@ -341,6 +341,23 @@ mod tests {
     }
 
     #[test]
+    fn leaves_columns_untyped_when_casts_are_declared_where_the_project_isnt_read() {
+        // Sanctum's token casts `expires_at` in `vendor`, and a package trait may merge casts when it initializes.
+        let vendor = "<?php\nnamespace Laravel\\Sanctum { class PersonalAccessToken extends \\Illuminate\\Database\\Eloquent\\Model { protected $casts = ['expires_at' => 'datetime']; } }\nnamespace Pkg { trait Translates { public function initializeTranslates(): void {} } }\n";
+        let models = "<?php\nnamespace App\\Models;\nclass Page extends \\Illuminate\\Database\\Eloquent\\Model { use \\Pkg\\Translates; }\nclass Note extends \\Illuminate\\Database\\Eloquent\\Model {}\n";
+        let migration = "<?php\nreturn new class {\n    public function up(): void {\n        Schema::create('personal_access_tokens', function ($table) { $table->id(); $table->timestamp('expires_at')->nullable(); });\n        Schema::create('pages', function ($table) { $table->id(); $table->json('title'); });\n        Schema::create('notes', function ($table) { $table->id(); $table->string('body'); });\n    }\n};\n";
+        let code = "<?php\nfunction f(\\Laravel\\Sanctum\\PersonalAccessToken $t, \\App\\Models\\Page $p, \\App\\Models\\Note $n): void {\n    $t->expires_at->isPast();\n    $p->title->x();\n    $n->body->x();\n}\n";
+        let fx = Fixture::new(&[("vendor/laravel.php", LARAVEL), ("vendor/sanctum.php", vendor), ("app/Models/Page.php", models), ("database/migrations/2024_01_01_000000_create.php", migration), ("app/f.php", code)]);
+        let found: Vec<(String, u32)> = crate::diagnostics::php_problems(&fx.snap.index, &fx.doc("app/f.php"))
+            .into_iter()
+            .filter_map(|d| match d.code { Some(NumberOrString::String(c)) if d.source.as_deref() == Some("mago") => Some((c, d.range.start.line)), _ => None })
+            .collect();
+        assert!(!found.iter().any(|(c, l)| c == "invalid-method-access" && (*l == 2 || *l == 3)), "{found:?}");
+        // A model whose casts are all read is still typed.
+        assert!(found.contains(&("invalid-method-access".into(), 4)), "{found:?}");
+    }
+
+    #[test]
     fn completes_attributes_after_the_arrow() {
         let code = "<?php\nuse App\\Models\\Post;\nfunction f(Post $post): void {\n    Post::query()->withCount('comments');\n    $post-><|>\n}\n";
         let fx = Fixture::new(&[("vendor/laravel.php", LARAVEL), ("app/Models/Post.php", MODELS), ("database/migrations/2024_01_01_000000_create_posts.php", MIGRATION), ("app/f.php", code)]);
