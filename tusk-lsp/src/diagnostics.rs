@@ -178,9 +178,19 @@ pub fn blade_problems_in(index: &crate::index::Index, doc: &Document, read: &dyn
     // What Laravel's compiled PHP adds, such as the `isset(` of `@isset(…)`, isn't the view's to fix.
     let added = |i: &&Issue| i.annotations.iter().find(|a| a.kind == AnnotationKind::Primary).is_some_and(|a| checked.view_offset(a.span.start.offset as usize).is_err());
     let guarded = |d: &Diagnostic| possibly_null(d) && checked.unsure.iter().any(|r| r.contains(&(doc.offset(d.range.start) as usize)));
+    // Livewire renders a component's view in the component's scope, so `$this` reaches its protected members.
+    let this = format!("${}", crate::framework::laravel::blade::THIS);
+    let scoped = |i: &&Issue| {
+        let visibility = ["invalid-property-read", "invalid-property-write", "invalid-method-access"].contains(&i.code.as_deref().unwrap_or_default());
+        visibility && i.annotations.iter().find(|a| a.kind == AnnotationKind::Primary).is_some_and(|a| {
+            let (start, end) = (a.span.start.offset as usize, a.span.end.offset as usize);
+            let before = checked.php[..start].trim_end().trim_end_matches("->").trim_end_matches('?');
+            checked.php.get(start..end).is_some_and(|t| t.starts_with(&this)) || before.ends_with(&this)
+        })
+    };
     issues
         .iter()
-        .filter(|i| !added(i))
+        .filter(|i| !added(i) && !scoped(i))
         .filter_map(|i| to_diagnostic_at(doc, parsed.file.id, i, "mago", at))
         .filter(|d| !blade_noise(d) && !guarded(d))
         .collect()

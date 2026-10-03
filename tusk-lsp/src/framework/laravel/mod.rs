@@ -9,6 +9,7 @@ pub mod actions;
 pub mod blade;
 mod data;
 pub mod forwarding;
+pub mod livewire;
 mod tables;
 pub mod views;
 

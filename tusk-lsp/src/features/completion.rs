@@ -68,6 +68,13 @@ fn blade_complete(ctx: &Ctx<'_>, blade: &super::BladePhp, offset: u32) -> Option
     let items = items
         .into_iter()
         .filter_map(|mut item| {
+            // A Livewire view's `$this`, which its PHP reads as another variable.
+            if item.label.strip_prefix('$') == Some(crate::framework::laravel::blade::THIS) {
+                item.label = "$this".into();
+                if let Some(CompletionTextEdit::Edit(edit)) = &mut item.text_edit {
+                    edit.new_text = "$this".into();
+                }
+            }
             // The PHP's import goes in its first line, which isn't the view's.
             if item.additional_text_edits.take().is_some_and(|e| !e.is_empty()) {
                 let (fqn, kind) = match item.data.as_ref().and_then(|d| serde_json::from_value::<Data>(d.clone()).ok())? {

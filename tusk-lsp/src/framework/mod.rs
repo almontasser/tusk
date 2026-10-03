@@ -476,6 +476,7 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     items.extend(filament::completion(ctx, offset).unwrap_or_default());
     items.extend(icons::completion(ctx, offset).unwrap_or_default());
     items.extend(filament::colors::completion(ctx, offset).unwrap_or_default());
+    items.extend(laravel::livewire::completion(ctx, offset).unwrap_or_default());
     (!items.is_empty()).then_some(items)
 }
 
@@ -484,11 +485,12 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
     let mut out = laravel::definition(ctx, offset);
     out.extend(filament::definition(ctx, offset));
     out.extend(icons::definition(ctx, offset));
+    out.extend(laravel::livewire::definition(ctx, offset));
     out
 }
 
 pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
-    laravel::hover(ctx, offset).or_else(|| filament::hover(ctx, offset)).or_else(|| icons::hover(ctx, offset)).or_else(|| filament::colors::hover(ctx, offset))
+    laravel::hover(ctx, offset).or_else(|| filament::hover(ctx, offset)).or_else(|| icons::hover(ctx, offset)).or_else(|| filament::colors::hover(ctx, offset)).or_else(|| laravel::livewire::hover(ctx, offset))
 }
 
 /// Problems with the strings passed to framework calls, such as a route name that doesn't exist.
@@ -497,6 +499,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     out.extend(filament::diagnostics(ctx));
     out.extend(icons::diagnostics(ctx));
     out.extend(filament::colors::diagnostics(ctx));
+    out.extend(laravel::livewire::diagnostics(ctx));
     out
 }
 
