@@ -6245,6 +6245,22 @@ an `artisan` file.
   link a request class. A model without a named policy gets the one Laravel's
   default guess names, `App\Policies\PostPolicy` or
   `App\Models\Policies\PostPolicy`, when it exists.
+- **Channels, features, and Context keys:** `laravel/names.rs` matches the
+  names other code uses against the definitions in the project's facts. A
+  channel's name in use is the literal at its start: a plain string, the left
+  of a `.` concatenation, or an interpolated string's first part, found by its
+  own walk of the file, since the shared string arguments stop at a
+  concatenation. It matches a pattern as Laravel's
+  `channelNameMatchesPattern()` does, `{param}` as `[^.]+`, and a partial name
+  matches a pattern some full name would. Only a whole, plain private or
+  presence name is checked, and only when every definition has a plain name;
+  Pennant features likewise, and only with `vendor/laravel/pennant` present.
+  Context keys aren't checked. Echo in JavaScript, TypeScript, and Vue isn't
+  covered: the editor starts this server for `php`, `blade`, and `dotenv`
+  only. Covering it needs the server registered for those languages (or a
+  small request the editor's TypeScript side makes for the channel list) and
+  a reader for `Echo.private(…)`, `.channel(…)`, `.join(…)`, and the
+  `useEcho*` hooks.
 - **Route parameters:** `laravel/route_parameters.rs` reads a route's
   parameters from its URI in the routes script, with the route's other
   parameter names (its domain's) as optional, for the parameters argument of

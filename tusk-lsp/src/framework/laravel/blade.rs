@@ -10,7 +10,7 @@ use mago_names::kind::NameKind;
 const CALL_DIRECTIVES: &[&str] = &[
     "include", "includeIf", "includeWhen", "includeUnless", "includeFirst", "extends", "extendsFirst", "each", "component",
     "componentFirst", "can", "cannot", "canany", "lang", "livewire", "method", "error", "section", "yield", "push",
-    "stack", "props", "env", "json", "vite",
+    "stack", "props", "env", "json", "vite", "feature", "featureany",
 ];
 
 /// A Blade view's PHP at the offsets it has in the view, so string positions in it are positions in the view.

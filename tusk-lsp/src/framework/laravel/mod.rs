@@ -11,6 +11,7 @@ mod data;
 mod facts;
 pub mod forwarding;
 mod links;
+mod names;
 mod route_parameters;
 mod tables;
 pub mod views;
@@ -1134,6 +1135,9 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
         return Some(items);
     }
     let first_arg = arg.call.arguments.first().and_then(|a| a.1.clone());
+    if let Some(items) = names::completion(ctx, arg, offset) {
+        return Some(items);
+    }
     if let Some(items) = route_parameters::completion(ctx, data, arg, offset) {
         return Some(items);
     }
@@ -1575,11 +1579,14 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         return component(&data, &name, livewire).and_then(|(t, _)| t).map(|p| vec![to_location((p, 1))]).unwrap_or_default();
     }
     with_args(ctx, None, |ctx, args| {
-        args.iter()
+        let mut found: Vec<Location> = args
+            .iter()
             .filter(|a| a.start <= offset && offset <= a.end)
             .filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data))
             .map(to_location)
-            .collect()
+            .collect();
+        found.extend(names::definition(ctx, &args, offset).into_iter().map(to_location));
+        found
     })
 }
 
@@ -1599,6 +1606,9 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
         return Some(markdown(text, ctx.doc.range(s, e)));
     }
     with_args(ctx, None, |ctx, args| {
+        if let Some((text, (start, end))) = names::hover(ctx, &args, offset) {
+            return Some(markdown(text, ctx.doc.range(start, end)));
+        }
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
         if let Some(text) = route_parameters::hover(ctx, &data, arg) {
             return Some(markdown(text, ctx.doc.range(arg.start, arg.end)));
@@ -1658,6 +1668,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
             }
         }
         out.extend(route_parameters::diagnostics(ctx, &data, &args));
+        out.extend(names::diagnostics(ctx, &args));
         out
     })
 }
