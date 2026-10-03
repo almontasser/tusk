@@ -59,6 +59,7 @@ static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
     plugins.register_function_provider(PestTestHelper);
     plugins.register_expression_hook(crate::framework::laravel::forwarding::ForwardHook);
     plugins.register_issue_filter_hook(crate::framework::laravel::forwarding::ForwardHook);
+    plugins.register_expression_hook(crate::framework::laravel::livewire::computed::ComputedHook);
     plugins
 });
 

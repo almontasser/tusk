@@ -94,7 +94,7 @@ fn mentions(text: &str) -> BTreeSet<String> {
 
 /// The project files that mention each name ([`mentions`]), for the index's generation, since the index has the
 /// project's code as the editor does.
-fn code_mentions(index: &Index, read: &dyn Fn(&Path) -> Option<String>) -> Arc<Mentioned> {
+pub(super) fn code_mentions(index: &Index, read: &dyn Fn(&Path) -> Option<String>) -> Arc<Mentioned> {
     static FOUND: LazyLock<Mutex<(u64, Arc<Mentioned>)>> = LazyLock::new(Default::default);
     // Held while it reads, so the project scan's threads read the files once.
     let mut found = FOUND.lock();
@@ -111,7 +111,7 @@ fn code_mentions(index: &Index, read: &dyn Fn(&Path) -> Option<String>) -> Arc<M
 }
 
 /// The files that mention each name.
-type Mentioned = HashMap<String, Vec<PathBuf>>;
+pub(super) type Mentioned = HashMap<String, Vec<PathBuf>>;
 
 /// What one place that renders a view passes: each variable, with its docblock type when it's known.
 type Site = BTreeMap<String, Option<String>>;
@@ -153,11 +153,11 @@ type Around = Option<Option<Site>>;
 static CODE_SITES: Cache<Arc<HashMap<String, Vec<Site>>>> = LazyLock::new(Default::default);
 static VIEW_SITES: Cache<Vec<Site>> = LazyLock::new(Default::default);
 static AROUND_SITES: Cache<Vec<Option<Site>>> = LazyLock::new(Default::default);
-type Cache<T> = LazyLock<Mutex<(u64, HashMap<u64, T>)>>;
+pub(super) type Cache<T> = LazyLock<Mutex<(u64, HashMap<u64, T>)>>;
 const CACHED: usize = 4096;
 
 /// `find()`, or what it gave for the same `key` with the same index.
-fn cached<T: Clone>(cache: &Mutex<(u64, HashMap<u64, T>)>, index: &Index, key: impl Hash, find: impl FnOnce() -> T) -> T {
+pub(super) fn cached<T: Clone>(cache: &Mutex<(u64, HashMap<u64, T>)>, index: &Index, key: impl Hash, find: impl FnOnce() -> T) -> T {
     let mut hasher = std::hash::DefaultHasher::new();
     key.hash(&mut hasher);
     let key = hasher.finish();
@@ -206,6 +206,10 @@ impl Walk<'_> {
             let Some(text) = read(path) else { continue };
             let found = cached(&CODE_SITES, index, (path, &text), || Arc::new(code_sites(index, path, &text)));
             sites.extend(found.get(view).cloned().unwrap_or_default());
+        }
+        // A Livewire component that renders the view by Livewire's convention, without a `render()`.
+        for class in super::livewire::conventional_classes(index, read, view) {
+            sites.push(livewire_site(index, &class));
         }
         // The variables the view reads, which a view that includes it passes as they are there.
         let child = index.config.root.join(format!("resources/views/{}.blade.php", view.replace('.', "/")));
@@ -519,7 +523,8 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
             }
         }
         // A Livewire component or Filament page passes its public properties, and so does a class component, with
-        // its slot.
+        // its slot. The view a Livewire component renders, or names in `$view`, also gets the component as `$this`.
+        let own_view = renders || super::livewire::view_property(path);
         let class = resolver.enclosing_class(path);
         let component = class.as_ref().is_some_and(|c| index.codebase.is_instance_of(c.as_bytes(), b"Illuminate\\View\\Component"));
         if let Some(class) = class.filter(|c| component || index.codebase.is_instance_of(c.as_bytes(), b"Livewire\\Component")) {
@@ -549,6 +554,9 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
                 for (name, t) in data {
                     vars.entry(name).or_insert(t);
                 }
+                if own_view {
+                    vars.insert("this".into(), Some(format!("\\{class}")));
+                }
             }
         }
         if renders {
@@ -556,6 +564,21 @@ fn code_sites(index: &Index, path: &Path, text: &str) -> HashMap<String, Vec<Sit
         }
     });
     sites
+}
+
+/// What a Livewire component passes its view: its public properties, and itself as `$this`.
+fn livewire_site(index: &Index, class: &str) -> Site {
+    let mut site = Site::new();
+    let meta = index.codebase.get_class_like(class.as_bytes());
+    for (name, declaring) in meta.iter().flat_map(|m| m.declaring_property_ids.iter()) {
+        let Some(p) = index.codebase.get_property(declaring.as_bytes(), name.as_bytes()) else { continue };
+        if p.read_visibility.is_public() && !p.flags.is_static() {
+            let t = p.type_metadata.as_ref().or(p.type_declaration_metadata.as_ref()).and_then(|t| docblock_type(&t.type_union));
+            site.insert(name.as_str_lossy().trim_start_matches('$').to_string(), t);
+        }
+    }
+    site.insert("this".into(), Some(format!("\\{class}")));
+    site
 }
 
 /// The key under which [`code_sites`] lists a class component's data for its view, after the view's name, which

@@ -364,7 +364,16 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> Checked {
         }
     }
     // `@var` on an assignment types each variable; the `$x` read before it is undefined, which isn't reported.
-    let vars: String = vars.iter().map(|(name, t)| format!(" /** @var {t} ${name} */ ${name} = ${name};")).collect();
+    // `$this`, a Livewire component's view's, can't be assigned, so the view's reads of it read [`THIS`] instead.
+    if vars.iter().any(|(name, _)| name == "this") {
+        for at in (0..out.len().saturating_sub(4)).filter(|at| out[*at..].starts_with(b"$this") && !out.get(at + 5).is_some_and(|b| word(*b))).collect::<Vec<_>>() {
+            out[at + 1..at + 5].copy_from_slice(THIS.as_bytes());
+        }
+    }
+    let vars: String = vars.iter().map(|(name, t)| {
+        let name = if name == "this" { THIS } else { name };
+        format!(" /** @var {t} ${name} */ ${name} = ${name};")
+    }).collect();
     let head = format!("<?php {}{vars}\n", imports.join(" "));
     // A loop left open at the end is closed there, as one being typed.
     let loops = blocks.iter().filter(|b| block(b.0) == Some(Block::Loop)).count();
@@ -382,6 +391,9 @@ pub fn checked_php(text: &str, vars: &[(String, String)]) -> Checked {
     unsure.sort_by_key(|r| r.start);
     Checked { php, head: head.len(), added: adds.iter().map(|(at, add)| (*at, add.len())).collect(), unsure, authed }
 }
+
+/// The variable that stands for `$this` in a Livewire component's view, as long as `this`, so offsets don't move.
+pub const THIS: &str = "thiz";
 
 /// A piece of a Blade view that holds PHP, from [`pieces`].
 enum Piece {

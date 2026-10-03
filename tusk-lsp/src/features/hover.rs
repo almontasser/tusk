@@ -237,7 +237,7 @@ fn render(heading: Option<String>, signature: &str, docblock: Option<&str>) -> S
     out
 }
 
-fn describe(ctx: &Ctx<'_>, symbol: &Symbol, start: u32, end: u32) -> Option<String> {
+pub(crate) fn describe(ctx: &Ctx<'_>, symbol: &Symbol, start: u32, end: u32) -> Option<String> {
     let codebase: &CodebaseMetadata = &ctx.index.codebase;
     let from_source = |span: Span, heading: Option<String>, fallback: String| -> String {
         match source(ctx, span) {
@@ -313,6 +313,8 @@ fn describe(ctx: &Ctx<'_>, symbol: &Symbol, start: u32, end: u32) -> Option<Stri
         }
         Symbol::Variable { name, .. } => {
             let t = ctx.analysis().type_at(start, end)?;
+            // A Livewire view's `$this`, which its PHP reads as another variable.
+            let name = if name == crate::framework::laravel::blade::THIS { "this" } else { name };
             Some(code(&format!("{} ${name}", display(&t))))
         }
     }

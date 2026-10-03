@@ -2585,6 +2585,63 @@ Tusk's server answers definitions and completions for component tags with the
 component's view. A definition provider in `main.ts` adds the class of a
 class-based component, from `componentClassPath` in `src/phptypes.ts`.
 
+#### Livewire views and events
+
+`tusk-lsp/src/framework/laravel/livewire/` ties a Blade view to its Livewire
+component. `view_classes` finds the component by the view's name: the project
+files that mention the name (`code_mentions`, the same index of quoted strings
+that view typing uses) are parsed, and a class that extends `Livewire\Component`
+counts when the name is the first argument of `view()`, `View::make()`, or
+`->view()` in it, or the default of a `$view` property, as Filament pages and
+widgets name their views. Any other literal doesn't count, so the layout that
+`->layout('layouts.app')` names isn't taken for the component's view. A class
+with no `render()` renders the view Livewire's convention gives it, from the
+`class_namespace` in `config/livewire.php`, read as text so it works without
+booting the app. `volt.rs` reads a Volt (or Livewire 4 single-file) view's
+`new class extends …` block syntactically, since the index doesn't hold Blade
+files, and takes what it extends and uses from the index.
+
+`Component` lists what the view reaches, as Livewire reads it: public, non-static
+properties; public, non-static methods not declared by `Livewire\Component`
+(`Utils::getPublicMethodsDefinedBySubClass`), less `#[Computed]` and
+`getNameProperty()` methods, which throw when called; and computed properties.
+`all_properties` and `all_methods` say whether a missing name is surely missing:
+every parent and trait is in the index, and no class of the app's own declares
+`__get()` or `__call()`. Livewire's own magic methods don't count, since they
+don't answer for wire calls.
+
+`view.rs` scans the view's HTML, skipping echoes, `@php` and `<?php` blocks,
+comments, and `@verbatim`, into tag attributes and `<script>` bodies. Values of
+`wire:model`, of `wire:` directives Livewire binds as events (`wire:click`,
+`wire:submit`, `wire:keydown`, `wire:poll`, and the rest), of `wire:target`,
+and every `$wire.` in attribute values and scripts become references. A
+reference is checked only when it's the whole value (`save`, `save(1)`,
+`form.title`), and diagnostics need the component's member list to be
+complete. Livewire evaluates an action as `$wire.` and the value, so in
+`a(); b()` only `a` is the component's, and that value isn't checked.
+
+`computed.rs`'s `ComputedHook`, registered with the analyzer's plugins, types
+`$this->name`, and any property read on a value of a component's type that
+Mago left `mixed`, as the computed method's return type. For the view to read
+`$this` as the component, `code_sites` (and `livewire_site` for a class found by
+convention) passes a `this` variable, and `checked_php` renames the view's
+`$this` to `$thiz`, the same length, so offsets don't move, and declares it
+with the component's type. Livewire binds the compiled view to the component
+(`ExtendedCompilerEngine`), so visibility problems on `$thiz` are dropped in
+`blade_problems_in`, hover shows it as `$this`, and completion offers it as
+`$this`.
+
+`events.rs` lists where events are dispatched and heard, cached per file by its
+text: PHP's `#[On]` attributes, `$listeners` defaults, and `->dispatch()` on
+`$this` (counted only in a Livewire component) or a Filament closure's
+`$livewire`; Blade's and `resources/js`'s `Livewire.dispatch()`,
+`$wire.dispatch()`, `$dispatch()`, `Livewire.on()`, `$wire.$on()`, and
+`addEventListener()`; and Alpine's `@name` and `x-on:name` listeners. Those last
+two are DOM listeners, shown on hover but not offered as names, since `click`
+and `submit` would crowd the list. Missing listeners aren't reported: packages'
+views and bundled JavaScript listen where the project can't see, such as
+Filament's `x-on:open-modal.window`.
+
 ## Search and navigation (milestone 4)
 
 ### Palette
@@ -8427,3 +8484,19 @@ Enter, and inputs such as the Automations designer's condition value and the
 New notification name couldn't be typed in. Such handlers now wrap their
 expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
 handler property whose expression body could return `false`.
+
+### 2026-10-03: Livewire views know their component
+
+A Livewire view's `wire:model`, `wire:click`, and `$wire.` complete, describe,
+and go to the component's members, and missing ones are reported; computed
+properties are typed as `$this->name`; and events link dispatches to listeners.
+The component comes from the project's code, not the booted app's view list, so
+it works without PHP and updates as the class is typed, and Volt's class is
+read from the view itself. Only a name that's the whole value is checked, and
+only against a component Tusk knows entirely, since a `__get()`, `__call()`, or
+unknown parent can answer for anything. In the view, `$this` is the component
+under another name of the same length, because Mago can't assign `$this`, and
+visibility problems on it are dropped, as Livewire renders the view in the
+component's scope. A dispatched event without a listener isn't reported:
+Filament's views and bundled JavaScript listen in ways the project's files
+don't show, so the hint couldn't be free of false positives.
