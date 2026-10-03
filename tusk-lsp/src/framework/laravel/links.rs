@@ -289,7 +289,18 @@ fn laravel_links_in_a_real_app() {
         let mut files: Vec<PathBuf> = index.read().project_files().map(Path::to_path_buf).collect();
         files.extend(ignore::WalkBuilder::new(root.join("resources/views")).build().flatten().map(|e| e.path().to_path_buf()).filter(|p| p.to_string_lossy().ends_with(".blade.php")));
         files.sort();
-        let codes = ["routeParameter", "channel", "feature", "config", "auth"];
+        {
+            let snap = Snapshot { docs: Documents::default(), index: index.clone(), root: root.clone(), framework: framework.clone(), client: None, cancel: Default::default() };
+            let at = std::time::Instant::now();
+            let n = facts(&snap, &snap.index.read()).len();
+            eprintln!("{n} facts in {:?}", at.elapsed());
+            // Another generation, as after an edit: the files are read again, but none is parsed again.
+            snap.index.write().generation += 1_000_000;
+            let at = std::time::Instant::now();
+            facts(&snap, &snap.index.read());
+            eprintln!("again in {:?}", at.elapsed());
+        }
+        let codes = ["routeParameter", "channel", "feature"];
         let (mut lenses, mut problems, mut count) = (0, 0, 0);
         let started = std::time::Instant::now();
         for path in files {
