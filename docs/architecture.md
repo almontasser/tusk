@@ -6334,6 +6334,59 @@ an `artisan` file.
   list, by the command in the call's first argument, so its entries come from
   `command_parameters` rather than `entries`. A class name in place of the
   command, which `Schedule::command()` takes, isn't checked.
+- **Facts from the project's code:** `laravel/facts.rs` reads every project
+  file's syntax, with names resolved but nothing analyzed, for what the code
+  says about Laravel's wiring: where objects are dispatched or sent (`new X`
+  passed to `event()`, `dispatch()`, `notify()`, `send()`, `queue()`, `later()`,
+  `chain()`, and the like, and `X::dispatch()`), listeners (`$listen`,
+  `Event::listen()`, and the `handle()` of classes in `app/Listeners`, unless
+  `shouldDiscoverEvents()` returns false), observers, policies, broadcast
+  channels, Pennant features, Context keys, and the keys `defaults()` calls
+  fill. A file that mentions none of these calls isn't parsed. Each file's facts
+  are kept by a hash of its text, and the project's by the index's generation,
+  so after an edit only that file is parsed again and requests read the cached
+  list. The scan runs on the index's scan pool without taking the index lock.
+- **Code lenses:** `laravel/links.rs` puts lenses on a file's first class from
+  those facts, each running the editor's `phpEditor.open` with a file and line,
+  as Filament's resource lenses do. A class's declaration comes from the
+  codebase. Dispatch sites show for a class that has listeners, that Laravel
+  sends (a notification or mailable), queues (`ShouldQueue`), or broadcasts, or
+  that uses its dispatching traits, so `$client->send(new ApiRequest)` doesn't
+  link a request class. A model without a named policy gets the one Laravel's
+  default guess names, `App\Policies\PostPolicy` or
+  `App\Models\Policies\PostPolicy`, when it exists.
+- **Channels, features, and Context keys:** `laravel/names.rs` matches the
+  names other code uses against the definitions in the project's facts. A
+  channel's name in use is the literal at its start: a plain string, the left
+  of a `.` concatenation, or an interpolated string's first part, found by its
+  own walk of the file, since the shared string arguments stop at a
+  concatenation. It matches a pattern as Laravel's
+  `channelNameMatchesPattern()` does, `{param}` as `[^.]+`, and a partial name
+  matches a pattern some full name would. Only a whole, plain private or
+  presence name is checked, and only when every definition has a plain name;
+  Pennant features likewise, and only with `vendor/laravel/pennant` present.
+  Context keys aren't checked. Echo in JavaScript, TypeScript, and Vue isn't
+  covered: the editor starts this server for `php`, `blade`, and `dotenv`
+  only. Covering it needs the server registered for those languages (or a
+  small request the editor's TypeScript side makes for the channel list) and
+  a reader for `Echo.private(…)`, `.channel(…)`, `.join(…)`, and the
+  `useEcho*` hooks.
+- **Setting config, and `can:` middleware:** `config([...])` keys and
+  `Config::set()` match `Kind::Config` for completion, hover, and links, and
+  `config_setter` keeps them out of the "not found" check. A middleware string
+  that starts with `can:` is still `Kind::Middleware`, but completion after
+  `can:`, and hover, links, and the check on the ability (`can_ability`), use
+  the auth script's abilities, as `Gate::allows()` does.
+- **Route parameters:** `laravel/route_parameters.rs` reads a route's
+  parameters from its URI in the routes script, with the route's other
+  parameter names (its domain's) as optional, for the parameters argument of
+  each route URL call (the third for `temporarySignedRoute()`). `action()`
+  finds the route by its action as the routes list names it, with an
+  invokable controller's `@__invoke`. A required URI parameter is reported
+  missing only when the call's parameters are an array of plain string keys, or
+  absent, and no project `defaults()` call fills it; Laravel's
+  `RouteUrlGenerator::formatParameters` fills required parameters from
+  positional values and `URL::defaults()`.
 - **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
   pages, and controller actions (read from `app/Http/Controllers`).
 - **Blade:** a view becomes "virtual PHP" of the same length.
@@ -8570,3 +8623,18 @@ visibility problems on it are dropped, as Livewire renders the view in the
 component's scope. A dispatched event without a listener isn't reported:
 Filament's views and bundled JavaScript listen in ways the project's files
 don't show, so the hint couldn't be free of false positives.
+
+### 2026-10-03: Links between Laravel classes come from the project's syntax
+
+Code lenses that link an event to its listeners and dispatch sites, a model to
+its observers and policy, and a job, notification, or mailable to where it's
+sent need, for one class, every place in the project that names it in a certain
+way. Find References would do it per class, but it analyzes each file that
+mentions the name, and lenses are asked for on every edit. Booting the app
+gives listeners and policies but not dispatch sites, and fails without a
+database or PHP. So `laravel/facts.rs` reads every project file's syntax once
+per index generation, resolving names only, into a list of facts that lenses,
+route parameter checks, channels, and Pennant features share. Files keep their
+facts by a hash of their text, so an edit parses one file again. The cost is
+that a value passed through a variable (`$n = new Paid; $u->notify($n)`) isn't
+followed, which only an analysis would do.

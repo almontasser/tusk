@@ -65,8 +65,13 @@ namespace {
 }
 "#;
 
-fn fixture(file: &str, text: &str) -> Fixture {
-    let fx = Fixture::new(&[("stubs.php", STUBS), (file, text)]);
+pub(super) fn fixture(file: &str, text: &str) -> Fixture {
+    fixture_with(&[(file, text)])
+}
+
+/// The app's facts with these files besides Laravel's stubs.
+pub(super) fn fixture_with(files: &[(&str, &str)]) -> Fixture {
+    let fx = Fixture::new(&[&[("stubs.php", STUBS)], files].concat());
     let state = &fx.snap.framework;
     state.seed("laravel:active", json!(true));
     state.seed(
@@ -124,7 +129,7 @@ fn fixture(file: &str, text: &str) -> Fixture {
     fx
 }
 
-fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
+pub(super) fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
     let fx = fixture(file, text);
     let at = fx.at();
     with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| crate::framework::completion(ctx, ctx.offset(at.position)))
@@ -132,13 +137,13 @@ fn complete(file: &str, text: &str) -> Vec<CompletionItem> {
         .unwrap_or_default()
 }
 
-fn labels(items: &[CompletionItem]) -> Vec<String> {
+pub(super) fn labels(items: &[CompletionItem]) -> Vec<String> {
     let mut l: Vec<_> = items.iter().map(|i| i.label.clone()).collect();
     l.sort();
     l
 }
 
-fn problems(file: &str, text: &str) -> Vec<(String, String)> {
+pub(super) fn problems(file: &str, text: &str) -> Vec<(String, String)> {
     let fx = fixture(file, text);
     with_ctx(&fx.snap, &uri(file), diagnostics)
         .unwrap()
@@ -528,4 +533,45 @@ fn shows_and_goes_to_artisan_commands() {
     let at = fx.at();
     let found = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
     assert!(found[0].uri.as_str().ends_with("routes/console.php") && found[0].range.start.line == 7, "{found:?}");
+}
+
+#[test]
+fn completes_config_keys_being_set_without_checking_them() {
+    assert_eq!(labels(&complete("t.php", "<?php config(['<|>' => 1]);")).len(), 4);
+    assert_eq!(labels(&complete("t.php", "<?php \\Illuminate\\Support\\Facades\\Config::set('<|>', 1);")).len(), 4);
+    let fx = fixture("t.php", "<?php \\Illuminate\\Support\\Facades\\Config::set('app.na<|>me', 'x');");
+    let at = fx.at();
+    let found = with_ctx(&fx.snap, &at.text_document.uri, |ctx| definition(ctx, ctx.offset(at.position))).unwrap();
+    assert!(found[0].uri.as_str().ends_with("config/app.php"), "{found:?}");
+    // A key being set may be new; one being read may not.
+    let found = problems("t.php", "<?php config(['app.new' => 1]); \\Illuminate\\Support\\Facades\\Config::set('app.new', 1); config('app.new'); config(['app.x' => 1], 'y');");
+    assert_eq!(found, vec![("config".into(), "Config [app.new] not found.".into())]);
+}
+
+#[test]
+fn completes_and_checks_the_ability_of_can_middleware() {
+    let auth = json!({"policies": {"update": [{"policy": "App\\Policies\\PostPolicy", "uri": "app/Policies/PostPolicy.php", "line": 20, "model": "\\App\\Models\\Post"}]}});
+    let route = "\\Illuminate\\Support\\Facades\\Route::middleware";
+    let fx = fixture("t.php", &format!("<?php {route}('can:<|>');"));
+    fx.snap.framework.seed("laravel:auth", auth.clone());
+    let at = fx.at();
+    let items = with_ctx_at(&fx.snap, &at.text_document.uri, at.position, |ctx| crate::framework::completion(ctx, ctx.offset(at.position))).flatten().unwrap();
+    assert_eq!(labels(&items), vec!["update"]);
+    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else { panic!() };
+    assert_eq!(edit.range.start.character, (6 + route.len() + 6) as u32);
+
+    let fx = fixture("t.php", &format!("<?php {route}('can:upd<|>ate,post');"));
+    fx.snap.framework.seed("laravel:auth", auth.clone());
+    let at = fx.at();
+    let (hover, found) = with_ctx(&fx.snap, &at.text_document.uri, |ctx| (super::hover(ctx, ctx.offset(at.position)), definition(ctx, ctx.offset(at.position)))).unwrap();
+    let lsp_types::HoverContents::Markup(m) = hover.unwrap().contents else { panic!() };
+    assert!(m.value.starts_with("`App\\Policies\\PostPolicy`"), "{}", m.value);
+    assert!(found[0].uri.as_str().ends_with("app/Policies/PostPolicy.php") && found[0].range.start.line == 19, "{found:?}");
+
+    let fx = fixture("t.php", &format!("<?php {route}(['can:update,post', 'can:upate,post', 'auth']);"));
+    fx.snap.framework.seed("laravel:auth", auth);
+    let found: Vec<String> = with_ctx(&fx.snap, &uri("t.php"), diagnostics).unwrap().into_iter().map(|d| d.message).collect();
+    assert_eq!(found, vec!["Policy [upate] not found."]);
+    fx.snap.framework.seed("laravel:auth", json!({"before": true, "policies": {}}));
+    assert!(with_ctx(&fx.snap, &uri("t.php"), diagnostics).unwrap().is_empty());
 }

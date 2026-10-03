@@ -8,8 +8,12 @@
 pub mod actions;
 pub mod blade;
 mod data;
+mod facts;
 pub mod forwarding;
+mod links;
 pub mod livewire;
+mod names;
+mod route_parameters;
 mod tables;
 pub mod views;
 
@@ -97,7 +101,7 @@ impl Site<'_> {
 }
 
 const ROUTE_FUNCTIONS: &[&str] = &["route", "signedRoute", "to_route", "temporarySignedRoute", "redirectToRoute"];
-const REDIRECTORS: &[&str] = &[
+pub(super) const REDIRECTORS: &[&str] = &[
     "Redirect",
     "URL",
     "Response",
@@ -151,6 +155,11 @@ fn kind_of(arg: &StringArg, codebase: &CodebaseMetadata) -> Option<Kind> {
         || s.function(&["@includeWhen", "@includeUnless"], &[1]);
     if view {
         return list_ok(Kind::View);
+    }
+    // Setting a key: `config(['app.locale' => 'ar'])` and `Config::set('app.locale', 'ar')`, which may add one.
+    let repositories = ["Illuminate\\Contracts\\Config\\Repository", "Illuminate\\Config\\Repository"];
+    if (s.function(&["config"], &[0]) && arg.in_array == Some(InArray::Key)) || s.method(&["set"], &repositories, &[0]) || s.facade(&["set"], "Config", &[], &[0]) {
+        return (!in_array || arg.in_array == Some(InArray::Key)).then_some(Kind::Config);
     }
     if s.function(&["config"], &[0])
         || s.object("Illuminate\\Container\\Attributes\\Config", &[0])
@@ -874,7 +883,9 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::ControllerAction if !v.contains('@') => return None,
         Kind::ControllerAction => ("controllerAction", format!("Controller/Method [{v}] not found.")),
         Kind::View => ("view", format!("View [{v}] not found.")),
+        Kind::Config if config_setter(arg) => return None,
         Kind::Config => ("config", format!("Config [{v}] not found.")),
+        Kind::Middleware if v.starts_with("can:") => return can_problem(v, data),
         Kind::Env => ("env", format!("Env [{v}] not found.")),
         Kind::Translation if !looks_like_translation_key(v) => return None,
         Kind::Translation => ("translation", format!("Translation [{v}] not found.")),
@@ -899,6 +910,39 @@ fn problem(kind: Kind, arg: &StringArg, entries: &[Entry], data: &Data<'_>, code
         Kind::Command | Kind::CommandParameter => return None,
     };
     (!found).then_some((code, message))
+}
+
+/// Whether a config key is set rather than read, which may add a key.
+fn config_setter(arg: &StringArg) -> bool {
+    arg.in_array == Some(InArray::Key) || arg.call.name.eq_ignore_ascii_case("set")
+}
+
+/// The ability that `can:update,post` middleware checks, with its offset in the string.
+fn can_ability(value: &str) -> Option<(u32, &str)> {
+    let rest = value.strip_prefix("can:")?;
+    Some((4, rest.split(',').next().unwrap_or(rest)))
+}
+
+/// `can:` middleware whose ability no gate or policy defines, unless a `Gate::before` hook decides abilities.
+fn can_problem(v: &str, data: &Data<'_>) -> Option<(&'static str, String)> {
+    let (_, ability) = can_ability(v)?;
+    let auth = data.auth()?;
+    if ability.is_empty() || auth["before"] == true {
+        return None;
+    }
+    auth["policies"].get(ability).is_none().then(|| ("auth", format!("Policy [{ability}] not found.")))
+}
+
+/// For a string of `can:` middleware with `offset` in its ability: the ability's span and its entry.
+fn can_entry(arg: &StringArg, data: &Data<'_>, offset: u32) -> Option<((u32, u32), Entry)> {
+    let (at, ability) = can_ability(&arg.value)?;
+    let start = arg.start + at;
+    let end = start + ability.len() as u32;
+    if offset < start || offset > end {
+        return None;
+    }
+    let entries = entries(Kind::Auth, data)?;
+    Some(((start, end), find(Kind::Auth, &entries, ability)?.clone()))
 }
 
 /// A command string's problem: a command that doesn't exist, or options and arguments it doesn't take. A class
@@ -1132,14 +1176,11 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
         return Some(items);
     }
     let first_arg = arg.call.arguments.first().and_then(|a| a.1.clone());
-    // Route parameters: `route('post.show', ['` offers the route's parameters.
-    if arg.index == 1 && arg.in_array == Some(InArray::Key) && (arg.call.is_function(&["route", "signedRoute", "to_route", "temporarySignedRoute"]) || arg.call.is_method(&["route", "signedRoute", "temporarySignedRoute"]))
-        && let Some(name) = &first_arg
-    {
-        let routes = data.routes()?;
-        let route = routes.as_array()?.iter().find(|r| r["name"].as_str() == Some(name))?;
-        let params = route["parameters"].as_array()?.iter().filter_map(|p| p.as_str().map(String::from)).collect();
-        return simple(params, CompletionItemKind::VARIABLE);
+    if let Some(items) = names::completion(ctx, arg, offset) {
+        return Some(items);
+    }
+    if let Some(items) = route_parameters::completion(ctx, data, arg, offset) {
+        return Some(items);
     }
     if is_validation(arg, codebase) {
         return Some(rule_items(range));
@@ -1193,6 +1234,11 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
                 })
                 .collect(),
         );
+    }
+    // The ability of `can:` middleware.
+    if kind == Kind::Middleware && typed.starts_with("can:") && !typed.contains(',') {
+        let range = ctx.doc.range(arg.start + 4, offset);
+        return Some(entries(Kind::Auth, data)?.into_iter().map(|e| completion_item(&e.key, Some(e.kind), range)).collect());
     }
     let mut entries = entries(kind, data)?;
     if kind == Kind::Storage {
@@ -1586,11 +1632,17 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         return component(&data, &name, livewire).and_then(|(t, _)| t).map(|p| vec![to_location((p, 1))]).unwrap_or_default();
     }
     with_args(ctx, None, |ctx, args| {
-        args.iter()
+        let mut found: Vec<Location> = args
+            .iter()
             .filter(|a| a.start <= offset && offset <= a.end)
-            .filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data))
+            .filter_map(|a| match kind_of(a, &ctx.index.codebase)? {
+                Kind::Middleware if can_entry(a, &data, offset).is_some() => can_entry(a, &data, offset)?.1.target,
+                kind => target(kind, a, &data),
+            })
             .map(to_location)
-            .collect()
+            .collect();
+        found.extend(names::definition(ctx, &args, offset).into_iter().map(to_location));
+        found
     })
 }
 
@@ -1610,8 +1662,19 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
         return Some(markdown(text, ctx.doc.range(s, e)));
     }
     with_args(ctx, None, |ctx, args| {
+        if let Some((text, (start, end))) = names::hover(ctx, &args, offset) {
+            return Some(markdown(text, ctx.doc.range(start, end)));
+        }
         let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
+        if let Some(text) = route_parameters::hover(ctx, &data, arg) {
+            return Some(markdown(text, ctx.doc.range(arg.start, arg.end)));
+        }
         let kind = kind_of(arg, &ctx.index.codebase)?;
+        if kind == Kind::Middleware
+            && let Some(((start, end), entry)) = can_entry(arg, &data, offset)
+        {
+            return Some(markdown(entry.hover?, ctx.doc.range(start, end)));
+        }
         let entries = match kind {
             Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
             _ => entries(kind, &data)?,
@@ -1665,6 +1728,8 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
                 });
             }
         }
+        out.extend(route_parameters::diagnostics(ctx, &data, &args));
+        out.extend(names::diagnostics(ctx, &args));
         out
     })
 }
@@ -1703,9 +1768,8 @@ pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {
     out
 }
 
-#[allow(dead_code)]
-pub fn code_lenses(_ctx: &Ctx<'_>) -> Vec<lsp_types::CodeLens> {
-    vec![]
+pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<lsp_types::CodeLens> {
+    links::code_lenses(ctx)
 }
 
 #[cfg(test)]

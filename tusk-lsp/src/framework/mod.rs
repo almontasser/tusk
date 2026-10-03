@@ -509,7 +509,9 @@ pub fn document_colors(ctx: &Ctx<'_>) -> Vec<lsp_types::ColorInformation> {
 }
 
 pub fn code_lenses(ctx: &Ctx<'_>) -> Vec<CodeLens> {
-    filament::code_lenses(ctx)
+    let mut out = laravel::code_lenses(ctx);
+    out.extend(filament::code_lenses(ctx));
+    out
 }
 
 pub fn document_links(ctx: &Ctx<'_>) -> Vec<DocumentLink> {
