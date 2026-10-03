@@ -33,6 +33,7 @@ pub mod closures;
 mod columns;
 mod schema;
 mod state;
+mod urls;
 use crate::features::Ctx;
 use crate::index::file_id;
 use crate::scope::{resolve_class, scope_at};
@@ -564,6 +565,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     if matches!(arg.call.name.as_str(), "default" | "options" | "enum") && arg.call.kind == CallKind::Method {
         return value_completion(ctx, offset);
     }
+    if let Some(items) = urls::completion(ctx, offset, &arg) {
+        return Some(items);
+    }
     if !filament_call(&arg) || arg.in_array.is_some() {
         return None;
     }
@@ -636,6 +640,10 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
     if state::is_state_arg(&arg) {
         return state::definition(ctx, offset);
     }
+    let pages = urls::definition(ctx, offset);
+    if !pages.is_empty() {
+        return pages;
+    }
     let Some((start, end, name)) = relationship_name(&arg) else { return vec![] };
     if !(start <= offset && offset <= end) {
         return vec![];
@@ -651,7 +659,7 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     if !active(ctx) {
         return None;
     }
-    state::hover(ctx, offset).or_else(|| columns::hover(ctx, offset))
+    state::hover(ctx, offset).or_else(|| columns::hover(ctx, offset)).or_else(|| urls::hover(ctx, offset))
 }
 
 /// Quick fixes for the problems [`diagnostics`] reports.
@@ -671,6 +679,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     out.extend(relationship_diagnostics(ctx));
     out.extend(closures::diagnostics(ctx));
     out.extend(columns::diagnostics(ctx));
+    out.extend(urls::diagnostics(ctx));
     out
 }
 

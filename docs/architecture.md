@@ -3735,7 +3735,7 @@ has no default and isn't variadic, and either has no type or one that allows
 `null` in Filament 3, or a built-in type that doesn't allow `null`. A class
 type is never reported, since the container may build it.
 
-### Columns
+### Columns and resource pages
 
 `filament/columns.rs` hovers relationship names, the first segment of a dotted
 `make()` or `->relationship()`, with the relation from introspection.
@@ -3746,6 +3746,12 @@ column or relationship, and `rel.name` a column of the related model. Names
 with an aggregate's suffix (`_count`, `_sum`, …), chains with `counts()` and
 the like, and tables whose file, resource, or pages contain code that changes
 the query are skipped, since such queries can select other names.
+
+`filament/urls.rs` reads `getUrl()`'s first argument (or `name:`) on a
+concrete resource class, or on `getResource()` in a page, whose resource is
+the page's `$resource` or its folder's. Pages come from the `getPages()` that
+the resource declares or inherits from an app class, when it returns a literal
+array of `'name' => Page::route(…)`.
 
 ### Links
 
