@@ -51,6 +51,8 @@ pub fn find(method: &str) -> Option<Handler> {
         TypeHierarchySupertypes::METHOD => typed!(TypeHierarchySupertypes, hierarchy::supertypes),
         TypeHierarchySubtypes::METHOD => typed!(TypeHierarchySubtypes, hierarchy::subtypes),
         Formatting::METHOD => typed!(Formatting, format::formatting),
+        DocumentColor::METHOD => typed!(DocumentColor, color::document_colors),
+        ColorPresentationRequest::METHOD => typed!(ColorPresentationRequest, color::color_presentations),
         "tusk/extract" => actions::introduce::extract_request,
         "tusk/extractTargets" => actions::introduce::targets_request,
         "tusk/inline" => actions::inline::inline_request,

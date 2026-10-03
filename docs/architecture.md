@@ -5896,6 +5896,59 @@ when `vendor/filament/filament` exists.
   state_paths_in_a_real_app` prints every `$get` and `$set` in a real app
   that doesn't resolve to a field, and every problem reported, to review.
 
+### Icons and colors
+
+`framework/icons.rs` handles blade-icons names, in any Laravel project, and
+`framework/filament/colors.rs` Filament's color names. Both find their strings
+through `framework/values.rs`, which follows a string literal to where its
+value goes: a call's argument, also as what a closure passed there returns
+(through `fn () =>`, `return`, `match` arms, ternaries, and `??`), a
+property's default, or a method's result. A `match` arm's conditions and a
+ternary's condition don't count. Calls are filtered by their written name
+before their receiver is typed, so a file costs one walk and a few typings.
+
+- **Icon sets:** `icon-sets.php` asks the booted app's
+  `BladeUI\Icons\Factory` for each set's prefix and folders. When the app
+  can't boot, each package in `vendor/composer/installed.json` that requires
+  a `blade-ui-kit` package has its service provider read: the
+  `$factory->add('set', …)` call's `__DIR__` path, and the prefix in the call
+  or as the single `prefix` of the config it reads, the project's copy first.
+  The SVG names are listed once into `State` (key `icons:sets`), until
+  `composer.lock`, `config/`, a provider, or `bootstrap/providers.php`
+  changes.
+- **Icon sites:** `icon()`, `icons()`, and every method whose name ends in
+  `Icon` on a Filament class, `$navigationIcon` and `$activeNavigationIcon`,
+  `getIcon()` in a `HasIcon` class, `FilamentIcon::register()`'s values, and
+  `svg()`. In Blade, `<x-{prefix}-…>` tags, the `icon` and `*-icon`
+  attributes of `x-filament::` components, `<x-icon name>`, and `@svg()`.
+  `icons([...])` and `colors([...])` read by owner: a panel's and a form
+  field's values, a table column's or infolist entry's string keys or else
+  values.
+- **Previews:** an icon's SVG goes in Markdown as a `data:` image with
+  Monaco's `|width=,height=` suffix, which Monaco's renderer allows in hovers
+  and suggestion details, with `currentColor` replaced by a gray. A
+  completion lists names only, with `{icon}` in its data, and
+  `completionItem/resolve` adds the selected one's preview, so a list of
+  1,300 heroicons stays small. A `Heroicon` enum case previews in its hover
+  and completion details.
+- **Colors:** Filament's defaults come from `ColorManager::DEFAULT_COLORS`
+  and its palettes' shade 500 from `Color`'s constants, read as text, which
+  hold `oklch()` in Filament 4 and 5 and `r, g, b` in Filament 3.
+  `filament-colors.php` reads each panel's `getColors()` and
+  `FilamentColor::getColors()` from the booted app. Swatches go through
+  `textDocument/documentColor`, which the editor already renders, and a
+  completion's documentation starts with the color's hex, which Monaco draws
+  as a swatch for a color item. The color presentation keeps the name.
+- **Sure-only warnings:** an unknown icon is reported when its prefix names
+  a set read from the booted app, from local folders, without a fallback
+  icon. An unknown color is reported when the booted app's colors were all
+  read, the receiver is typed as a Filament class, and the value looks like
+  a name. Strings in project files that call `FilamentColor::register()` and
+  `fi-color-*` classes in the project's CSS count as known.
+- **Real apps:** `TUSK_FILAMENT_APP=<root> cargo test -- --ignored
+  --nocapture icons_and_colors` reads every icon and color in `app/` and
+  `resources/views/` and prints what has no file and each problem.
+
 ### Formatting
 
 `features/format.rs` answers `textDocument/formatting` for PHP with
@@ -8427,3 +8480,20 @@ Enter, and inputs such as the Automations designer's condition value and the
 New notification name couldn't be typed in. Such handlers now wrap their
 expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
 handler property whose expression body could return `false`.
+
+### 2026-10-03: Icons and colors from the app's own sets and palettes
+
+Icon names complete, preview, and are checked against the SVG files of the
+sets the project installs, not a list of heroicons. The booted app knows each
+set's prefix and folders exactly, including config overrides and a project's
+own set, so it's asked first; reading the providers covers an app that can't
+boot, for completion and previews but not warnings. Previews resolve lazily
+because a set can hold thousands of icons, and Monaco's Markdown renderer
+already allows `data:` images, so the editor needed no change.
+
+Colors use the LSP's document colors, which the editor's client already wires
+to Monaco's color decorations, rather than a preview in hover text alone. A
+color name has no written form for another picked color, so the presentation
+returns the name unchanged. Unknown colors are reported only from the booted
+app's full list, because panels, plugins, and closures register colors that
+reading the source can't see.

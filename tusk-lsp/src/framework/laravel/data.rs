@@ -50,7 +50,7 @@ impl Data<'_> {
         if p.is_absolute() { p.to_path_buf() } else { self.root().join(p) }
     }
 
-    fn script(&self, key: &str, template: &str, depends_on: &[&str]) -> Option<Arc<Value>> {
+    pub(super) fn script(&self, key: &str, template: &str, depends_on: &[&str]) -> Option<Arc<Value>> {
         // An app without `vendor/autoload.php` and `bootstrap/app.php` boots through `artisan tinker` instead,
         // as Laravel LSP does. A project PHP can't boot fails here, and the failure is cached like any result.
         let bootable = self.root().join("vendor/autoload.php").is_file() && self.root().join("bootstrap/app.php").is_file();

@@ -29,6 +29,7 @@ use serde_json::Value;
 
 use super::{CallKind, StringArg, string_arg_at, string_args};
 
+pub mod colors;
 mod schema;
 mod state;
 use crate::features::Ctx;

@@ -321,3 +321,33 @@ fn searches_racing_edits_and_other_requests_all_finish() {
     let answers = c.responses(&ids);
     assert!(answers.iter().all(|r| r.response_result.is_ok()), "{answers:?}");
 }
+
+/// Filament's color classes and an icon set's package, as installed, without an app to boot.
+const FILAMENT_VENDOR: &[(&str, &str)] = &[
+    ("vendor/filament/filament/composer.json", "{}"),
+    ("vendor/filament/support/src/Colors/Color.php", "<?php\nnamespace Filament\\Support\\Colors;\nclass Color {\n    public const WCAG = 4.5;\n    public const Red = [\n        400 => 'oklch(0.704 0.191 22.216)',\n        500 => 'oklch(0.637 0.237 25.331)',\n    ];\n}\n"),
+    ("vendor/filament/support/src/Colors/ColorManager.php", "<?php\nclass ColorManager {\n    const DEFAULT_COLORS = [\n        'danger' => Color::Red,\n    ];\n}\n"),
+    ("vendor/composer/installed.json", r#"{"packages": [{"name": "blade-ui-kit/blade-heroicons", "require": {"blade-ui-kit/blade-icons": "^1.6"}, "install-path": "../blade-ui-kit/blade-heroicons"}]}"#),
+    ("vendor/blade-ui-kit/blade-heroicons/config/blade-heroicons.php", "<?php\nreturn [\n    'prefix' => 'heroicon',\n];\n"),
+    ("vendor/blade-ui-kit/blade-heroicons/src/BladeHeroiconsServiceProvider.php", "<?php\n$this->callAfterResolving(Factory::class, function (Factory $factory, Container $container) {\n    $config = $container->make('config')->get('blade-heroicons', []);\n    $factory->add('heroicons', array_merge(['path' => __DIR__.'/../resources/svg'], $config));\n});\n"),
+    ("vendor/blade-ui-kit/blade-heroicons/resources/svg/o-user.svg", "<svg stroke=\"currentColor\"/>"),
+];
+
+#[test]
+fn shows_filament_color_swatches_and_icon_previews() {
+    let mut c = indexed(FILAMENT_VENDOR);
+    let uri = c.open("src/t.php", "<?php\nuse Filament\\Support\\Colors\\Color;\n$c->color('danger')->colors([Color::Red])->icon('heroicon-o-');\n");
+    let colors = c.request_raw(request::DocumentColor::METHOD, json!({ "textDocument": { "uri": uri } }));
+    let colors: Vec<ColorInformation> = serde_json::from_value(colors).unwrap();
+    assert_eq!(colors.iter().map(|c| c.range.start.character).collect::<Vec<_>>(), vec![11, 29]);
+    assert!((colors[0].color.red - 0.984).abs() < 0.01, "{:?}", colors[0].color);
+    // Picking another color keeps the name.
+    let presented = c.request_raw(request::ColorPresentationRequest::METHOD, json!({ "textDocument": { "uri": uri }, "color": colors[0].color, "range": colors[0].range }));
+    assert_eq!(presented[0]["label"], "danger");
+
+    let items = c.request_raw(request::Completion::METHOD, json!({ "textDocument": { "uri": uri }, "position": { "line": 2, "character": 59 } }));
+    let item = items["items"].as_array().unwrap().iter().find(|i| i["label"] == "heroicon-o-user").expect("the icon").clone();
+    assert!(item.get("documentation").is_none());
+    let resolved = c.request_raw(request::ResolveCompletionItem::METHOD, item);
+    assert!(resolved["documentation"]["value"].as_str().unwrap().starts_with("![heroicon-o-user](data:image/svg+xml;base64,"), "{resolved}");
+}

@@ -1461,6 +1461,13 @@ pub fn blade_components(state: &crate::framework::State) -> Option<std::sync::Ar
     data.active().then(|| data.blade_components()).flatten()
 }
 
+/// The JSON a script prints in the booted app, cached under `key` until a path in `depends_on` changes, for
+/// features outside this module. `None` outside a Laravel app or when PHP fails.
+pub(crate) fn script(state: &crate::framework::State, key: &str, template: &str, depends_on: &[&str]) -> Option<std::sync::Arc<Value>> {
+    let data = Data(state);
+    data.active().then(|| data.script(key, template, depends_on)).flatten()
+}
+
 /// What the project's Laravel reads in Blade's `@use`, from its `compileUse`: `None` without `@use`, and else
 /// whether it reads `function` and `const` imports, and groups such as `App\Models\{Post, User}`. Laravel added
 /// both after `@use` itself, so the source says rather than the version.
