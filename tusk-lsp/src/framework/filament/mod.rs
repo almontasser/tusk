@@ -29,6 +29,7 @@ use serde_json::Value;
 
 use super::{CallKind, StringArg, string_arg_at, string_args};
 
+pub mod closures;
 mod schema;
 mod state;
 use crate::features::Ctx;
@@ -79,7 +80,11 @@ fn short(fqn: &str) -> &str {
 }
 
 fn is_resource(ctx: &Ctx<'_>, class: &str) -> bool {
-    let codebase = &ctx.index.codebase;
+    is_resource_in(&ctx.index, class)
+}
+
+fn is_resource_in(index: &crate::index::Index, class: &str) -> bool {
+    let codebase = &index.codebase;
     codebase.is_instance_of(class.as_bytes(), b"Filament\\Resources\\Resource")
         || codebase.get_class_like(class.as_bytes()).and_then(|c| c.direct_parent_class).is_some_and(|p| short(&p.as_str_lossy()).eq_ignore_ascii_case("Resource"))
 }
@@ -541,7 +546,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     if !active(ctx) {
         return None;
     }
-    let Some(arg) = string_arg_at(ctx, offset) else { return state::value_completion(ctx, offset).or_else(|| value_completion(ctx, offset)) };
+    let Some(arg) = string_arg_at(ctx, offset) else {
+        return closures::completion(ctx, offset).or_else(|| state::value_completion(ctx, offset)).or_else(|| value_completion(ctx, offset));
+    };
     let typed = ctx.doc.text.get(arg.start as usize..offset as usize)?.to_string();
 
     // $get('…') and $set('…'): the fields the closure's schema reaches.
@@ -661,6 +668,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     }
     let mut out = state::diagnostics(ctx);
     out.extend(relationship_diagnostics(ctx));
+    out.extend(closures::diagnostics(ctx));
     out
 }
 

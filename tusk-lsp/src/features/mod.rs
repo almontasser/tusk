@@ -42,7 +42,8 @@ pub struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     pub fn analysis(&self) -> &Analysis {
-        self.analysis.get_or_init(|| analyze(&self.parsed, self.arena, &self.index))
+        let docs = self.snap.docs.clone();
+        self.analysis.get_or_init(|| crate::framework::filament::closures::with_docs(docs, || analyze(&self.parsed, self.arena, &self.index)))
     }
 
     pub fn resolver(&self) -> Resolver<'_, 'a> {

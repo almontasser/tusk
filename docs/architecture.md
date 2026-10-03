@@ -3663,6 +3663,78 @@ a thread of its own and returns what's cached, so no request waits for PHP:
 diagnostics start the reads when a file opens, and completion and hover read
 again when the options are over a minute old.
 
+### Closure parameters
+
+Filament calls a component's closures through `evaluate()`
+(`EvaluatesClosures`), which resolves each parameter by the names the call
+passes, then by the class's `resolveDefaultClosureDependencyForEvaluationByName()`,
+then by type, then by `$evaluationIdentifier`, then from Laravel's container
+for a class type. Otherwise it uses the default, or `null` when the parameter
+allows it (Filament 4 and later, `allowsNull()`), or throws
+`BindingResolutionException` (Filament 3, also for an untyped parameter).
+
+`filament/closures.rs` reads those names from the project's own Filament code
+through the index, rather than from a list, so each version and each class
+gets its own (`injections`, cached for the index's generation):
+
+- The resolver's names: from the class up through its parents, each class that
+  brings a resolver of its own (its declaring class differs from its
+  parent's) has the method's source parsed. It must be one `return match
+  ($parameterName)` with literal string arms and a `default` that calls
+  `parent::` of the same method. Anything else marks the class as not read
+  in full.
+- `$evaluationIdentifier`: the default of the declaring property, which the
+  codebase keeps as a literal string type.
+- Passed names: the keys of every `evaluate()` call's literal named
+  injections in the files of the class, its parents, and their traits. A call
+  that passes them any other way, as `Action::call()` passes `$parameters`,
+  marks the class as not read in full.
+- Whether `null` is given: whether `resolveClosureDependencyForEvaluation()`
+  mentions `allowsNull()`.
+
+File facts (`file_facts`) are cached by path, keyed by a hash of an open
+document's text or a closed file's size and modification time, so `vendor` is
+parsed once per session.
+
+A site is a closure or arrow function passed to a method call whose chain
+starts at `X::make()`, `$this`, or a parameter typed with a class, where that
+class evaluates closures. `ClosureHook`, an analyzer plugin, types the site's
+untyped parameters: `analysis::run` computes them before analyzing
+(`closures::typing`, with the open documents that `Ctx::analysis` passes
+through `with_docs`), and the hook sets each one on the first expression of
+the closure's body where its type is still `mixed`, skipping functions inside
+it that have a variable of that name of their own. `$get` and `$set` become
+`Get` and `Set` (Filament 4's `Schemas\Components\Utilities` or Filament 3's
+`Forms`), the identifier the class itself, `$operation` a string, `$table`
+`Table`, `$livewire` the class around the closure when it's a Livewire
+component, and `$record` the model:
+
+- in a relation manager or `ManageRelatedRecords` page, its
+  `$relatedResource`'s model, or the related model of its `$relationship`,
+  read from the owner model's method that returns `$this->hasMany(X::class)`
+  or another relationship;
+- in a resource page, its `$resource`'s `$model`; in a resource, its own;
+- in another Livewire component, nothing; elsewhere, the model of the resource
+  `resource_by_folder` finds: the one `*Resource.php` in the file's folder or
+  a parent under `app/`, or the one named after the folder it came from
+  (Filament 3's `PostResource/Pages`). Several side by side give none.
+
+`$record` is nullable except for table columns, and the hook drops "possibly
+null" problems on a nullable one, since a form's record is `null` only while
+creating. Inside the children of a chain with `->relationship()` it isn't
+typed: those are the related records. All of this reads the index and files
+only, so it also runs in the project scan without the framework's state.
+
+Completion of names parses a copy of the text with the unfinished closure
+completed (`fn ($)` becomes `fn ($x) => null`), since an unfinished closure
+doesn't parse. The problem for a parameter Filament can't inject needs a
+method in `EVALUATED`, whose closure the component keeps and evaluates itself
+in Filament 3, 4, and 5 (checked against each version's source), declared in a
+`Filament\` class, and a class read in full. Such a parameter throws when it
+has no default and isn't variadic, and either has no type or one that allows
+`null` in Filament 3, or a built-in type that doesn't allow `null`. A class
+type is never reported, since the container may build it.
+
 ### Links
 
 Code lenses carry the command `phpEditor.open` with a file URI and a line.
@@ -8427,3 +8499,26 @@ Enter, and inputs such as the Automations designer's condition value and the
 New notification name couldn't be typed in. Such handlers now wrap their
 expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
 handler property whose expression body could return `false`.
+
+### 2026-10-03: Filament closure parameters are read from Filament's resolvers
+
+Filament injects closure parameters by name, and the names differ by class and
+version: a column has `$rowLoop` and `$table` but no `$get`, an action has
+`$data` and `$arguments`, and Filament 3 throws where Filament 4 passes `null`.
+A list in Tusk would drift from Filament with each release and each plugin, so
+the server reads each class's `resolveDefaultClosureDependencyForEvaluationByName()`
+match, its `$evaluationIdentifier`, and its `evaluate()` calls' named
+injections from `vendor` through the index. Reading code it can't follow in
+full, such as a resolver that isn't a literal `match` or an `evaluate()` call
+given an array built in code, makes the class unsure, and an unsure class gets
+completion but no warning. Which methods evaluate their closure themselves
+isn't readable the same way (a closure may be called directly or by another
+object), so that one list, `EVALUATED`, is kept by hand and checked against
+Filament 3, 4, and 5.
+
+The parameters are typed by an analyzer hook rather than by rewriting the
+code, so hover, completion, and Mago's checks see the same types. The hook
+computes its types from the index and files alone, which keeps it usable in
+the project scan, where no framework state or PHP is available; a
+relationship's related model comes from the model method's
+`$this->hasMany(X::class)`, not from introspection.
