@@ -30,6 +30,7 @@ use serde_json::Value;
 use super::{CallKind, StringArg, string_arg_at, string_args};
 
 pub mod closures;
+mod columns;
 mod schema;
 mod state;
 use crate::features::Ctx;
@@ -650,7 +651,7 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
     if !active(ctx) {
         return None;
     }
-    state::hover(ctx, offset)
+    state::hover(ctx, offset).or_else(|| columns::hover(ctx, offset))
 }
 
 /// Quick fixes for the problems [`diagnostics`] reports.
@@ -669,6 +670,7 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
     let mut out = state::diagnostics(ctx);
     out.extend(relationship_diagnostics(ctx));
     out.extend(closures::diagnostics(ctx));
+    out.extend(columns::diagnostics(ctx));
     out
 }
 

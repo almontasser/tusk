@@ -3735,6 +3735,18 @@ has no default and isn't variadic, and either has no type or one that allows
 `null` in Filament 3, or a built-in type that doesn't allow `null`. A class
 type is never reported, since the container may build it.
 
+### Columns
+
+`filament/columns.rs` hovers relationship names, the first segment of a dotted
+`make()` or `->relationship()`, with the relation from introspection.
+`->searchable()` and `->sortable()` with only boolean arguments on a
+`Tables\Columns\Column` subclass are checked against the model's columns when
+the database gave them (`columnsGuessed` is false): a plain name must be a
+column or relationship, and `rel.name` a column of the related model. Names
+with an aggregate's suffix (`_count`, `_sum`, …), chains with `counts()` and
+the like, and tables whose file, resource, or pages contain code that changes
+the query are skipped, since such queries can select other names.
+
 ### Links
 
 Code lenses carry the command `phpEditor.open` with a file URI and a line.
