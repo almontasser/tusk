@@ -222,6 +222,21 @@ impl Data<'_> {
     }
 }
 
+/// The default connection's tables: `{live, tables: {name: [columns]}, models: {class: table}}`, where `live`
+/// says the tables come from the database, not from the models. A database can be slow or unreachable, so this
+/// never waits: it gives what an earlier run found, if any, while the script runs again in the background.
+pub fn tables(state: &Arc<State>) -> Option<Arc<Value>> {
+    static SCRIPT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    // Tests seed the result for a project that isn't there.
+    if !cfg!(test) && !(state.root().join("vendor/autoload.php").is_file() && state.root().join("bootstrap/app.php").is_file()) {
+        return None;
+    }
+    let script = SCRIPT.get_or_init(|| format!("{BOOT}{}\n{}", body(GLOBAL), body(include_str!("../../../php/laravel/tables.php"))));
+    // The SQLite file is under `database/`, so a migration that runs there is seen too.
+    let tables = state.php_soon("laravel:tables", script, vec![], &["database/", "app/Models/", "config/database.php", ".env"], std::time::Duration::from_secs(300))?;
+    tables["tables"].is_object().then_some(tables)
+}
+
 fn parse_env(text: &str) -> Value {
     let mut out = Map::new();
     for (i, line) in text.split('\n').enumerate() {

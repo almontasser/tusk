@@ -59,6 +59,7 @@ static PLUGINS: LazyLock<PluginRegistry> = LazyLock::new(|| {
     plugins.register_function_provider(PestTestHelper);
     plugins.register_expression_hook(crate::framework::laravel::forwarding::ForwardHook);
     plugins.register_issue_filter_hook(crate::framework::laravel::forwarding::ForwardHook);
+    plugins.register_expression_hook(crate::framework::laravel::validated::ValidatedHook);
     plugins
 });
 
@@ -577,7 +578,8 @@ fn run(parsed: &Parsed<'_>, arena: &LocalArena, index: &Index, settings: Setting
     let mut result = AnalysisResult::new(SymbolReferences::new());
     let analyzer = Analyzer::new(arena, &parsed.file, &parsed.names, &index.codebase, &PLUGINS, settings);
     let names = parsed.names.iter().map(|(start, _, name, _)| (start, Box::from(name)));
-    let artifacts = crate::framework::laravel::forwarding::with_names(names, || analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default());
+    let analyze = || analyzer.analyze_with_artifacts(parsed.program, &mut result).unwrap_or_default();
+    let artifacts = crate::framework::laravel::validated::with_rules(index, || crate::framework::laravel::forwarding::with_names(names, analyze));
     Analysis { artifacts, issues: result.issues }
 }
 

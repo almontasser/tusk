@@ -172,7 +172,7 @@ fn item(label: &str, kind: CompletionItemKind, detail: &str, range: Range, sort:
 }
 
 /// How to write a class at `offset`: its short name when imported or in the same namespace, else qualified.
-fn class_reference(ctx: &Ctx<'_>, offset: u32, class: &str) -> String {
+pub(crate) fn class_reference(ctx: &Ctx<'_>, offset: u32, class: &str) -> String {
     let short = short(class);
     if resolve_class(&scope_at(ctx.parsed.program, offset), short).eq_ignore_ascii_case(class) {
         short.to_string()
@@ -182,7 +182,7 @@ fn class_reference(ctx: &Ctx<'_>, offset: u32, class: &str) -> String {
 }
 
 /// An enum's cases in declaration order, with each backed case's value as written.
-fn enum_cases(ctx: &Ctx<'_>, class: &str) -> Option<Vec<(String, Option<String>)>> {
+pub(crate) fn enum_cases(ctx: &Ctx<'_>, class: &str) -> Option<Vec<(String, Option<String>)>> {
     let meta = ctx.index.codebase.get_enum(class.as_bytes())?;
     let mut cases: Vec<_> = meta.enum_cases.values().collect();
     cases.sort_by_key(|c| c.span.start.offset);

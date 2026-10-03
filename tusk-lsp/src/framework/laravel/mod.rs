@@ -10,6 +10,8 @@ pub mod blade;
 mod data;
 pub mod forwarding;
 mod tables;
+pub mod validated;
+pub mod validation;
 pub mod views;
 
 use std::path::{Path, PathBuf};
@@ -970,7 +972,9 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
     }
     with_args(ctx, Some(offset), |ctx, args| match args.first() {
         Some(arg) => string_completion(ctx, &data, arg, offset),
-        None => rules_method_completion(ctx, offset),
+        None => rules_method_completion(ctx, offset)
+            .or_else(|| validation::nested_rule_completion(ctx, offset))
+            .or_else(|| validation::enum_class_completion(ctx, offset)),
     })
     .filter(|items| !items.is_empty())
 }
@@ -1130,6 +1134,9 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
     if let Some(items) = eloquent_completion(ctx, data, arg, range) {
         return Some(items);
     }
+    if let Some(items) = validation::string_completion(ctx, arg, offset) {
+        return Some(items);
+    }
     let first_arg = arg.call.arguments.first().and_then(|a| a.1.clone());
     // Route parameters: `route('post.show', ['` offers the route's parameters.
     if arg.index == 1 && arg.in_array == Some(InArray::Key) && (arg.call.is_function(&["route", "signedRoute", "to_route", "temporarySignedRoute"]) || arg.call.is_method(&["route", "signedRoute", "temporarySignedRoute"]))
@@ -1141,7 +1148,7 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
         return simple(params, CompletionItemKind::VARIABLE);
     }
     if is_validation(arg, codebase) {
-        return Some(rule_items(range));
+        return Some(validation::rule_completion(ctx, arg.start, offset));
     }
     // Translation parameters and locales.
     let translation_call = arg.call.is_function(&["__", "trans", "trans_choice", "@lang"])
@@ -1214,7 +1221,8 @@ fn string_completion(ctx: &Ctx<'_>, data: &Data<'_>, arg: &StringArg, offset: u3
     )
 }
 
-/// Whether a string is a validation rule: a rules array passed to `validate()` or `Validator::make()`.
+/// Whether a string is a validation rule: a rules array passed to `validate()` or `Validator::make()`, or Livewire's
+/// `#[Validate]`.
 fn is_validation(arg: &StringArg, codebase: &CodebaseMetadata) -> bool {
     if matches!(arg.in_array, Some(InArray::Key)) {
         return false;
@@ -1222,9 +1230,12 @@ fn is_validation(arg: &StringArg, codebase: &CodebaseMetadata) -> bool {
     let request = ["Illuminate\\Http\\Request", "Request", "Illuminate\\Support\\Facades\\Request"];
     let validators = ["Validator", "Illuminate\\Support\\Facades\\Validator", "Illuminate\\Contracts\\Validation\\Factory", "Illuminate\\Contracts\\Validation\\Validator", "Illuminate\\Validation\\Factory", "Illuminate\\Validation\\Validator"];
     let s = Site { arg, codebase };
+    let livewire = ["Livewire\\Attributes\\Validate", "Livewire\\Attributes\\Rule"];
     s.method(&["validate", "validateWithBag"], &request, &[0])
         || s.function(&["validator"], &[1])
         || s.method(&["validate", "make", "sometimes"], &validators, &[1])
+        || s.method(&["validate"], &[validation::LIVEWIRE_COMPONENT, validation::LIVEWIRE_FORM], &[0])
+        || (livewire.iter().any(|c| s.object(c, &[0])) && arg.name.as_deref().is_none_or(|n| n == "rule"))
 }
 
 fn rule_items(range: Range) -> Vec<CompletionItem> {
@@ -1255,8 +1266,8 @@ fn rules_method_completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionI
     }
     let class = ctx.resolver().enclosing_class(&path)?;
     let codebase = &ctx.index.codebase;
-    let form = ["Illuminate\\Foundation\\Http\\FormRequest", "Livewire\\Form"].iter().any(|p| codebase.is_instance_of(class.as_bytes(), p.as_bytes()));
-    form.then(|| rule_items(replacement(ctx, literal.span.start.offset + 1, offset)))
+    let form = [validation::FORM_REQUEST, validation::LIVEWIRE_FORM, validation::LIVEWIRE_COMPONENT].iter().any(|p| codebase.is_instance_of(class.as_bytes(), p.as_bytes()));
+    form.then(|| validation::rule_completion(ctx, literal.span.start.offset + 1, offset))
 }
 
 /// The props a Vue page declares with `defineProps`.
@@ -1578,11 +1589,14 @@ pub fn definition(ctx: &Ctx<'_>, offset: u32) -> Vec<Location> {
         return component(&data, &name, livewire).and_then(|(t, _)| t).map(|p| vec![to_location((p, 1))]).unwrap_or_default();
     }
     with_args(ctx, None, |ctx, args| {
-        args.iter()
+        let mut out: Vec<Location> = args
+            .iter()
             .filter(|a| a.start <= offset && offset <= a.end)
             .filter_map(|a| target(kind_of(a, &ctx.index.codebase)?, a, &data))
             .map(to_location)
-            .collect()
+            .collect();
+        out.extend(args.iter().filter(|a| a.start <= offset && offset <= a.end).filter_map(|a| validation::definition(ctx, a)));
+        out
     })
 }
 
@@ -1602,7 +1616,12 @@ pub fn hover(ctx: &Ctx<'_>, offset: u32) -> Option<Hover> {
         return Some(markdown(text, ctx.doc.range(s, e)));
     }
     with_args(ctx, None, |ctx, args| {
-        let arg = args.iter().find(|a| a.start <= offset && offset <= a.end)?;
+        let Some(arg) = args.iter().find(|a| a.start <= offset && offset <= a.end) else {
+            return validation::rules_method_hover(ctx, offset).map(|(text, range)| markdown(text, range));
+        };
+        if let Some(text) = validation::hover(ctx, &data, arg, offset) {
+            return Some(markdown(text, ctx.doc.range(arg.start, arg.end)));
+        }
         let kind = kind_of(arg, &ctx.index.codebase)?;
         let entries = match kind {
             Kind::CommandParameter => command_parameters(&data, arg.call.arguments.first()?.1.as_deref()?)?,
@@ -1657,6 +1676,8 @@ pub fn diagnostics(ctx: &Ctx<'_>) -> Vec<Diagnostic> {
                 });
             }
         }
+        out.extend(validation::problems(ctx, &args));
+        out.extend(validation::table_problems(ctx, &args));
         out
     })
 }

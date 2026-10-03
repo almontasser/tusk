@@ -1129,6 +1129,33 @@ this took Mago's errors from 5,378 to 4,737; most of what it adds are real
 problems Mago couldn't see in `mixed` values, such as
 `Post::first()->title`, where `first()` may return `null`.
 
+### Validated data in analysis
+
+Laravel declares `FormRequest::validated()` as `mixed` and the request's
+`validate()` as `array`. `ValidatedHook` in
+`tusk-lsp/src/framework/laravel/validated.rs` types them, when Mago's type is
+`mixed` or an array of anything, as an open array shape of the rules' keys:
+`validated()` and `validated('key')` on a form request whose rules are complete
+and not custom, `validate([...])` and `validateWithBag()` on a request with a
+literal rules array, a controller's `$this->validate($request, [...])`,
+`Validator::make($data, [...])->validate()`, and a Livewire component's or form's
+`validate()`, from its rules or a literal array. `analysis::run` passes the
+project's rules by class in a thread-local (`with_rules`).
+
+Each key's type is a superset of what passes its rules, read from Laravel's
+`ValidatesAttributes`: `string`, `integer` (`filter_var()`, so `5.0` and `true`
+pass; `int` only with `:strict`), `numeric` and `decimal`, `boolean` (`0`,
+`1`, `'0'`, `'1'`), `array`, and `list`. A value that's an empty or blank
+string skips every rule but an implicit one (`required`, `filled`,
+`accepted`, `declined`), so without one, a key can also be a `string`. `null`
+fails a type rule unless the key is `nullable`. A key is in the data when it's
+`required`, `accepted`, `declined`, or `present`, unless it's `sometimes` or
+has an `exclude` rule. Dotted keys nest, and `*` keys type each element; a key
+with keys of its own that isn't an `array` or `list` can be anything. Shapes
+stay open, since a Livewire root component's validation adds its form objects'
+keys. On the municipality app, this removed 9 of Mago's problems about `mixed`
+and added none.
+
 ### Questions from servers
 
 A server can ask a question with `window/showMessageRequest`. The client
@@ -6224,6 +6251,33 @@ an `artisan` file.
   list, by the command in the call's first argument, so its entries come from
   `command_parameters` rather than `entries`. A class name in place of the
   command, which `Schedule::command()` takes, isn't checked.
+- **Validation:** `laravel/validation.rs` reads rules where the index reads
+  each project file (`validation::scan`, kept in `Index::validation` by file):
+  each class's `rules()` and Livewire's `#[Validate]` and `#[Rule]` on its
+  properties, as `Field`s with each key's rules as written and the key's span.
+  `Rules::complete` says the keys are all there: one returned array literal
+  with plain string keys and no spread. A class that declares
+  `withValidator()`, `validator()`, `getValidatorInstance()`, or `validated()`
+  is `custom`. `class_rules` walks up the parents to the nearest class with
+  rules, cached by class per index generation (`by_class`). Input methods
+  (`validated`, `input`, `string`, `has`, `only`, and the rest) on a form
+  request, on its `safe()` input, or on `$this` in it complete those keys; a
+  plain `Request` gets the literal rules of a `validate()`,
+  `validateWithBag()`, `Validator::make()`, or `validator()` in the same
+  function. Only `validated()` and `safe()` input are checked (code
+  `validation`), and only when the rules are complete and not custom, since
+  every other method reads any input. Member completion adds a form request's
+  top-level keys after `->`.
+- **Tables in rules:** `php/laravel/tables.php` lists the default connection's
+  tables of every schema with their columns (`live`), and maps each model in
+  `app/Models` to its table; without a database, models' tables with their
+  guessed columns stand in. It runs through `State::php_soon`, so a slow or
+  unreachable database never holds a request. `exists:` and `unique:` rules
+  in rule strings, nested rule lists, and `rules()` strings, and
+  `Rule::exists()`, `Rule::unique()`, `new Exists()`, and `new Unique()`
+  complete and hover tables and columns. A table given as a model class maps
+  through the models; `connection.table` isn't placed. Unknown tables (code
+  `table`) and columns (code `column`) are reported only when `live`.
 - **Facts read directly:** `.env`, `public/`, the Mix manifest, Inertia
   pages, and controller actions (read from `app/Http/Controllers`).
 - **Blade:** a view becomes "virtual PHP" of the same length.
@@ -8427,3 +8481,20 @@ Enter, and inputs such as the Automations designer's condition value and the
 New notification name couldn't be typed in. Such handlers now wrap their
 expression in `void (…)`, and `src/keyhandlers.test.ts` fails on any key
 handler property whose expression body could return `false`.
+
+### 2026-10-03: Validation rules give input keys, validated types, and tables
+
+Form requests' rules are read at index time rather than when a controller
+asks, since the analyzer's hook sees only the codebase, not other files' text.
+Reading only top-level classes keeps the index scan safe on pathologically deep
+files; a full walk overflowed a scan thread's stack.
+
+Only `validated()` and `safe()` keys are checked. `input()`, `has()`, and the
+rest read the whole request, so a key the rules don't have may be meant.
+Validated data gets the broadest type that's still true rather than the
+intuitive one: input arrives as strings, JSON can carry any type, and an empty
+string skips non-implicit rules. Wildcard keys give `array<array-key, T>`, not
+`list<T>`, since `tags[a]=x` is valid input; only the `list` rule gives a list.
+Table and column warnings need tables read from the database, since models'
+guesses leave columns out.
+
