@@ -202,7 +202,15 @@ export async function chooseConnection() {
   const root = host.root();
   if (!root) return;
   const current = selectedName();
-  const choose = (name: string) => () => (select(name), loadTables());
+  const choose = (name: string) => async () => {
+    if (name !== current) {
+      if (!(await confirmDiscard())) return;
+      // A Redis value's editor saves through the selected connection, so it mustn't outlive the switch.
+      if (isRedis()) results.replaceChildren();
+    }
+    select(name);
+    loadTables();
+  };
   const mark = (name: string) => (name === current ? "codicon-check" : "codicon-database");
   const items: Item[] = (await sources()).map((s) => ({ label: s.name || ".env", detail: `${s.origin === "config" ? "config/database.php · " : s.origin === "redis" ? ".env · " : ""}${describe(s.connection, root)}`, icon: mark(s.name), run: choose(s.name) }));
   items.push({ label: "Data Sources…", detail: "Add, edit, test, or remove connections", icon: "codicon-settings-gear", run: () => dataSources() });
@@ -816,7 +824,9 @@ function filterBar(t: TableView) {
 
 /** Editing for a table's rows when they include its primary key, which finds each row again. */
 async function tableEditing(table: string, result: Result, rows: Cell[][], again: () => unknown) {
-  const driver = connection!.driver;
+  // The rows' own connection: choosing another one before Submit mustn't send the changes there.
+  const source = connection!;
+  const driver = source.driver;
   const keys = (await query(primaryKeyQuery(driver, table)).catch(() => ({ rows: [] as Cell[][] }))).rows.map((r) => r[0]!);
   const keyIndexes = keys.map((k) => result.columns.indexOf(k));
   if (!keys.length || keyIndexes.includes(-1)) return null;
@@ -836,7 +846,7 @@ async function tableEditing(table: string, result: Result, rows: Cell[][], again
     empty: "default" as const,
     defaults: true,
     describe: statements,
-    submit: (changes: Changes) => invoke("db_batch", { connection: limited(connection), statements: statements(changes), oneRowEach: true }),
+    submit: (changes: Changes) => invoke("db_batch", { connection: limited(source), statements: statements(changes), oneRowEach: true }),
     target: table,
     again,
   };

@@ -80,6 +80,10 @@ test("envTable merges both files and envFiles splits them back", () => {
   const files = envFiles(t);
   assert.deepEqual(files.secret, secret);
   assert.deepEqual(files.shared, { $shared: { host: "http://localhost" }, local: { user: "me", port: "8000" }, prod: { host: "https://example.com" } });
+
+  // A variable in both files keeps each value in the file it came from.
+  const mixed = envFiles(envTable({ local: { api_key: "dev" } }, { prod: { api_key: "live" } }));
+  assert.deepEqual(mixed, { shared: { local: { api_key: "dev" }, prod: {} }, secret: { prod: { api_key: "live" } } });
 });
 
 test("envFiles keeps empty environments and variables without values", () => {

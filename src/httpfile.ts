@@ -521,7 +521,9 @@ export function curlArgs(p: Prepared, files: { headers: string; body: string; co
   // --stderr -: curl's own errors, such as a malformed URL, come before the JSON on stdout.
   const args = ["-sS", "--max-time", String(p.timeout), "-D", files.headers, "-o", files.body, "-w", `${INFO_MARKER}%{json}`, "-g", "--stderr", "-"];
   if (p.method === "HEAD") args.push("--head");
-  else args.push("-X", p.method);
+  // A POST with a body is curl's own, which a 301, 302, or 303 redirect follows with GET, as browsers do; -X POST
+  // would post again, such as to the page after a Laravel login.
+  else if (!(p.followRedirects && p.method === "POST" && (p.body !== undefined || p.bodyFile || p.form?.length))) args.push("-X", p.method);
   if (p.followRedirects) args.push("-L", "--max-redirs", "20");
   if (p.connectTimeout) args.push("--connect-timeout", String(p.connectTimeout));
   if (p.insecure) args.push("-k");
@@ -533,6 +535,8 @@ export function curlArgs(p: Prepared, files: { headers: string; body: string; co
   for (const f of p.form ?? []) {
     // -F reads @ and < in values as files, so text goes through --form-string.
     if (f.file) args.push("-F", `${f.name}=@"${f.file}"${f.filename ? `;filename="${f.filename}"` : ""}${f.type ? `;type=${f.type}` : ""}`);
+    // Inline content with a filename or type is a file part: quoted, so -F keeps its ;, quotes, and a leading @ or <.
+    else if (f.filename || f.type) args.push("-F", `${f.name}="${(f.value ?? "").replace(/[\\"]/g, "\\$&")}"${f.filename ? `;filename="${f.filename}"` : ""}${f.type ? `;type=${f.type}` : ""}`);
     else args.push("--form-string", `${f.name}=${f.value ?? ""}`);
   }
   if (p.bodyFile) args.push("--data-binary", `@${p.bodyFile}`);
@@ -934,7 +938,9 @@ export const SAMPLE_FORMAT = "%{http_code} %{time_total} %{time_starttransfer} %
 export function loadArgs(p: Prepared, count: number, concurrency: number, cookies?: string): string[] {
   const args = ["-s", "-Z", "--parallel-immediate", "--parallel-max", String(concurrency), "--max-time", String(p.timeout), "-o", "/dev/null", "-w", SAMPLE_FORMAT];
   if (p.method === "HEAD") args.push("--head");
-  else args.push("-X", p.method);
+  // A POST with a body is curl's own, which a 301, 302, or 303 redirect follows with GET, as browsers do; -X POST
+  // would post again, such as to the page after a Laravel login.
+  else if (!(p.followRedirects && p.method === "POST" && (p.body !== undefined || p.bodyFile || p.form?.length))) args.push("-X", p.method);
   if (p.followRedirects) args.push("-L");
   if (p.insecure) args.push("-k");
   args.push(...connectionArgs(p));
@@ -944,6 +950,8 @@ export function loadArgs(p: Prepared, count: number, concurrency: number, cookie
   for (const [k, v] of p.headers) args.push("-H", v ? `${k}: ${v}` : `${k};`);
   for (const f of p.form ?? []) {
     if (f.file) args.push("-F", `${f.name}=@"${f.file}"${f.filename ? `;filename="${f.filename}"` : ""}${f.type ? `;type=${f.type}` : ""}`);
+    // Inline content with a filename or type is a file part: quoted, so -F keeps its ;, quotes, and a leading @ or <.
+    else if (f.filename || f.type) args.push("-F", `${f.name}="${(f.value ?? "").replace(/[\\"]/g, "\\$&")}"${f.filename ? `;filename="${f.filename}"` : ""}${f.type ? `;type=${f.type}` : ""}`);
     else args.push("--form-string", `${f.name}=${f.value ?? ""}`);
   }
   if (p.bodyFile) args.push("--data-binary", `@${p.bodyFile}`);
@@ -1387,7 +1395,13 @@ export function writeChecks(code: string, checks: Check[]): string {
 
 type EnvFile = Record<string, Record<string, unknown>>;
 /** A variable in the environment editor. A value that's undefined isn't set in that environment. */
-export type EnvRow = { name: string; private: boolean; values: Record<string, string | undefined> };
+export type EnvRow = {
+  name: string;
+  private: boolean;
+  values: Record<string, string | undefined>;
+  /** The environments whose values a private variable has in the shared file, which keeps them. */
+  sharedIn?: string[];
+};
 /** Environments as a table: a column per environment, $shared first, and a row per variable. */
 export type EnvTable = { envs: string[]; rows: EnvRow[] };
 
@@ -1403,9 +1417,12 @@ export function envTable(shared: EnvFile | null, secret: EnvFile | null): EnvTab
       for (const [name, v] of Object.entries(vars ?? {})) {
         const row = rows.get(name) ?? { name, private: false, values: {} };
         row.private ||= isPrivate;
+        if (!isPrivate) row.sharedIn = [...(row.sharedIn ?? []), env];
         row.values[env] = typeof v === "string" ? v : JSON.stringify(v);
         rows.set(name, row);
       }
+  // Only a private variable needs to know which values stay shared.
+  for (const row of rows.values()) if (!row.private) delete row.sharedIn;
   return { envs, rows: [...rows.values()] };
 }
 
@@ -1422,7 +1439,7 @@ export function envFiles(t: EnvTable): { shared: EnvFile; secret: EnvFile } {
       if (!row.name) continue;
       const unset = Object.values(row.values).every((v) => v === undefined);
       const value = unset && (real.includes(env) || (!real.length && env === "$shared")) ? "" : row.values[env];
-      if (value !== undefined) vars[row.private ? "secret" : "shared"][row.name] = value;
+      if (value !== undefined) vars[row.private && !row.sharedIn?.includes(env) ? "secret" : "shared"][row.name] = value;
     }
     if (env !== "$shared" || Object.keys(vars.shared).length) out.shared[env] = vars.shared;
     if (Object.keys(vars.secret).length) out.secret[env] = vars.secret;

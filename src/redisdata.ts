@@ -212,12 +212,27 @@ export const columnsOf: Record<string, string[]> = { hash: ["field", "value"], l
 
 const SCORE = /^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$|^[+-]?inf$/i;
 
+/** Applies list changes: ARGV is the deletion marker, the count of [index, loaded value, new value] triples, those, then values to append. */
+const LIST_EDIT = `local n = tonumber(ARGV[2])
+for i = 0, n - 1 do
+  local b = 3 + i * 3
+  if redis.call('LINDEX', KEYS[1], ARGV[b]) ~= ARGV[b + 1] then return redis.error_reply('The list changed since it loaded. Reload it and try again.') end
+end
+for i = 0, n - 1 do
+  local b = 3 + i * 3
+  redis.call('LSET', KEYS[1], ARGV[b], ARGV[b + 2])
+end
+redis.call('LREM', KEYS[1], 0, ARGV[1])
+for i = 3 + n * 3, #ARGV do redis.call('RPUSH', KEYS[1], ARGV[i]) end
+return 'OK'`;
+
 /**
  * The commands that apply grid changes to a hash, list, set, sorted set, or stream. `first` is the Redis index of the
  * page's first row, for a list. Throws for input Redis would refuse, such as a score that isn't a number.
  * A list element is deleted by setting it to a unique marker and removing the marker, as Redis has no delete by index.
+ * A list's changes go in one script that checks the elements first (`LIST_EDIT`).
  */
-export function editCommands(type: string, key: string, values: Cell[][], changes: Changes<Cell>, first = 0, marker = `__tusk_deleted_${Date.now()}__`): string[][] {
+export function editCommands(type: string, key: string, values: Cell[][], changes: Changes<Cell>, first = 0, marker = `__tusk_deleted_${Date.now()}__`, readable = false): string[][] {
   const out: string[][] = [];
   const s = (v: Cell | undefined) => v ?? "";
   const value = (r: number, c: number) => (changes.edits.get(r)?.has(c) ? changes.edits.get(r)!.get(c)! : values[r][c]);
@@ -239,12 +254,20 @@ export function editCommands(type: string, key: string, values: Cell[][], change
         out.push(["HSET", key, v.field, s(v.value)]);
       }
       break;
-    case "list":
-      for (const r of edited) out.push(["LSET", key, String(first + r), s(value(r, 0))]);
-      for (const r of changes.deletes) out.push(["LSET", key, String(first + r), marker]);
-      if (changes.deletes.size) out.push(["LREM", key, "0", marker]);
-      for (const v of changes.inserts) out.push(["RPUSH", key, s(v.value)]);
+    case "list": {
+      // By index, in one script that first checks each element still holds what loaded, so a list that changed
+      // meanwhile, such as a queue a worker pops, has nothing changed rather than the wrong elements.
+      const sets = [...edited.map((r) => [String(first + r), s(values[r][0]), s(value(r, 0))]), ...[...changes.deletes].map((r) => [String(first + r), s(values[r][0]), marker])];
+      // `readable` is what the script does, for the preview of the changes.
+      if (readable) {
+        out.push(...sets.map(([i, , v]) => ["LSET", key, i, v]));
+        if (changes.deletes.size) out.push(["LREM", key, "0", marker]);
+        out.push(...changes.inserts.map((v) => ["RPUSH", key, s(v.value)]));
+        break;
+      }
+      out.push(["EVAL", LIST_EDIT, "1", key, marker, String(sets.length), ...sets.flat(), ...changes.inserts.map((v) => s(v.value))]);
       break;
+    }
     case "set":
       for (const r of changes.deletes) out.push(["SREM", key, s(values[r][0])]);
       for (const r of edited) out.push(["SREM", key, s(values[r][0])], ["SADD", key, s(value(r, 0))]);

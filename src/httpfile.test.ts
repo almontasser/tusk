@@ -126,6 +126,9 @@ test("prepares a request for curl", async () => {
   assert.equal(input, p.body);
   assert.deepEqual(args.slice(0, 4), ["-sS", "--max-time", "5", "-D"]);
   assert.ok(args.includes("-X") && args.includes("POST") && !args.includes("-L"));
+  // Following redirects, a POST with a body is curl's own, which a redirect turns into a GET.
+  const followed = curlArgs({ ...p, followRedirects: true }, { headers: "/h", body: "/b" }).args;
+  assert.ok(followed.includes("-L") && !followed.includes("-X"));
   assert.deepEqual(args.slice(-2), ["--", "http://x/api/posts"]);
   assert.ok(args.includes("Authorization: Bearer t"));
   const basic = parseHttpFile("GET /\nAuthorization: Basic {{user}} pass")[0];

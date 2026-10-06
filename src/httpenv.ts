@@ -62,7 +62,8 @@ function render(dir: string, t: EnvTable) {
     const name = h("input", { value: row.name, spellcheck: false, title: "Name. Requests use it as {{name}}" });
     name.oninput = () => (row.name = name.value.trim());
     const secret = h("input", { type: "checkbox", checked: row.private, title: `Private values go in ${PRIVATE_ENV_FILE}, which Git ignores` });
-    secret.onchange = () => (row.private = secret.checked);
+    // Ticked here, every value goes private, including those the shared file had.
+    secret.onchange = () => ((row.private = secret.checked), delete row.sharedIn);
     const inputs = t.envs.map((env) => h("input", { value: row.values[env] ?? "", spellcheck: false }));
     // Empty cells show the $shared value they get, and a mark when other environments have a value.
     const mark = () =>

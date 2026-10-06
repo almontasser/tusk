@@ -66,6 +66,10 @@ test("turns grid edits into commands per type", () => {
   // A deleted row's edit is dropped; list deletes go through a marker, at the page's indexes.
   assert.deepEqual(
     editCommands("list", "q", [["a"], ["b"], ["c"]], changes({ edits: new Map([[0, new Map([[0, "A"]])], [1, new Map([[0, "B"]])]]), deletes: new Set([1, 2]), inserts: [{}] }), 1000, "M"),
+    [["EVAL", editCommands("list", "q", [], changes({}))[0][1], "1", "q", "M", "3", "1000", "a", "A", "1001", "b", "M", "1002", "c", "M", ""]],
+  );
+  assert.deepEqual(
+    editCommands("list", "q", [["a"], ["b"], ["c"]], changes({ edits: new Map([[0, new Map([[0, "A"]])], [1, new Map([[0, "B"]])]]), deletes: new Set([1, 2]), inserts: [{}] }), 1000, "M", true),
     [["LSET", "q", "1000", "A"], ["LSET", "q", "1001", "M"], ["LSET", "q", "1002", "M"], ["LREM", "q", "0", "M"], ["RPUSH", "q", ""]],
   );
   assert.deepEqual(editCommands("set", "s", [["x"]], changes({ edits: new Map([[0, new Map([[0, "y"]])]]) })), [["SREM", "s", "x"], ["SADD", "s", "y"]]);

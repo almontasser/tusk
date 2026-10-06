@@ -665,9 +665,9 @@ async function collectionView(key: string, type: string, page: number, pages: Pa
   if (page > 0) button(summary, "Previous", "chevron-left", () => showKey(key, page - 1, pages)).classList.add("db-page");
   if (next !== null) button(summary, "Next", "chevron-right", () => showKey(key, page + 1, [...pages.slice(0, page + 1), { offset: first + n, from: next! }])).classList.add("db-page");
   // The grid's changes hold text only: Redis has no NULL or DEFAULT, so the grid offers neither.
-  const commands = (changes: Changes) => {
+  const commands = (changes: Changes, readable = false) => {
     if ([...changes.deletes, ...changes.edits.keys()].some((r) => binary.has(r))) throw new Error("Rows with binary values can't be changed here.");
-    return editCommands(type, key, cells, changes as Changes<Cell>, first);
+    return editCommands(type, key, cells, changes as Changes<Cell>, first, undefined, readable);
   };
   const grid = dataGrid({
     columns,
@@ -680,7 +680,7 @@ async function collectionView(key: string, type: string, page: number, pages: Pa
       nulls: false,
       empty: type === "stream" ? false : "empty",
       editable: (r) => type !== "stream" && !binary.has(r),
-      describe: (changes) => commands(changes).map(commandLine),
+      describe: (changes) => commands(changes, true).map(commandLine),
       submit: async (changes) => {
         const failed = (await call(commands(changes), true)).find(isError);
         if (failed) throw new Error(failed.error);

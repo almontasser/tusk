@@ -368,7 +368,11 @@ export async function upload(paths: string[], server?: DeployServer | "choose", 
       continue;
     }
     const found = await invoke<FileInfoLike[]>("deploy_local_files", { root: at.localRoot, paths: [path], excludes: s.excludes });
-    for (const f of found) files.push({ local: `${at.localRoot}/${f.path}`, remote: joinRemote(at.remoteRoot, f.path), size: f.size });
+    // Each file through its own deepest mapping, such as public/ mapped to another folder than the project.
+    for (const f of found) {
+      const placed = remoteFor(s, host.root(), `${at.localRoot}/${f.path}`);
+      if (placed) files.push({ local: placed.local, remote: placed.remote, size: f.size });
+    }
   }
   if (outside.length && !o.quiet)
     toast(`${outside.join(", ")} ${outside.length === 1 ? "isn't" : "aren't"} in ${s.name}'s mappings, so Tusk doesn't know where ${outside.length === 1 ? "it goes" : "they go"}.`, { kind: "info", action: { label: "Edit Mappings…", run: () => editServers(s.name) } });
@@ -396,7 +400,8 @@ export async function download(paths: string[], server?: DeployServer | "choose"
         else {
           const prefix = path === at.localRoot ? "" : path.slice(at.localRoot.length + 1);
           const found = await reach(() => invoke<FileInfoLike[]>("deploy_remote_files", { server: wire(s), dir: at.remote, excludes: s.excludes, prefix, id }));
-          for (const f of found) files.push({ local: `${path}/${f.path}`, remote: joinRemote(at.remote, f.path), size: f.size });
+          // A file that a deeper mapping places elsewhere comes from that mapping's folder, not this listing.
+          for (const f of found) if (remoteFor(s, host.root(), `${path}/${f.path}`)?.mapping === at.mapping) files.push({ local: `${path}/${f.path}`, remote: joinRemote(at.remote, f.path), size: f.size });
         }
       }
     });
@@ -489,13 +494,17 @@ export async function filesDeleted(paths: string[]) {
   if (!gone.length) return;
   const excluded = await invoke<boolean[]>("deploy_excluded", { excludes: s.excludes, paths: gone.map((p) => p.local.slice(p.localRoot.length + 1)) });
   gone = gone.filter((_, i) => !excluded[i]);
+  // Counted before a folder takes the place of its files, so deleting a big folder still asks.
+  const count = gone.length;
+  const folder = gone.some((p) => gone.some((o) => o !== p && o.remote.startsWith(`${p.remote}/`)));
   // A folder deleted with its files: deleting the folder deletes them.
   gone = gone.filter((p) => !gone.some((o) => o !== p && p.remote.startsWith(`${o.remote}/`)));
   if (!gone.length) return;
   const added = placed.filter((_, i) => exists[i]).map((p) => p.local);
   if (added.length) void upload(added, s, { quiet: true });
-  if (gone.length > QUIET_DELETES)
-    return toast(`${gone.length} files in ${s.name}'s mappings were deleted here, such as by a branch switch. Delete them from ${s.name} too?`, { kind: "info", action: { label: "Review…", run: () => deleteFromServer(gone.map((p) => p.local), s) } });
+  // A folder on the server may hold more than this computer had, such as uploads or a vendor folder, so it always asks.
+  if (count > QUIET_DELETES || folder)
+    return toast(`${count} ${count === 1 ? "file" : "files"} in ${s.name}'s mappings were deleted here${folder ? ", with their folders" : ", such as by a branch switch"}. Delete them from ${s.name} too?`, { kind: "info", action: { label: "Review…", run: () => deleteFromServer(gone.map((p) => p.local), s) } });
   void deleteFromServer(gone.map((p) => p.local), s, { ask: false });
 }
 

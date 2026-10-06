@@ -9026,3 +9026,32 @@ A pass over the running app and the backend found these, now fixed:
 - **Windows.** `PHP_INI_SCAN_DIR` joins folders with `;`, and the profiler
   checks for its server with curl rather than `lsof`.
 
+### 2026-10-06: Deployment deletes, data edits, and HTTP requests that do what they say
+
+- **Deleting a folder asks.** Upload on save with "delete what you delete"
+  folded a deleted folder's files into the folder before counting them, so
+  `rm -rf vendor` deleted the server's `vendor`, with anything only the server
+  had in it, without asking. Deletions are counted before folding, and a
+  folder always asks.
+- **Deployment follows nested mappings.** Uploading a folder sends each file
+  through its own deepest mapping, so with `public` mapped elsewhere,
+  `public/index.php` no longer lands under the project's mapping. Downloading
+  a folder leaves out the files a deeper mapping places elsewhere instead of
+  fetching them from the wrong server folder; download that mapping's folder
+  for them.
+- **Edits go to the rows' connection.** A table's edits submit to the
+  connection the rows came from. Switching connections asks about pending
+  changes, and clears an open Redis value, whose editor saves through the
+  selected connection.
+- **Redis list edits check the list first.** List edits and deletes went by
+  index, so a queue that a worker popped in the meantime had other elements
+  changed. They now run as one script (`LIST_EDIT` in `redisdata.ts`) that
+  checks each element still holds what loaded and changes nothing otherwise.
+  The preview still lists the `LSET`, `LREM`, and `RPUSH` steps.
+- **HTTP client.** Following redirects, a POST with a body leaves out `-X
+  POST`, so a 301, 302, or 303 continues with GET, as browsers do; a Laravel
+  login's redirect had been posted to the dashboard. Inline multipart parts
+  with a filename or type are sent as file parts, quoted for `-F`. The
+  environment editor keeps a private variable's values from the shared file
+  in the shared file (`sharedIn`), unless you tick Private on its row.
+
