@@ -167,8 +167,21 @@ function stashMenu(s: Stash): MenuItem[] {
 
 // ---- Actions ----
 
+/**
+ * Whether `stash@{n}` is still the stash listed: one made or dropped elsewhere since, such as by a rebase's
+ * autostash, shifts the numbers. Says so when it isn't.
+ */
+async function unchanged(s: Stash) {
+  const now = (await git("rev-parse", s.ref).catch(() => "")).trim();
+  if (now && (now.startsWith(s.hash) || s.hash.startsWith(now))) return true;
+  status("The stashes changed since the list was read. Pick the stash again.", "app", "info");
+  await loadStashes();
+  return false;
+}
+
 /** Applies a stash, or pops it. Conflicts leave the stash in place and offer the merge tool. */
 async function apply(s: Stash, pop: boolean) {
+  if (!(await unchanged(s))) return;
   const out = await gitTask(`${pop ? "Popping" : "Applying"} ${s.message}…`, ["stash", pop ? "pop" : "apply", s.ref], `Can't ${pop ? "pop" : "apply"} "${s.message}"`);
   loadStashes();
   if (out !== undefined) status(`${pop ? "Popped" : "Applied"} "${s.message}".`, "app", "info");
@@ -176,6 +189,7 @@ async function apply(s: Stash, pop: boolean) {
 
 async function drop(s: Stash) {
   if (!(await confirm(`Drop the stash "${s.message}"? Its changes are deleted, and you can't undo it.`, "Drop Stash"))) return;
+  if (!(await unchanged(s))) return;
   try {
     await git("stash", "drop", s.ref);
     status(`Dropped "${s.message}".`, "app", "info");

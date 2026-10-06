@@ -103,8 +103,11 @@ async function checkout(r: Ref, refs: Ref[]) {
   const target = args.at(-1)!;
   const out = await gitTask(`Checking out ${target}…`, args, `Can't check out ${target}`);
   if (out !== undefined) return info(`Checked out ${target}.`);
-  // git refuses when uncommitted changes would be overwritten.
-  const blocked = await git("checkout", "--dry-run", ...args.slice(1)).then(() => false, (e) => /would be overwritten|commit your changes or stash/i.test(errorText(e)));
+  // git refuses before changing anything, so asking again gives its reason: uncommitted changes in the way.
+  const blocked = await git(...args).then(
+    () => (info(`Checked out ${target}.`), false),
+    (e) => /would be overwritten|commit your changes or stash/i.test(errorText(e)),
+  );
   if (blocked)
     showError(`Your changes would be overwritten by checking out ${target}`, undefined, {
       label: "Smart Checkout",
@@ -114,9 +117,13 @@ async function checkout(r: Ref, refs: Ref[]) {
 
 /** Stashes the changes, checks out, and brings the changes back, as PhpStorm's Smart Checkout. */
 async function smartCheckout(args: string[], target: string) {
+  const top = () => git("rev-parse", "-q", "--verify", "refs/stash").then((h) => h.trim(), () => "");
+  const before = await top();
   if ((await gitTask("Stashing your changes…", ["stash", "push", "--include-untracked", "-m", `Smart checkout of ${target}`], "Can't stash your changes")) === undefined) return;
+  // A push with nothing to stash makes no stash, and popping then would apply an older, unrelated one.
+  const stashed = (await top()) !== before;
   const ok = (await gitTask(`Checking out ${target}…`, args, `Can't check out ${target}`)) !== undefined;
-  const restored = (await gitTask("Restoring your changes…", ["stash", "pop"], "Your changes are kept in the stash")) !== undefined;
+  const restored = !stashed || (await gitTask("Restoring your changes…", ["stash", "pop"], "Your changes are kept in the stash")) !== undefined;
   if (ok && restored) info(`Checked out ${target} with your changes.`);
 }
 

@@ -226,12 +226,15 @@ export type Conflict = {
 export function parseConflicts(lines: string[]): Conflict[] {
   const conflicts: Conflict[] = [];
   let open: Partial<Conflict> | null = null;
+  // Markers are exactly seven characters, then a space and a label or the line's end, so content such as a Markdown
+  // heading's ======== underline isn't one.
+  const marker = (line: string, c: string) => line.startsWith(c.repeat(7)) && /^( |\r?$)/.test(line.slice(7));
   lines.forEach((line, i) => {
     const n = i + 1;
-    if (line.startsWith("<<<<<<<")) open = { start: n, currentLabel: line.slice(7).trim() };
-    else if (open && line.startsWith("|||||||") && open.separator === undefined) open.base = n;
-    else if (open && line.startsWith("=======") && open.separator === undefined) open.separator = n;
-    else if (open && line.startsWith(">>>>>>>") && open.separator !== undefined) {
+    if (marker(line, "<")) open = { start: n, currentLabel: line.slice(7).trim() };
+    else if (open && marker(line, "|") && open.separator === undefined) open.base = n;
+    else if (open && marker(line, "=") && open.separator === undefined) open.separator = n;
+    else if (open && marker(line, ">") && open.separator !== undefined) {
       conflicts.push({ ...(open as Conflict), end: n, incomingLabel: line.slice(7).trim() });
       open = null;
     }

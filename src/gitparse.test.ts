@@ -115,6 +115,8 @@ test("parses log records, changed files, and conflicts", () => {
     { start: 10, currentLabel: "HEAD", separator: 12, end: 13, incomingLabel: "other" },
   ]);
   assert.deepEqual(parseConflicts(["<<<<<<< HEAD", "unfinished"]), []);
+  // A heading's underline in either side isn't a separator.
+  assert.deepEqual(parseConflicts(["<<<<<<< HEAD", "Title", "============", "=======", "Other", ">>>>>>> b"]), [{ start: 1, currentLabel: "HEAD", separator: 4, end: 6, incomingLabel: "b" }]);
 
   const status = (index: string, worktree: string) => ({ index, worktree, path: "x" });
   assert.deepEqual(["UU", "AA", "DD", "AU", "UD", "M ", " M", "A "].map((s) => isConflict(status(s[0], s[1]))), [true, true, true, true, true, false, false, false]);

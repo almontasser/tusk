@@ -218,11 +218,13 @@ async function bulk(action: Bulk, keys: string[]) {
   if (!items.length) return info("Select changed files first.");
   const paths = [...new Set(items.map((x) => x.f.path))];
   if (action === "stage") return (await change("add", "--", ...paths)) && info(`Staged ${plural(paths.length, "file")}.`);
-  if (action === "unstage") return (await change("restore", "--staged", "--", ...paths)) && info(`Unstaged ${plural(paths.length, "file")}.`);
+  // A staged rename unstages and rolls back with its old path, which `git mv` removed from the index.
+  const renamed = (g: Group) => items.filter((x) => x.g === g && x.f.from).map((x) => x.f.from!);
+  if (action === "unstage") return (await change("restore", "--staged", "--", ...paths, ...renamed("s"))) && info(`Unstaged ${plural(paths.length, "file")}.`);
   // Rollback: a staged row goes back to HEAD in the index and working tree; an unstaged one to the index.
   const untracked = items.filter((x) => x.f.worktree === "?" && x.f.index === "?").map((x) => x.f.path);
   const added = items.filter((x) => x.g === "s" && x.f.index === "A").map((x) => x.f.path);
-  const toHead = items.filter((x) => x.g === "s" && x.f.index !== "A").map((x) => x.f.path);
+  const toHead = [...items.filter((x) => x.g === "s" && x.f.index !== "A").map((x) => x.f.path), ...renamed("s")];
   const toIndex = items.filter((x) => x.g === "c" && x.f.worktree !== "?").map((x) => x.f.path).filter((p) => !toHead.includes(p));
   const what = paths.length === 1 ? paths[0] : plural(paths.length, "file");
   const extra = [untracked.length && `${plural(untracked.length, "new file")} ${untracked.length === 1 ? "goes" : "go"} to the ${trash}`, added.length && `${plural(added.length, "added file")} ${added.length === 1 ? "is" : "are"} unstaged and kept`].filter(Boolean).join("; ");

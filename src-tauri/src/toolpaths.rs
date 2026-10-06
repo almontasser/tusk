@@ -62,6 +62,10 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     command.env("PATH", path);
+    // Git's messages in English: the app reads some, such as "not fully merged", which git translates otherwise.
+    if Path::new(program.as_ref()).file_stem().is_some_and(|s| s == "git") {
+        command.env("LANGUAGE", "C");
+    }
     command
 }
 

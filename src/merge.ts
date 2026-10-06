@@ -265,7 +265,7 @@ function renderFiles() {
 
 /** Which index stages a conflicted file has: 1 base, 2 yours, 3 theirs. A missing 2 or 3 means that side deleted it. */
 async function stagesOf(rel: string) {
-  const out = await invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["--no-optional-locks", "ls-files", "-u", "--", rel], input: null });
+  const out = await invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["--no-optional-locks", "--literal-pathspecs", "ls-files", "-u", "--", rel], input: null });
   return new Set(out.split("\n").filter(Boolean).map((l) => l.split(/\s+/)[2]));
 }
 

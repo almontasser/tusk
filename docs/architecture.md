@@ -9086,3 +9086,21 @@ user code:
   groups keeps text after the last group, and renaming a NavigationGroup with
   other calls changes its label.
 
+### 2026-10-06: Git acts on exactly the files and stashes you picked
+
+- Every git command the app runs passes `--literal-pathspecs`, so a path such
+  as `file[12].php` is that file; rolling it back also discarded `file1.php`.
+- Conflict markers are seven characters followed by a space or the line's
+  end, so a Markdown heading's `========` underline in a conflict isn't read
+  as the separator.
+- Stage Change in the gutter compares the index as LF and writes it back with
+  the index's own line endings; on a CRLF file it staged the whole file as LF.
+  `writeIndex` refuses text with U+FFFD, which a non-UTF-8 file's index text
+  has after git's output is decoded, so partial staging can't damage it.
+- Unstage and Rollback of a staged rename include its old path.
+- Stash apply, pop, and drop check that `stash@{n}` is still the listed stash.
+- Smart Checkout is offered again: the refused checkout runs once more for
+  its reason, as `git checkout` has no `--dry-run`. It pops only a stash it
+  made.
+- Git runs with `LANGUAGE=C`, so the messages the app reads stay English.
+

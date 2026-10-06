@@ -39,8 +39,9 @@ export const gitStatusError = () => statusError;
 
 // `--no-optional-locks` stops read-only commands such as `status` from rewriting .git/index.
 // Otherwise every refresh changes .git, the file watcher reports it, and the refresh repeats forever.
+// `--literal-pathspecs`: a path is that file, so rolling back `file[12].php` doesn't also match `file1.php`.
 const run = (args: string[], input: string | null) =>
-  invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["--no-optional-locks", ...args], input });
+  invoke<string>("run_capture", { cwd: host.root(), program: "git", args: ["--no-optional-locks", "--literal-pathspecs", ...args], input });
 export const git = (...args: string[]) => run(args, null);
 const gitWithInput = (input: string, ...args: string[]) => run(args, input);
 
@@ -347,6 +348,11 @@ export async function stageSelected() {
 
 /** Makes `text` the staged version of a file. Returns false, with the error in the status bar, if git refuses. */
 async function writeIndex(path: string, text: string) {
+  // Git's text reaches the page as UTF-8, with U+FFFD for bytes that aren't, so the index would lose them.
+  if (text.includes("\uFFFD")) {
+    host.status(`${path} isn't UTF-8, so only the whole file can be staged, from the Commit view.`);
+    return false;
+  }
   try {
     const hash = (await gitWithInput(text, "hash-object", "-w", "--stdin", `--path=${path}`)).trim();
     const mode = (await git("ls-files", "--stage", "--", path)).split(" ")[0] || "100644";
@@ -736,8 +742,11 @@ async function stageChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
   const state = changeStates.get(editor);
   if (!model || !state) return;
   const text = model.getValue(monaco.editor.EndOfLinePreference.LF);
-  const staged = await git("show", `:./${state.rel}`).catch(() => null);
-  if (staged === null) return host.status(`${state.rel} isn't in the index. Stage the whole file from the Commit view.`);
+  const raw = await git("show", `:./${state.rel}`).catch(() => null);
+  if (raw === null) return host.status(`${state.rel} isn't in the index. Stage the whole file from the Commit view.`);
+  // Compared as LF, like the editor's text, and written back with the index's own line endings.
+  const crlf = raw.includes("\r\n");
+  const staged = crlf ? raw.replace(/\r\n/g, "\n") : raw;
   // The blocks between the index and the editor that overlap the change, which is against HEAD.
   // A deletion sits between lines, at half a line after the line before it.
   const span = (b: Block) => (b.modifiedEndLineNumber ? [b.modifiedStartLineNumber, b.modifiedEndLineNumber] : [b.modifiedStartLineNumber + 0.5, b.modifiedStartLineNumber + 0.5]);
@@ -746,7 +755,8 @@ async function stageChange(editor: monaco.editor.ICodeEditor, c: LineChange) {
     .map((x) => x.block!)
     .filter((b) => span(b)[0] <= to && span(b)[1] >= from);
   if (!blocks.length) return host.status("This change is already staged.");
-  if (!(await writeIndex(state.rel, applyBlocks(staged, text, blocks)))) return;
+  const next = applyBlocks(staged, text, blocks);
+  if (!(await writeIndex(state.rel, crlf ? next.replace(/\n/g, "\r\n") : next))) return;
   await refreshGit();
   host.status(`Staged the change at line ${c.start} of ${state.rel}`);
 }
