@@ -49,9 +49,14 @@ fn parse_target(target: &str) -> Result<(bool, &str, &str, &str), String> {
     Ok((tls, address, service, method))
 }
 
+/// A timeout from the request's settings, which a huge, negative, or missing number would make panic.
+fn seconds(value: f64) -> Result<Duration, String> {
+    Duration::try_from_secs_f64(value).map_err(|_| format!("{value} isn't a timeout in seconds"))
+}
+
 async fn connect(tls: bool, address: &str, connect_timeout: f64) -> Result<Channel, String> {
     let url = format!("{}://{address}", if tls { "https" } else { "http" });
-    let mut endpoint = Endpoint::from_shared(url).map_err(|e| e.to_string())?.connect_timeout(Duration::from_secs_f64(connect_timeout));
+    let mut endpoint = Endpoint::from_shared(url).map_err(|e| e.to_string())?.connect_timeout(seconds(connect_timeout)?);
     if tls {
         let _ = rustls::crypto::ring::default_provider().install_default();
         endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots()).map_err(|e| e.to_string())?;
@@ -238,7 +243,7 @@ async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, Stri
         let key = tonic::metadata::MetadataKey::from_bytes(name.to_lowercase().as_bytes()).map_err(|e| format!("{name}: {e}"))?;
         request.metadata_mut().insert(key, value.parse().map_err(|e| format!("{name}: {e}"))?);
     }
-    request.set_timeout(Duration::from_secs_f64(timeout));
+    request.set_timeout(seconds(timeout)?);
     let path = PathAndQuery::try_from(format!("/{}/{}", method.parent_service().full_name(), method.name())).map_err(|e| e.to_string())?;
     let mut grpc = tonic::client::Grpc::new(channel);
     grpc.ready().await.map_err(|e| source(&e))?;

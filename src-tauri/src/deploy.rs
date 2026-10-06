@@ -218,7 +218,7 @@ pub fn deploy_trust_host(host: String, port: u16, key: String, line: Option<usiz
     let path = known_hosts();
     if let Some(line) = line {
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        std::fs::write(&path, without_entry(&text, line)).map_err(|e| e.to_string())?;
+        crate::fs::write_atomic(&path, without_entry(&text, line).as_bytes()).map_err(|e| e.to_string())?;
     }
     let dir = path.parent().ok_or("No folder")?;
     if !dir.exists() {

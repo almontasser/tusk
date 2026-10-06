@@ -52,19 +52,16 @@ pub fn path_env() -> std::ffi::OsString {
     std::env::join_paths(first.into_iter().chain(std::env::split_paths(&path))).unwrap_or(path)
 }
 
-/// A command that runs `program` with `path_env()` as its PATH. On Windows it finds the program as a shell would,
+/// A command that runs `program`, found by `resolve`, with `path_env()` as its PATH. On Windows it finds the program as a shell would,
 /// runs `/bin/sh` and `/usr/bin/env` from Git for Windows, and opens no console window.
 pub fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
     let path = path_env_for(&program.as_ref().to_string_lossy());
+    let mut command = std::process::Command::new(resolve(&program.as_ref().to_string_lossy()));
     #[cfg(windows)]
-    let mut command = {
+    {
         use std::os::windows::process::CommandExt;
-        let mut command = std::process::Command::new(resolve(&program.as_ref().to_string_lossy()));
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        command
-    };
-    #[cfg(not(windows))]
-    let mut command = std::process::Command::new(program);
+    }
     command.env("PATH", path);
     command
 }
@@ -92,9 +89,22 @@ pub fn resolve(program: &str) -> String {
             "/bin/sh" => git_unix_tool("sh.exe"),
             "/usr/bin/env" => git_unix_tool("env.exe"),
             _ if !program.contains(['/', '\\']) => find_in(std::env::split_paths(&path_env()), program),
+            // Another Unix program named by its path, such as /bin/cp or /usr/bin/curl: Git for Windows' copy, or the
+            // one on PATH (Windows ships curl.exe).
+            _ if program.starts_with('/') => {
+                let name = program.rsplit('/').next().unwrap_or(program);
+                git_unix_tool(&format!("{name}.exe")).or_else(|| find_in(std::env::split_paths(&path_env()), name))
+            }
             _ => None,
         };
         if let Some(found) = found {
+            return found.to_string_lossy().into_owned();
+        }
+    }
+    // A Unix program kept elsewhere on this system, such as lsof in /usr/bin rather than /usr/sbin on Linux.
+    #[cfg(not(windows))]
+    if program.starts_with('/') && !Path::new(program).exists() {
+        if let Some(found) = program.rsplit('/').next().and_then(which) {
             return found.to_string_lossy().into_owned();
         }
     }
@@ -238,6 +248,14 @@ pub fn auto_checks(app: &AppHandle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_unix_program_kept_elsewhere() {
+        assert_eq!(resolve("/bin/sh"), "/bin/sh");
+        assert!(Path::new(&resolve("/nowhere/sh")).is_file());
+        assert_eq!(resolve("/nowhere/no-such-program"), "/nowhere/no-such-program");
+    }
 
     #[test]
     fn finds_the_tool_behind_env() {

@@ -92,9 +92,41 @@ pub async fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, Strin
 pub async fn write_file(path: String, contents: String, charset: Option<String>) -> Result<(), String> {
     crate::blocking(move || {
         let bytes = encode(&contents, charset.as_deref())?;
-        std::fs::write(path, bytes).map_err(|e| e.to_string())
+        write_atomic(&path, &bytes).map_err(|e| e.to_string())
     })
     .await
+}
+
+/// Writes a file through a temporary file beside it, renamed over it, so a crash or a full disk mid-write leaves the
+/// old file whole. A symlink's target is written, and keeps its permissions. A file with other hard links is written
+/// in place, as replacing it would split them, and so is one whose folder takes no new files or that can't be
+/// replaced, such as a file another program holds open on Windows.
+pub fn write_atomic(path: impl AsRef<std::path::Path>, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = path.as_ref();
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let meta = std::fs::metadata(&target).ok();
+    #[cfg(unix)]
+    let linked = meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1);
+    #[cfg(not(unix))]
+    let linked = false;
+    let temp = target.file_name().map(|name| target.with_file_name(format!(".{}.tusk-save", name.to_string_lossy())));
+    if let Some(temp) = temp.filter(|_| !linked) {
+        if let Ok(mut file) = std::fs::File::create(&temp) {
+            let written = file.write_all(bytes).and_then(|_| file.sync_all()).and_then(|_| match &meta {
+                Some(m) => std::fs::set_permissions(&temp, m.permissions()),
+                None => Ok(()),
+            });
+            drop(file);
+            if written.is_ok() && std::fs::rename(&temp, &target).is_ok() {
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&temp);
+            // A failed write, such as on a full disk, would fail in place too, and truncate the file.
+            written?;
+        }
+    }
+    std::fs::write(&target, bytes)
 }
 
 const BOM: &str = "\u{feff}";
@@ -162,8 +194,15 @@ fn encoding(label: &str) -> Result<&'static encoding_rs::Encoding, String> {
 #[tauri::command(async)]
 pub fn rename_path(from: String, to: String) -> Result<(), String> {
     // std::fs::rename silently replaces an existing file, so refuse instead.
-    // Allow a change of case only, such as post.php to Post.php on a case-insensitive disk.
-    if std::path::Path::new(&to).exists() && !from.eq_ignore_ascii_case(&to) {
+    // Allow a change of case only, such as post.php to Post.php on a case-insensitive disk, where both name one file.
+    #[cfg(unix)]
+    let same_file = {
+        use std::os::unix::fs::MetadataExt;
+        matches!((std::fs::metadata(&from), std::fs::metadata(&to)), (Ok(a), Ok(b)) if a.dev() == b.dev() && a.ino() == b.ino())
+    };
+    #[cfg(not(unix))]
+    let same_file = from.eq_ignore_ascii_case(&to);
+    if std::path::Path::new(&to).exists() && !same_file {
         return Err(format!("{to} already exists"));
     }
     if let Some(parent) = std::path::Path::new(&to).parent() {
@@ -222,7 +261,8 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
     let pending = std::sync::Arc::downgrade(&changed);
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            changed.lock().unwrap().extend(event.paths.iter().map(crate::slash));
+            // A save's temporary file comes and goes within the save; the saved file's own change is enough.
+            changed.lock().unwrap().extend(event.paths.iter().map(crate::slash).filter(|p| !p.ends_with(".tusk-save")));
         }
     })
     .map_err(|e| e.to_string())?;
@@ -245,6 +285,31 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_atomically_through_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("tusk-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.php");
+        std::fs::write(&file, "old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o750)).unwrap();
+        std::os::unix::fs::symlink(&file, dir.join("link.php")).unwrap();
+        write_atomic(&dir.join("link.php"), b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
+        assert!(std::fs::symlink_metadata(dir.join("link.php")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o750);
+        // A hard link still shares the file.
+        std::fs::hard_link(&file, dir.join("hard.php")).unwrap();
+        write_atomic(&file, b"both").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("hard.php")).unwrap(), "both");
+        write_atomic(&dir.join("fresh.php"), b"x").unwrap();
+        let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        names.sort();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(names, ["a.php", "fresh.php", "hard.php", "link.php"]);
+    }
 
     #[test]
     fn round_trips_editorconfig_charsets() {

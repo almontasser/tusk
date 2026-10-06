@@ -588,6 +588,8 @@ async function openFolder(dir: unknown = null) {
   $("project-name").textContent = nameOf(dir);
   $("project-badge").textContent = initials(nameOf(dir));
   $("welcome").hidden = true;
+  // Shows the empty editor's shortcuts when no session reopens tabs.
+  renderTabs();
   // The Filament tool window shows the project's panels, which a new project has its own of.
   $("filament-list").replaceChildren();
   if (currentView === "filament") void loadFilament();
@@ -1444,7 +1446,9 @@ const goToSymbol = () => pick("Go to symbol", (q) => symbolItems(q, false), 150)
 /** Shows the current file against the clipboard, or against another file, in the diff view. */
 async function compareWithClipboard() {
   if (!active) return;
-  const clipboard = await invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }).catch((e) => (showError("Can't read the clipboard", e), null));
+  // pbpaste on a Mac, where the page's clipboard API asks with a Paste prompt; WebView2 and WebKitGTK read it directly.
+  const read = isMac ? invoke<string>("run_capture", { cwd: root || "/", program: "pbpaste", args: [], input: null }) : navigator.clipboard.readText();
+  const clipboard = await read.catch((e) => (showError("Can't read the clipboard", e), null));
   if (clipboard === null) return;
   showDiff(relative(active), clipboard, editor.getValue(), "Clipboard ↔ Current file");
 }
@@ -1551,7 +1555,7 @@ const actions: Action[] = [
   { label: "Find in Files", keys: "Meta+Shift+F", run: () => openSearch(editor) },
   { label: "Replace in Files", keys: "Meta+Shift+R", run: () => openSearch(editor, true) },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
-  { label: "File Structure", keys: "Meta+F12", run: () => editor.trigger("action", "editor.action.quickOutline", {}) },
+  { label: "File Structure", keys: "Meta+F12", run: () => (editor.focus(), editor.trigger("action", "editor.action.quickOutline", {})) },
   { label: "Commit…", keys: "Meta+K", run: focusCommit },
   { label: "Push…", keys: "Meta+Shift+K", run: () => root && push() },
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },

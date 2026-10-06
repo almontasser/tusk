@@ -73,14 +73,14 @@ async function fetchModel(m: Model, path: string) {
   await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
   let done = false;
   const progress = setInterval(async () => {
-    const size = Number(await run("/usr/bin/stat", ["-f", "%z", part]).catch(() => "0"));
+    const size = await invoke<number>("file_size", { path: part });
     if (!done) status(`Downloading ${m.label}: ${Math.floor((size / m.size) * 100)}%`, "ai:progress");
   }, 1000);
   try {
     // Retries resume too, since -C - continues from the partial file's size.
     await curl(["-fsSL", "--retry", "10", "--retry-all-errors", "-C", "-", "-o", part, `https://huggingface.co/${m.repo}/resolve/${m.revision}/${m.file}`]);
     status(`Checking ${m.label}…`, "ai:progress");
-    const [sum] = (await run("/usr/bin/shasum", ["-a", "256", part])).split(" ");
+    const sum = await invoke<string>("file_sha256", { path: part });
     if (sum !== m.sha256) {
       await invoke("remove_path", { path: part });
       throw new Error("the download was damaged. Turn AI completion on again to retry.");

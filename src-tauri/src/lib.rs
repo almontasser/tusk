@@ -319,6 +319,8 @@ pub fn run() {
             tools::tool_path,
             tools::tools_ensure,
             tools::path_exists,
+            tools::file_size,
+            tools::file_sha256,
             tools::paths_exist,
             tools::run_capture,
             tools::open_url,

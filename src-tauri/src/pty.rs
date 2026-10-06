@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -9,11 +9,13 @@ struct Session {
     /// Input goes through a thread, so pasting into a program that isn't reading can't block the app.
     writer: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    pid: Option<u32>,
 }
 
-/// Open terminal sessions by ID. When the app exits, the operating system closes the
-/// pseudo-terminals and their processes receive SIGHUP, so nothing outlives the app.
+/// Running terminal sessions by ID. A session leaves when its process exits or is killed, which closes its
+/// pseudo-terminal. When the app exits, the operating system closes the pseudo-terminals and their processes receive
+/// SIGHUP, so nothing outlives the app.
 #[derive(Default)]
 pub struct PtyState(Mutex<HashMap<u32, Session>>);
 
@@ -44,7 +46,7 @@ pub fn pty_spawn(
     cmd.env("PATH", crate::toolpaths::path_env_for(&command[0]));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -58,7 +60,18 @@ pub fn pty_spawn(
         }
     });
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    state.0.lock().unwrap().insert(id, Session { writer, master: pair.master, child });
+    let session = Session { writer, master: pair.master, killer: child.clone_killer(), pid: child.process_id() };
+    state.0.lock().unwrap().insert(id, session);
+
+    // The process's exit ends its session, and dropping the master lets the reader below reach the end of the output
+    // (Windows' pseudo-console stays open until then). A session already gone was killed, which has no exit code.
+    let (exited, exit_code) = std::sync::mpsc::channel::<Option<u32>>();
+    let waiter = app.clone();
+    std::thread::spawn(move || {
+        let status = child.wait();
+        let ours = waiter.state::<PtyState>().0.lock().unwrap().remove(&id).is_some();
+        let _ = exited.send(status.ok().filter(|_| ours).map(|s| s.exit_code()));
+    });
 
     // One thread reads, and another sends: output that arrives while an event is being sent is
     // joined into the next one, so a command that prints a lot sends a few large events, not
@@ -84,26 +97,12 @@ pub fn pty_spawn(
                 let _ = app.emit(&event, text);
             }
         }
-        let _ = app.emit(&format!("pty-exit:{name}"), exit_code(&app, id));
+        // The output ends when the process closes the terminal, usually as it exits: its code, or None when it was
+        // killed or takes over a second more to exit.
+        let code = exit_code.recv_timeout(std::time::Duration::from_secs(1)).ok().flatten();
+        let _ = app.emit(&format!("pty-exit:{name}"), code);
     });
     Ok(id)
-}
-
-/// The exit code of a session's process once its output has ended, or None when it was killed or takes over a
-/// second to exit. The output ends when the process closes the terminal, which is usually as it exits.
-fn exit_code(app: &AppHandle, id: u32) -> Option<u32> {
-    for _ in 0..50 {
-        let state = app.state::<PtyState>();
-        let mut sessions = state.0.lock().unwrap();
-        match sessions.get_mut(&id)?.child.try_wait() {
-            Ok(Some(status)) => return Some(status.exit_code()),
-            Ok(None) => {}
-            Err(_) => return None,
-        }
-        drop(sessions);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    None
 }
 
 #[tauri::command]
@@ -123,14 +122,14 @@ pub fn pty_resize(state: State<PtyState>, id: u32, rows: u16, cols: u16) -> Resu
 #[tauri::command]
 pub fn pty_kill(state: State<PtyState>, id: u32) {
     if let Some(mut s) = state.0.lock().unwrap().remove(&id) {
-        let _ = s.child.kill();
+        let _ = s.killer.kill();
     }
 }
 
 /// The folder a terminal's process is in, such as a shell after `cd`, so a restored shell starts there.
 #[tauri::command]
 pub fn pty_cwd(state: State<PtyState>, id: u32) -> Option<String> {
-    let pid = state.0.lock().unwrap().get(&id)?.child.process_id()?;
+    let pid = state.0.lock().unwrap().get(&id)?.pid?;
     process_cwd(pid).map(crate::slash)
 }
 

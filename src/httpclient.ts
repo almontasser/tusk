@@ -549,7 +549,7 @@ export async function probe(p: Prepared, path: string, env: string | undefined, 
 // The size of each log file before a request, so what the request logged is what the files gained after it.
 
 const LOG_LIMIT = 200 * 1024;
-const logFiles = () => ({ cwd: `${host.root()}/storage/logs`, program: "/bin/sh", input: null, any_status: true });
+const logFiles = () => ({ cwd: `${host.root()}/storage/logs`, program: "/bin/sh", input: null, anyStatus: true });
 
 /** Sizes of laravel.log and the newest daily log (laravel-YYYY-MM-DD.log), by path. GNU's `stat` (Linux, Git for Windows) first, then the Mac's. */
 async function logSizes(): Promise<Record<string, number>> {

@@ -210,9 +210,10 @@ const JS_CALLS: &[(&str, Role, usize)] = &[
 
 /// The event names that JavaScript calls in `ranges` of `text` pass.
 fn js_sites(path: &Path, text: &str, ranges: &[(usize, usize)]) -> Vec<Site> {
-    let src = text.as_bytes();
     let mut out = vec![];
     for &(start, end) in ranges {
+        // Up to the range's end only, so a quote just past it isn't read as one that opens a string.
+        let src = &text.as_bytes()[..end];
         let js = &text[start..end];
         for (at, _) in js.match_indices('(') {
             let before = &js[..at];
@@ -400,6 +401,19 @@ mod tests {
                 ("saved".into(), Role::Dom),
             ]
         );
+    }
+
+    #[test]
+    fn survives_every_prefix_as_typing_leaves_it() {
+        let views = [
+            "<button x-on:click='$wire.dispatch('>x</button><button @click=\"Livewire.dispatchTo(\">x</button>",
+            "<button wire:click=\"$dispatch('post-created', { id: 1 })\" @saved.window=\"x\">\n<script>Livewire.on('r', () => {}); $wire.dispatchTo('feed', 'loaded'); this.$dispatch('é')</script>",
+        ];
+        for view in views {
+            for end in (0..=view.len()).filter(|&i| view.is_char_boundary(i)) {
+                blade_sites(Path::new("/v.blade.php"), &view[..end]);
+            }
+        }
     }
 
     #[test]

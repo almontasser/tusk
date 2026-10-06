@@ -152,12 +152,13 @@ pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root:
             let _ = app.emit(&event, msg);
         }
         // Stopping or replacing a server takes it out of the list first, so one still listed has exited on its own,
-        // such as from a crash: the client is told, to start it again.
+        // such as from a crash, or wrote what isn't a message: it's stopped, and the client is told, to start it again.
         let state = app.state::<LspState>();
         let mut servers = state.0.lock().unwrap();
         if servers.get(&server).is_some_and(|(c, _)| c.id() == pid) {
             let (mut child, _) = servers.remove(&server).unwrap();
             drop(servers);
+            let _ = child.kill();
             let _ = child.wait();
             let _ = app.emit("lsp-exit", server);
         }
@@ -354,7 +355,7 @@ pub fn toml_edit(path: String, edits: Vec<tusk_lsp::config_edit::Edit>, create: 
     };
     let out = tusk_lsp::config_edit::edit(&text, &edits).map_err(|e| format!("Can't change {name}: {e}"))?;
     if out != text || !exists {
-        std::fs::write(&path, out).map_err(|e| format!("Can't write {name}: {e}"))?;
+        crate::fs::write_atomic(&path, out.as_bytes()).map_err(|e| format!("Can't write {name}: {e}"))?;
     }
     Ok(())
 }

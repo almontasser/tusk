@@ -1033,7 +1033,8 @@ pub fn camel(name: &str) -> String {
 
 /// The PHP type a cast gives an attribute, or `None` for a cast whose type isn't known, such as a custom cast class.
 pub fn cast_type(codebase: &CodebaseMetadata, cast: &str) -> Option<String> {
-    let base = cast.split(':').next().unwrap_or(cast).trim_start_matches('\\');
+    // `decimal:2` and `datetime:Y-m-d` take arguments, but `encrypted:array` is a cast of its own.
+    let base = if cast.to_ascii_lowercase().starts_with("encrypted:") { cast } else { cast.split(':').next().unwrap_or(cast).trim_start_matches('\\') };
     Some(match base.to_ascii_lowercase().as_str() {
         "int" | "integer" | "timestamp" => "int".into(),
         "real" | "float" | "double" => "float".into(),
@@ -1245,6 +1246,18 @@ mod tests {
         // What the database gave stays as it is.
         let live = std::sync::Arc::new(serde_json::json!({"model": {"class": "App\\Models\\Post", "columns": ["id"], "columnsGuessed": false, "relations": []}}));
         assert!(std::sync::Arc::ptr_eq(&fill_guessed_columns(&e, &codebase, live.clone()), &live));
+    }
+
+    #[test]
+    fn types_casts_with_and_without_arguments() {
+        let codebase = CodebaseMetadata::default();
+        let ty = |cast| cast_type(&codebase, cast);
+        assert_eq!(ty("decimal:2").as_deref(), Some("numeric-string"));
+        assert_eq!(ty("datetime:Y-m-d").as_deref(), Some("\\Illuminate\\Support\\Carbon"));
+        assert_eq!(ty("encrypted").as_deref(), Some("string"));
+        assert_eq!(ty("encrypted:array").as_deref(), Some("array"));
+        assert_eq!(ty("encrypted:collection").as_deref(), Some("\\Illuminate\\Support\\Collection"));
+        assert_eq!(ty("encrypted:object").as_deref(), Some("\\stdClass"));
     }
 
     #[test]

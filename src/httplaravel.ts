@@ -165,12 +165,12 @@ export async function appAddresses(): Promise<Address[]> {
       continue;
     }
     // Linked sites are symbolic links in Sites; secured ones have a certificate.
-    const out = await invoke<string>("run_capture", { cwd: dir, program: "/bin/sh", args: ["-c", 'for f in Sites/*; do [ -L "$f" ] && printf "%s\\t%s\\n" "${f#Sites/}" "$(readlink "$f")"; done; ls Certificates 2>/dev/null; true'], input: null, any_status: true }).catch(() => "");
+    const out = await invoke<string>("run_capture", { cwd: dir, program: "/bin/sh", args: ["-c", 'for f in Sites/*; do [ -L "$f" ] && printf "%s\\t%s\\n" "${f#Sites/}" "$(readlink "$f")"; done; ls Certificates 2>/dev/null; true'], input: null, anyStatus: true }).catch(() => "");
     const lines = out.split("\n");
     valet = { tld: config.tld ?? "test", paths: config.paths ?? [], links: lines.filter((l) => l.includes("\t")).map((l) => l.split("\t") as [string, string]), secured: lines.filter((l) => l.endsWith(".crt")).map((l) => l.slice(0, -4)), app };
     break;
   }
-  const lsof = await invoke<string>("run_capture", { cwd: "/", program: "/usr/sbin/lsof", args: ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fcn"], input: null, any_status: true }).catch(() => "");
+  const lsof = await invoke<string>("run_capture", { cwd: "/", program: "/usr/sbin/lsof", args: ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fcn"], input: null, anyStatus: true }).catch(() => "");
   return rankAddresses({ root, env: await dotenv(), compose, valet, phpPorts: phpPorts(lsof) });
 }
 

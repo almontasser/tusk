@@ -60,8 +60,10 @@ pub fn scan(text: &str) -> Scan {
         let rest = &src[i..];
         if let Some(end) = past_echo(src, i) {
             i = end;
-        } else if rest.starts_with(b"@{{") || rest.starts_with(b"@@") {
+        } else if rest.starts_with(b"@{{") {
             i += 3;
+        } else if rest.starts_with(b"@@") {
+            i += 2;
         } else if at_word(i, b"@php") && src[i + 4..].iter().find(|b| !b.is_ascii_whitespace()) != Some(&b'(') {
             i = find(src, i, b"@endphp").map_or(src.len(), |e| e + 7);
         } else if rest.starts_with(b"<?") {
@@ -311,12 +313,16 @@ pub fn refs(text: &str, scan: &Scan) -> Vec<Ref> {
 /// `$wire.name`, `$wire.form.title`, and the property or method names in `$wire.$set('name')`, `$wire.call('name')`,
 /// and the like, in JavaScript from `start` to `end`.
 fn wire_refs(text: &str, start: usize, end: usize, out: &mut Vec<Ref>) {
-    let src = text.as_bytes();
+    // Up to `end` only, so nothing past the JavaScript is read as part of it.
+    let src = &text.as_bytes()[..end];
     for (at, _) in text[start..end].match_indices("$wire.") {
         let at = start + at + 6;
-        if src.get(at) == Some(&b'$') || at >= end {
+        if at >= end {
+            continue;
+        }
+        if src[at] == b'$' {
             // `$wire.$set('name')`: the string names a property.
-            let name = 1 + ident_len(&src[(at + 1).min(end)..end]);
+            let name = 1 + ident_len(&src[at + 1..end]);
             string_ref(text, at + name, end, &text[at..at + name], out);
             continue;
         }
@@ -344,7 +350,7 @@ fn wire_refs(text: &str, start: usize, end: usize, out: &mut Vec<Ref>) {
 
 /// The name in the string that a `$wire` method at `at` takes first, such as `title` in `$set('title', 1)`.
 fn string_ref(text: &str, at: usize, end: usize, method: &str, out: &mut Vec<Ref>) {
-    let src = text.as_bytes();
+    let src = &text.as_bytes()[..end];
     let kind = match method {
         "$set" | "$get" | "$toggle" | "$entangle" | "$watch" => RefKind::Property,
         "$call" => RefKind::Method,
@@ -628,6 +634,19 @@ mod tests {
 
     fn names(text: &str) -> Vec<(String, RefKind, bool)> {
         refs(text, &scan(text)).into_iter().map(|r| (text[r.start..r.end].to_string(), r.kind, r.checked)).collect()
+    }
+
+    #[test]
+    fn survives_every_prefix_as_typing_leaves_it() {
+        let views = [
+            "<div x-data=\"$wire.\"><script>\nlet x = $wire.$set('a', 1); $wire.call(\"save\"); $wire.form.title = 'é'</script>",
+            "<a wire:click=\"$set('title', '')\" @click=\"$wire.call('reset')\" wire:model.live=\"form.title\">@@x</a><script>$wire.",
+        ];
+        for view in views {
+            for end in (0..=view.len()).filter(|&i| view.is_char_boundary(i)) {
+                names(&view[..end]);
+            }
+        }
     }
 
     #[test]

@@ -527,9 +527,16 @@ fn with_redis<T>(c: &Connection, mut f: impl FnMut(&mut Redis) -> std::io::Resul
         }
     };
     if let Some(mut redis) = pooled {
-        if let Ok(value) = f(&mut redis) {
-            give_back(redis);
-            return Ok(value);
+        use std::io::ErrorKind::*;
+        match f(&mut redis) {
+            Ok(value) => {
+                give_back(redis);
+                return Ok(value);
+            }
+            // Only a connection that was already closed runs `f` again: after a timeout, the server may have run the
+            // commands, and a write such as INCR would run twice.
+            Err(e) if !matches!(e.kind(), BrokenPipe | ConnectionReset | ConnectionAborted | NotConnected | UnexpectedEof) => return Err(e.to_string()),
+            Err(_) => {}
         }
     }
     let mut redis = Redis::open(c)?;
@@ -749,6 +756,8 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
         .args(identity.iter().flat_map(|i| ["-i", i.as_str(), "-o", "IdentitiesOnly=yes"]))
         .arg("-L")
         .arg(format!("127.0.0.1:{local}:{host}:{port}"))
+        // A destination from a shared tusk.json can't pass as an option, such as -oProxyCommand=….
+        .arg("--")
         .arg(&destination)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

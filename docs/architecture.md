@@ -40,7 +40,7 @@ one client per server, and Monaco merges their results.
 | --- | --- |
 | `read_dir` | Lists one folder, folders first, sorted by name without regard to case. Hides `.git` and `.DS_Store`. |
 | `read_file` | Returns a file as UTF-8 text. |
-| `write_file` | Replaces a file's contents. |
+| `write_file` | Replaces a file's contents through a temporary file beside it (`write_atomic`), renamed over it, so a crash mid-save leaves the old file whole. The watcher leaves the temporary `.name.tusk-save` out of `fs-change`. |
 | `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. |
 | `paths_exist` | Whether each of a batch of paths exists, in one call. |
 
@@ -5029,7 +5029,8 @@ under a `HostKeyAlias`, and that a failing one names the command.
   classes.
 - **Tinker** is a terminal tab running `artisan tinker`, in Sail when it's up.
 - **Compare with Clipboard** reads the clipboard with `pbpaste` through
-  `run_capture`, because WebKit asks for permission on
+  `run_capture` on a Mac, because WebKit asks for permission on
+  `navigator.clipboard.readText`; WebView2 and WebKitGTK read it with
   `navigator.clipboard.readText`. Both comparisons use the git diff view.
 
 ## Interface
@@ -8941,3 +8942,48 @@ comes from a class the project doesn't declare, outside Eloquent's own, or when
 a trait outside Eloquent has an `initialize…()` method, which may merge casts.
 Such a model's columns then keep Mago's own types, as before migrations were
 read.
+
+### 2026-10-06: Production pass on saving, processes, and other systems
+
+A pass over the running app and the backend found these, now fixed:
+
+- **Saving is atomic.** `write_file`, `toml_edit`, and the known_hosts update
+  wrote in place, so a crash or a full disk mid-write left a truncated file.
+  `fs::write_atomic` writes a temporary file beside the target, syncs it, keeps
+  the old permissions, and renames it over the target. It writes a symlink's
+  target, and writes in place a file with other hard links (replacing it would
+  split them) or one it can't replace, such as a file another program holds
+  open on Windows. The watcher drops the temporary file's events, so deployment
+  doesn't see it as a deleted file.
+- **Terminal sessions end with their process.** A session left `PtyState` only
+  through `pty_kill`, so every finished command, such as each HTTP request run
+  through curl, kept its pseudo-terminal and a thread until the app quit, and
+  macOS runs out of them at about 500. A thread now waits for each process,
+  removes its session, and sends its exit code; dropping the session closes
+  the pseudo-terminal, which Windows' pseudo-console needs before its output
+  ends. A killed session still reports no exit code.
+- **Unix programs are found on every system.** The frontend names programs by
+  their macOS paths, such as `/usr/bin/curl` and `/usr/sbin/lsof`.
+  `toolpaths::resolve` now finds a path that doesn't exist by its name: Git for
+  Windows' copy or the one on PATH on Windows (which ships `curl.exe`), and the
+  one on PATH elsewhere, such as Linux's `/usr/bin/lsof`. The AI model download
+  reads its progress and checksum with `file_size` and `file_sha256` instead of
+  BSD's `stat -f` and `shasum`.
+- **Smaller fixes.** File Structure focuses the editor first, as Monaco's
+  outline needs. A project without a saved session shows the empty editor's
+  shortcuts. `run_capture`'s `anyStatus` was passed as `any_status`, which Tauri
+  ignores. Renaming `post.php` to `Post.php` on a case-sensitive disk no longer
+  replaces an existing `Post.php`. A pooled Redis connection runs a command
+  again only when it was already closed, not after a timeout, when the server
+  may have run it. A language server whose output can't be read is stopped
+  before the app waits for it. A gRPC timeout too large for a `Duration` is an
+  error rather than a panic. The database tunnel puts `--` before the SSH
+  destination, which a shared `tusk.json` can set.
+- **Tusk's server.** Livewire's JavaScript scanners read a quote just past a
+  script's end, and panicked on `@click="Livewire.dispatchTo("` and on
+  `$wire.` at the end of a file; each reads only up to its range's end now, and
+  a test types every prefix of such views. `encrypted:array`,
+  `encrypted:collection`, and `encrypted:object` casts were typed as `string`,
+  which reported `foreach` and array access on them. `@@` skipped one character
+  too many.
+

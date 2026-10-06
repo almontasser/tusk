@@ -20,6 +20,21 @@ pub fn paths_exist(paths: Vec<String>) -> Vec<bool> {
     paths.iter().map(|p| std::path::Path::new(p).exists()).collect()
 }
 
+/// A file's size in bytes, 0 when it's missing.
+#[tauri::command(async)]
+pub fn file_size(path: String) -> u64 {
+    std::fs::metadata(path).map_or(0, |m| m.len())
+}
+
+/// A file's SHA-256 in hex, read in chunks so a model of several GB isn't held in memory.
+#[tauri::command(async)]
+pub fn file_sha256(path: String) -> Result<String, String> {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    std::io::copy(&mut std::fs::File::open(path).map_err(|e| e.to_string())?, &mut hash).map_err(|e| e.to_string())?;
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 /// Runs a program in `cwd` and returns its standard output, for short queries such as
 /// `php artisan list --format=json`. `input`, if given, is written to standard input.
 /// Fails with standard error if the program fails, unless `any_status`: checkers such as Mago
