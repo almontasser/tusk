@@ -8,7 +8,7 @@ import { humanize } from "./filamentcatalog";
 import { type Doc, host } from "./filamentdesigner";
 import { shortClass } from "./filamentschema";
 import { applyWorkspaceEdit } from "./lsp";
-import { droppedImports, type Edit, Imports, mergeEdits } from "./phpcode";
+import { droppedImports, type Edit, fillClasses, Imports, mergeEdits } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
 import { isAbsolute } from "./platform.ts";
@@ -94,7 +94,7 @@ class AccessView implements AccessHost {
       if (doc.model.getValue() !== doc.text) return this.refresh(doc.path);
       if (doc.outline.errors) return host.status("Fix the syntax errors in the policy first.");
       const imports = new Imports(doc.text, doc.outline);
-      const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
+      const fill = (code: string) => fillClasses(code, (fqn) => imports.name(fqn));
       const edits = build(imports, fill);
       if (!edits?.length) return;
       const added = [...edits, ...imports.edits()];

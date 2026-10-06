@@ -596,7 +596,7 @@ export function whereRow(w: Where, columns: string[], set: (w: Where | null) => 
   const ops: [Op | "null" | "notnull", string][] = [["=", "is"], ["!=", "is not"], [">", ">"], ["<", "<"], [">=", "≥"], ["<=", "≤"], ["null", "is empty"], ["notnull", "is not empty"]];
   const current = w.value === null ? (w.op === "!=" ? "notnull" : "null") : w.op;
   const op = h("select", {}, ...ops.map(([v, l]) => h("option", { value: v, textContent: l, selected: v === current })));
-  const parse = (x: string) => (/^-?\d+(\.\d+)?$/.test(x.trim()) ? Number(x.trim()) : x.trim() === "true" || x.trim() === "false" ? x.trim() === "true" : x);
+  const parse = (x: string) => (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(x.trim()) ? Number(x.trim()) : x.trim() === "true" || x.trim() === "false" ? x.trim() === "true" : x);
   const value = commitInput(w.value === null ? "" : String(w.value), (x) => set({ ...w, value: parse(x) }), { placeholder: "value" });
   value.hidden = w.value === null;
   col.onchange = () => set({ ...w, column: col.value });

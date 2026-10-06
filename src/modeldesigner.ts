@@ -36,7 +36,7 @@ import {
   camel,
   plural,
 } from "./modelgen";
-import { addMember, droppedImports, Imports, type Edit, insertItem, mergeEdits, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
+import { addMember, droppedImports, fillClasses, Imports, type Edit, insertItem, mergeEdits, methodNamed, nodeValue, type OClass, phpString, phpValue, propertyNamed, replaceNode, setProperty } from "./phpcode";
 import { confirm } from "./palette";
 import { errorText, showError } from "./status";
 import { closeView, showEditorView } from "./terminal";
@@ -779,11 +779,18 @@ class ModelDesigner {
     const ex = s.existing!;
     // Fillable: in the property, in Laravel 13's #[Fillable] attribute, or a new property. A model with
     // `$guarded = []` takes everything already.
-    const nextFillable = mergeList(ex.fillable, s.before, spec.columns, (c) => c.fillable);
+    // The lists as the file has them now, so names added in the editor since the designer opened stay.
+    const listNow = (prop: string, attribute: string, read: string[]) => {
+      const v = nodeValue(propertyNamed(cls, prop)?.value ?? cls.attributes.find((a) => a.name === attribute)?.args?.items[0]?.value);
+      return Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : read;
+    };
+    const fillableNow = listNow("fillable", "Illuminate\\Database\\Eloquent\\Attributes\\Fillable", ex.fillable);
+    const nextFillable = mergeList(fillableNow, s.before, spec.columns, (c) => c.fillable);
     const unguarded = ex.guarded.length === 0 && !ex.fillable.length;
-    if (!unguarded && JSON.stringify(nextFillable) !== JSON.stringify(ex.fillable)) edits.push(...this.listEdit(text, cls, "fillable", "Illuminate\\Database\\Eloquent\\Attributes\\Fillable", nextFillable, "protected $fillable", imports));
-    const hidden = mergeList(ex.hidden, s.before, spec.columns, (c) => !!c.hidden);
-    if (JSON.stringify(hidden) !== JSON.stringify(ex.hidden)) edits.push(...this.listEdit(text, cls, "hidden", "Illuminate\\Database\\Eloquent\\Attributes\\Hidden", hidden, "protected $hidden", imports));
+    if (!unguarded && JSON.stringify(nextFillable) !== JSON.stringify(fillableNow)) edits.push(...this.listEdit(text, cls, "fillable", "Illuminate\\Database\\Eloquent\\Attributes\\Fillable", nextFillable, "protected $fillable", imports));
+    const hiddenNow = listNow("hidden", "Illuminate\\Database\\Eloquent\\Attributes\\Hidden", ex.hidden);
+    const hidden = mergeList(hiddenNow, s.before, spec.columns, (c) => !!c.hidden);
+    if (JSON.stringify(hidden) !== JSON.stringify(hiddenNow)) edits.push(...this.listEdit(text, cls, "hidden", "Illuminate\\Database\\Eloquent\\Attributes\\Hidden", hidden, "protected $hidden", imports));
     // Casts: new ones go into casts() or $casts; the ones already there stay.
     const newCasts = spec.columns.map((c) => [c.name, castFor(c)] as const).filter(([n, c]) => c && !ex.casts[n] && !ex.casts[s.before.find((b) => b.name === n)?.name ?? ""]) as [string, string][];
     if (newCasts.length) {
@@ -809,7 +816,7 @@ class ModelDesigner {
       if (r.type !== "morphTo") imports.name(r.related);
       edits.push(addMember(text, cls, relationMethod(r)));
     }
-    if (this.history) edits.push(...historyModelEdits(text, cls, this.history).map((e) => ({ ...e, text: e.text.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn)) })));
+    if (this.history) edits.push(...historyModelEdits(text, cls, this.history).map((e) => ({ ...e, text: fillClasses(e.text, (fqn) => imports.name(fqn)) })));
     if (edits.length) {
       const all = [...edits, ...imports.edits()];
       await this.edit(model, [...all, ...droppedImports(text, outline, all)]);
@@ -824,7 +831,6 @@ class ModelDesigner {
     const arg = attr?.args?.items[0]?.value;
     if (attr && arg) return [replaceNode(text, arg, phpValue(list))];
     void imports;
-    void nodeValue;
     return list.length ? [setProperty(text, cls, prop, phpValue(list), declaration)] : [];
   }
 }
@@ -840,8 +846,9 @@ function projectKey(models: Record<string, fapp.ModelSummary>): ModelSpec["key"]
 
 /** A default typed into the column table, as PHP: numbers and booleans as they are, anything else quoted. */
 function normalizeDefault(v: string, type: string): string {
-  if (/^'.*'$/.test(v) || /^(true|false|null)$/i.test(v)) return v.toLowerCase() === v ? v : v.toLowerCase();
-  if (/^-?\d+(\.\d+)?$/.test(v)) return type === "boolean" ? (v === "0" ? "false" : "true") : v;
+  if (/^'.*'$/.test(v)) return v;
+  if (/^(true|false|null)$/i.test(v)) return v.toLowerCase();
+  if (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(v)) return type === "boolean" ? (v === "0" ? "false" : "true") : v;
   if (type === "boolean") return /^(yes|on)$/i.test(v) ? "true" : "false";
   return phpString(v);
 }

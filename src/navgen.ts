@@ -241,11 +241,19 @@ export function groupOrderEdits(text: string, code: PanelCode, order: { label: s
     return segments[i];
   });
   list.push(...segments.filter((_, i) => !used.has(i)));
+  // What follows the last item, such as a group commented out for later, stays at the end.
+  const lastEnd = arr.items.length ? arr.items[arr.items.length - 1].span[1] : arr.open + 1;
+  const comma = text.indexOf(",", lastEnd);
+  const tail = text
+    .slice(comma >= 0 && comma < arr.close && !text.slice(lastEnd, comma).trim() ? comma + 1 : lastEnd, arr.close)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   const unit = indentUnit(text);
-  const multiline = arr.items.length === 0 || text.slice(arr.open, arr.items[0].span[0]).includes("\n") || list.some((s) => s.includes("\n"));
+  const multiline = arr.items.length === 0 || text.slice(arr.open, arr.items[0].span[0]).includes("\n") || list.some((s) => s.includes("\n")) || tail.length > 0;
   const outer = lineIndent(text, arr.open);
   const indent = arr.items.length && multiline && text.slice(arr.open, arr.items[0].span[0]).includes("\n") ? lineIndent(text, arr.items[0].span[0]) : outer + unit;
-  const body = multiline ? `\n${list.map((s) => `${indent}${s.replace(/\n/g, `\n${indent}`)},`).join("\n")}\n${outer}` : list.join(", ");
+  const body = multiline ? `\n${[...list.map((s) => `${indent}${s.replace(/\n/g, `\n${indent}`)},`), ...tail.map((l) => `${indent}${l}`)].join("\n")}\n${outer}` : list.join(", ");
   return [{ start: arr.open + 1, end: arr.close, text: body }];
 }
 

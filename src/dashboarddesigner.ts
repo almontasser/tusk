@@ -11,7 +11,7 @@ import { inTableByDefault, renderGen, tableColumn } from "./filamentgen";
 import { popover } from "./filamentpickers";
 import { shortClass } from "./filamentschema";
 import { panelChains, readPanelWidgets } from "./panelgen";
-import { addMember, insertItem, methodNamed, moveItem, type OClass, propertyNamed, removeItem, removeProperty, replaceNode, setProperty } from "./phpcode";
+import { addMember, type ArrayNode, insertItem, methodNamed, moveItem, type OClass, propertyNamed, removeItem, removeProperty, replaceNode, setProperty } from "./phpcode";
 import { showError } from "./status";
 import { showEditorView } from "./terminal";
 import { WIDGET_KINDS, type WidgetKind, widgetFile } from "./widgetgen";
@@ -147,7 +147,7 @@ class DashboardDesigner {
         h("span", { class: "fd-spacer" }),
         iconButton("arrow-left", "Move earlier", () => i > 0 && void this.move(list, i, i - 1, own)),
         iconButton("arrow-right", "Move later", () => i < list.length - 1 && void this.move(list, i, i + 1, own)),
-        iconButton("eye-closed", own ? "Remove from this dashboard" : "Hide from the dashboard", () => void this.hide(w, i, own)),
+        iconButton("eye-closed", own ? "Remove from this dashboard" : "Hide from the dashboard", () => void this.hide(w, own)),
       ),
       h("div", { class: "db-card-body" }, this.sketch(w.kind)),
       h("div", { class: "db-card-foot" }, h("span", { class: "fd-note" }, shortClass(w.class)), h("span", { class: "fd-spacer" }), spanSel),
@@ -178,6 +178,17 @@ class DashboardDesigner {
     return r?.kind === "array" ? r : null;
   }
 
+  /**
+   * A widget's item in the file's array, found by its class: the list the app gives leaves out classes it can't
+   * load, so its positions can differ from the array's.
+   */
+  private itemOf(text: string, arr: ArrayNode, widget: string) {
+    return arr.items.findIndex((it) => {
+      const m = /([\w\\]+)::(?:class|make)\b/.exec(text.slice(it.value.span[0], it.value.span[1]));
+      return !!m && shortClass(m[1]) === shortClass(widget);
+    });
+  }
+
   private async move(list: fapp.WidgetInfo[], from: number, to: number, own: boolean) {
     if (own) {
       const path = this.currentFile();
@@ -185,7 +196,8 @@ class DashboardDesigner {
       return this.edit([{ path, build: (text, outline) => {
         const cls = outline.classes.find((c) => c.name);
         const arr = cls && this.ownArray(cls);
-        return arr ? moveItem(text, arr, from, to > from ? to + 1 : to) : null;
+        const [a, b] = arr ? [this.itemOf(text, arr, list[from].class), this.itemOf(text, arr, list[to].class)] : [-1, -1];
+        return arr && a >= 0 && b >= 0 ? moveItem(text, arr, a, b > a ? b + 1 : b) : null;
       } }], "Moved the widget");
     }
     // The panel's dashboard: the widgets in the project get sorts in their new order; packages' widgets keep theirs.
@@ -202,14 +214,15 @@ class DashboardDesigner {
     return this.edit(files, "Moved the widget");
   }
 
-  private async hide(w: fapp.WidgetInfo, i: number, own: boolean) {
+  private async hide(w: fapp.WidgetInfo, own: boolean) {
     if (own) {
       const path = this.currentFile();
       if (path)
         await this.edit([{ path, build: (text, outline) => {
           const cls = outline.classes.find((c) => c.name);
           const arr = cls && this.ownArray(cls);
-          return arr ? [removeItem(text, arr, i)] : null;
+          const at = arr ? this.itemOf(text, arr, w.class) : -1;
+          return arr && at >= 0 ? [removeItem(text, arr, at)] : null;
         } }], `Removed ${shortClass(w.class)} from the dashboard`);
       return;
     }

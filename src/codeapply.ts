@@ -6,7 +6,7 @@ import type * as L from "vscode-languageserver-protocol";
 import * as fapp from "./filamentapp";
 import { host } from "./filamentdesigner";
 import { applyWorkspaceEdit } from "./lsp";
-import { droppedImports, type Edit, Imports, mergeEdits, type Outline } from "./phpcode";
+import { droppedImports, type Edit, fillClasses, Imports, mergeEdits, type Outline } from "./phpcode";
 import { showError } from "./status";
 
 /** A file's edits, from its text and outline; `fill` turns `{{Fqn}}` into the class's name there, importing it. */
@@ -24,7 +24,7 @@ export function editFiles(files: { path: string; build: FileBuild }[], message: 
       const outline = await fapp.outlineOf(text, f.path);
       if (outline.errors) throw new Error(`Fix the syntax errors in ${f.path.split("/").pop()} first.`);
       const imports = new Imports(text, outline);
-      const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
+      const fill = (code: string) => fillClasses(code, (fqn) => imports.name(fqn));
       const edits = (f.build(text, outline, fill) ?? []).map((e) => ({ ...e, text: fill(e.text) }));
       if (!edits.length) continue;
       const added = [...edits, ...imports.edits()];

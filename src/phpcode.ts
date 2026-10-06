@@ -541,13 +541,24 @@ export function removeMethod(text: string, method: OMethod): Edit {
   return { start: Math.max(start, 0), end: method.span[1], text: "" };
 }
 
+const PLACEHOLDER = /\{\{([\w\\]+)\}\}/g;
+
+/**
+ * Writes each `{{Fqn}}` placeholder in generated code with `name`. PHP strings stay as they are, since a string can
+ * hold what you typed, such as `'Your code is {{code}}'`; comments get theirs, such as a docblock's `@property`.
+ */
+export const fillClasses = (code: string, name: (fqn: string) => string) =>
+  code.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\/\/[^\n]*|#(?!\[)[^\n]*|\/\*[\s\S]*?\*\/|\{\{([\w\\]+)\}\}/g, (m, fqn?: string) =>
+    fqn ? name(fqn) : m.startsWith("'") || m.startsWith('"') ? m : m.replace(PLACEHOLDER, (_, f: string) => name(f)),
+  );
+
 /**
  * A new PHP file in `namespace` whose code names classes as `{{Fqn}}`: each is imported and written by its short
  * name, or fully qualified when another import already took that name. An empty namespace writes none.
  */
 export function phpFile(namespace: string, code: string): string {
   const taken = new Map<string, string>();
-  const body = code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => {
+  const body = fillClasses(code, (fqn) => {
     const short = shortName(fqn);
     const owner = taken.get(short.toLowerCase());
     if (!owner) taken.set(short.toLowerCase(), fqn);

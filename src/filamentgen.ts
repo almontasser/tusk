@@ -1,7 +1,7 @@
 // Code the designers write: the component that suits a database column in a form, a table, a filter, or an
 // infolist, and the closures behind "visible when" conditions. No editor imports, so Node tests it.
 import { labelFromName } from "./filamentcatalog.ts";
-import { phpString } from "./phpcode.ts";
+import { fillClasses, phpString } from "./phpcode.ts";
 
 /** A model's column, as `introspect.php model` or the model designer describes it. */
 export type Column = { name: string; type: string; fullType?: string; nullable: boolean; default?: string | null; autoIncrement?: boolean };
@@ -31,7 +31,7 @@ const FL = "Filament\\Tables\\Filters\\";
 
 /** Writes a component, one call per line after the first, with classes named by `name`. */
 export function renderGen(g: Gen, name: (fqn: string) => string): string {
-  const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => name(fqn));
+  const fill = (code: string) => fillClasses(code, name);
   return [`${name(g.cls)}::make(${fill(g.make)})`, ...g.calls.map(([m, a]) => `    ->${m}(${fill(a)})`)].join("\n");
 }
 
@@ -108,7 +108,7 @@ const cls = (fqn: string) => `{{${fqn}}}`;
 export function defaultCode(c: Column, nature: Nature): string | null {
   if (c.default === null || c.default === undefined || ["date", "datetime", "time", "json", "foreign", "password", "id", "uuid", "morph"].includes(nature)) return null;
   const raw = String(c.default).replace(/::[\w\s]+$/, "").trim();
-  if (/^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(raw)) return raw;
   const quoted = /^'((?:[^']|'')*)'$/.exec(raw);
   if (quoted) return phpString(quoted[1].replace(/''/g, "'"));
   // MySQL writes a string default without quotes; anything with a call or a keyword is an expression.
@@ -330,7 +330,7 @@ export const OPERATORS: [Operator, string][] = [
 export const needsValue = (op: Operator) => op === "equals" || op === "notEquals" || op === "in";
 
 /** A PHP literal for a value typed in the builder: a number stays a number, anything else is a string. */
-const literal = (v: string) => (/^-?\d+(\.\d+)?$/.test(v.trim()) ? v.trim() : phpString(v));
+const literal = (v: string) => (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(v.trim()) ? v.trim() : phpString(v));
 
 /** The expression for one condition, on `$get`. */
 function conditionCode(c: Condition): string {

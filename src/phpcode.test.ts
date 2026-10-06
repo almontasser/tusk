@@ -12,6 +12,7 @@ import {
   phpValue,
   raw,
   removeCall,
+  fillClasses,
   removeItem,
   removeMethod,
   setCall,
@@ -198,4 +199,10 @@ test("insertItem and moveItem follow an array's blank lines between items", () =
   assert.match(applyEdits(spaced.text, [insertItem(spaced.text, arr, 3, "'d' => 4")]), /'c' => 3,\n\n {12}'d' => 4,\n {8}\];/);
   assert.match(applyEdits(spaced.text, [insertItem(spaced.text, arr, 1, "'z' => 0")]), /'a' => 1,\n\n {12}'z' => 0,\n\n {12}'b' => 2,/);
   assert.match(applyEdits(spaced.text, moveItem(spaced.text, arr, 2, 0)), /return \[\n {12}'c' => 3,\n\n {12}'a' => 1,\n\n {12}'b' => 2,\n {8}\];/);
+});
+
+test("fillClasses names classes outside strings, and in comments", () => {
+  const short = (f: string) => f.slice(f.lastIndexOf("\\") + 1);
+  const code = "// it's {{App\\Models\\Post}}\n/** @property {{App\\Models\\User}} $u */\n{{App\\Mail\\Code}}::make('Your code is {{code}}', \"{{id}}\")";
+  assert.equal(fillClasses(code, short), "// it's Post\n/** @property User $u */\nCode::make('Your code is {{code}}', \"{{id}}\")");
 });

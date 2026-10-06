@@ -514,7 +514,10 @@ class ScheduleDesigner {
   private setPrune(p: Prunable, next: Prune) {
     return this.editModel(p.class, (text, c) => {
       const r = methodNamed(c, "prunable")?.returns;
-      return r?.length === 1 ? [replaceNode(text, r[0], prunableCode(next))] : [];
+      // Only the query the designer read: one edited by hand since then is left as it is.
+      const now = r?.length === 1 ? readPrunable(text.slice(r[0].span[0], r[0].span[1])) : null;
+      if (!r || !now || JSON.stringify(now) !== JSON.stringify(p.prune)) throw new Error(`${shortClass(p.class)}'s prunable() changed since the designer read it. Reopen the designer to see it.`);
+      return [replaceNode(text, r[0], prunableCode(next))];
     }, `${shortClass(p.class)}: deletes records older than ${next.days} days`);
   }
 

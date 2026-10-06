@@ -88,9 +88,9 @@ export function importRules(c: { type: string; nullable: boolean; default?: stri
   const t = c.type.toLowerCase();
   let cast: PorterColumn["cast"] = "text";
   if (/bool|tinyint\(1\)/.test(t)) (cast = "boolean"), rules.push("boolean");
-  else if (/int/.test(t)) (cast = "integer"), rules.push("integer");
+  else if (/(?<!po)int/.test(t)) (cast = "integer"), rules.push("integer");
   else if (/dec|float|double|numeric|real/.test(t)) (cast = "numeric"), rules.push("numeric");
-  else if (/date|time/.test(t)) rules.push(/time/.test(t) && !/^date$/.test(t) ? "datetime" : "date");
+  else if (/date|time/.test(t)) rules.push("date");
   else if (/char|text|string/.test(t) && !/text/.test(t)) rules.push("max:255");
   return { rules, required, cast };
 }

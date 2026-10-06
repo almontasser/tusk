@@ -183,7 +183,7 @@ class PorterDesigner {
       if (this.kind === "importer") {
         const cast = h("select", {}, ...[["text", "Text"], ["numeric", "Number"], ["integer", "Whole number"], ["boolean", "Yes or no"], ["array", "List, split by commas"]].map(([v, l]) => h("option", { value: v, textContent: l, selected: c.cast === v })));
         cast.onchange = () => void this.editColumn(i, (t, col) => castEdits(t, col, cast.value as PorterColumn["cast"]), `${c.name}: read as ${cast.value}`);
-        const rules = c.rules === null ? h("span", { class: "fd-note" }, "Rules written as code") : commitInput(c.rules.join(", "), (v) => void this.editColumn(i, (t, col) => columnCallEdit(t, col, "rules", v.trim() ? rulesCode(v.split(",").map((x) => x.trim()).filter(Boolean)) : null), `${c.name}: rules`), { placeholder: "Such as: required, max:255" });
+        const rules = c.rules === null ? h("span", { class: "fd-note" }, "Rules written as code") : commitInput(c.rules.join(", "), (v) => void this.editColumn(i, (t, col) => columnCallEdit(t, col, "rules", v.trim() ? rulesCode(v.split(/,\s+|\|/).map((x) => x.trim()).filter(Boolean)) : null), `${c.name}: rules`), { placeholder: "Such as: required, in:draft,published" });
         const example = commitInput(c.example ?? "", (v) => void this.editColumn(i, (t, col) => columnCallEdit(t, col, "example", v.trim() ? phpString(v.trim()) : null), `${c.name}: example`), { placeholder: "A value for the example CSV" });
         fields.push(
           h("label", { class: "pd-field" }, h("span", { class: "fd-note" }, "Read as"), cast),

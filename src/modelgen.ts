@@ -138,12 +138,14 @@ const short = (fqn: string) => fqn.slice(fqn.lastIndexOf("\\") + 1);
 // ---- Columns ----
 
 /** The Blueprint call for a column, without `$table->` or the semicolon. */
-export function columnCall(c: ColumnSpec): string {
+export function columnCall(c: ColumnSpec, was?: ColumnSpec): string {
   const name = phpString(c.name);
   let call: string;
   if (c.type === "foreignId" || c.type === "foreignUuid" || c.type === "foreignUlid") {
     call = `${c.type}(${name})`;
     if (c.nullable) call += "->nullable()";
+    // A change keeps the foreign key it has: constrained() would add a second one.
+    if (was) return call;
     call += c.references ? `->constrained(${phpString(c.references)})` : "->constrained()";
     if (c.onDelete === "cascade") call += "->cascadeOnDelete()";
     else if (c.onDelete === "set null") call += "->nullOnDelete()";
@@ -156,8 +158,9 @@ export function columnCall(c: ColumnSpec): string {
   call = `${c.type}(${args.join(", ")})`;
   if (c.nullable) call += "->nullable()";
   if (c.default !== undefined && c.default !== "") call += `->default(${c.default})`;
-  if (c.unique) call += "->unique()";
-  else if (c.index) call += "->index()";
+  // A change adds only an index it didn't have; the one it has stays, and adding it again fails.
+  if (c.unique && !was?.unique) call += "->unique()";
+  else if (c.index && !c.unique && !(was?.index || was?.unique)) call += "->index()";
   if (c.comment) call += `->comment(${phpString(c.comment)})`;
   return call;
 }
@@ -328,7 +331,8 @@ export function relationMethod(r: RelationSpec): string {
       break;
     case "morphMany":
     case "morphToMany":
-      body = `$this->${r.type}(${related}, ${phpString(r.foreignKey || `${camel(r.name)}able`)})`;
+      // The related model's morph name, as Laravel names it from that model: Comment's is `commentable`.
+      body = `$this->${r.type}(${related}, ${phpString(r.foreignKey || `${camel(short(r.related))}able`)})`;
       break;
     case "belongsTo":
       body = `$this->belongsTo(${related}${r.foreignKey && r.foreignKey !== foreignKeyFor(r.name) ? `, ${phpString(r.foreignKey)}` : ""})`;
@@ -471,10 +475,17 @@ export function alterMigration(table: string, changes: ColumnChange[], o: { soft
         up.push(`$table->renameColumn(${phpString(ch.from)}, ${phpString(ch.to)});`);
         down.unshift(`$table->renameColumn(${phpString(ch.to)}, ${phpString(ch.from)});`);
         break;
-      case "change":
-        up.push(`$table->${columnCall(ch.column)}->change();`);
-        down.unshift(`$table->${columnCall({ ...ch.before, name: ch.column.name })}->change();`);
+      case "change": {
+        const was = { ...ch.before, name: ch.column.name };
+        // An index that `to` no longer has goes first.
+        const drops = (from: ColumnSpec, to: ColumnSpec) => [
+          ...(from.unique && !to.unique ? [`$table->dropUnique([${phpString(to.name)}]);`] : []),
+          ...(from.index && !from.unique && !to.index && !to.unique ? [`$table->dropIndex([${phpString(to.name)}]);`] : []),
+        ];
+        up.push(...drops(was, ch.column), `$table->${columnCall(ch.column, was)}->change();`);
+        down.unshift(...drops(ch.column, was), `$table->${columnCall(was, ch.column)}->change();`);
         break;
+      }
     }
   }
   if (o.softDeletes === "add") up.push("$table->softDeletes();"), down.unshift("$table->dropSoftDeletes();");
@@ -579,8 +590,8 @@ export function columnFromDatabase(col: { name: string; type: string; fullType?:
   // Booleans come back as 0 and 1, sometimes quoted.
   if (type === "boolean" && raw !== undefined && /^(0|1|true|false)$/i.test(raw)) c = { ...c, default: /^(1|true)$/i.test(raw) ? "true" : "false" };
   // A number quoted in the database is a number to a numeric column.
-  if (type !== "boolean" && raw !== undefined && /^-?\d+(\.\d+)?$/.test(raw) && /int|decimal|numeric|float|double|real|serial/.test(t)) c = { ...c, default: raw };
-  const def = c.default === null || c.default === undefined ? undefined : /^'.*'$/.test(c.default) || /^-?\d+(\.\d+)?$/.test(c.default) ? c.default : /^(true|false|null)$/i.test(c.default) ? c.default.toLowerCase() : phpString(c.default);
+  if (type !== "boolean" && raw !== undefined && /^-?(0|[1-9]\d*)(\.\d+)?$/.test(raw) && /int|decimal|numeric|float|double|real|serial/.test(t)) c = { ...c, default: raw };
+  const def = c.default === null || c.default === undefined ? undefined : /^'.*'$/.test(c.default) || /^-?(0|[1-9]\d*)(\.\d+)?$/.test(c.default) ? c.default : /^(true|false|null)$/i.test(c.default) ? c.default.toLowerCase() : phpString(c.default);
   return {
     id: o.id,
     name: c.name,

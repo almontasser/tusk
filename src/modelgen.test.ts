@@ -116,6 +116,8 @@ test("columnFromDatabase reads database types", () => {
   assert.equal(read("integer", "integer", { cast: "boolean" }).type, "boolean");
   assert.equal(read("integer", "integer", { foreign: { table: "users", onDelete: "cascade" } }).type, "foreignId");
   assert.equal(columnFromDatabase({ name: "s", type: "varchar", nullable: false, default: "draft" }, { unique: false, index: false, fillable: true, hidden: false, id: "s" }).default, "'draft'");
+  // A leading zero isn't a PHP number: 08 doesn't parse, and 007 would read as octal.
+  assert.equal(columnFromDatabase({ name: "zip", type: "varchar", nullable: false, default: "08" }, { unique: false, index: false, fillable: true, hidden: false, id: "z" }).default, "'08'");
 });
 
 test("columnFromDatabase reads SQLite's boolean defaults", () => {
@@ -149,4 +151,19 @@ test("pivotMigration uses each side's key type", async () => {
   const code = pivotMigration("post_tag", { table: "posts", key: "post_id", type: "foreignUuid" }, { table: "tags", key: "tag_id" });
   assert.match(code, /\$table->foreignUuid\('post_id'\)->constrained\('posts'\)/);
   assert.match(code, /\$table->foreignId\('tag_id'\)->constrained\('tags'\)/);
+});
+
+test("alterMigration changes a column without adding the index or key it has again", () => {
+  const slug = { id: "1", name: "slug", type: "string", nullable: false, unique: true, fillable: true };
+  const author = { id: "2", name: "author_id", type: "foreignId", nullable: false, references: "authors", onDelete: "cascade" as const, fillable: true };
+  const out = alterMigration("posts", [
+    { kind: "change", before: slug, column: { ...slug, nullable: true } },
+    { kind: "change", before: author, column: { ...author, nullable: true } },
+    { kind: "change", before: slug, column: { ...slug, unique: false } },
+  ]);
+  assert.match(out, /\$table->string\('slug'\)->nullable\(\)->change\(\);/);
+  assert.match(out, /\$table->foreignId\('author_id'\)->nullable\(\)->change\(\);/);
+  assert.match(out, /\$table->dropUnique\(\['slug'\]\);\n\s*\$table->string\('slug'\)->change\(\);/);
+  // Down adds back the unique index the change dropped.
+  assert.match(out, /\$table->string\('slug'\)->unique\(\)->change\(\);/);
 });

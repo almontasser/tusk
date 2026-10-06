@@ -20,7 +20,7 @@ import { askName, closePopover, heroicon, popover } from "./filamentpickers";
 import { childSlot, type Comp, type Path, parentOf, readRoot, resolve, type Root, type RootKind, rootSlot, ROOT_SLOTS, samePath, type Slot, shortClass, slotKey, slotNamed, walk } from "./filamentschema";
 import { applyWorkspaceEdit, saveModel } from "./lsp";
 import { renderPageWidgets } from "./pagewidgets";
-import { addMember, type PNode, classNamed, droppedImports, type Edit, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, methodNamed, moveCode, propertyNamed, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
+import { addMember, type PNode, classNamed, droppedImports, type Edit, fillClasses, findCall, mergeEdits, Imports, indentCode, insertItem, lineIndent, methodNamed, moveCode, propertyNamed, moveItem, type OClass, type Outline, phpString, reindent, removeCall, removeItem, replaceItem, setArgs, setCall } from "./phpcode";
 import { showError } from "./status";
 import { confirm } from "./palette";
 import { showEditorView } from "./terminal";
@@ -359,7 +359,7 @@ export class Designer {
       return;
     }
     const imports = new Imports(fresh.text, fresh.outline);
-    const fill = (code: string) => code.replace(/\{\{([\w\\]+)\}\}/g, (_, fqn: string) => imports.name(fqn));
+    const fill = (code: string) => fillClasses(code, (fqn) => imports.name(fqn));
     let edits: Edit[] | null;
     try {
       edits = build(imports, fill);

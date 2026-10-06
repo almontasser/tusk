@@ -253,6 +253,12 @@ export function changeNavGroupEdits(text: string, code: PanelCode, index: number
   if (g.kind === "make" && g.node.kind === "chain" && g.node.calls.some((c) => !["icon", "collapsed", "label"].includes(c.name))) {
     const n = g.node;
     const edits: Edit[] = [];
+    if (change.label !== undefined) {
+      // Where the label is: make()'s argument, or ->label().
+      const base = n.base.kind === "static" ? n.base : null;
+      const labelArgs = base && textValue(base.args.items[0]?.value) ? base.args : findCall(n, "label")?.args;
+      if (labelArgs) edits.push(setArgs(text, labelArgs, labelCode(change.label, g.translated)));
+    }
     if (change.icon !== undefined) {
       const call = findCall(n, "icon");
       if (change.icon) edits.push(setCall(text, n, "icon", change.icon));

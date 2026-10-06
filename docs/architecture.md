@@ -9055,3 +9055,34 @@ A pass over the running app and the backend found these, now fixed:
   environment editor keeps a private variable's values from the shared file
   in the shared file (`sharedIn`), unless you tick Private on its row.
 
+### 2026-10-06: Designers keep the code they don't own
+
+A review of the designers that rewrite PHP found edits that dropped or broke
+user code:
+
+- `removeItem` starts at the end of the previous item's line, so that item's
+  trailing comment stays, and takes the removed item's own comment with it.
+- The enum designer changes each case in place and adds new ones after the
+  last kept case, so comments and constants between cases stay; only a
+  reorder rewrites the cases as one block. A `match` with a `default` arm of
+  its own value is left to you instead of being written back with
+  `default => null`. Reserved enum names and a case named `Class` are refused.
+- Properties declared together, `public string $a, $b;`, lose just the one you
+  remove. Settings migrations delete before they rename.
+- The model designer merges `$fillable` and `$hidden` into the lists as the
+  file has them when you apply, not as they were when it opened.
+- The dashboard designer finds a widget's array item by its class; the app's
+  list leaves out classes it can't load, so positions differed.
+- `{{Fqn}}` placeholders are filled by `fillClasses` (`phpcode.ts`), which
+  leaves PHP strings alone, so `'Your code is {{code}}'` stays as typed.
+- `change()` columns leave out `constrained()` and an index they already have,
+  which failed on a second foreign key or index, and drop an index the change
+  removes. Defaults with leading zeros, such as `08`, are strings, not PHP
+  numbers. A quoted default keeps its case.
+- Smaller: morph relations are named after the related model
+  (`commentable`), the importer's rules split on `, ` so `in:a,b` stays one
+  rule, timestamps get Laravel's `date` rule, the schedule designer won't
+  rewrite a `prunable()` edited since it read it, reordering navigation
+  groups keeps text after the last group, and renaming a NavigationGroup with
+  other calls changes its label.
+
