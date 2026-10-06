@@ -462,11 +462,12 @@ and run `npm install --package-lock-only` in that folder.
 ### Finding PHP
 
 Apps opened from Finder get a minimal `PATH`. At startup, `lib.rs` runs your
-login shell (`$SHELL -ilc`) once and adopts its `PATH`, so every tool the app
+login shell (`$SHELL -ilc`) once and keeps its `PATH`, so every tool the app
 starts later (`php`, `git`, `gh`) resolves the same way as in your terminal. It
 runs on a thread, because a shell with plugins can take a second or more, and
-the window shouldn't wait for it. Commands that start a program call
-`login_path()` first, which waits for that thread.
+the window shouldn't wait for it. `toolpaths::path_env` gives each program it
+through `login_path()`, which waits for that thread. The app's own environment
+stays as it is.
 
 ### Tool paths
 
@@ -8978,7 +8979,10 @@ A pass over the running app and the backend found these, now fixed:
   may have run it. A language server whose output can't be read is stopped
   before the app waits for it. A gRPC timeout too large for a `Duration` is an
   error rather than a panic. The database tunnel puts `--` before the SSH
-  destination, which a shared `tusk.json` can set.
+  destination, which a shared `tusk.json` can set. The login shell's PATH is
+  kept in `LOGIN_PATH` and given to each program the app starts, rather than
+  set as the app's own PATH from a thread at launch: changing the environment
+  while other threads, such as WebKitGTK's, read it can crash on Linux.
 - **Tusk's server.** Livewire's JavaScript scanners read a quote just past a
   script's end, and panicked on `@click="Livewire.dispatchTo("` and on
   `$wire.` at the end of a file; each reads only up to its range's end now, and

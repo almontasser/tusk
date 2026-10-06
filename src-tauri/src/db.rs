@@ -746,7 +746,6 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
             return Ok(*local);
         }
     }
-    crate::login_path();
     let local = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = crate::lsp::watched("ssh");
     let child = child

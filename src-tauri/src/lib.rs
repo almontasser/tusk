@@ -17,12 +17,14 @@ use tauri::Manager;
 
 /// Apps opened from Finder get a minimal PATH, so tools installed through
 /// Homebrew, Herd, or Composer are missing. The login shell's PATH is read on a thread at launch,
-/// since an interactive shell with plugins can take a second or more; `login_path()` waits for it,
-/// so call it before starting any program.
-static LOGIN_PATH: LazyLock<()> = LazyLock::new(use_login_shell_path);
+/// since an interactive shell with plugins can take a second or more; `login_path()` waits for it.
+/// It's kept here rather than set as the process's PATH: changing the environment while other threads,
+/// such as WebKitGTK's, read it can crash on Linux.
+static LOGIN_PATH: LazyLock<Option<std::ffi::OsString>> = LazyLock::new(login_shell_path);
 
-pub fn login_path() {
-    LazyLock::force(&LOGIN_PATH);
+/// The PATH for programs the app starts: the login shell's, or else the app's own.
+pub fn login_path() -> std::ffi::OsString {
+    LOGIN_PATH.clone().or_else(|| std::env::var_os("PATH")).unwrap_or_default()
 }
 
 /// A path the way the frontend writes paths. On Windows that's with `/` between folders and a lowercase drive
@@ -51,22 +53,22 @@ pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String
 
 /// Windows apps get the full PATH from the registry, so there's nothing to read.
 #[cfg(windows)]
-fn use_login_shell_path() {}
+fn login_shell_path() -> Option<std::ffi::OsString> {
+    None
+}
 
 #[cfg(not(windows))]
-fn use_login_shell_path() {
+fn login_shell_path() -> Option<std::ffi::OsString> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| toolpaths::default_shell().into());
     let Ok(out) = std::process::Command::new(shell)
         .args(["-ilc", "printf '\\n__PATH__%s__PATH__' \"$PATH\""])
         .stdin(std::process::Stdio::null())
         .output()
     else {
-        return;
+        return None;
     };
     let out = String::from_utf8_lossy(&out.stdout);
-    if let Some(path) = out.split("__PATH__").nth(1).filter(|p| !p.is_empty()) {
-        std::env::set_var("PATH", path);
-    }
+    out.split("__PATH__").nth(1).filter(|p| !p.is_empty()).map(Into::into)
 }
 
 /// macOS 27 shows its "Write with Siri" button beside the caret of any text client that allows the Writing
@@ -211,7 +213,7 @@ fn menu_shortcuts_shown_only(_window: tauri::WebviewWindow) -> Result<(), String
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    std::thread::spawn(login_path);
+    std::thread::spawn(|| LazyLock::force(&LOGIN_PATH));
     let builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::Builder::new().bind_address("127.0.0.1").build());

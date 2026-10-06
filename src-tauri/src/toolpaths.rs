@@ -41,8 +41,7 @@ pub fn init(app: &AppHandle) {
 /// PATH for a program the app starts: the shims, then the login shell's PATH. Windows has no shims (a `.cmd` file
 /// isn't found by programs that start `php`), so each set path's folder comes first instead.
 pub fn path_env() -> std::ffi::OsString {
-    crate::login_path();
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = crate::login_path();
     #[cfg(windows)]
     let first: Vec<PathBuf> = CONFIG.read().unwrap().as_ref().map_or(vec![], |c| {
         TOOLS.iter().filter_map(|(name, _)| Some(Path::new(c.paths.get(*name).filter(|p| !p.is_empty())?).parent()?.to_path_buf())).collect()
@@ -144,8 +143,7 @@ fn find_in(dirs: impl Iterator<Item = PathBuf>, name: &str) -> Option<PathBuf> {
 
 /// Where a program is on the login shell's PATH, without the shims.
 fn which(name: &str) -> Option<PathBuf> {
-    crate::login_path();
-    find_in(std::env::split_paths(&std::env::var_os("PATH")?), name)
+    find_in(std::env::split_paths(&crate::login_path()), name)
 }
 
 /// The tool a command runs, looking past `/usr/bin/env VAR=value`.

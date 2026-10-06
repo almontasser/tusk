@@ -103,7 +103,6 @@ pub fn tool(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
 /// exit if the app dies without stopping them.
 #[tauri::command(async)]
 pub fn lsp_start(app: AppHandle, state: State<'_, LspState>, name: String, root: String) -> Result<u32, String> {
-    crate::login_path();
     // The Angular server loads TypeScript and its language service from these folders: the project's first, then its own.
     let ng_dir = tool(&app, "node/node_modules/@angular/language-server")?.to_string_lossy().into_owned();
     let ts_probe = format!("{root},{ng_dir}");
