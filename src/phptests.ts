@@ -9,7 +9,11 @@ export type TestCase = {
   filter?: string;
 };
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+/**
+ * A test name as a `--filter` pattern. PHPUnit escapes `/` itself, so escaping it here would end the pattern early,
+ * and it reads a filter with `@` as a data set's name, so `@` is written as `\x40`.
+ */
+export const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/@/g, "\\x40");
 
 /**
  * Returns the tests in a file, with a whole-file entry first. PHPUnit tests are
@@ -30,8 +34,9 @@ export function findTests(source: string): TestCase[] {
       tests.push({ line: lineOf(m.index!), name: m[2], filter: `::${m[2]}( with data set .*)?$` });
   }
   // Pest matches "Class::description", with any describe() blocks in front joined by " → ".
-  for (const m of code.matchAll(/^[ \t]*(it|test)\(\s*(['"])(.*?)\2/gm)) {
-    const name = `${m[1] === "it" ? "it " : ""}${m[3]}`;
+  for (const m of code.matchAll(/^[ \t]*(it|test)\(\s*(['"])((?:\\.|(?!\2).)*)\2/gm)) {
+    // The description as PHP reads it: `doesn\'t` is `doesn't`.
+    const name = `${m[1] === "it" ? "it " : ""}${m[3].replace(/\\(['"\\])/g, "$1")}`;
     tests.push({ line: lineOf(m.index!), name, filter: `::(?:.* → )?${escapeRegex(name)}( with data set .*)?$` });
   }
   if (!tests.length) return [];

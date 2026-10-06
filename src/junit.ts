@@ -1,4 +1,5 @@
 import { isAbsolute } from "./platform.ts";
+import { escapeRegex } from "./phptests.ts";
 // Reads the reports PHPUnit and Pest write: JUnit XML (--log-junit), the event stream, and Clover coverage
 // (--coverage-clover). Free of editor imports so Node can test it.
 
@@ -131,7 +132,6 @@ export const localPath = (file: string, root: string, containerRoot: string) =>
 // ponytail: assumes Laravel's autoload-dev mapping of Tests\ to tests/.
 export const classFile = (className: string) => `${className.replace(/^(P\\)?Tests\\/, "tests/").replace(/\\/g, "/")}.php`;
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /** A test's name without its data set, and without the describe() blocks Pest puts in front. */
 export const baseName = (name: string) => name.replace(/ with data set .*$/, "").replace(/^.* → /, "");

@@ -1,6 +1,7 @@
 // Run configurations, as PhpStorm has them: named, saved ways to run tests, Artisan, scripts, and servers. This
 // module holds the types, the form each type shows, validation, and the command line each builds. It has no editor
 // imports, so Node can test it. To add a type, add it to ConfigType and TYPES, and give it a case in `commandFor`.
+import { escapeRegex } from "./phptests.ts";
 
 export type ConfigType = "test" | "artisan" | "php" | "composer" | "npm" | "shell" | "server";
 /** How a configuration runs: plainly, in the debugger, with code coverage, or with Xdebug's profiler. */
@@ -182,7 +183,6 @@ export function shellWords(line = ""): string[] {
 /** Quotes a word for `/bin/sh` when it needs it. */
 export const shellQuote = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /**
  * The `--filter` for one test by name: a PHPUnit method, or a Pest description with any describe() blocks in front,

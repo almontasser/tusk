@@ -20,7 +20,7 @@ import { onSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
 import { errorText, showError } from "./status";
 import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
-import { isWindows, keyText, thisComputer } from "./platform.ts";
+import { isAbsolute, isWindows, keyText, thisComputer } from "./platform.ts";
 
 let getRoot: () => string;
 let openAt: (path: string, line: number) => Promise<unknown>;
@@ -219,7 +219,7 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
   if (profiler) extraEnv.push(...(await profiler.profileEnv(profiles, root)));
   const started = Math.floor(Date.now() / 1000);
   const command = info.php ? (await php(argv, debug, [...env, ...extraEnv], docker)).command : env.length ? ["/usr/bin/env", ...env, ...argv] : argv;
-  const cwd = c.cwd ? `${root}/${c.cwd.replace(/^\/+|\/+$/g, "")}` : root;
+  const cwd = !c.cwd ? root : isAbsolute(c.cwd) ? c.cwd : `${root}/${c.cwd.replace(/^\/+|\/+$/g, "")}`;
 
   let timer: ReturnType<typeof setInterval> | undefined;
   let run: Run | undefined;
@@ -237,15 +237,26 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
     async (code) => {
       finish();
       if (reports) {
-        const shown = await showResults(reports.junit, reports.details, code);
-        if (!shown) await showLive(reports.live, false, reports.format);
+        // A later test run owns the Tests tab now.
+        if (testRun === run) {
+          const shown = await showResults(reports.junit, reports.details, code);
+          if (!shown) await showLive(reports.live, false, reports.format);
+        }
         reports.cleanUp();
       }
       if (coverage && reports) showCoverage(reports.clover, reports.perTest);
       if (profiler) profiler.openNewestProfile(profiles, started, title);
       resolve(code);
     },
-    () => (finish(), resolve(null)),
+    // Closing the tab stops the run: the Tests tab shows what ran.
+    async () => {
+      finish();
+      if (reports) {
+        if (testRun === run) await showLive(reports.live, false, reports.format);
+        reports.cleanUp();
+      }
+      resolve(null);
+    },
     longRunning(c),
   );
   if (!terminal) return clearInterval(timer), null; // openTerminal said why.
@@ -255,7 +266,7 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
     testRun = run;
     startTestRun(title);
     const r = reports;
-    timer = setInterval(() => showLive(r.live, true, r.format), 500);
+    timer = setInterval(() => testRun === run && showLive(r.live, true, r.format), 500);
   }
   renderWidget();
   return done;

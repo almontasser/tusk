@@ -140,17 +140,19 @@ function render() {
   const total = Math.max(run.total, rows.length);
   const time = results.length ? results.reduce((t, r) => t + r.time, 0) : (Date.now() - run.started) / 1000;
   const failed = counts.failed ? ` · ${counts.failed} failed` : "";
+  // A run that failed outside its tests, such as in setUpBeforeClass(), reports only the tests that ran.
+  const errored = !run.running && !run.stopped && !counts.failed && !!run.code;
   summary.textContent = run.running
     ? `Running: ${done}${total ? ` of ${total}` : ""}${failed}`
     : !rows.length
       ? run.stopped || run.code
         ? "The run ended without results. Its terminal tab has the output."
         : "No tests ran."
-      : `${run.stopped ? `Stopped after ${done} of ${plural(total, "test")}` : plural(done, "test")}: ${[counts.passed && `${counts.passed} passed`, counts.failed && `${counts.failed} failed`, counts.skipped && `${counts.skipped} skipped`].filter(Boolean).join(", ")} · ${seconds(time)}`;
-  summary.className = `tests-summary${counts.failed ? " test-failed" : !run.running && rows.length && !run.stopped ? " test-passed" : ""}`;
+      : `${run.stopped ? `Stopped after ${done} of ${plural(total, "test")}` : plural(done, "test")}: ${[counts.passed && `${counts.passed} passed`, counts.failed && `${counts.failed} failed`, counts.skipped && `${counts.skipped} skipped`].filter(Boolean).join(", ")} · ${seconds(time)}${errored ? ` · exited with code ${run.code}; its terminal tab has the output` : ""}`;
+  summary.className = `tests-summary${counts.failed || errored ? " test-failed" : !run.running && rows.length && !run.stopped ? " test-passed" : ""}`;
   const share = total ? done / total : run.running ? 0 : 1;
   bar.style.width = `${Math.round(share * 100)}%`;
-  progress.classList.toggle("failed", counts.failed > 0);
+  progress.classList.toggle("failed", counts.failed > 0 || errored);
   progress.hidden = !run.running && !rows.length;
   progress.ariaValueNow = String(Math.round(share * 100));
   rerunButton.disabled = run.running || !run.title;

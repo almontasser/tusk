@@ -219,7 +219,9 @@ export function breakpointsView(api: Api) {
       );
     } else if (s?.line && s.options) {
       const { path, line, options: o } = s;
-      const set = (change: BreakpointOptions) => api.set(path, line, { ...o, ...change });
+      // Merged into the options as they are now: the pane doesn't redraw while you type, so `o` misses earlier fields' changes.
+      const current = () => api.list().find(([p]) => p === path)?.[1].find(([l]) => l === line)?.[1] ?? o;
+      const set = (change: BreakpointOptions) => api.set(path, line, { ...current(), ...change });
       detail.replaceChildren(
         h("h3", {}, `${projectRelative(api.root(), path)}:${line}`),
         h("code", { class: "bp-preview" }, lineText(path, line)),

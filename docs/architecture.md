@@ -9004,3 +9004,25 @@ A pass over the running app and the backend found these, now fixed:
   which reported `foreach` and array access on them. `@@` skipped one character
   too many.
 
+### 2026-10-06: Test filters, run lifecycle, and local debugging in Docker projects
+
+- **Test filters.** `escapeRegex` escaped `/`, which PHPUnit escapes again,
+  ending the pattern early, and left `@`, which PHPUnit reads as a data set's
+  name, so `it('hits /api')` and `test('mail a@b.com')` ran no tests. One
+  shared `escapeRegex` in `phptests.ts` leaves `/` and writes `@` as `\x40`.
+  Pest descriptions with escaped quotes, such as `it('doesn\'t break')`, are
+  read whole and unescaped.
+- **Run lifecycle.** A run that fails outside its tests, such as in
+  `setUpBeforeClass()`, shows its exit code in red instead of "passed".
+  Closing a running test's terminal finishes the Tests tab with what ran. A
+  test run that a later one replaced no longer draws over it or ends it. An
+  absolute working directory in a run configuration is used as it is.
+- **Debugging.** Sail's or Compose's mount is the automatic path mapping only
+  while the container runs, since PHP on this computer has the project's own
+  paths, which the mapping made breakpoints miss. Starting a debug run listens
+  again when that changed, unless something is paused. The Breakpoints tab
+  merges each field into the breakpoint's current options, so a hit count no
+  longer erases the condition typed before it.
+- **Windows.** `PHP_INI_SCAN_DIR` joins folders with `;`, and the profiler
+  checks for its server with curl rather than `lsof`.
+

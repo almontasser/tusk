@@ -106,10 +106,16 @@ let server: { root: string; port: number } | undefined;
 /** Whether the profiling server runs, so the session starts it again. */
 export const profilingServerRunning = () => !!server;
 
-/** Whether something listens on a local port. lsof exits with an error when nothing does. */
+/** Whether something listens on a local port: curl prints the port it connected to, and nothing useful when it can't connect. */
 const listening = (port: number) =>
-  invoke("run_capture", { cwd: "/", program: "/usr/sbin/lsof", args: ["-iTCP:" + port, "-sTCP:LISTEN"], input: null }).then(
-    () => true,
+  invoke<string>("run_capture", {
+    cwd: "/",
+    program: "/usr/bin/curl",
+    args: ["-s", "-I", "-w", "\n%{remote_port}", "--connect-timeout", "1", "--max-time", "2", `http://127.0.0.1:${port}/`],
+    input: null,
+    anyStatus: true,
+  }).then(
+    (out) => out.trim().split("\n").at(-1) === String(port),
     () => false,
   );
 

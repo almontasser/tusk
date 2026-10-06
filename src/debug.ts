@@ -10,7 +10,7 @@ import { type MenuItem, showMenu } from "./files";
 import { listNav } from "./listnav";
 import { ensureTools } from "./lsp";
 import { confirm, pick } from "./palette";
-import { composeService, usesSail } from "./sail";
+import { composeService, containerRoot, runningContainer, usesSail } from "./sail";
 import { completions, handlerLines, inlineValues, portInUse, thrownIn, uncaughtClass, xdebugEnvFor } from "./debugexceptions";
 import { onSettings, openSettings, registerSettings, updateSetting } from "./settings";
 import { splitter } from "./splitter";
@@ -18,7 +18,7 @@ import { errorText, showError, status } from "./status";
 import { onProjectValue, projectScope, projectValue, type Scope, setProjectValue, shareItem } from "./projectstate";
 import { projectRelative } from "./projectstatedata";
 import { showPanelView } from "./terminal";
-import { isAbsolute, keyText, mod, thisComputer } from "./platform.ts";
+import { isAbsolute, isWindows, keyText, mod, thisComputer } from "./platform.ts";
 
 type Host = { root(): string; openAt(path: string, line: number): Promise<unknown>; status(text: string): void };
 type Frame = { id: number; name: string; line: number; source?: { path?: string; name?: string } };
@@ -76,7 +76,7 @@ const scanDir = () =>
 /** PHP_INI_SCAN_DIR adding the folders in `dirs` ("" is none) to PHP's own, or nothing when there are none. */
 export async function iniDirsEnv(dirs: string[]): Promise<string[]> {
   dirs = dirs.filter(Boolean);
-  return dirs.length ? [`PHP_INI_SCAN_DIR=${[await scanDir(), ...dirs].join(":")}`] : [];
+  return dirs.length ? [`PHP_INI_SCAN_DIR=${[await scanDir(), ...dirs].join(isWindows ? ";" : ":")}`] : [];
 }
 
 /** The trigger value for a request's XDEBUG_SESSION. */
@@ -419,11 +419,13 @@ export function setExceptionClasses() {
 /**
  * Server paths and the local folders they map to, for code that runs in Docker, as typed: comma-separated
  * entries, each `/server/path` (the project folder) or `/server/path=/local/path`. Set by you, or else
- * where Sail or the project's Compose service mounts the project.
+ * where Sail or the project's Compose service mounts the project. With `whenUp`, that mount only while its
+ * container runs: PHP on this computer has the project's own paths, which a mapping would make breakpoints miss.
  */
-async function serverPaths(): Promise<string> {
+async function serverPaths(whenUp = true): Promise<string> {
   const saved = projectValue<string>("debugPathMappings");
   if (typeof saved === "string") return saved;
+  if (whenUp) return (await runningContainer(host.root())) ? containerRoot : "";
   if (await usesSail(host.root())) return "/var/www/html";
   return (await composeService(host.root()))?.workdir ?? "";
 }
@@ -460,7 +462,7 @@ export async function setServerRoot() {
       ];
     },
     0,
-    { value: await serverPaths() },
+    { value: await serverPaths(false) },
   );
 }
 
@@ -499,11 +501,20 @@ const currentLine = new Map<string, string[]>();
 let stackError = "";
 /** The settings the listener started with, to restart it when they change. */
 let launched = "";
+/** The path mappings the listener started with. */
+let mapped = "";
 const launchKey = () => JSON.stringify([debugSettings.debugPort, debugSettings.debugMaxChildren, debugSettings.debugMaxData, debugSettings.debugBreakAtFirstLine]);
 
 /** Starts listening for Xdebug connections on the port in the Debugger settings. */
 export async function startDebugging() {
-  if (running) return;
+  if (running) {
+    // The containers started or stopped since the listener started, so the code runs with other paths now.
+    if (!launched || threads.size || (await serverPaths()) === mapped) return;
+    log("Listening again with the project's path mappings for where PHP runs now.");
+    launched = "";
+    await stopDebugging(true);
+    return startDebugging();
+  }
   showPanel();
   running = true;
   starting = true;
@@ -517,7 +528,8 @@ export async function startDebugging() {
     await request("initialize", { adapterID: "php", clientID: "tusk", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path", supportsVariableType: true });
     await findHandler();
     // The adapter answers "launch" once it listens; breakpoints go out on its "initialized" event.
-    const mappings = parseMappings(await serverPaths());
+    mapped = await serverPaths();
+    const mappings = parseMappings(mapped);
     const pathMappings = Object.keys(mappings).length ? mappings : undefined;
     await request("launch", {
       port,

@@ -48,6 +48,12 @@ test("finds Pest tests and escapes their names", () => {
   assert.ok(filter.test('P\\Tests\\PostTest::`group` → it creates a post (with title) with data set "(1)"'));
   assert.ok(!filter.test("P\\Tests\\PostTest::it creates a post (with title) twice"));
   assert.equal(findTests("<?php\ndescribe('group', function () {\n    it('nests', fn () => 1);\n});")[1]?.name, "it nests");
+
+  // Escaped quotes, and filters PHPUnit reads as it should: it escapes `/` itself, and `@` would name a data set.
+  const odd = findTests("<?php\nit('doesn\\'t break');\ntest(\"say \\\"hi\\\"\");\nit('hits /api');\ntest('mail a@b.com');");
+  assert.deepEqual(odd.slice(1).map((t) => t.name), ["it doesn't break", 'say "hi"', "it hits /api", "mail a@b.com"]);
+  assert.ok(odd[3].filter!.includes("it hits /api"));
+  assert.ok(odd[4].filter!.includes("a\\x40b\\.com"));
 });
 
 test("finds declarations that span several lines", () => {
