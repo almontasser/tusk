@@ -9,7 +9,7 @@ import { findInFolder } from "./search";
 import { openTerminal } from "./terminal";
 import { hideInTree } from "./treehidden";
 import { deploymentMenu } from "./deploy";
-import { fileManager, keyText, mod, trash } from "./platform.ts";
+import { fileManager, isWindows, keyText, mod, trash } from "./platform.ts";
 
 type Host = {
   root(): string;
@@ -18,6 +18,8 @@ type Host = {
   openFile(path: string): unknown;
   /** Moves an open tab after its file moved on disk. */
   renamed(from: string, to: string): unknown;
+  /** The files open in tabs or held by other views. */
+  openPaths(): string[];
   /** Closes tabs and models for a path, or for everything inside a folder, without asking. */
   forget(path: string): void;
   status(text: string): void;
@@ -28,6 +30,8 @@ export type MenuItem = { label: string; keys?: string; run(): unknown } | { labe
 
 const $ = (id: string) => document.getElementById(id)!;
 let host: Host;
+/** A typed name with `/` between folders, as the app's paths have them: Windows users may type `\`. */
+const typedPath = (q: string) => (isWindows ? q.replaceAll("\\", "/") : q).trim();
 let selected = "";
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
@@ -62,7 +66,7 @@ export function select(path: string) {
 export function newFile(dir = targetDir()) {
   const where = relative(dir) || "the project root";
   pick(`New file in ${where}. Use / to create folders too.`, (q) => {
-    const name = q.trim().replace(/^\/+/, "");
+    const name = typedPath(q).replace(/^\/+/, "");
     return name ? [{ label: `Create ${relative(`${dir}/${name}`)}`, run: () => createFile(`${dir}/${name}`) }] : [];
   });
 }
@@ -77,7 +81,7 @@ async function createFile(path: string) {
 
 export function newFolder(dir = targetDir()) {
   pick(`New folder in ${relative(dir) || "the project root"}`, (q) => {
-    const name = q.trim().replace(/^\/+/, "");
+    const name = typedPath(q).replace(/^\/+/, "");
     return name ? [{ label: `Create folder ${relative(`${dir}/${name}`)}`, run: () => attempt("Create folder", () => invoke("create_dir", { path: `${dir}/${name}` })) }] : [];
   });
 }
@@ -89,7 +93,7 @@ export function rename(path = selected || host.active()) {
   pick(
     `Rename ${relative(path)}. Use / to move it.`,
     (q) => {
-      const next = q.trim();
+      const next = typedPath(q);
       return next && next !== name ? [{ label: `Rename to ${relative(`${parentOf(path)}/${next}`)}`, run: () => move(path, `${parentOf(path)}/${next}`) }] : [];
     },
     0,
@@ -106,8 +110,10 @@ export async function move(from: string, to: string) {
   await attempt("Move", async () => {
     const files = isDir(from) ? (await invoke<string[]>("list_files", { root: from })).map((f) => `${from}/${f}`) : [from];
     const php = files.filter((f) => f.endsWith(".php")).map((f) => ({ from: f, to: to + f.slice(from.length) }));
+    // Open files that the listing leaves out, such as an ignored .env, move with the folder too.
+    const ignored = isDir(from) ? host.openPaths().filter((p) => p.startsWith(`${from}/`) && !files.includes(p)) : [];
     await invoke("rename_path", { from, to });
-    for (const f of files) await host.renamed(f, to + f.slice(from.length));
+    for (const f of [...files, ...ignored]) await host.renamed(f, to + f.slice(from.length));
     let failure: string | null = null;
     if (php.length) {
       host.status(`Updating references for ${php.length} PHP file${php.length > 1 ? "s" : ""}…`);

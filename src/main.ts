@@ -561,7 +561,15 @@ const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(roo
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const isDirty = (t: Tab) => t.model.getAlternativeVersionId() !== t.saved;
 
-async function openFolder(dir: unknown = null) {
+let opening = Promise.resolve();
+/** Opens a project after any project still opening, so a quick switch can't mix the two projects' tabs and terminals. */
+function openFolder(dir: unknown = null) {
+  const next = opening.then(() => openFolderNow(dir));
+  opening = next.catch(() => {});
+  return next;
+}
+
+async function openFolderNow(dir: unknown) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
   saveSession();
@@ -744,9 +752,10 @@ async function ensureModel(path: string) {
   return monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, undefined, uri);
 }
 
-function markSaved(path: string) {
+/** Marks a tab saved as of `version`: the model's version when its text was read for writing, so typing during the write stays unsaved. */
+function markSaved(path: string, version?: number) {
   const tab = tabs.get(path);
-  if (tab) tab.saved = tab.model.getAlternativeVersionId();
+  if (tab) tab.saved = version ?? tab.model.getAlternativeVersionId();
   renderTabs();
   requestFilesSaved();
 }
@@ -1195,12 +1204,13 @@ async function saveFile(path: string, explicit = false) {
   if (formatOnSave(tab.model.getLanguageId())) await formatModel(tab.model);
   await applySaveRules(tab.model);
   const text = tab.model.getValue();
+  const version = tab.model.getAlternativeVersionId();
   try {
     await writeText(path, text);
   } catch (e) {
     return showError(`Couldn't save ${relative(path)}`, e);
   }
-  markSaved(path);
+  markSaved(path, version);
   didSave(tab.model);
   afterSave(path, text);
   recordVersion(path, text);
@@ -1350,10 +1360,13 @@ listen<string[]>("fs-change", ({ payload }) => {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
       const tab = tabs.get(path);
       if (model && !(tab && isDirty(tab))) {
+        const version = model.getAlternativeVersionId();
         const text = await readText(path).catch(() => null);
         if (text !== null && text !== model.getValue()) {
           // Another program changed it, such as a git checkout: keep what the editor had first.
           await recordVersion(path, model.getValue(), "before external");
+          // Typing during the reads above wins over the file.
+          if (model.isDisposed() || model.getAlternativeVersionId() !== version) continue;
           model.setValue(text);
           if (tab) tab.saved = model.getAlternativeVersionId();
         }
@@ -1973,7 +1986,7 @@ initProblems({
   unsaved: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!),
   changed: updateProblems,
 });
-initFiles({ root: () => root, active: activeFile, openFile, renamed, forget, status });
+initFiles({ root: () => root, active: activeFile, openFile, renamed, openPaths: () => [...tabs.keys(), ...held], forget, status });
 initProjectState({ openFile: (path) => void openFile(path) });
 setServiceChoice({
   get: () => projectValue<string>("dockerService"),
@@ -2113,8 +2126,9 @@ initLocalHistory({
       model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
       model.pushStackElement();
     }
+    const version = model?.getAlternativeVersionId();
     await writeText(path, text);
-    if (model) markSaved(path), didSave(model), afterSave(path, text);
+    if (model) markSaved(path, version), didSave(model), afterSave(path, text);
   },
 });
 initLocalHistoryView({ root: () => root, openFile: (path) => openFile(path) });

@@ -25,7 +25,7 @@ export type Host = {
   /** Returns the model for a file, loading it from disk if needed. */
   ensureModel(path: string): Promise<monaco.editor.ITextModel>;
   /** Records that the model's current text is on disk. */
-  markSaved(path: string): void;
+  markSaved(path: string, version?: number): void;
   /** Moves an open tab after a file is renamed on disk. */
   renamed(from: string, to: string): void;
   /** Closes a deleted file's tab and drops its model. */
@@ -230,8 +230,9 @@ async function locations(result: L.Location | L.Location[] | L.LocationLink[] | 
 /** Writes a model to its file and tells the servers, which update their index for open files on save. */
 export async function saveModel(model: monaco.editor.ITextModel) {
   const path = model.uri.fsPath;
+  const version = model.getAlternativeVersionId();
   await writeText(path, model.getValue());
-  host.markSaved(path);
+  host.markSaved(path, version);
   didSave(model);
 }
 
@@ -571,16 +572,24 @@ async function startServer(
     pending.clear();
   };
 
-  const processId = await invoke<number>("lsp_start", { name, root });
-  const init = call<L.InitializeResult>("initialize", {
-    processId,
-    rootUri: monaco.Uri.file(root).toString(),
-    workspaceFolders: [{ uri: monaco.Uri.file(root).toString(), name: root.split("/").pop()! }],
-    initializationOptions,
-    capabilities: clientCapabilities,
-  } satisfies L.InitializeParams);
-  ready = init;
-  const c = (await init).capabilities;
+  let c: L.ServerCapabilities;
+  try {
+    const processId = await invoke<number>("lsp_start", { name, root });
+    const init = call<L.InitializeResult>("initialize", {
+      processId,
+      rootUri: monaco.Uri.file(root).toString(),
+      workspaceFolders: [{ uri: monaco.Uri.file(root).toString(), name: root.split("/").pop()! }],
+      initializationOptions,
+      capabilities: clientCapabilities,
+    } satisfies L.InitializeParams);
+    ready = init;
+    c = (await init).capabilities;
+  } catch (e) {
+    // A server that failed to start leaves no listener that a later start's messages would reach.
+    unlisten();
+    unlistenExit();
+    throw e;
+  }
   await notify("initialized", {});
   monaco.editor.getModels().forEach(track);
   reg(monaco.editor.onDidCreateModel(track));
@@ -1075,7 +1084,7 @@ export async function startLsp(root: string, h: Host) {
   await ensureTools();
   host = h;
   readModels(root);
-  starts++;
+  const start = ++starts;
   projectRoot = root;
   magoConfigPath = undefined;
   servers.splice(0).forEach((s) => s.stop());
@@ -1113,7 +1122,9 @@ export async function startLsp(root: string, h: Host) {
   const typos = startSpelling(root);
   startFrontendServersLazily(root, starts, packageJson.includes('"@angular/core"'));
   for (const s of await Promise.allSettled([tusk, tailwind, typos])) {
-    if (s.status === "fulfilled" && s.value) servers.push(s.value);
+    // A later start, such as for another project, replaced these servers while they started.
+    if (s.status === "fulfilled" && s.value) start === starts ? servers.push(s.value) : s.value.stop();
+    else if (start !== starts) continue;
     // A missing tool has its own toast already (toolpaths.ts), so the status bar says the rest.
     else if (s.status === "rejected") host.status(`Language server failed: ${s.reason}`, "app", /wasn't found\./.test(String(s.reason)) ? "info" : undefined);
   }

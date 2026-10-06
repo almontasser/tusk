@@ -110,7 +110,10 @@ pub fn write_atomic(path: impl AsRef<std::path::Path>, bytes: &[u8]) -> std::io:
     let linked = meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1);
     #[cfg(not(unix))]
     let linked = false;
-    let temp = target.file_name().map(|name| target.with_file_name(format!(".{}.tusk-save", name.to_string_lossy())));
+    // Its own name for each write, so two saves of one file at once can't share a temporary file.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = target.file_name().map(|name| target.with_file_name(format!(".{}.{}-{n}.tusk-save", name.to_string_lossy(), std::process::id())));
     if let Some(temp) = temp.filter(|_| !linked) {
         if let Ok(mut file) = std::fs::File::create(&temp) {
             let written = file.write_all(bytes).and_then(|_| file.sync_all()).and_then(|_| match &meta {

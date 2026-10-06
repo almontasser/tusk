@@ -40,7 +40,7 @@ one client per server, and Monaco merges their results.
 | --- | --- |
 | `read_dir` | Lists one folder, folders first, sorted by name without regard to case. Hides `.git` and `.DS_Store`. |
 | `read_file` | Returns a file as UTF-8 text. |
-| `write_file` | Replaces a file's contents through a temporary file beside it (`write_atomic`), renamed over it, so a crash mid-save leaves the old file whole. The watcher leaves the temporary `.name.tusk-save` out of `fs-change`. |
+| `write_file` | Replaces a file's contents through a temporary file beside it (`write_atomic`), renamed over it, so a crash mid-save leaves the old file whole. Each write's temporary file has its own name (`.name.<pid>-<n>.tusk-save`), and the watcher leaves those out of `fs-change`. |
 | `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. |
 | `paths_exist` | Whether each of a batch of paths exists, in one call. |
 
@@ -8983,6 +8983,19 @@ A pass over the running app and the backend found these, now fixed:
   kept in `LOGIN_PATH` and given to each program the app starts, rather than
   set as the app's own PATH from a thread at launch: changing the environment
   while other threads, such as WebKitGTK's, read it can crash on Linux.
+- **Editing races in the frontend.** A save marked the tab saved at the
+  model's version after the write, so keys typed during a slow write showed as
+  saved but weren't on disk; `markSaved` now takes the version whose text was
+  written. A file reloaded after an outside change skips the reload when you
+  typed while it read the file. Opening a project waits for one still opening,
+  so a quick switch at launch can't mix two projects' tabs and terminals.
+  Language servers from a start that a later one replaced are dropped, and a
+  failed start removes its listeners, which had answered the next start's
+  requests twice. Moving a folder moves its open files that git ignores, such
+  as `.env`. Replace All searches again when its results are from another
+  project. Settings saves run one after another, so an older one can't land
+  last. On Windows, backslashes typed in New File, New Folder, and Rename are
+  folder separators.
 - **Tusk's server.** Livewire's JavaScript scanners read a quote just past a
   script's end, and panicked on `@click="Livewire.dispatchTo("` and on
   `$wire.` at the end of a file; each reads only up to its range's end now, and

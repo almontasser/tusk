@@ -15,7 +15,7 @@ import { limits } from "./limits";
 type Host = {
   root(): string;
   openAt(path: string, range: monaco.IRange): unknown;
-  markSaved(path: string): void;
+  markSaved(path: string, version?: number): void;
   status(text: string): void;
   showView(name: "search"): void;
 };
@@ -238,8 +238,9 @@ async function replaceOne(m: Match) {
       // Only if the line still holds the match where the search found it.
       if (model.getValueInRange(new monaco.Range(m.line, m.column, m.line, m.end)) !== found) return host.status("The file changed; search again.");
       model.pushEditOperations([], [{ range: new monaco.Range(m.line, m.column, m.line, m.end), text }], () => null);
+      const version = model.getAlternativeVersionId();
       await writeText(m.path, model.getValue());
-      host.markSaved(m.path);
+      host.markSaved(m.path, version);
       didSave(model);
     } else {
       const lines = (await readText(m.path)).split("\n");
@@ -263,7 +264,8 @@ async function replaceAll(path?: string) {
   const q = query();
   if (!q.text) return;
   rememberSearch();
-  if (running) await search(); // Replace what the fields say now, not an older search's results.
+  // Replace what the fields say now, not an older search's results, nor another project's.
+  if (running || matches.some((m) => !m.path.startsWith(`${host.root()}/`))) await search();
   const listed = path ? matches.filter((m) => m.path === path) : matches;
   if (!listed.length) return host.status("No matches to replace.");
   showReplacePreview({
@@ -298,9 +300,10 @@ async function applyKept(files: [string, Replacement[]][]) {
         model.pushEditOperations([], [{ range: model.getFullModelRange(), text: result.text }], () => null);
         model.pushStackElement();
       }
+      const version = model?.getAlternativeVersionId();
       await writeText(path, result.text);
       if (model) {
-        host.markSaved(path);
+        host.markSaved(path, version);
         didSave(model);
       }
       replaced += result.applied;
@@ -336,9 +339,10 @@ async function replaceIn(paths: string[]) {
       const result = await invoke<{ text: string; count: number }>("replace_text", { text, query: q, replacement: replacement() });
       if (!result.count) continue;
       if (model) model.pushEditOperations([], [{ range: model.getFullModelRange(), text: result.text }], () => null);
+      const version = model?.getAlternativeVersionId();
       await writeText(path, result.text);
       if (model) {
-        host.markSaved(path);
+        host.markSaved(path, version);
         didSave(model);
       }
       replaced += result.count;

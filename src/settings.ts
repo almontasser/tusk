@@ -185,7 +185,11 @@ let blocked = "";
 
 const openFileAction = { label: "Open settings.json", run: () => openSettingsFile() };
 
-async function persist() {
+let saving = Promise.resolve();
+/** Saves after any save still running, so quick changes, such as zooming, can't land out of order. */
+const persist = () => (saving = saving.then(write));
+
+async function write() {
   if (blocked) return toast(`${blocked}. Your changes apply, but aren't saved until you fix the file.`, { action: openFileAction });
   const out = settingsToWrite(raw, settings, invalid);
   try {
