@@ -1,0 +1,104 @@
+{
+  "errors": false,
+  "namespace": "App\\Enums",
+  "uses": [],
+  "useInsert": 28,
+  "classes": [
+    {
+      "kind": "enum",
+      "name": "Status",
+      "fqn": "App\\Enums\\Status",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        29,
+        205
+      ],
+      "bodyStart": 50,
+      "bodyEnd": 204,
+      "traits": [],
+      "constants": [
+        {
+          "name": "DEFAULT",
+          "value": {
+            "kind": "classConst",
+            "class": "self",
+            "classSpan": [
+              156,
+              160
+            ],
+            "name": "Draft",
+            "span": [
+              156,
+              167
+            ]
+          },
+          "span": [
+            140,
+            168
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "name": "Draft",
+          "value": {
+            "kind": "string",
+            "value": "draft",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              68,
+              75
+            ]
+          },
+          "span": [
+            55,
+            76
+          ]
+        },
+        {
+          "name": "Review",
+          "value": {
+            "kind": "string",
+            "value": "review",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              125,
+              133
+            ]
+          },
+          "span": [
+            111,
+            134
+          ]
+        },
+        {
+          "name": "Published",
+          "value": {
+            "kind": "string",
+            "value": "published",
+            "quote": "single",
+            "interpolated": false,
+            "span": [
+              191,
+              202
+            ]
+          },
+          "span": [
+            174,
+            203
+          ]
+        }
+      ],
+      "properties": [],
+      "methods": []
+    }
+  ],
+  "statements": [],
+  "returns": []
+}

@@ -82,8 +82,8 @@ test("settingsEdits and the migration for an existing class", () => {
   assert.match(after, /public PostStatus \$default_status;/);
   assert.match(after, /public array \$tags;\n\n    public string \$currency;\n\n    public static function group/);
   assert.deepEqual(migrationLines(read.spec, designed), [
-    "$this->migrator->rename('general.site_name', 'general.app_name');",
     "$this->migrator->delete('general.open');",
+    "$this->migrator->rename('general.site_name', 'general.app_name');",
     "$this->migrator->update('general.tax_rate', fn () => 0.25);",
     "$this->migrator->update('general.default_status', fn () => 'published');",
     "$this->migrator->add('general.currency', 'USD');",
@@ -94,7 +94,7 @@ test("settingsEdits and the migration for an existing class", () => {
   const moved = applyEdits(text, mergeEdits(settingsEdits(text, outline, read, regrouped)));
   assert.match(moved, /return 'site';/);
   assert.doesNotMatch(moved, /use App\\Enums\\PostStatus;/);
-  assert.equal(migrationLines(read.spec, regrouped)[0], "$this->migrator->rename('general.site_name', 'site.site_name');");
+  assert.ok(migrationLines(read.spec, regrouped).includes("$this->migrator->rename('general.site_name', 'site.site_name');"));
   // A property the database lacks is added with its value.
   const partial = readSettings(outline, ENUMS, Object.fromEntries(Object.entries(VALUES).filter(([k]) => k !== "tags")))!;
   partial.spec.props.at(-1)!.value = [];
@@ -120,4 +120,17 @@ test("pageFieldEdits fills the generator's empty form, and adds after existing f
 test("registerEdit lists a class in config/settings.php", () => {
   const config = "<?php\n\nreturn [\n\n    'settings' => [\n\n    ],\n];\n";
   assert.equal(applyEdits(config, [registerEdit(config, "App\\Shop\\ShopSettings")!]), "<?php\n\nreturn [\n\n    'settings' => [\n        \\App\\Shop\\ShopSettings::class,\n\n    ],\n];\n");
+});
+
+test("settingsEdits removes one of the properties declared together", () => {
+  const { text, outline } = fixture("SharedSettings");
+  const read = readSettings(outline, [], null)!;
+  const without = (...names: string[]) => {
+    const designed = structuredClone(read.spec);
+    designed.props = designed.props.filter((p) => !names.includes(p.name));
+    return applyEdits(text, mergeEdits(settingsEdits(text, outline, read, designed)));
+  };
+  assert.equal(without("site_name"), text.replace("$site_name, $tagline", "$tagline"));
+  assert.equal(without("tagline"), text.replace("$site_name, $tagline", "$site_name"));
+  assert.doesNotMatch(without("site_name", "tagline"), /public string/);
 });

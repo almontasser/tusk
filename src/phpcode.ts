@@ -321,7 +321,16 @@ export function removeItem(text: string, arr: ArrayNode, index: number): Edit {
     const { openEnd } = arrayLayout(text, arr, "    ");
     return { start: openEnd, end: arr.close, text: "" };
   }
-  if (index > 0) return { start: items[index - 1].span[1], end: item.span[1], text: "" };
+  if (index > 0) {
+    const prevEnd = items[index - 1].span[1];
+    // On lines of their own: from the end of the previous item's line, so its trailing comment stays with it, to the
+    // end of this item's line, with its comma and comment. A comment above the item goes with it.
+    const prevLine = text.indexOf("\n", prevEnd);
+    const lineEnd = text.indexOf("\n", item.span[1]);
+    if (prevLine !== -1 && prevLine < item.span[0] && lineEnd !== -1 && /^\s*,?\s*(\/\/[^\n]*|\/\*[^\n]*?\*\/\s*)?$/.test(text.slice(item.span[1], lineEnd)))
+      return { start: prevLine, end: lineEnd, text: "" };
+    return { start: prevEnd, end: item.span[1], text: "" };
+  }
   // The first item: up to where the next one starts, keeping a comment written above the next item.
   const comma = commaAfter(text, item.span[1]);
   const end = comma !== null ? skipSpace(text, comma + 1) : items[1].span[0];

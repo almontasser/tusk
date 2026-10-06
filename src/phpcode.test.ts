@@ -90,6 +90,13 @@ test("removeItem takes the item's lines and keeps the comment above the next one
   assert.match(last, /\$state \?\? ''\)\),\n {20}\]\)/);
 });
 
+test("removeItem keeps the previous item's comment and takes its own", () => {
+  const { text, outline } = fixture("Comments");
+  const arr = outline.classes[0].methods[0].returns[0] as ArrayNode;
+  assert.equal(applyEdits(text, [removeItem(text, arr, 1)]), text.replace("\n            // about b\n            'b', // B", ""));
+  assert.equal(applyEdits(text, [removeItem(text, arr, 2)]), text.replace("\n            'c',", ""));
+});
+
 test("moveItem moves a component with its calls", () => {
   const out = applyEdits(post.text, moveItem(post.text, sectionSchema(), 2, 0));
   assert.match(out, /->schema\(\[\n {24}Select::make\('category_id'\)\n {28}->relationship\('category', 'name'\)\n {28}->searchable\(\),\n {24}TextInput::make\('title'\)/);

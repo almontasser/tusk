@@ -1,0 +1,128 @@
+{
+  "errors": false,
+  "namespace": null,
+  "uses": [],
+  "useInsert": 6,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "A",
+      "fqn": "A",
+      "abstract": false,
+      "final": false,
+      "extends": null,
+      "implements": [],
+      "attributes": [],
+      "span": [
+        6,
+        161
+      ],
+      "bodyStart": 15,
+      "bodyEnd": 160,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [],
+      "methods": [
+        {
+          "name": "f",
+          "static": false,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": null,
+          "attributes": [],
+          "span": [
+            20,
+            159
+          ],
+          "docStart": null,
+          "body": [
+            41,
+            158
+          ],
+          "returns": [
+            {
+              "kind": "array",
+              "items": [
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "a",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      71,
+                      74
+                    ]
+                  },
+                  "span": [
+                    71,
+                    74
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "b",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      116,
+                      119
+                    ]
+                  },
+                  "span": [
+                    116,
+                    119
+                  ],
+                  "spread": false
+                },
+                {
+                  "key": null,
+                  "value": {
+                    "kind": "string",
+                    "value": "c",
+                    "quote": "single",
+                    "interpolated": false,
+                    "span": [
+                      138,
+                      141
+                    ]
+                  },
+                  "span": [
+                    138,
+                    141
+                  ],
+                  "spread": false
+                }
+              ],
+              "open": 57,
+              "close": 151,
+              "legacy": false,
+              "span": [
+                57,
+                152
+              ]
+            }
+          ],
+          "statements": [],
+          "bodyStatements": [
+            {
+              "kind": "other",
+              "span": [
+                50,
+                153
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": [],
+  "returns": []
+}

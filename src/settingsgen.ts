@@ -3,6 +3,7 @@
 // its values. Also the form fields a settings page gets for new properties. No editor imports, so Node tests it.
 import { type Column, formField, type Gen, type ModelFacts, renderGen } from "./filamentgen.ts";
 import { readRoot } from "./filamentschema.ts";
+import { splitTopLevel } from "./refactorparse.ts";
 import { addMember, applyEdits, droppedImports, type Edit, Imports, insertItem, lineIndent, type OClass, type Outline, phpFile, phpString, phpValue, type PhpValue, removeProperty, replaceNode } from "./phpcode.ts";
 
 export type SettingType = "string" | "int" | "float" | "bool" | "array" | "date" | "enum";
@@ -153,8 +154,21 @@ export function settingsEdits(text: string, outline: Outline, before: ReadSettin
   const imports = new Imports(text, outline);
   const name = (f: string) => imports.name(f);
   const own = (p: SettingProp) => cls.properties.find((o) => o.name === p.original?.name && !o.static);
-  // Removed properties.
-  for (const o of before.spec.props) if (!designed.props.some((p) => p.original?.name === o.name)) edits.push(removeProperty(text, own(o)!));
+  // Removed properties. Properties declared together, as in `public string $a, $b;`, share one span: the
+  // declaration goes when all of them do, and otherwise loses just the removed ones.
+  const removed = new Set(before.spec.props.filter((o) => !designed.props.some((p) => p.original?.name === o.name)).map((o) => o.name));
+  const declarations = new Map(cls.properties.filter((o) => !o.static && removed.has(o.name)).map((o) => [o.span.join(), o]));
+  for (const o of declarations.values()) {
+    const together = cls.properties.filter((x) => x.span.join() === o.span.join());
+    if (together.every((x) => removed.has(x.name))) {
+      edits.push(removeProperty(text, o));
+      continue;
+    }
+    const decl = text.slice(o.span[0], o.span[1]).replace(/;\s*$/, "");
+    const head = decl.indexOf("$");
+    const kept = splitTopLevel(decl.slice(head)).map((v) => v.trim()).filter((v) => !removed.has(/^\$(\w+)/.exec(v)?.[1] ?? ""));
+    edits.push({ start: o.span[0] + head, end: o.span[0] + decl.length, text: kept.join(", ") });
+  }
   // Changed properties: the type and name, in place, so attributes and comments stay.
   for (const p of designed.props) {
     const o = own(p);
@@ -210,8 +224,9 @@ export function migrationLines(before: SettingsSpec | null, designed: SettingsSp
   const key = (group: string, name: string) => phpString(`${group}.${name}`);
   const lines: string[] = [];
   const kept = designed.props.filter((p) => p.original?.stored);
-  for (const p of kept) if (p.original!.name !== p.name || old !== g) lines.push(`$this->migrator->rename(${key(old, p.original!.name)}, ${key(g, p.name)});`);
+  // Deletes first, so a property can be renamed to a name another one gave up.
   for (const o of before?.props ?? []) if (o.original?.stored && !designed.props.some((p) => p.original?.name === o.name)) lines.push(`$this->migrator->delete(${key(old, o.name)});`);
+  for (const p of kept) if (p.original!.name !== p.name || old !== g) lines.push(`$this->migrator->rename(${key(old, p.original!.name)}, ${key(g, p.name)});`);
   for (const p of kept) if (p.value !== undefined && p.original!.value !== undefined && !same(p.value, p.original!.value)) lines.push(`$this->migrator->update(${key(g, p.name)}, fn () => ${valueCode(p.value)});`);
   for (const p of designed.props) if (!p.original?.stored) lines.push(`$this->migrator->add(${key(g, p.name)}, ${valueCode(p.value ?? null)});`);
   return lines;

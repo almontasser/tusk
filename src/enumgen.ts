@@ -165,8 +165,9 @@ export function readMatch(code: string, attr: Attr): { values: Record<string, st
     const v = readValue(valueCode, attr);
     if (!v) return null;
     translated ||= v.translated;
+    // A `default` arm with a value of its own would be written back as null, so such a match isn't the designer's to edit.
+    if (conds.some((c) => c.split(",").some((x) => x.trim() === "default"))) return null;
     for (const cond of conds.flatMap((c) => c.split(",").map((x) => x.trim()))) {
-      if (cond === "default") continue;
       const name = /^(self|static)::(\w+)$/.exec(cond)?.[2];
       if (!name) return null;
       values[name] = v.value;
@@ -268,8 +269,28 @@ export function enumEdits(text: string, outline: Outline, before: ReadEnum, desi
     const indent = cases[0] ? lineIndent(text, cases[0].span[0]) : lineIndent(text, cls.bodyStart) + "    ";
     const spaced = cases.length > 1 ? /\n[ \t]*\n/.test(text.slice(cases[0].span[1], cases[1].span[0])) : true;
     const backing = before.spec.backing;
-    const block = designed.cases.map((c) => `case ${c.name}${backing ? ` = ${backing === "int" ? String(Number(c.value) || 0) : `'${c.value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`}` : ""};`).join(spaced ? "\n\n" : "\n");
-    if (cases.length) {
+    const caseCode = (c: DesignedCase) => `case ${c.name}${backing ? ` = ${backing === "int" ? String(Number(c.value) || 0) : `'${c.value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`}` : ""};`;
+    const block = designed.cases.map(caseCode).join(spaced ? "\n\n" : "\n");
+    const endOf = (k: (typeof cases)[number]) => text.indexOf(";", k.span[1] - 1) + 1 || k.span[1];
+    // Without a reorder, each case changes in place and new ones follow the last, so comments and constants between
+    // cases stay.
+    const kept = designed.cases.filter((c) => c.original);
+    const inOrder =
+      kept.length > 0 &&
+      designed.cases.slice(0, kept.length).every((c) => c.original) &&
+      JSON.stringify(kept.map((c) => c.original)) === JSON.stringify(cases.map((k) => k.name).filter((n) => kept.some((c) => c.original === n)));
+    if (inOrder) {
+      for (const k of cases) {
+        const d = kept.find((c) => c.original === k.name);
+        if (!d) {
+          const lineStart = text.lastIndexOf("\n", k.span[0] - 1);
+          edits.push({ start: lineStart === -1 ? k.span[0] : lineStart, end: endOf(k), text: "" });
+        } else if (caseCode(d) !== text.slice(k.span[0], endOf(k))) edits.push({ start: k.span[0], end: endOf(k), text: caseCode(d) });
+      }
+      const added = designed.cases.slice(kept.length).map((c) => `${spaced ? "\n" : ""}\n${indent}${caseCode(c)}`).join("");
+      const at = endOf(cases.filter((k) => kept.some((c) => c.original === k.name)).at(-1)!);
+      if (added) edits.push({ start: at, end: at, text: added });
+    } else if (cases.length) {
       const start = text.lastIndexOf("\n", cases[0].span[0] - 1) + 1;
       const last = cases[cases.length - 1];
       const end = text.indexOf(";", last.span[1] - 1) + 1 || last.span[1];

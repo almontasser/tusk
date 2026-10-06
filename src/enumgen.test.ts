@@ -1,7 +1,9 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { caseLabel, caseName, caseValue, enumFile, type DesignedCase, type EnumSpec, matchCode, readMatch, splitTopLevel } from "./enumgen.ts";
+import { caseLabel, caseName, caseValue, enumEdits, enumFile, type DesignedCase, type EnumSpec, matchCode, readEnum, readMatch, splitTopLevel } from "./enumgen.ts";
+import { fixture } from "./designerfixture.ts";
+import { applyEdits } from "./phpcode.ts";
 
 const spec: EnumSpec = {
   name: "OrderStatus",
@@ -39,6 +41,9 @@ test("readMatch reads plain arms, shared arms, and translated labels, and refuse
   assert.deepEqual(readMatch("match ($this) {\n self::New => 'info',\n self::Shipped, self::Delivered => 'success',\n self::Cancelled => 'danger',\n}", "color"), { values: { New: "info", Shipped: "success", Delivered: "success", Cancelled: "danger" }, translated: false });
   assert.deepEqual(readMatch("match ($this) { self::A => __('First, really'), self::B => __('Second') }", "label"), { values: { A: "First, really", B: "Second" }, translated: true });
   assert.equal(readMatch("match ($this) { self::New => FilamentIcon::resolve(X::Y) ?? Heroicon::Sparkles }", "icon"), null);
+  // A default with its own value can't be kept by the designer, which writes `default => null`.
+  assert.equal(readMatch("match ($this) { self::New => 'info', default => 'gray' }", "color"), null);
+  assert.deepEqual(readMatch("match ($this) { self::New => 'info', default => null }", "color"), { values: { New: "info" }, translated: false });
   assert.deepEqual(readMatch(matchCode(spec, "icon", true), "icon")!.values, { New: "Sparkles", Shipped: "Truck" });
   assert.equal(readMatch("match (true) { default => 'x' }", "label"), null);
   assert.deepEqual(splitTopLevel("a, f(b, c), 'd, e'"), ["a", "f(b, c)", "'d, e'"]);
@@ -75,4 +80,14 @@ test("readEnum and enumEdits change an enum in place", async () => {
   assert.match(withDescription, /implements HasColor, HasIcon, HasLabel, HasDescription/);
   assert.match(withDescription, /use Filament\\Support\\Contracts\\HasDescription;/);
   assert.match(withDescription, /public function getDescription\(\): string \| Htmlable \| null\n {4}\{\n {8}return match \(\$this\) \{\n {12}self::New => 'New orders',/);
+});
+
+test("enumEdits changes cases in place, keeping what's between them", () => {
+  const { text, outline } = fixture("StatusEnum");
+  const before = readEnum(text, outline)!;
+  const [draft, review, published] = before.spec.cases.map((c) => ({ ...c, original: c.name }));
+  const edit = (cases: DesignedCase[]) => applyEdits(text, enumEdits(text, outline, before, { cases, contracts: before.spec.contracts, translated: false }, { heroicon: false }));
+  const added = edit([draft, { ...review, name: "InReview" }, published, { name: "Archived", value: "archived" } as DesignedCase]);
+  assert.equal(added, text.replace("case Review = 'review';", "case InReview = 'review';").replace("case Published = 'published';", "case Published = 'published';\n    case Archived = 'archived';"));
+  assert.equal(edit([draft, published]), text.replace("\n    case Review = 'review';", ""));
 });

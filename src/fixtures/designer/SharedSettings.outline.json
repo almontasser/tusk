@@ -1,0 +1,122 @@
+{
+  "errors": false,
+  "namespace": "App\\Settings",
+  "uses": [
+    {
+      "alias": "Settings",
+      "name": "Spatie\\LaravelSettings\\Settings",
+      "kind": "class",
+      "span": [
+        32,
+        68
+      ]
+    }
+  ],
+  "useInsert": 69,
+  "classes": [
+    {
+      "kind": "class",
+      "name": "SharedSettings",
+      "fqn": "App\\Settings\\SharedSettings",
+      "abstract": false,
+      "final": false,
+      "extends": "Spatie\\LaravelSettings\\Settings",
+      "implements": [],
+      "attributes": [],
+      "span": [
+        70,
+        259
+      ],
+      "bodyStart": 109,
+      "bodyEnd": 258,
+      "traits": [],
+      "constants": [],
+      "cases": [],
+      "properties": [
+        {
+          "name": "site_name",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "string",
+          "value": null,
+          "span": [
+            114,
+            149
+          ],
+          "attributes": []
+        },
+        {
+          "name": "tagline",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "string",
+          "value": null,
+          "span": [
+            114,
+            149
+          ],
+          "attributes": []
+        },
+        {
+          "name": "active",
+          "static": false,
+          "visibility": "public",
+          "readonly": false,
+          "type": "bool",
+          "value": null,
+          "span": [
+            155,
+            175
+          ],
+          "attributes": []
+        }
+      ],
+      "methods": [
+        {
+          "name": "group",
+          "static": true,
+          "abstract": false,
+          "visibility": "public",
+          "params": [],
+          "returnType": "string",
+          "attributes": [],
+          "span": [
+            181,
+            257
+          ],
+          "docStart": null,
+          "body": [
+            225,
+            256
+          ],
+          "returns": [
+            {
+              "kind": "string",
+              "value": "general",
+              "quote": "single",
+              "interpolated": false,
+              "span": [
+                241,
+                250
+              ]
+            }
+          ],
+          "statements": [],
+          "bodyStatements": [
+            {
+              "kind": "other",
+              "span": [
+                234,
+                251
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": [],
+  "returns": []
+}

@@ -3,6 +3,7 @@
 // place (src/enumgen.ts), keeping what the designer can't read. Changes are staged, with the file's code previewed.
 import { invoke } from "@tauri-apps/api/core";
 import type * as L from "vscode-languageserver-protocol";
+import { typeNameProblem } from "./classparse";
 import { h, icon, iconButton, redraw } from "./dom";
 import { monaco } from "./editor";
 import { type Attr, caseLabel, caseName, caseValue, CONTRACTS, type DesignedCase, enumEdits, enumFile, type EnumSpec, readEnum, type ReadEnum } from "./enumgen";
@@ -325,6 +326,9 @@ class EnumDesigner {
     const s = this.spec!;
     const out: string[] = [];
     if (!/^[A-Z]\w*$/.test(s.name)) out.push("Give the enum a class name, such as OrderStatus.");
+    else if (typeNameProblem(s.name)) out.push(typeNameProblem(s.name)!);
+    // PHP reserves `class` for Status::class, so no case can take the name.
+    if (this.cases.some((c) => c.name.toLowerCase() === "class")) out.push("A case can't be named Class: PHP reserves it.");
     if (!this.cases.length) out.push("Add at least one case.");
     const names = this.cases.map((c) => c.name);
     const dupName = names.find((n, i) => names.indexOf(n) !== i);
