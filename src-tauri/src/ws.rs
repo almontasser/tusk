@@ -56,6 +56,8 @@ pub fn ws_connect(app: AppHandle, state: State<'_, WsState>, url: String, header
     let addr = (host.as_str(), port).to_socket_addrs().map_err(|e| e.to_string())?.next().ok_or("Couldn't resolve the host")?;
     let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10)).map_err(|e| e.to_string())?;
     let socket = tcp.try_clone().map_err(|e| e.to_string())?;
+    // A server that accepts the connection but never answers the handshake fails it rather than hanging.
+    socket.set_read_timeout(Some(Duration::from_secs(30))).map_err(|e| e.to_string())?;
     let tls = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(insecure)
         .danger_accept_invalid_hostnames(insecure)
