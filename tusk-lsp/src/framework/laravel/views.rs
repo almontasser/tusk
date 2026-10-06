@@ -1182,7 +1182,7 @@ fn sites_in(index: &Index, path: &Path, text: &str, quoted: &[String; 2], tags: 
             }
             let mut vars: Site = echoes.into_iter().map(|(name, s, e)| (name, analysis.type_of(checked.php_offset(s) as u32, checked.php_offset(e) as u32).and_then(|t| docblock_type(&t)))).collect();
             if let Some(data) = args.get(position + 1) {
-                let t = data.and_then(|d| type_of(d));
+                let t = data.and_then(&type_of);
                 // Data whose keys aren't all known may replace any variable.
                 if !matches!(t.as_deref().map(|t| &t.types[..]), Some([TAtomic::Array(TArray::Keyed(k))]) if k.parameters.is_none()) {
                     vars.clear();

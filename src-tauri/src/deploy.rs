@@ -1195,7 +1195,7 @@ fn diff(local: &[FileInfo], remote: &[FileInfo]) -> (Vec<Difference>, Vec<Differ
                 let d = Difference { path: l.path.clone(), kind: "changed", newer: newer(l, r), local: Some(l.clone()), remote: Some((*r).clone()) };
                 if l.size != r.size {
                     sure.push(d);
-                } else if d.newer != "" {
+                } else if !d.newer.is_empty() {
                     unsure.push(d);
                 }
             }

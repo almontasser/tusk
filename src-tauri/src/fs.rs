@@ -19,7 +19,7 @@ pub async fn read_dir(path: String) -> Result<Vec<Entry>, String> {
 }
 
 fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
-    let mut entries: Vec<Entry> = std::fs::read_dir(&path)
+    let mut entries: Vec<Entry> = std::fs::read_dir(path)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter(|e| !matches!(e.file_name().to_str(), Some(".git" | ".DS_Store")))

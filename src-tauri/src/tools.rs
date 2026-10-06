@@ -45,7 +45,7 @@ pub async fn run_capture(cwd: String, program: String, args: Vec<String>, input:
 }
 
 fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String>, any_status: bool) -> Result<String, String> {
-    crate::toolpaths::check(&[&[program.clone()], &args[..]].concat())?;
+    crate::toolpaths::check(&[std::slice::from_ref(&program), &args[..]].concat())?;
     let mut child = crate::toolpaths::command(program)
         .args(args)
         .current_dir(cwd)

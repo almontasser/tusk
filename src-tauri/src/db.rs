@@ -129,7 +129,10 @@ static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<S
 fn running(id: &Option<String>, cancel: impl FnOnce() -> Cancel) -> Result<(), String> {
     let Some(id) = id else { return Ok(()) };
     match RUNNING.lock().unwrap().get_mut(id) {
-        Some(slot) => Ok(*slot = Some(cancel())),
+        Some(slot) => {
+            *slot = Some(cancel());
+            Ok(())
+        }
         None => Err(CANCELED.into()),
     }
 }
@@ -679,7 +682,7 @@ fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String
         _ => None,
     };
     let reply = with_redis(c, |db| {
-        db.send(&[args.clone()])?;
+        db.send(std::slice::from_ref(&args))?;
         db.read()
     })?;
     match reply {
