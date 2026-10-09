@@ -172,7 +172,7 @@ function apply() {
       fontSize: settings.fontSize,
       wordWrap: settings.wordWrap ? "on" : "off",
       minimap: { enabled: settings.minimap },
-      renderWhitespace: settings.showWhitespace ? "boundary" : "none",
+      renderWhitespace: settings.showWhitespace ? "boundary" : "selection",
       inlayHints: { enabled: settings.inlayHints ? "on" : "off" },
     });
     setVim(ed, settings.vim);

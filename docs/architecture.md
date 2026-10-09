@@ -9187,7 +9187,7 @@ user code:
 - Column Selection Mode (⇧⌘8) sets `columnSelection` on every pane's editor,
   and `addPane` gives new panes the current value.
 - Soft-Wrap, Show Minimap, the new `showWhitespace` setting (Monaco's
-  `renderWhitespace: "boundary"`), and the font size actions change settings
+  `renderWhitespace: "boundary"`, or Monaco's default `"selection"` when off), and the font size actions change settings
   with `updateSetting`, so they persist and show in Settings.
 - ⌘K clears the focused terminal on a Mac (`clearTerminal`). The action comes
   before Commit… and its `when` is false off a Mac, so Ctrl+K there still

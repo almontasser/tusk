@@ -1926,6 +1926,8 @@ function surroundWith() {
   const model = editor.getModel();
   const sel = editor.getSelection();
   if (!model || !sel) return;
+  // The templates are PHP's and Blade's.
+  if (!model.uri.path.endsWith(".php")) return status("Surround With has templates for PHP and Blade files.");
   const ed = editor;
   const items = (model.uri.path.endsWith(".blade.php") ? BLADE_SURROUNDS : PHP_SURROUNDS).map((t) => ({
     label: t.label,
