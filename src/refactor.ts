@@ -87,7 +87,7 @@ function changesOf(edit: L.WorkspaceEdit): Record<string, L.TextEdit[]> {
 async function applyServerEdit(result: ServerEdit, title: string, preview = false) {
   const changes = changesOf(result.edit);
   const files = Object.keys(changes).length;
-  const apply = () => applyWorkspaceEdit(result.edit).then(() => host.status(`${result.message}${files > 1 ? " ⌘Z undoes it in every file." : ""}`));
+  const apply = () => applyWorkspaceEdit(result.edit).then((applied) => applied && host.status(`${result.message}${files > 1 ? " ⌘Z undoes it in every file." : ""}`));
   if (!result.skipped.length && !preview) return apply();
   const texts = new Map<string, string>();
   for (const uri of new Set([...Object.keys(changes), ...result.skipped.map((s) => s.uri)])) texts.set(uri, await textOf(monaco.Uri.parse(uri).fsPath).catch(() => ""));
