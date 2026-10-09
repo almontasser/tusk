@@ -38,7 +38,8 @@ export async function showReplacePreview(o: PreviewOptions) {
   panel.replaceChildren(h("p", { class: "muted replace-note" }, `Working out ${o.matches.length} replacements…`));
   let after: (string | null)[];
   try {
-    after = await invoke<(string | null)[]>("replacements", { matches: o.matches.map((m) => [m.text, m.column]), query: o.query, replacement: o.replacement });
+    // A match's text may be part of its line, so its column there is counted from where the text starts.
+    after = await invoke<(string | null)[]>("replacements", { matches: o.matches.map((m) => [m.text, m.column - m.offset]), query: o.query, replacement: o.replacement });
   } catch (e) {
     panel.replaceChildren(h("p", { class: "muted replace-note", role: "alert" }, `Couldn't work out the replacements: ${errorText(e)}`));
     return;
@@ -92,7 +93,7 @@ export async function showReplacePreview(o: PreviewOptions) {
     const children: HTMLElement[] = list.map((it, i) => {
       const box = checkbox(true, `Replace on line ${it.m.line}`, (on) => (it.kept = on));
       const before = it.m.text;
-      const changed = before.slice(0, it.m.column - 1) + it.text + before.slice(it.m.end - 1);
+      const changed = before.slice(0, it.m.column - 1 - it.m.offset) + it.text + before.slice(it.m.end - 1 - it.m.offset);
       const row = h(
         "li",
         { class: "hierarchy-row", role: "treeitem", style: "padding-left: 28px", data: { key: `${path}\n${i}`, path, label: before.trim() } },
@@ -131,7 +132,7 @@ export async function showReplacePreview(o: PreviewOptions) {
   replaceButton.onclick = async () => {
     const kept = [...files].map(([path, list]): [string, Replacement[]] => [
       path,
-      list.filter((it) => it.kept).map((it) => ({ line: it.m.line, column: it.m.column, end: it.m.end, text: it.text!, lineText: it.m.text })),
+      list.filter((it) => it.kept).map((it) => ({ line: it.m.line, column: it.m.column, end: it.m.end, text: it.text!, lineText: it.m.text, lineOffset: it.m.offset })),
     ]).filter(([, list]) => list.length);
     closeView(panel);
     await o.apply(kept).catch((e) => showError("Replace failed", e));

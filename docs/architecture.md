@@ -9180,12 +9180,14 @@ user code:
   counted its columns from the line's start, so a minified file's line of
   hundreds of KB with thousands of matches took gigabytes and hung. A match's
   `text` is now a window of up to 200 characters before it and 300 after, with
-  `offset`, the UTF-16 column the window starts at, which `src/search.ts`
-  subtracts; columns are counted in one pass per line. Cancel is checked
-  between matches, not only between files, and empty matches, which grep
-  reports inside multibyte characters and which panicked the slice, are
-  skipped. The Replace Preview doesn't know the offset yet, so a match in a cut
-  line is left out there as changed since the search.
+  `offset`, the UTF-16 column the window starts at, which `src/search.ts` and
+  the Replace Preview subtract; columns are counted in one pass per line. The
+  preview's `replacements` call gets the column within the window, and
+  `applyReplacements` checks that the file's line still reads the same at each
+  match's window (`lineText` at `lineOffset`) rather than comparing the whole
+  line, then applies by absolute column. Cancel is checked between matches,
+  not only between files, and empty matches, which grep reports inside
+  multibyte characters and which panicked the slice, are skipped.
 - **Redis connections that changed state aren't pooled.** A console or key
   browser command such as `SELECT`, `MULTI`, `WATCH`, a subscription,
   `MONITOR`, `CLIENT`, `RESET`, `HELLO`, or `AUTH` closes its connection

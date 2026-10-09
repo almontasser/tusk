@@ -375,6 +375,9 @@ mod tests {
         let units: Vec<u16> = m.text.encode_utf16().collect();
         assert_eq!(String::from_utf16(&units[m.column - 1 - m.offset..m.end - 1 - m.offset]).unwrap(), "needle");
         assert_eq!(m.text.chars().count(), 200 + 6 + 300);
+        // The replace preview works out a match in its window, by the column counted from the window's start.
+        let got = replacements(vec![(m.text.clone(), m.column - m.offset)], q("need(le)", true, true, false), "x$1".into()).unwrap();
+        assert_eq!(got, [Some("xle".to_string())]);
         // `x*` matches only empty text, some of it inside "é"; none of it is a match, and nothing panics.
         assert!(find_text(root.clone(), q("x*", true, true, false), "".into(), "".into(), &stop, MAX_MATCHES).unwrap().is_empty());
         let short = find_text(root, q("é", false, true, false), "".into(), "".into(), &stop, MAX_MATCHES).unwrap();
