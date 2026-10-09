@@ -277,8 +277,9 @@ async fn take(server: &Server) -> Result<Conn, String> {
         let Some(mut idle) = idle else { break };
         let alive = match &mut idle.conn {
             Conn::Sftp { ssh, .. } => !ssh.is_closed(),
-            // FTP servers drop idle logins after a few minutes; a NOOP finds out without a data connection.
-            Conn::Ftp { ftp, .. } => idle.since.elapsed() < Duration::from_secs(15) || ftp.noop().await.is_ok(),
+            // FTP servers drop idle logins after a few minutes; a NOOP finds out without a data connection. One
+            // that doesn't answer in 5 seconds, such as through a NAT that forgot it, counts as dropped.
+            Conn::Ftp { ftp, .. } => idle.since.elapsed() < Duration::from_secs(15) || matches!(tokio::time::timeout(Duration::from_secs(5), ftp.noop()).await, Ok(Ok(_))),
         };
         if alive {
             return Ok(idle.conn);
@@ -320,7 +321,7 @@ async fn connect(server: &Server) -> Result<Conn, String> {
 }
 
 async fn connect_sftp(server: &Server) -> Result<Conn, String> {
-    use crate::sshconfig::{expand, parse_jump, resolve, Tokens};
+    use crate::sshconfig::{expand_command, parse_jump, resolve, Tokens};
     // A host that's an alias in ~/.ssh/config connects as ssh would: to its HostName, port, and user, with its
     // keys, through its jump hosts or its ProxyCommand. Settings typed here win over the file's.
     let cfg = resolve(&server.host);
@@ -338,7 +339,7 @@ async fn connect_sftp(server: &Server) -> Result<Conn, String> {
         // Later hops go through the one before; the first can have a ProxyCommand of its own.
         let via = match (jumps.last(), &jump.proxy_command) {
             (Some(previous), _) => Via::Jump(previous),
-            (None, Some(command)) => Via::Command(expand(command, &Tokens { host_name: &jump_host, original: &alias, user: &jump_user, port: jump_port })),
+            (None, Some(command)) => Via::Command(expand_command(command, &Tokens { host_name: &jump_host, original: &alias, user: &jump_user, port: jump_port })?),
             (None, None) => Via::Direct,
         };
         let (mut handle, child) = handshake(&jump_host, jump_port, jump.host_key_alias.as_deref(), via).await.map_err(|e| if e.starts_with("host-key:") { e } else { format!("Can't reach the jump host {alias}: {e}") })?;
@@ -348,7 +349,7 @@ async fn connect_sftp(server: &Server) -> Result<Conn, String> {
     }
     let via = match (jumps.last(), &cfg.proxy_command) {
         (Some(jump), _) => Via::Jump(jump),
-        (None, Some(command)) => Via::Command(expand(command, &Tokens { host_name: &host, original: &server.host, user: &user, port })),
+        (None, Some(command)) => Via::Command(expand_command(command, &Tokens { host_name: &host, original: &server.host, user: &user, port })?),
         (None, None) => Via::Direct,
     };
     let (mut ssh, child) = handshake(&host, port, cfg.host_key_alias.as_deref(), via).await?;
@@ -554,7 +555,7 @@ pub(crate) fn whoami() -> String {
 fn key_files(cfg: &crate::sshconfig::HostConfig, chosen: &str) -> Vec<(PathBuf, bool)> {
     let home = std::env::home_dir().unwrap_or_default();
     if !chosen.is_empty() {
-        return vec![(PathBuf::from(chosen.replacen('~', &home.to_string_lossy(), 1)), true)];
+        return vec![(PathBuf::from(crate::sshconfig::expand_tilde(chosen)), true)];
     }
     let mut files: Vec<(PathBuf, bool)> = cfg.identity_files.iter().map(|f| (PathBuf::from(f), false)).collect();
     if !cfg.identities_only {
@@ -725,6 +726,12 @@ fn name_of(path: &str) -> &str {
     &path[path.rfind('/').map_or(0, |i| i + 1)..]
 }
 
+/// Whether a name a server listed is one entry of its folder. `.`, `..`, and names with a separator are left out:
+/// joined to a local folder, a hostile server's `../x` would reach outside it.
+fn listable(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\'])
+}
+
 fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() || dir == "." {
         name.to_string()
@@ -755,7 +762,7 @@ impl Conn {
                         let m = e.metadata();
                         Entry { name: e.file_name(), dir: m.is_dir(), link: m.is_symlink(), size: m.size.unwrap_or(0), mtime: m.mtime.unwrap_or(0) as i64, mode: m.permissions.map(|p| p & 0o7777), owner: m.uid.zip(m.gid) }
                     })
-                    .filter(|e| e.name != "." && e.name != "..")
+                    .filter(|e| listable(&e.name))
                     .collect())
             }
             Conn::Ftp { ftp, mlsd } => {
@@ -764,14 +771,14 @@ impl Conn {
                     match ftp.mlsd(Some(dir)).await {
                         Ok(lines) => {
                             *mlsd = Some(true);
-                            return Ok(lines.iter().filter_map(|l| suppaftp::list::ListParser::parse_mlsd(l).ok()).map(ftp_entry).filter(|e| e.name != "." && e.name != "..").collect());
+                            return Ok(lines.iter().filter_map(|l| suppaftp::list::ListParser::parse_mlsd(l).ok()).map(ftp_entry).filter(|e| listable(&e.name)).collect());
                         }
                         Err(e) if mlsd.is_none() && ["[500]", "[502]", "[504]"].iter().any(|c| e.to_string().contains(c)) => *mlsd = Some(false),
                         Err(e) => return Err(ftp_err(dir)(e)),
                     }
                 }
                 let lines = ftp.list(Some(dir)).await.map_err(ftp_err(dir))?;
-                Ok(lines.iter().filter_map(|l| suppaftp::list::File::try_from(l.as_str()).ok()).map(ftp_entry).filter(|e| e.name != "." && e.name != "..").collect())
+                Ok(lines.iter().filter_map(|l| suppaftp::list::File::try_from(l.as_str()).ok()).map(ftp_entry).filter(|e| listable(&e.name)).collect())
             }
         }
     }
@@ -1589,6 +1596,14 @@ mod tests {
     }
 
     #[test]
+    fn listings_leave_out_names_that_leave_the_folder() {
+        assert!(listable("index.php") && listable(".env") && listable("..."));
+        for name in ["", ".", "..", "../x", "a/b", r"..\x", "/etc"] {
+            assert!(!listable(name), "{name}");
+        }
+    }
+
+    #[test]
     fn excludes_match_names_anywhere_and_paths_from_the_root() {
         let x = Excludes::new(&[".git".into(), "node_modules".into(), "storage/logs".into(), "*.log".into(), "/vendor/".into()]);
         assert!(x.matches(".git"));
@@ -1615,7 +1630,7 @@ mod tests {
             std::fs::write(path, "x").unwrap();
         }
         let root = crate::slash(&dir);
-        let files = local_files(&dir, &[root.clone()], &Excludes::new(&["node_modules".into(), ".env".into()]));
+        let files = local_files(&dir, std::slice::from_ref(&root), &Excludes::new(&["node_modules".into(), ".env".into()]));
         assert_eq!(files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["app/A.php", "app/B.php", "public/index.php"]);
         let one = local_files(&dir, &[format!("{root}/app/B.php"), format!("{root}/.env")], &Excludes::new(&[".env".into()]));
         assert_eq!(one.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["app/B.php"]);

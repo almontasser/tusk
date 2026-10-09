@@ -50,10 +50,12 @@ fn request(socket: &str, confirm: bool, prompt: &str) -> Option<String> {
 }
 
 /// Reads one prompt from `stream`, asks `ask`, and writes the answer back. A prompt without `secret` is
-/// ignored: any program on the computer can reach the port.
+/// ignored: any program on the computer can reach the port, so a prompt over 64 KB, or one that takes over 10
+/// seconds to arrive, is too.
 fn handle(mut stream: TcpStream, secret: &str, ask: impl FnOnce(bool, String) -> Option<String>) {
     let mut text = String::new();
-    if stream.read_to_string(&mut text).is_err() {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    if Read::by_ref(&mut stream).take(64 * 1024).read_to_string(&mut text).is_err() {
         return;
     }
     let Some(text) = text.strip_prefix(secret).and_then(|t| t.strip_prefix('\n')) else { return };

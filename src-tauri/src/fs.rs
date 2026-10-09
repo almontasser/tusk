@@ -26,7 +26,8 @@ fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
         .map(|e| Entry {
             name: e.file_name().to_string_lossy().into(),
             path: crate::slash(e.path()),
-            is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            // A link to a folder lists as one; the tree only opens a folder when you do, so a loop of links is harmless.
+            is_dir: e.file_type().is_ok_and(|t| t.is_dir() || (t.is_symlink() && e.path().is_dir())),
         })
         .collect();
     entries.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
@@ -249,7 +250,7 @@ pub async fn remove_path(path: String) -> Result<(), String> {
 }
 
 /// Removes a folder only when it's empty, as after undoing a refactoring that created a file in a new folder.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_empty_dir(path: String) -> Result<(), String> {
     std::fs::remove_dir(path).map_err(|e| e.to_string())
 }

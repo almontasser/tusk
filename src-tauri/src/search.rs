@@ -109,7 +109,7 @@ fn find_symbol_free(root: &str) -> Result<Vec<Folder>, String> {
         .filter(|(dir, (_, bytes, free))| *free && *bytes >= 100 * 1024 && dir.parent().and_then(|p| folders.get(p)).is_some_and(|parent| !parent.2))
         .map(|(dir, (files, bytes, _))| Folder { path: crate::slash(dir), files: *files, bytes: *bytes })
         .collect();
-    found.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    found.sort_by_key(|f| std::cmp::Reverse(f.bytes));
     Ok(found)
 }
 
@@ -150,7 +150,34 @@ pub struct Match {
     /// 1-based start and end columns in UTF-16 code units, as Monaco counts them.
     column: usize,
     end: usize,
+    /// The line around the match: up to 200 characters before it and 300 after, so a match in a minified file
+    /// doesn't copy its whole line.
     text: String,
+    /// The 0-based UTF-16 column `text` starts at, 0 unless the line was cut.
+    offset: usize,
+}
+
+/// Characters a match's `text` keeps before and after it.
+const BEFORE: usize = 200;
+const AFTER: usize = 300;
+
+/// Calls `each` with every match in `text`, one line: its 1-based UTF-16 start and end columns, the 0-based column
+/// its window starts at, and the window. Columns are counted in one pass over the line. `each` returns false to stop.
+fn line_matches(matcher: &RegexMatcher, text: &str, mut each: impl FnMut(usize, usize, usize, &str) -> bool) {
+    let (mut byte, mut units) = (0, 0); // How far counting got, in bytes and UTF-16 units.
+    let _ = matcher.find_iter(text.as_bytes(), |m| {
+        // An empty match marks nothing, and grep reports some inside a multibyte character.
+        if m.is_empty() || !text.is_char_boundary(m.start()) || !text.is_char_boundary(m.end()) {
+            return true;
+        }
+        let column = units + text[byte..m.start()].encode_utf16().count();
+        let end = column + text[m.start()..m.end()].encode_utf16().count();
+        (byte, units) = (m.end(), end);
+        let from = text[..m.start()].char_indices().rev().nth(BEFORE - 1).map_or(0, |(i, _)| i);
+        let to = text[m.end()..].char_indices().nth(AFTER).map_or(text.len(), |(i, _)| m.end() + i);
+        let offset = column - text[from..m.start()].encode_utf16().count();
+        each(column + 1, end + 1, offset, text[from..to].trim_end())
+    });
 }
 
 /// Searches in flight by the caller's ID, each with the flag that stops it.
@@ -196,23 +223,21 @@ fn find_text(root: String, query: Query, include: String, exclude: String, stop:
             &matcher,
             path,
             UTF8(|line, text| {
-                let utf16 = |byte: usize| text[..byte].encode_utf16().count() + 1;
-                let _ = matcher.find_iter(text.as_bytes(), |m| {
-                    matches.push(Match {
-                        path: crate::slash(path),
-                        line,
-                        column: utf16(m.start()),
-                        end: utf16(m.end()),
-                        text: text.trim_end().into(),
-                    });
-                    matches.len() < limit
+                // A line with thousands of matches checks for Cancel between them.
+                let more = |found: usize| found < limit && !stop.load(std::sync::atomic::Ordering::Relaxed);
+                line_matches(&matcher, text, |column, end, offset, text| {
+                    matches.push(Match { path: crate::slash(path), line, column, end, text: text.into(), offset });
+                    more(matches.len())
                 });
-                Ok(matches.len() < limit)
+                Ok(more(matches.len()))
             }),
         );
         if matches.len() >= limit {
             break;
         }
+    }
+    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(CANCELLED.into());
     }
     Ok(matches)
 }
@@ -333,6 +358,27 @@ mod tests {
         assert!(all.iter().any(|f| f.starts_with("vendor")));
         let matching = tauri::async_runtime::block_on(files_matching(root.clone(), q("needle", false, false, false), "".into(), None)).unwrap();
         assert_eq!(matching.len(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cuts_long_lines_around_matches_and_skips_empty_ones() {
+        let dir = std::env::temp_dir().join(format!("php-editor-search-long-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Each emoji is 2 UTF-16 units, as Monaco counts columns.
+        std::fs::write(dir.join("min.css"), format!("{}needle{}\ncafé é\n", "😀".repeat(300), "b".repeat(1000))).unwrap();
+        let root = dir.to_string_lossy().to_string();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let found = find_text(root.clone(), q("needle", false, true, false), "".into(), "".into(), &stop, MAX_MATCHES).unwrap();
+        let m = &found[0];
+        assert_eq!((m.column, m.end, m.offset), (601, 607, 200));
+        let units: Vec<u16> = m.text.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&units[m.column - 1 - m.offset..m.end - 1 - m.offset]).unwrap(), "needle");
+        assert_eq!(m.text.chars().count(), 200 + 6 + 300);
+        // `x*` matches only empty text, some of it inside "é"; none of it is a match, and nothing panics.
+        assert!(find_text(root.clone(), q("x*", true, true, false), "".into(), "".into(), &stop, MAX_MATCHES).unwrap().is_empty());
+        let short = find_text(root, q("é", false, true, false), "".into(), "".into(), &stop, MAX_MATCHES).unwrap();
+        assert_eq!(short.iter().map(|m| (m.column, m.offset, m.text.as_str())).collect::<Vec<_>>(), [(4, 0, "café é"), (6, 0, "café é")]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

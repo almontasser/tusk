@@ -52,7 +52,10 @@ fn kill_with_app(child: &Child) {
 
 /// Running language servers by name, each with a channel to the thread that writes its input.
 #[derive(Default)]
-pub struct LspState(Mutex<HashMap<String, (Child, Sender<Vec<u8>>)>>);
+pub struct LspState(Mutex<HashMap<String, Server>>);
+
+/// A language server's process and the channel to its input's writer.
+type Server = (Child, Sender<Vec<u8>>);
 
 /// Writes messages to a server's input on a thread of its own. A busy server stops reading, its
 /// pipe fills, and a write then blocks until it reads again; that must never be the main thread.
@@ -344,7 +347,7 @@ mod tests {
 
 /// Edits a TOML file, such as `mago.toml` or `_typos.toml`, keeping its comments and the keys it doesn't touch
 /// (`tusk_lsp::config_edit`). A missing file starts from `create`, or empty.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn toml_edit(path: String, edits: Vec<tusk_lsp::config_edit::Edit>, create: Option<String>) -> Result<(), String> {
     let name = std::path::Path::new(&path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());
     let (text, exists) = match std::fs::read_to_string(&path) {
@@ -360,7 +363,7 @@ pub fn toml_edit(path: String, edits: Vec<tusk_lsp::config_edit::Edit>, create: 
 }
 
 /// A TOML file as JSON, or null when it doesn't exist.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn toml_read(path: String) -> Result<serde_json::Value, String> {
     match std::fs::read_to_string(&path) {
         Ok(text) => {
@@ -374,7 +377,7 @@ pub fn toml_read(path: String) -> Result<serde_json::Value, String> {
 
 /// The PHP Analysis settings page's view of a Mago configuration (`tusk_lsp::mago_config::describe`): `path` is
 /// the project's `mago.toml`, or the editor's generated copy when the project has none.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mago_settings(root: String, path: String) -> Result<serde_json::Value, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("Can't read {path}: {e}"))?;
     tusk_lsp::mago_config::describe(&text, std::path::Path::new(&root))

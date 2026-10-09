@@ -66,9 +66,22 @@ fn capture(cwd: String, program: String, args: Vec<String>, input: Option<String
     Ok(String::from_utf8_lossy(&out.stdout).into())
 }
 
-/// Opens a web address in the browser, or a file in its app.
+/// Starts a program that opens something and ends by itself, and waits for it on a thread of its own, so it
+/// doesn't stay behind as a zombie.
+fn start_and_reap(command: &mut std::process::Command) -> Result<(), String> {
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+/// Opens a web or mailto address in the browser or the mail app. Other schemes, such as `file:` or an app's own,
+/// are refused: the address can come from a page, a terminal, or a server.
 #[tauri::command(async)]
 pub fn open_url(url: String) -> Result<(), String> {
+    let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+    if !matches!(scheme.as_deref(), Some("http" | "https" | "mailto")) {
+        return Err(format!("Only web and mailto addresses open from the editor, not {url}"));
+    }
     #[cfg(target_os = "macos")]
     let mut command = crate::toolpaths::command("open");
     #[cfg(windows)]
@@ -79,7 +92,7 @@ pub fn open_url(url: String) -> Result<(), String> {
     };
     #[cfg(target_os = "linux")]
     let mut command = crate::toolpaths::command("xdg-open");
-    command.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|e| e.to_string())
+    start_and_reap(command.arg(url))
 }
 
 /// Shows a file in Finder or Explorer, selected. Linux file managers have no common way to select one, so its folder opens.
@@ -105,7 +118,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
         command.arg(std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new("/")));
         command
     };
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ()).map_err(|e| e.to_string())
+    start_and_reap(&mut command)
 }
 
 // Language tools are downloaded, not bundled, so the app stays small and tools update without an app

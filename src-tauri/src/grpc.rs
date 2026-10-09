@@ -185,7 +185,12 @@ fn project_pool(root: &Path, service: &str) -> Result<DescriptorPool, String> {
 async fn find_method(channel: &Channel, root: &Path, service: &str, method: &str) -> Result<MethodDescriptor, String> {
     let pool = match reflected_pool(channel, service).await {
         Ok(pool) => pool,
-        Err(reflection) => project_pool(root, service).map_err(|e| format!("The server's reflection failed ({}), and {e}", reflection.message()))?,
+        Err(reflection) => {
+            // Reading and compiling the .proto files is file work, off the async workers.
+            let (root, name) = (root.to_path_buf(), service.to_string());
+            let pool = crate::blocking(move || project_pool(&root, &name)).await;
+            pool.map_err(|e| format!("The server's reflection failed ({}), and {e}", reflection.message()))?
+        }
     };
     let s = pool.get_service_by_name(service).ok_or(format!("{service} isn't a service the schema defines"))?;
     let found = s.methods().find(|m| m.name() == method);
@@ -291,6 +296,8 @@ async fn call(root: &Path, target: &str, body: &str, metadata: Vec<(String, Stri
 /// Calls `target` (see `parse_target`) with `body` and `metadata`. `grpc_cancel` with the same `id`
 /// stops it. `root` is the project, whose .proto files are the schema when the server has no reflection.
 /// Each reply is also emitted as `grpc:<id>`, with its JSON, as it arrives.
+// The frontend names each argument, so they stay separate rather than one struct.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn grpc_call(app: AppHandle, state: State<'_, GrpcState>, id: String, root: String, target: String, body: String, metadata: Vec<(String, String)>, timeout: f64, connect_timeout: f64) -> Result<GrpcResponse, String> {
     let (cancel, cancelled) = oneshot::channel();
@@ -331,10 +338,12 @@ pub async fn grpc_methods(root: String, address: String) -> Result<Vec<String>, 
             }
         }
     } else {
-        let root = Path::new(&root);
-        for s in proto_files(root).iter().filter_map(|f| compile(root, f).ok()).flat_map(|pool| pool.services().collect::<Vec<_>>()) {
-            methods.extend(s.methods().map(|m| format!("{}/{}", s.full_name(), m.name())));
-        }
+        methods = crate::blocking(move || {
+            let root = Path::new(&root);
+            let pools = proto_files(root).iter().filter_map(|f| compile(root, f).ok()).collect::<Vec<_>>();
+            Ok(pools.iter().flat_map(|pool| pool.services()).flat_map(|s| s.methods().map(|m| format!("{}/{}", s.full_name(), m.name())).collect::<Vec<_>>()).collect())
+        })
+        .await?;
     }
     methods.sort();
     methods.dedup();

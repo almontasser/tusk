@@ -57,17 +57,37 @@ fn login_shell_path() -> Option<std::ffi::OsString> {
     None
 }
 
+/// A shell whose startup files wait on something, such as a prompt or a network share, is stopped after 10 seconds,
+/// and the app keeps its own PATH.
 #[cfg(not(windows))]
 fn login_shell_path() -> Option<std::ffi::OsString> {
+    use std::io::Read;
+    use std::process::Stdio;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| toolpaths::default_shell().into());
-    let Ok(out) = std::process::Command::new(shell)
+    let Ok(mut child) = std::process::Command::new(shell)
         .args(["-ilc", "printf '\\n__PATH__%s__PATH__' \"$PATH\""])
-        .stdin(std::process::Stdio::null())
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
     else {
         return None;
     };
-    let out = String::from_utf8_lossy(&out.stdout);
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        let _ = tx.send(out);
+    });
+    let Ok(out) = rx.recv_timeout(std::time::Duration::from_secs(10)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        eprintln!("login shell: no PATH within 10 seconds; using the app's own");
+        return None;
+    };
+    let _ = child.wait();
+    let out = String::from_utf8_lossy(&out);
     out.split("__PATH__").nth(1).filter(|p| !p.is_empty()).map(Into::into)
 }
 
@@ -111,6 +131,9 @@ async fn update_check(app: tauri::AppHandle, manual: bool) {
         return say("Development builds don't update.".into());
     }
     if CHECKING.swap(true, Ordering::SeqCst) {
+        if manual {
+            say("Tusk is already checking for updates.".into());
+        }
         return;
     }
     match async { app.updater()?.check().await }.await {
@@ -357,6 +380,7 @@ pub fn run() {
             // Language servers keep running when their parent dies, so stop them on quit.
             if let tauri::RunEvent::Exit = event {
                 app.state::<lsp::LspState>().stop_all();
+                toolpaths::remove_shims();
             }
             // A restart after an update starts the app itself, not through the Dock or Finder, so macOS leaves
             // it behind the app that was in front.

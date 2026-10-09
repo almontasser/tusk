@@ -19,7 +19,8 @@ type Host = {
   status(text: string): void;
   showView(name: "search"): void;
 };
-export type Match = { path: string; line: number; column: number; end: number; text: string };
+/** `text` is the line around the match, which starts at the 0-based UTF-16 column `offset`: a long line is cut. */
+export type Match = { path: string; line: number; column: number; end: number; text: string; offset: number };
 export type Query = { text: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
 
 /** Files start expanded until this many rows are shown; the rest render their matches when expanded. */
@@ -108,13 +109,13 @@ function byFile() {
 
 /** The line around a match, trimmed, with the match wrapped in <mark>. Columns are UTF-16, like JS strings. */
 function preview(m: Match) {
-  const start = m.column - 1;
+  const [start, end] = [m.column - 1 - m.offset, m.end - 1 - m.offset];
   const from = Math.max(0, Math.min(start - 40, m.text.search(/\S|$/)));
   const span = document.createElement("span");
   span.className = "preview";
   const mark = document.createElement("mark");
-  mark.textContent = m.text.slice(start, m.end - 1);
-  span.append((from > 0 && start - from >= 40 ? "…" : "") + m.text.slice(from, start), mark, m.text.slice(m.end - 1, m.end + 120));
+  mark.textContent = m.text.slice(start, end);
+  span.append((from + m.offset > 0 && start - from >= 40 ? "…" : "") + m.text.slice(from, start), mark, m.text.slice(end, end + 121));
   return span;
 }
 
@@ -233,7 +234,7 @@ function expandAll(open: boolean) {
 /** Replaces one match: its text runs through the same replace as Replace All, so regex groups work. */
 async function replaceOne(m: Match) {
   const q = query();
-  const found = m.text.slice(m.column - 1, m.end - 1);
+  const found = m.text.slice(m.column - 1 - m.offset, m.end - 1 - m.offset);
   try {
     const { text } = await invoke<{ text: string; count: number }>("replace_text", { text: found, query: q, replacement: replacement() });
     const model = monaco.editor.getModel(monaco.Uri.file(m.path));
@@ -248,7 +249,7 @@ async function replaceOne(m: Match) {
     } else {
       const lines = (await readText(m.path)).split("\n");
       const line = lines[m.line - 1];
-      if (line === undefined || !line.startsWith(m.text.slice(0, m.end - 1))) return host.status("The file changed; search again.");
+      if (line === undefined || !line.startsWith(m.text.slice(0, m.end - 1 - m.offset), m.offset)) return host.status("The file changed; search again.");
       // Columns are UTF-16 code units, the same units JavaScript strings index by.
       lines[m.line - 1] = line.slice(0, m.column - 1) + text + line.slice(m.end - 1);
       await writeText(m.path, lines.join("\n"));
@@ -470,7 +471,7 @@ export async function loadTodos() {
   const kept = await Promise.all(
     [...byFile].map(async ([path, list]) => {
       const text = await readText(path).catch(() => null);
-      if (text === null) return list.filter((m) => inComment(m.text, m.column));
+      if (text === null) return list.filter((m) => inComment(m.text, m.column - m.offset));
       const lines = commentMask(text, /\.(html?|blade\.php)$/.test(path)).split("\n");
       // A blanked keyword was in a comment.
       return list.filter((m) => lines[m.line - 1]?.[m.column - 1] === " ");
@@ -503,8 +504,8 @@ function todoRow(m: Match) {
   const text = document.createElement("span");
   text.className = "preview";
   const mark = document.createElement("mark");
-  mark.textContent = m.text.slice(m.column - 1, m.end - 1);
-  text.append(mark, m.text.slice(m.end - 1, m.end + 200).replace(/\s*(\*\/|-->|--\}\})\s*$/, ""));
+  mark.textContent = m.text.slice(m.column - 1 - m.offset, m.end - 1 - m.offset);
+  text.append(mark, m.text.slice(m.end - 1 - m.offset, m.end + 200 - m.offset).replace(/\s*(\*\/|-->|--\}\})\s*$/, ""));
   li.append(line, text);
   li.onclick = () => host.openAt(m.path, new monaco.Range(m.line, m.column, m.line, m.end));
   return li;

@@ -26,16 +26,50 @@ static CONFIG: RwLock<Option<Config>> = RwLock::new(None);
 static SHIMS: OnceLock<PathBuf> = OnceLock::new();
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
-/// Sets where the shims go. Call it once in setup, before any command runs.
+/// Sets where the shims go: a folder for this run, `bin/<process ID>`, so two copies of the app running at once
+/// keep their own. Folders of runs that ended go. Call it once in setup, before any command runs.
 pub fn init(app: &AppHandle) {
     if let Ok(dir) = app.path().app_local_data_dir() {
-        let dir = dir.join("bin");
-        // Shims from the last run point where the settings said then; the frontend writes them again.
+        let bin = dir.join("bin");
+        for entry in std::fs::read_dir(&bin).into_iter().flatten().flatten() {
+            if !entry.file_name().to_str().and_then(|n| n.parse().ok()).is_some_and(running) {
+                let path = entry.path();
+                let _ = std::fs::remove_dir_all(&path).or_else(|_| std::fs::remove_file(&path));
+            }
+        }
+        // A folder left by an earlier run with the same ID points where the settings said then.
+        let dir = bin.join(std::process::id().to_string());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         let _ = SHIMS.set(dir);
     }
     let _ = APP.set(app.clone());
+}
+
+/// Removes this run's shims, as the app exits.
+pub fn remove_shims() {
+    if let Some(dir) = SHIMS.get() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Whether a process is running.
+#[cfg(target_os = "macos")]
+fn running(pid: u32) -> bool {
+    // Signal 0 only checks; EPERM means it runs as another user.
+    let signaled = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+    signaled || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(target_os = "linux")]
+fn running(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Windows has no shims, so no run needs its folder.
+#[cfg(windows)]
+fn running(_pid: u32) -> bool {
+    false
 }
 
 /// PATH for a program the app starts: the shims, then the login shell's PATH. Windows has no shims (a `.cmd` file
@@ -134,11 +168,16 @@ fn executable(path: &Path) -> bool {
     path.is_file()
 }
 
-/// The first `name` in `dirs`; on Windows, also with each extension in PATHEXT.
+/// The first `name` in `dirs`. On Windows, with each extension in PATHEXT first, as cmd looks, and as it is only
+/// when it has an extension already, so a Unix script named `composer` beside `composer.bat` isn't chosen.
 fn find_in(dirs: impl Iterator<Item = PathBuf>, name: &str) -> Option<PathBuf> {
     #[cfg(windows)]
-    let names: Vec<String> = std::iter::once(name.to_string())
-        .chain(std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into()).split(';').filter(|e| !e.is_empty()).map(|e| format!("{name}{}", e.to_ascii_lowercase())))
+    let names: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(|e| format!("{name}{}", e.to_ascii_lowercase()))
+        .chain(Path::new(name).extension().map(|_| name.to_string()))
         .collect();
     #[cfg(not(windows))]
     let names = [name.to_string()];
