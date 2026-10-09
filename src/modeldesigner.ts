@@ -568,12 +568,22 @@ class ModelDesigner {
     if (this.preview.getValue() !== code) this.preview.setValue(code);
     const apply = this.el.querySelector<HTMLButtonElement>(".md-apply");
     const problems = this.problems();
+    const same = !problems.length && this.unchanged();
     if (apply) {
-      apply.disabled = !!problems.length || !!this.busy;
-      apply.title = problems.join("\n");
+      apply.disabled = !!problems.length || !!this.busy || same;
+      apply.title = same ? "Nothing to apply: the table and the model don't change" : problems.join("\n");
     }
     const note = this.el.querySelector(".md-problems");
     if (note) note.textContent = problems[0] ?? "";
+  }
+
+  /** Whether Apply on an existing model would write nothing: no migration, no edit to the class, no inverse relations. */
+  private unchanged(): boolean {
+    const s = this.state!;
+    if (!s.existing) return false;
+    const spec = this.cleanSpec();
+    const hidden = mergeList(s.existing.hidden, s.before, spec.columns, (c) => !!c.hidden);
+    return !diffColumns(spec.columns, s.before).length && s.spec.softDeletes === s.softDeletesBefore && !this.modelChanges().length && JSON.stringify(hidden) === JSON.stringify(s.existing.hidden) && !s.inverse.size;
   }
 
   /** The spec without columns that have no name yet. */

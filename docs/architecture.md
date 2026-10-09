@@ -9263,3 +9263,39 @@ user code:
   files runs on the blocking pool, as do `toml_edit`, `toml_read`,
   `mago_settings`, and `remove_empty_dir`. Check for Updates while a check
   runs says one is already running. Clippy reports no warnings.
+
+### 2026-10-09: Interface fixes from a UI review
+
+- **Toasts:** a toast moves into an open modal dialog, as context menus do, so
+  the dialog's backdrop doesn't cover it, and returns to the body when the
+  dialog closes. Errors stay 10 seconds and notices 6, and the timer waits while
+  the pointer is over the toast.
+- **Cut-off text:** one `mouseover` listener in `dom.ts` gives an element with
+  `text-overflow: ellipsis` whose text doesn't fit a tooltip with its text. A
+  title of the element's own wins.
+- **Tab strips:** one `wheel` listener in `dom.ts` scrolls the editor's and the
+  terminal's tab strips sideways with a vertical wheel.
+- **Narrow windows:** the title bar clips instead of pushing Settings off, the
+  search box's label truncates, and its keycaps hide below 960 px. The welcome
+  page scrolls when its card is taller than the window.
+- **Selects:** the chevron's right padding is `!important`, since panels set
+  padding shorthands that ran the text under it.
+- **Palette:** a query that matches nothing shows "Nothing found", and a slow
+  source shows "Searching…"; the row can't be chosen. Beside a detail, the
+  label keeps up to 60% of the row and the path loses its start (`direction:
+  rtl`, with left-to-right marks around the text; WebKit draws no ellipsis
+  for a `<bdi>`). Each row's tooltip has the label and the
+  detail.
+- **Find in Files:** the replace button's selector outranks Monaco's `.codicon`
+  rule, so it shows only on the hovered or selected match.
+- **Commit:** **Commit** and **Commit and Push** are off when there are no
+  changes, no amend, and no merge to conclude. The model designer's **Apply
+  changes** is off when neither the table nor the model would change.
+- **Designer popovers:** closing one returns focus to its anchor when focus was
+  in the popover; the popover is labeled with its anchor's tooltip or text.
+- **Theme tokens:** the hard-coded yellows are `color-mix()` of `--yellow`, the
+  CSS and Markdown file icons have light-theme colors, and `--muted` and
+  `--faint` are lighter in the dark theme and darker in the light one, for
+  contrast. Color themes still derive their own. A selected tree row is shaded
+  as inactive when the tree doesn't have focus. The database connection and
+  remote server pickers are buttons.

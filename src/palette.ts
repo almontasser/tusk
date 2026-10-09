@@ -145,13 +145,20 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
   let selected = 0;
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let searching = false;
   const previousFocus = document.activeElement as HTMLElement | null;
 
   const render = () => {
+    // A query that matches nothing says so, or that its results are on the way; the row can't be chosen.
+    if (!items.length && (searching || input.value.trim())) {
+      list.replaceChildren(Object.assign(document.createElement("li"), { className: "muted", textContent: searching ? "Searching…" : "Nothing found" }));
+      return showTitle(), place();
+    }
     list.replaceChildren(
       ...items.slice(0, MAX_ROWS).map((item, i) => {
         const li = document.createElement("li");
         li.role = "option";
+        li.title = item.detail ? `${item.label} ${item.detail}` : item.label;
         li.ariaSelected = String(i === selected);
         li.className = i === selected ? "selected" : "";
         if (initial?.numbered) li.append(Object.assign(document.createElement("span"), { className: "mnemonic", textContent: i < 9 ? String(i + 1) : "" }));
@@ -183,7 +190,9 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
         if (item.detail) {
           const detail = document.createElement("span");
           detail.className = "detail";
-          detail.textContent = item.detail;
+          // The box runs right to left so a long path loses its start behind an ellipsis; left-to-right marks keep
+          // a leading or trailing slash in place (a <bdi> would, but WebKit then draws no ellipsis).
+          detail.textContent = `\u200e${item.detail}\u200e`;
           li.append(detail);
         }
         li.onmousedown = (e) => (e.preventDefault(), choose(i));
@@ -200,8 +209,13 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
     const current = ++generation;
     // A source that fails shows why in the list, rather than an empty list that reads as "no results".
     const failed = (e: unknown): Item[] => (console.error(placeholder, e), [{ label: "Couldn't load the list", detail: errorText(e), icon: "codicon-error icon-error", run: () => {} }]);
-    new Promise<Item[]>((resolve) => resolve(source(input.value))).then(null, failed).then((result) => {
+    new Promise<Item[]>((resolve) => {
+      const result = source(input.value);
+      if (!Array.isArray(result) && !items.length) (searching = true), render();
+      resolve(result);
+    }).then(null, failed).then((result) => {
       if (current !== generation) return; // A newer query already ran.
+      searching = false;
       items = result;
       selected = 0;
       render();
@@ -227,13 +241,14 @@ export function pick(placeholder: string, source: Source, delay = 0, initial?: O
 
   input.oninput = () => {
     clearTimeout(timer);
+    if (delay && !items.length) (searching = true), render();
     timer = delay ? setTimeout(update, delay) : (update(), undefined);
   };
   input.onkeydown = (e) => {
     const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
     if (e.key in moves) {
-      // Only the two rows whose selection changes are touched, not the whole list.
-      const rows = list.children;
+      // Only the two rows whose selection changes are touched, not the whole list; a "Nothing found" row isn't one.
+      const rows = items.length ? list.children : [];
       rows[selected]?.classList.remove("selected");
       rows[selected]?.setAttribute("aria-selected", "false");
       selected = Math.max(0, Math.min(Math.min(items.length, MAX_ROWS) - 1, selected + moves[e.key]));

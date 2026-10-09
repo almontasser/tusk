@@ -1233,7 +1233,8 @@ model's name in the Filament designer.
 - **Preview:** the right side shows the migration, the model, and the factory as
   they'll be written.
 
-Changes are staged until you click **Create model** or **Apply changes**. A new
+Changes are staged until you click **Create model** or **Apply changes**, which
+is off while neither the table nor the model would change. A new
 model gets its class, a migration, and optionally a factory that fakes each
 column, a seeder, a policy, and a Filament resource. For an existing model,
 Tusk writes a migration with only the changes, such as
@@ -3131,7 +3132,8 @@ unstaged one to its staged version, and a new file goes to the Trash.
 
 The message box sits at the bottom of the view, and stays in view while a long
 list of changes scrolls. Write a message and press ⌘⏎ or click **Commit**. The
-buttons are off while the commit runs, and the status bar shows progress while
+buttons are off while the commit runs, and when there's nothing to commit (no
+changes, no amend, and no merge to conclude), and the status bar shows progress while
 git hooks run. If a hook or git refuses the commit, the message offers **Show
 Details** with the full output. **Commit and Push** opens the Push dialog after
 committing. With nothing staged, **Commit** offers to stage all the changes and
