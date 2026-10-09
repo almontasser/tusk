@@ -300,7 +300,7 @@ mod tests {
         std::fs::write(&file, "old").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o750)).unwrap();
         std::os::unix::fs::symlink(&file, dir.join("link.php")).unwrap();
-        write_atomic(&dir.join("link.php"), b"new").unwrap();
+        write_atomic(dir.join("link.php"), b"new").unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
         assert!(std::fs::symlink_metadata(dir.join("link.php")).unwrap().file_type().is_symlink());
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o750);
@@ -308,7 +308,7 @@ mod tests {
         std::fs::hard_link(&file, dir.join("hard.php")).unwrap();
         write_atomic(&file, b"both").unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("hard.php")).unwrap(), "both");
-        write_atomic(&dir.join("fresh.php"), b"x").unwrap();
+        write_atomic(dir.join("fresh.php"), b"x").unwrap();
         let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         names.sort();
         std::fs::remove_dir_all(&dir).unwrap();
