@@ -343,6 +343,7 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⇧⌘' | Maximize the bottom panel, or restore it |
 | ⇧⎋ | Hide the bottom panel, while you work in it |
 | ⌘F in a terminal | Find in the terminal's output |
+| ⌘K in a terminal | Clear the terminal (on a Mac; Ctrl+K stays the shell's elsewhere) |
 | ⌃⌃ | Run anything: Artisan commands or shell commands |
 | ⌃⇧R | Run the test at the cursor, or all tests in the file |
 | ⌃R | Run the selected run configuration |
@@ -380,8 +381,16 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌥⇧G | Add carets to the ends of the selected lines |
 | ⌃⇧J | Join lines |
 | ⌘⇧U | Toggle case |
+| ⌥⌘T | Surround the selected lines, or the caret's line, with `if`, `foreach`, `try`/`catch`, a closure, and more (`@if`, `@foreach`, `@auth`, `@php` in Blade) |
+| ⇧⌘V | Paste from history: one of the last 20 texts you copied or cut in an editor |
+| ⇧⌘8 | Column selection mode: dragging or ⇧ and the arrows select a block |
 | ⌃⌥I | Auto-indent lines |
 | ⌘= and ⌘- | Expand or collapse the fold at the caret (with ⌥, recursively; with ⇧, all) |
+
+The View menu and ⌘⇧A also have **Soft-Wrap**, **Show Minimap**, and **Show
+Whitespaces**, which switch those settings, and **Increase Font Size**,
+**Decrease Font Size**, and **Reset Font Size**. They have no shortcut until
+you give them one.
 
 Monaco's other editing commands, such as sorting lines, changing case, and
 folding by level, are in the Edit and Code menus and in Find Action, with
@@ -428,6 +437,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Editor font and font size | JetBrains Mono (or its Nerd Font build), or else Menlo, at 13; ligatures are on only with a font that has them |
 | Wrap long lines | Off |
 | Show the minimap | Off |
+| Show whitespace (dots and arrows, except single spaces between words) | Off |
 | Show inlay hints | On |
 | Show the cursor line's problem at the end of the line | Off |
 | Vim emulation | Off |
@@ -445,6 +455,7 @@ shows only when it applies. Changes apply immediately and are saved in
 | Limits: recent projects to remember | 12 |
 | Limits: most matches for Find in Files and TODO | 20,000 |
 | Limits: HTTP requests to keep in the history, and the largest response to show | 100, 5 MB |
+| Limits: ask before opening a file larger than | 20 MB |
 | Local history: days and versions to keep, and the largest file | 14 days, 100 versions, 1,000 KB |
 | Debugger: Xdebug port | 9003 |
 | Debugger: items to load per array or object, and the longest string to load | 128, 2048 bytes |
@@ -564,7 +575,7 @@ as the terminals, **Tests**, and **Problems**, work the same way: right-click
 one to close it, the others, or all; middle-click to close it; and drag it along
 the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in the
 panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
-select all, or clear it. Click **+** at the end of the panel's tab bar for a
+select all, or clear it; on a Mac, ⌘K clears the focused terminal too. Click **+** at the end of the panel's tab bar for a
 new terminal. The terminal button shows the last shell you used, or opens
 one, even while another panel tab shows. It skips command tabs, such as
 `git pull`, and shells that have exited.
@@ -606,7 +617,12 @@ reloads it as one edit, so ⌘Z brings back what you had. If the tab has unsaved
 changes, a bar above the editor says the file changed on disk: **Reload** takes
 the file's text, and **Keep Mine** keeps yours, which then saves over it. Saving
 before you choose asks whether to overwrite the file, reload it, or cancel;
-automatic saving skips the file and shows the bar instead.
+automatic saving skips the file and shows the bar instead. When the file
+watcher loses events, as after a large checkout, Tusk checks every open file
+and every folder shown in the tree.
+
+Opening a file larger than 20 MB asks first, since large files can slow the
+editor; **Settings > Limits** changes the size.
 
 The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
@@ -733,7 +749,9 @@ the gutter for breakpoints, bookmarks, the line's change, and blame.
 Right-click the project tree for **New File…**, **New Folder…**, **Rename…**,
 **Move to Trash**, **Find in Folder…** (Find in Files limited to the folder),
 **Open in Terminal**, **Copy Path**, **Copy Relative Path**, and **Reveal in
-Finder**. In the tree, you can also press:
+Finder**. Test files, and folders in `tests`, also get **Run Tests** and
+**Debug Tests**, which run them as a temporary run configuration. In the tree,
+you can also press:
 
 - ↑ and ↓ to move between rows, and ⏎ to open a file or folder.
 - F2 or ⇧F6 to rename.
@@ -2689,6 +2707,8 @@ project has more than 200 keys, completion lists the keys without their values.
   pages, open once the PHP server has indexed them. If `route:list` fails, it runs in
   a terminal tab so you can see the error.
 - **Laravel Tinker**, from ⌘⇧A, opens `php artisan tinker` in a terminal tab.
+- **Show Laravel Log**, in **Tools > Laravel** and ⌘⇧A, opens the newest log in
+  `storage/logs` (the latest daily log, or else `laravel.log`) at its last line.
 
 When Sail's containers are running, both commands run in the container.
 
@@ -3474,8 +3494,9 @@ Right-click the gutter at a line to add, remove, disable, or edit its
 breakpoint, add a conditional breakpoint or a logpoint, remove the file's or
 all breakpoints, annotate the file with Git blame, or copy the line's
 reference (`path:line`) or its link on the remote, such as GitHub, at the
-current commit. **Copy Remote URL** in ⌘⇧A
-copies the link to the selected lines. While execution is paused, **Run to Line** resumes
+current commit, or open it. **Copy Remote URL** in ⌘⇧A
+copies the link to the selected lines, and **Open on GitHub** opens it in your
+browser. While execution is paused, **Run to Line** resumes
 and pauses at that line once. Run **Edit Breakpoint…** from ⌘⇧A to edit the
 breakpoint at the cursor in the palette, or press ⇧⌘F8 to edit it in the
 Breakpoints tab:
@@ -4287,6 +4308,7 @@ screenshots with [Filament's demo app](https://github.com/filamentphp/demo)), ta
 | `src/bookmarks.ts` | Bookmarks and the Bookmarks tab |
 | `src/bookmarksdata.ts` | Reading and reordering saved bookmarks |
 | `src/snippets.ts` | Your snippets from `snippets.json` |
+| `src/surround.ts` | Surround With's templates and Paste from History's list |
 | `src/format.ts` | Formatting with the project's Prettier or Pint, or Tusk's server (Mago's formatter) |
 | `src/markdownpreview.ts` | The Markdown preview tab |
 | `src/markdown.ts` | Renders Markdown for the preview, and its scroll position |

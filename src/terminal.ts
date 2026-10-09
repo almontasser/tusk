@@ -526,6 +526,8 @@ export function showPanelView(title: string, el: HTMLElement, onClose: () => voi
 const focusedSession = () => [...sessions, ...docked].find((s) => s.term && s.el.contains(document.activeElement)) ?? (panelVisible && active?.term ? active : undefined);
 /** Whether a terminal has focus, for ⌘F to find in it instead of in the editor. */
 export const terminalFocused = () => !!document.activeElement?.closest(".term");
+/** Clears the focused terminal's screen and scrollback, as its context menu's Clear does. */
+export const clearTerminal = () => focusedSession()?.term?.clear();
 
 /**
  * Opens the find bar over the terminal that has focus: matches highlight as you type, Enter and ⇧Enter go to the

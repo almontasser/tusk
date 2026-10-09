@@ -9173,3 +9173,39 @@ user code:
   off a Mac, so it only worked on a Mac. It reads the event.
 - Deployment's reload looks the tab up after reading the file, so a tab closed
   meanwhile isn't edited through a disposed model.
+
+### 2026-10-09: Editor actions, view toggles, and watcher rescans
+
+- Surround With (⌥⌘T) picks a template at the caret (`pickAtCaret`) and inserts
+  it with the snippet controller around `$TM_SELECTED_TEXT`. Block templates
+  first select the lines from their indentation (`blockRange` in
+  `src/surround.ts`), so Monaco re-indents the selected lines inside the block.
+  `.blade.php` files get Blade directives instead of PHP statements.
+- Paste from History (⇧⌘V) keeps the last 20 texts copied or cut in any
+  editor, from `copy` and `cut` listeners on the document in the capture phase,
+  which Monaco's own clipboard actions fire too. `remember` dedupes them.
+- Column Selection Mode (⇧⌘8) sets `columnSelection` on every pane's editor,
+  and `addPane` gives new panes the current value.
+- Soft-Wrap, Show Minimap, the new `showWhitespace` setting (Monaco's
+  `renderWhitespace: "boundary"`), and the font size actions change settings
+  with `updateSetting`, so they persist and show in Settings.
+- ⌘K clears the focused terminal on a Mac (`clearTerminal`). The action comes
+  before Commit… and its `when` is false off a Mac, so Ctrl+K there still
+  falls through to the terminal-key check and reaches readline.
+- `copyRemoteUrl` takes `browse` to open the link with `open_url`: Open on
+  GitHub in the Git menu and the editor's and gutter's menus.
+- Show Laravel Log lists `storage/logs` and opens the latest dated log, or the
+  last by name, through `openFile`, at its last line.
+- `openFile` checks `file_size` before loading a file that has no model yet
+  and asks above `limits.largeFileMB` (20 MB). `ensureModel` callers, such as
+  the language server's location loads and session restore, don't ask.
+- The tree's context menu runs or debugs tests in a test file or a folder in
+  `tests` through a `runTests` host callback, which main.ts sets to
+  `runTestsIn` in `src/runner.ts`: a temporary `test` configuration with a
+  `file` or `directory` scope.
+- The file watcher dropped errors and overflow events (`need_rescan`), whose
+  events have no paths, so open tabs and the index went stale after a big
+  checkout. It now logs the error and emits `fs-rescan` with the watched
+  folder. The page queues every open file under it through the `fs-change`
+  batch, which reloads clean tabs, shows the changed-on-disk bar on dirty
+  ones, and tells the language servers, and re-renders every shown folder.

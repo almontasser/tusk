@@ -38,7 +38,8 @@ import { initHierarchy, showTypeHierarchy } from "./hierarchy";
 import { initCallHierarchy, showCallHierarchy } from "./callhierarchy";
 import { generate, initGenerate } from "./generate";
 import { initRefactorPreview } from "./refactorpreview";
-import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings } from "./extract";
+import { extractConstant, extractMethod, extractVariable, initExtract, introduceField, pickAtCaret, refactorings, snippets } from "./extract";
+import { BLADE_SURROUNDS, blockRange, PHP_SURROUNDS, remember } from "./surround";
 import { followEditor, forgetPath, forgetProblems, initProblems, problemCounts, scanProject, runPhpStan, showInlineProblems, showProblems } from "./problems";
 import { initLocalHistory, putLabel, recordExternalChanges, recordVersion, showDeletedFiles, showLocalHistory } from "./localhistory";
 import { initLocalHistoryView } from "./localhistoryview";
@@ -49,10 +50,10 @@ import { copyPath, initFiles, newFile, newFolder, remove, rename, revealInFinder
 import { initHistory, showFileHistory, showLog } from "./history";
 import { detectFormatters, formatModel, formatOnSave, initFormatting, setFormattersDialog } from "./format";
 import { openFormatters } from "./formattersdialog";
-import { addEditor, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
+import { addEditor, defaults as settingDefaults, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, nextMatch, openSearch, refreshSearch, refreshTodos } from "./search";
-import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
+import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, runTestsIn, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
 import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
@@ -73,7 +74,7 @@ import "./spelling";
 import "./phpstan";
 import "./magosettings";
 import { splitter } from "./splitter";
-import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
+import { clearTerminal, closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 /** `disk` is the file's text as last read or written, to tell when another program changed it; undefined when unknown. */
@@ -104,7 +105,7 @@ function addPane(): Pane {
   el.innerHTML = `<nav class="tabs" role="tablist"></nav><div class="pane-notice" hidden></div><div class="pane-editor"></div><div class="pane-sash-x"></div><div class="pane-sash-y"></div>`;
   const ed = createEditor(el.querySelector<HTMLElement>(".pane-editor")!);
   // The code's context menu is the app's (codeMenu), with PhpStorm's actions and shortcuts rather than VS Code's.
-  ed.updateOptions({ contextmenu: false });
+  ed.updateOptions({ contextmenu: false, columnSelection });
   const pane: Pane = { editor: ed, el, bar: el.querySelector("nav")!, notice: el.querySelector(".pane-notice")!, paths: [], active: "" };
   panes.push(pane);
   addEditor(ed);
@@ -125,6 +126,14 @@ function addPane(): Pane {
   ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
   ed.onDidChangeCursorPosition((e) => pane.editor === editor && followEditor(active, e.position));
   return pane;
+}
+
+/** Column Selection Mode (⇧⌘8): a drag or ⇧ and the arrows select a block, in every pane. */
+let columnSelection = false;
+function toggleColumnSelection() {
+  columnSelection = !columnSelection;
+  panes.forEach((p) => p.editor.updateOptions({ columnSelection }));
+  status(`Column selection mode ${columnSelection ? "on" : "off"}`);
 }
 
 /** Menu rows for the actions with these labels that apply now, with their shortcuts from the keymap. */
@@ -174,7 +183,7 @@ function codeMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouseEv
     ...(file && isTestFile(model.uri.fsPath) ? [...action("Run Test at Cursor"), ...action("Debug Test at Cursor")] : []),
     ...(model.getLanguageId() === "markdown" ? action("Markdown Preview") : []),
     "-",
-    ...(file ? submenu("Git", ["Annotate with Git Blame", "Show File History", "-", "Next Change", "Previous Change", "-", "Copy Remote URL"]) : []),
+    ...(file ? submenu("Git", ["Annotate with Git Blame", "Show File History", "-", "Next Change", "Previous Change", "-", "Copy Remote URL", "Open on GitHub"]) : []),
     ...(file ? deploymentMenu(model.uri.fsPath, false) : []),
     ...(file ? [...action("Show Local History"), ...action("Compare with Clipboard")] : []),
     "-",
@@ -209,6 +218,7 @@ function gutterMenu(ed: monaco.editor.ICodeEditor, e: monaco.editor.IEditorMouse
     { label: isAnnotated(ed) ? "Close Git Blame Annotations" : "Annotate with Git Blame", run: () => annotate(ed) },
     { label: "Copy Reference", keys: shortcutText(actions.find((a) => a.label === "Copy Reference")?.keys), run: () => copyReference(path, line) },
     { label: "Copy Remote URL", run: () => copyRemoteUrl(path, line) },
+    { label: "Open on GitHub", run: () => copyRemoteUrl(path, line, line, true) },
   ]);
   return true;
 }
@@ -1051,8 +1061,15 @@ function addTab(path: string, model: monaco.editor.ITextModel) {
 /** Counts calls to openFile, so a file that loads after one you opened later doesn't take its place. */
 let opens = 0;
 
-/** Shows a file or panel tab in the focused pane. False when another opened while it loaded. */
+/** Whether to open a file not loaded yet: one larger than the limit in Settings > Limits asks first. */
+async function openLarge(path: string) {
+  const mb = (await invoke<number>("file_size", { path }).catch(() => 0)) / 1e6;
+  return mb <= limits.largeFileMB || confirm(`${nameOf(path)} is ${Math.round(mb)} MB. Open it anyway? Large files can slow the editor.`, "Open");
+}
+
+/** Shows a file or panel tab in the focused pane. False when another opened while it loaded, or a large file stayed closed. */
 async function openFile(path: string) {
+  if (!tabs.has(path) && !isView(path) && !monaco.editor.getModel(monaco.Uri.file(path)) && !(await openLarge(path))) return false;
   const call = ++opens;
   if (!tabs.has(path) && !isView(path)) addTab(path, await ensureModel(path));
   if (call !== opens) {
@@ -1459,7 +1476,15 @@ async function reloadFromDisk(path: string) {
 // re-render affected folders.
 let pending = new Set<string>();
 let timer: ReturnType<typeof setTimeout> | undefined;
-listen<string[]>("fs-change", ({ payload }) => {
+/** Set when the watcher lost events, so every shown folder re-renders. */
+let rescan = false;
+listen<string[]>("fs-change", ({ payload }) => fsChanged(payload));
+// The watcher overflowed or failed, as after a large checkout: check every open file and shown folder.
+listen<string>("fs-rescan", ({ payload: dir }) => {
+  rescan = true;
+  fsChanged(monaco.editor.getModels().filter((m) => m.uri.scheme === "file" && m.uri.fsPath.startsWith(`${dir}/`)).map((m) => m.uri.fsPath));
+});
+function fsChanged(payload: string[]) {
   payload.forEach((p) => pending.add(p));
   if (payload.some((p) => p.endsWith("/.editorconfig"))) {
     forgetEditorConfigs();
@@ -1468,7 +1493,9 @@ listen<string[]>("fs-change", ({ payload }) => {
   clearTimeout(timer);
   timer = setTimeout(async () => {
     const paths = pending;
+    const all = rescan;
     pending = new Set();
+    rescan = false;
     for (const path of paths) {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
       if (!model) continue;
@@ -1499,7 +1526,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     const changed = [...paths];
     const exists = changed.length ? await invoke<boolean[]>("paths_exist", { paths: changed }) : [];
     filesChanged(changed.map((path, i) => ({ path, exists: exists[i] })));
-    for (const dir of new Set([...paths].map(parentOf))) {
+    for (const dir of all ? [...renderedDirs.keys()] : new Set([...paths].map(parentOf))) {
       const ul = renderedDirs.get(dir);
       if (ul) renderDir(ul, dir, true);
     }
@@ -1510,7 +1537,7 @@ listen<string[]>("fs-change", ({ payload }) => {
     httpFilesChanged([...paths]);
     filamentFilesChanged([...paths]);
   }, 150);
-});
+}
 
 /** Opens a file and moves the cursor to a position or selects a range. */
 async function openAt(path: string, target?: monaco.IRange | monaco.IPosition) {
@@ -1686,6 +1713,8 @@ const actions: Action[] = [
   { label: "Replace in Files", keys: "Meta+Shift+R", run: () => openSearch(editor, true) },
   { label: "Recent Files", keys: "Meta+E", run: recentFiles },
   { label: "File Structure", keys: "Meta+F12", run: () => (editor.focus(), editor.trigger("action", "editor.action.quickOutline", {})) },
+  // ⌘K clears a focused terminal on a Mac, as in Terminal.app; off a Mac, Ctrl+K stays the shell's.
+  { label: "Clear Terminal", keys: "Meta+K", run: clearTerminal, when: () => isMac && terminalFocused() },
   { label: "Commit…", keys: "Meta+K", run: focusCommit },
   { label: "Push…", keys: "Meta+Shift+K", run: () => root && push() },
   { label: "Update Project", keys: "Meta+T", run: () => root && updateProject() },
@@ -1706,6 +1735,14 @@ const actions: Action[] = [
     run: () => {
       const s = editor.getSelection();
       if (active && s) copyRemoteUrl(active, s.startLineNumber, s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber);
+    },
+    editorOnly: true,
+  },
+  {
+    label: "Open on GitHub",
+    run: () => {
+      const s = editor.getSelection();
+      if (active && s) copyRemoteUrl(active, s.startLineNumber, s.endColumn === 1 && s.endLineNumber > s.startLineNumber ? s.endLineNumber - 1 : s.endLineNumber, true);
     },
     editorOnly: true,
   },
@@ -1734,6 +1771,17 @@ const actions: Action[] = [
   { label: "Share Project Settings in tusk.json…", run: chooseSharedState },
   { label: "Toggle AI Completion", run: () => updateSetting("aiCompletion", !settings.aiCompletion) },
   { label: "Toggle Inline Problems", run: () => updateSetting("inlineProblems", !settings.inlineProblems) },
+  // Editor actions and view toggles.
+  { label: "Surround With…", keys: "Meta+Alt+T", run: surroundWith, editorOnly: true },
+  { label: "Paste from History…", keys: "Meta+Shift+V", run: pasteFromHistory, editorOnly: true },
+  { label: "Column Selection Mode", keys: "Meta+Shift+8", run: toggleColumnSelection },
+  { label: "Soft-Wrap", run: () => updateSetting("wordWrap", !settings.wordWrap) },
+  { label: "Show Minimap", run: () => updateSetting("minimap", !settings.minimap) },
+  { label: "Show Whitespaces", run: () => updateSetting("showWhitespace", !settings.showWhitespace) },
+  { label: "Increase Font Size", run: () => setFontSize(settings.fontSize + 1) },
+  { label: "Decrease Font Size", run: () => setFontSize(settings.fontSize - 1) },
+  { label: "Reset Font Size", run: () => setFontSize(settingDefaults.fontSize) },
+  { label: "Show Laravel Log", run: showLaravelLog },
   { label: "Pull Requests", run: () => showView("prs") },
   { label: "Database", run: () => showView("database") },
   { label: "Database: Switch Connection…", run: () => (showView("database"), chooseConnection()) },
@@ -1872,6 +1920,67 @@ const actions: Action[] = [
   { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
   { label: "Formatters…", run: () => root && openFormatters() },
 ];
+
+/** Surround With (⌥⌘T): wraps the selected lines, or the caret's line, in a template picked at the caret. */
+function surroundWith() {
+  const model = editor.getModel();
+  const sel = editor.getSelection();
+  if (!model || !sel) return;
+  const ed = editor;
+  const items = (model.uri.path.endsWith(".blade.php") ? BLADE_SURROUNDS : PHP_SURROUNDS).map((t) => ({
+    label: t.label,
+    run: () => {
+      ed.focus();
+      ed.setSelection(t.block || sel.isEmpty() ? blockRange(sel, (n) => model.getLineContent(n)) : sel);
+      snippets(ed).insert(t.snippet);
+    },
+  }));
+  pickAtCaret(ed, "Surround with", items);
+}
+
+/** The last texts copied or cut in any editor, newest first, for Paste from History. */
+let copied: string[] = [];
+for (const type of ["copy", "cut"]) {
+  document.addEventListener(type, () => {
+    const ed = monaco.editor.getEditors().find((e) => e.hasTextFocus());
+    const model = ed?.getModel();
+    if (!ed || !model) return;
+    // With nothing selected, the editor copies the whole line.
+    const text = ed.getSelections()!.map((s) => (s.isEmpty() ? model.getLineContent(s.startLineNumber) + model.getEOL() : model.getValueInRange(s))).join(model.getEOL());
+    copied = remember(copied, text);
+  }, true);
+}
+
+/** Paste from History (⇧⌘V): picks one of the last copied texts and puts it in place of the selection. */
+function pasteFromHistory() {
+  if (!copied.length) return status("Nothing copied yet.");
+  const ed = editor;
+  pick("Paste from history", (q) => copied.filter((t) => t.toLowerCase().includes(q.toLowerCase())).map((text) => ({
+    label: text.trim().replace(/\s*\n\s*/g, " ⏎ ").slice(0, 120),
+    run: () => {
+      ed.focus();
+      ed.executeEdits("paste-history", (ed.getSelections() ?? []).map((range) => ({ range, text, forceMoveMarkers: true })));
+      ed.pushUndoStop();
+    },
+  })));
+}
+
+/** Sets the editor's font size, within the settings dialog's range. */
+const setFontSize = (size: number) => updateSetting("fontSize", Math.min(32, Math.max(8, size)));
+
+/** Opens the newest log in storage/logs at its last line: the latest daily log, or else the last by name. */
+async function showLaravelLog() {
+  if (!root) return;
+  const dir = `${root}/storage/logs`;
+  const names = (await invoke<Entry[]>("read_dir", { path: dir }).catch(() => [])).filter((e) => !e.is_dir && e.name.endsWith(".log")).map((e) => e.name).sort();
+  // ponytail: no modification times here, so a stale daily log beats a laravel.log written since; add mtime to read_dir if that matters.
+  const name = names.filter((n) => /\d{4}-\d\d-\d\d/.test(n)).at(-1) ?? names.at(-1);
+  if (!name) return status("storage/logs has no log files.");
+  if (!(await openFile(`${dir}/${name}`))) return;
+  const line = editor.getModel()?.getLineCount() ?? 1;
+  editor.setPosition({ lineNumber: line, column: 1 });
+  editor.revealLine(line);
+}
 
 /** Copies `path:line`, relative to the project, as PhpStorm's Copy Reference does for a line. */
 function copyReference(path: string, line: number) {
@@ -2104,7 +2213,7 @@ initProblems({
   unsaved: (path) => !!tabs.get(path) && isDirty(tabs.get(path)!),
   changed: updateProblems,
 });
-initFiles({ root: () => root, active: activeFile, openFile, renamed, openPaths: () => [...tabs.keys(), ...held], forget, status });
+initFiles({ root: () => root, active: activeFile, openFile, renamed, openPaths: () => [...tabs.keys(), ...held], forget, status, runTests: runTestsIn });
 initProjectState({ openFile: (path) => void openFile(path) });
 setServiceChoice({
   get: () => projectValue<string>("dockerService"),

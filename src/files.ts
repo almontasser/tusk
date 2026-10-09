@@ -23,6 +23,8 @@ type Host = {
   /** Closes tabs and models for a path, or for everything inside a folder, without asking. */
   forget(path: string): void;
   status(text: string): void;
+  /** Runs or debugs the tests in a file or folder. */
+  runTests(path: string, dir: boolean, debug: boolean): unknown;
 };
 
 /** A menu row, with its shortcut as symbols (such as ⌥⏎) in `keys`, a submenu, or a separator. */
@@ -239,6 +241,10 @@ async function menuFor(path: string): Promise<MenuItem[]> {
   ];
   if (path !== host.root()) {
     items.push("-", { label: "Rename…", run: () => rename(path) }, { label: `Move to ${trash}`, run: () => remove(path) }, { label: "Hide in Project Tree", run: () => hideInTree(rel) });
+  }
+  // Test files, and folders in tests/, as runner.ts's isTestFile reads them.
+  if (isDir(path) ? /(^|\/)tests(\/|$)/.test(rel) : /(^|\/)tests\/.*\.php$|Test\.php$/.test(rel)) {
+    items.push("-", { label: "Run Tests", run: () => host.runTests(path, isDir(path), false) }, { label: "Debug Tests", run: () => host.runTests(path, isDir(path), true) });
   }
   items.push(
     "-",

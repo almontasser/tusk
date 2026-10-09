@@ -27,7 +27,7 @@ export type Target = { range: L.Range; text: string; occurrences: L.Range[]; con
 /** The server's edit: `\0` marks each place the new name goes, `name` is its suggestion. */
 export type Extraction = { edits: L.TextEdit[]; name: string; type: string | null; constant: boolean };
 
-const snippets = (editor: Editor) => editor.getContribution("snippetController2") as unknown as Snippets;
+export const snippets = (editor: Editor) => editor.getContribution("snippetController2") as unknown as Snippets;
 const toRange = (r: L.Range) => new monaco.Range(r.start.line + 1, r.start.character + 1, r.end.line + 1, r.end.character + 1);
 const fromRange = (r: monaco.IRange): L.Range => ({ start: { line: r.startLineNumber - 1, character: r.startColumn - 1 }, end: { line: r.endLineNumber - 1, character: r.endColumn - 1 } });
 const oneLine = (text: string) => (text.length > 80 ? `${text.slice(0, 77)}…` : text).replace(/\s*\n\s*/g, " ");

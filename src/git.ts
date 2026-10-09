@@ -682,18 +682,19 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   editor.onDidDispose(() => refreshers.delete(refresh));
 }
 
-/** Copies a link to lines of a file at the current commit on the remote's website, such as GitHub. */
-export async function copyRemoteUrl(path: string, start: number, end = start) {
+/** Copies a link to lines of a file at the current commit on the remote's website, such as GitHub, or with `browse`, opens it. */
+export async function copyRemoteUrl(path: string, start: number, end = start, browse = false) {
   try {
     // The project can be a folder inside the repository, so the path starts with the folder's prefix.
     const [[prefix, commit], remote] = await Promise.all([git("rev-parse", "--show-prefix", "HEAD").then((o) => o.split("\n")), git("ls-remote", "--get-url")]);
     const url = remoteLineUrl(remote, commit, prefix + path.slice(host.root().length + 1), start, end);
     if (!url) return host.status("This repository has no remote on a website, such as GitHub.");
-    await navigator.clipboard.writeText(url);
+    await (browse ? invoke("open_url", { url }) : navigator.clipboard.writeText(url));
     const pushed = (await git("branch", "-r", "--contains", "HEAD").catch(() => "")).trim();
-    host.status(pushed ? `Copied ${url}` : `Copied ${url}. Push the current commit so the link works.`);
+    const done = `${browse ? "Opened" : "Copied"} ${url}`;
+    host.status(pushed ? done : `${done}. Push the current commit so the link works.`);
   } catch (e) {
-    host.status(`Couldn't copy the remote URL: ${e}`);
+    host.status(`Couldn't ${browse ? "open" : "copy"} the remote URL: ${e}`);
   }
 }
 

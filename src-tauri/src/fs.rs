@@ -262,8 +262,17 @@ pub fn remove_empty_dir(path: String) -> Result<(), String> {
 pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Result<(), String> {
     let changed = std::sync::Arc::new(Mutex::new(std::collections::HashSet::<String>::new()));
     let pending = std::sync::Arc::downgrade(&changed);
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
+    let (rescan_app, root) = (app.clone(), crate::slash(&path));
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
+        // An overflowed queue or a watcher error loses events: `fs-rescan` has the page check what it shows.
+        Err(e) => {
+            eprintln!("File watcher error: {e}");
+            let _ = rescan_app.emit("fs-rescan", &root);
+        }
+        Ok(event) if event.need_rescan() => {
+            let _ = rescan_app.emit("fs-rescan", &root);
+        }
+        Ok(event) => {
             // A save's temporary file comes and goes within the save; the saved file's own change is enough.
             changed.lock().unwrap().extend(event.paths.iter().map(crate::slash).filter(|p| !p.ends_with(".tusk-save")));
         }

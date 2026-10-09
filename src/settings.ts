@@ -20,6 +20,8 @@ export type Settings = {
   fontSize: number;
   wordWrap: boolean;
   minimap: boolean;
+  /** Dots for spaces and arrows for tabs, except single spaces between words. */
+  showWhitespace: boolean;
   inlayHints: boolean;
   /** The worst problem on the cursor line, after the line's end. */
   inlineProblems: boolean;
@@ -36,7 +38,7 @@ export type Settings = {
   keymap: Record<string, string>;
 };
 
-const defaults: Settings = {
+export const defaults: Settings = {
   theme: "dark",
   darkTheme: "dark",
   lightTheme: "light",
@@ -45,6 +47,7 @@ const defaults: Settings = {
   fontSize: 13,
   wordWrap: false,
   minimap: false,
+  showWhitespace: false,
   inlayHints: true,
   inlineProblems: false,
   autoSave: true,
@@ -87,6 +90,7 @@ const fields: Field[] = [
   { group: "Appearance", key: "fontSize", label: "Font size", type: "number", min: 8, max: 32 },
   { group: "Editor", key: "wordWrap", label: "Wrap long lines", type: "checkbox" },
   { group: "Editor", key: "minimap", label: "Show the minimap", type: "checkbox" },
+  { group: "Editor", key: "showWhitespace", label: "Show whitespace", type: "checkbox" },
   { group: "Editor", key: "inlayHints", label: "Show inlay hints (parameter names and types)", type: "checkbox" },
   { group: "Editor", key: "inlineProblems", label: "Show the cursor line's problem at the end of the line", type: "checkbox" },
   { group: "Editor", key: "autoSave", label: "Save files automatically", type: "checkbox", help: "When you switch tabs, close a tab, or switch to another app." },
@@ -168,6 +172,7 @@ function apply() {
       fontSize: settings.fontSize,
       wordWrap: settings.wordWrap ? "on" : "off",
       minimap: { enabled: settings.minimap },
+      renderWhitespace: settings.showWhitespace ? "boundary" : "none",
       inlayHints: { enabled: settings.inlayHints ? "on" : "off" },
     });
     setVim(ed, settings.vim);

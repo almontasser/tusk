@@ -444,6 +444,12 @@ export function runTest(path: string, test: TestCase, mode: Mode = "run") {
   return runTemporary(config, mode);
 }
 
+/** Runs the tests in a file or folder of the project tree, as a temporary configuration. */
+export function runTestsIn(path: string, dir: boolean, debug = false) {
+  const rel = path.slice(getRoot().length + 1);
+  return runTemporary({ name: rel.split("/").pop()!.replace(/\.php$/, ""), type: "test", scope: dir ? "directory" : "file", path: rel, docker: true }, debug ? "debug" : "run");
+}
+
 export const runAllTests = (coverage = false) => runTemporary({ name: "All Tests", type: "test", scope: "all", docker: true }, coverage ? "coverage" : "run");
 
 /** Runs the test around the cursor, or all tests in the file. */

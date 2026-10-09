@@ -4,12 +4,13 @@ import { registerSettings } from "./settings";
 
 export const limits = registerSettings(
   "Limits",
-  { recentProjects: 12, searchMatches: 20_000, httpHistory: 100, httpShownMB: 5 },
+  { recentProjects: 12, searchMatches: 20_000, httpHistory: 100, httpShownMB: 5, largeFileMB: 20 },
   [
     { key: "recentProjects", label: "Recent projects to remember", type: "number", min: 1, max: 100 },
     { key: "searchMatches", label: "Most matches for Find in Files and TODO", type: "number", min: 100, max: 1_000_000, help: "Replace All still changes every matching file." },
     { key: "httpHistory", label: "HTTP requests to keep in the history", type: "number", min: 10, max: 5000, help: "Per project, besides pinned requests." },
     { key: "httpShownMB", label: "Largest HTTP response to show, in MB", type: "number", min: 1, max: 200, help: "A larger body opens in an editor tab instead." },
+    { key: "largeFileMB", label: "Ask before opening a file larger than, in MB", type: "number", min: 1, max: 2000, help: "Large files can slow the editor." },
   ],
 );
 
