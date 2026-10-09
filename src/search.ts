@@ -39,6 +39,9 @@ const replacement = () => $<HTMLInputElement>("replace-with").value;
 let running = "";
 
 async function search() {
+  // This search covers what the fields say now, so one waiting to start isn't needed.
+  clearTimeout(timer);
+  timer = undefined;
   const current = ++generation;
   const q = query();
   if (running) invoke("search_cancel", { id: running }).catch(() => {});
@@ -265,7 +268,7 @@ async function replaceAll(path?: string) {
   if (!q.text) return;
   rememberSearch();
   // Replace what the fields say now, not an older search's results, nor another project's.
-  if (running || matches.some((m) => !m.path.startsWith(`${host.root()}/`))) await search();
+  if (timer !== undefined || running || matches.some((m) => !m.path.startsWith(`${host.root()}/`))) await search();
   const listed = path ? matches.filter((m) => m.path === path) : matches;
   if (!listed.length) return host.status("No matches to replace.");
   showReplacePreview({

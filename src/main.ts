@@ -1378,9 +1378,9 @@ listen<string[]>("fs-change", ({ payload }) => {
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     projectFilesChanged(paths);
     aiFilesChanged([...paths]);
-    const php = [...paths].filter((p) => p.endsWith(".php"));
-    const exists = php.length ? await invoke<boolean[]>("paths_exist", { paths: php }) : [];
-    filesChanged(php.map((path, i) => ({ path, exists: exists[i] })));
+    const changed = [...paths];
+    const exists = changed.length ? await invoke<boolean[]>("paths_exist", { paths: changed }) : [];
+    filesChanged(changed.map((path, i) => ({ path, exists: exists[i] })));
     for (const dir of new Set([...paths].map(parentOf))) {
       const ul = renderedDirs.get(dir);
       if (ul) renderDir(ul, dir, true);
@@ -1812,7 +1812,7 @@ onSettings((s) => {
   if (JSON.stringify(s.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(s.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
 });
 setKeymapEditor(() => editKeymap());
-setFileOpener((path) => openFile(path));
+setFileOpener((path) => openFile(path), markSaved);
 
 // Turning spell checking on or off starts or stops its language server.
 let spellCheck = settings.spellCheck;

@@ -195,11 +195,32 @@ async function write() {
   try {
     const path = await file();
     await invoke("create_dir", { path: path.slice(0, path.lastIndexOf("/")) });
-    await invoke("write_file", { path, contents: JSON.stringify(out, null, 2) + "\n" });
+    const text = JSON.stringify(out, null, 2) + "\n";
+    await invoke("write_file", { path, contents: text });
     raw = out;
+    showInTab(path, text);
   } catch (e) {
     showError("Couldn't save your settings", e, { label: "Retry", run: persist });
   }
+}
+
+/** settings.json's text as last read or written, to tell an open tab without edits from one with them. */
+let onDisk = "";
+
+/**
+ * Puts a save in an open settings.json tab, which the file watcher doesn't cover, so saving the tab later can't
+ * undo it. A tab with edits keeps them, and a toast says the file changed.
+ */
+function showInTab(path: string, text: string) {
+  const before = onDisk;
+  onDisk = text;
+  const model = monaco.editor.getModel(monaco.Uri.file(path));
+  if (!model || model.getValue() === text) return;
+  if (model.getValue() !== before) return toast("Your settings changed while settings.json has unsaved edits. Saving the tab replaces the changes.");
+  model.pushStackElement();
+  model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  model.pushStackElement();
+  markSaved(path);
 }
 
 /** Changes one setting, applies it, and saves. A key another module added with registerSettings takes its own value's type. */
@@ -322,8 +343,9 @@ let keymapEditor = () => {};
 /** Sets what the Keymap button in the dialog opens. */
 export const setKeymapEditor = (open: () => void) => (keymapEditor = open);
 let openFile: (path: string) => unknown = () => {};
-/** Sets how the dialog opens settings.json in the editor. */
-export const setFileOpener = (open: (path: string) => unknown) => (openFile = open);
+let markSaved: (path: string) => unknown = () => {};
+/** Sets how the dialog opens settings.json in the editor, and how a save from here marks its open tab saved. */
+export const setFileOpener = (open: (path: string) => unknown, saved: (path: string) => unknown) => ((openFile = open), (markSaved = saved));
 /** Opens a file in the editor, such as a tool's configuration from its settings section. */
 export const openPath = (path: string) => openFile(path);
 
@@ -356,6 +378,7 @@ async function load() {
   let text: string;
   try {
     text = await invoke<string>("read_file", { path });
+    onDisk = text;
   } catch (e) {
     // No settings file yet: use the defaults.
     if (!(await invoke<boolean>("path_exists", { path }).catch(() => true))) return;

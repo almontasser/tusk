@@ -9104,3 +9104,33 @@ user code:
   made.
 - Git runs with `LANGUAGE=C`, so the messages the app reads stay English.
 
+### 2026-10-09: Language server edits, tree drags, and stale async results
+
+- Each server hears about the changed files its `workspace/didChangeWatchedFiles`
+  watchers match, by their globs (`globToRegex`, relative to the project; a
+  pattern without a folder names a file in the root). main.ts sent `.php`
+  files only, so `composer.lock`, `mago.toml`, `.env`, `lang/`, and `public/`
+  changes, such as a `composer require` in the terminal, left Tusk's server
+  stale.
+- `applyWorkspaceEdit` refuses the whole edit when a document edit names a
+  version other than its open model's version id, which is the version the
+  servers get with each change, and returns false (`applied: false` to a
+  server's `workspace/applyEdit`). It awaits `renamed` and closes a deleted
+  file's tab.
+- Go to Definition and other location lists drop the targets they can't read,
+  not the whole list.
+- An incremental change made while a reload's full text waits in `unsent`
+  waits with it, so the server doesn't get the change before the text.
+- A request whose send fails leaves no pending entry, and the undo group's
+  listeners go once the group is empty.
+- The tree moves files only for a drag that started in it: `dragend` and any
+  other `dragstart` clear the dragged path, which a later tab drag onto a
+  folder used to move.
+- A save from the settings dialog replaces an open, unedited `settings.json`
+  tab's text as one undo step and marks it saved (main.ts passes `markSaved`
+  to `setFileOpener`); with unsaved edits, a toast says saving the tab
+  replaces the change. Saving the stale tab reverted, say, a theme change.
+- Blame annotations apply only to the model they were read for, and Replace
+  All first runs a search still waiting on its 250 ms timer, instead of
+  previewing the previous query's matches.
+

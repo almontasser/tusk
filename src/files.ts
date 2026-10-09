@@ -294,7 +294,11 @@ export function initFiles(h: Host) {
   });
 
   // Drag a row onto a folder, or onto a file in the folder, to move it there.
+  // Only a drag that starts in the tree moves anything: one from a tab or the editor finds `dragged` empty, even
+  // when a tree drag ended without its dragend, as when its row re-rendered.
   let dragged = "";
+  document.addEventListener("dragstart", () => (dragged = ""), true);
+  tree.addEventListener("dragend", () => (dragged = ""));
   tree.addEventListener("dragstart", (e) => {
     dragged = pathAt(e) ?? "";
     e.dataTransfer?.setData("text/plain", dragged);

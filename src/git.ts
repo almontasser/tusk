@@ -637,6 +637,8 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     const rel = model && relOf(model);
     if (!rel || !annotated.has(rel)) return editor.updateOptions({ lineNumbers: "on", lineNumbersMinChars: 5 });
     const lines = await blameLines();
+    // Another file, or annotations turned off, while blame ran: a newer call shows that.
+    if (editor.getModel() !== model || !annotated.has(rel)) return;
     annotations.set(editor, lines);
     const label = (n: number) => {
       const b = lines[n - 1];

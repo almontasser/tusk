@@ -17,6 +17,7 @@ import { onProjectValue, projectScope, projectValue, setProjectValue } from "./p
 import { editExclusions, type Folder } from "./indexexcludedialog";
 import { toast } from "./dom";
 import { recordVersion } from "./localhistory";
+import { globToRegex } from "./editorconfig";
 
 type M = typeof monaco.languages;
 
@@ -27,7 +28,7 @@ export type Host = {
   /** Records that the model's current text is on disk. */
   markSaved(path: string, version?: number): void;
   /** Moves an open tab after a file is renamed on disk. */
-  renamed(from: string, to: string): void;
+  renamed(from: string, to: string): void | Promise<void>;
   /** Closes a deleted file's tab and drops its model. */
   forget(path: string): void;
   /** Opens a file at a 1-based line. */
@@ -217,12 +218,15 @@ monaco.languages.registerCodeActionProvider("php", {
 }, { providedCodeActionKinds: ["quickfix"] });
 monaco.editor.registerCommand("tusk.runAction", (_, action: L.CodeAction) => runTuskAction(action));
 
-/** Converts locations and loads their files, because Monaco can only show locations in existing models. */
+/**
+ * Converts locations and loads their files, because Monaco can only show locations in existing models. A file that
+ * can't be read drops its own locations, not the others.
+ */
 async function locations(result: L.Location | L.Location[] | L.LocationLink[] | null): Promise<monaco.languages.Location[]> {
   const list = !result ? [] : Array.isArray(result) ? result : [result];
   const locs = list.map((l) => ("targetUri" in l ? { uri: l.targetUri, range: l.targetSelectionRange } : l));
-  await Promise.all(locs.map((l) => host.ensureModel(pathOf(l.uri))));
-  return locs.map((l) => ({ uri: monaco.Uri.parse(l.uri), range: toRange(l.range) }));
+  const loaded = await Promise.allSettled(locs.map((l) => host.ensureModel(pathOf(l.uri))));
+  return locs.filter((_, i) => loaded[i].status === "fulfilled").map((l) => ({ uri: monaco.Uri.parse(l.uri), range: toRange(l.range) }));
 }
 
 // ---- Workspace edits ----
@@ -251,7 +255,11 @@ function linkUndo(models: monaco.editor.ITextModel[], created: Map<string, strin
   const listeners = [...group].map((model) =>
     model.onDidChangeContent((e) => {
       if (!group.has(model)) return;
-      if (!e.isUndoing) return void group.delete(model);
+      if (!e.isUndoing) {
+        group.delete(model);
+        if (!group.size) listeners.forEach((l) => l.dispose());
+        return;
+      }
       listeners.forEach((l) => l.dispose());
       const others = [...group].filter((m) => m !== model && !m.isDisposed());
       for (const m of others) m.undo();
@@ -282,10 +290,24 @@ export function serverMessage(message: string): string {
   return cut.length > 240 ? `${cut.slice(0, 240)}…` : cut;
 }
 
-/** Applies an edit and saves every touched file, as PhpStorm does for refactorings. One ⌘Z undoes it in all of them. */
-export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
+/**
+ * Applies an edit and saves every touched file, as PhpStorm does for refactorings. One ⌘Z undoes it in all of them.
+ * An edit made for an older version of an open file applies nowhere, since its ranges no longer fit; returns
+ * whether it applied.
+ */
+export async function applyWorkspaceEdit(edit: L.WorkspaceEdit): Promise<boolean> {
   const ops: (L.TextDocumentEdit | L.CreateFile | L.RenameFile | L.DeleteFile)[] =
     edit.documentChanges ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri, version: null }, edits }));
+  // The servers get each model's version id with its text, so the version an edit names is one of those.
+  const changed = ops.some((op) => {
+    if ("kind" in op || op.textDocument.version == null) return false;
+    const model = monaco.editor.getModel(monaco.Uri.file(pathOf(op.textDocument.uri)));
+    return model && model.getVersionId() !== op.textDocument.version;
+  });
+  if (changed) {
+    host.status("The file changed while the refactoring ran; run it again.", undefined, "error");
+    return false;
+  }
   const edited: monaco.editor.ITextModel[] = [];
   /** Files the edit creates, with the folders it creates for them, deepest first. */
   const created = new Map<string, string[]>();
@@ -320,12 +342,15 @@ export async function applyWorkspaceEdit(edit: L.WorkspaceEdit) {
     } else if (op.kind === "rename") {
       const [from, to] = [pathOf(op.oldUri), pathOf(op.newUri)];
       await invoke("rename_path", { from, to });
-      host.renamed(from, to);
+      await host.renamed(from, to);
     } else if (op.kind === "delete") {
-      await invoke("remove_path", { path: pathOf(op.uri) });
+      const path = pathOf(op.uri);
+      await invoke("remove_path", { path });
+      host.forget(path);
     }
   }
   linkUndo(edited, created);
+  return true;
 }
 
 // Servers can link to a location with this command, for example in code lenses.
@@ -380,7 +405,8 @@ type Server = {
   notify(method: string, params: unknown): void;
   /** Runs a code action or command: its edit (resolved first if the server resolves them), then its command. */
   codeAction(action: L.CodeAction | L.Command): Promise<void>;
-  filesChanged(changes: L.FileEvent[]): void;
+  /** Tells the server about the changed files it watches. `exists` false means deleted. */
+  filesChanged(files: { path: string; exists: boolean }[]): void;
 };
 
 /**
@@ -423,7 +449,11 @@ async function startServer(
       notify("$/cancelRequest", { id });
       p.resolve(null);
     });
-    return send({ id, method, params }).then(() => result).finally(() => cancel?.dispose());
+    const sent = send({ id, method, params }).catch((e) => {
+      pending.delete(id);
+      throw e;
+    });
+    return sent.then(() => result).finally(() => cancel?.dispose());
   };
   const request = async <T>(method: string, params: unknown, token?: monaco.CancellationToken): Promise<T> => {
     await ready;
@@ -484,14 +514,20 @@ async function startServer(
   async function serverRequest(method: string, params: any): Promise<unknown> {
     switch (method) {
       case "workspace/applyEdit":
-        await applyWorkspaceEdit(params.edit);
-        return { applied: true };
+        return { applied: await applyWorkspaceEdit(params.edit) };
       case "workspace/configuration":
         return params.items.map((item: L.ConfigurationItem) => (item.section ? settings[item.section] ?? null : settings));
       case "window/showMessageRequest":
         return askUser(name, params);
       case "client/registerCapability":
-        if (params.registrations.some((r: L.Registration) => r.method === "workspace/didChangeWatchedFiles")) watchesFiles = true;
+        for (const r of params.registrations as L.Registration[]) {
+          if (r.method !== "workspace/didChangeWatchedFiles") continue;
+          for (const { globPattern: g } of (r.registerOptions as L.DidChangeWatchedFilesRegistrationOptions | undefined)?.watchers ?? []) {
+            const [base, glob] = typeof g === "string" ? [root, g] : [pathOf(typeof g.baseUri === "string" ? g.baseUri : g.baseUri.uri), g.pattern];
+            // A pattern without a folder, such as composer.lock, names a file in the base folder itself.
+            watchers.push({ base, pattern: globToRegex(glob.includes("/") ? glob : `/${glob}`) });
+          }
+        }
         return null;
       default: // window/workDoneProgress/create and others need no work.
         return null;
@@ -516,8 +552,8 @@ async function startServer(
   const progressTitles = new Map<string | number, string>();
   const progressTimers = new Map<string | number, ReturnType<typeof setTimeout>>();
   const progressShown = new Set<string | number>();
-  // Set when the server asks to hear about file changes, so its index follows moves and edits at once.
-  let watchesFiles = false;
+  // The files the server asks to hear about, so its index follows moves, edits, and `composer require` at once.
+  const watchers: { base: string; pattern: RegExp }[] = [];
 
   const serves = (model: monaco.editor.ITextModel) => langs.includes(model.getLanguageId()) && model.uri.scheme === "file";
 
@@ -542,7 +578,8 @@ async function startServer(
     const sync = typeof c.textDocumentSync === "number" ? c.textDocumentSync : c.textDocumentSync?.change;
     notify("textDocument/didOpen", { textDocument: { uri, languageId: model.getLanguageId(), version: model.getVersionId(), text: textOf(model) } });
     const listener = model.onDidChangeContent((e) => {
-      if (sync === 2 /* Incremental */ && !e.isFlush) {
+      // Text still waiting in `unsent`, such as after a reload, goes whole with this change in it, not after it.
+      if (sync === 2 /* Incremental */ && !e.isFlush && !unsent.has(uri)) {
         // Monaco orders changes from the end of the document back, so the server can apply them in turn.
         const contentChanges = e.changes.map((ch) => ({ range: fromRange(ch.range), rangeLength: ch.rangeLength, text: ch.text }));
         return notify("textDocument/didChange", { textDocument: { uri, version: e.versionId }, contentChanges });
@@ -611,8 +648,11 @@ async function startServer(
     didSave(model) {
       if (serves(model)) notify("textDocument/didSave", { textDocument: { uri: model.uri.toString() } });
     },
-    filesChanged(changes) {
-      if (watchesFiles) notify("workspace/didChangeWatchedFiles", { changes });
+    filesChanged(files) {
+      const watched = files.filter((f) => watchers.some((w) => f.path.startsWith(`${w.base}/`) && w.pattern.test(f.path.slice(w.base.length + 1))));
+      // Created and changed look the same here; the server reads the file either way.
+      const changes = watched.map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
+      if (changes.length) notify("workspace/didChangeWatchedFiles", { changes });
     },
     executeCommand: (command, args) => request("workspace/executeCommand", { command, arguments: args }),
     notify: (method, params) => void ready.then(() => notify(method, params)),
@@ -1423,13 +1463,11 @@ export async function excludeFolder(root: string, rel: string, exclude: boolean)
 }
 
 /**
- * Tells the servers which files changed on disk: PHP files for the index, and the others Tusk's server watches
- * for Laravel's facts, such as `.env`, `composer.lock`, and `mago.toml`. `exists` false means deleted.
+ * Tells the servers which files changed on disk. Each hears about the files its watchers match: Tusk's server
+ * asks for PHP files for the index, and `.env`, `composer.lock`, `mago.toml`, `lang/`, and `public/` for
+ * Laravel's facts. `exists` false means deleted.
  */
 export function filesChanged(files: { path: string; exists: boolean }[]) {
-  const watched = files.filter((f) => /\.php$|\/\.env$|\/composer\.lock$|\/mago\.toml$|\/lang\/.*\.json$|\/public\//.test(f.path));
-  // Created and changed look the same here; the server reads the file either way.
-  const changes = watched.map((f): L.FileEvent => ({ uri: monaco.Uri.file(f.path).toString(), type: f.exists ? 2 : 3 }));
-  if (changes.length) servers.forEach((s) => s.filesChanged(changes));
+  servers.forEach((s) => s.filesChanged(files));
 }
 

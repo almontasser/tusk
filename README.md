@@ -411,7 +411,9 @@ shows only when it applies. Changes apply immediately and are saved in
   project's `tusk.json` so your team gets them; otherwise they stay on this
   Mac (see "Project settings and tusk.json").
 - **Open settings.json** opens the file in the editor. When you save it there,
-  Tusk applies it.
+  Tusk applies it. A change you make elsewhere, such as picking a theme, shows
+  in the open file; if the file has unsaved edits, a message says so instead,
+  since saving them replaces the change.
 - A number outside its range isn't applied; the dialog says which numbers it
   takes.
 - If `settings.json` isn't valid JSON, Tusk uses the defaults, doesn't write the
