@@ -9299,3 +9299,34 @@ user code:
   contrast. Color themes still derive their own. A selected tree row is shaded
   as inactive when the tree doesn't have focus. The database connection and
   remote server pickers are buttons.
+
+### 2026-10-09: Navigation history, tab actions, and Go to Test
+
+- `src/navigation.ts` keeps Navigate Back and Forward's stacks (`Places`, 50
+  places each) and pairs a class with its test (`testPartners`). It loads no
+  Monaco, so `navigation.test.ts` covers it.
+- Each pane's cursor and model listeners call `recordPlace` for the focused
+  editor; showing another file moves no cursor, so the model listener records
+  the switch. A
+  move into another file pushes where the cursor was; a move of more than 10
+  lines pushes it only when Monaco reports it as explicit or unset, so a
+  paste or an undo isn't a jump. The move to `openAt`'s target right after a
+  file opens isn't pushed a second time (`enteredAt`), and nothing is pushed
+  while Back or Forward opens a place. A place whose file no longer opens is
+  skipped with a status message.
+- Last Edit Location is the cursor at each content change of a file model,
+  leaving out flushes such as `setValue`.
+- `closeFile` keeps the last 20 closed paths for Reopen Closed Tab, except
+  while a project closes. The stacks, the last edit, and the closed tabs are
+  cleared when another project opens.
+- The tab menu's close actions moved to `closeOthers` and `closeToRight`, which
+  the Window > Editor Tabs actions share. The tab menu gains Rename File…,
+  through `files.ts`'s `rename`.
+- Next and Previous Method (`goToMethod` in `src/breadcrumbs.ts`) read the
+  outline service's cached symbols, as the breadcrumbs do, and go to the
+  methods', functions', and constructors' names.
+- Go to Test lists the project with `list_files`, leaving out `vendor`, and
+  matches file names: one match opens, several open a picker.
+- The status bar's cursor position, indentation, and language are buttons:
+  Go to Line, a picker of Convert Indents to Spaces or Tabs, and a picker of
+  Monaco's languages that calls `setModelLanguage`.

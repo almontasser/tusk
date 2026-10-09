@@ -257,8 +257,9 @@ DMG that everyone installs by hand.
 - **Status bar:** error and warning counts for open files (click them to list
   the problems), the file's path followed by breadcrumbs for the class and
   method at the cursor (click one to go to it), background work such as
-  indexing, the cursor position,
-  indentation, line endings, and the file's language.
+  indexing, the cursor position (click it to go to a line), the indentation
+  (click it to convert indents to spaces or tabs), the encoding and line
+  endings, and the file's language (click it to pick another one for the file).
 - **Welcome screen:** without an open folder, the window lists your recent
   projects. Tab and Enter open one; right-click one to remove it from the list.
 
@@ -297,6 +298,11 @@ shortcut, the other action loses it. Changes are saved in `settings.json` as
 | ⌘⇧O | Go to file (press again to include ignored files, such as `vendor`) |
 | ⌥⌘O | Go to symbol in the project: classes, functions, constants, and methods (`User::save` narrows to a class's) |
 | ⌘E | Recent files |
+| ⌥⌘← and ⌥⌘→ | Navigate back and forward through the places the cursor jumped from: another file, or more than 10 lines away |
+| ⇧⌘⌫ | Go to the last edit location |
+| ⇧⌘T | Go to the test of the current class (`UserTest.php` for `User.php`), or from a test to its class |
+| ⌃↓ and ⌃↑ | Next and previous method or function (on a Mac, turn off Mission Control's ⌃↑ and ⌃↓ in System Settings first) |
+| ⇧⌘] and ⇧⌘[ | Select the next and previous editor tab |
 | ⌘⇧F | Find in files |
 | ⌘⌥↓, ⌘⌥↑ | Next and previous match in the Find view's results, while it shows |
 | ⌘⇧R | Replace in files |
@@ -743,6 +749,11 @@ formatting, running the test (in test files), and the Markdown preview (in
 Markdown files). Each shows its shortcut from your keymap. Hover over a
 submenu, or press → on it, to open it. Right-click
 the gutter for breakpoints, bookmarks, the line's change, and blame.
+
+Right-click an editor tab to close it, the others, all of them, or those to its
+right, to split it, to rename its file, or to copy its path. **Window > Editor
+Tabs** has the same closing actions for the focused pane, and **Reopen Closed
+Tab**, which reopens the most recently closed file that still exists.
 
 ## Files
 

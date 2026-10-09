@@ -57,7 +57,8 @@ import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunni
 import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
-import { showBreadcrumbs } from "./breadcrumbs";
+import { goToMethod, showBreadcrumbs } from "./breadcrumbs";
+import { isJump, Places, type Place, testPartners } from "./navigation.ts";
 import { withFolders } from "./diagnostics";
 import { chooseService, composeService, composeServices, forgetComposeServices, setServiceChoice } from "./sail";
 import { setMenu } from "./menu";
@@ -125,6 +126,14 @@ function addPane(): Pane {
   ed.onDidChangeCursorSelection(() => pane.editor === editor && updateStatusItems());
   ed.onDidChangeCursorPosition(() => pane.editor === editor && showBreadcrumbs($("path"), relative(active), editor));
   ed.onDidChangeCursorPosition((e) => pane.editor === editor && followEditor(active, e.position));
+  ed.onDidChangeCursorPosition((e) => pane.editor === editor && recordPlace(e.reason));
+  // Showing another file moves no cursor, so the switch is recorded here.
+  ed.onDidChangeModel(() => pane.editor === editor && recordPlace(monaco.editor.CursorChangeReason.NotSet));
+  ed.onDidChangeModelContent((e) => {
+    const model = ed.getModel();
+    const pos = ed.getPosition();
+    if (pane.editor === editor && !e.isFlush && model?.uri.scheme === "file" && pos) lastEdit = { path: model.uri.fsPath, line: pos.lineNumber, column: pos.column };
+  });
   return pane;
 }
 
@@ -612,6 +621,10 @@ async function openFolderNow(dir: unknown) {
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
+  places.clear();
+  lastPlace = undefined;
+  lastEdit = undefined;
+  closedTabs = [];
   // Saves timed while the old project closed would store the new one without its tabs.
   clearTimeout(saveTimer);
   clearTimeout(panelSave);
@@ -894,6 +907,15 @@ function markErrors() {
 }
 $("problems").onclick = () => root && showProblems();
 $("encoding").onclick = () => changeEncoding();
+$("cursor-position").onclick = () => (editor.focus(), editor.trigger("status", "editor.action.gotoLine", {}));
+$("indentation").onclick = () =>
+  pick("Indentation", (q) => rank(q, menuActions("Convert Indents to Spaces", "Convert Indents to Tabs").map((a) => ({ label: a.label, detail: a.keys, run: a.run }))));
+$("language").onclick = () => {
+  const model = editor.getModel();
+  if (!model) return;
+  const items = monaco.languages.getLanguages().map((l) => ({ label: languageName(l.id), detail: l.id, run: () => (monaco.editor.setModelLanguage(model, l.id), updateStatusItems()) }));
+  pick("Language for this file", (q) => rank(q, items));
+};
 
 // ---- Recent projects and the welcome screen ----
 
@@ -1127,6 +1149,7 @@ async function closeFile(path: string) {
     }
   } else tab.model.dispose();
   tabs.delete(path);
+  if (!switching) closedTabs = [path, ...closedTabs.filter((p) => p !== path)].slice(0, 20);
   viewStates.delete(path);
   changedOnDisk(path, null);
   retarget((p) => (p === path ? null : p));
@@ -1366,14 +1389,11 @@ function renderTabs() {
         el.onauxclick = (e) => e.button === 1 && closeTab(path, pane);
         el.oncontextmenu = (e) => {
           e.preventDefault();
-          const closeAll = async (keep?: string) => {
-            for (const p of pane.paths.filter((p) => p !== keep)) await closeTab(p, pane);
-          };
           showMenu(e.clientX, e.clientY, [
             { label: "Close", run: () => closeTab(path, pane) },
-            { label: "Close Others", run: () => closeAll(path) },
-            { label: "Close All", run: () => closeAll() },
-            { label: "Close Tabs to the Right", run: async () => { for (const p of pane.paths.slice(pane.paths.indexOf(path) + 1)) await closeTab(p, pane); } },
+            { label: "Close Others", run: () => closeOthers(pane, path) },
+            { label: "Close All", run: () => closeOthers(pane) },
+            { label: "Close Tabs to the Right", run: () => closeToRight(pane, path) },
             ...(view?.editorOnly
               ? []
               : view
@@ -1384,6 +1404,7 @@ function renderTabs() {
                   { label: "Split Down", run: () => (focusPane(pane), openFile(path).then(() => split("col"))) },
                   ...(tab?.model.getLanguageId() === "markdown" ? [{ label: "Open Preview", run: () => (focusPane(pane), openFile(path).then(markdownPreview)) }] : []),
                   "-" as const,
+                  { label: "Rename File…", run: () => rename(path) },
                   { label: "Copy Path", run: () => copyPath(path) },
                   { label: "Copy Relative Path", run: () => copyPath(path, true) },
                   { label: `Reveal in ${fileManager}`, run: () => revealInFinder(path) },
@@ -1557,6 +1578,94 @@ monaco.editor.registerEditorOpener({
   },
 });
 
+// ---- Navigation history and tab actions ----
+
+const places = new Places();
+/** Where the focused editor's cursor was, to remember when it jumps. */
+let lastPlace: Place | undefined;
+/** When the cursor last moved into another file, so the move to the target that follows isn't a jump of its own. */
+let enteredAt = 0;
+let navigating = false;
+let lastEdit: Place | undefined;
+/** Files whose tabs closed, most recent first, for Reopen Closed Tab. */
+let closedTabs: string[] = [];
+
+const here = (): Place | undefined => {
+  const model = editor.getModel();
+  const pos = editor.getPosition();
+  return model?.uri.scheme === "file" && pos ? { path: model.uri.fsPath, line: pos.lineNumber, column: pos.column } : undefined;
+};
+
+/** Remembers where the cursor jumped from. Small moves, and moves by edits such as a paste or an undo, aren't jumps. */
+function recordPlace(reason: monaco.editor.CursorChangeReason) {
+  const now = here();
+  if (!now) return;
+  const { Explicit, NotSet } = monaco.editor.CursorChangeReason;
+  if (lastPlace && !navigating && isJump(lastPlace, now)) {
+    if (lastPlace.path !== now.path) places.push(lastPlace), (enteredAt = performance.now());
+    else if ((reason === Explicit || reason === NotSet) && performance.now() - enteredAt > 100) places.push(lastPlace);
+  }
+  lastPlace = now;
+}
+
+/** Navigate Back (-1) or Forward (1). A place whose file can't open any more is skipped. */
+async function navigate(direction: -1 | 1) {
+  for (let place; (place = direction < 0 ? places.goBack(here()) : places.goForward(here())); ) {
+    navigating = true;
+    try {
+      await openAt(place.path, { lineNumber: place.line, column: place.column });
+      lastPlace = here();
+      return;
+    } catch {
+      status(`Can't open ${relative(place.path)}`);
+    } finally {
+      navigating = false;
+    }
+  }
+}
+
+function goToLastEdit() {
+  if (!lastEdit) return status("No edits to go back to.");
+  const { path, line, column } = lastEdit;
+  openAt(path, { lineNumber: line, column }).catch(() => status(`Can't open ${relative(path)}`));
+}
+
+async function closeOthers(pane: Pane, keep?: string) {
+  for (const p of pane.paths.filter((p) => p !== keep)) await closeTab(p, pane);
+}
+
+async function closeToRight(pane: Pane, path: string) {
+  for (const p of pane.paths.slice(pane.paths.indexOf(path) + 1)) await closeTab(p, pane);
+}
+
+/** Selects the focused pane's next (1) or previous (-1) tab, wrapping around. */
+function selectTab(direction: 1 | -1) {
+  const { paths } = currentPane();
+  if (paths.length > 1) openFile(paths[(paths.indexOf(active) + direction + paths.length) % paths.length]);
+}
+
+/** Reopens the most recently closed file that still exists. */
+async function reopenClosedTab() {
+  while (closedTabs.length) {
+    const path = closedTabs.shift()!;
+    const [exists] = await invoke<boolean[]>("paths_exist", { paths: [path] });
+    if (exists) return openFile(path);
+  }
+  status("No closed tabs to reopen.");
+}
+
+/** Goes from a class to its test, `UserTest.php` for `User.php`, or from a test to its class. */
+async function goToTest() {
+  const path = activeFile();
+  const dir = root;
+  if (!path || !dir) return;
+  const files = testPartners(path, await invoke<string[]>("list_files", { root: dir }));
+  const name = nameOf(path).replace(/\.php$/, "");
+  if (!files.length) return status(name.endsWith("Test") ? `No test subject found for ${name}` : `No test found for ${name}`);
+  if (files.length === 1) return openFile(`${dir}/${files[0]}`);
+  pick(`Choose a file for ${name}`, (q) => rank(q, files.map((f) => fileItem(`${dir}/${f}`))));
+}
+
 // ---- Navigation and search ----
 
 const fileItem = (path: string): Item => {
@@ -1704,6 +1813,18 @@ const actions: Action[] = [
   { label: "Import Color Theme…", run: importTheme },
   { label: "Remove Imported Color Theme…", run: removeTheme },
   { label: "Close Tab", keys: "Meta+W", run: () => closeFocusedRequest() || closeFocusedPanelTab() || closeTab(active) },
+  { label: "Back", keys: "Meta+Alt+ArrowLeft", run: () => navigate(-1) },
+  { label: "Forward", keys: "Meta+Alt+ArrowRight", run: () => navigate(1) },
+  { label: "Last Edit Location", keys: "Meta+Shift+Backspace", run: goToLastEdit },
+  { label: "Go to Test", keys: "Meta+Shift+T", run: goToTest },
+  { label: "Next Method", keys: "Ctrl+ArrowDown", run: () => goToMethod(editor, 1), editorOnly: true },
+  { label: "Previous Method", keys: "Ctrl+ArrowUp", run: () => goToMethod(editor, -1), editorOnly: true },
+  { label: "Select Next Tab", keys: "Meta+Shift+BracketRight", run: () => selectTab(1) },
+  { label: "Select Previous Tab", keys: "Meta+Shift+BracketLeft", run: () => selectTab(-1) },
+  { label: "Close Other Tabs", run: () => closeOthers(currentPane(), active) },
+  { label: "Close All Tabs", run: () => closeOthers(currentPane()) },
+  { label: "Close Tabs to the Right", run: () => closeToRight(currentPane(), active) },
+  { label: "Reopen Closed Tab", run: reopenClosedTab },
   { label: "Search Everywhere", keys: "Shift Shift", run: () => searchEverywhere() },
   { label: "Find Action", keys: "Meta+Shift+A", run: () => findAction() },
   { label: "Go to File", keys: "Meta+Shift+O", run: goToFile },

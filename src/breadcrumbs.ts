@@ -69,3 +69,22 @@ export function showBreadcrumbs(el: HTMLElement, rel: string, editor: monaco.edi
     if (symbols && call === drawn) draw(symbols);
   }, edited ? 600 : 100);
 }
+
+const { Method, Function, Constructor } = monaco.languages.SymbolKind;
+
+/** Moves the cursor to the name of the next (1) or previous (-1) method or function, as PhpStorm's ⌃↓ and ⌃↑ do. */
+export async function goToMethod(editor: monaco.editor.ICodeEditor, direction: 1 | -1) {
+  const model = editor.getModel();
+  const line = editor.getPosition()?.lineNumber;
+  if (!model || !line) return;
+  const outline = await StandaloneServices.get(IOutlineModelService).getOrCreate(model, new monaco.CancellationTokenSource().token);
+  const flat = (symbols: monaco.languages.DocumentSymbol[]): monaco.languages.DocumentSymbol[] => symbols.flatMap((s) => [s, ...flat(s.children ?? [])]);
+  const starts = flat(outline.getTopLevelSymbols())
+    .filter((s) => [Method, Function, Constructor].includes(s.kind))
+    .map((s) => s.selectionRange)
+    .sort((a, b) => a.startLineNumber - b.startLineNumber);
+  const target = direction > 0 ? starts.find((r) => r.startLineNumber > line) : starts.filter((r) => r.startLineNumber < line).at(-1);
+  if (!target || editor.getModel() !== model) return;
+  editor.setPosition(monaco.Range.getStartPosition(target));
+  editor.revealRangeInCenterIfOutsideViewport(target);
+}

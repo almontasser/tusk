@@ -29,8 +29,9 @@ const LAYOUT: [string, Entry[]][] = [
     "Split Right", "Split Down", "Move Tab to Next Pane", "Unsplit", "-", "Markdown Preview", "-", "Color Theme…", "Import Color Theme…", "Remove Imported Color Theme…", "Toggle Inline Problems", "Toggle AI Completion", "-",
     "Soft-Wrap", "Show Minimap", "Show Whitespaces", "-", "Increase Font Size", "Decrease Font Size", "Reset Font Size", "-", native("Fullscreen")]],
   ["Navigate", ["Search Everywhere", "Find Action", "Go to File", "Go to Class", "Go to Symbol", "Go to Request…", "File Structure", "Select Opened File in Project", "-",
-    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-",
-    ...commandsIn("navigate"), "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files", "-", "Next Change", "Previous Change"]],
+    "Back", "Forward", "Last Edit Location", "-",
+    "Go to Declaration", "Go to Implementation", "Go to Type Declaration", "Go to Super Method", "Go to Test", "Find Usages", "Type Hierarchy", "Call Hierarchy", "-",
+    ...commandsIn("navigate"), "Next Method", "Previous Method", "-", "Next Problem", "Previous Problem", "Next Problem in Files", "Previous Problem in Files", "-", "Next Change", "Previous Change"]],
   ["Code", ["Generate…", "Show Context Actions", "Basic Completion", "Parameter Info", "Quick Documentation", "-",
     ...commandsIn("comment"), "Reformat Code", "Formatters…", "Auto-Indent Lines", "Optimize Imports", "Fix All Safe Problems in File", "-",
     ["Folding", ["Expand", "Collapse", "Toggle Fold", "Expand Recursively", "Collapse Recursively", "-", "Expand All", "Collapse All", ["Collapse to Level", commandsIn("fold-level")], "-",
@@ -51,7 +52,8 @@ const LAYOUT: [string, Entry[]][] = [
     "-", "Choose PHP Interpreter…", "Hidden Files and Folders…", "Choose Docker Service for Commands…", "Restart Language Servers", "Reindex Project", "Index Exclusions…", "PHP Analysis Settings…", "Share Project Settings in tusk.json…"]],
   ["Git", ["Commit…", "Push…", "Update Project", "Fetch", "-", "Branches…", "Worktrees…", "Stash Changes…", "Stashes…", "Interactive Rebase…", "Resolve Conflicts in Merge Tool", "Stage Selected Changes (in a diff)", "-", "Initialize Repository", "-",
     "Annotate with Git Blame", "Show File History", "Copy Remote URL", "Open on GitHub", "-", "Create Pull Request…"]],
-  ["Window", [native("Minimize"), native("Maximize")]],
+  ["Window", [native("Minimize"), native("Maximize"), "-",
+    ["Editor Tabs", ["Select Next Tab", "Select Previous Tab", "-", "Close Other Tabs", "Close All Tabs", "Close Tabs to the Right", "-", "Reopen Closed Tab"]]]],
   ["Help", ["Find Action", "Keyboard Shortcuts", "Keymap…"]],
 ];
 
