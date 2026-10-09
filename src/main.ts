@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fileManager, isMac, keyText, open, shortcutText, thisComputer, ThisComputer, trash } from "./platform.ts";
 import { createEditor, monaco } from "./editor";
-import { iconButton, toast } from "./dom";
+import { h, icon, iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
 import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
@@ -13,7 +13,7 @@ import { attachDebugger, breakpointMenu, choosePort, editBreakpoint, exceptionOp
 import { afterSave, annotate, blameMenu, changeMenu, copyRemoteUrl, goToChange, isAnnotated, trackEditor, branchListeners, worktrees, stageSelected, showDiff, change, focusCommit, initGit, refreshGit } from "./git";
 import { attachDocblocks } from "./docblock";
 import { indentation, type Properties } from "./editorconfig";
-import { CHARSETS, charsetName, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
+import { CHARSETS, charsetName, chosenCharset, editorConfigFor, forgetEditorConfigs, initProjectFiles, readText, savesCr, setCharset, writeText } from "./projectfiles";
 import { componentClassPath } from "./phptypes";
 import { initComposer, loadPackages, requirePackage, updateAll } from "./composer";
 import { initLaravelElements, newLaravelElement } from "./laravelelements";
@@ -76,7 +76,8 @@ import { splitter } from "./splitter";
 import { closeDocked, closeFocusedPanelTab, closeTerminals, closeView, dockBack, draggingPanelTab, dropIndex, findInTerminal, focusTab, hidePanel, initDocking, renameTerminal, terminalFocused, onPanelChange, openTerminal, type PanelTab, tabIcon, undockDragged, panelShown, type Restore, runningTerminals, toggleTerminal } from "./terminal";
 
 type Entry = { name: string; path: string; is_dir: boolean };
-type Tab = { model: monaco.editor.ITextModel; saved: number };
+/** `disk` is the file's text as last read or written, to tell when another program changed it; undefined when unknown. */
+type Tab = { model: monaco.editor.ITextModel; saved: number; disk?: string };
 
 const $ = (id: string) => document.getElementById(id)!;
 installErrorHandlers();
@@ -235,7 +236,7 @@ const MAX_PANES = 4;
 
 /** Opens the current file in a new pane to the right (`row`) or below (`col`). With four panes, it moves to the next pane instead. */
 function split(dir: "row" | "col") {
-  if (isView(active)) return;
+  if (!activeFile()) return;
   if (panes.length >= MAX_PANES) return focusPane(panes[(panes.indexOf(currentPane()) + 1) % panes.length]), editor.focus();
   splitPane(currentPane(), dir, active, false);
   editor.focus();
@@ -276,6 +277,9 @@ function unsplit(pane = currentPane()) {
   target.paths.push(...pane.paths.filter((p) => !target.paths.includes(p)));
   if (pane.editor === editor) focusPane(target);
   panes.splice(panes.indexOf(pane), 1);
+  // Panel tabs move with the pane's tabs; removing its element would take theirs along.
+  const host = target.el.querySelector(".pane-editor")!;
+  for (const view of views.values()) if (pane.el.contains(view.el)) (view.el.hidden = true), host.append(view.el);
   removeEditor(pane.editor);
   pane.editor.dispose();
   const group = pane.el.parentElement!;
@@ -560,8 +564,12 @@ const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
 const relative = (path: string) => (path.startsWith(root + "/") ? path.slice(root.length + 1) : remoteFileLabel(path) || path);
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const isDirty = (t: Tab) => t.model.getAlternativeVersionId() !== t.saved;
+/** Text as a model keeps it: without a byte order mark, and with one kind of line break. */
+const plain = (text: string) => text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
 
 let opening = Promise.resolve();
+/** While a project closes, its tabs close one by one, and saving the session then would lose them. */
+let switching = false;
 /** Opens a project after any project still opening, so a quick switch can't mix the two projects' tabs and terminals. */
 function openFolder(dir: unknown = null) {
   const next = opening.then(() => openFolderNow(dir));
@@ -572,8 +580,19 @@ function openFolder(dir: unknown = null) {
 async function openFolderNow(dir: unknown) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
+  const [exists] = await invoke<boolean[]>("paths_exist", { paths: [dir] });
+  if (!exists) {
+    toast(`Folder not found: ${dir}`, { action: { label: "Remove from Recent", run: () => (forgetProject(dir), !root && showWelcome()) } });
+    if (!root) showWelcome();
+    return;
+  }
   saveSession();
-  for (const path of [...tabs.keys()]) await closeFile(path);
+  switching = true;
+  try {
+    for (const path of [...tabs.keys()]) await closeFile(path);
+  } finally {
+    switching = false;
+  }
   if (tabs.size) return; // user kept unsaved changes
   // Terminals go back to the panel; editor-only views, such as a diff, belong to the old project.
   for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), tab.editorOnly ? closeDocked(tab) : dockBack(tab);
@@ -583,6 +602,10 @@ async function openFolderNow(dir: unknown) {
   // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
   monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
   root = dir;
+  // Saves timed while the old project closed would store the new one without its tabs.
+  clearTimeout(saveTimer);
+  clearTimeout(panelSave);
+  panelSave = undefined;
   forgetProblems();
   resetHttpClient();
   recent = [];
@@ -660,7 +683,7 @@ function loadSession(): Session | null {
 }
 
 function saveSession() {
-  if (!root) return;
+  if (!root || switching) return;
   if (active && tabs.has(active)) viewStates.set(active, editor.saveViewState()!);
   const paths = [...tabs.keys()];
   const session: Session = {
@@ -755,7 +778,11 @@ async function ensureModel(path: string) {
 /** Marks a tab saved as of `version`: the model's version when its text was read for writing, so typing during the write stays unsaved. */
 function markSaved(path: string, version?: number) {
   const tab = tabs.get(path);
-  if (tab) tab.saved = version ?? tab.model.getAlternativeVersionId();
+  if (tab) {
+    // A save from elsewhere, such as a refactoring or Replace in Files, wrote the model's text; after typing since, what it wrote is unknown.
+    tab.disk = version === undefined || version === tab.model.getAlternativeVersionId() ? tab.model.getValue() : undefined;
+    tab.saved = version ?? tab.model.getAlternativeVersionId();
+  }
   renderTabs();
   requestFilesSaved();
 }
@@ -781,7 +808,7 @@ async function renamed(from: string, to: string) {
   if (unsaved !== null) model.setValue(unsaved);
   // Rebuild the map so the tab keeps its position.
   const entries = [...tabs].map(([p, t]): [string, Tab] =>
-    p === from ? [to, { model, saved: unsaved === null ? model.getAlternativeVersionId() : -1 }] : [p, t],
+    p === from ? [to, { model, saved: unsaved === null ? model.getAlternativeVersionId() : -1, disk: tab.disk }] : [p, t],
   );
   tabs.clear();
   entries.forEach(([p, t]) => tabs.set(p, t));
@@ -936,6 +963,8 @@ const listings = new WeakMap<HTMLUListElement, string>();
 async function renderDir(ul: HTMLUListElement, dir: string, onlyIfChanged = false) {
   renderedDirs.set(dir, ul);
   const entries = await invoke<Entry[]>("read_dir", { path: dir });
+  // The folder was collapsed or drawn again meanwhile.
+  if (renderedDirs.get(dir) !== ul) return;
   const listing = entries.map((e) => `${e.is_dir ? "d" : "f"}${e.name}`).join("\0");
   if (onlyIfChanged && listings.get(ul) === listing) return;
   listings.set(ul, listing);
@@ -1015,18 +1044,30 @@ function collapseAll() {
 /** Registers an open file's model, without showing it. */
 function addTab(path: string, model: monaco.editor.ITextModel) {
   if (tabs.has(path)) return;
-  tabs.set(path, { model, saved: model.getAlternativeVersionId() });
+  tabs.set(path, { model, saved: model.getAlternativeVersionId(), disk: model.getValue() });
   model.onDidChangeContent(() => showDirty(path));
 }
 
+/** Counts calls to openFile, so a file that loads after one you opened later doesn't take its place. */
+let opens = 0;
+
+/** Shows a file or panel tab in the focused pane. False when another opened while it loaded. */
 async function openFile(path: string) {
+  const call = ++opens;
   if (!tabs.has(path) && !isView(path)) addTab(path, await ensureModel(path));
+  if (call !== opens) {
+    // It gets a tab behind the one opened since.
+    if (!currentPane().paths.includes(path)) currentPane().paths.push(path);
+    renderTabs();
+    return false;
+  }
   if (!isView(path)) recent = [path, ...recent.filter((p) => p !== path)].slice(0, 30);
   showModel(path);
   renderTabs();
   if (isView(path)) focusTab(views.get(path)!);
   else editor.focus();
   markActiveInTree();
+  return true;
 }
 
 /** Closes a tab in one pane. The file stays open if another pane has it; otherwise it closes, saving first. */
@@ -1070,6 +1111,7 @@ async function closeFile(path: string) {
   } else tab.model.dispose();
   tabs.delete(path);
   viewStates.delete(path);
+  changedOnDisk(path, null);
   retarget((p) => (p === path ? null : p));
   saveSoon();
   renderTabs();
@@ -1147,9 +1189,14 @@ function changeEncoding() {
         run: async () => {
           const how = await choose(`Reopen ${nameOf(path)} as ${name(charset)}, or convert its text to ${name(charset)}?`, ["Reopen", "Convert and Save", "Cancel"]);
           if (how === "Convert and Save") {
+            const was = { charset: chosenCharset(path), saved: tab.saved, disk: tab.disk };
             setCharset(path, charset);
+            // The file reads differently in the new charset, so its text on disk can't be compared.
             tab.saved = -1;
+            tab.disk = undefined;
             await saveFile(path);
+            // Not saved: the file keeps its charset.
+            if (tab.saved === -1) setCharset(path, was.charset), (tab.saved = was.saved), (tab.disk = was.disk);
           } else if (how === "Reopen") {
             if (isDirty(tab) && !(await confirm(`Reopen ${nameOf(path)}? Its unsaved changes are lost.`, "Reopen"))) return;
             setCharset(path, charset);
@@ -1157,6 +1204,7 @@ function changeEncoding() {
             if (text === null) return;
             tab.model.setValue(text);
             tab.saved = tab.model.getAlternativeVersionId();
+            tab.disk = text;
           } else return;
           showDirty(path);
           applyEditorConfig(tab.model);
@@ -1203,6 +1251,17 @@ async function saveFile(path: string, explicit = false) {
   if (!tab || !isDirty(tab)) return;
   if (formatOnSave(tab.model.getLanguageId())) await formatModel(tab.model);
   await applySaveRules(tab.model);
+  // Renamed or closed while formatting: writing would bring the old path back.
+  if (tabs.get(path) !== tab) return;
+  // Another program changed the file since it was read or saved. Auto-save leaves it to the notice; otherwise it asks.
+  const disk = tab.disk === undefined ? null : await readText(path).catch(() => null);
+  if (disk !== null && plain(disk) !== plain(tab.disk!)) {
+    changedOnDisk(path, disk);
+    if (settings.autoSave && !explicit) return;
+    const choice = await choose(`${nameOf(path)} changed on disk. Overwrite?`, ["Overwrite", "Reload", "Cancel"]);
+    if (choice === "Reload") return reloadFromDisk(path);
+    if (choice !== "Overwrite" || tabs.get(path) !== tab) return;
+  }
   const text = tab.model.getValue();
   const version = tab.model.getAlternativeVersionId();
   try {
@@ -1210,6 +1269,8 @@ async function saveFile(path: string, explicit = false) {
   } catch (e) {
     return showError(`Couldn't save ${relative(path)}`, e);
   }
+  tab.disk = text;
+  changedOnDisk(path, null);
   markSaved(path, version);
   didSave(tab.model);
   afterSave(path, text);
@@ -1343,7 +1404,59 @@ function markActiveInTree() {
   document.querySelector(`#tree .row[data-path="${CSS.escape(active)}"]`)?.classList.add("active");
 }
 
-// Batch watcher events: reload clean open files that changed on disk, re-render affected folders.
+/** Disk text of files that changed on disk while their tab had unsaved edits, which their pane's notice offers. */
+const diskChanges = new Map<string, string>();
+
+/** Shows the notice for a file that changed on disk while it had unsaved edits, or hides it for null. */
+function changedOnDisk(path: string, text: string | null) {
+  if (text === null && !diskChanges.delete(path)) return;
+  const button = (label: string, run: () => unknown, primary = false) => h("button", { type: "button", class: primary ? "primary" : "", onclick: run }, label);
+  if (text === null) notices.delete(path);
+  else {
+    diskChanges.set(path, text);
+    notices.set(path, () =>
+      h(
+        "div",
+        { class: "deploy-notice", role: "alert" },
+        icon("warning"),
+        h("span", {}, `${nameOf(path)} changed on disk while you were editing it.`),
+        // Saving then writes your text over it without asking.
+        button("Keep Mine", () => {
+          const tab = tabs.get(path);
+          if (tab) tab.disk = diskChanges.get(path);
+          changedOnDisk(path, null);
+        }),
+        button("Reload", () => reloadFromDisk(path), true),
+      ),
+    );
+  }
+  renderTabs();
+}
+
+/** Replaces a model's text as one edit, so undo brings back what was there and the language servers get a change, not a new file. */
+function replaceText(model: monaco.editor.ITextModel, text: string) {
+  model.pushStackElement();
+  if (plain(text) !== plain(model.getValue())) model.pushEditOperations([], [{ range: model.getFullModelRange(), text: text.replace(/^﻿/, "") }], () => null);
+  // Edits take the model's line endings; a file that now has others throughout keeps them.
+  const crlf = text.includes("\r\n");
+  if (crlf !== /(^|[^\r])\n/.test(text) && crlf !== (model.getEOL() === "\r\n")) model.pushEOL(crlf ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF);
+  model.pushStackElement();
+}
+
+/** Replaces a tab's text with the file's on disk, and marks it saved. */
+async function reloadFromDisk(path: string) {
+  const text = await readText(path).catch((e) => (showError(`Couldn't reload ${relative(path)}`, e), null));
+  const tab = tabs.get(path);
+  if (text === null || !tab) return;
+  if (text !== tab.model.getValue()) replaceText(tab.model, text);
+  tab.saved = tab.model.getAlternativeVersionId();
+  tab.disk = text;
+  changedOnDisk(path, null);
+  showDirty(path);
+}
+
+// Batch watcher events: reload clean open files that changed on disk, offer to for ones with unsaved edits, and
+// re-render affected folders.
 let pending = new Set<string>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 listen<string[]>("fs-change", ({ payload }) => {
@@ -1358,19 +1471,24 @@ listen<string[]>("fs-change", ({ payload }) => {
     pending = new Set();
     for (const path of paths) {
       const model = monaco.editor.getModel(monaco.Uri.file(path));
+      if (!model) continue;
+      const version = model.getAlternativeVersionId();
+      const text = await readText(path).catch(() => null);
       const tab = tabs.get(path);
-      if (model && !(tab && isDirty(tab))) {
-        const version = model.getAlternativeVersionId();
-        const text = await readText(path).catch(() => null);
-        if (text !== null && text !== model.getValue()) {
-          // Another program changed it, such as a git checkout: keep what the editor had first.
-          await recordVersion(path, model.getValue(), "before external");
-          // Typing during the reads above wins over the file.
-          if (model.isDisposed() || model.getAlternativeVersionId() !== version) continue;
-          model.setValue(text);
-          if (tab) tab.saved = model.getAlternativeVersionId();
-        }
+      if (text === null || model.isDisposed()) continue;
+      // With unsaved edits, the notice asks which text to keep, unless the file is what was last seen.
+      if (tab && isDirty(tab) && plain(text) !== plain(model.getValue())) {
+        if (tab.disk !== undefined && plain(text) !== plain(tab.disk)) changedOnDisk(path, text);
+        continue;
       }
+      if (text !== model.getValue()) {
+        // Another program changed it, such as a git checkout: keep what the editor had first.
+        await recordVersion(path, model.getValue(), "before external");
+        // Typing during the reads above wins over the file.
+        if (model.isDisposed() || model.getAlternativeVersionId() !== version) continue;
+        replaceText(model, text);
+      }
+      if (tab && tabs.get(path) === tab) (tab.saved = model.getAlternativeVersionId()), (tab.disk = text), changedOnDisk(path, null);
     }
     // Files without a model weren't open, so the loop above kept no version of them.
     recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
@@ -1396,8 +1514,7 @@ listen<string[]>("fs-change", ({ payload }) => {
 
 /** Opens a file and moves the cursor to a position or selects a range. */
 async function openAt(path: string, target?: monaco.IRange | monaco.IPosition) {
-  await openFile(path);
-  if (!target) return;
+  if (!(await openFile(path)) || !target) return;
   if (monaco.Range.isIRange(target)) editor.setSelection(target);
   else editor.setPosition(target);
   editor.revealRangeInCenterIfOutsideViewport(editor.getSelection()!);
@@ -1926,7 +2043,8 @@ window.addEventListener(
     const action = actions.find((a) => a.keys && canonical(a.keys) === combo && !(a.editorOnly && !editor.hasTextFocus()) && !(a.when && !a.when()));
     if (!action) return;
     // In Vim mode, ⌃ and a letter, such as ⌃D or ⌃R, belong to Vim while you type in the editor.
-    if (settings.vim && /^Ctrl\+([A-Z]|BracketLeft)$/.test(combo) && editor.hasTextFocus()) return;
+    // Off a Mac, the combo names Ctrl as Meta, so this reads the event.
+    if (settings.vim && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && /^(Key[A-Z]|BracketLeft)$/.test(e.code) && editor.hasTextFocus()) return;
     // In a terminal, Ctrl and Alt keys belong to the shell (⌃R searches history), except the terminal's own actions.
     // Off a Mac, Ctrl also plays ⌘'s part, so the shell gets Ctrl with a letter and no Shift, as readline uses it
     // (Ctrl+W deletes a word there, not the tab), and Ctrl+Shift keys stay the app's.
@@ -2056,11 +2174,14 @@ initDeployment({
   openPaths: () => [...tabs.keys()],
   // Replaces the text as one edit, so undo brings back what was there, and marks it saved.
   reload: async (path) => {
-    const tab = tabs.get(path);
     const text = await readText(path);
-    if (!tab || text === tab.model.getValue()) return;
-    tab.model.pushEditOperations([], [{ range: tab.model.getFullModelRange(), text }], () => null);
+    // Looked up after the read: the tab may have closed, and its model with it.
+    const tab = tabs.get(path);
+    if (!tab || tab.model.isDisposed()) return;
+    if (text !== tab.model.getValue()) replaceText(tab.model, text);
     tab.saved = tab.model.getAlternativeVersionId();
+    tab.disk = text;
+    changedOnDisk(path, null);
     showDirty(path);
   },
   notice: (path, make) => (make ? notices.set(path, make) : notices.delete(path), renderTabs()),
