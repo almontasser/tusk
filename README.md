@@ -599,6 +599,13 @@ Files save automatically, as in PhpStorm: when you switch tabs, close a tab, or
 switch to another app. ⌘S saves every changed file. If you turn automatic saving
 off, closing a changed tab asks whether to save it.
 
+When another program, such as `git checkout`, changes an open file, the tab
+reloads it as one edit, so ⌘Z brings back what you had. If the tab has unsaved
+changes, a bar above the editor says the file changed on disk: **Reload** takes
+the file's text, and **Keep Mine** keeps yours, which then saves over it. Saving
+before you choose asks whether to overwrite the file, reload it, or cancel;
+automatic saving skips the file and shows the bar instead.
+
 The app reopens the last folder when it starts, with the tabs you had open in
 it. Each tab keeps its cursor, selection, scroll position, and folded code, both
 when you switch tabs and when you reopen the project. Expanded folders in the
@@ -611,7 +618,9 @@ characters. If the debugger was listening, it listens again, and the profiling
 server and **Start Debug Server**'s server start again if they were running.
 Other commands, tests, and git commands don't run again. Opening another
 project closes the terminals of the one before. Refactorings such as rename
-save every file they change.
+save every file they change. A recent project whose folder is gone shows
+**Folder not found**, with a button that removes it from the list, and the open
+project stays open.
 
 ## Project settings and tusk.json
 

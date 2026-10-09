@@ -86,10 +86,11 @@ export function attachSuperMethods(editor: monaco.editor.ICodeEditor) {
   const soon = (ms: number) => (clearTimeout(timer), (timer = setTimeout(() => decorate(editor), ms)));
   editor.onDidChangeModel(() => soon(0));
   // Tusk's server checks a file again once it has indexed it after an edit, so new problems mean new answers.
-  monaco.editor.onDidChangeMarkers((uris) => {
+  const markers = monaco.editor.onDidChangeMarkers((uris) => {
     const model = editor.getModel();
     if (model && uris.some((u) => u.toString() === model.uri.toString())) soon(300);
   });
+  editor.onDidDispose(() => (markers.dispose(), clearTimeout(timer)));
   // A file without problems before or after an edit changes no markers.
   editor.onDidChangeModelContent(() => soon(2000));
   editor.onMouseDown((e) => {

@@ -9104,3 +9104,43 @@ user code:
   made.
 - Git runs with `LANGUAGE=C`, so the messages the app reads stay English.
 
+
+### 2026-10-09: Editor shell races and external changes
+
+- A file that another program changed while its tab had unsaved edits was
+  skipped by the watcher, and the next save overwrote the change. Each tab now
+  keeps `disk`, the text last read or written. The watcher compares with it
+  (ignoring a byte order mark and line endings, which models don't keep) and
+  shows a pane notice through `notices` with **Reload** and **Keep Mine**.
+  `saveFile` reads the file before writing; when it differs from `disk`, it
+  asks Overwrite, Reload, or Cancel, and auto-save skips the file and shows the
+  notice. Keep Mine sets `disk` to the file's new text, so the next save
+  writes without asking.
+- Reloading a clean tab used `setValue`, which dropped undo history and sent
+  the language servers a whole new file. `replaceText` now makes one
+  full-range edit, plus `pushEOL` when the file's line endings changed
+  throughout, for the watcher, Reload, and deployment's reload.
+- `saveFile` checks the tab is still at its path after format-on-save, so a
+  rename meanwhile doesn't write the old path back.
+- Convert and Save restores the file's charset (`chosenCharset`), saved
+  version, and `disk` when the save doesn't happen.
+- `openFile` numbers its calls. One whose file loads after a later call
+  started adds its tab without showing it, and `openAt` skips the selection.
+- Switching projects: each closed tab's `saveSoon` could save the old project's
+  session with tabs missing while a "Save changes?" prompt was open.
+  `saveSession` does nothing while the tabs close, and the timers are cleared
+  when the new root is set.
+- Opening a recent project whose folder is gone switched the title, kept the
+  old tree, and added the path to the recent list again. `openFolderNow` now
+  checks `paths_exist` first and shows "Folder not found" with Remove from
+  Recent; at startup the welcome screen shows.
+- `renderDir` drops a listing when the folder was collapsed or drawn again
+  during `read_dir`.
+- Unsplit moved the pane's tabs but removed docked panel views with the pane's
+  element, after which ⌘9 failed. They now move to the target pane, hidden.
+  Splitting with no file open does nothing, and each editor's super-method
+  marker listener is disposed with it.
+- Vim mode's Ctrl+letter check read the keymap combo, which names Ctrl as Meta
+  off a Mac, so it only worked on a Mac. It reads the event.
+- Deployment's reload looks the tab up after reading the file, so a tab closed
+  meanwhile isn't edited through a disposed model.

@@ -49,6 +49,8 @@ export const charsetName = (path: string, props: Properties) => {
 
 /** Reads and saves a file in `charset` from now on, or as before for undefined. */
 export const setCharset = (path: string, charset: string | undefined) => (charset ? chosen.set(path, charset) : chosen.delete(path));
+/** The encoding picked for a file with Change Encoding, if any. */
+export const chosenCharset = (path: string) => chosen.get(path);
 
 /** Files read with old Mac line endings, CR alone, which they keep when saved. */
 const crFiles = new Set<string>();
