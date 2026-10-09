@@ -20,6 +20,8 @@ struct Session {
 pub struct PtyState(Mutex<HashMap<u32, Session>>);
 
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+/// The most output one event carries, in bytes; more goes out in several.
+const MAX_EVENT: usize = 256 * 1024;
 
 /// Starts `command` (or the shell from Settings > Terminal) in a pseudo-terminal. Output arrives as
 /// `pty:<id>` events, and `pty-exit:<id>` fires when the process ends. With a `channel`, the
@@ -75,8 +77,9 @@ pub fn pty_spawn(
 
     // One thread reads, and another sends: output that arrives while an event is being sent is
     // joined into the next one, so a command that prints a lot sends a few large events, not
-    // thousands of small ones. Nothing waits, so an echoed keystroke goes out at once.
-    let (chunks, output) = std::sync::mpsc::channel::<Vec<u8>>();
+    // thousands of small ones. Nothing waits for a batch to fill, so an echoed keystroke goes out at
+    // once. The channel holds a few reads, so a program that prints faster than they're sent waits.
+    let (chunks, output) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
     std::thread::spawn(move || {
         let mut buf = vec![0u8; 65536];
         while let Ok(n) = reader.read(&mut buf) {
@@ -93,8 +96,14 @@ pub fn pty_spawn(
             pending.extend_from_slice(&chunk);
             pending.extend(output.try_iter().flatten());
             let text = take_utf8(&mut pending);
-            if !text.is_empty() {
-                let _ = app.emit(&event, text);
+            let mut rest = text.as_str();
+            while !rest.is_empty() {
+                let mut at = rest.len().min(MAX_EVENT);
+                while !rest.is_char_boundary(at) {
+                    at -= 1;
+                }
+                let _ = app.emit(&event, &rest[..at]);
+                rest = &rest[at..];
             }
         }
         // The output ends when the process closes the terminal, usually as it exits: its code, or None when it was
@@ -214,16 +223,34 @@ fn follow_location(mut shell: Vec<String>) -> Vec<String> {
     shell
 }
 
-/// Takes the longest valid UTF-8 prefix from `buf`, leaving a character that was split
-/// across reads for the next call. Invalid bytes become U+FFFD.
+/// Takes the text from `buf`, leaving a character that was split across reads for the next call.
+/// Invalid bytes become U+FFFD.
 fn take_utf8(buf: &mut Vec<u8>) -> String {
-    let valid = match std::str::from_utf8(buf) {
-        Ok(_) => buf.len(),
-        Err(e) if e.error_len().is_none() => e.valid_up_to(), // Incomplete character at the end.
-        Err(_) => buf.len(),                                  // Invalid bytes: decode lossily.
-    };
-    let text = String::from_utf8_lossy(&buf[..valid]).into_owned();
-    buf.drain(..valid);
+    let mut text = String::new();
+    let mut rest = &buf[..];
+    while !rest.is_empty() {
+        let e = match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                text.push_str(valid);
+                rest = &[];
+                break;
+            }
+            Err(e) => e,
+        };
+        text.push_str(std::str::from_utf8(&rest[..e.valid_up_to()]).unwrap_or_default());
+        match e.error_len() {
+            Some(invalid) => {
+                text.push('\u{fffd}');
+                rest = &rest[e.valid_up_to() + invalid..];
+            }
+            None => {
+                rest = &rest[e.valid_up_to()..]; // A character that the next read finishes.
+                break;
+            }
+        }
+    }
+    let used = buf.len() - rest.len();
+    buf.drain(..used);
     text
 }
 
@@ -267,5 +294,12 @@ mod tests {
 
         let mut invalid = vec![b'a', 0xff, b'b'];
         assert_eq!(take_utf8(&mut invalid), "a\u{fffd}b");
+
+        // An invalid byte doesn't spoil a character split after it.
+        let mut buf = vec![b'a', 0xff, bytes[0]];
+        assert_eq!(take_utf8(&mut buf), "a\u{fffd}");
+        buf.push(bytes[1]);
+        assert_eq!(take_utf8(&mut buf), "é");
+        assert!(buf.is_empty());
     }
 }

@@ -9209,3 +9209,57 @@ user code:
   folder. The page queues every open file under it through the `fs-change`
   batch, which reloads clean tabs, shows the changed-on-disk bar on dirty
   ones, and tells the language servers, and re-renders every shown folder.
+
+### 2026-10-09: Backend limits, pooled state, and child processes
+
+- **Find in Files cuts long lines.** Each match copied its whole line and
+  counted its columns from the line's start, so a minified file's line of
+  hundreds of KB with thousands of matches took gigabytes and hung. A match's
+  `text` is now a window of up to 200 characters before it and 300 after, with
+  `offset`, the UTF-16 column the window starts at, which `src/search.ts` and
+  the Replace Preview subtract; columns are counted in one pass per line. The
+  preview's `replacements` call gets the column within the window, and
+  `applyReplacements` checks that the file's line still reads the same at each
+  match's window (`lineText` at `lineOffset`) rather than comparing the whole
+  line, then applies by absolute column. Cancel is checked between matches,
+  not only between files, and empty matches, which grep reports inside
+  multibyte characters and which panicked the slice, are skipped.
+- **Redis connections that changed state aren't pooled.** A console or key
+  browser command such as `SELECT`, `MULTI`, `WATCH`, a subscription,
+  `MONITOR`, `CLIENT`, `RESET`, `HELLO`, or `AUTH` closes its connection
+  afterwards, so the next call doesn't run in another database or a
+  transaction. `SCAN` without a cursor is an error instead of a panic.
+- **SSH tunnels wait without the lock.** `db_tunnel` waited up to 15 seconds
+  for ssh while holding every tunnel's lock; it now waits on the blocking pool
+  and locks only to look up and insert. When two calls open the same tunnel,
+  the first stays and the second's ssh is stopped. A stopped ssh is waited
+  for, so it doesn't stay as a zombie.
+- **Terminal output has backpressure.** The reader hands output to the
+  emitter through a channel of 8 reads, so a program printing faster than the
+  window takes it waits, and an event carries at most 256 KB. `take_utf8`
+  decodes past invalid bytes, so a character split across reads survives an
+  invalid byte before it.
+- **Remote names can't leave their folder.** A listing from SFTP or FTP drops
+  empty names, `.`, `..`, and names with `/` or `\`, which a hostile server
+  could use to write outside the local folder.
+- **ProxyCommand tokens are checked.** A host or user with a character outside
+  `[A-Za-z0-9._:@%[]-]` is refused before `%h`, `%n`, or `%r` puts it into the
+  shell command. A key file's `~` expands as ssh's config does.
+- **Waiting is bounded.** An idle FTP connection's NOOP gets 5 seconds, and
+  one that doesn't answer counts as closed. The login shell that reports PATH
+  at launch gets 10 seconds, then is stopped, and the app keeps its own PATH.
+  The askpass listener reads a prompt for up to 10 seconds and 64 KB.
+- **Children are reaped.** `open_url` and `reveal_path` wait for `open`,
+  `xdg-open`, or Explorer on a thread. `open_url` opens only `http`, `https`,
+  and `mailto` addresses, which is all its callers pass.
+- **Shims per run.** Each run writes its tool shims to `bin/<process ID>`
+  rather than wiping the shared `bin`, which broke a second copy of the app
+  running beside it. A run removes its folder as it exits, and the next launch
+  removes folders of processes that aren't running.
+- **Smaller fixes.** A symbolic link to a folder lists as a folder in the
+  tree, which opens folders only when you do, so a loop of links is harmless.
+  On Windows, a tool is found with its PATHEXT extensions first, and by its
+  bare name only when that has an extension. Reading and compiling `.proto`
+  files runs on the blocking pool, as do `toml_edit`, `toml_read`,
+  `mago_settings`, and `remove_empty_dir`. Check for Updates while a check
+  runs says one is already running. Clippy reports no warnings.

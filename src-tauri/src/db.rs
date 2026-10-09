@@ -517,12 +517,23 @@ static REDIS_POOL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMa
 /// Idle connections kept per server and database.
 const REDIS_IDLE: usize = 4;
 
+/// Whether a command changes its connection's state, such as its database, a transaction, or a subscription, so
+/// the connection can't go back to the pool for the next call.
+fn changes_connection(args: &[String]) -> bool {
+    const STATEFUL: &[&str] = &["SELECT", "MULTI", "WATCH", "SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "MONITOR", "CLIENT", "RESET", "HELLO", "AUTH"];
+    args.first().is_some_and(|name| STATEFUL.iter().any(|s| name.eq_ignore_ascii_case(s)))
+}
+
 /// Runs `f` on a pooled connection, or a new one. A pooled connection the server has since closed, such as
-/// after its idle timeout or the Mac's sleep, fails with an I/O error, and `f` runs again on a new one.
-fn with_redis<T>(c: &Connection, mut f: impl FnMut(&mut Redis) -> std::io::Result<T>) -> Result<T, String> {
+/// after its idle timeout or the Mac's sleep, fails with an I/O error, and `f` runs again on a new one. Unless
+/// `poolable`, the connection is closed afterwards instead of going back to the pool.
+fn with_redis<T>(c: &Connection, poolable: bool, mut f: impl FnMut(&mut Redis) -> std::io::Result<T>) -> Result<T, String> {
     let key = format!("{}|{}|{}|{}|{}|{}|{}|{}", c.host, c.port, c.username, c.password, c.database, c.ssl_mode, c.ssl_ca, c.read_timeout);
     let pooled = REDIS_POOL.lock().unwrap().get_mut(&key).and_then(Vec::pop);
     let give_back = |redis: Redis| {
+        if !poolable {
+            return;
+        }
         let mut pool = REDIS_POOL.lock().unwrap();
         let idle = pool.entry(key.clone()).or_default();
         if idle.len() < REDIS_IDLE {
@@ -568,12 +579,13 @@ fn reply_json(reply: &Reply) -> serde_json::Value {
 pub async fn redis_call(connection: Connection, commands: Vec<Vec<String>>, atomic: Option<bool>) -> Result<Vec<serde_json::Value>, String> {
     let atomic = atomic == Some(true);
     tauri::async_runtime::spawn_blocking(move || {
+        let poolable = !commands.iter().any(|c| changes_connection(c));
         let mut all = commands;
         if atomic {
             all.insert(0, vec!["MULTI".into()]);
             all.push(vec!["EXEC".into()]);
         }
-        let mut replies = with_redis(&connection, |r| {
+        let mut replies = with_redis(&connection, poolable, |r| {
             r.send(&all)?;
             (0..all.len()).map(|_| r.read()).collect::<std::io::Result<Vec<_>>>()
         })?;
@@ -646,8 +658,11 @@ fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String
     let Some(name) = args.first().map(|a| a.to_uppercase()) else { return Err("Type a command.".into()) };
     let mut result = QueryResult { columns: vec!["value".into()], ..QueryResult::new(c, skip) };
     if name == "SCAN" {
+        if args.len() < 2 {
+            return Err("SCAN needs a cursor, such as SCAN 0.".into());
+        }
         let mut keys = Vec::new();
-        with_redis(c, |db| {
+        with_redis(c, true, |db| {
             keys.clear();
             let mut args = args.clone();
             loop {
@@ -681,7 +696,7 @@ fn redis(c: &Connection, command: &str, skip: u64) -> Result<QueryResult, String
         _ if has("WITHVALUES") => Some(["field", "value"]),
         _ => None,
     };
-    let reply = with_redis(c, |db| {
+    let reply = with_redis(c, !changes_connection(&args), |db| {
         db.send(std::slice::from_ref(&args))?;
         db.read()
     })?;
@@ -738,16 +753,26 @@ pub struct Tunnels(std::sync::Mutex<std::collections::HashMap<String, (std::proc
 /// system's `ssh`, so ~/.ssh/config, keys, and the agent apply; `destination` is anything `ssh` accepts, such
 /// as `forge@203.0.113.5`, a host alias, or `ssh://user@host:2222`. A password prompt can't be answered here,
 /// so it needs key or agent authentication. A running tunnel is reused, and every tunnel ends with the app.
-#[tauri::command(async)]
-pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: String, port: u16, identity: Option<String>) -> Result<u16, String> {
+#[tauri::command]
+pub async fn db_tunnel(app: tauri::AppHandle, destination: String, host: String, port: u16, identity: Option<String>) -> Result<u16, String> {
+    use tauri::Manager;
+    crate::blocking(move || open_tunnel(&app.state::<Tunnels>(), destination, host, port, identity)).await
+}
+
+/// A running tunnel's local port, if there's one for `key`.
+fn running_tunnel(tunnels: &Tunnels, key: &str) -> Option<u16> {
+    let mut tunnels = tunnels.0.lock().unwrap();
+    let (child, local) = tunnels.get_mut(key)?;
+    matches!(child.try_wait(), Ok(None)).then_some(*local)
+}
+
+/// Starts a tunnel and waits for it, without holding the lock other tunnels need meanwhile.
+fn open_tunnel(tunnels: &Tunnels, destination: String, host: String, port: u16, identity: Option<String>) -> Result<u16, String> {
     use std::process::Stdio;
     let identity = identity.filter(|i| !i.is_empty());
     let key = format!("{destination}|{host}|{port}|{}", identity.as_deref().unwrap_or(""));
-    let mut tunnels = state.0.lock().unwrap();
-    if let Some((child, local)) = tunnels.get_mut(&key) {
-        if matches!(child.try_wait(), Ok(None)) {
-            return Ok(*local);
-        }
+    if let Some(local) = running_tunnel(tunnels, &key) {
+        return Ok(local);
     }
     let local = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let mut child = crate::lsp::watched("ssh");
@@ -778,12 +803,19 @@ pub fn db_tunnel(state: tauri::State<'_, Tunnels>, destination: String, host: St
             if let Some(mut stderr) = child.stderr.take() {
                 std::thread::spawn(move || std::io::copy(&mut stderr, &mut std::io::sink()));
             }
-            tunnels.insert(key, (child, local));
+            // A call for the same tunnel may have opened one meanwhile; the first one stays.
+            if let Some(running) = running_tunnel(tunnels, &key) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(running);
+            }
+            tunnels.0.lock().unwrap().insert(key, (child, local));
             return Ok(local);
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     let _ = child.kill();
+    let _ = child.wait();
     Err(format!("SSH to {destination} timed out."))
 }
 
@@ -962,7 +994,7 @@ mod tests {
         assert!(call(&[&["SET", "p", "changed"], &["SET", "q"]], true).unwrap_err().contains("wrong number of arguments"));
         assert_eq!(call(&[&["GET", "p"]], false).unwrap(), [serde_json::json!("a")]);
         // A value that isn't UTF-8 comes back as bytes, not mangled text.
-        with_redis(&c, |r| {
+        with_redis(&c, true, |r| {
             use std::io::Write;
             r.0.get_mut().write_all(b"*3\r\n$3\r\nSET\r\n$3\r\nbin\r\n$2\r\n\xff\xfe\r\n")?;
             r.read()

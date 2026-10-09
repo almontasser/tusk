@@ -127,7 +127,7 @@ fn glob_files(pattern: &str) -> Vec<PathBuf> {
     std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| matcher.is_match(n))).collect()).unwrap_or_default()
 }
 
-fn expand_tilde(path: &str) -> String {
+pub(crate) fn expand_tilde(path: &str) -> String {
     match path.strip_prefix('~') {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", crate::slash(home())),
         _ => path.to_string(),
@@ -261,6 +261,18 @@ pub fn expand(s: &str, t: &Tokens) -> String {
         }
     }
     out
+}
+
+/// A ProxyCommand with its tokens filled in, for the shell to run. A host or user it takes with a character the
+/// shell reads, such as `;` or `$`, is refused: the server's settings, or a shared ~/.ssh/config, could run commands.
+pub fn expand_command(command: &str, t: &Tokens) -> Result<String, String> {
+    let safe = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "._:@%[]-".contains(c));
+    for (token, what, value) in [("%h", "host", t.host_name), ("%n", "host", t.original), ("%r", "user", t.user)] {
+        if command.contains(token) && !safe(value) {
+            return Err(format!("The {what} {value:?} can't go into the ProxyCommand: use only letters, digits, and . _ : @ % [ ] -."));
+        }
+    }
+    Ok(expand(command, t))
 }
 
 enum Proxy {
@@ -475,5 +487,15 @@ mod tests {
     fn tokens_fill_in() {
         let t = Tokens { host_name: "10.0.0.5", original: "web", user: "forge", port: 2222 };
         assert_eq!(expand("nc %h %p # %n as %r, 100%%, %x", &t), "nc 10.0.0.5 2222 # web as forge, 100%, %x");
+    }
+
+    #[test]
+    fn a_proxy_command_refuses_shell_characters_in_hosts_and_users() {
+        let t = |host: &'static str, user: &'static str| Tokens { host_name: host, original: host, user, port: 22 };
+        assert_eq!(expand_command("nc %h %p", &t("[fe80::1%en0]", "forge")).unwrap(), "nc [fe80::1%en0] 22");
+        assert!(expand_command("nc %h %p", &t("web; rm -rf ~", "forge")).unwrap_err().contains("host"));
+        assert!(expand_command("ssh -W %h:%p %r@jump", &t("web", "$(id)")).unwrap_err().contains("user"));
+        // A value the command doesn't use doesn't matter.
+        assert!(expand_command("nc %h %p", &t("web", "a b")).is_ok());
     }
 }

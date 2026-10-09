@@ -26,7 +26,8 @@ fn list_dir(path: &str) -> Result<Vec<Entry>, String> {
         .map(|e| Entry {
             name: e.file_name().to_string_lossy().into(),
             path: crate::slash(e.path()),
-            is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            // A link to a folder lists as one; the tree only opens a folder when you do, so a loop of links is harmless.
+            is_dir: e.file_type().is_ok_and(|t| t.is_dir() || (t.is_symlink() && e.path().is_dir())),
         })
         .collect();
     entries.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
@@ -249,7 +250,7 @@ pub async fn remove_path(path: String) -> Result<(), String> {
 }
 
 /// Removes a folder only when it's empty, as after undoing a refactoring that created a file in a new folder.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_empty_dir(path: String) -> Result<(), String> {
     std::fs::remove_dir(path).map_err(|e| e.to_string())
 }
@@ -308,7 +309,7 @@ mod tests {
         std::fs::write(&file, "old").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o750)).unwrap();
         std::os::unix::fs::symlink(&file, dir.join("link.php")).unwrap();
-        write_atomic(&dir.join("link.php"), b"new").unwrap();
+        write_atomic(dir.join("link.php"), b"new").unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
         assert!(std::fs::symlink_metadata(dir.join("link.php")).unwrap().file_type().is_symlink());
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o750);
@@ -316,7 +317,7 @@ mod tests {
         std::fs::hard_link(&file, dir.join("hard.php")).unwrap();
         write_atomic(&file, b"both").unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("hard.php")).unwrap(), "both");
-        write_atomic(&dir.join("fresh.php"), b"x").unwrap();
+        write_atomic(dir.join("fresh.php"), b"x").unwrap();
         let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         names.sort();
         std::fs::remove_dir_all(&dir).unwrap();
