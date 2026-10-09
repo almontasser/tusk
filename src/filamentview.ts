@@ -275,7 +275,7 @@ export async function loadFilament() {
           r.navigationIcon ? heroicon(iconsDir, r.navigationIcon) : icon("symbol-structure"),
           h("span", { class: "fv-name" }, r.navigationLabel ?? r.pluralLabel ?? shortClass(r.class)),
           h("span", { class: "fv-detail" }, shortClass(r.model ?? "")),
-          r.relations.length ? h("span", { class: "fv-badge", title: `${r.relations.length} relation managers` }, icon("references"), String(r.relations.length)) : null,
+          r.relations.length ? h("span", { class: "fv-badge", title: `${r.relations.length} relation manager${r.relations.length === 1 ? "" : "s"}` }, icon("references"), String(r.relations.length)) : null,
         );
         row.onclick = () => file && void openDesigner(file);
         row.onkeydown = (e) => void (e.key === "Enter" && file && void openDesigner(file));

@@ -13,7 +13,10 @@ let closeOpen: (() => void) | null = null;
  */
 export function popover(anchor: HTMLElement | { x: number; y: number }, content: HTMLElement, onClose: () => void = () => {}, className = "") {
   closeOpen?.();
-  const el = h("div", { class: `fd-popover ${className}`, role: "dialog" }, content);
+  const from = document.activeElement as HTMLElement | null;
+  // Named for what opened it, such as the button's tooltip.
+  const label = (anchor instanceof HTMLElement && (anchor.title || anchor.ariaLabel || anchor.textContent?.trim())) || "Options";
+  const el = h("div", { class: `fd-popover ${className}`, role: "dialog", ariaLabel: label }, content);
   (document.querySelector("dialog[open]") ?? document.body).append(el);
   const r = anchor instanceof HTMLElement ? anchor.getBoundingClientRect() : { left: anchor.x, bottom: anchor.y, top: anchor.y, right: anchor.x };
   const place = () => {
@@ -26,7 +29,10 @@ export function popover(anchor: HTMLElement | { x: number; y: number }, content:
   place();
   const close = () => {
     if (!el.isConnected) return;
+    // Focus that was in the popover goes back to what opened it, rather than to the page.
+    const refocus = el.contains(document.activeElement) || document.activeElement === document.body;
     el.remove();
+    if (refocus) (anchor instanceof HTMLElement && anchor.isConnected ? anchor : from)?.focus();
     removeEventListener("mousedown", outside, true);
     removeEventListener("keydown", keys, true);
     closeOpen = null;

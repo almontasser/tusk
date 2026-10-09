@@ -33,8 +33,8 @@ export const icon = (name: string) => h("span", { class: `codicon codicon-${name
 export const iconButton = (name: string, title: string, onclick: () => unknown) => h("button", { class: "icon-button", title: keyText(title), onclick }, icon(name));
 
 /**
- * Shows a message in the corner. An error closes itself after 6 seconds; a hint with an action stays until
- * you act on it or close it, or for `timeout` ms, as for a notice of what just happened.
+ * Shows a message in the corner. An error closes itself after 10 seconds and a notice after 6; a hint with an
+ * action stays until you act on it or close it, or for `timeout` ms. A toast waits while the pointer is over it.
  */
 type ToastAction = { label: string; run(): unknown };
 
@@ -57,6 +57,37 @@ export function toast(text: string, { kind = "error", action, timeout }: { kind?
     ...(actions.length > 1 ? [] : buttons),
     h("button", { class: "codicon codicon-close", ariaLabel: "Dismiss", onclick: close }),
   );
-  document.getElementById("toasts")!.append(el);
-  if (!actions.length || timeout) setTimeout(close, timeout ?? 6000);
+  // In a modal dialog, the toasts go in the dialog, since its backdrop covers the page; they return when it closes.
+  const box = document.getElementById("toasts")!;
+  const dialog = document.querySelector("dialog[open]");
+  if (dialog && box.parentElement !== dialog) dialog.addEventListener("close", () => document.body.append(box), { once: true });
+  (dialog ?? document.body).append(box);
+  box.append(el);
+  if (actions.length && !timeout) return;
+  let left = timeout ?? (kind === "error" ? 10000 : 6000);
+  let start = Date.now();
+  let timer = setTimeout(close, left);
+  el.onmouseenter = () => (clearTimeout(timer), (left -= Date.now() - start));
+  el.onmouseleave = () => ((start = Date.now()), (timer = setTimeout(close, Math.max(left, 2000))));
 }
+
+// A cut-off label shows its whole text on hover. A title of its own wins; one set here follows the text. Tests
+// load this module without a document.
+globalThis.document?.addEventListener("mouseover", (e) => {
+  const el = e.target;
+  if (!(el instanceof HTMLElement) || (el.title && !el.dataset.autoTitle)) return;
+  if (el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === "ellipsis") (el.title = el.textContent ?? ""), (el.dataset.autoTitle = "1");
+  else if (el.dataset.autoTitle) el.removeAttribute("title"), delete el.dataset.autoTitle;
+});
+
+// The wheel scrolls a tab strip sideways.
+globalThis.document?.addEventListener(
+  "wheel",
+  (e) => {
+    const tabs = (e.target as Element).closest?.(".tabs, #terminal-tabs");
+    if (!tabs || !e.deltaY || e.deltaX) return;
+    tabs.scrollLeft += e.deltaY;
+    e.preventDefault();
+  },
+  { passive: false },
+);

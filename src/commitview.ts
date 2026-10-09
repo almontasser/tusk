@@ -52,6 +52,7 @@ function render() {
   empty.hidden = !!st;
   $("git-changes").hidden = !st;
   $("git-group-folders").setAttribute("aria-pressed", String(settings.gitGroupByFolder));
+  commitButtons();
   if (!st) return renderEmpty(empty);
   const rows: HTMLElement[] = [];
   for (const [g, label] of GROUPS) {
@@ -289,9 +290,23 @@ function menuFor(key: string): MenuItem[] {
 
 let committing = false;
 
+/**
+ * Turns Commit and Commit and Push off while a commit runs, or when there's nothing to commit: no changes, no
+ * amend, and no merge to conclude. Unstaged changes count, since Commit offers to stage them.
+ */
+function commitButtons() {
+  const nothing = !gitStatus()?.files.length && !$<HTMLInputElement>("amend").checked && gitOperation()?.kind !== "merge";
+  for (const id of ["commit", "commit-push"]) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = committing || nothing;
+    b.dataset.title ??= b.title;
+    b.title = nothing ? "There are no changes to commit" : b.dataset.title;
+  }
+}
+
 function setBusy(busy: boolean) {
   committing = busy;
-  for (const id of ["commit", "commit-push"]) $<HTMLButtonElement>(id).disabled = busy;
+  commitButtons();
   $("commit").textContent = busy ? "Committing…" : "Commit";
   $("git-changes").setAttribute("aria-busy", String(busy));
 }
@@ -335,6 +350,7 @@ async function commit(push: boolean) {
 
 export function initCommitView(hst: Host) {
   host = hst;
+  $("amend").addEventListener("change", commitButtons);
   const list = $("git-files");
   let shift = false;
   let byKey = false;
