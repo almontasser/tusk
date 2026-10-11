@@ -85,6 +85,28 @@ async function prettier(rel: string, text: string, language: string) {
   return run("node", [tools.prettier!, ...plugins, "--stdin-filepath", rel], text);
 }
 
+/**
+ * Whether PHP formats with Mago: chosen, or Auto in a project without its own Prettier or Pint. Only Mago formats a
+ * selection, so it's the one PHP formatter that Reformat Code (⌥⌘L) uses on a selection.
+ */
+const phpUsesMago = () => {
+  const choice = formatterFor(choices(), "php");
+  return choice === "mago" || (choice === "auto" && !(tools.prettier && !tools.bundled) && !tools.pint);
+};
+
+/** Mago's edit for the statements, members, or imports that hold `range`, or none when there's nothing to change. */
+async function magoRange(model: monaco.editor.ITextModel, range: monaco.Range): Promise<monaco.languages.TextEdit[]> {
+  const edits = await tuskRequest<L.TextEdit[] | null>("textDocument/rangeFormatting", {
+    textDocument: { uri: model.uri.toString() },
+    range: { start: { line: range.startLineNumber - 1, character: range.startColumn - 1 }, end: { line: range.endLineNumber - 1, character: range.endColumn - 1 } },
+    options: { tabSize: 4, insertSpaces: true },
+  });
+  return (edits ?? []).map((e) => ({
+    range: new monaco.Range(e.range.start.line + 1, e.range.start.character + 1, e.range.end.line + 1, e.range.end.character + 1),
+    text: e.newText,
+  }));
+}
+
 async function mago(path: string, text: string) {
   const edits = await tuskRequest<L.TextEdit[] | null>("textDocument/formatting", {
     textDocument: { uri: monaco.Uri.file(path).toString() },
@@ -172,10 +194,27 @@ async function formatReported(model: monaco.editor.ITextModel): Promise<string |
 }
 
 let provider: monaco.IDisposable | undefined;
+let rangeProvider: monaco.IDisposable | undefined;
 /** Registers the formatter for every language that doesn't use Monaco's own, which then has the language alone. */
 function register() {
   builtInFormatters();
   provider?.dispose();
+  rangeProvider?.dispose();
+  rangeProvider = phpUsesMago()
+    ? monaco.languages.registerDocumentRangeFormattingEditProvider("php", {
+        async provideDocumentRangeFormattingEdits(model, range) {
+          if (!host.root() || model.uri.scheme !== "file") return [];
+          try {
+            const edits = await magoRange(model, range);
+            status(edits.length ? "Formatted the selection with Mago" : "The selection is already formatted", "format");
+            return edits;
+          } catch (e) {
+            host.status(`Format failed: ${String(e).trim().split("\n")[0]}`);
+            return [];
+          }
+        },
+      })
+    : undefined;
   const languages = PRETTIER_LANGUAGES.filter((l) => formatterFor(choices(), l) !== "builtin");
   // Monaco turns the whole-file result into minimal edits, so the cursor stays put.
   provider = monaco.languages.registerDocumentFormattingEditProvider(languages, {

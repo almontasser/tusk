@@ -2038,9 +2038,17 @@ const actions: Action[] = [
   // ⌘F finds in the terminal while one has focus, and in the editor otherwise.
   { label: "Find in Terminal", keys: "Meta+F", run: () => findInTerminal() || toast("Open a terminal to find in it.", { kind: "info", timeout: 4000 }), when: terminalFocused },
   { label: "Rename Terminal Tab…", run: () => renameTerminal() },
-  { label: "Reformat Code", keys: "Alt+Meta+L", run: () => editor.getAction("editor.action.formatDocument")?.run() },
+  // With a selection, as in PhpStorm, only the selection, where the language's formatter can format part of a file.
+  { label: "Reformat Code", keys: "Alt+Meta+L", run: reformatCode },
   { label: "Formatters…", run: () => root && openFormatters() },
 ];
+
+/** Reformat Code (⌥⌘L): the selection when there is one and its formatter can format part of a file, else the file. */
+function reformatCode() {
+  const selection = editor.getAction("editor.action.formatSelection");
+  const selected = editor.getSelections()?.some((s) => !s.isEmpty());
+  return (selected && selection?.isSupported() ? selection : editor.getAction("editor.action.formatDocument"))?.run();
+}
 
 /** Surround With (⌥⌘T): wraps the selected lines, or the caret's line, in a template picked at the caret. */
 function surroundWith() {

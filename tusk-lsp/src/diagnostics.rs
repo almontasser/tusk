@@ -257,7 +257,7 @@ fn to_diagnostic_at(doc: &Document, file: mago_database::file::FileId, issue: &I
         Level::Help => DiagnosticSeverity::HINT,
         Level::Note => DiagnosticSeverity::INFORMATION,
     };
-    let mut message = issue.message.clone();
+    let mut message = issue.message.to_string();
     if let Some(label) = primary.message.as_deref().filter(|m| !m.is_empty() && *m != issue.message) {
         message.push_str(&format!("\n{label}"));
     }

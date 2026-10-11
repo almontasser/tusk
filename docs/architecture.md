@@ -424,7 +424,7 @@ check and is killed partway through a large run.
 
 | Tool | Version | Form |
 | --- | --- | --- |
-| Mago | 1.50.0 | Native binary for the build's target |
+| Mago | 1.56.1 | Native binary for the build's target |
 | Tailwind CSS language server | 0.16.0 | npm package, run with Node |
 | vtsls (TypeScript) | 0.3.0, with TypeScript 5.9.3 | npm package, run with Node |
 | Vue language server | 3.3.11 | npm package, run with Node |
@@ -923,7 +923,7 @@ line**, which doesn't run Mago, so the light bulb shows it too. `magoExpect`
 writes `// @mago-expect lint:code` (`analysis:` for the analyzer) above the
 marker's first line with its indentation, or adds `,code` to a
 `// @mago-expect` or `@mago-ignore` comment for the same category in the
-comment lines just above. Mago 1.50.0 ignores a comment that mixes `lint:` and
+comment lines just above. Mago (as of 1.56.1) ignores a comment that mixes `lint:` and
 `analysis:` codes, so each category gets its own line. A line with `<?php` gets
 no suppression, and neither do `parse` and `unfulfilled-expect`.
 
@@ -4163,6 +4163,11 @@ the lookups, `formatterFor` and `formatsOnSave`.
   while Node.js is missing, so the two never compete.
 - After formatting, `status("Formatted with …", "format")` names the formatter.
 - `saveFile` asks `formatOnSave(language)` instead of reading the setting.
+- PHP also gets a range formatting provider while it formats with Mago (chosen,
+  or Auto without the project's own Prettier or Pint), which sends
+  `textDocument/rangeFormatting` to Tusk's server. Reformat Code (⌥⌘L) runs
+  Monaco's Format Selection when there's a selection and a range formatter for
+  the language, and formats the file otherwise.
 
 `detectFormatters` looks for Prettier, Pint, and PHP CS Fixer when a folder
 opens.
@@ -5861,7 +5866,7 @@ replaced Phpactor, Laravel LSP, and the Filament server in September 2026 (see
 the decision log). It serves PHP and Blade: navigation, completion, hovers,
 diagnostics, refactorings, and the Laravel and Filament features.
 
-It's built on Mago's crates, pinned to `=1.50.0` because their API changes
+It's built on Mago's crates, pinned to `=1.56.1` because their API changes
 between minor versions:
 
 - `mago-syntax` parses.
@@ -6211,6 +6216,13 @@ them. An option the formatter doesn't know makes only the formatter an error,
 which each request reports, as the command line refuses the file; the
 analyzer and linter keep their settings. A file with a syntax error isn't
 formatted, and the error names its line.
+
+`textDocument/rangeFormatting` uses `Formatter::format_range` (Mago 1.56):
+the smallest statement or class member that holds the selection, or the whole
+group of `use` imports, formatted and indented for where it sits, as one edit.
+Text outside it stays as it is. An empty selection formats the statement at the
+cursor; a selection of only HTML, an ignored region, or one already formatted
+gets no edit.
 
 ### Type and call hierarchy
 
@@ -9330,3 +9342,26 @@ user code:
 - The status bar's cursor position, indentation, and language are buttons:
   Go to Line, a picker of Convert Indents to Spaces or Tabs, and a picker of
   Monaco's languages that calls `setModelLanguage`.
+
+### 2026-10-11: Mago 1.56.1
+
+- The Mago crates and the bundled binary moved from 1.50.0 to 1.56.1. The
+  crates need Rust 1.99. The API changes were small:
+  `TNamedObject::intersection_types` is a boxed `Vec`, type parameters are a
+  boxed slice, keyed arrays' and lists' known items sit behind an `Arc`, and
+  `Issue::message` is a `Cow<str>`. The upgrade brings the analyzer fixes and
+  speedups since 1.51, and the Swoole and rdkafka stubs.
+- Format Selection uses the new `Formatter::format_range`, on the server and in
+  the editor (see Formatting).
+- Mago's new parser recovery for unfinished code (`recover_incomplete`) was
+  tried in place of `repair::balance_end`, and kept out. It closes bodies and
+  lists open at the end of a file, but drops a string or `match` left open
+  there, which completion of route names, view names, and compared values
+  needs, so 9 tests failed.
+- The other editor APIs aren't used yet. The analyzer's `EditorFileData`
+  (method, member, variable, and callable records) could replace parts of
+  `symbol.rs`'s resolution for references and rename, but that's its own change.
+  `direct_trait_names` adds nothing over `used_traits`. Declaration-only
+  analysis and directory symlinks belong to Mago's orchestrator and loader,
+  which Tusk doesn't use, and Guard and the slow-file warning are the command
+  line's.

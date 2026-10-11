@@ -145,7 +145,7 @@ impl FunctionReturnTypeProvider for AuthHelper {
         let manager = context.codebase().get_class_like(AUTH_MANAGER.as_bytes())?;
         let mixins: Vec<TAtomic> = manager.mixins.iter().flat_map(|m| m.type_union.types.iter().cloned()).filter(|a| matches!(a, TAtomic::Object(TObject::Named(_)))).collect();
         let mut named = TNamedObject::new(manager.original_name);
-        named.intersection_types = (!mixins.is_empty()).then_some(mixins);
+        named.intersection_types = (!mixins.is_empty()).then(|| Box::new(mixins));
         Some(TUnion::from_atomic(TAtomic::Object(TObject::Named(named))))
     }
 }
@@ -236,7 +236,7 @@ impl ExpressionHook for ExpectationHook {
                 return Ok(());
             }
             let Some(expectation) = context.codebase().get_class_like(EXPECTATION.as_bytes()) else { return Ok(()) };
-            let t = TNamedObject::new_with_type_parameters(expectation.original_name, n.type_parameters.clone());
+            let t = TNamedObject::new_with_type_parameters(expectation.original_name, n.type_parameters.clone().map(Vec::from));
             context.set_expression_type(expr, TUnion::from_atomic(TAtomic::Object(TObject::Named(t))));
             return Ok(());
         }

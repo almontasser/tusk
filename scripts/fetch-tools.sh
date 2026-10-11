@@ -51,11 +51,11 @@ exe=""; [ "$os" = windows ] && exe=.exe
 # sha <tool> <os>-<arch>: the pinned checksum of a tool's download for one system and architecture.
 sha() {
   case "$1-$2" in
-    mago-macos-aarch64) echo 99e75c1261f2287784cf2700c59f062da2f21a2ce54ea3068c879eb4384a96bd ;;
-    mago-macos-x86_64) echo b4ff313db87ef3fc8ed04e6920a193fc31a466a62d6dc53f9a7f3d26b4c9eaaa ;;
-    mago-linux-aarch64) echo 72b549cb66c71a158b3182a36efdb2c935a0fd79d9c555780a0b739cb857b919 ;;
-    mago-linux-x86_64) echo 5eb5d8aa26d378eaf6574ac52a84a9fe69ff8909b441498a96af29b66d7ba642 ;;
-    mago-windows-x86_64) echo dbff448ef9ef52a8abef6b1f2f9e58a376f62846af9074ac6eed0ea19846c769 ;;
+    mago-macos-aarch64) echo ad820c342ac9720c3e9f277e09e6fefc623f72f6c9d7f1f1a334bba392f345ed ;;
+    mago-macos-x86_64) echo e86b955059d1310c9ea0a509b2e2eed93cd2ccb5102581ec9d38b1a83cb0ce35 ;;
+    mago-linux-aarch64) echo a9b33b79efbe826ac440da92a29ecc7941bced587ea9d71141fd7546655a6c2c ;;
+    mago-linux-x86_64) echo a92184409a8f8ee046fece89ff52dcd170ecb69aa84d438f737682a20854b74e ;;
+    mago-windows-x86_64) echo 76e6f9aff4d09975abafd9d217ba97aaa6d35fecad2e4af0519de643bb9a856d ;;
     typos-macos-aarch64) echo c57edf504147dc74dab985f3b56170969e2ab00d4b1b1f1dcb5fb7eb0e3c9b89 ;;
     typos-macos-x86_64) echo e9069658eedfc575033451bf146980b05fe911e357f8013672d1a375f49bc0a1 ;;
     typos-linux-aarch64) echo e4ed859acefdb76d5b0da32f4cd4669052c5b3a9fffa1d995d21eb89da61be60 ;;
@@ -96,17 +96,17 @@ for arch in $archs; do
   ext=tar.gz; [ "$os" = windows ] && ext=zip
   # Mac downloads keep their first cache names, from before other systems.
   key="$arch"; [ "$os" = macos ] || key="$t"
-  fetch "mago-1.50.0-$key.$ext" \
-    "https://github.com/carthage-software/mago/releases/download/1.50.0/mago-1.50.0-$t.$ext" \
+  fetch "mago-1.56.1-$key.$ext" \
+    "https://github.com/carthage-software/mago/releases/download/1.56.1/mago-1.56.1-$t.$ext" \
     "$(sha mago "$os-$arch")"
   # Spell checking: typos-lsp, a language server for the typos checker, which knows code's naming styles.
   fetch "typos-lsp-0.1.56-$key.$ext" \
     "https://github.com/tekumara/typos-lsp/releases/download/v0.1.56/typos-lsp-v0.1.56-$t.$ext" \
     "$(sha typos "$os-$arch")"
   rm -rf "$cache/unpack" && mkdir -p "$cache/$key"
-  unpack "$cache/mago-1.50.0-$key.$ext" "$cache/unpack"
+  unpack "$cache/mago-1.56.1-$key.$ext" "$cache/unpack"
   unpack "$cache/typos-lsp-0.1.56-$key.$ext" "$cache/unpack"
-  cp "$cache/unpack/mago-1.50.0-$t/mago$exe" "$(find "$cache/unpack" -name "typos-lsp$exe" -type f | head -1)" "$cache/$key/"
+  cp "$cache/unpack/mago-1.56.1-$t/mago$exe" "$(find "$cache/unpack" -name "typos-lsp$exe" -type f | head -1)" "$cache/$key/"
   rm -rf "$cache/unpack"
 done
 keys=$(for a in $archs; do if [ "$os" = macos ]; then echo "$a"; else triple "$a"; fi; done)
