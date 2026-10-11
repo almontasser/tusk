@@ -3127,8 +3127,10 @@ restorable. They could reopen through `runConfig` instead.
 **Removal.** **Run > Remove .test Domains and Certificate**
 (`removeTestDomains`) asks first, stops this window's `.test` runs and awaits
 their stops, and then calls `local_domains_remove`. It reverses the system
-setup with one prompt and deletes the CA. It fails while other Tusk windows
-serve names.
+setup and deletes the CA. That's one prompt on Windows and Linux. On macOS,
+deleting the certificate's trust shows macOS's own dialog, and removing
+`/etc/resolver/test` shows the administrator prompt. It fails while other Tusk
+windows serve names.
 
 ### Test results
 

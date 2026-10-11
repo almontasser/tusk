@@ -3075,7 +3075,8 @@ Docker.
 
 To undo the setup, run **Run > Remove .test Domains and Certificate**. Tusk
 stops its `.test` servers, removes its certificate from your system's trusted
-certificates, and removes its `.test` DNS setting, after one password prompt.
+certificates, and removes its `.test` DNS setting. Your system asks for your
+password: once on Windows and Linux, and twice on macOS.
 
 ### The Tests tab
 
