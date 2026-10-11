@@ -242,7 +242,7 @@ pub fn default_shell() -> &'static str {
 
 /// A shell word for `sh`: the text in single quotes.
 #[cfg_attr(windows, allow(dead_code))]
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 

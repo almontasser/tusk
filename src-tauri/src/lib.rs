@@ -3,6 +3,8 @@ mod db;
 mod deploy;
 mod fs;
 mod grpc;
+mod localdomains;
+mod localsystem;
 mod lsp;
 mod profile;
 mod pty;
@@ -371,6 +373,10 @@ pub fn run() {
             grpc::grpc_call,
             grpc::grpc_cancel,
             grpc::grpc_methods,
+            localdomains::local_domain_start,
+            localdomains::local_domain_stop,
+            localdomains::local_domains_allow_port_443,
+            localdomains::local_domains_remove,
             check_update,
             restart,
             menu_shortcuts_shown_only,
@@ -382,6 +388,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 app.state::<lsp::LspState>().stop_all();
                 toolpaths::remove_shims();
+                localdomains::shutdown();
             }
             // A restart after an update starts the app itself, not through the Dock or Finder, so macOS leaves
             // it behind the app that was in front.

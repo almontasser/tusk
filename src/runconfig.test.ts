@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addTemporary, clean, commandFor, longRunning, methodFilter, newConfig, readConfigs, shellWords, uniqueName, validate, type RunConfig } from "./runconfig.ts";
+import { addTemporary, clean, commandFor, domainFor, longRunning, methodFilter, newConfig, readConfigs, routerScript, shellWords, summary, uniqueName, validate, type RunConfig } from "./runconfig.ts";
 
 const laravel = { artisan: true, pest: true };
 
@@ -81,4 +81,47 @@ test("names, cleans, and reads configurations", () => {
   assert.deepEqual(clean({ name: "S", type: "server", docker: true }), { name: "S", type: "server", docker: true });
   assert.deepEqual(readConfigs([{ name: "A", type: "shell" }, { name: "B", type: "nope" }, null, "x"]), [{ name: "A", type: "shell" }]);
   assert.deepEqual(readConfigs({}), []);
+});
+
+test("names .test domains after the configuration or the project folder", () => {
+  const d = (domain: string | undefined, root: string) => domainFor({ name: "s", type: "server", testDomain: true, domain }, root);
+  assert.equal(d(" Shop ", "/x/y"), "shop");
+  assert.equal(d(undefined, "/Users/me/My Shop!"), "my-shop");
+  assert.equal(d("", "C:\\Users\\me\\blog_v2\\"), "blog-v2");
+  assert.equal(d(undefined, "/srv/ÄÖ"), "app");
+  assert.equal(d(undefined, ""), "app");
+  const long = d(undefined, `/srv/${"a".repeat(62)}-bcdefgh`);
+  assert.equal(long, "a".repeat(62));
+});
+
+test("validates .test servers", () => {
+  const s: RunConfig = { name: "S", type: "server", testDomain: true, host: "", port: 0 };
+  // Host and port don't apply.
+  assert.deepEqual(validate(s, [s]), []);
+  assert.deepEqual(validate({ ...s, domain: "my-shop2" }, []), []);
+  for (const bad of ["-shop", "shop-", "my.shop", "a".repeat(64), "my shop"]) assert.match(validate({ ...s, domain: bad }, [])[0], /can't be a \.test domain/);
+  assert.deepEqual(validate({ ...s, docker: true }, []), ["Turn off Docker to serve at a .test domain: Tusk's proxy reaches servers on this computer."]);
+  assert.equal(newConfig("server", []).testDomain, false);
+});
+
+test("runs .test servers with PHP's server and the router", () => {
+  const served = { port: 51234, router: "/cache/router-shop.php" };
+  const s: RunConfig = { name: "S", type: "server", testDomain: true, args: "-d memory_limit=1G" };
+  assert.deepEqual(commandFor(s, laravel, served), ["php", "-S", "127.0.0.1:51234", "-t", "public", "/cache/router-shop.php", "-d", "memory_limit=1G"]);
+  assert.deepEqual(commandFor({ ...s, server: "php", path: "web", args: "" }, laravel, served), ["php", "-S", "127.0.0.1:51234", "-t", "web", "/cache/router-shop.php"]);
+  assert.equal(summary({ ...s, args: "" }, laravel, "/x/Shop"), "php -S 127.0.0.1:… -t public (https://shop.test)");
+  assert.equal(summary({ ...s, args: "", domain: "blog" }, laravel), "php -S 127.0.0.1:… -t public (https://blog.test)");
+});
+
+test("writes router scripts with the values in PHP strings", () => {
+  const plain = routerScript("https://shop.test");
+  assert.match(plain, /\$_SERVER\['HTTPS'\] = 'on';/);
+  assert.match(plain, /\$_SERVER\['REQUEST_SCHEME'\] = 'https';/);
+  assert.match(plain, /\$_SERVER\['SERVER_PORT'\] = '443';/);
+  assert.match(plain, /return false;/);
+  const laravelRouter = routerScript("https://shop.test:8443", { docroot: "C:\\it's\\public", serverPhp: "/a/server.php" });
+  assert.match(laravelRouter, /\$_SERVER\['SERVER_PORT'\] = '8443';/);
+  assert.ok(laravelRouter.includes(`chdir('C:\\\\it\\'s\\\\public');`));
+  assert.ok(laravelRouter.includes(`return require '/a/server.php';`));
+  assert.ok(!laravelRouter.includes("return false"));
 });

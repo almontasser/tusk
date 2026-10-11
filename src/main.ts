@@ -53,7 +53,7 @@ import { openFormatters } from "./formattersdialog";
 import { addEditor, defaults as settingDefaults, importTheme, initSettings, onSettings, openSettings, pickTheme, removeEditor, removeTheme, setFileOpener, setKeymapEditor, settings, settingsFileSaved, updateSetting } from "./settings";
 import { aiFilesChanged, initAi } from "./ai";
 import { initSearch, loadTodos, nextMatch, openSearch, refreshSearch, refreshTodos } from "./search";
-import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, runTestsIn, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
+import { attachTestRunner, chooseAndRun, editConfigurations, initRunner, isRunning, isTestFile, loadRunConfigurations, removeTestDomains, rerun, runAllTests, runAnything, runSelected, runTestAtCursor, runTestsIn, saveTemporary, showRoutes, stopRun, testMenu, tinker } from "./runner";
 import { goToMnemonic, hasBookmark, initBookmarks, loadBookmarks, showBookmarks, toggleBookmark, toggleMnemonic } from "./bookmarks";
 import { editSnippets, initSnippets } from "./snippets";
 import { hasCoverage, hideCoverage, showTestsCoveringLine } from "./coverage";
@@ -2018,6 +2018,7 @@ const actions: Action[] = [
   { label: "Debug…", keys: "Ctrl+Alt+D", run: () => root && chooseAndRun("debug") },
   { label: "Edit Configurations…", run: () => root && editConfigurations() },
   { label: "Save Temporary Configuration", run: () => root && saveTemporary() },
+  { label: "Remove .test Domains and Certificate", run: () => removeTestDomains() },
   // ⌘F2 stops a run while one runs, and otherwise the debugger.
   { label: "Stop", keys: "Meta+F2", run: () => stopRun(), when: isRunning },
   { label: "Run Anything", keys: "Ctrl Ctrl", run: () => root && runAnything() },

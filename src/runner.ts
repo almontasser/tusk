@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
-import { h, icon } from "./dom";
+import { h, icon, toast } from "./dom";
 import { confirm, type Item, pick, rank } from "./palette";
 import { findTests, testAt, type TestCase } from "./phptests";
 import { containerXdebugEnv, herdXdebug, iniDirsEnv, startDebugging, xdebugEnv } from "./debug";
@@ -18,8 +18,8 @@ import { pathsFor, psr4From } from "./psr4";
 import { type MenuItem, showMenu } from "./files";
 import { onSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
-import { errorText, showError } from "./status";
-import { addTemporary, clean, commandFor, longRunning, type Mode, type Project, readConfigs, type RunConfig, summary, TYPES, uniqueName, validate } from "./runconfig";
+import { errorText, showError, withProgress } from "./status";
+import { addTemporary, clean, commandFor, docrootFor, domainFor, longRunning, type Mode, type Project, readConfigs, routerScript, type RunConfig, type Served, servesTestDomain, summary, TYPES, uniqueName, validate } from "./runconfig";
 import { isAbsolute, isWindows, keyText, thisComputer } from "./platform.ts";
 
 let getRoot: () => string;
@@ -116,7 +116,8 @@ onProjectValue(SHARED, () => renderWidget());
 
 // ---- Running ----
 
-type Run = { config: RunConfig; mode: Mode; title: string; terminal: TerminalRun };
+/** `stopRoute` stops a .test run's route; it runs once, and resolves when the proxy no longer serves the name. */
+type Run = { config: RunConfig; mode: Mode; title: string; terminal: TerminalRun; stopRoute?: () => Promise<void> };
 /** The runs that are still going. */
 const runs: Run[] = [];
 /** The last run, for Rerun. */
@@ -127,6 +128,11 @@ let runCounter = 0;
 
 export const isRunning = () => runs.length > 0;
 const runsOf = (name: string) => runs.filter((r) => r.config.name === name);
+
+/** Waits for stopped runs to end: within 3 seconds, ⌃C and then a kill. */
+async function stopped(list: Run[]) {
+  for (let i = 0; i < 40 && list.some((r) => !r.terminal.exited()); i++) await new Promise((r) => setTimeout(r, 100));
+}
 
 /**
  * A command for this computer: `vendor/bin/…` becomes absolute, since the terminal looks a relative program up in
@@ -165,8 +171,7 @@ export async function runConfig(c: RunConfig, mode: Mode = "run", chain: string[
   if (earlier.length && !c.multiple) {
     if (!(await confirm(`“${c.name}” is still running. Stop it and run it again?`, "Stop and Rerun"))) return null;
     earlier.forEach((r) => r.terminal.stop());
-    // It stops within 3 seconds: ⌃C, and then a kill.
-    for (let i = 0; i < 40 && earlier.some((r) => !r.terminal.exited()); i++) await new Promise((r) => setTimeout(r, 100));
+    await stopped(earlier);
   }
 
   for (const step of c.before ?? []) {
@@ -196,7 +201,8 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
   const debug = mode === "debug";
   const docker = info.php && (c.docker ?? info.defaults.docker ?? false);
   const env = Object.entries(c.env ?? {}).map(([k, v]) => `${k}=${v}`);
-  let argv = commandFor(c, await projectInfo());
+  const project = await projectInfo();
+  let argv = commandFor(c, project);
   const container = docker ? await runningContainer(root) : null;
   // On this Mac, Composer is the bundled composer.phar; in a container, the container's own.
   if (c.type === "composer" && !container) argv = ["php", await toolPath("composer/composer.phar"), ...argv.slice(1)];
@@ -218,8 +224,16 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
   const profiles = profiler ? await profiler.profileDir() : "";
   if (profiler) extraEnv.push(...(await profiler.profileEnv(profiles, root)));
   const started = Math.floor(Date.now() / 1000);
-  const command = info.php ? (await php(argv, debug, [...env, ...extraEnv], docker)).command : env.length ? ["/usr/bin/env", ...env, ...argv] : argv;
   const cwd = !c.cwd ? root : isAbsolute(c.cwd) ? c.cwd : `${root}/${c.cwd.replace(/^\/+|\/+$/g, "")}`;
+  // Started last, so nothing before the terminal opens can fail and leave the domain routed.
+  const domain = servesTestDomain(c) ? await serveDomain(c, cwd) : undefined;
+  if (domain === null) return null; // serveDomain said why.
+  if (domain) {
+    argv = commandFor(c, project, domain);
+    // So the browser's parallel requests don't wait in line for one PHP worker. PHP's server has no workers on Windows.
+    if (!isWindows) extraEnv.push("PHP_CLI_SERVER_WORKERS=4");
+  }
+  const command = info.php ? (await php(argv, debug, [...env, ...extraEnv], docker)).command : env.length ? ["/usr/bin/env", ...env, ...argv] : argv;
 
   let timer: ReturnType<typeof setInterval> | undefined;
   let run: Run | undefined;
@@ -235,6 +249,8 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
     title,
     command,
     async (code) => {
+      // First, so a rerun waiting in serveDomain sees the stop.
+      domain?.stopRoute();
       finish();
       if (reports) {
         // A later test run owns the Tests tab now.
@@ -250,6 +266,7 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
     },
     // Closing the tab stops the run: the Tests tab shows what ran.
     async () => {
+      domain?.stopRoute();
       finish();
       if (reports) {
         if (testRun === run) await showLive(reports.live, false, reports.format);
@@ -257,10 +274,18 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
       }
       resolve(null);
     },
-    longRunning(c),
-  );
-  if (!terminal) return clearInterval(timer), null; // openTerminal said why.
-  run = { config: c, mode, title, terminal };
+    // ponytail: a .test run doesn't reopen with the project, since rerunning its command skips local_domain_start;
+    // it could reopen through runConfig instead.
+    longRunning(c) && !domain,
+    undefined,
+    domain && `Serving ${domain.url} (PHP on 127.0.0.1:${domain.port})`,
+  ).catch((e) => {
+    domain?.stopRoute();
+    throw e;
+  });
+  if (!terminal) return domain?.stopRoute(), clearInterval(timer), null; // openTerminal said why.
+  run = { config: c, mode, title, terminal, stopRoute: domain?.stopRoute };
+  if (domain) domain.announce();
   runs.push(run);
   if (reports) {
     testRun = run;
@@ -270,6 +295,75 @@ async function launch(c: RunConfig, mode: Mode): Promise<number | null> {
   }
   renderWidget();
   return done;
+}
+
+// ---- Local .test domains ----
+
+type DomainStart = { url: string; port: number; notes: string[]; canUsePort443: boolean };
+
+/** Each name's latest stop of its route, so a rerun's start waits for its earlier run's stop. */
+const routeStops = new Map<string, Promise<void>>();
+
+/**
+ * Starts serving a .test server's domain through Tusk's proxy, which can wait behind the system's password prompt the
+ * first time, and writes its router script. Resolves to what the run needs, or null after showing why it can't.
+ */
+async function serveDomain(c: RunConfig, cwd: string) {
+  const name = domainFor(c, getRoot());
+  await routeStops.get(name);
+  const start = await withProgress(`Setting up https://${name}.test…`, () => invoke<DomainStart>("local_domain_start", { name }), { error: `Can't serve https://${name}.test` });
+  if (!start) return null;
+  let stop: Promise<void> | undefined;
+  const stopRoute = () => {
+    if (!stop) routeStops.set(name, (stop = invoke<void>("local_domain_stop", { name }).catch((e) => showError(`Can't stop serving https://${name}.test`, e))));
+    return stop;
+  };
+  try {
+    const full = (path: string) => (isAbsolute(path) ? path : `${cwd}/${path}`);
+    const docroot = full(docrootFor(c));
+    // Laravel's server.php, as `artisan serve` runs it: the project's own, or the framework's.
+    const candidates = c.server === "php" ? [] : [`${cwd}/server.php`, `${cwd}/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php`];
+    let serverPhp: string | undefined;
+    for (const path of candidates) if (!serverPhp && (await invoke<boolean>("path_exists", { path }))) serverPhp = path;
+    const router = `${await cacheDir()}/router-${name}.php`;
+    await invoke("write_file", { path: router, contents: routerScript(start.url, serverPhp ? { docroot, serverPhp } : undefined) });
+    const served: Served & { url: string; stopRoute: () => Promise<void>; announce: () => void } = {
+      port: start.port,
+      router,
+      url: start.url,
+      stopRoute,
+      announce: () => {
+        const open = { label: "Open in Browser", run: () => invoke("open_url", { url: start.url }).catch((e) => showError("Can't open the browser", e)) };
+        const port443 = { label: "Use Port 443…", run: allowPort443 };
+        toast(`Serving ${start.url}`, { kind: "info", action: start.canUsePort443 ? [open, port443] : open, timeout: 10000 });
+        for (const note of start.notes) toast(note, { kind: "info" });
+      },
+    };
+    return served;
+  } catch (e) {
+    stopRoute();
+    showError(`Can't serve https://${name}.test`, e);
+    return null;
+  }
+}
+
+/** Lets Tusk's proxy use port 443 on Linux, after one password prompt. */
+async function allowPort443() {
+  const done = await withProgress("Letting Tusk use port 443…", () => invoke("local_domains_allow_port_443").then(() => true), { error: "Can't let Tusk use port 443" });
+  if (done) toast("Tusk can use port 443 now. Rerun the server to use its address without a port.", { kind: "info" });
+}
+
+/** Stops this window's .test runs, and removes Tusk's .test DNS setting, its local certificate, and the certificate's trust. */
+export async function removeTestDomains() {
+  const question =
+    "Tusk stops its .test servers, removes its local certificate from your system's trusted certificates, and removes its .test DNS setting. Your system asks for your password.";
+  if (!(await confirm(question, "Remove"))) return;
+  const serving = runs.filter((r) => r.stopRoute);
+  serving.forEach((r) => r.terminal.stop());
+  await stopped(serving);
+  await Promise.all([...serving.map((r) => r.stopRoute!()), ...routeStops.values()]);
+  const done = await withProgress("Removing .test domains and the certificate…", () => invoke("local_domains_remove").then(() => true), { error: "Can't remove the .test domains" });
+  if (done) toast("Removed Tusk's .test domains and its local certificate.", { kind: "info" });
 }
 
 /**
@@ -358,7 +452,7 @@ export function chooseAndRun(mode: Mode = "run", placeholder = `${modeLabels[mod
   const items = (): Item[] =>
     configurations().map(({ config, where }) => ({
       label: config.name,
-      detail: `${TYPES[config.type].label}${where === "shared" ? " · shared" : where === "temporary" ? " · temporary" : ""} · ${summary(config)}`,
+      detail: `${TYPES[config.type].label}${where === "shared" ? " · shared" : where === "temporary" ? " · temporary" : ""} · ${summary(config, undefined, getRoot())}`,
       icon: `codicon-${TYPES[config.type].icon}`,
       run: () => select(config.name).then(() => runConfig(config, mode)),
     }));
@@ -416,7 +510,7 @@ function renderWidget() {
   el.replaceChildren(
     h(
       "button",
-      { class: `tb-button run-config${running ? " running" : ""}${current?.where === "temporary" ? " temporary" : ""}`, title: c ? `${c.name}: ${summary(c)}${running ? " (running)" : ""}` : "Add a run configuration", ariaLabel: "Run configuration", ariaHasPopup: "menu", onclick: () => (c ? widgetMenu() : editConfigurations()) },
+      { class: `tb-button run-config${running ? " running" : ""}${current?.where === "temporary" ? " temporary" : ""}`, title: c ? `${c.name}: ${summary(c, undefined, getRoot())}${running ? " (running)" : ""}` : "Add a run configuration", ariaLabel: "Run configuration", ariaHasPopup: "menu", onclick: () => (c ? widgetMenu() : editConfigurations()) },
       icon(c ? TYPES[c.type].icon : "add"),
       running ? h("span", { class: "run-dot", ariaHidden: "true" }) : null,
       h("span", { class: "run-config-name" }, c?.name ?? "Add Configuration…"),
