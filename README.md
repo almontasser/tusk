@@ -3056,8 +3056,9 @@ with a trusted certificate, instead of at a host and port. To use it, turn on
 When you click **Run**, Tusk does the rest:
 
 - The first time, Tusk creates its own local certificate authority, trusts it,
-  and routes `.test` names to this computer. Your system asks for your password
-  once.
+  and routes `.test` names to this computer. Your system asks for your
+  password. On macOS, it also asks you to trust the certificate. On older
+  Linux systems, each new domain asks for your password again.
 - Tusk starts PHP's built-in server on a free port, with a router that marks
   each request as HTTPS, and serves it at the domain through a proxy built into
   Tusk. For Laravel, the router runs Laravel's own `server.php`, as
@@ -3066,7 +3067,7 @@ When you click **Run**, Tusk does the rest:
   show the address.
 
 The address has no port when Tusk can use port 443. Otherwise it's
-`https://<domain>.test:8443`. On Linux, the notification then offers
+`https://<domain>.test:8443`, or another free port when 8443 is taken. On Linux, the notification then offers
 **Use Port 443…**, which asks for your password once; rerun the server
 afterwards. Stopping the run stops serving the domain. The domains work only
 while Tusk runs, and a configuration served at a `.test` domain can't run in

@@ -3057,7 +3057,8 @@ minted per name on first use and are valid for 30 days. The folder also holds
 `routes/<id>.lock`.
 
 **Ports.** HTTPS listens on 443, and falls back to 8443 when it can't bind
-there; with 8443, there's no port 80. Port 80 only redirects to HTTPS. On Linux,
+there. When 8443 is taken too, often by another dev tool, the system picks a
+free port. With a fallback port, there's no port 80. Port 80 only redirects to HTTPS. On Linux,
 the fallback notification offers **Use Port 443…**
 (`local_domains_allow_port_443`), which writes
 `/etc/sysctl.d/50-tusk-ports.conf` with
@@ -3066,7 +3067,7 @@ moves the listeners. On macOS, the proxy binds `[::]`, dual-stack, because
 macOS lets unprivileged programs bind low ports only on the wildcard address,
 and it turns away peers that aren't loopback. Windows and Linux bind
 `127.0.0.1` and `::1`. After binding, a self-check connects to `127.0.0.1` and
-falls back to 8443 when another program takes that traffic.
+falls back to the next port when another program takes that traffic.
 
 **DNS.** A responder answers on UDP `127.0.0.1:15353`, or `:53` on Windows,
 since NRPT rules can't name a port. A `.test` name gets an A record for
@@ -3074,20 +3075,44 @@ since NRPT rules can't name a port. A `.test` name gets an A record for
 types get an empty answer, and other domains get REFUSED. One resolver setup
 covers every name and subdomain.
 
-**One prompt for the setup.** The system setup runs once, elevated, as one
-prompt. As specified for `src-tauri/src/localsystem.rs`:
+**The system setup.** `src-tauri/src/localsystem.rs` sets up the system the
+first time. Each system asks in its own way:
 
-- macOS: `/etc/resolver/test` (`nameserver 127.0.0.1`, `port 15353`), and the
-  CA trusted in the System keychain, through an `osascript` administrator
-  prompt.
-- Windows: an NRPT rule for `.test` pointing at `127.0.0.1`, and the CA in
-  `LocalMachine\Root`, through one UAC prompt.
-- Linux: a systemd-resolved drop-in that routes `~test` to
-  `127.0.0.1:15353`, or, without systemd-resolved, `/etc/hosts` entries in a
-  marked block. The CA goes in the system store through
-  `update-ca-certificates`, `update-ca-trust`, or `trust`, and in Chrome's and
-  Firefox's NSS databases when `certutil` is installed. It all runs through
-  `pkexec`.
+- macOS shows two dialogs. First, macOS's own dialog asks you to trust Tusk's
+  CA in your login keychain. This step runs as you, since Big Sur asks for
+  trust changes in its own dialog even for root. Older Tusk CAs in the login
+  keychain are deleted first. Second, an administrator prompt
+  (`osascript … with administrator privileges`) writes `/etc/resolver/test`,
+  marked `# Tusk`, with `nameserver 127.0.0.1` and `port 15353`, and flushes
+  the DNS cache. It replaces another tool's `/etc/resolver/test`. Status reads
+  the file and runs `security verify-cert` on the CA.
+- Windows shows one UAC prompt. It runs an elevated PowerShell with
+  `-EncodedCommand`. The script adds the CA from embedded bytes to
+  `LocalMachine\Root`, and replaces older Tusk CAs. It adds an NRPT rule that
+  sends `.test` to `127.0.0.1`, commented `Tusk`, and clears the DNS cache.
+  Each step exits with its own code, so a failure says which step failed.
+  Status uses one hidden PowerShell call.
+- Linux shows one `pkexec /bin/sh -c` prompt. With systemd-resolved 258 or
+  later, it writes a DNS delegate, `/etc/systemd/dns-delegate.d/tusk.dns-delegate`,
+  that routes `~test` to `127.0.0.1:15353` with `DefaultRoute=no`, and
+  restarts resolved. Tusk doesn't set a global `DNS=` in `resolved.conf`:
+  systemd-resolved treats the global scope as a default route, which would
+  send every lookup to Tusk. On older systemd (Ubuntu 22.04 and 24.04, Debian
+  12), or without systemd-resolved, names go in an `/etc/hosts` block between
+  `# BEGIN Tusk .test domains` and `# END Tusk .test domains`. Then each new
+  domain asks for your password again. System trust goes through
+  `update-ca-certificates`, `update-ca-trust`, or `trust anchor`. Chrome's,
+  Chromium's, and Firefox's NSS databases are updated as you, without root,
+  when `certutil` is installed. Otherwise, a note names `libnss3-tools` or
+  `nss-tools`. If `pkexec` can't ask, the error gives a `sudo sh '<script>'`
+  command to run.
+
+Root never runs or reads a file that a program running as you could change.
+The scripts, the certificate, and the new hosts text travel inline. The one
+exception is the macOS trust step, which runs as you and reads `ca.pem`.
+Removal touches only files and entries that carry Tusk's marker or Tusk's
+certificate. Firefox 120 and later trusts the system's roots by default on
+macOS and Windows, so it needs nothing extra there.
 
 **Several windows.** The first window with a route takes `owner.lock`, which
 the system releases if the window dies, and runs the listeners. Other windows
@@ -9485,6 +9510,9 @@ user code:
   different hook per system (`/etc/resolver` on macOS, an NRPT rule on
   Windows, and systemd-resolved on Linux, with `/etc/hosts` as the fallback),
   and names don't resolve while Tusk is closed.
+- On Linux, the hook is a systemd-resolved DNS delegate on systemd 258 and
+  later, and the hosts file elsewhere. A global `DNS=` would make
+  systemd-resolved send every lookup to Tusk.
 
 ### 2026-10-12: Several Tusk windows share one proxy through lock files
 
