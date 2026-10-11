@@ -175,7 +175,7 @@ async fn serve_tls(tcp: TcpStream, inner: Arc<Inner>, acceptor: TlsAcceptor) {
             }
             Err(_) => ("502 Bad Gateway", format!("{host} is registered but its server isn't answering on port {port}.")),
         },
-        None => ("503 Service Unavailable", format!("{host} isn't running. Run its configuration in Tusk.")),
+        None => ("404 Not Found", format!("{host} isn't running. Run its configuration in Tusk.")),
     };
     let head = read_head(&mut tls).await;
     let (kind, body) = if accepts_html(&head) {
@@ -192,6 +192,8 @@ async fn serve_tls(tcp: TcpStream, inner: Arc<Inner>, acceptor: TlsAcceptor) {
 }
 
 const PAGE: &str = include_str!("page.html");
+/// Tusk's icon, shown on the page and as its favicon.
+const ICON: &str = include_str!("../../../design/icon.svg");
 
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
@@ -214,10 +216,11 @@ fn fill(template: &str, values: &[(&str, &str)]) -> String {
 /// The page for `host` that isn't served: not running, or, with its `port`, not answering. The not-running
 /// page links to the `running` names, with `suffix` (such as `:8443`) after each.
 fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str) -> String {
+    use base64::Engine;
     let host = escape(host);
-    let (dot, status, verb) = match port {
-        Some(_) => ("amber", "Not answering", "answering"),
-        None => ("gray", "Not running", "running"),
+    let (tone, code, reason, verb, waiting) = match port {
+        Some(_) => ("down", "502", "Bad Gateway", "answering", "Waiting for the server to answer"),
+        None => ("off", "404", "Not Found", "running", "Waiting for it to start"),
     };
     let explanation = match port {
         Some(port) => format!("Tusk is serving this address, but nothing answers on port <code>{port}</code> yet. The server may still be starting, or it stopped. Check its terminal tab in Tusk. This page opens your site as soon as it answers."),
@@ -230,15 +233,31 @@ fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str) -> Stri
                 .map(|name| {
                     let name = escape(name);
                     let suffix = escape(suffix);
-                    format!("\n        <li><a href=\"https://{name}.test{suffix}/\"><code>{name}.test</code></a></li>")
+                    format!("\n      <li><a href=\"https://{name}.test{suffix}/\"><code>{name}.test</code></a></li>")
                 })
                 .collect();
-            format!("\n    <div class=\"running\">\n      <div class=\"label\">Running in Tusk</div>\n      <ul>{rows}\n      </ul>\n    </div>")
+            format!("\n  <section class=\"running\">\n    <h2>Running in Tusk</h2>\n    <ul>{rows}\n    </ul>\n  </section>")
         }
         _ => String::new(),
     };
-    let title = format!("{host} isn&#39;t {verb}");
-    fill(PAGE, &[("title", &title), ("dot", dot), ("status", status), ("host", &host), ("verb", verb), ("explanation", &explanation), ("running", &running)])
+    let title = format!("{code} · {host} isn&#39;t {verb}");
+    let favicon = format!("data:image/svg+xml;base64,{}", base64::engine::general_purpose::STANDARD.encode(ICON));
+    fill(
+        PAGE,
+        &[
+            ("title", &title),
+            ("favicon", &favicon),
+            ("icon", ICON),
+            ("tone", tone),
+            ("code", code),
+            ("reason", reason),
+            ("host", &host),
+            ("verb", verb),
+            ("explanation", &explanation),
+            ("waiting", waiting),
+            ("running", &running),
+        ],
+    )
 }
 
 /// Redirects `http://name.test/path` to HTTPS.
@@ -322,15 +341,18 @@ mod tests {
     fn pages() {
         let running = ["shop".to_string(), "a\"b".to_string()];
         let off = page("<script>", None, &running, ":8443");
-        assert!(off.contains("<title>&lt;script&gt; isn&#39;t running</title>") && off.contains("Not running") && off.contains("dot gray"));
+        assert!(off.contains("<title>404 · &lt;script&gt; isn&#39;t running</title>") && off.contains("<body class=\"off\">"));
+        assert!(off.contains("<div class=\"code\" aria-hidden=\"true\">404</div>") && off.contains("404 Not Found</footer>"));
         assert!(off.contains("<h1><code>&lt;script&gt;</code> isn't running</h1>") && !off.contains("<script>\""), "{off}");
-        assert!(off.contains("Nothing in Tusk is serving this address."));
+        assert!(off.contains("Nothing in Tusk is serving this address.") && off.contains("Waiting for it to start"));
         assert!(off.contains("Running in Tusk") && off.contains("<a href=\"https://shop.test:8443/\"><code>shop.test</code></a>"));
         assert!(off.contains("https://a&quot;b.test:8443/") && !off.contains("{{"));
+        // Tusk's icon, inline and as the favicon.
+        assert!(off.contains("<div class=\"logo\" aria-hidden=\"true\"><svg") && off.contains("href=\"data:image/svg+xml;base64,"));
         assert!(!page("shop.test", None, &[], "").contains("Running in Tusk"));
 
         let down = page("shop.test", Some(18803), &running, "");
-        assert!(down.contains("Not answering") && down.contains("dot amber") && down.contains("<code>shop.test</code> isn't answering"));
+        assert!(down.contains("<body class=\"down\">") && down.contains(">502</div>") && down.contains("<code>shop.test</code> isn't answering"));
         assert!(down.contains("nothing answers on port <code>18803</code> yet") && !down.contains("Running in Tusk"));
     }
 

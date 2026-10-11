@@ -4,73 +4,172 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
+<link rel="icon" href="{{favicon}}">
 <style>
+  /* Tusk's icon colors: indigo #8288DC → #5157BD → #2B2E7C, and ivory #FAF4E4. */
   :root {
-    --bg: #f6f6f7;
-    --card: #ffffff;
-    --border: #e4e4e7;
-    --text: #18181b;
-    --muted: #71717a;
-    --link: #2563eb;
-    --dot-gray: #a1a1aa;
-    --dot-amber: #d97706;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    color-scheme: light dark;
+    --bg: #f5f5fc;
+    --text: #17183d;
+    --muted: #595c86;
+    --faint: #8f92b8;
+    --grid: rgba(81, 87, 189, 0.10);
+    --glow: rgba(130, 136, 220, 0.45);
+    --glass: rgba(255, 255, 255, 0.72);
+    --edge: rgba(81, 87, 189, 0.18);
+    --accent: #5157bd;
+    --chip: rgba(81, 87, 189, 0.10);
+    --code-top: #2b2e7c;
+    --code-bottom: #8288dc;
+    --live: #16a34a;
+    --signal: #5157bd;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111113;
-      --card: #1a1a1d;
-      --border: #2a2a2e;
-      --text: #ececef;
-      --muted: #a1a1aa;
-      --link: #60a5fa;
-      --dot-gray: #71717a;
-      --dot-amber: #fbbf24;
-      --shadow: none;
+      --bg: #0b0c1e;
+      --text: #ececf8;
+      --muted: #a5a8d2;
+      --faint: #6d709c;
+      --grid: rgba(130, 136, 220, 0.09);
+      --glow: rgba(81, 87, 189, 0.55);
+      --glass: rgba(23, 24, 56, 0.62);
+      --edge: rgba(130, 136, 220, 0.20);
+      --accent: #aeb2f2;
+      --chip: rgba(130, 136, 220, 0.16);
+      --code-top: #faf4e4;
+      --code-bottom: #8288dc;
+      --live: #4ade80;
+      --signal: #8288dc;
     }
   }
+  /* Not answering: the signal turns amber. */
+  .down { --signal: #d97706; }
+  @media (prefers-color-scheme: dark) { .down { --signal: #fbbf24; } }
+
   * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
   body {
-    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  main { max-width: 480px; margin: 0 auto; padding: 30vh 24px 48px; }
-  @media (max-height: 600px) { main { padding-top: 48px; } }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 28px;
-    box-shadow: var(--shadow);
+
+  /* A glow from the top over a faint grid that fades out toward the edges. */
+  .backdrop { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .backdrop::before, .backdrop::after { content: ""; position: absolute; inset: 0; }
+  .backdrop::before {
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 44px 44px;
+    background-position: center top;
+    -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 25%, #000 25%, transparent 75%);
+    mask-image: radial-gradient(ellipse 75% 60% at 50% 25%, #000 25%, transparent 75%);
   }
-  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1.6s ease-in-out infinite; }
-  .dot.gray { background: var(--dot-gray); }
-  .dot.amber { background: var(--dot-amber); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
-  h1 { font-size: 22px; font-weight: 600; margin: 12px 0 8px; overflow-wrap: anywhere; }
-  p { font-size: 15px; line-height: 1.55; margin: 0; }
-  .running { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
-  .label { font-size: 12px; color: var(--muted); }
-  ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
-  a { color: var(--link); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  footer { margin-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
+  .backdrop::after { background: radial-gradient(55% 45% at 50% 0%, var(--glow), transparent 70%); }
+
+  main {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 56px 24px 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .logo { width: 76px; height: 76px; filter: drop-shadow(0 14px 30px var(--glow)); animation: float 5s ease-in-out infinite; }
+  .logo svg { width: 100%; height: 100%; display: block; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+  .code {
+    margin: 6px 0 2px;
+    font-size: clamp(104px, 24vw, 176px);
+    font-weight: 800;
+    line-height: 0.95;
+    letter-spacing: -0.06em;
+    font-variant-numeric: tabular-nums;
+    background: linear-gradient(180deg, var(--code-top) 15%, var(--code-bottom) 95%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    user-select: none;
+  }
+  h1 { margin: 0 0 12px; font-size: 26px; line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  h1 code { font-size: 0.92em; font-weight: 600; color: var(--accent); background: var(--chip); padding: 2px 10px; border-radius: 10px; }
+  .lead { margin: 0; max-width: 460px; font-size: 16px; line-height: 1.6; color: var(--muted); }
+  .lead code { color: var(--text); }
+
+  .waiting {
+    margin-top: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 8px 14px;
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .signal { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); }
+  .signal::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--signal); animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+  @keyframes ping { 0% { transform: scale(1); opacity: 0.6; } 80%, 100% { transform: scale(3); opacity: 0; } }
+
+  .running { margin-top: 36px; width: 100%; }
+  .running h2 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  .running ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .running a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    color: var(--text);
+    font-size: 13.5px;
+    text-decoration: none;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .running a::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); }
+  .running a::after { content: "→"; color: var(--faint); transition: transform 0.15s, color 0.15s; }
+  .running a:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .running a:hover::after { color: var(--accent); transform: translateX(2px); }
+  .running a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  footer { position: relative; z-index: 1; padding: 20px 24px 28px; text-align: center; font-size: 12px; color: var(--faint); }
+  footer b { font-weight: 600; color: var(--muted); }
+
+  @media (max-height: 640px) { main { justify-content: flex-start; padding-top: 32px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .logo, .signal::after { animation: none; }
+    .running a, .running a::after { transition: none; }
+  }
 </style>
 </head>
-<body>
+<body class="{{tone}}">
+<div class="backdrop" aria-hidden="true"></div>
 <main>
-  <div class="card">
-    <div class="status"><span class="dot {{dot}}"></span>{{status}}</div>
-    <h1><code>{{host}}</code> isn't {{verb}}</h1>
-    <p>{{explanation}}</p>{{running}}
-  </div>
-  <footer>Tusk's local proxy</footer>
+  <div class="logo" aria-hidden="true">{{icon}}</div>
+  <div class="code" aria-hidden="true">{{code}}</div>
+  <h1><code>{{host}}</code> isn't {{verb}}</h1>
+  <p class="lead">{{explanation}}</p>
+  <div class="waiting" role="status"><span class="signal"></span>{{waiting}}</div>{{running}}
 </main>
+<footer><b>Tusk</b> · local proxy · {{code}} {{reason}}</footer>
 <script>
   (function () {
     var timer, busy = false;

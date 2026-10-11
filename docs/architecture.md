@@ -3047,13 +3047,15 @@ the request as it would without a router: files as they are, and
 `return false` reach the script (checked with PHP 8.4).
 
 **When nothing answers.** A name that no window serves gets
-`503 Service Unavailable`. A registered name whose port refuses the
+`404 Not Found`. A registered name whose port refuses the
 connection gets `502 Bad Gateway`. Both replies carry `Retry-After: 2`,
 `Cache-Control: no-store`, and `X-Tusk-Proxy: unavailable`. When the request's
 `Accept` names `text/html`, the body is the page in
 `src-tauri/src/localdomains/page.html`, filled by `page` in `proxy.rs`. Every
-value is HTML-escaped, since names come from SNI and route files. The page says
-which case it is. The not-running page also links to every name served now
+value is HTML-escaped, since names come from SNI and route files. The page
+shows Tusk's icon (`design/icon.svg`, inline and as the favicon) above the
+status code in large type, and says which case it is. It's one document with
+no outside requests, in light and dark. The not-running page also links to every name served now
 (`Inner::names`, this window's and other live windows'), with the port from
 the `Host` header, such as `:8443`. Its inline script fetches the same URL
 every 2 seconds, pauses while the tab is hidden, and reloads once a reply

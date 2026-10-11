@@ -567,11 +567,11 @@ mod tests {
         let ca = a.inner.ca().der.clone();
         assert!(get(https, &ca, "shop.test").await.ends_with("shop body"));
         let missing = get(https, &ca, "nope.test").await;
-        assert!(missing.starts_with("HTTP/1.1 503") && missing.contains("text/plain") && missing.contains("nope.test isn't running"), "{missing}");
+        assert!(missing.starts_with("HTTP/1.1 404") && missing.contains("text/plain") && missing.contains("nope.test isn't running"), "{missing}");
         assert!(missing.contains("\r\nX-Tusk-Proxy: unavailable\r\n") && missing.contains("\r\nRetry-After: 2\r\n"), "{missing}");
         let html = "Accept: text/html,*/*\r\n";
         let page = request(https, &ca, "nope.test", html).await;
-        assert!(page.starts_with("HTTP/1.1 503 Service Unavailable\r\n") && page.contains("text/html"), "{page}");
+        assert!(page.starts_with("HTTP/1.1 404 Not Found\r\n") && page.contains("text/html"), "{page}");
         assert!(page.contains("\r\nX-Tusk-Proxy: unavailable\r\n") && page.contains("\r\nRetry-After: 2\r\n") && page.contains("\r\nCache-Control: no-store\r\n"));
         assert!(page.contains("<code>nope.test</code> isn't running") && page.contains("<a href=\"https://shop.test/\">"), "{page}");
 
@@ -662,7 +662,7 @@ mod tests {
         b.tick().await;
         assert!(b.owner.lock().await.is_some());
         assert!(get(https, &ca, "b.test").await.ends_with("b body"));
-        assert!(get(https, &ca, "a.test").await.starts_with("HTTP/1.1 503"));
+        assert!(get(https, &ca, "a.test").await.starts_with("HTTP/1.1 404"));
         drop(b);
         let _ = fs::remove_dir_all(dir);
     }
