@@ -295,6 +295,12 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
     Ok(())
 }
 
+/// Stops watching, as when the project closes.
+#[tauri::command]
+pub fn unwatch(state: State<'_, WatchState>) {
+    *state.0.lock().unwrap() = None;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

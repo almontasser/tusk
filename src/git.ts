@@ -161,7 +161,11 @@ export function refreshGit(): Promise<void> {
 let cachedHead: string | undefined;
 
 async function loadStatus() {
-  if (!host.root()) return;
+  if (!host.root()) {
+    // No project, as after Close Project: the title bar shows no branch.
+    if (current) (current = undefined), (lastBranch = undefined), renderBranch(), branchListeners.forEach((f) => f());
+    return;
+  }
   const [status, head] = await Promise.all([
     git("status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all").then(
       (out) => ((statusError = ""), parseStatus(out)),

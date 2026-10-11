@@ -5,7 +5,7 @@ import { fileManager, isMac, keyText, open, shortcutText, thisComputer, ThisComp
 import { createEditor, monaco } from "./editor";
 import { h, icon, iconButton, toast } from "./dom";
 import { installErrorHandlers, showError, status } from "./status";
-import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
+import { checkComposerLock, didSave, filesChanged, manageExclusions, reindex, startLsp, stopLsp, TYPE_KINDS, workspaceSymbols } from "./lsp";
 import { choose, confirm, type Item, pick, rank } from "./palette";
 import { fileIcon, folderIcon, initials } from "./icons";
 import { decorateConflicts, initConflicts } from "./conflicts";
@@ -596,6 +596,60 @@ function openFolder(dir: unknown = null) {
   return next;
 }
 
+/** Closes the project after any project still opening, and shows the welcome screen. */
+function closeProject() {
+  const next = opening.then(closeProjectNow);
+  opening = next.catch(() => {});
+  return next;
+}
+
+async function closeProjectNow() {
+  if (!root || !(await leaveProject())) return;
+  stopLsp();
+  await stopDebugging(true);
+  await invoke("unwatch");
+  root = "";
+  try { localStorage.removeItem("lastFolder"); } catch {}
+  $("project").textContent = "Project";
+  $("project-name").textContent = "No project";
+  $("project-badge").textContent = "";
+  $("tree").replaceChildren();
+  refreshGit();
+  loadRunConfigurations();
+  showWelcome();
+}
+
+/** Saves the project's session and closes its tabs, views, and terminals. False when you keep unsaved changes. */
+async function leaveProject() {
+  saveSession();
+  switching = true;
+  try {
+    for (const path of [...tabs.keys()]) await closeFile(path);
+  } finally {
+    switching = false;
+  }
+  if (tabs.size) return false;
+  // Terminals go back to the panel; editor-only views, such as a diff, belong to the old project.
+  for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), tab.editorOnly ? closeDocked(tab) : dockBack(tab);
+  // The old project's shells and servers belong to it; the new project's session reopens its own.
+  closeTerminals();
+  closeView($("history"));
+  // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
+  monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
+  places.clear();
+  lastPlace = undefined;
+  lastEdit = undefined;
+  closedTabs = [];
+  // Saves timed while the old project closed would store the next one without its tabs.
+  clearTimeout(saveTimer);
+  clearTimeout(panelSave);
+  panelSave = undefined;
+  forgetProblems();
+  resetHttpClient();
+  recent = [];
+  return true;
+}
+
 async function openFolderNow(dir: unknown) {
   dir ??= await open({ directory: true });
   if (typeof dir !== "string") return;
@@ -605,33 +659,8 @@ async function openFolderNow(dir: unknown) {
     if (!root) showWelcome();
     return;
   }
-  saveSession();
-  switching = true;
-  try {
-    for (const path of [...tabs.keys()]) await closeFile(path);
-  } finally {
-    switching = false;
-  }
-  if (tabs.size) return; // user kept unsaved changes
-  // Terminals go back to the panel; editor-only views, such as a diff, belong to the old project.
-  for (const [path, tab] of [...views]) views.delete(path), retarget((p) => (p === path ? null : p)), tab.editorOnly ? closeDocked(tab) : dockBack(tab);
-  // The old project's shells and servers belong to it; the new project's session reopens its own.
-  closeTerminals();
-  closeView($("history"));
-  // Files loaded without a tab, such as those go to definition and find references read, belong to the old project.
-  monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
+  if (!(await leaveProject())) return;
   root = dir;
-  places.clear();
-  lastPlace = undefined;
-  lastEdit = undefined;
-  closedTabs = [];
-  // Saves timed while the old project closed would store the new one without its tabs.
-  clearTimeout(saveTimer);
-  clearTimeout(panelSave);
-  panelSave = undefined;
-  forgetProblems();
-  resetHttpClient();
-  recent = [];
   const session = loadSession();
   openDirs.clear();
   session?.dirs.forEach((d) => openDirs.add(d));
@@ -945,7 +974,12 @@ function projectItem(dir: string): Item {
 
 /** The project name in the title bar: switch to a recent project or open a folder. */
 function projectMenu() {
-  const items = [{ label: "Open Folder…", icon: "codicon-folder-opened", run: () => openFolder() }, ...recentProjects().filter((d) => d !== root).map(projectItem)];
+  const items = [
+    { label: "Open Folder…", icon: "codicon-folder-opened", run: () => openFolder() },
+    { label: "New Laravel Project…", icon: "codicon-rocket", run: () => newLaravelProject() },
+    ...(root ? [{ label: "Close Project", icon: "codicon-close", run: () => closeProject() }] : []),
+    ...recentProjects().filter((d) => d !== root).map(projectItem),
+  ];
   pick("Open a recent project", (q) => rank(q, items), 0, { value: "", anchor: $("project-menu") });
 }
 
@@ -962,7 +996,11 @@ function showWelcome() {
       li.tabIndex = 0;
       li.role = "button";
       li.onclick = () => openFolder(dir);
-      li.onkeydown = (e) => void (e.key === "Enter" && openFolder(dir));
+      li.onkeydown = (e) => void (e.key === "Enter" && e.target === li && openFolder(dir));
+      const remove = iconButton("close", "Remove from Recent Projects", () => (forgetProject(dir), showWelcome()));
+      remove.classList.add("recent-remove");
+      remove.addEventListener("click", (e) => e.stopPropagation());
+      li.append(remove);
       li.oncontextmenu = (e) => {
         e.preventDefault();
         showMenu(e.clientX, e.clientY, [
@@ -1750,6 +1788,8 @@ const editorAction = (label: string, keys: string, id: string): Action => ({
 // Shortcuts follow PhpStorm's macOS keymap.
 const actions: Action[] = [
   { label: "Open Folder…", run: () => openFolder() },
+  { label: "New Laravel Project…", run: () => newLaravelProject() },
+  { label: "Close Project", run: () => closeProject() },
   { label: "Quit Tusk", keys: "Meta+Q", run: quit },
   // ⌘N generates code in a PHP editor, as in PhpStorm, and creates a file everywhere else.
   { label: "Generate…", keys: "Meta+N", run: () => generate(editor), editorOnly: true, when: () => editor.getModel()?.getLanguageId() === "php" },
@@ -1947,7 +1987,6 @@ const actions: Action[] = [
   { label: "Laravel: Open Notification in Designer…", run: () => root && void import("./notifydesigner").then((m) => m.openNotificationPicker()) },
   { label: "Open in Enum Designer", run: () => active && void import("./enumdesigner").then((m) => m.openEnumDesigner(active)), when: () => /\/app\/.*Enums?\/\w+\.php$|Enum\.php$/.test(active) },
   { label: "Laravel: New Element…", run: () => root && newLaravelElement() },
-  { label: "Laravel: New Project…", run: () => newLaravelProject() },
   { label: "Laravel: Open Model in Designer…", run: () => root && openModelPicker() },
   { label: "Laravel: Open Settings in Designer…", run: () => root && void import("./settingsdesigner").then((m) => m.openSettingsPicker()) },
   { label: "Filament: New Settings Page…", run: () => root && void import("./settingsdesigner").then((m) => m.newSettingsPagePicker()) },
@@ -2457,7 +2496,12 @@ initHttpClient({
 });
 initComposer({ root: () => root, status });
 initLaravelElements({ root: () => root, openAt: (path, line) => openAt(path, { lineNumber: line, column: 1 }), status });
-initLaravelNew({ openTerminal: (cwd, title, command, onExit) => void openTerminal(cwd, title, command, onExit), openFolder: (dir) => void openFolder(dir), status });
+initLaravelNew({
+  // With no project open, the welcome screen would hide the installer's terminal, so it steps aside until the tab closes.
+  openTerminal: (cwd, title, command, onExit) => (($("welcome").hidden = true), void openTerminal(cwd, title, command, onExit, () => !root && showWelcome())),
+  openFolder: (dir) => void openFolder(dir),
+  status,
+});
 initFilament({
   root: () => root,
   ensureModel,

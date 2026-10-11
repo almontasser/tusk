@@ -81,7 +81,7 @@ export async function newLaravelProject() {
   const field = (label: string, editor: HTMLElement, help?: string) => h("label", { class: "rw-field" }, h("span", { class: "rw-field-label" }, label), editor, help ? h("span", { class: "fd-note" }, help) : null);
   let problem = "";
   const render = () => {
-    const where = h("div", { class: "fd-inline-editor" }, commitInput(p.parent, (v) => ((p.parent = v), render()), { className: "fd-mono" }), h("button", { type: "button", class: "nl-browse", onclick: async () => {
+    const where = h("div", { class: "fd-inline-editor" }, commitInput(p.parent, (v) => ((p.parent = v.trim().replace(/^~(?=\/|$)/, home)), render()), { className: "fd-mono" }), h("button", { type: "button", class: "nl-browse", onclick: async () => {
       const dir = await openDialog({ directory: true, defaultPath: p.parent || undefined }).catch(() => null);
       if (typeof dir === "string") (p.parent = dir), render();
     } }, icon("folder-opened"), "Choose…"));
@@ -167,6 +167,8 @@ async function start(p: NewProject, dialog: HTMLDialogElement) {
   const target = `${p.parent}/${p.name}`;
   if (await invoke<boolean>("path_exists", { path: target })) throw new Error(`${target} already exists.`);
   if (p.filament && p.user.password.length < 8) throw new Error("The first user's password needs at least 8 characters.");
+  // The installer makes the project's folder, but not the folder it goes in.
+  await invoke("create_dir", { path: p.parent });
   const button = dialog.querySelector<HTMLButtonElement>(".rw-foot .primary");
   if (button) (button.disabled = true), (button.textContent = "Preparing the installer…");
   const tools = await installer();

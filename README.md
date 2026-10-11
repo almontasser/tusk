@@ -233,7 +233,7 @@ DMG that everyone installs by hand.
 ## The window
 
 - **Title bar:** the project name (click it for a dropdown to switch to a
-  recent project or open a folder), the current branch and its pull request, a **Search everywhere**
+  recent project, open a folder, create a Laravel project, or close the project), the current branch and its pull request, a **Search everywhere**
   box, and buttons for the debug server, the terminal, and settings.
 - **Tool bar on the left:** icons for the **Project**, **Commit**, **Pull
   Requests**, and **Find** views. Click the active icon to hide the sidebar,
@@ -261,7 +261,8 @@ DMG that everyone installs by hand.
   (click it to convert indents to spaces or tabs), the encoding and line
   endings, and the file's language (click it to pick another one for the file).
 - **Welcome screen:** without an open folder, the window lists your recent
-  projects. Tab and Enter open one; right-click one to remove it from the list.
+  projects. Tab and Enter open one. To remove one from the list, click the ×
+  that shows when you point at it or tab to it, or right-click it.
 
 Errors, such as a failed git command, also appear briefly in the lower-right
 corner. Any failure the app doesn't otherwise handle shows there too, once
@@ -405,7 +406,9 @@ whitespace). The keymap editor can give them other shortcuts; a two-key chord
 such as ⌘K ⌘X stays Monaco's and can't be changed there.
 
 To open a folder, click **Open Folder…** in the sidebar or run the **Open
-Folder…** action.
+Folder…** action. **Close Project**, in the **File** menu or the project
+dropdown in the title bar, saves the project's session, closes its tabs and
+terminals, stops its language servers, and returns to the welcome screen.
 
 ## Settings
 
@@ -1494,12 +1497,14 @@ page. A class outside the folders the package discovers is listed in
 
 ## New Laravel projects and elements
 
-**New Laravel Project…** on the welcome screen or in the palette creates a
+**New Laravel Project…** on the welcome screen, in the **File** menu, in the
+project dropdown in the title bar, or in the palette creates a
 project with Laravel's own installer. Tusk keeps a copy of `laravel/installer`
 in its tools folder and installs it with its bundled Composer the first time,
 so nothing is installed globally. The dialog chooses:
 
-- The folder and name.
+- The folder and name. Tusk creates the folder if it doesn't exist, and `~`
+  stands for your home folder.
 - The starter kit: none, Livewire, React, Vue, Svelte, or a community kit by its
   package name, with Laravel's authentication, WorkOS, or none, and teams.
 - The database, the test framework (Pest or PHPUnit), the front-end package
@@ -1507,7 +1512,8 @@ so nothing is installed globally. The dialog chooses:
 - An admin panel: Filament with its first panel and, on SQLite, a first user.
 
 It runs in a terminal tab, where you can follow it, and the project opens when
-it succeeds.
+it succeeds. With no project open, the welcome screen steps aside for the
+terminal and returns when you close its tab.
 
 **Laravel: New Element…** lists every `make:` command the project's Artisan
 has, Laravel's and packages' alike, such as Filament's, Livewire's, or an MCP

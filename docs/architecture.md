@@ -4173,6 +4173,14 @@ logging still gets saved. When it opens a folder, it expands the saved folders,
 reopens the tabs, skips files that no longer exist, splits the panes again,
 and reopens the terminals, after the language servers start.
 
+`leaveProject` in `main.ts` is what opening another folder and **Close
+Project** share: it saves the session, closes the tabs (stopping if you keep
+unsaved changes), the editor-only views, and the terminals, and forgets the
+project's models, places, problems, and HTTP client state. Close Project then
+stops the language servers (`stopLsp`), the debugger, and the file watcher
+(`unwatch`), clears `lastFolder`, the tree, the branch, and the run widget, and
+shows the welcome screen.
+
 A shell reopens in its last folder. `terminal.ts` can't see `cd`, so 500 ms
 after you press Enter in a shell, it asks for the shell process's working
 directory with `pty_cwd`, which calls macOS's `proc_pidinfo` with
@@ -5982,7 +5990,11 @@ script the terminal runs: the installer, then `composer require
 filament/filament`, `filament:install --panels`, and, on SQLite,
 `make:filament-user` with the dialog's name, email, and password. Other
 databases need their server and credentials first, so the first user is left
-to you.
+to you. `start` creates the folder the project goes in (`create_dir`), since
+the installer makes only the project's own folder. The terminal's folder must
+exist too: `portable-pty` silently starts a missing one in the home folder.
+With no project open, the welcome screen covers the panel, so the host hides it
+while the installer's terminal runs and shows it again when the tab closes.
 
 `src/laravelelements.ts` reads `artisan list --format=json`, which describes
 each command's arguments and options (required, array, takes a value, repeats),
@@ -9497,6 +9509,27 @@ user code:
   analysis and directory symlinks belong to Mago's orchestrator and loader,
   which Tusk doesn't use, and Guard and the slow-file warning are the command
   line's.
+
+### 2026-10-12: Close Project, removing recent projects, and New Laravel Project fixes
+
+- New Laravel Project into a folder that didn't exist did nothing visible. The
+  script's `cd` failed at once, and its terminal and the "stopped" status were
+  behind the welcome screen. `start` now creates the folder, and the welcome
+  screen steps aside while the installer's terminal runs. A `~` in the folder
+  stands for the home folder.
+- **Close Project** joins the File menu and the project dropdown, which also
+  gets **New Laravel Project…** (renamed from "Laravel: New Project…", the
+  welcome screen's name for it). It reuses the teardown that switching
+  projects already did (`leaveProject`), rather than reloading the page, which
+  would leave the language servers running until the app quits. `stopLsp`
+  kills the processes with `lsp_stop`, since a client's `stop` only detaches
+  from its server, which a project switch leaves for the next start to replace.
+- Each recent project on the welcome screen has an × that removes it from the
+  list, shown on hover and focus. Removing one was only in the right-click menu,
+  which nothing pointed to. It's hidden with `opacity`, not `visibility`, so Tab
+  still reaches it.
+- The first user's fields in the dialog line up at the top; the grid aligned
+  their bottoms, so the password's note pushed its field up.
 
 ### 2026-10-12: Serve .test domains from Tusk, not a separate tool
 
