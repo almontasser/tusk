@@ -78,6 +78,15 @@ impl Inner {
         others(&self.dir, &self.id).into_iter().find_map(|routes| routes.get(name).copied())
     }
 
+    /// Every name served now, by this process or another live one, sorted.
+    fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.routes.lock().unwrap().keys().cloned().collect();
+        names.extend(others(&self.dir, &self.id).into_iter().flat_map(HashMap::into_keys));
+        names.sort();
+        names.dedup();
+        names
+    }
+
     fn save(&self, routes: &BTreeMap<String, u16>) -> Result<(), String> {
         let path = self.dir.join("routes").join(format!("{}.json", self.id));
         write_atomic(&path, &serde_json::to_vec(routes).map_err(|e| e.to_string())?)
@@ -521,6 +530,11 @@ mod tests {
 
     /// Requests `/` from `name` through the proxy on `port`, trusting `ca`.
     async fn get(port: u16, ca: &CertificateDer<'static>, name: &str) -> String {
+        request(port, ca, name, "").await
+    }
+
+    /// Like `get`, with `headers`, each line ending in CRLF.
+    async fn request(port: u16, ca: &CertificateDer<'static>, name: &str, headers: &str) -> String {
         let mut roots = rustls::RootCertStore::empty();
         roots.add(ca.clone()).unwrap();
         let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -531,7 +545,7 @@ mod tests {
         let tcp = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
         let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
         let mut tls = connector.connect(ServerName::try_from(name.to_string()).unwrap(), tcp).await.unwrap();
-        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n\r\n").as_bytes()).await.unwrap();
+        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n{headers}\r\n").as_bytes()).await.unwrap();
         let mut response = Vec::new();
         let _ = tls.read_to_end(&mut response).await;
         String::from_utf8_lossy(&response).into_owned()
@@ -553,11 +567,20 @@ mod tests {
         let ca = a.inner.ca().der.clone();
         assert!(get(https, &ca, "shop.test").await.ends_with("shop body"));
         let missing = get(https, &ca, "nope.test").await;
-        assert!(missing.starts_with("HTTP/1.1 502") && missing.contains("nope.test isn't running"), "{missing}");
+        assert!(missing.starts_with("HTTP/1.1 503") && missing.contains("text/plain") && missing.contains("nope.test isn't running"), "{missing}");
+        assert!(missing.contains("\r\nX-Tusk-Proxy: unavailable\r\n") && missing.contains("\r\nRetry-After: 2\r\n"), "{missing}");
+        let html = "Accept: text/html,*/*\r\n";
+        let page = request(https, &ca, "nope.test", html).await;
+        assert!(page.starts_with("HTTP/1.1 503 Service Unavailable\r\n") && page.contains("text/html"), "{page}");
+        assert!(page.contains("\r\nX-Tusk-Proxy: unavailable\r\n") && page.contains("\r\nRetry-After: 2\r\n") && page.contains("\r\nCache-Control: no-store\r\n"));
+        assert!(page.contains("<code>nope.test</code> isn't running") && page.contains("<a href=\"https://shop.test/\">"), "{page}");
 
         // Registered, but nothing listens on its port.
         a.register("down", free()).unwrap();
         assert!(get(https, &ca, "down.test").await.contains("isn't answering on port"));
+        let page = request(https, &ca, "down.test", html).await;
+        assert!(page.starts_with("HTTP/1.1 502 Bad Gateway\r\n") && page.contains("\r\nX-Tusk-Proxy: unavailable\r\n"), "{page}");
+        assert!(page.contains("<code>down.test</code> isn't answering") && !page.contains("Running in Tusk"), "{page}");
 
         // The DNS responder runs beside the proxy.
         let socket = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -639,7 +662,7 @@ mod tests {
         b.tick().await;
         assert!(b.owner.lock().await.is_some());
         assert!(get(https, &ca, "b.test").await.ends_with("b body"));
-        assert!(get(https, &ca, "a.test").await.starts_with("HTTP/1.1 502"));
+        assert!(get(https, &ca, "a.test").await.starts_with("HTTP/1.1 503"));
         drop(b);
         let _ = fs::remove_dir_all(dir);
     }

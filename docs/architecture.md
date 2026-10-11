@@ -3046,6 +3046,19 @@ the request as it would without a router: files as they are, and
 `index.php` for paths that aren't files. Changes to `$_SERVER` made before
 `return false` reach the script (checked with PHP 8.4).
 
+**When nothing answers.** A name that no window serves gets
+`503 Service Unavailable`. A registered name whose port refuses the
+connection gets `502 Bad Gateway`. Both replies carry `Retry-After: 2`,
+`Cache-Control: no-store`, and `X-Tusk-Proxy: unavailable`. When the request's
+`Accept` names `text/html`, the body is the page in
+`src-tauri/src/localdomains/page.html`, filled by `page` in `proxy.rs`. Every
+value is HTML-escaped, since names come from SNI and route files. The page says
+which case it is. The not-running page also links to every name served now
+(`Inner::names`, this window's and other live windows'), with the port from
+the `Host` header, such as `:8443`. Its inline script fetches the same URL
+every 2 seconds, pauses while the tab is hidden, and reloads once a reply
+lacks the marker header. Other clients get one line of plain text.
+
 **The shared folder.** The backend keeps its state in `tusk-local-domains/`
 in the local data folder: `~/Library/Application Support` on macOS,
 `%LOCALAPPDATA%` on Windows, and `~/.local/share` on Linux. Development and

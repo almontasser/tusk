@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --border: #e4e4e7;
+    --text: #18181b;
+    --muted: #71717a;
+    --link: #2563eb;
+    --dot-gray: #a1a1aa;
+    --dot-amber: #d97706;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111113;
+      --card: #1a1a1d;
+      --border: #2a2a2e;
+      --text: #ececef;
+      --muted: #a1a1aa;
+      --link: #60a5fa;
+      --dot-gray: #71717a;
+      --dot-amber: #fbbf24;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 480px; margin: 0 auto; padding: 30vh 24px 48px; }
+  @media (max-height: 600px) { main { padding-top: 48px; } }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    box-shadow: var(--shadow);
+  }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1.6s ease-in-out infinite; }
+  .dot.gray { background: var(--dot-gray); }
+  .dot.amber { background: var(--dot-amber); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  h1 { font-size: 22px; font-weight: 600; margin: 12px 0 8px; overflow-wrap: anywhere; }
+  p { font-size: 15px; line-height: 1.55; margin: 0; }
+  .running { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .label { font-size: 12px; color: var(--muted); }
+  ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  footer { margin-top: 14px; font-size: 12px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="status"><span class="dot {{dot}}"></span>{{status}}</div>
+    <h1><code>{{host}}</code> isn't {{verb}}</h1>
+    <p>{{explanation}}</p>{{running}}
+  </div>
+  <footer>Tusk's local proxy</footer>
+</main>
+<script>
+  (function () {
+    var timer, busy = false;
+    function later() {
+      clearTimeout(timer);
+      timer = setTimeout(poll, 2000);
+    }
+    function poll() {
+      clearTimeout(timer);
+      if (document.hidden || busy) return;
+      busy = true;
+      fetch(location.href, { cache: "no-store" }).then(function (r) {
+        if (r.headers.get("X-Tusk-Proxy") !== "unavailable") return location.reload();
+        busy = false;
+        later();
+      }, function () {
+        busy = false;
+        later();
+      });
+    }
+    document.addEventListener("visibilitychange", poll);
+    later();
+  })();
+</script>
+</body>
+</html>

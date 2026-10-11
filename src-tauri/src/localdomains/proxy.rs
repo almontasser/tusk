@@ -167,19 +167,78 @@ async fn serve_tls(tcp: TcpStream, inner: Arc<Inner>, acceptor: TlsAcceptor) {
     let Ok(Ok(mut tls)) = tokio::time::timeout(Duration::from_secs(10), acceptor.accept(tcp)).await else { return };
     let host = tls.get_ref().1.server_name().unwrap_or_default().to_ascii_lowercase();
     let port = host.strip_suffix(".test").and_then(|label| inner.lookup(label));
-    let message = match port {
+    let (status, message) = match port {
         Some(port) => match TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
             Ok(mut upstream) => {
                 let _ = tokio::io::copy_bidirectional(&mut tls, &mut upstream).await;
                 return;
             }
-            Err(_) => format!("{host} is registered but its server isn't answering on port {port}."),
+            Err(_) => ("502 Bad Gateway", format!("{host} is registered but its server isn't answering on port {port}.")),
         },
-        None => format!("{host} isn't running. Run its configuration in Tusk."),
+        None => ("503 Service Unavailable", format!("{host} isn't running. Run its configuration in Tusk.")),
     };
     let head = read_head(&mut tls).await;
-    let _ = tls.write_all(&reply("502 Bad Gateway", &head, &message, None)).await;
+    let (kind, body) = if accepts_html(&head) {
+        // Links to the other names keep the proxy's port, as when it runs on 8443.
+        let host_header = header(&head, "host").unwrap_or_default();
+        let suffix = host_header.rsplit_once(':').filter(|(_, p)| p.parse::<u16>().is_ok()).map_or(String::new(), |(_, p)| format!(":{p}"));
+        ("text/html", page(&host, port, &inner.names(), &suffix))
+    } else {
+        ("text/plain", format!("{message}\n"))
+    };
+    let extra = "Retry-After: 2\r\nCache-Control: no-store\r\nX-Tusk-Proxy: unavailable\r\n";
+    let _ = tls.write_all(&respond(status, kind, &body, extra)).await;
     let _ = tls.shutdown().await;
+}
+
+const PAGE: &str = include_str!("page.html");
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+/// Replaces each `{{key}}` in `template` in one pass, so a value can't bring in another placeholder.
+fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once("{{") {
+        let (key, after) = after.split_once("}}").unwrap_or((after, ""));
+        out.push_str(before);
+        out.push_str(values.iter().find(|(k, _)| *k == key).map_or("", |(_, v)| v));
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The page for `host` that isn't served: not running, or, with its `port`, not answering. The not-running
+/// page links to the `running` names, with `suffix` (such as `:8443`) after each.
+fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str) -> String {
+    let host = escape(host);
+    let (dot, status, verb) = match port {
+        Some(_) => ("amber", "Not answering", "answering"),
+        None => ("gray", "Not running", "running"),
+    };
+    let explanation = match port {
+        Some(port) => format!("Tusk is serving this address, but nothing answers on port <code>{port}</code> yet. The server may still be starting, or it stopped. Check its terminal tab in Tusk. This page opens your site as soon as it answers."),
+        None => "Nothing in Tusk is serving this address. Run its configuration in Tusk, and this page opens your site as soon as it&#39;s up.".to_string(),
+    };
+    let running = match port {
+        None if !running.is_empty() => {
+            let rows: String = running
+                .iter()
+                .map(|name| {
+                    let name = escape(name);
+                    let suffix = escape(suffix);
+                    format!("\n        <li><a href=\"https://{name}.test{suffix}/\"><code>{name}.test</code></a></li>")
+                })
+                .collect();
+            format!("\n    <div class=\"running\">\n      <div class=\"label\">Running in Tusk</div>\n      <ul>{rows}\n      </ul>\n    </div>")
+        }
+        _ => String::new(),
+    };
+    let title = format!("{host} isn&#39;t {verb}");
+    fill(PAGE, &[("title", &title), ("dot", dot), ("status", status), ("host", &host), ("verb", verb), ("explanation", &explanation), ("running", &running)])
 }
 
 /// Redirects `http://name.test/path` to HTTPS.
@@ -227,14 +286,23 @@ fn header(head: &[u8], name: &str) -> Option<String> {
 
 /// A response with `text` as short HTML when the request accepts it, else as plain text.
 fn reply(status: &str, head: &[u8], text: &str, location: Option<&str>) -> Vec<u8> {
-    let (kind, body) = if header(head, "accept").is_some_and(|a| a.contains("text/html")) {
-        let text = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let (kind, body) = if accepts_html(head) {
+        let text = escape(text);
         ("text/html", format!("<!doctype html><meta charset=\"utf-8\"><title>{text}</title><p>{text}</p>\n"))
     } else {
         ("text/plain", format!("{text}\n"))
     };
     let location = location.map(|l| format!("Location: {l}\r\n")).unwrap_or_default();
-    format!("HTTP/1.1 {status}\r\n{location}Content-Type: {kind}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+    respond(status, kind, &body, &location)
+}
+
+fn accepts_html(head: &[u8]) -> bool {
+    header(head, "accept").is_some_and(|a| a.contains("text/html"))
+}
+
+/// A response with `extra` header lines, each ending in CRLF.
+fn respond(status: &str, kind: &str, body: &str, extra: &str) -> Vec<u8> {
+    format!("HTTP/1.1 {status}\r\n{extra}Content-Type: {kind}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
         .into_bytes()
 }
 
@@ -248,6 +316,22 @@ mod tests {
         assert!(html.starts_with("HTTP/1.1 502 Bad Gateway\r\n") && html.contains("text/html") && html.contains("a &lt;b&gt;"));
         let plain = String::from_utf8(reply("502 Bad Gateway", b"GET / HTTP/1.1\r\n\r\n", "x", None)).unwrap();
         assert!(plain.contains("text/plain") && plain.ends_with("\r\n\r\nx\n"));
+    }
+
+    #[test]
+    fn pages() {
+        let running = ["shop".to_string(), "a\"b".to_string()];
+        let off = page("<script>", None, &running, ":8443");
+        assert!(off.contains("<title>&lt;script&gt; isn&#39;t running</title>") && off.contains("Not running") && off.contains("dot gray"));
+        assert!(off.contains("<h1><code>&lt;script&gt;</code> isn't running</h1>") && !off.contains("<script>\""), "{off}");
+        assert!(off.contains("Nothing in Tusk is serving this address."));
+        assert!(off.contains("Running in Tusk") && off.contains("<a href=\"https://shop.test:8443/\"><code>shop.test</code></a>"));
+        assert!(off.contains("https://a&quot;b.test:8443/") && !off.contains("{{"));
+        assert!(!page("shop.test", None, &[], "").contains("Running in Tusk"));
+
+        let down = page("shop.test", Some(18803), &running, "");
+        assert!(down.contains("Not answering") && down.contains("dot amber") && down.contains("<code>shop.test</code> isn't answering"));
+        assert!(down.contains("nothing answers on port <code>18803</code> yet") && !down.contains("Running in Tusk"));
     }
 
     #[tokio::test]
