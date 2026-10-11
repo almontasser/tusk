@@ -2,6 +2,7 @@
 // reach Tusk's DNS responder (see localdomains.rs). Each OS's setup runs as one elevated script, so you answer one
 // password or UAC prompt, and `remove` undoes it. Tusk only touches files and entries that carry its marker or its
 // certificate, so other tools' settings stay as they are.
+// Root never reads a file you could change: each script, and the certificate and hosts file in it, travels inline.
 //
 // macOS: /etc/resolver/test, and trust in the login keychain. macOS asks for trust changes in its own dialog since
 // Big Sur, even for root, so trust is set as you, outside the elevated script.
@@ -106,6 +107,14 @@ fn ca_der(path: &Path) -> Result<Vec<u8>, String> {
     pem_certs(&text).into_iter().next().ok_or_else(|| format!("{} holds no certificate", path.display()))
 }
 
+/// `der` as PEM, rebuilt from the parsed certificate so nothing else in the file reaches root.
+fn der_pem(der: &[u8]) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let lines: Vec<&str> = b64.as_bytes().chunks(64).map(|c| std::str::from_utf8(c).unwrap_or_default()).collect();
+    format!("-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n", lines.join("\n"))
+}
+
 /// The SHA-1 fingerprint in uppercase hex: macOS's and Windows' name for a certificate.
 fn sha1_hex(der: &[u8]) -> String {
     use sha1::Digest;
@@ -169,7 +178,7 @@ impl Drop for Scratch {
 // macOS.
 
 const MAC_RESOLVER: &str = "/etc/resolver/test";
-const MAC_PROMPT: &str = "Tusk needs your password to serve https://….test sites: it trusts Tusk's local certificate and sends .test names to Tusk.";
+const MAC_PROMPT: &str = "Tusk needs your password to send .test names to Tusk, so https://<name>.test sites open in your browser.";
 const MAC_REMOVE_PROMPT: &str = "Tusk needs your password to undo its .test setup.";
 
 /// Whether /etc/resolver/test sends .test to 127.0.0.1 on `port`, and only there.
@@ -206,16 +215,13 @@ fn mac_remove_script() -> String {
 
 /// An AppleScript string literal.
 fn applescript_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"))
 }
 
-/// The AppleScript that runs `script` as root after the password prompt.
-fn mac_osascript(script: &Path, prompt: &str) -> String {
-    format!(
-        "do shell script \"/bin/sh \" & quoted form of {} with administrator privileges with prompt {}",
-        applescript_string(&script.to_string_lossy()),
-        applescript_string(prompt)
-    )
+/// The AppleScript that runs `script` as root after the password prompt. The script travels inline, so root runs
+/// no file you could change.
+fn mac_osascript(script: &str, prompt: &str) -> String {
+    format!("do shell script {} with administrator privileges with prompt {}", applescript_string(script), applescript_string(prompt))
 }
 
 /// The SHA-1 fingerprints of certificates labelled exactly "Tusk Local CA" in `security find-certificate -a -Z`'s output.
@@ -278,56 +284,75 @@ fn win_parse_status(output: &str) -> (bool, bool) {
     (resolver, trusted)
 }
 
-/// Writes the error to `log` and exits 1 when a step fails.
-fn win_script(body: &str, log: &Path) -> String {
-    format!(
-        "$ErrorActionPreference = 'Stop'\ntry {{\n{body}}} catch {{\n  ($_ | Out-String) | Set-Content -LiteralPath {} -Encoding UTF8\n  exit 1\n}}\nexit 0\n",
-        ps_quote(&log.to_string_lossy())
-    )
+// The elevated script can't hand text back (Start-Process -Verb RunAs has no output), and a log file in your temp
+// folder is one you could have prepared, so each step reports through its own exit code instead.
+const WIN_TRUST_FAILED: i32 = 10;
+const WIN_DNS_FAILED: i32 = 11;
+
+/// What a failed step's exit code means.
+fn win_failure(code: i32) -> Option<&'static str> {
+    match code {
+        WIN_TRUST_FAILED => Some("Windows didn't change its trusted root certificates."),
+        WIN_DNS_FAILED => Some("Windows didn't change its DNS rule for .test."),
+        _ => None,
+    }
 }
 
-/// The elevated script: the certificate into the machine's Root store, replacing older Tusk CAs, and the NRPT rule.
-fn win_apply_script(pem: &Path, thumbprint: &str, trust: bool, resolver: bool, log: &Path) -> String {
-    let mut body = String::new();
+/// A step that exits with `code` when it fails.
+fn win_step(body: &str, code: i32) -> String {
+    format!("try {{\n{body}}} catch {{ exit {code} }}\n")
+}
+
+/// Opens the machine's Root store as `$store`.
+const WIN_OPEN_ROOT: &str = "  $store = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')\n  $store.Open('ReadWrite')\n";
+
+/// The elevated script: the certificate, embedded as DER, into the machine's Root store, replacing older Tusk CAs,
+/// and the NRPT rule.
+fn win_apply_script(der: &[u8], trust: bool, resolver: bool) -> String {
+    use base64::Engine;
+    let mut script = String::from("$ErrorActionPreference = 'Stop'\n");
     if trust {
-        body += &format!(
-            "  Get-ChildItem Cert:\\LocalMachine\\Root | Where-Object {{ $_.GetNameInfo('SimpleName', $false) -eq {} -and $_.Thumbprint -ne {} }} | Remove-Item\n\
-             \x20 Import-Certificate -FilePath {} -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null\n",
-            ps_quote(CA_NAME),
-            ps_quote(thumbprint),
-            ps_quote(&pem.to_string_lossy())
+        let body = format!(
+            "  $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String('{}'))\n{WIN_OPEN_ROOT}\
+             \x20 $store.Certificates | Where-Object {{ $_.GetNameInfo('SimpleName', $false) -eq {} -and $_.Thumbprint -ne $cert.Thumbprint }} | ForEach-Object {{ $store.Remove($_) }}\n\
+             \x20 $store.Add($cert)\n  $store.Close()\n",
+            base64::engine::general_purpose::STANDARD.encode(der),
+            ps_quote(CA_NAME)
         );
+        script += &win_step(&body, WIN_TRUST_FAILED);
     }
     if resolver {
-        body += "  Get-DnsClientNrptRule | Where-Object { $_.Comment -eq 'Tusk' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force }\n\
-                 \x20 Add-DnsClientNrptRule -Namespace '.test' -NameServers '127.0.0.1' -Comment 'Tusk'\n\
-                 \x20 Clear-DnsClientCache\n";
+        let body = "  Get-DnsClientNrptRule | Where-Object { $_.Comment -eq 'Tusk' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force }\n\
+                    \x20 Add-DnsClientNrptRule -Namespace '.test' -NameServers '127.0.0.1' -Comment 'Tusk'\n\
+                    \x20 Clear-DnsClientCache\n";
+        script += &win_step(body, WIN_DNS_FAILED);
     }
-    win_script(&body, log)
+    script + "exit 0\n"
 }
 
 /// The elevated script that removes Tusk's NRPT rules and its certificates from the machine's Root store.
-fn win_remove_script(thumbprint: Option<&str>, log: &Path) -> String {
+fn win_remove_script(thumbprint: Option<&str>) -> String {
     let by_print = thumbprint.map(|t| format!(" -or $_.Thumbprint -eq {}", ps_quote(t))).unwrap_or_default();
-    let body = format!(
-        "  Get-ChildItem Cert:\\LocalMachine\\Root | Where-Object {{ $_.GetNameInfo('SimpleName', $false) -eq {}{by_print} }} | Remove-Item\n\
-         \x20 Get-DnsClientNrptRule | Where-Object {{ $_.Comment -eq 'Tusk' -or (($_.Namespace -contains '.test') -and ($_.NameServers -contains '127.0.0.1')) }} | ForEach-Object {{ Remove-DnsClientNrptRule -Name $_.Name -Force }}\n\
-         \x20 Clear-DnsClientCache\n",
+    let trust = format!(
+        "{WIN_OPEN_ROOT}  $store.Certificates | Where-Object {{ $_.GetNameInfo('SimpleName', $false) -eq {}{by_print} }} | ForEach-Object {{ $store.Remove($_) }}\n  $store.Close()\n",
         ps_quote(CA_NAME)
     );
-    win_script(&body, log)
+    let dns = "  Get-DnsClientNrptRule | Where-Object { $_.Comment -eq 'Tusk' -or (($_.Namespace -contains '.test') -and ($_.NameServers -contains '127.0.0.1')) } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force }\n\
+               \x20 Clear-DnsClientCache\n";
+    format!("$ErrorActionPreference = 'Stop'\n{}{}exit 0\n", win_step(&trust, WIN_TRUST_FAILED), win_step(dns, WIN_DNS_FAILED))
 }
 
-/// Runs `script` elevated after the UAC prompt and exits with its code, or 1223 (ERROR_CANCELLED) when the prompt
-/// was declined.
-fn win_elevate_command(script: &Path) -> String {
-    // Start-Process joins -ArgumentList with spaces, so the path needs its own double quotes.
-    let file = ps_quote(&format!("\"{}\"", script.to_string_lossy()));
+/// The command, for a plain `powershell -Command`, that runs `script` elevated after the UAC prompt and exits with
+/// its code, or 1223 (ERROR_CANCELLED) when the prompt was declined. The script travels encoded on the elevated
+/// command line, so the elevated PowerShell reads no file. The command holds no double quotes, so it passes through
+/// the command line unchanged.
+fn win_elevate_command(script: &str) -> String {
     format!(
         "try {{ $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden \
-         -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',{file}); exit $p.ExitCode }} \
+         -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{}'); exit $p.ExitCode }} \
          catch {{ $e = $_.Exception; while ($e) {{ if ($e.NativeErrorCode -eq 1223) {{ exit 1223 }}; $e = $e.InnerException }}; \
-         [Console]::Error.WriteLine($_.Exception.Message); exit 2 }}"
+         [Console]::Error.WriteLine($_.Exception.Message); exit 2 }}",
+        ps_encoded(script)
     )
 }
 
@@ -397,16 +422,31 @@ fn uses_resolved(target: &Path, text: &str) -> bool {
     target.starts_with("/run/systemd/resolve") || text.lines().any(|l| l.split_whitespace().eq(["nameserver", "127.0.0.53"]))
 }
 
-/// What the elevated Linux script sets up.
+/// What the elevated Linux script sets up. Everything travels inside the script, so root reads none of your files.
 #[derive(Default)]
 struct LinuxApply<'a> {
-    /// The certificate, and the store it goes in.
-    trust: Option<(&'a Path, Store)>,
+    /// The certificate as PEM, and the store it goes in.
+    trust: Option<(&'a str, Store)>,
     /// The DNS port for a resolved delegate.
     delegate: Option<u16>,
-    /// A prepared /etc/hosts to copy over the real one.
-    hosts: Option<&'a Path>,
+    /// The new /etc/hosts.
+    hosts: Option<&'a str>,
     low_ports: bool,
+}
+
+const HEREDOC_END: &str = "TUSK_EOF";
+
+/// A quoted here-document holding `content`, which must end in a newline; an error if a line would end it early.
+fn heredoc(content: &str) -> Result<String, String> {
+    if content.lines().any(|l| l == HEREDOC_END) || !content.ends_with('\n') {
+        return Err("Tusk couldn't build its setup script.".into());
+    }
+    Ok(format!("<<'{HEREDOC_END}'\n{content}{HEREDOC_END}\n"))
+}
+
+/// Writes `pem` to a private root-owned file for `trust anchor`, which takes only files, runs it, and deletes it.
+fn p11_anchor(flag: &str, pem: &str) -> Result<String, String> {
+    Ok(format!("f=$(mktemp)\ncat > \"$f\" {}trust anchor {flag} \"$f\" || {{ rm -f \"$f\"; exit 1; }}\nrm -f \"$f\"\n", heredoc(pem)?))
 }
 
 /// Runs `body` with `set -e`. The subshell turns every failure into exit 1, so pkexec's own 126 and 127 stay
@@ -415,35 +455,42 @@ fn linux_script(body: &str) -> String {
     format!("#!/bin/sh\n(\nset -e\n{body}) || exit 1\n")
 }
 
-fn linux_apply_script(a: &LinuxApply) -> String {
-    use crate::toolpaths::quote;
+/// Replaces /etc/hosts with `text`, byte for byte. printf rather than a here-document, which would add a final
+/// newline the file may not have. > keeps the file's owner, mode, and inode.
+fn hosts_write(text: &str) -> String {
+    format!("printf '%s' {} > /etc/hosts\n", crate::toolpaths::quote(text))
+}
+
+fn linux_apply_script(a: &LinuxApply) -> Result<String, String> {
     let mut body = String::new();
     match a.trust {
-        Some((pem, Store::P11)) => body += &format!("trust anchor --store {}\n", quote(&pem.to_string_lossy())),
-        Some((pem, store)) => body += &format!("install -m 644 {} {}\n{}\n", quote(&pem.to_string_lossy()), store.file().unwrap_or_default(), store.update()),
+        Some((pem, Store::P11)) => body += &p11_anchor("--store", pem)?,
+        Some((pem, store)) => {
+            let file = store.file().unwrap_or_default();
+            body += &format!("cat > {file} {}chmod 644 {file}\n{}\n", heredoc(pem)?, store.update());
+        }
         None => {}
     }
     if let Some(port) = a.delegate {
-        body += &format!("mkdir -p /etc/systemd/dns-delegate.d\ncat > {LINUX_DELEGATE} <<'TUSK'\n{}TUSK\nsystemctl restart systemd-resolved\n", delegate_conf(port));
+        body += &format!("mkdir -p /etc/systemd/dns-delegate.d\ncat > {LINUX_DELEGATE} {}systemctl restart systemd-resolved\n", heredoc(&delegate_conf(port))?);
     }
     if let Some(hosts) = a.hosts {
-        // cat keeps /etc/hosts' owner, mode, and inode.
-        body += &format!("cat {} > /etc/hosts\n", quote(&hosts.to_string_lossy()));
+        body += &hosts_write(hosts);
     }
     if a.low_ports {
         body += &format!("printf '%s\\n' '{MARK}' 'net.ipv4.ip_unprivileged_port_start=80' > {LINUX_SYSCTL}\nsysctl -w net.ipv4.ip_unprivileged_port_start=80\n");
     }
-    linux_script(&body)
+    Ok(linux_script(&body))
 }
 
 /// What the elevated Linux script removes.
 #[derive(Default)]
 struct LinuxRemove<'a> {
-    /// The store to take the certificate out of, with the certificate for p11-kit.
-    trust: Option<(Store, &'a Path)>,
+    /// The store to take the certificate out of, with the certificate as PEM for p11-kit.
+    trust: Option<(Store, &'a str)>,
     delegate: bool,
-    /// A prepared /etc/hosts without Tusk's block.
-    hosts: Option<&'a Path>,
+    /// The new /etc/hosts, without Tusk's block.
+    hosts: Option<&'a str>,
     sysctl: bool,
 }
 
@@ -453,11 +500,10 @@ impl LinuxRemove<'_> {
     }
 }
 
-fn linux_remove_script(r: &LinuxRemove) -> String {
-    use crate::toolpaths::quote;
+fn linux_remove_script(r: &LinuxRemove) -> Result<String, String> {
     let mut body = String::new();
     match r.trust {
-        Some((Store::P11, pem)) => body += &format!("trust anchor --remove {}\n", quote(&pem.to_string_lossy())),
+        Some((Store::P11, pem)) => body += &p11_anchor("--remove", pem)?,
         Some((store, _)) => body += &format!("rm -f {}\n{}\n", store.file().unwrap_or_default(), store.update()),
         None => {}
     }
@@ -465,12 +511,12 @@ fn linux_remove_script(r: &LinuxRemove) -> String {
         body += &format!("if grep -qx '{MARK}' {LINUX_DELEGATE}; then rm -f {LINUX_DELEGATE}; systemctl restart systemd-resolved; fi\n");
     }
     if let Some(hosts) = r.hosts {
-        body += &format!("cat {} > /etc/hosts\n", quote(&hosts.to_string_lossy()));
+        body += &hosts_write(hosts);
     }
     if r.sysctl {
         body += &format!("rm -f {LINUX_SYSCTL}\nsysctl -w net.ipv4.ip_unprivileged_port_start=1024\n");
     }
-    linux_script(&body)
+    Ok(linux_script(&body))
 }
 
 /// NSS databases of Chrome, Chromium, and Firefox profiles under `home`, including the snap and flatpak ones.
@@ -606,9 +652,7 @@ mod imp {
     }
 
     fn elevate(script: &str, prompt: &str) -> Result<(), String> {
-        let scratch = Scratch::new()?;
-        let path = scratch.file("tusk-setup.sh", script.as_bytes())?;
-        let out = cmd("/usr/bin/osascript").arg("-e").arg(mac_osascript(&path, prompt)).output().map_err(|e| e.to_string())?;
+        let out = cmd("/usr/bin/osascript").arg("-e").arg(mac_osascript(script, prompt)).output().map_err(|e| e.to_string())?;
         if out.status.success() {
             return Ok(());
         }
@@ -630,6 +674,9 @@ mod imp {
                 delete(&old)?;
             }
             let keychain = login_keychain();
+            // ponytail: security reads ca.pem as you, so a process running as you could swap it before the trust
+            // dialog; that dialog doesn't show which certificate it trusts. Calling SecTrustSettingsSetTrustSettings
+            // with the parsed bytes closes the gap, at the cost of Security framework bindings.
             security(&["add-trusted-cert".as_ref(), "-r".as_ref(), "trustRoot".as_ref(), "-k".as_ref(), keychain.as_ref(), w.ca_pem.as_os_str()])?;
         }
         if !before.resolver {
@@ -667,20 +714,13 @@ mod imp {
     }
 
     /// Runs `script` elevated, once you accept the UAC prompt.
-    fn elevate(script: impl FnOnce(&Path) -> String) -> Result<(), String> {
-        let scratch = Scratch::new()?;
-        let log = scratch.dir.join("error.txt");
-        // Windows PowerShell reads a script without a BOM in the ANSI code page, which mangles other paths.
-        let path = scratch.file("tusk-setup.ps1", format!("\u{feff}{}", script(&log)).as_bytes())?;
-        let out = powershell(&win_elevate_command(&path)).map_err(|e| e.to_string())?;
+    fn elevate(script: &str) -> Result<(), String> {
+        let out = cmd("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &win_elevate_command(script)]).output().map_err(|e| e.to_string())?;
         match out.status.code() {
             Some(0) => Ok(()),
             Some(1223) => Err("cancelled".into()),
-            _ => {
-                let logged = std::fs::read_to_string(&log).unwrap_or_default();
-                let error = logged.trim_start_matches('\u{feff}').trim();
-                Err(format!("Setup failed: {}", if error.is_empty() { failure(&out) } else { error.to_string() }))
-            }
+            Some(code) if win_failure(code).is_some() => Err(format!("Setup failed: {}", win_failure(code).unwrap_or_default())),
+            _ => Err(format!("Setup failed: {}", failure(&out))),
         }
     }
 
@@ -692,14 +732,13 @@ mod imp {
         if before.ca_trusted && before.resolver {
             return Ok(vec![]);
         }
-        let print = sha1_hex(&ca_der(&w.ca_pem)?);
-        elevate(|log| win_apply_script(&w.ca_pem, &print, !before.ca_trusted, !before.resolver, log))?;
+        elevate(&win_apply_script(&ca_der(&w.ca_pem)?, !before.ca_trusted, !before.resolver))?;
         Ok(vec![])
     }
 
     pub fn remove(ca_pem: &Path) -> Result<(), String> {
         let print = ca_der(ca_pem).ok().map(|d| sha1_hex(&d));
-        elevate(|log| win_remove_script(print.as_deref(), log))
+        elevate(&win_remove_script(print.as_deref()))
     }
 }
 
@@ -776,26 +815,25 @@ mod imp {
     }
 
     /// Runs `script` as root through polkit. Keeps the script when you have to run it yourself.
-    fn elevate(mut scratch: Scratch, script: &str) -> Result<(), String> {
-        use crate::toolpaths::quote;
-        let path = scratch.file("tusk-setup.sh", script.as_bytes())?;
-        let manual = format!("sudo sh {}", quote(&path.to_string_lossy()));
-        let out = match cmd("pkexec").arg("/bin/sh").arg(&path).output() {
-            Ok(out) => out,
-            Err(_) => {
-                scratch.keep = true;
-                return Err(format!("Tusk can't ask for your password because pkexec isn't installed. Run this in a terminal, then try again: {manual}"));
-            }
+    /// Runs `script` as root through polkit, inline, so root runs no file you could change. When you have to run it
+    /// yourself, it's kept in a file for `sudo sh`.
+    fn elevate(script: &str) -> Result<(), String> {
+        // A script over Linux's 128 KB argument limit, such as one carrying a very large /etc/hosts, fails to start
+        // and takes the run-it-yourself path too.
+        let reason = match cmd("pkexec").arg("/bin/sh").arg("-c").arg(script).output() {
+            Ok(out) => match out.status.code() {
+                Some(0) => return Ok(()),
+                Some(126) => return Err("cancelled".into()),
+                Some(127) => "you aren't authorized, or no polkit agent is running".to_string(),
+                _ => return Err(format!("Setup failed: {}", failure(&out))),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "pkexec isn't installed".into(),
+            Err(e) => e.to_string(),
         };
-        match out.status.code() {
-            Some(0) => Ok(()),
-            Some(126) => Err("cancelled".into()),
-            Some(127) => {
-                scratch.keep = true;
-                Err(format!("Tusk couldn't ask for your password: you aren't authorized, or no polkit agent is running. Run this in a terminal, then try again: {manual}"))
-            }
-            _ => Err(format!("Setup failed: {}", failure(&out))),
-        }
+        let mut scratch = Scratch::new()?;
+        let path = scratch.file("tusk-setup.sh", script.as_bytes())?;
+        scratch.keep = true;
+        Err(format!("Tusk couldn't ask for your password: {reason}. Run this in a terminal, then try again: sudo sh {}", crate::toolpaths::quote(&path.to_string_lossy())))
     }
 
     pub fn apply(w: &Wanted, low_ports: bool) -> Result<Vec<String>, String> {
@@ -814,17 +852,16 @@ mod imp {
         } else {
             notes.push(NSS_NOTE.to_string());
         }
-        let scratch = Scratch::new()?;
+        let pem = der_pem(&ca);
         let hosts;
         let mut plan = LinuxApply { low_ports: low_ports && !before.low_ports, ..Default::default() };
         if !system_trusted(&ca) {
             let store = store().ok_or("This Linux has none of update-ca-certificates, update-ca-trust, or trust, so Tusk can't add its certificate.")?;
-            plan.trust = Some((&w.ca_pem, store));
+            plan.trust = Some((&pem, store));
         }
         if !before.resolver {
             if before.uses_hosts {
-                let text = std::fs::read_to_string("/etc/hosts").unwrap_or_default();
-                hosts = scratch.file("hosts", hosts_with(&text, &w.names).as_bytes())?;
+                hosts = hosts_with(&std::fs::read_to_string("/etc/hosts").unwrap_or_default(), &w.names);
                 plan.hosts = Some(&hosts);
             } else {
                 plan.delegate = Some(w.dns_port);
@@ -834,8 +871,7 @@ mod imp {
             notes.push(HOSTS_NOTE.to_string());
         }
         if plan.trust.is_some() || plan.delegate.is_some() || plan.hosts.is_some() || plan.low_ports {
-            let script = linux_apply_script(&plan);
-            elevate(scratch, &script)?;
+            elevate(&linux_apply_script(&plan)?)?;
         }
         Ok(notes)
     }
@@ -847,25 +883,20 @@ mod imp {
                 nss_delete(&db);
             }
         }
-        let scratch = Scratch::new()?;
-        let hosts;
+        let pem = ca.as_deref().map(der_pem).unwrap_or_default();
         let trust = match store() {
-            Some(s @ (Store::Debian | Store::Fedora)) if s.file().is_some_and(|f| Path::new(f).exists()) => Some((s, ca_pem)),
-            Some(Store::P11) if ca.as_deref().is_some_and(system_trusted) => Some((Store::P11, ca_pem)),
+            Some(s @ (Store::Debian | Store::Fedora)) if s.file().is_some_and(|f| Path::new(f).exists()) => Some((s, pem.as_str())),
+            Some(Store::P11) if ca.as_deref().is_some_and(system_trusted) => Some((Store::P11, pem.as_str())),
             _ => None,
         };
         let delegate = std::fs::read_to_string(LINUX_DELEGATE).is_ok_and(|t| is_tusk_file(&t));
-        let mut undo = LinuxRemove { trust, delegate, hosts: None, sysctl: Path::new(LINUX_SYSCTL).exists() };
         let text = std::fs::read_to_string("/etc/hosts").unwrap_or_default();
-        if hosts_split(&text).1.is_some() {
-            hosts = scratch.file("hosts", hosts_without(&text).as_bytes())?;
-            undo.hosts = Some(&hosts);
-        }
+        let hosts = hosts_split(&text).1.map(|_| hosts_without(&text));
+        let undo = LinuxRemove { trust, delegate, hosts: hosts.as_deref(), sysctl: Path::new(LINUX_SYSCTL).exists() };
         if undo.is_empty() {
             return Ok(());
         }
-        let script = linux_remove_script(&undo);
-        elevate(scratch, &script)
+        elevate(&linux_remove_script(&undo)?)
     }
 }
 
@@ -900,12 +931,15 @@ mod tests {
         assert!(apply.contains("dscacheutil -flushcache\nkillall -HUP mDNSResponder"));
         let remove = mac_remove_script();
         assert!(remove.starts_with("if grep -qx '# Tusk' /etc/resolver/test 2>/dev/null; then rm -f /etc/resolver/test; fi"));
-        let script = mac_osascript(Path::new("/tmp/My Folder/it's \"q\"\\x.sh"), MAC_PROMPT);
+        // The script goes inline, escaped for AppleScript.
+        let script = mac_osascript("echo 'it''s' \"q\" \\x\nnext", MAC_PROMPT);
         assert_eq!(
             script,
-            "do shell script \"/bin/sh \" & quoted form of \"/tmp/My Folder/it's \\\"q\\\"\\\\x.sh\" with administrator privileges \
-             with prompt \"Tusk needs your password to serve https://….test sites: it trusts Tusk's local certificate and sends .test names to Tusk.\""
+            "do shell script \"echo 'it''s' \\\"q\\\" \\\\x\\nnext\" with administrator privileges \
+             with prompt \"Tusk needs your password to send .test names to Tusk, so https://<name>.test sites open in your browser.\""
         );
+        let apply = mac_osascript(&apply, MAC_PROMPT);
+        assert!(apply.starts_with("do shell script \"set -e\\nmkdir -p /etc/resolver\\n") && !apply.contains("/bin/sh") && !apply.contains('\n'));
     }
 
     #[test]
@@ -926,24 +960,38 @@ mod tests {
 
     #[test]
     fn windows_scripts() {
-        let pem = Path::new("C:\\Users\\O'Brien\\App Data\\ca.pem");
-        let log = Path::new("C:\\Temp\\x y\\error.txt");
-        let apply = win_apply_script(pem, "ABCD", true, true, log);
+        use base64::Engine;
+        let der = [0x30u8, 0x82, 0xFF, 0x01];
+        let apply = win_apply_script(&der, true, true);
         assert!(apply.starts_with("$ErrorActionPreference = 'Stop'\ntry {\n"));
-        assert!(apply.contains("Where-Object { $_.GetNameInfo('SimpleName', $false) -eq 'Tusk Local CA' -and $_.Thumbprint -ne 'ABCD' } | Remove-Item"));
-        assert!(apply.contains("  Import-Certificate -FilePath 'C:\\Users\\O''Brien\\App Data\\ca.pem' -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null\n"));
-        assert!(apply.contains("  Add-DnsClientNrptRule -Namespace '.test' -NameServers '127.0.0.1' -Comment 'Tusk'\n  Clear-DnsClientCache\n"));
-        assert!(apply.contains("Set-Content -LiteralPath 'C:\\Temp\\x y\\error.txt' -Encoding UTF8\n  exit 1"));
-        let only_dns = win_apply_script(pem, "ABCD", false, true, log);
-        assert!(!only_dns.contains("Import-Certificate") && only_dns.contains("Add-DnsClientNrptRule"));
-        let remove = win_remove_script(Some("ABCD"), log);
-        assert!(remove.contains("-eq 'Tusk Local CA' -or $_.Thumbprint -eq 'ABCD' } | Remove-Item"));
+        assert!(apply.contains("X509Certificate2]::new([Convert]::FromBase64String('MIL/AQ=='))"));
+        assert!(apply.contains("X509Store]::new('Root', 'LocalMachine')"));
+        assert!(apply.contains("Where-Object { $_.GetNameInfo('SimpleName', $false) -eq 'Tusk Local CA' -and $_.Thumbprint -ne $cert.Thumbprint } | ForEach-Object { $store.Remove($_) }"));
+        assert!(apply.contains("  $store.Add($cert)\n  $store.Close()\n} catch { exit 10 }\n"));
+        assert!(apply.contains("  Add-DnsClientNrptRule -Namespace '.test' -NameServers '127.0.0.1' -Comment 'Tusk'\n  Clear-DnsClientCache\n} catch { exit 11 }\nexit 0\n"));
+        assert!(!apply.contains("-FilePath") && !apply.contains("Import-Certificate") && !apply.contains("Temp"));
+        let only_dns = win_apply_script(&der, false, true);
+        assert!(!only_dns.contains("X509") && only_dns.contains("Add-DnsClientNrptRule"));
+        let remove = win_remove_script(Some("AB'CD"));
+        assert!(remove.contains("-eq 'Tusk Local CA' -or $_.Thumbprint -eq 'AB''CD' } | ForEach-Object { $store.Remove($_) }"));
         assert!(remove.contains("$_.Comment -eq 'Tusk' -or (($_.Namespace -contains '.test') -and ($_.NameServers -contains '127.0.0.1'))"));
-        assert!(!win_remove_script(None, log).contains("Thumbprint"));
-        let elevate = win_elevate_command(Path::new("C:\\Users\\O'Brien\\AppData\\Local\\Temp\\tusk setup\\tusk-setup.ps1"));
+        assert!(!win_remove_script(None).contains("Thumbprint"));
+        assert_eq!(win_failure(10), Some("Windows didn't change its trusted root certificates."));
+        assert_eq!(win_failure(2), None);
+
+        // The elevated script travels encoded, and the whole command line stays well under Windows' 32,767
+        // characters for a large CA (an RSA 4096 CA is about 1.4 KB of DER; Tusk's P-256 one about 0.5 KB).
+        let big = vec![0x30u8; 1400];
+        let script = win_apply_script(&big, true, true);
+        let elevate = win_elevate_command(&script);
         assert!(elevate.contains("-Verb RunAs -Wait -PassThru -WindowStyle Hidden"));
-        assert!(elevate.contains("-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','\"C:\\Users\\O''Brien\\AppData\\Local\\Temp\\tusk setup\\tusk-setup.ps1\"'); exit $p.ExitCode"));
+        assert!(elevate.contains(&format!("'-EncodedCommand','{}'); exit $p.ExitCode", ps_encoded(&script))));
         assert!(elevate.contains("NativeErrorCode -eq 1223) { exit 1223 }"));
+        assert!(!elevate.contains('"') && !elevate.contains("'-File'"));
+        let line = format!("powershell.exe -NoProfile -NonInteractive -Command \"{elevate}\"");
+        assert!(line.len() < 12_000, "{} characters", line.len());
+        let inner = base64::engine::general_purpose::STANDARD.decode(ps_encoded(&script)).unwrap();
+        assert_eq!(inner.len(), script.encode_utf16().count() * 2);
         assert!(win_status_script("AB'CD").contains("Join-Path 'Cert:\\LocalMachine\\Root' 'AB''CD'"));
     }
 
@@ -973,29 +1021,45 @@ mod tests {
 
     #[test]
     fn linux_scripts() {
-        let pem = Path::new("/home/me/My Data/it's/ca.pem");
-        let hosts = Path::new("/tmp/tusk setup/hosts");
-        let all = linux_apply_script(&LinuxApply { trust: Some((pem, Store::Debian)), delegate: Some(15353), hosts: Some(hosts), low_ports: true });
+        let pem = der_pem(&[0x30u8; 100]);
+        assert!(pem.starts_with("-----BEGIN CERTIFICATE-----\nMDAw") && pem.ends_with("=\n-----END CERTIFICATE-----\n"));
+        assert_eq!(pem_certs(&pem), [vec![0x30u8; 100]]);
+        let hosts = "127.0.0.1 localhost\n# it's\n127.0.0.1 a.test";
+        let all = linux_apply_script(&LinuxApply { trust: Some((&pem, Store::Debian)), delegate: Some(15353), hosts: Some(hosts), low_ports: true }).unwrap();
         assert!(all.starts_with("#!/bin/sh\n(\nset -e\n") && all.ends_with(") || exit 1\n"));
-        assert!(all.contains("install -m 644 '/home/me/My Data/it'\\''s/ca.pem' /usr/local/share/ca-certificates/tusk-local-ca.crt\nupdate-ca-certificates\n"));
+        assert!(all.contains(&format!(
+            "cat > /usr/local/share/ca-certificates/tusk-local-ca.crt <<'TUSK_EOF'\n{pem}TUSK_EOF\nchmod 644 /usr/local/share/ca-certificates/tusk-local-ca.crt\nupdate-ca-certificates\n"
+        )));
         assert!(all.contains(
-            "cat > /etc/systemd/dns-delegate.d/tusk.dns-delegate <<'TUSK'\n# Tusk\n[Delegate]\nDNS=127.0.0.1:15353\nDomains=~test\nDefaultRoute=no\nTUSK\nsystemctl restart systemd-resolved\n"
+            "cat > /etc/systemd/dns-delegate.d/tusk.dns-delegate <<'TUSK_EOF'\n# Tusk\n[Delegate]\nDNS=127.0.0.1:15353\nDomains=~test\nDefaultRoute=no\nTUSK_EOF\nsystemctl restart systemd-resolved\n"
         ));
-        assert!(all.contains("cat '/tmp/tusk setup/hosts' > /etc/hosts\n"));
+        // Byte for byte, without a final newline the file doesn't have.
+        assert!(all.contains("printf '%s' '127.0.0.1 localhost\n# it'\\''s\n127.0.0.1 a.test' > /etc/hosts\n"));
         assert!(all.contains("> /etc/sysctl.d/50-tusk-ports.conf\nsysctl -w net.ipv4.ip_unprivileged_port_start=80\n"));
-        let fedora = linux_apply_script(&LinuxApply { trust: Some((pem, Store::Fedora)), ..Default::default() });
-        assert!(fedora.contains("/etc/pki/ca-trust/source/anchors/tusk-local-ca.pem\nupdate-ca-trust extract\n") && !fedora.contains("systemctl"));
-        let p11 = linux_apply_script(&LinuxApply { trust: Some((pem, Store::P11)), ..Default::default() });
-        assert!(p11.contains("trust anchor --store '/home/me/My Data/it'\\''s/ca.pem'\n"));
+        let fedora = linux_apply_script(&LinuxApply { trust: Some((&pem, Store::Fedora)), ..Default::default() }).unwrap();
+        assert!(fedora.contains("cat > /etc/pki/ca-trust/source/anchors/tusk-local-ca.pem <<'TUSK_EOF'\n") && fedora.contains("update-ca-trust extract\n") && !fedora.contains("systemctl"));
+        let p11 = linux_apply_script(&LinuxApply { trust: Some((&pem, Store::P11)), ..Default::default() }).unwrap();
+        assert!(p11.contains(&format!("f=$(mktemp)\ncat > \"$f\" <<'TUSK_EOF'\n{pem}TUSK_EOF\ntrust anchor --store \"$f\" || {{ rm -f \"$f\"; exit 1; }}\nrm -f \"$f\"\n")));
 
-        let remove = linux_remove_script(&LinuxRemove { trust: Some((Store::Debian, pem)), delegate: true, hosts: Some(hosts), sysctl: true });
+        let remove = linux_remove_script(&LinuxRemove { trust: Some((Store::Debian, "")), delegate: true, hosts: Some(hosts), sysctl: true }).unwrap();
         assert!(remove.contains("rm -f /usr/local/share/ca-certificates/tusk-local-ca.crt\nupdate-ca-certificates\n"));
         assert!(remove.contains("if grep -qx '# Tusk' /etc/systemd/dns-delegate.d/tusk.dns-delegate; then rm -f"));
-        assert!(remove.contains("cat '/tmp/tusk setup/hosts' > /etc/hosts\n"));
+        assert!(remove.contains("printf '%s' '127.0.0.1 localhost\n"));
         assert!(remove.contains("rm -f /etc/sysctl.d/50-tusk-ports.conf\nsysctl -w net.ipv4.ip_unprivileged_port_start=1024\n"));
-        let p11 = linux_remove_script(&LinuxRemove { trust: Some((Store::P11, pem)), ..Default::default() });
-        assert!(p11.contains("trust anchor --remove '/home/me/My Data/it'\\''s/ca.pem'\n"));
+        let p11 = linux_remove_script(&LinuxRemove { trust: Some((Store::P11, &pem)), ..Default::default() }).unwrap();
+        assert!(p11.contains(&format!("<<'TUSK_EOF'\n{pem}TUSK_EOF\ntrust anchor --remove \"$f\"")));
         assert!(LinuxRemove::default().is_empty());
+
+        // Root reads no file of yours: not ca.pem in your data folder, and no temp file.
+        for script in [&all, &fedora, &p11, &remove] {
+            assert!(!script.contains("/home/") && !script.contains("tusk-local-domains") && !script.contains("/tmp/") && !script.contains("cat '"), "{script}");
+        }
+
+        // Content that would end the here-document early fails instead of making a broken script.
+        assert!(heredoc("a\nTUSK_EOF\nb\n").is_err());
+        assert!(heredoc("no final newline").is_err());
+        assert!(linux_apply_script(&LinuxApply { trust: Some(("x\nTUSK_EOF\n", Store::Debian)), ..Default::default() }).is_err());
+        assert_eq!(heredoc("a\n TUSK_EOF\n").unwrap(), "<<'TUSK_EOF'\na\n TUSK_EOF\nTUSK_EOF\n");
     }
 
     #[test]
