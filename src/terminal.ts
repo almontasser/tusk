@@ -134,7 +134,7 @@ export type TerminalRun = { stop(): void; exited(): boolean; reveal(): void };
  * Opens a terminal tab. Without `command`, it runs your login shell. `onExit` runs when the process
  * ends, with its exit code when known; `onClose` runs when its tab closes, even while the process still runs. Shells, and commands
  * opened with `restorable` (such as a dev server), reopen with the project while they still run. `scrollback` is
- * output from the last session to show first. Resolves to the running command, or undefined when it couldn't start.
+ * output from the last session to show first, and `banner` a dim line before the command's output, such as its URL. Resolves to the running command, or undefined when it couldn't start.
  */
 export async function openTerminal(
   cwd: string,
@@ -144,6 +144,7 @@ export async function openTerminal(
   onClose?: () => void,
   restorable = false,
   scrollback?: string,
+  banner?: string,
 ): Promise<TerminalRun | undefined> {
   showPanel(true);
   const [{ Terminal }, { FitAddon }, { SearchAddon }, { WebLinksAddon }] = await loadXterm();
@@ -161,6 +162,7 @@ export async function openTerminal(
   term.open(el);
   fit.fit();
   if (scrollback) term.write(`${scrollback.replaceAll("\n", "\r\n")}\r\n\x1b[2m[Restored from the last session]\x1b[0m\r\n`);
+  if (banner) term.write(`\x1b[2m${banner}\x1b[0m\r\n`);
   el.oncontextmenu = (e) => {
     e.preventDefault();
     showMenu(e.clientX, e.clientY, [
@@ -191,7 +193,7 @@ export async function openTerminal(
     el.remove();
     if (!sessions.length) showPanel(false);
     const what = command ? command.join(" ") : "the shell";
-    showError(`Couldn't start ${what} in ${cwd}`, e, { label: "Retry", run: () => openTerminal(cwd, title, command, onExit, onClose, restorable, scrollback) });
+    showError(`Couldn't start ${what} in ${cwd}`, e, { label: "Retry", run: () => openTerminal(cwd, title, command, onExit, onClose, restorable, scrollback, banner) });
     return;
   }
   const restore = !command || restorable ? { title, cwd, command } : undefined;

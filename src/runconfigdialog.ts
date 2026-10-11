@@ -91,7 +91,7 @@ export function openConfigurationsDialog({ entries: initial, selected, add, root
     };
     if (field.kind === "checkbox") {
       const box = h("input", { type: "checkbox", checked: !!value, onchange: () => set(box.checked, true) });
-      return h("label", { class: "rc-check" }, box, field.label);
+      return h("label", { class: "rc-check" }, box, field.label, field.help ? h("span", { class: "rc-help" }, field.help) : null);
     }
     let input: HTMLInputElement | HTMLSelectElement;
     if (field.kind === "select") {
@@ -236,7 +236,7 @@ export function openConfigurationsDialog({ entries: initial, selected, add, root
     renderList();
     const errors = current ? errorsOf(current) : [];
     problems.replaceChildren(...errors.map((e) => h("li", { class: "error" }, icon("error"), e)));
-    preview.textContent = current ? summary(current.config, project) : "";
+    preview.textContent = current ? summary(current.config, project, root) : "";
     runButton.disabled = debugButton.disabled = !current || errors.length > 0;
     if (current && !TYPES[current.config.type].php) debugButton.disabled = true;
   }

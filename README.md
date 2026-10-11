@@ -43,7 +43,7 @@ file to change when you add it.
 | Git | Git asks for passwords and passphrases in a dialog (`gitOutput` in `src/git.ts`). Security keys that need a touch or a PIN, beyond ssh's own prompts, aren't supported. The log's branch graph shows only without filters, and a filtered log searches messages, not changed lines (`src/history.ts`). Grouping changed files by folder shows one row per folder, not nested folders (`src/commitview.ts`). **Apply Non-Conflicting Changes** merges whole conflict blocks, not single changes within a block that also has a true conflict (`resolveSimple` in `src/gitparse.ts`). The branches popup opens a branch's actions as a second popup rather than a submenu (`src/branches.ts`). A project opened at a subfolder of a repository gets the Commit view's paths relative to the repository's root, so its actions and Stage Change in the gutter miss the files (`src/git.ts`, `src/commitview.ts`); open the repository's root folder instead. |
 | Find in files | Results stop at 20,000 matches, which **Settings > Limits** changes, so the replace preview lists only those; **Replace in All Files…** changes every matching file without a preview. Refactorings that search the project, such as Safe Delete, stop at 20,000 matches whatever the setting. A result keeps up to 200 characters of its line before the match and 300 after, so a minified file's long lines stay small, and the replace preview shows that part of the line. Empty matches, such as `x*` finds between characters, aren't listed. |
 | Test results | On PHPUnit 10 and later, a running test's file is found from its class name through `composer.json`'s PSR-4 folders, so a class outside them opens at a guess. A comparison's full expected and actual values come from the TeamCity log; where only PHPUnit's JUnit diff has them, the diff shows the changed lines and three lines around them. |
-| Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. |
+| Run configurations | In Sail, a configuration's environment variables and working directory don't reach the container (Compose services get the variables, and every container command runs in the project folder). Templates are each type's defaults; you can't edit them. A server that reopens with the project runs again as a plain command, not as its configuration, so the run widget doesn't show it as running. A server served at a `.test` domain doesn't reopen with the project, can't run in Docker, and its domain doesn't resolve while Tusk is closed. |
 | Type hierarchy | Subtypes come from the PHP index, which loads `vendor` classes only as far as the project reaches them, so a package class the project never uses isn't listed. |
 | Call hierarchy | Calls through dynamic names, such as `$this->$method()`, and calls on a value whose type the analyzer can't infer are missed. |
 | TODO comments | The search stops at the Find in Files limit (20,000 matches by default), counted before those outside comments are dropped. |
@@ -3020,7 +3020,7 @@ The types are:
 | Composer script | A script from `composer.json`, with the bundled Composer |
 | npm script | A script from `package.json` |
 | Shell command | A command line through `/bin/sh` |
-| PHP web server | `php artisan serve`, or PHP's built-in server with a document root, on a host and port |
+| PHP web server | `php artisan serve`, or PHP's built-in server with a document root, on a host and port, or at `https://<domain>.test` |
 
 Every type also has a working directory, environment variables, whether it
 runs in Docker when the containers are up (Sail, or the service you chose with
@@ -3044,6 +3044,37 @@ again. Tusk keeps the five newest; save one from the widget's menu or with
 green icon and a **Stop** button. **Stop** interrupts the command with ⌃C, and
 kills it if it's still running 3 seconds later. **Rerun** runs the last run
 again; before any run, it asks which configuration to run.
+
+#### Local .test domains
+
+A PHP web server configuration can serve your app at `https://<domain>.test`,
+with a trusted certificate, instead of at a host and port. To use it, turn on
+**Serve at https://‹domain›.test** in the configuration, and optionally enter a
+**Domain**. Without one, Tusk uses the project folder's name, so a project in
+`My Shop` serves at `https://my-shop.test`.
+
+When you click **Run**, Tusk does the rest:
+
+- The first time, Tusk creates its own local certificate authority, trusts it,
+  and routes `.test` names to this computer. Your system asks for your password
+  once.
+- Tusk starts PHP's built-in server on a free port, with a router that marks
+  each request as HTTPS, and serves it at the domain through a proxy built into
+  Tusk. For Laravel, the router runs Laravel's own `server.php`, as
+  `php artisan serve` does, so `url()` and `request()->isSecure()` see HTTPS.
+- The terminal tab's first line, and a notification with **Open in Browser**,
+  show the address.
+
+The address has no port when Tusk can use port 443. Otherwise it's
+`https://<domain>.test:8443`. On Linux, the notification then offers
+**Use Port 443…**, which asks for your password once; rerun the server
+afterwards. Stopping the run stops serving the domain. The domains work only
+while Tusk runs, and a configuration served at a `.test` domain can't run in
+Docker.
+
+To undo the setup, run **Run > Remove .test Domains and Certificate**. Tusk
+stops its `.test` servers, removes its certificate from your system's trusted
+certificates, and removes its `.test` DNS setting, after one password prompt.
 
 ### The Tests tab
 

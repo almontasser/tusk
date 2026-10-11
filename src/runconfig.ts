@@ -40,6 +40,10 @@ export type RunConfig = {
   server?: "artisan" | "php";
   host?: string;
   port?: number;
+  /** Server: serve at https://<domain>.test through Tusk's proxy, instead of at the host and port. */
+  testDomain?: boolean;
+  /** Server: the .test domain's label; empty for the project folder's name. */
+  domain?: string;
 };
 
 export type Field = {
@@ -137,13 +141,20 @@ export const TYPES: Record<ConfigType, TypeInfo> = {
     label: "PHP web server",
     icon: "globe",
     php: true,
-    defaults: { server: "artisan", host: "127.0.0.1", port: 8000, docker: false },
+    defaults: { server: "artisan", host: "127.0.0.1", port: 8000, docker: false, testDomain: false },
     fields: [
       { key: "server", label: "Server", kind: "select", options: [["artisan", "php artisan serve"], ["php", "PHP's built-in server (php -S)"]] },
-      { key: "host", label: "Host", kind: "text", placeholder: "127.0.0.1" },
-      { key: "port", label: "Port", kind: "number", placeholder: "8000" },
+      { key: "host", label: "Host", kind: "text", placeholder: "127.0.0.1", shown: (c) => !c.testDomain },
+      { key: "port", label: "Port", kind: "number", placeholder: "8000", shown: (c) => !c.testDomain },
+      { key: "domain", label: "Domain", kind: "text", placeholder: "the project folder's name", help: "Served at https://‹domain›.test.", shown: (c) => !!c.testDomain },
       { key: "path", label: "Document root", kind: "text", placeholder: "public", shown: (c) => c.server === "php", path: "dir" },
       { key: "args", label: "Arguments", kind: "text" },
+      {
+        key: "testDomain",
+        label: "Serve at https://‹domain›.test",
+        kind: "checkbox",
+        help: "Tusk sets up a local certificate and DNS the first time, and your system asks for your password once.",
+      },
     ],
   },
 };
@@ -199,11 +210,32 @@ export function testRunner(runner: RunConfig["runner"], project: Project): strin
   return chosen === "artisan" ? ["php", "artisan", "test"] : [`vendor/bin/${chosen}`];
 }
 
+/** A .test domain's label: lowercase letters, digits, and hyphens, as the backend accepts. */
+const LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+
+/** Whether a configuration serves at a .test domain. */
+export const servesTestDomain = (c: RunConfig) => c.type === "server" && !!c.testDomain;
+
+/** The .test domain's label: the configuration's domain, or else the project folder's name made into a label. */
+export function domainFor(c: RunConfig, root: string): string {
+  if (c.domain?.trim()) return c.domain.trim().toLowerCase();
+  const folder = root.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const trim = (s: string) => s.replace(/^-+|-+$/g, "");
+  return trim(trim(folder.toLowerCase().replace(/[^a-z0-9]+/g, "-")).slice(0, 63)) || "app";
+}
+
+/** A .test server's document root, relative to its folder: Laravel's `public`, or the configured one. */
+export const docrootFor = (c: RunConfig) => (c.server === "php" ? c.path || "public" : "public");
+
+/** Where a .test server listens, and its router script, from `local_domain_start` and `routerScript`. */
+export type Served = { port: number; router: string };
+
 /**
  * The command line a configuration runs, relative to the project, before the container, the environment, and
- * the test reports are added. `vendor/bin/…` stays relative for the container to resolve.
+ * the test reports are added. `vendor/bin/…` stays relative for the container to resolve. A .test server runs PHP's
+ * built-in server on `served`'s port with its router, for Laravel too, as `artisan serve` itself does.
  */
-export function commandFor(c: RunConfig, project: Project): string[] {
+export function commandFor(c: RunConfig, project: Project, served?: Served): string[] {
   const args = shellWords(c.args);
   switch (c.type) {
     case "test": {
@@ -224,6 +256,7 @@ export function commandFor(c: RunConfig, project: Project): string[] {
     case "shell":
       return ["/bin/sh", "-c", c.command ?? ""];
     case "server": {
+      if (c.testDomain) return ["php", "-S", `127.0.0.1:${served?.port ?? "…"}`, "-t", docrootFor(c), ...(served ? [served.router] : []), ...args];
       const host = c.host || "127.0.0.1";
       const port = String(c.port || 8000);
       return c.server === "php" ? ["php", "-S", `${host}:${port}`, "-t", c.path || "public", ...args] : ["php", "artisan", "serve", "--host", host, "--port", port, ...args];
@@ -231,9 +264,34 @@ export function commandFor(c: RunConfig, project: Project): string[] {
   }
 }
 
-/** A one-line summary, such as the command it runs, for lists. */
-export const summary = (c: RunConfig, project: Project = { artisan: true, pest: false }) =>
-  c.type === "shell" ? (c.command ?? "") : commandFor(c, project).map(shellQuote).join(" ");
+/** A one-line summary, such as the command it runs, for lists. A .test server's port is chosen when it runs, so it reads `…`. */
+export function summary(c: RunConfig, project: Project = { artisan: true, pest: false }, root = "") {
+  if (c.type === "shell") return c.command ?? "";
+  const line = commandFor(c, project).map((w) => (w.endsWith(":…") ? w : shellQuote(w))).join(" ");
+  return servesTestDomain(c) ? `${line} (https://${domainFor(c, root)}.test)` : line;
+}
+
+/** PHP's single-quoted string for `s`. */
+const phpString = (s: string) => `'${s.replace(/[\\']/g, "\\$&")}'`;
+
+/**
+ * The router script for a .test server. Tusk's proxy adds no X-Forwarded headers, so the router marks each request
+ * as HTTPS on the URL's port. With `laravel`, it runs Laravel's server.php from the document root, as `artisan serve`
+ * does; without, `return false` serves the request as PHP's server does without a router, keeping the changes to
+ * `$_SERVER`. Values are written into the script, since passing environment variables differs on Windows.
+ */
+export function routerScript(url: string, laravel?: { docroot: string; serverPhp: string }): string {
+  const port = new URL(url).port || "443";
+  return [
+    "<?php",
+    "// Written by Tusk for a .test run configuration: its proxy serves HTTPS, so requests are marked as secure.",
+    "$_SERVER['HTTPS'] = 'on';",
+    "$_SERVER['REQUEST_SCHEME'] = 'https';",
+    `$_SERVER['SERVER_PORT'] = ${phpString(port)};`,
+    ...(laravel ? [`chdir(${phpString(laravel.docroot)});`, `return require ${phpString(laravel.serverPhp)};`] : ["return false;"]),
+    "",
+  ].join("\n");
+}
 
 /** Commands that keep running until stopped: dev servers, watchers, queue workers, and containers. */
 export const LONG_RUNNING =
@@ -262,7 +320,11 @@ export function validate(c: RunConfig, all: RunConfig[]): string[] {
   if (c.type === "php") need(c.path, "the script to run");
   if (c.type === "composer" || c.type === "npm") need(c.command, "the script's name");
   if (c.type === "shell") need(c.command, "the command line");
-  if (c.type === "server") {
+  if (c.type === "server" && c.testDomain) {
+    if (c.domain?.trim() && !LABEL.test(c.domain.trim().toLowerCase()))
+      errors.push(`“${c.domain}” can't be a .test domain. Use up to 63 lowercase letters, digits, and hyphens, not starting or ending with a hyphen.`);
+    if (c.docker) errors.push("Turn off Docker to serve at a .test domain: Tusk's proxy reaches servers on this computer.");
+  } else if (c.type === "server") {
     if (!Number.isInteger(c.port) || c.port! < 1 || c.port! > 65535) errors.push("Enter a port from 1 to 65535.");
     need(c.host, "the host");
   }

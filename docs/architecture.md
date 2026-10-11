@@ -3000,6 +3000,111 @@ one instead. **Rerun** repeats the last run with its mode, and **Rerun Failed
 Tests** runs the last test configuration with a `filter` scope built by
 `filterFor`, without saving it.
 
+### Local .test domains
+
+A PHP web server configuration with `testDomain` on serves at
+`https://<domain>.test`. `domainFor` in `src/runconfig.ts` picks the label: the
+configuration's `domain`, or the project folder's name in lowercase, with runs
+of other characters turned into `-`, at most 63 characters, and `app` when
+nothing is left. `validate` checks the label as the backend does, skips the
+host and port, and rejects Docker, since the proxy reaches servers on this
+computer only.
+
+**How a run is served.** `launch` in `src/runner.ts` calls `serveDomain` last,
+just before the terminal opens, so nothing that runs after it can fail and
+leave the name routed. `serveDomain` awaits `local_domain_start` inside
+`withProgress`, since the first call can sit behind the system's password
+prompt. The command validates the name, does the one-time system setup,
+picks a free port, registers the route, and starts the proxy. It returns the
+URL, the port for PHP, notes to show, and whether Linux could move the proxy to
+port 443. Tusk then writes the router script to `router-<domain>.php` in the
+app cache folder and runs `php -S 127.0.0.1:<port> -t <docroot> <router>`, for
+`php artisan serve` configurations too. On macOS and Linux, the run gets
+`PHP_CLI_SERVER_WORKERS=4`, so the browser's parallel requests don't wait for
+one PHP worker. The terminal's first line is a dim banner,
+`Serving https://shop.test (PHP on 127.0.0.1:PORT)`, which the web links
+add-on makes clickable, and a notification offers **Open in Browser**. Each
+note shows as its own notification.
+
+The run stops its route (`local_domain_stop`) when it exits, when its tab
+closes, and when the terminal can't open. Each name's latest stop is kept in
+`routeStops`, and `serveDomain` awaits it first: a rerun stops the earlier run
+and launches at once, while the earlier run's stop is still in flight, and
+starting a name this window still serves is an error.
+
+**The router marks requests HTTPS.** The proxy terminates TLS and copies bytes,
+routed by SNI. It adds no `X-Forwarded-*` headers, so `routerScript` sets
+`$_SERVER['HTTPS']`, `REQUEST_SCHEME`, and `SERVER_PORT` (443, or the fallback
+port from the URL). Values are written into the script as PHP strings, since
+passing environment variables differs on Windows. For `php artisan serve`
+configurations, the router changes to the absolute document root, which
+Laravel's `server.php` reads with `getcwd()`, and requires the project's
+`server.php`, or else the framework's
+`vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php`.
+Otherwise, or without either file, it returns `false`, and PHP's server serves
+the request as it would without a router: files as they are, and
+`index.php` for paths that aren't files. Changes to `$_SERVER` made before
+`return false` reach the script (checked with PHP 8.4).
+
+**The shared folder.** The backend keeps its state in `tusk-local-domains/`
+in the local data folder: `~/Library/Application Support` on macOS,
+`%LOCALAPPDATA%` on Windows, and `~/.local/share` on Linux. Development and
+release builds share it. It holds `ca.pem` and `ca-key.pem`, the Tusk Local
+CA: ECDSA P-256, valid for 10 years, and name-constrained to `.test` with every
+IP address excluded, so it can't vouch for anything else. Leaf certificates are
+minted per name on first use and are valid for 30 days. The folder also holds
+`owner.lock` and `owner.json`, and each window's `routes/<id>.json` and
+`routes/<id>.lock`.
+
+**Ports.** HTTPS listens on 443, and falls back to 8443 when it can't bind
+there; with 8443, there's no port 80. Port 80 only redirects to HTTPS. On Linux,
+the fallback notification offers **Use Port 443…**
+(`local_domains_allow_port_443`), which writes
+`/etc/sysctl.d/50-tusk-ports.conf` with
+`net.ipv4.ip_unprivileged_port_start=80` after one `pkexec` prompt, and then
+moves the listeners. On macOS, the proxy binds `[::]`, dual-stack, because
+macOS lets unprivileged programs bind low ports only on the wildcard address,
+and it turns away peers that aren't loopback. Windows and Linux bind
+`127.0.0.1` and `::1`. After binding, a self-check connects to `127.0.0.1` and
+falls back to 8443 when another program takes that traffic.
+
+**DNS.** A responder answers on UDP `127.0.0.1:15353`, or `:53` on Windows,
+since NRPT rules can't name a port. A `.test` name gets an A record for
+`127.0.0.1`, and an AAAA record for `::1` when `::1` is bound. Other record
+types get an empty answer, and other domains get REFUSED. One resolver setup
+covers every name and subdomain.
+
+**One prompt for the setup.** The system setup runs once, elevated, as one
+prompt. As specified for `src-tauri/src/localsystem.rs`:
+
+- macOS: `/etc/resolver/test` (`nameserver 127.0.0.1`, `port 15353`), and the
+  CA trusted in the System keychain, through an `osascript` administrator
+  prompt.
+- Windows: an NRPT rule for `.test` pointing at `127.0.0.1`, and the CA in
+  `LocalMachine\Root`, through one UAC prompt.
+- Linux: a systemd-resolved drop-in that routes `~test` to
+  `127.0.0.1:15353`, or, without systemd-resolved, `/etc/hosts` entries in a
+  marked block. The CA goes in the system store through
+  `update-ca-certificates`, `update-ca-trust`, or `trust`, and in Chrome's and
+  Firefox's NSS databases when `certutil` is installed. It all runs through
+  `pkexec`.
+
+**Several windows.** The first window with a route takes `owner.lock`, which
+the system releases if the window dies, and runs the listeners. Other windows
+with routes retry about every 2 seconds and take over when the owner goes. A
+name is unique across windows, and routes from dead windows are ignored.
+
+**Restore.** Server runs are long-running, so their terminals normally reopen
+with the project by running the raw command again. That would skip
+`local_domain_start` and leave the domain unrouted, so `.test` runs aren't
+restorable. They could reopen through `runConfig` instead.
+
+**Removal.** **Run > Remove .test Domains and Certificate**
+(`removeTestDomains`) asks first, stops this window's `.test` runs and awaits
+their stops, and then calls `local_domains_remove`. It reverses the system
+setup with one prompt and deletes the CA. It fails while other Tusk windows
+serve names.
+
 ### Test results
 
 Every test run adds `--log-junit <app cache>/junit-<n>.xml`, which PHPUnit, Pest,
@@ -9365,3 +9470,33 @@ user code:
   analysis and directory symlinks belong to Mago's orchestrator and loader,
   which Tusk doesn't use, and Guard and the slow-file warning are the command
   line's.
+
+### 2026-10-12: Serve .test domains from Tusk, not a separate tool
+
+- A PHP web server configuration can serve at `https://<domain>.test` (see
+  Local .test domains). The proxy, the DNS responder, and the CA run inside
+  Tusk, only while it runs. There's no daemon to install, update, or leave
+  behind, and the user doesn't need Valet, Herd, or mkcert.
+
+### 2026-10-12: A Tusk DNS resolver for .test, not hosts entries
+
+- The user chose a resolver: one system setup covers every name and
+  subdomain, so a new name needs no new password prompt. The cost is a
+  different hook per system (`/etc/resolver` on macOS, an NRPT rule on
+  Windows, and systemd-resolved on Linux, with `/etc/hosts` as the fallback),
+  and names don't resolve while Tusk is closed.
+
+### 2026-10-12: Several Tusk windows share one proxy through lock files
+
+- Only one program can listen on 443 and the DNS port, so the first window with
+  a route owns the listeners through `owner.lock`, and every window writes its
+  routes to the shared folder. The system releases the lock when a window
+  dies, and another window with routes takes over within about 2 seconds.
+
+### 2026-10-12: The router marks requests HTTPS instead of forwarded headers
+
+- Laravel ignores `X-Forwarded-Proto` unless its trusted proxies include the
+  proxy, which would need a change in every app. The router script sets
+  `$_SERVER['HTTPS']`, the scheme, and the port instead, so `url()` and
+  `request()->isSecure()` work without changes, and the proxy stays a byte
+  copy.
