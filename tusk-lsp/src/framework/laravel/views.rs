@@ -598,7 +598,7 @@ fn component_ignored(index: &Index, changes: &ExceptChanges, class: &str) -> Opt
     let default = index.codebase.get_declaring_property(class.as_bytes(), b"$except").and_then(|p| p.default_type_metadata.as_ref());
     for atomic in default.into_iter().flat_map(|t| t.type_union.types.iter()) {
         let TAtomic::Array(TArray::List(list)) = atomic else { continue };
-        except.extend(list.known_elements.iter().flatten().filter_map(|(_, (_, t))| t.get_single_literal_string_value()).map(|v| String::from_utf8_lossy(v).into_owned()));
+        except.extend(list.known_elements.iter().flat_map(|m| m.iter()).filter_map(|(_, (_, t))| t.get_single_literal_string_value()).map(|v| String::from_utf8_lossy(v).into_owned()));
     }
     for change in changes.get(&class.to_ascii_lowercase()).into_iter().flatten() {
         except = match change.as_ref()? {
@@ -1241,7 +1241,7 @@ fn read_vars(text: &str) -> BTreeSet<String> {
 /// The entries of a keyed array type, such as `compact()`'s or a data array literal's.
 fn entries(t: Option<&TUnion>, vars: &mut BTreeMap<String, Option<String>>) {
     let Some([TAtomic::Array(TArray::Keyed(keyed))]) = t.map(|t| &t.types[..]) else { return };
-    for (key, (optional, value)) in keyed.known_items.iter().flatten() {
+    for (key, (optional, value)) in keyed.known_items.iter().flat_map(|m| m.iter()) {
         if let ArrayKey::String(name) = key {
             vars.insert(name.as_str_lossy().into_owned(), (!optional).then(|| docblock_type(value)).flatten());
         }
@@ -1284,7 +1284,7 @@ pub fn docblock_type(t: &TUnion) -> Option<String> {
             }
             TAtomic::Array(TArray::List(l)) => {
                 // A literal list, such as `[$post]`, has its elements' types and `never` for the rest.
-                let known = l.known_elements.iter().flatten().map(|(_, (_, t))| t);
+                let known = l.known_elements.iter().flat_map(|m| m.iter()).map(|(_, (_, t))| t);
                 let elements: Option<Vec<String>> = known.chain((!l.element_type.is_never()).then_some(&*l.element_type)).map(docblock_type).collect();
                 match elements.filter(|e| !e.is_empty()) {
                     Some(mut e) => {

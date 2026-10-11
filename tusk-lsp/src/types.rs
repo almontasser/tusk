@@ -21,7 +21,7 @@ fn collect(atomic: &TAtomic, codebase: &CodebaseMetadata, out: &mut Vec<String>)
     match atomic {
         TAtomic::Object(TObject::Named(named)) => {
             push(&named.name.as_str_lossy(), codebase, out);
-            for part in named.intersection_types.iter().flatten() {
+            for part in named.intersection_types.iter().flat_map(|v| v.iter()) {
                 collect(part, codebase, out);
             }
         }

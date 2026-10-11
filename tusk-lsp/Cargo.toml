@@ -7,17 +7,17 @@ license = "FSL-1.1-MIT"
 
 [dependencies]
 # Mago's crates change their API between minor versions, so they're pinned and upgraded on purpose.
-mago-allocator = "=1.50.0"
-mago-analyzer = "=1.50.0"
-mago-codex = "=1.50.0"
-mago-database = "=1.50.0"
-mago-names = "=1.50.0"
-mago-php-version = "=1.50.0"
-mago-prelude = { version = "=1.50.0", features = ["build"] }
-mago-reporting = "=1.50.0"
-mago-span = "=1.50.0"
-mago-syntax = "=1.50.0"
-mago-word = "=1.50.0"
+mago-allocator = "=1.56.1"
+mago-analyzer = "=1.56.1"
+mago-codex = "=1.56.1"
+mago-database = "=1.56.1"
+mago-names = "=1.56.1"
+mago-php-version = "=1.56.1"
+mago-prelude = { version = "=1.56.1", features = ["build"] }
+mago-reporting = "=1.56.1"
+mago-span = "=1.56.1"
+mago-syntax = "=1.56.1"
+mago-word = "=1.56.1"
 foldhash = "0.2"
 lsp-server = "0.10"
 lsp-types = "0.97"
@@ -29,15 +29,15 @@ rayon = "1"
 ignore = "0.4"
 globset = "0.4"
 percent-encoding = "2"
-mago-syntax-core = "=1.50.0"
-mago-text-edit = "=1.50.0"
-mago-linter = { version = "=1.50.0", features = ["serde"] }
+mago-syntax-core = "=1.56.1"
+mago-text-edit = "=1.56.1"
+mago-linter = { version = "=1.56.1", features = ["serde"] }
 toml = "0.9"
 toml_edit = "0.25"
 libc = "0.2.189"
-mago-formatter = { version = "=1.50.0", features = ["serde"] }
+mago-formatter = { version = "=1.56.1", features = ["serde"] }
 
 [dev-dependencies]
-mago-allocator = "=1.50.0"
+mago-allocator = "=1.56.1"
 mimalloc = "0.1.52"
 tempfile = "3.27.0"
