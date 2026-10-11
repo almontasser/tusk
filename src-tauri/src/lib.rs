@@ -332,6 +332,7 @@ pub fn run() {
             fs::remove_empty_dir,
             fs::trash_path,
             fs::watch,
+            fs::unwatch,
             lsp::lsp_start,
             lsp::lsp_send,
             lsp::lsp_stop,

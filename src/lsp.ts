@@ -1171,6 +1171,14 @@ export async function startLsp(root: string, h: Host) {
   checkComposerLock(root);
 }
 
+/** Stops the language servers and their processes, and any still starting, as when the project closes. */
+export function stopLsp() {
+  starts++;
+  projectRoot = "";
+  servers.splice(0).forEach((s) => (s.stop(), invoke("lsp_stop", { name: s.name }).catch(() => {})));
+  lazyStart?.dispose();
+}
+
 /**
  * Scans vendor for folders that declare nothing, after composer.lock changes (a project's first open included),
  * and when there are some the list doesn't skip and no earlier scan offered, says so in a toast whose Review
