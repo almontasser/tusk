@@ -593,6 +593,21 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn falls_back_to_a_system_port_when_both_are_taken() {
+        let dir = temp_dir();
+        let ports = test_ports();
+        let _https = TcpListener::bind((Ipv4Addr::LOCALHOST, ports.https)).await.unwrap();
+        let _fallback = TcpListener::bind((Ipv4Addr::LOCALHOST, ports.fallback)).await.unwrap();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
+        a.register("shop", upstream("shop body").await).unwrap();
+        let (https, _) = a.ensure_listeners().await.unwrap();
+        assert!(https != 0 && https != ports.https && https != ports.fallback);
+        assert!(get(https, &a.inner.ca().der.clone(), "shop.test").await.ends_with("shop body"));
+        drop(a);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn shares_and_hands_over_the_proxy() {
         let dir = temp_dir();
         let ports = test_ports();

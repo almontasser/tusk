@@ -39,9 +39,13 @@ impl Listening {
 pub async fn listen(inner: Arc<Inner>, ports: &Ports) -> Result<Listening, String> {
     let (https, https_port, v6) = match bind_checked(ports.https).await {
         Ok(bound) => bound,
-        Err(first) => bind_checked(ports.fallback)
-            .await
-            .map_err(|e| format!("Tusk couldn't listen on port {} ({first}) or port {} ({e}).", ports.https, ports.fallback))?,
+        Err(first) => match bind_checked(ports.fallback).await {
+            Ok(bound) => bound,
+            // Another dev tool often holds the fallback too, so let the system pick a free port.
+            Err(e) => bind_checked(0).await.map_err(|_| {
+                format!("Tusk couldn't listen on port {} ({first}) or port {} ({e}).", ports.https, ports.fallback)
+            })?,
+        },
     };
     let mut l = Listening::default();
     l.https_port = https_port;
@@ -97,17 +101,20 @@ async fn bind(port: u16) -> std::io::Result<(Vec<TcpListener>, bool)> {
         return Ok((vec![TcpListener::bind((Ipv6Addr::UNSPECIFIED, port)).await?], true));
     }
     let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
+    // With port 0, the system picks the port for IPv4 and IPv6 takes the same one.
+    let port = v4.local_addr()?.port();
     match TcpListener::bind((Ipv6Addr::LOCALHOST, port)).await {
         Ok(v6) => Ok((vec![v4, v6], true)),
         Err(_) => Ok((vec![v4], false)),
     }
 }
 
-/// Binds `port` and checks that a connection to 127.0.0.1 reaches it. tokio sets SO_REUSEADDR, so on macOS a
+/// Binds `port`, or a port the system picks for 0, and checks that a connection to 127.0.0.1 reaches it. tokio sets SO_REUSEADDR, so on macOS a
 /// wildcard bind can succeed while another process's 127.0.0.1 bind on the same port takes the loopback traffic.
 async fn bind_checked(port: u16) -> Result<(Vec<TcpListener>, u16, bool), String> {
     let (listeners, v6) = retry_bind(|| bind(port)).await.map_err(|e| e.to_string())?;
     let first = &listeners[0];
+    let port = first.local_addr().map_err(|e| e.to_string())?.port();
     let check = async {
         let client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.ok()?;
         let me = client.local_addr().ok()?;
