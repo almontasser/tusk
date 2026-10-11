@@ -57,6 +57,8 @@ export type Field = {
   shown?: (c: RunConfig) => boolean;
   /** The field names a file or folder in the project, which the dialog checks exists. */
   path?: "file" | "dir";
+  /** A checkbox shown in the fields' order, such as one that reveals the field after it, not with the options below. */
+  inline?: boolean;
 };
 
 export type TypeInfo = {
@@ -144,17 +146,18 @@ export const TYPES: Record<ConfigType, TypeInfo> = {
     defaults: { server: "artisan", host: "127.0.0.1", port: 8000, docker: false, testDomain: false },
     fields: [
       { key: "server", label: "Server", kind: "select", options: [["artisan", "php artisan serve"], ["php", "PHP's built-in server (php -S)"]] },
+      {
+        key: "testDomain",
+        label: "Serve at https://‹domain›.test",
+        kind: "checkbox",
+        inline: true,
+        help: "The first run sets up a local certificate and DNS, and asks for your password.",
+      },
       { key: "host", label: "Host", kind: "text", placeholder: "127.0.0.1", shown: (c) => !c.testDomain },
       { key: "port", label: "Port", kind: "number", placeholder: "8000", shown: (c) => !c.testDomain },
       { key: "domain", label: "Domain", kind: "text", placeholder: "the project folder's name", help: "Served at https://‹domain›.test.", shown: (c) => !!c.testDomain },
       { key: "path", label: "Document root", kind: "text", placeholder: "public", shown: (c) => c.server === "php", path: "dir" },
       { key: "args", label: "Arguments", kind: "text" },
-      {
-        key: "testDomain",
-        label: "Serve at https://‹domain›.test",
-        kind: "checkbox",
-        help: "Tusk sets up a local certificate and DNS the first time, and your system asks for your password once.",
-      },
     ],
   },
 };

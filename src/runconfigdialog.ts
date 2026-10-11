@@ -209,8 +209,8 @@ export function openConfigurationsDialog({ entries: initial, selected, add, root
         item.where === "temporary" ? h("span", { class: "option-note" }, "Temporary: save it to keep it.") : null,
       ),
       h("h3", {}, icon(info.icon), info.label),
-      h("div", { class: "dialog-fields" }, ...info.fields.filter((f) => f.kind !== "checkbox" && (!f.shown || f.shown(c))).map((f) => control(f, c))),
-      h("div", { class: "dialog-options" }, ...info.fields.filter((f) => f.kind === "checkbox" && (!f.shown || f.shown(c))).map((f) => control(f, c))),
+      h("div", { class: "dialog-fields" }, ...info.fields.filter((f) => (f.kind !== "checkbox" || f.inline) && (!f.shown || f.shown(c))).map((f) => control(f, c))),
+      h("div", { class: "dialog-options" }, ...info.fields.filter((f) => f.kind === "checkbox" && !f.inline && (!f.shown || f.shown(c))).map((f) => control(f, c))),
       h("h3", {}, "Environment"),
       h(
         "div",
