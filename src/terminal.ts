@@ -276,9 +276,13 @@ export function closeFocusedPanelTab() {
 }
 
 function close(session: Session) {
+  // A tab that's already closed has nothing to close; splice(-1) would drop the last tab and leave its view showing.
+  const i = sessions.indexOf(session);
+  if (i < 0) return;
   session.dispose();
-  sessions.splice(sessions.indexOf(session), 1);
+  sessions.splice(i, 1);
   if (active === session) activate(sessions.at(-1));
+  else renderTabs();
   if (!sessions.length) showPanel(false);
 }
 
