@@ -3,6 +3,9 @@ mod db;
 mod deploy;
 mod fs;
 mod grpc;
+// The proxy in localdomains.rs calls it; until that lands, nothing does.
+#[allow(dead_code)]
+mod localsystem;
 mod lsp;
 mod profile;
 mod pty;
