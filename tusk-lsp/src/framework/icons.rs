@@ -396,6 +396,8 @@ fn php_icon_at(ctx: &Ctx<'_>, offset: u32) -> Option<(u32, u32, String, bool)> {
 }
 
 pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
+    // In PHP, icons are strings, so the sets, which can take booting the app, wait for one.
+    let in_php = if is_blade(&ctx.doc) { None } else { Some(icon_at(ctx, offset)?) };
     let sets = sets(&ctx.snap.framework);
     if sets.is_empty() {
         return None;
@@ -410,7 +412,10 @@ pub fn completion(ctx: &Ctx<'_>, offset: u32) -> Option<Vec<CompletionItem>> {
             return Some(items(&sets, range, "x-", "~"));
         }
     }
-    let (start, _, value, is_site) = icon_at(ctx, offset)?;
+    let (start, _, value, is_site) = match in_php {
+        Some(found) => found,
+        None => icon_at(ctx, offset)?,
+    };
     let typed = ctx.doc.text.get(start as usize..offset as usize)?;
     // Any string that starts with a set's prefix completes too, wherever it is.
     if !is_site && !sets.iter().any(|s| typed.starts_with(&format!("{}-", s.prefix))) {
