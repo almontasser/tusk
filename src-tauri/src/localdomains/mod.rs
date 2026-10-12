@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -176,6 +177,8 @@ pub struct Instance {
     inner: Arc<Inner>,
     ports: Ports,
     owner: tokio::sync::Mutex<Option<Owner>>,
+    /// Keep the listeners running with no routes, as the setting to start the proxy with Tusk asks.
+    keep: AtomicBool,
     /// Held for the instance's lifetime, so others can tell its routes are live.
     _lock: File,
 }
@@ -190,7 +193,7 @@ impl Instance {
         let lock = File::create(routes.join(format!("{id}.lock"))).map_err(|e| e.to_string())?;
         lock.try_lock().map_err(|e| e.to_string())?;
         let inner = Arc::new(Inner { dir, id, routes: Mutex::default(), runnable: Mutex::default(), on_run, ca: RwLock::new(Arc::new(ca)) });
-        let me = Arc::new(Instance { inner, ports, owner: tokio::sync::Mutex::new(None), _lock: lock });
+        let me = Arc::new(Instance { inner, ports, owner: tokio::sync::Mutex::new(None), keep: AtomicBool::new(false), _lock: lock });
         let weak: Weak<Instance> = Arc::downgrade(&me);
         tokio::spawn(async move {
             loop {
@@ -314,17 +317,37 @@ impl Instance {
         write_atomic(&self.inner.dir.join("owner.json"), &serde_json::to_vec(&info).map_err(|e| e.to_string())?)
     }
 
-    /// Takes over the listeners when the owner has quit and this process has routes. An owner steps down when
-    /// owner.json is gone, which means another process removed the setup, and it has no routes of its own.
+    /// Whether this process needs no listeners: it serves nothing and doesn't keep them.
+    fn idle(&self) -> bool {
+        self.inner.routes.lock().unwrap().is_empty() && !self.keep.load(Ordering::Relaxed)
+    }
+
+    /// Keeps the listeners running with no routes, or stops keeping them. Stopping hands them to another process
+    /// with routes, which takes over on its next tick, unless this one serves names itself.
+    pub async fn keep_listening(&self, on: bool) -> Result<Vec<String>, String> {
+        self.keep.store(on, Ordering::Relaxed);
+        if on {
+            return self.ensure_listeners().await.map(|(_, notes)| notes);
+        }
+        let mut owner = self.owner.lock().await;
+        if owner.is_some() && self.idle() {
+            let _ = fs::remove_file(self.inner.dir.join("owner.json"));
+            *owner = None;
+        }
+        Ok(Vec::new())
+    }
+
+    /// Takes over the listeners when the owner has quit and this process has routes, or keeps them. An idle owner
+    /// steps down when owner.json is gone, which means another process removed the setup.
     async fn tick(&self) {
         self.take_requests();
-        let no_routes = self.inner.routes.lock().unwrap().is_empty();
+        let idle = self.idle();
         let mut owner = self.owner.lock().await;
         if owner.is_some() {
-            if no_routes && !self.inner.dir.join("owner.json").exists() {
+            if idle && !self.inner.dir.join("owner.json").exists() {
                 *owner = None;
             }
-        } else if !no_routes {
+        } else if !idle {
             match self.try_own(&mut owner).await {
                 Ok(Some(notes)) => notes.iter().for_each(|n| eprintln!("local domains: {n}")),
                 Ok(None) => {}
@@ -508,6 +531,26 @@ pub async fn local_domains_runnable(app: AppHandle, runnable: BTreeMap<String, S
         }
     };
     me.set_runnable(runnable)
+}
+
+/// Starts the proxy and its DNS responder with nothing served, so `.test` names resolve and their page offers to run
+/// them, or stops keeping them. It asks for no setup: names reach Tusk once a first `.test` run has set up the
+/// system. Returns notes, such as a port another program holds.
+#[tauri::command]
+pub async fn local_domains_serve(app: AppHandle, on: bool) -> Result<Vec<String>, String> {
+    let me = match current() {
+        Some(me) => me,
+        None if !on => return Ok(Vec::new()),
+        None => {
+            let dir = shared_dir(&app)?;
+            let loaded = {
+                let dir = dir.clone();
+                crate::blocking(move || ca::ensure(&dir)).await?
+            };
+            instance(&app, &dir, loaded)?
+        }
+    };
+    me.keep_listening(on).await
 }
 
 /// Stops serving `name` from this process. Stopping a name that isn't served does nothing.
@@ -812,6 +855,33 @@ mod tests {
 
         // A served name passes POSTs through to its server.
         assert!(send(https, &ca, "shop.test", &post("shop.test", "x")).await.ends_with("shop body"));
+        drop((a, b));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn keeps_listening_with_nothing_served() {
+        let dir = temp_dir();
+        let ports = test_ports();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
+        let b = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
+        let ca = a.inner.ca().der.clone();
+        // With the setting on, A runs the proxy with no routes, so a name's page answers.
+        a.keep_listening(true).await.unwrap();
+        assert!(a.owner.lock().await.is_some());
+        assert!(get(ports.https, &ca, "blog.test").await.starts_with("HTTP/1.1 404"));
+        a.tick().await;
+        assert!(a.owner.lock().await.is_some(), "an owner that keeps listening doesn't step down");
+
+        // B serves a name through A. When A stops keeping the listeners, B takes over.
+        b.register("b", upstream("b body").await).unwrap();
+        b.ensure_listeners().await.unwrap();
+        a.keep_listening(false).await.unwrap();
+        assert!(a.owner.lock().await.is_none());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        b.tick().await;
+        assert!(b.owner.lock().await.is_some());
+        assert!(get(ports.https, &ca, "b.test").await.ends_with("b body"));
         drop((a, b));
         let _ = fs::remove_dir_all(dir);
     }

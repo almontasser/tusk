@@ -3077,7 +3077,9 @@ The address has no port when Tusk can use port 443. Otherwise it's
 **Use Port 443…**, which asks for your password once; rerun the server
 afterwards. Stopping the run stops serving the domain. Opening a domain that
 isn't running shows a page with a **Run** button when an open Tusk window has
-its configuration; the page turns into your site once it's up. The domains work only
+its configuration; the page turns into your site once it's up. To have that page
+answer before you've run anything, turn on **Settings > .test Domains > Start
+the .test proxy with Tusk**. The domains work only
 while Tusk runs, and a configuration served at a `.test` domain can't run in
 Docker.
 

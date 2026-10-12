@@ -376,6 +376,7 @@ pub fn run() {
             localdomains::local_domain_start,
             localdomains::local_domain_stop,
             localdomains::local_domains_runnable,
+            localdomains::local_domains_serve,
             localdomains::local_domains_allow_port_443,
             localdomains::local_domains_remove,
             check_update,

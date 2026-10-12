@@ -17,7 +17,7 @@ import { initCoverage, loadCoverage } from "./coverage";
 import { formRequestParameter, methodBody, methodLine, routeTarget, validationRules } from "./phptypes";
 import { pathsFor, psr4From } from "./psr4";
 import { type MenuItem, showMenu } from "./files";
-import { onSettings, settings } from "./settings";
+import { onSettings, registerSettings, settings } from "./settings";
 import { onProjectValue, projectValue, setProjectValue } from "./projectstate";
 import { errorText, showError, withProgress } from "./status";
 import { addTemporary, clean, commandFor, docrootFor, domainFor, longRunning, type Mode, type Project, readConfigs, routerScript, type RunConfig, type Served, servesTestDomain, summary, TYPES, uniqueName, validate } from "./runconfig";
@@ -365,9 +365,32 @@ export async function removeTestDomains() {
   await Promise.all([...serving.map((r) => r.stopRoute!()), ...routeStops.values()]);
   const done = await withProgress("Removing .test domains and the certificate…", () => invoke("local_domains_remove").then(() => true), { error: "Can't remove the .test domains" });
   if (done) toast("Removed Tusk's .test domains and its local certificate.", { kind: "info" });
-  // Removing stopped this window's part of the proxy, so publish its domains again.
+  // Removing stopped this window's part of the proxy, so publish its domains, and start it again if the setting asks.
   published = "";
   publishRunnable();
+  serveWithSetting(true);
+}
+
+const domainSettings = registerSettings(".test Domains", { localDomainsAtStartup: false }, [
+  {
+    key: "localDomainsAtStartup",
+    label: "Start the .test proxy with Tusk",
+    type: "checkbox",
+    help: "So https://‹domain›.test opens a page that can run its server before you've run it. It needs your first .test run to have set up your system.",
+  },
+]);
+
+/** Whether this window last asked the proxy to keep running. */
+let serving = false;
+
+/** Starts the proxy, or stops keeping it, as the setting says. `force` asks again, as after removing the setup. */
+function serveWithSetting(force = false) {
+  const on = domainSettings.localDomainsAtStartup;
+  if (on === serving && !force) return;
+  serving = on;
+  invoke<string[]>("local_domains_serve", { on })
+    .then((notes) => notes.forEach((note) => status(note)))
+    .catch((e) => showError(on ? "Can't start the .test proxy" : "Can't stop the .test proxy", e));
 }
 
 /** What `publishRunnable` sent last, so it sends only changes. */
@@ -802,6 +825,7 @@ export function initRunner(
   showDiff = diff;
   loadProfiler = profiler;
   listen<string>("local-domain-run", (e) => runFromPage(e.payload));
+  onSettings(() => serveWithSetting());
   getRoot = root;
   openAt = open;
   status = showStatus;

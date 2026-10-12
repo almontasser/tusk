@@ -3078,6 +3078,16 @@ window can do; a request older than 30 seconds is dropped. The frontend runs
 the configuration as **Run** would, unless it's already running, and the
 page reloads into the site once it answers.
 
+**Starting with Tusk.** The proxy normally starts with the first `.test` run.
+The **Start the .test proxy with Tusk** setting (`localDomainsAtStartup`, off by
+default, in the **.test Domains** group) calls `local_domains_serve`, which
+starts the listeners and the DNS responder with nothing served, so a name's
+page, and its **Run** button, answer before anything runs. It asks for no
+setup: names reach Tusk once a first `.test` run has set up the system. The
+window keeps the listeners while the setting is on, and takes them over like a
+window with routes when their owner quits. Turning the setting off hands them
+to a window with routes, unless this one serves names itself.
+
 **The shared folder.** The backend keeps its state in `tusk-local-domains/`
 in the local data folder: `~/Library/Application Support` on macOS,
 `%LOCALAPPDATA%` on Windows, and `~/.local/share` on Linux. Development and
