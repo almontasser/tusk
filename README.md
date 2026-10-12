@@ -583,7 +583,7 @@ split it right or down, or to copy or reveal its path. Bottom panel tabs, such
 as the terminals, **Tests**, and **Problems**, work the same way: right-click
 one to close it, the others, or all; middle-click to close it; and drag it along
 the tab bar to reorder it. ⌘W closes the panel tab when you last clicked in the
-panel, and the editor tab otherwise. Right-click a terminal to copy, paste,
+panel, and the editor tab otherwise; only that tab's underline is in the accent color. Right-click a terminal to copy, paste,
 select all, or clear it; on a Mac, ⌘K clears the focused terminal too. Click **+** at the end of the panel's tab bar for a
 new terminal. The terminal button shows the last shell you used, or opens
 one, even while another panel tab shows. It skips command tabs, such as

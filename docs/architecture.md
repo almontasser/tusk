@@ -2891,6 +2891,9 @@ use `showMenu` from `files.ts`. A capture-phase `pointerdown` and `focusin`
 listener records whether you last used the panel, and **Close Tab** (⌘W) calls
 `closeFocusedPanelTab` first, falling back to the editor tab. Clicks count, not
 only focus, because panel views such as **Tests** have nothing that takes focus.
+The same listener sets `panel-focused` on `body`, and CSS grays the active-tab
+underline everywhere except where ⌘W will act: an HTTP request tab while focus is
+in its form (`:focus-within`), else the panel tab, else the focused pane's tab.
 
 A panel tab dropped on an editor pane leaves `sessions` for `docked` in
 `terminal.ts`, still running, and `main.ts` gives it a `view:N` path in the

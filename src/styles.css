@@ -401,6 +401,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pane-editor { flex: 1; min-height: 0; position: relative; }
 /* The focused pane's current tab is underlined in the accent color; other panes' in gray. */
 .pane:not(.focused) .tabs .tab.active::after { background: var(--faint); }
+/* Likewise across the editor and the panel: ⌘W closes a request tab when focus is in the HTTP form, else the panel's tab, else the editor's. */
+body.panel-focused #editor .tabs .tab.active::after,
+body:not(.panel-focused) #panel .tab.active::after,
+#panel:has(.http-client:focus-within) #terminal-tabs .tab.active::after,
+.pane:has(.http-client:focus-within) > .tabs .tab.active::after,
+.http-client:not(:focus-within) .tab.active::after { background: var(--faint); }
 /* The splitters on a pane's left and top edges, over its border with the pane or group before it. */
 #editor .pane > .splitter { position: absolute; z-index: 20; }
 #editor .pane > .splitter-x { top: 0; bottom: 0; left: -4px; width: 8px; }

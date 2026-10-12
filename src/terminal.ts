@@ -39,7 +39,9 @@ let active: Session | undefined;
 let panelVisible = false;
 // Whether you last clicked or focused inside the panel, so ⌘W closes a panel tab instead of an editor tab.
 let panelFocused = false;
-const track = (e: Event) => (panelFocused = $("panel").contains(e.target as Node));
+const track = (e: Event) => ((panelFocused = $("panel").contains(e.target as Node)), markFocus());
+// Marks which area ⌘W acts on, so only its current tab is underlined in the accent color.
+const markFocus = () => document.body.classList.toggle("panel-focused", panelFocused && panelVisible);
 addEventListener("pointerdown", track, true);
 addEventListener("focusin", track, true);
 
@@ -460,6 +462,7 @@ newTerminal.onclick = () => openTerminal(editorHost.root());
 function showPanel(visible: boolean) {
   panelVisible = visible;
   $("panel").hidden = !visible;
+  markFocus();
   if (visible) active?.fit?.fit();
   renderTabs();
 }
