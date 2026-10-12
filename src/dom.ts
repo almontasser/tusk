@@ -28,6 +28,19 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props<K>
   return e;
 }
 
+/** `fn` after calls stop for `wait` ms. `flush` runs a pending call now. */
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: A | null = null;
+  const run = () => {
+    clearTimeout(timer);
+    const args = pending;
+    pending = null;
+    if (args) fn(...args);
+  };
+  return Object.assign((...args: A) => (clearTimeout(timer), (pending = args), (timer = setTimeout(run, wait))), { flush: run });
+}
+
 export const icon = (name: string) => h("span", { class: `codicon codicon-${name}` });
 // Tooltips name keys as the Mac draws them (⌘W); keyText names them as this platform does.
 export const iconButton = (name: string, title: string, onclick: () => unknown) => h("button", { class: "icon-button", title: keyText(title), onclick }, icon(name));

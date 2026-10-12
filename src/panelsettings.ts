@@ -1,7 +1,7 @@
 // A panel's settings, in an editor tab of its own: its brand, colors, sign-in pages, layout, navigation groups,
 // plugins, and tenancy, read from the panel provider's `panel()` and changed there (src/panelgen.ts), with a preview
 // of the panel beside them. Each change is saved at once, as in the other designers.
-import { h, icon, iconButton, redraw } from "./dom";
+import { debounce, h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import type { Catalog } from "./filamentcatalog";
 import { type Doc, host } from "./filamentdesigner";
@@ -112,7 +112,7 @@ class PanelSettings {
 
   private async read() {
     const model = await host.ensureModel(this.file);
-    this.listening ??= model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
+    this.listening ??= model.onDidChangeContent(debounce(() => void this.read().then(() => this.el.isConnected && this.render()), 150));
     const text = model.getValue();
     this.doc = { path: this.file, model, text, outline: await fapp.outlineOf(text, this.file) };
   }

@@ -498,12 +498,18 @@ let phpstanRunning = false;
  */
 export function showInlineProblems(ed: monaco.editor.ICodeEditor) {
   const inline = ed.createDecorationsCollection();
+  // What the decoration shows. An edit clears it, and so does showing another file, so one still in the model with
+  // the same text needs no update.
+  let drawn = "";
   const update = () => {
     const model = ed.getModel();
     const line = ed.getPosition()?.lineNumber;
     const markers = model && line && settings.inlineProblems ? monaco.editor.getModelMarkers({ resource: model.uri }) : [];
     const shown = inlineProblem(markers.filter((m) => isShown(m.severity) && m.startLineNumber === line));
     if (!model || !line || !shown) return inline.clear();
+    const key = `${line} ${shown.severity} ${shown.text}`;
+    if (key === drawn && inline.getRanges().length) return;
+    drawn = key;
     const col = model.getLineMaxColumn(line);
     inline.set([{ range: new monaco.Range(line, col, line, col), options: { after: { content: `    ${shown.text}`, inlineClassName: `inline-problem inline-problem-${level(shown.severity)}` } } }]);
   };

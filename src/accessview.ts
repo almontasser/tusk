@@ -1,7 +1,7 @@
 // A model's Access view: the resource designer's Access tab in an editor tab of its own, for models without a
 // resource, or opened from the model designer or a policy file. Each change is saved at once, as in the designer.
 import type * as L from "vscode-languageserver-protocol";
-import { h, icon, iconButton } from "./dom";
+import { debounce, h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import { type AccessHost, renderAccessTab } from "./filamentaccess";
 import { humanize } from "./filamentcatalog";
@@ -71,7 +71,7 @@ class AccessView implements AccessHost {
   private async doc(path: string): Promise<Doc> {
     const model = await host.ensureModel(path);
     const text = model.getValue();
-    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.refresh(path)));
+    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(debounce(() => void this.refresh(path), 150)));
     return { path, model, text, outline: await fapp.outlineOf(text, path) };
   }
 

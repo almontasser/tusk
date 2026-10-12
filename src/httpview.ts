@@ -77,7 +77,7 @@ import { choose, confirm, type Item, pick, rank } from "./palette";
 import { openSettings } from "./settings";
 import { listRoutes, openRoute, routeRules } from "./runner";
 import { showPanelView } from "./terminal";
-import { h, icon, iconButton } from "./dom";
+import { debounce, h, icon, iconButton } from "./dom";
 import { limits } from "./limits";
 import { listNav } from "./listnav";
 import { splitter } from "./splitter";
@@ -101,18 +101,6 @@ function ago(time: number) {
   // With the time, so several sends of one request on a day stay apart.
   const when: Intl.DateTimeFormatOptions = s < 6 * 86400 ? { weekday: "short" } : { month: "short", day: "numeric" };
   return new Date(time).toLocaleString(undefined, { ...when, hour: "numeric", minute: "2-digit" });
-}
-/** `fn` after calls stop for `wait` ms. `flush` runs a pending call now. */
-function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let pending: A | null = null;
-  const run = () => {
-    clearTimeout(timer);
-    const args = pending;
-    pending = null;
-    if (args) fn(...args);
-  };
-  return Object.assign((...args: A) => (clearTimeout(timer), (pending = args), (timer = setTimeout(run, wait))), { flush: run });
 }
 const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   automaticLayout: true,

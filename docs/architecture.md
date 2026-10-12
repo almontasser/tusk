@@ -3451,7 +3451,10 @@ replacement without the added line.
   commit message as text after the line. Blame runs `git blame --porcelain
   --contents -` with the editor text on standard input, so lines you haven't
   saved show "Not committed yet". Results are cached per file and version,
-  shared by panes, and only one blame runs per file at a time.
+  shared by panes, and only one blame runs per file at a time. Blaming new text
+  reads the whole file (about 10 ms on the main thread for 10,000 lines), so an
+  edit hides the inline blame until typing pauses for 2 seconds. A cursor move
+  alone shows the cached blame after 300 ms.
 - **Annotations.** **Annotate with Git Blame** swaps the line numbers for a
   function that returns the commit, age, and author of each line. Monaco's
   `lineNumbers` option accepts a function, so this needs no custom gutter.
@@ -6980,12 +6983,16 @@ measurement.
   drawn. Mago's quick-fix provider, which Monaco asks each time the caret
   settles, returns at once for a line without Mago problems. The session saves
   each time the caret or the scroll position settles, so each terminal keeps
-  its saved text until it prints or clears.
-- **Views stop listening when their tab closes.** A designer or view that
-  follows edits to its files (Access, Automations, Environment, Notifications,
-  Panel Settings, Import and Export, Scheduled Tasks, Widgets) disposes its
-  model listeners when its tab closes. Its element stays in the page when
-  parked, so `isConnected` doesn't tell a closed view from an open one.
+  its saved text until it prints or clears. Change markers, spelling
+  underlines, and the inline problem aren't set again when they'd come out the
+  same, which would redraw the lines they're on.
+- **Views follow edits after a pause, and stop when their tab closes.** A
+  designer or view that follows edits to its files (Access, Automations,
+  Environment, Notifications, Panel Settings, Import and Export, Scheduled
+  Tasks, Widgets) reads the file again and redraws 150 ms after typing stops
+  (`debounce` in `dom.ts`), and disposes its model listeners when its tab
+  closes. Its element stays in the page when parked, so `isConnected` doesn't
+  tell a closed view from an open one.
 - **Read layout once a frame.** The Markdown preview's scroll sync reads its
   blocks' positions in an animation frame, not in every scroll event.
 - **Load rarely used code on first use.** `xterm.js`, `marked` and DOMPurify,

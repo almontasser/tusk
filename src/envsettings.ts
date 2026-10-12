@@ -3,7 +3,7 @@
 // to `.env` at once through the editor's model, so open tabs and local history stay in step; src/envgen.ts edits
 // the text. Beside each value, the value the booted app uses, from introspect.php, shows when they differ.
 import { invoke } from "@tauri-apps/api/core";
-import { h, icon, iconButton, redraw, toast } from "./dom";
+import { debounce, h, icon, iconButton, redraw, toast } from "./dom";
 import type { monaco } from "./editor";
 import { blockKeys, encode, envValues, interpolate, isSecret, readEnv, setEnv, timezoneFromEnv, timezoneSource } from "./envgen";
 import * as fapp from "./filamentapp";
@@ -66,7 +66,7 @@ class EnvSettings {
     if (!(await invoke<boolean>("path_exists", { path: this.path }))) return (this.missing = true), this.render();
     this.missing = false;
     this.model = await host.ensureModel(this.path);
-    this.listening = this.model.onDidChangeContent(() => this.el.isConnected && this.render());
+    this.listening = this.model.onDidChangeContent(debounce(() => this.el.isConnected && this.render(), 150));
     await this.readProject();
   }
 

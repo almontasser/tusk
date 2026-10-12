@@ -3,7 +3,7 @@
 // runs. It also explains that the scheduler must run, with buttons for development and the line for a server's
 // cron, and edits the prunable() query of the models `model:prune` cleans up.
 import { invoke } from "@tauri-apps/api/core";
-import { h, icon, iconButton, redraw } from "./dom";
+import { debounce, h, icon, iconButton, redraw } from "./dom";
 import { editFiles } from "./codeapply";
 import * as fapp from "./filamentapp";
 import { host } from "./filamentdesigner";
@@ -120,7 +120,7 @@ class ScheduleDesigner {
       const path = `${this.root}/${rel}`;
       if (!(await invoke<boolean>("path_exists", { path }).catch(() => false))) continue;
       const model = await host.ensureModel(path);
-      if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render())));
+      if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(debounce(() => void this.read().then(() => this.el.isConnected && this.render()), 150)));
       const text = model.getValue();
       const outline = await fapp.outlineOf(text, path);
       const place = findPlace(kind, outline);

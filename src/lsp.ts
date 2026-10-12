@@ -129,15 +129,18 @@ const toMarker = (d: L.Diagnostic, owner: string): monaco.editor.IMarkerData => 
 /**
  * Spelling gets a green wavy underline of its own, as in PhpStorm, since Monaco styles markers by severity only.
  * Following the markers, rather than the server's publishes, clears the underlines when the spell checker stops.
+ * Other servers' markers change after every edit, so the underlines are set again only when the typos differ.
  */
-const typoDecorations = new Map<string, string[]>();
+const typoDecorations = new WeakMap<monaco.editor.ITextModel, { ids: string[]; key: string }>();
 monaco.editor.onDidChangeMarkers((uris) => {
   for (const uri of uris) {
     const model = monaco.editor.getModel(uri);
-    const old = typoDecorations.get(uri.toString()) ?? [];
-    const typos = model && spelling.severity === "typo" ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
-    if (!model || (!old.length && !typos.length)) continue;
-    typoDecorations.set(uri.toString(), model.deltaDecorations(old, typos.map((range) => ({ range, options: { description: "typo", inlineClassName: "typo" } }))));
+    if (!model) continue;
+    const typos = spelling.severity === "typo" ? monaco.editor.getModelMarkers({ resource: uri, owner: "lsp:typos" }) : [];
+    const key = JSON.stringify(typos.map((m) => [m.startLineNumber, m.startColumn, m.endLineNumber, m.endColumn]));
+    const old = typoDecorations.get(model);
+    if (key === (old?.key ?? "[]")) continue;
+    typoDecorations.set(model, { key, ids: model.deltaDecorations(old?.ids ?? [], typos.map((range) => ({ range, options: { description: "typo", inlineClassName: "typo" } }))) });
   }
 });
 

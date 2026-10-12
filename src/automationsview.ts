@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { type Action, type Cond, methodsOf, observedByEdits, observerClass, opFor, type Op, readObserver, type Rule, ruleEdits, slotOf, TRIGGERS, type Trigger, type Value } from "./automationgen";
 import { editFiles } from "./codeapply";
-import { h, icon, iconButton } from "./dom";
+import { debounce, h, icon, iconButton } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -96,7 +96,7 @@ class AutomationsView {
   /** The observer's file with its outline, read again whenever it changes in the editor. */
   private async read(path: string, fqn: string): Promise<Doc> {
     const model = await host.ensureModel(path);
-    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.refresh()));
+    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(debounce(() => void this.refresh(), 150)));
     const text = model.getValue();
     return { path, fqn, text, outline: await fapp.outlineOf(text, path) };
   }

@@ -2,7 +2,7 @@
 // the record a row fills, changed in its code as you go (src/portergen.ts), with the CSV they read or write beside
 // them. It also says what imports and exports still need in the app: Filament's tables, and a queue worker.
 import { editFiles } from "./codeapply";
-import { h, icon, iconButton, redraw } from "./dom";
+import { debounce, h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import { humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -53,7 +53,7 @@ class PorterDesigner {
 
   private async read() {
     const m = await host.ensureModel(this.file);
-    this.listening ??= m.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
+    this.listening ??= m.onDidChangeContent(debounce(() => void this.read().then(() => this.el.isConnected && this.render()), 150));
     const text = m.getValue();
     const outline = await fapp.outlineOf(text, this.file);
     const cls = outline.classes.find((c) => c.name);

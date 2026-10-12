@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
 import { monaco } from "./editor";
 import { hasConflicts } from "./conflicts";
-import { h, icon, iconButton } from "./dom";
+import { debounce, h, icon, iconButton } from "./dom";
 import { copyHash, showCommitDiff, showCommitPopup, showInLog } from "./history";
 import { openMerge } from "./merge";
 import type { MenuItem } from "./files";
@@ -594,10 +594,6 @@ export const isAnnotated = (editor: monaco.editor.ICodeEditor) => {
 export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const markers = editor.createDecorationsCollection();
   const inline = editor.createDecorationsCollection();
-  const debounce = (fn: () => unknown, ms: number) => {
-    let t: ReturnType<typeof setTimeout>;
-    return () => (clearTimeout(t), (t = setTimeout(fn, ms)));
-  };
   const relOf = (model: monaco.editor.ITextModel) => {
     const root = host.root();
     return current && model.uri.scheme === "file" && model.uri.fsPath.startsWith(root + "/") ? model.uri.fsPath.slice(root.length + 1) : undefined;
@@ -609,7 +605,11 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     const head = rel ? await headLines(rel) : null;
     if (!model || !rel || head === null || editor.getModel() !== model) return markers.clear(), changeStates.delete(editor);
     const changes = lineChanges(head, model.getLinesContent());
+    const before = changeStates.get(editor)?.changes;
     changeStates.set(editor, { rel, head, changes });
+    // Markers already where the changes are aren't set again, which would redraw the gutter after every pause.
+    const drawn = markers.getRanges();
+    if (changes.length === drawn.length && changes.every((c, i) => c.kind === before?.[i]?.kind && c.start === drawn[i].startLineNumber && c.end === drawn[i].endLineNumber)) return;
     markers.set(
       changes.map((c) => ({
         range: new monaco.Range(c.start, 1, c.end, 1),
@@ -626,7 +626,7 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   const describe = (b: BlameLine) =>
     /^0+$/.test(b.hash) ? "You · Not committed yet" : `${b.author}, ${ago(b.time)} · ${b.summary}`;
 
-  const updateInline = debounce(async () => {
+  const showInline = async () => {
     const model = editor.getModel();
     const line = editor.getPosition()?.lineNumber;
     const lines = await blameLines();
@@ -634,7 +634,13 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
     if (!model || !line || !b || editor.getModel() !== model) return inline.clear();
     const col = model.getLineMaxColumn(line);
     inline.set([{ range: new monaco.Range(line, col, line, col), options: { after: { content: `    ${describe(b)}`, inlineClassName: "inline-blame" } } }]);
-  }, 300);
+  };
+  // Blaming new text reads the whole file, so after an edit the inline blame hides and waits for a 2 s pause; a
+  // cursor move alone reuses the blame of the text as it is, after 300 ms.
+  let editedAt = 0;
+  let inlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const updateInline = () => (clearTimeout(inlineTimer), (inlineTimer = setTimeout(showInline, Math.max(300, editedAt + 2000 - Date.now()))));
+  const edited = () => ((editedAt = Date.now()), inline.clear(), updateInline());
 
   const applyAnnotations = async () => {
     const model = editor.getModel();
@@ -660,8 +666,8 @@ export function trackEditor(editor: monaco.editor.IStandaloneCodeEditor) {
   });
 
   const updateAnnotations = debounce(applyAnnotations, 300);
-  editor.onDidChangeModel(() => (closePeek(editor), updateMarkers(), updateInline(), applyAnnotations()));
-  editor.onDidChangeModelContent(() => (closePeek(editor), updateMarkers(), updateInline(), updateAnnotations()));
+  editor.onDidChangeModel(() => (closePeek(editor), updateMarkers(), (editedAt = 0), updateInline(), applyAnnotations()));
+  editor.onDidChangeModelContent(() => (closePeek(editor), updateMarkers(), edited(), updateAnnotations()));
   // Clicking a blame annotation shows its commit.
   editor.onMouseDown((e) => {
     const b = e.event.leftButton && e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS && blameAt(editor, e.target.position?.lineNumber ?? 0);

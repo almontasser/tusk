@@ -1,7 +1,7 @@
 // The widget designer: a stats overview's cards or a chart's data, heading, and size, in an editor tab, changed in
 // the widget's code as you go (src/widgetgen.ts), with a preview beside them. A table widget opens in the resource
 // designer's table tab instead.
-import { h, icon, iconButton, redraw } from "./dom";
+import { debounce, h, icon, iconButton, redraw } from "./dom";
 import { editFiles, type FileBuild } from "./codeapply";
 import { removeTraitEdits, traitsEdits } from "./usergen";
 import { renderEntryAccess } from "./filamentaccess";
@@ -100,7 +100,7 @@ class WidgetDesigner {
 
   private async read() {
     const model = await host.ensureModel(this.file);
-    this.listening ??= model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
+    this.listening ??= model.onDidChangeContent(debounce(() => void this.read().then(() => this.el.isConnected && this.render()), 150));
     const text = model.getValue();
     const outline = await fapp.outlineOf(text, this.file);
     const cls = outline.classes.find((c) => c.name);

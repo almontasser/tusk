@@ -4,7 +4,7 @@
 // notifications. Action buttons send them through src/notifysend.ts.
 import { invoke } from "@tauri-apps/api/core";
 import { editFiles } from "./codeapply";
-import { h, icon, iconButton, redraw } from "./dom";
+import { debounce, h, icon, iconButton, redraw } from "./dom";
 import * as fapp from "./filamentapp";
 import { type Catalog, humanize } from "./filamentcatalog";
 import { host } from "./filamentdesigner";
@@ -193,7 +193,7 @@ class NotificationDesigner {
 
   private async read() {
     const model = await host.ensureModel(this.file);
-    this.listening ??= model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
+    this.listening ??= model.onDidChangeContent(debounce(() => void this.read().then(() => this.el.isConnected && this.render()), 150));
     const text = model.getValue();
     const outline = await fapp.outlineOf(text, this.file);
     const cls = outline.classes.find((c) => c.name);
