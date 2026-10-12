@@ -8,6 +8,7 @@ import { parseEnv } from "./dbconfig";
 import { monaco } from "./editor";
 import {
   curlArgs,
+  curlFollows,
   type HttpRequest,
   INFO_MARKER,
   lookupIn,
@@ -29,6 +30,8 @@ import { pick } from "./palette";
 import { limits } from "./limits";
 import { registerSettings } from "./settings";
 import { isAbsolute } from "./platform.ts";
+import { envDirs, type Environments, mergeEnvironments, responseCharset } from "./httpclientdata";
+export type { Environments };
 
 export type Host = {
   root(): string;
@@ -50,7 +53,6 @@ export type Host = {
   profiler(): Promise<typeof import("./profiler")>;
   showDiff(path: string, original: string, modified: string, label: string): unknown;
 };
-export type Environments = Record<string, Record<string, string>>;
 
 /** What curl reports about a transfer (its --write-out JSON), in seconds and bytes. */
 export type CurlInfo = {
@@ -93,6 +95,8 @@ export type Exchange = {
   error?: string;
   /** Names used in the request that no environment, file, or script defines. */
   unresolved: string[];
+  /** Set when the request had @no-cookie-jar, so Send Again leaves the jar out too. */
+  noCookieJar?: boolean;
   /** Pinned exchanges stay in the history past its limit. */
   pinned?: boolean;
   /** What Laravel's log gained while the request ran. */
@@ -153,31 +157,40 @@ export const changed = () => listeners.forEach((fn) => fn());
 export const ENV_FILE = "http-client.env.json";
 export const PRIVATE_ENV_FILE = "http-client.private.env.json";
 
-/** The folder whose environment files apply to an .http file: its own folder when it has one, or else the project root. */
+/**
+ * The folder whose environment files apply to an .http file: the nearest one with either file, from the file's own
+ * folder up to the project root, or else the project root.
+ */
 export async function environmentDir(path: string) {
-  for (const dir of [parentOf(path), host.root()]) {
-    const found = await invoke<boolean[]>("paths_exist", { paths: [`${dir}/${ENV_FILE}`, `${dir}/${PRIVATE_ENV_FILE}`] }).catch(() => [false, false]);
-    if (found.some(Boolean)) return dir;
+  const dirs = envDirs(parentOf(path), host.root());
+  const found = await invoke<boolean[]>("paths_exist", { paths: dirs.flatMap((d) => [`${d}/${ENV_FILE}`, `${d}/${PRIVATE_ENV_FILE}`]) }).catch(() => []);
+  return dirs.find((_, i) => found[2 * i] || found[2 * i + 1]) ?? host.root();
+}
+
+/** The last error reported for each environment file that isn't valid JSON, so it shows once rather than on each keystroke. */
+const envErrors = new Map<string, string>();
+
+/** An environment file's JSON, or null when it's missing. A file that isn't valid JSON is reported and left out. */
+async function readEnvFile(path: string): Promise<Record<string, unknown> | null> {
+  const text = await invoke<string>("read_file", { path }).catch(() => null);
+  if (text === null) return null;
+  try {
+    const json = JSON.parse(text);
+    envErrors.delete(path);
+    return json;
+  } catch (e) {
+    const message = `Can't read ${path.replace(`${host.root()}/`, "")}, so its environments are left out: ${e instanceof Error ? e.message : e}`;
+    if (envErrors.get(path) !== message) host.status(message);
+    envErrors.set(path, message);
+    return null;
   }
-  return host.root();
 }
 
 /** Environments for an .http file (or the project root's, for ""). Private values override shared ones. */
 export async function environments(path = ""): Promise<Environments> {
   const dir = path ? await environmentDir(path) : host.root();
-  const read = (name: string) =>
-    invoke<string>("read_file", { path: `${dir}/${name}` })
-      .then((t) => JSON.parse(t) as Environments)
-      .catch(() => null);
-  const [shared, secret] = await Promise.all([read(ENV_FILE), read(PRIVATE_ENV_FILE)]);
-  const merged: Environments = {};
-  for (const [env, vars] of [...Object.entries(shared ?? {}), ...Object.entries(secret ?? {})]) {
-    // PhpStorm's $shared environment applies to every other one.
-    if (env !== "$shared") merged[env] = { ...merged[env], ...Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])) };
-  }
-  const common = { ...shared?.$shared, ...secret?.$shared };
-  for (const env of Object.keys(merged)) merged[env] = { ...common, ...merged[env] };
-  return merged;
+  const [shared, secret] = await Promise.all([readEnvFile(`${dir}/${ENV_FILE}`), readEnvFile(`${dir}/${PRIVATE_ENV_FILE}`)]);
+  return mergeEnvironments(shared, secret);
 }
 
 export function selectedEnvironment(envs: Environments): string | undefined {
@@ -218,9 +231,14 @@ export async function createEnvironmentFile(file = ENV_FILE) {
 /** Saves values to an environment in the private environment file that applies to `path`, creating it if needed. */
 export async function saveToPrivateEnvironment(path: string, env: string, values: Record<string, string>) {
   const file = `${await environmentDir(path)}/${PRIVATE_ENV_FILE}`;
-  const existing = await invoke<string>("read_file", { path: file })
-    .then((t) => JSON.parse(t) as Environments)
-    .catch(() => ({}) as Environments);
+  const text = await invoke<string>("read_file", { path: file }).catch(() => null);
+  let existing: Record<string, Record<string, unknown>>;
+  try {
+    existing = text === null ? {} : JSON.parse(text);
+  } catch (e) {
+    // Writing over a file that isn't valid JSON would lose what's in it.
+    return host.status(`Can't save to ${PRIVATE_ENV_FILE} until its JSON is fixed: ${e instanceof Error ? e.message : e}`);
+  }
   existing[env] = { ...existing[env], ...values };
   await invoke("write_file", { path: file, contents: JSON.stringify(existing, null, 2) + "\n" });
   await ignorePrivateFile();
@@ -343,6 +361,11 @@ export type Cancel = { current?: () => void; cancelled?: boolean; onMessage?: (j
 
 type Transfer = Pick<Exchange, "heads" | "info" | "bodyPath" | "contentType" | "error">;
 
+let follows: Promise<boolean> | undefined;
+/** Whether the system curl has --follow (8.16 and later), which follows a 303 after PUT or DELETE with GET. */
+export const curlHasFollow = () =>
+  (follows ??= invoke<string>("run_capture", { cwd: "/", program: "/usr/bin/curl", args: ["--version"], input: null }).then(curlFollows, () => false));
+
 /**
  * Sends a prepared request with curl, saving the response in `store` under `id`. curl runs in a PTY rather than
  * through run_capture, so it can be stopped; a text body goes through a file, since a PTY's input is a terminal.
@@ -358,7 +381,7 @@ async function transmit(prepared: Prepared, dir: string, store: string, id: stri
     await invoke("write_file", { path: requestBody, contents: p.body });
     p = { ...p, body: undefined, bodyFile: requestBody };
   }
-  const { args } = curlArgs(p, files);
+  const { args } = curlArgs(p, files, await curlHasFollow());
   let out = "";
   try {
     const run = await spawnStreaming(dir, ["/usr/bin/curl", ...args], (text) => (out += text));
@@ -435,7 +458,7 @@ async function laravelSession(p: Prepared, env: string | undefined, dir: string,
   if (!(await token())) {
     const scratch = await cacheDir("http-scratch");
     for (const csrfPath of [typeof p.laravelSession === "string" ? p.laravelSession : "/sanctum/csrf-cookie", "/"]) {
-      const get: Prepared = { method: "GET", url: origin + csrfPath, headers: [["Accept", "text/html,application/json"]], followRedirects: true, timeout: p.timeout, insecure: p.insecure };
+      const get: Prepared = { method: "GET", url: origin + csrfPath, headers: [["Accept", "text/html,application/json"]], followRedirects: true, timeout: p.timeout, connectTimeout: p.connectTimeout, insecure: p.insecure, proxy: p.proxy, clientCert: p.clientCert, clientKey: p.clientKey };
       const t = await transmit(get, dir, scratch, `csrf-${newId()}`, cookies, cancel);
       await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
       if (cancel.cancelled || (await token())) break;
@@ -486,6 +509,7 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
 
   const store = request.tags.noLog ? await cacheDir("http-scratch") : await cacheDir("http-history");
   const cookies = request.tags.noCookieJar ? undefined : await cookieJar(s.env);
+  if (request.tags.noCookieJar) exchange.noCookieJar = true;
   const cancel = options.cancel ?? {};
   if (exchange.request.laravelSession) {
     if (cookies) exchange.request = await laravelSession(exchange.request, s.env, dir, cookies, cancel);
@@ -498,7 +522,7 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
   const final = exchange.heads.at(-1);
 
   if (final && request.handler) {
-    const body = isText(exchange.contentType) ? await invoke<string>("read_file", { path: exchange.bodyPath }).catch(() => "") : "";
+    const body = isText(exchange.contentType) ? await readBody(exchange).catch(() => "") : "";
     const out = await runScript(request.handler, dir, {
       globals: globals(),
       variables,
@@ -511,7 +535,7 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
     exchange.logs.push(...out.logs);
     if (out.error) exchange.tests.push({ name: "Response handler", passed: false, message: out.error });
   }
-  if (final && request.output) await saveOutput(exchange.bodyPath, request.output, dir);
+  if (final && request.output) await saveOutput(exchange.bodyPath, { ...request.output, path: resolve(request.output.path, lookup()) }, dir);
   if (!request.tags.noLog && !cancel.cancelled) await remember(exchange);
   return exchange;
 }
@@ -528,7 +552,7 @@ export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchan
     return send(old.path, named ?? request, { cancel });
   }
   const exchange: Exchange = { ...old, id: newId(), time: Date.now(), heads: [], tests: [], logs: [], error: undefined, info: undefined, pinned: false, queries: undefined, bodyHidden: undefined, savedBody: undefined };
-  const cookies = await cookieJar(old.env);
+  const cookies = old.noCookieJar ? undefined : await cookieJar(old.env);
   const log = await logSizes();
   Object.assign(exchange, await transmit(old.request, parentOf(old.path), await cacheDir("http-history"), exchange.id, cookies, cancel));
   exchange.appLog = await logSince(log);
@@ -536,11 +560,11 @@ export async function resend(old: Exchange, cancel: Cancel = {}): Promise<Exchan
   return exchange;
 }
 
-/** Sends a prepared request without scripts or history, as monitoring does. The body is deleted, after it's read when `readBody` is set. */
-export async function probe(p: Prepared, path: string, env: string | undefined, cancel: Cancel = {}, readBody = false) {
+/** Sends a prepared request without scripts or history, as monitoring does. The body is deleted, after it's read when `withBody` is set. */
+export async function probe(p: Prepared, path: string, env: string | undefined, cancel: Cancel = {}, withBody = false) {
   const id = newId();
   const t = await transmit(p, parentOf(path), await cacheDir("http-scratch"), id, p.laravelSession ? await cookieJar(env) : undefined, cancel);
-  const body = readBody ? await invoke<string>("read_file", { path: t.bodyPath }).catch(() => "") : "";
+  const body = withBody ? await readBody(t).catch(() => "") : "";
   await invoke("remove_path", { path: t.bodyPath }).catch(() => {});
   return { ...t, body };
 }
@@ -567,6 +591,10 @@ async function logSince(before: Record<string, number>) {
   }
   return text || undefined;
 }
+
+/** A response body's text, in the charset its Content-Type names, or else (or when the name is unknown) UTF-8. */
+export const readBody = (x: Pick<Exchange, "bodyPath" | "contentType">) =>
+  invoke<string>("read_file", { path: x.bodyPath, charset: responseCharset(x.contentType) }).catch(() => invoke<string>("read_file", { path: x.bodyPath }));
 
 export const isText = (type: string) => !type || /^text\/|json|xml|javascript|html|x-www-form-urlencoded|graphql|yaml|csv/i.test(type);
 
@@ -636,7 +664,7 @@ async function protectBody(x: Exchange) {
   let redacted: string | undefined;
   if (mode === "redact") {
     if (!isText(x.contentType) || (x.info?.size_download ?? 0) > MAX_REDACTED) return;
-    const text = await invoke<string>("read_file", { path: x.bodyPath }).catch(() => undefined);
+    const text = await readBody(x).catch(() => undefined);
     if (text === undefined) return;
     redacted = redactBody(text, x.contentType);
     if (redacted === text) return;
@@ -646,7 +674,8 @@ async function protectBody(x: Exchange) {
     await invoke("create_dir", { path: dir });
     const raw = `${dir}/${x.bodyPath.split("/").pop()}`;
     await invoke("rename_path", { from: x.bodyPath, to: raw });
-    if (redacted !== undefined) await invoke("write_file", { path: x.bodyPath, contents: redacted });
+    // In the body's charset, so it reads back like the body; UTF-8 when the mask's characters don't fit in it.
+    if (redacted !== undefined) await invoke("write_file", { path: x.bodyPath, contents: redacted, charset: responseCharset(x.contentType) }).catch(() => invoke("write_file", { path: x.bodyPath, contents: redacted }));
     x.savedBody = redacted === undefined ? "" : x.bodyPath;
     x.bodyPath = raw;
     x.bodyHidden = redacted === undefined ? "dropped" : "redacted";

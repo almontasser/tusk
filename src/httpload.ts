@@ -2,7 +2,7 @@
 // one request many times at once with curl's parallel mode and shows live statistics; and its monitor.
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "./platform.ts";
-import { cacheDir, type Cancel, cookieJar, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
+import { cacheDir, type Cancel, cookieJar, curlHasFollow, type Exchange, host, prepareRequest, probe, send, spawnStreaming } from "./httpclient";
 import { histogram, type HttpRequest, loadArgs, overBudget, parseHttp, parseSample, type Prepared, type Sample, summarize } from "./httpfile";
 import { junitReport, type ReportCase } from "./httpimport";
 import { projectValue, setProjectValue } from "./projectstate";
@@ -181,7 +181,7 @@ async function burst(path: string, { prepared, jar }: { prepared: Prepared; jar?
   const began = performance.now();
   const elapsed = () => (performance.now() - began) / 1000;
   let buffer = "";
-  const run = await spawnStreaming(path.slice(0, path.lastIndexOf("/")), ["/usr/bin/curl", ...loadArgs(prepared, count, concurrency, jar)], (text) => {
+  const run = await spawnStreaming(path.slice(0, path.lastIndexOf("/")), ["/usr/bin/curl", ...loadArgs(prepared, count, concurrency, jar, await curlHasFollow())], (text) => {
     buffer += text;
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() ?? "";

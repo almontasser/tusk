@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   curlArgs,
+  curlFollows,
   formatRequest,
   header,
   bodyFromRules,
@@ -124,8 +125,8 @@ test("prepares a request for curl", async () => {
   assert.equal(p.followRedirects, false);
   const { args, input } = curlArgs(p, { headers: "/h", body: "/b", cookies: "/c" });
   assert.equal(input, p.body);
-  assert.deepEqual(args.slice(0, 4), ["-sS", "--max-time", "5", "-D"]);
-  assert.ok(args.includes("-X") && args.includes("POST") && !args.includes("-L"));
+  assert.deepEqual(args.slice(0, 5), ["-sS", "--speed-limit", "1", "--speed-time", "5"]);
+  assert.ok(!args.includes("-X") && args.includes("--data-binary") && !args.includes("-L"));
   // Following redirects, a POST with a body is curl's own, which a redirect turns into a GET.
   const followed = curlArgs({ ...p, followRedirects: true }, { headers: "/h", body: "/b" }).args;
   assert.ok(followed.includes("-L") && !followed.includes("-X"));
@@ -487,4 +488,66 @@ test("redactBody hides secret fields in response bodies", () => {
   assert.equal(out.access_token, "••••mnop");
   assert.equal(redactBody("token=abc&name=x", "application/x-www-form-urlencoded"), "token=••••&name=x");
   assert.equal(redactBody("<p>token</p>", "text/html"), "<p>token</p>");
+});
+
+test("reads a request line with spaces inside {{ }}, an HTTP version, or a method of its own", () => {
+  const rs = parseHttpFile("GET {{ host }}/api/users\n###\nGET {{$random.integer(1, 10)}}/x HTTP/1.1\n###\n{{ host }}/x HTTP/2\n###\nPROPFIND {{host}}/dav\n###\nget /lower");
+  assert.deepEqual(rs.map((r) => [r.method, r.url, r.httpVersion]), [
+    ["GET", "{{ host }}/api/users", ""],
+    ["GET", "{{$random.integer(1, 10)}}/x", "HTTP/1.1"],
+    ["GET", "{{ host }}/x", "HTTP/2"],
+    ["PROPFIND", "{{host}}/dav", ""],
+    ["GET", "/lower", ""],
+  ]);
+  const text = "###\nGET {{ host }}/a\n    ?x=1\n    &y=2\n";
+  assert.equal(formatRequest(parseHttpFile(text)[0]), text);
+});
+
+test("reads # @name = value", () => {
+  assert.deepEqual(parseHttpFile("# @name = login\nGET /\n###\n# @name=me\nGET /").map((r) => r.name), ["login", "me"]);
+});
+
+const files = { headers: "/h", body: "/b" };
+const base = { url: "http://x/", headers: [] as [string, string][], followRedirects: true, timeout: 60, insecure: false };
+
+test("follows redirects as browsers do", () => {
+  // A POST without -X turns into a GET on a 301, 302, or 303; without a body it sends Content-Length: 0.
+  const post = curlArgs({ ...base, method: "POST" }, files);
+  assert.ok(!post.args.includes("-X") && post.args.includes("-L"));
+  assert.deepEqual(post.args.slice(post.args.indexOf("--data-binary"), post.args.indexOf("--data-binary") + 2), ["--data-binary", ""]);
+  assert.equal(post.input, null);
+  assert.ok(!curlArgs({ ...base, method: "POST", followRedirects: false }, files).args.includes("-X"));
+  // curl 8.16's --follow resets a -X method to GET on a 303.
+  const put = curlArgs({ ...base, method: "PUT", body: "x" }, files, true).args;
+  assert.ok(put.includes("--follow") && !put.includes("-L") && put.includes("PUT"));
+  assert.ok(curlArgs({ ...base, method: "DELETE" }, files).args.includes("-L"));
+  const load = loadArgs({ ...base, method: "POST" }, 2, 1, undefined, true);
+  assert.ok(!load.includes("-X") && load.includes("--follow") && load.includes(""));
+  assert.deepEqual(["curl 8.7.1 (x86_64-apple-darwin26.0)", "curl 8.16.0 (x)", "curl 9.0.0 (x)", "nonsense"].map(curlFollows), [false, true, true, false]);
+});
+
+test("always decompresses, asking only for encodings curl can decode", () => {
+  const args = (v: string) => curlArgs({ ...base, method: "GET", headers: [["Accept-Encoding", v]] }, files).args;
+  const mixed = args("br, gzip;q=0.8, zstd");
+  assert.ok(mixed.includes("--compressed") && mixed.includes("Accept-Encoding: gzip;q=0.8"));
+  const only = args("br");
+  assert.ok(only.includes("--compressed") && !only.some((a) => /accept-encoding/i.test(a)));
+});
+
+test("encodes variable values in the query unless # @no-auto-encoding", async () => {
+  const lookup = lookupIn([{ host: "http://x", q: "C# & .NET", t: "{{q}}" }]);
+  const [r, raw] = parseHttpFile("GET {{host}}/s?q={{q}}&lit=a+b&t={{t}}&u={{nope}}\n###\n# @no-auto-encoding\nGET {{host}}/s?q={{q}}");
+  assert.equal((await prepare(r, lookup, "/", async () => "")).url, "http://x/s?q=C%23%20%26%20.NET&lit=a+b&t=C%23%20%26%20.NET&u={{nope}}");
+  assert.equal(raw.tags.noAutoEncoding, true);
+  assert.match(formatRequest(raw), /^# @no-auto-encoding$/m);
+  assert.equal((await prepare(raw, lookup, "/", async () => "")).url, "http://x/s?q=C#%20&%20.NET");
+});
+
+test("@timeout is the time allowed without new data", () => {
+  const args = curlArgs({ ...base, method: "GET", timeout: 5 }, files).args;
+  assert.ok(!args.includes("--max-time"));
+  assert.deepEqual(args.slice(args.indexOf("--speed-limit"), args.indexOf("--speed-limit") + 4), ["--speed-limit", "1", "--speed-time", "5"]);
+  const short = curlArgs({ ...base, method: "GET", timeout: 0.5 }, files).args;
+  assert.equal(short[short.indexOf("--speed-time") + 1], "1");
+  assert.ok(!loadArgs({ ...base, method: "GET", timeout: 5 }, 2, 1).includes("--max-time"));
 });

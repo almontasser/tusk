@@ -45,7 +45,7 @@ export type Tags = {
   noLog?: boolean;
   /** Accept any TLS certificate. Not a PhpStorm tag; PhpStorm reads it as a comment. */
   insecure?: boolean;
-  /** Seconds. */
+  /** Seconds without new data before giving up. */
   timeout?: number;
   connectionTimeout?: number;
   /** Send Laravel's XSRF token and a browser's Origin, fetching the token from this path (or the defaults) first. Not a PhpStorm tag. */
@@ -59,12 +59,24 @@ export type Tags = {
   http?: "2" | "1.1";
   /** Milliseconds the response may take before it counts as too slow. Not a PhpStorm tag. */
   budget?: number;
+  /** Send variable values in the query as they are, rather than URL-encoded. */
+  noAutoEncoding?: boolean;
 };
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT", "GRAPHQL", "WEBSOCKET", "GRPC"];
-const REQUEST_LINE = new RegExp(`^(${METHODS.join("|")})\\s+(\\S+)(?:\\s+(HTTP\\/[\\d.]+))?\\s*$`, "i");
+/**
+ * A request line: METHOD URL HTTP/version, with the method and version optional. The URL is the rest of the line, so
+ * {{ name }} and {{$random.integer(1, 10)}} keep their spaces. A method of your own, such as PROPFIND, is an uppercase word.
+ */
+function requestLine(line: string): { method: string; url: string; httpVersion: string } {
+  const m = line.trim().match(/^(?:([A-Za-z][A-Za-z-]*)\s+)?(.+?)(?:\s+(HTTP\/[\d.]+))?$/)!;
+  if (m[1] && (METHODS.includes(m[1].toUpperCase()) || /^[A-Z-]+$/.test(m[1]))) return { method: m[1].toUpperCase(), url: m[2], httpVersion: m[3] ?? "" };
+  const n = line.trim().match(/^(.+?)(?:\s+(HTTP\/[\d.]+))?$/)!;
+  return { method: "", url: n[1], httpVersion: n[2] ?? "" };
+}
 const VAR_LINE = /^@([\w.-]+)\s*=\s*(.*?)\s*$/;
-const TAG_LINE = /^\s*(?:#|\/\/)\s*@([\w-]+)(?:\s+(.*?))?\s*$/;
+// `# @name value`, or `# @name = value`.
+const TAG_LINE = /^\s*(?:#|\/\/)\s*@([\w-]+)(?:(?:\s*=\s*|\s+)(.*?))?\s*$/;
 const isComment = (line: string) => /^\s*(#|\/\/)/.test(line);
 const seconds = (text = "") => {
   const m = text.match(/^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/);
@@ -125,6 +137,7 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
         else if (tag === "no-cookie-jar") tags.noCookieJar = true;
         else if (tag === "no-log") tags.noLog = true;
         else if (tag === "insecure") tags.insecure = true;
+        else if (tag === "no-auto-encoding") tags.noAutoEncoding = true;
         else if (tag === "timeout") tags.timeout = seconds(value);
         else if (tag === "connection-timeout") tags.connectionTimeout = seconds(value);
         else if (tag === "laravel-session") tags.laravelSession = value || true;
@@ -136,21 +149,20 @@ export function parseHttp(text: string): { requests: HttpRequest[]; vars: Record
         else if (tag === "budget") tags.budget = /^\d+(\.\d+)?$/.test(value ?? "") ? Number(value) : (seconds(value) ?? NaN) * 1000 || undefined;
         else comments.push(line);
       } else if (isComment(line)) comments.push(line);
-      else if (/^<\s*(\{%|\S)/.test(line.trim()) && !REQUEST_LINE.test(line.trim())) ([preScript, i] = readScript(lines, i, "<")), i--;
+      else if (/^<\s*(\{%|\S)/.test(line.trim())) ([preScript, i] = readScript(lines, i, "<")), i--;
       else break;
     }
     if (i >= to) return;
-    const first = lines[i].trim();
-    const rl = first.match(REQUEST_LINE);
+    const rl = requestLine(lines[i]);
     const request: HttpRequest = {
       name: tags.name ?? title,
       title,
       line: i + 1,
       start: separator ? from : from + 1,
       end: to,
-      method: rl ? rl[1].toUpperCase() : "GET",
-      url: rl ? rl[2] : first.split(/\s+/)[0],
-      httpVersion: rl?.[3] ?? "",
+      method: rl.method || "GET",
+      url: rl.url,
+      httpVersion: rl.httpVersion,
       headers: [],
       body: "",
       comments,
@@ -212,8 +224,8 @@ function requestLines(r: HttpRequest): string[] {
   const version = r.httpVersion ? ` ${r.httpVersion}` : "";
   if (!r.urlLines || version) return [`${r.method} ${r.url}${version}`];
   const [first, ...rest] = r.urlLines;
-  const written = first.trim().split(/\s+/)[1] + rest.map((l) => l.trim()).join("");
-  if (written === r.url && first.trim().split(/\s+/)[0].toUpperCase() === r.method) return r.urlLines;
+  const rl = requestLine(first);
+  if (rl.url + rest.map((l) => l.trim()).join("") === r.url && rl.method === r.method) return r.urlLines;
   // The URL changed: keep one query parameter per line, as it was.
   const indent = rest[0]?.match(/^\s*/)![0] || "    ";
   const q = r.url.indexOf("?");
@@ -231,6 +243,7 @@ export function formatRequest(r: HttpRequest): string {
   if (t.noCookieJar) out.push("# @no-cookie-jar");
   if (t.noLog) out.push("# @no-log");
   if (t.insecure) out.push("# @insecure");
+  if (t.noAutoEncoding) out.push("# @no-auto-encoding");
   if (t.timeout !== undefined) out.push(`# @timeout ${t.timeout}`);
   if (t.connectionTimeout !== undefined) out.push(`# @connection-timeout ${t.connectionTimeout}`);
   if (t.laravelSession) out.push(`# @laravel-session${typeof t.laravelSession === "string" ? ` ${t.laravelSession}` : ""}`);
@@ -416,6 +429,20 @@ const basicAuth = (name: string, value: string) => {
 };
 
 /**
+ * The URL with its variables replaced. In the query, after the first ? you write, each variable's value is URL-encoded,
+ * as PhpStorm does, unless the request has `# @no-auto-encoding`.
+ */
+function url(r: HttpRequest, lookup: Lookup): string {
+  const q = r.url.replace(VAR, (m) => " ".repeat(m.length)).indexOf("?");
+  if (q < 0 || r.tags.noAutoEncoding) return resolve(r.url, lookup);
+  const query = r.url.slice(q).replace(VAR, (all, name) => {
+    const value = lookup(name);
+    return value === undefined ? all : encodeURIComponent(resolve(value, lookup));
+  });
+  return resolve(r.url.slice(0, q), lookup) + query;
+}
+
+/**
  * Replaces variables and finds files relative to `dir`, the .http file's folder. `read` loads a file whose
  * variables are replaced too (`<@ path`); a plain `< path` body is sent as it is.
  */
@@ -424,7 +451,7 @@ export async function prepare(r: HttpRequest, lookup: Lookup, dir: string, read:
   const headers = r.headers.filter((h) => h.enabled).map((h): [string, string] => [h.name, basicAuth(h.name, sub(h.value))]);
   const p: Prepared = {
     method: r.method,
-    url: sub(r.url).replace(/ /g, "%20"),
+    url: url(r, lookup).replace(/ /g, "%20"),
     headers,
     followRedirects: !r.tags.noRedirect,
     timeout: r.tags.timeout ?? 60,
@@ -509,6 +536,36 @@ const connectionArgs = (p: Prepared) => [
   ...(p.http ? [p.http === "2" ? "--http2" : "--http1.1"] : []),
 ];
 
+/** Whether a `curl --version` output is curl 8.16 or later, which has --follow. */
+export const curlFollows = (version: string) => {
+  const m = version.match(/^curl (\d+)\.(\d+)/);
+  return !!m && (Number(m[1]) > 8 || (Number(m[1]) === 8 && Number(m[2]) >= 16));
+};
+
+/**
+ * curl options for the method, redirects, and @timeout. A POST is curl's own, without -X, which a 301, 302, or 303
+ * redirect follows with GET, as browsers do; -X POST would post again, such as to the page after a Laravel login. Any
+ * other -X method stays on every redirect, unless `follow` says curl has --follow, which follows a 303 with GET.
+ * @timeout is the time without new data, so a slow download that keeps going isn't cut off.
+ */
+function methodArgs(p: Prepared, follow: boolean): string[] {
+  const args = ["--speed-limit", "1", "--speed-time", String(Math.max(1, Math.ceil(p.timeout)))];
+  if (p.method === "HEAD") args.push("--head");
+  // An empty body still sends Content-Length: 0, which some servers require of a POST.
+  else if (p.method === "POST") !(p.body !== undefined || p.bodyFile || p.form?.length) && args.push("--data-binary", "");
+  else args.push("-X", p.method);
+  if (p.followRedirects) args.push(follow ? "--follow" : "-L");
+  return args;
+}
+
+/** Accept-Encoding without br and zstd, which curl may not decode. Empty when nothing is left. */
+const decodable = (value: string) =>
+  value
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e && !/^(br|zstd)\s*(;|$)/i.test(e))
+    .join(", ");
+
 /** Marks the end of the headers curl writes to stdout, before its --write-out JSON. */
 export const INFO_MARKER = "\n__HTTP_INFO__";
 
@@ -516,22 +573,21 @@ export const INFO_MARKER = "\n__HTTP_INFO__";
  * curl arguments that save the response headers and body to files and print timing as JSON. A text body goes
  * to stdin, so it's returned as `input`.
  */
-export function curlArgs(p: Prepared, files: { headers: string; body: string; cookies?: string }): { args: string[]; input: string | null } {
+export function curlArgs(p: Prepared, files: { headers: string; body: string; cookies?: string }, follow = false): { args: string[]; input: string | null } {
   // -g: brackets and braces in a URL, such as ?filter[status]=open, are literal rather than curl's globs.
   // --stderr -: curl's own errors, such as a malformed URL, come before the JSON on stdout.
-  const args = ["-sS", "--max-time", String(p.timeout), "-D", files.headers, "-o", files.body, "-w", `${INFO_MARKER}%{json}`, "-g", "--stderr", "-"];
-  if (p.method === "HEAD") args.push("--head");
-  // A POST with a body is curl's own, which a 301, 302, or 303 redirect follows with GET, as browsers do; -X POST
-  // would post again, such as to the page after a Laravel login.
-  else if (!(p.followRedirects && p.method === "POST" && (p.body !== undefined || p.bodyFile || p.form?.length))) args.push("-X", p.method);
-  if (p.followRedirects) args.push("-L", "--max-redirs", "20");
+  const args = ["-sS", ...methodArgs(p, follow), "-D", files.headers, "-o", files.body, "-w", `${INFO_MARKER}%{json}`, "-g", "--stderr", "-"];
+  if (p.followRedirects) args.push("--max-redirs", "20");
   if (p.connectTimeout) args.push("--connect-timeout", String(p.connectTimeout));
   if (p.insecure) args.push("-k");
   args.push(...connectionArgs(p));
   if (files.cookies) args.push("-b", files.cookies, "-c", files.cookies);
-  // Without an Accept-Encoding header of your own, curl asks for compressed bodies and decompresses them.
-  if (!p.headers.some(([k]) => k.toLowerCase() === "accept-encoding")) args.push("--compressed");
-  for (const [k, v] of p.headers) args.push("-H", v ? `${k}: ${v}` : `${k};`);
+  // curl asks for compressed bodies and decompresses them, also when you ask with an Accept-Encoding header of your own.
+  args.push("--compressed");
+  for (const [k, v] of p.headers) {
+    if (k.toLowerCase() !== "accept-encoding") args.push("-H", v ? `${k}: ${v}` : `${k};`);
+    else if (decodable(v)) args.push("-H", `${k}: ${decodable(v)}`);
+  }
   for (const f of p.form ?? []) {
     // -F reads @ and < in values as files, so text goes through --form-string.
     if (f.file) args.push("-F", `${f.name}=@"${f.file}"${f.filename ? `;filename="${f.filename}"` : ""}${f.type ? `;type=${f.type}` : ""}`);
@@ -935,13 +991,8 @@ export const SAMPLE_FORMAT = "%{http_code} %{time_total} %{time_starttransfer} %
  * line per request. curl repeats a URL through its glob syntax, here a range in the fragment, which isn't sent.
  * A text body must already be in `p.bodyFile`, since the requests can't share stdin.
  */
-export function loadArgs(p: Prepared, count: number, concurrency: number, cookies?: string): string[] {
-  const args = ["-s", "-Z", "--parallel-immediate", "--parallel-max", String(concurrency), "--max-time", String(p.timeout), "-o", "/dev/null", "-w", SAMPLE_FORMAT];
-  if (p.method === "HEAD") args.push("--head");
-  // A POST with a body is curl's own, which a 301, 302, or 303 redirect follows with GET, as browsers do; -X POST
-  // would post again, such as to the page after a Laravel login.
-  else if (!(p.followRedirects && p.method === "POST" && (p.body !== undefined || p.bodyFile || p.form?.length))) args.push("-X", p.method);
-  if (p.followRedirects) args.push("-L");
+export function loadArgs(p: Prepared, count: number, concurrency: number, cookies?: string, follow = false): string[] {
+  const args = ["-s", "-Z", "--parallel-immediate", "--parallel-max", String(concurrency), ...methodArgs(p, follow), "-o", "/dev/null", "-w", SAMPLE_FORMAT];
   if (p.insecure) args.push("-k");
   args.push(...connectionArgs(p));
   if (p.connectTimeout) args.push("--connect-timeout", String(p.connectTimeout));

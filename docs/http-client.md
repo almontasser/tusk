@@ -215,11 +215,17 @@ A request's `{{name}}` comes from the first of these that defines it:
 2. A global value a script saved (`client.global.set`). Globals last until you
    clear them with **HTTP Client: Global Variables…** in ⌘⇧A.
 3. A file variable: `@name = value` in the `.http` file.
-4. The selected environment, from `http-client.env.json` next to the file or in
-   the project root. `http-client.private.env.json` overrides it for secrets.
-   **Edit Private Environments…** in the environment menu creates it and adds it
-   to `.gitignore`. Values in a `$shared` environment apply to every
-   environment.
+4. The selected environment, from `http-client.env.json`.
+   `http-client.private.env.json` overrides it for secrets. **Edit Private
+   Environments…** in the environment menu creates it and adds it to
+   `.gitignore`. Values in a `$shared` environment apply to every environment.
+
+Tusk looks for the environment files in the `.http` file's folder, then in each
+parent folder up to the project root. The nearest folder with either file wins,
+and files further up are ignored. For `http/admin/users.http`, that's
+`http/admin`, then `http`, then the project root. The request and the
+environment menu use the same files. A file that isn't valid JSON shows an
+error that names it, and its environments are left out until you fix it.
 
 Dynamic values change each time you send: `{{$uuid}}`, `{{$timestamp}}`,
 `{{$isoTimestamp}}`, `{{$randomInt}}`, `{{$random.integer(1, 10)}}`,
@@ -228,8 +234,20 @@ Dynamic values change each time you send: `{{$uuid}}`, `{{$timestamp}}`,
 `{{$random.numeric(6)}}`, `{{$random.email}}`, and `{{$random.bool}}`.
 `{{$dotenv.NAME}}` reads the project's `.env`.
 
+In the query, after the `?`, a variable's value is URL-encoded, as in PhpStorm.
+With `q` set to `C# & .NET`, `?q={{q}}` sends `?q=C%23%20%26%20.NET`. What you
+type yourself is sent as written. `# @no-auto-encoding` sends the values as
+they are, such as a variable that holds `a=1&b=2`.
+
 ```json
 { "local": { "host": "http://localhost:8000" }, "staging": { "host": "https://staging.example.com" } }
+```
+
+A nested object gives its values dotted names. With this file, `{{client.host}}`
+is `https://dev.example.com`:
+
+```json
+{ "dev": { "client": { "host": "https://dev.example.com" } } }
 ```
 
 **Edit Environments…** in the environment menu creates `http-client.env.json`
@@ -275,10 +293,11 @@ Put these comments above the request line:
 | Tag | Effect |
 | --- | --- |
 | `# @name login` | A name for scripts and the tool window |
-| `# @no-redirect` | Don't follow redirects |
+| `# @no-redirect` | Don't follow redirects. Without it, a POST becomes a GET after a 301, 302, or 303, as in a browser. Other methods stay the same on every redirect, unless curl 8.16 or later sends the request: then a 303 continues with a GET |
+| `# @no-auto-encoding` | Send variable values in the query as they are, rather than URL-encoded |
 | `# @no-cookie-jar` | Don't send or keep cookies |
 | `# @no-log` | Leave it out of the history |
-| `# @timeout 5` | Seconds before giving up (60 by default) |
+| `# @timeout 5` | Seconds without new data before giving up (60 by default). A slow download that keeps going isn't cut off |
 | `# @connection-timeout 2` | Seconds to wait for the connection |
 | `# @insecure` | Accept any TLS certificate. PhpStorm reads it as a comment |
 | `# @laravel-session` | Sign in with Laravel's session, as **Auth** > **Laravel session** sets it. A path after it, such as `/csrf`, is where to get the XSRF token. PhpStorm reads it as a comment |
@@ -296,7 +315,8 @@ of your own:
 ```
 
 After the body, `>> ./out.json` saves the response to a file, adding a number
-when it exists, and `>>! ./out.json` replaces it.
+when it exists, and `>>! ./out.json` replaces it. The path can use variables,
+such as `>> {{outDir}}/out.json`, which get the same values as the request's.
 
 Cookies work like a browser's: responses' cookies are kept per environment and
 sent with later requests. **HTTP Client: Clear Cookies** in ⌘⇧A forgets them.

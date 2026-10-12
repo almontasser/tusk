@@ -23,6 +23,7 @@ import {
   parentOf,
   PRIVATE_ENV_FILE,
   type Cancel,
+  readBody,
   requestAt,
   resend,
   saveToPrivateEnvironment,
@@ -961,14 +962,21 @@ function readParts(r: HttpRequest): Part[] {
     })
     .filter((p): p is Part => !!p);
 }
-const writeParts = (parts: Part[]) =>
-  parts
-    .filter((p) => p.name)
-    .map((p) => {
-      const filename = p.file ? `; filename="${p.filename || p.value.split("/").pop()}"` : "";
-      return `--${BOUNDARY}\nContent-Disposition: form-data; name="${p.name}"${filename}${p.type ? `\nContent-Type: ${p.type}` : ""}\n\n${p.file ? `< ${p.value}` : p.value}`;
-    })
-    .join("\n") + (parts.some((p) => p.name) ? `\n--${BOUNDARY}--` : "");
+/** Writes the parts with the boundary the Content-Type names, adding one when it names none. */
+function writeParts(r: HttpRequest, parts: Part[]) {
+  const type = header(r, "content-type") ?? "multipart/form-data";
+  let boundary = type.match(/boundary="?([^";]+)"?/)?.[1];
+  if (!boundary) setContentType(r, `${type}; boundary=${(boundary = BOUNDARY)}`);
+  return (
+    parts
+      .filter((p) => p.name)
+      .map((p) => {
+        const filename = p.file ? `; filename="${p.filename || p.value.split("/").pop()}"` : "";
+        return `--${boundary}\nContent-Disposition: form-data; name="${p.name}"${filename}${p.type ? `\nContent-Type: ${p.type}` : ""}\n\n${p.file ? `< ${p.value}` : p.value}`;
+      })
+      .join("\n") + (parts.some((p) => p.name) ? `\n--${boundary}--` : "")
+  );
+}
 
 /** Lets you choose a file, and returns its path relative to the .http file's folder. */
 async function chooseFile(): Promise<string | null> {
@@ -1075,7 +1083,7 @@ function bodyTab(r: HttpRequest) {
   } else if (type === "multipart") {
     const parts = readParts(r);
     const rows: Header[] = parts.map((p) => ({ name: p.name, value: p.value, enabled: true }));
-    const write = () => updateSoon((q) => (q.body = writeParts(rows.map((row, i) => ({ ...(parts[i] ?? { file: false }), name: row.name, value: row.value })))));
+    const write = () => updateSoon((q) => (q.body = writeParts(q, rows.map((row, i) => ({ ...(parts[i] ?? { file: false }), name: row.name, value: row.value })))));
     pane.append(
       rowsEditor(rows, {
         checkbox: false,
@@ -1625,7 +1633,7 @@ function bodyView(x: Exchange) {
     { class: "http-body-bar" },
     h("div", { class: "segmented" }, ...modes.map(([id, label]) => h("button", { textContent: label, ariaPressed: String(id === bodyMode), onclick: () => ((bodyMode = id), renderResponse()) }))),
     h("span", { class: "muted http-type" }, x.contentType || "No content type"),
-    iconButton("copy", "Copy the body", () => invoke<string>("read_file", { path: x.bodyPath }).then((text) => copy(text, "the response body"), (e) => showError("Couldn't copy the body", e))),
+    iconButton("copy", "Copy the body", () => readBody(x).then((text) => copy(text, "the response body"), (e) => showError("Couldn't copy the body", e))),
     iconButton("save", "Save the body as…", async () => {
       const to = await save({ defaultPath: `${host.root()}/${x.bodyPath.split("/").pop()!.replace(/^[^.]+/, "response")}` });
       if (to) await invoke("run_capture", { cwd: "/", program: "/bin/cp", args: [x.bodyPath, to], input: null }).then(() => host.status(`Saved ${to}`), (e) => host.status(`Couldn't save the body: ${e}`));
@@ -1657,7 +1665,7 @@ function bodyView(x: Exchange) {
   };
   const status = x.heads.at(-1)?.status ?? 0;
   if (status >= 500 && isText(type) && size <= MAX_SHOWN())
-    invoke<string>("read_file", { path: x.bodyPath }).then((text) => {
+    readBody(x).then((text) => {
       const report = laravelException(text, status);
       if (report && pane.isConnected) bar.after(exceptionBanner(report, /json/.test(type)));
     }, () => {}); // The body's own read below shows the error.
@@ -1668,7 +1676,7 @@ function bodyView(x: Exchange) {
         pane.append(image ? h("div", { class: "http-image" }, h("img", { src, alt: "Response image" })) : h("iframe", { class: "http-preview", src }));
       });
     } else
-      read(invoke<string>("read_file", { path: x.bodyPath }), (html) => {
+      read(readBody(x), (html) => {
         // No scripts: the page renders as HTML only, with links resolving against the request's URL.
         const frame = h("iframe", { class: "http-preview" });
         frame.setAttribute("sandbox", "");
@@ -1679,7 +1687,7 @@ function bodyView(x: Exchange) {
   }
   if (!isText(type)) return pane.append(h("p", { class: "http-hint" }, `A ${bytes(size)} ${type || "binary"} body. Save it, or open it in an editor tab.`)), pane;
   if (size > MAX_SHOWN()) return pane.append(h("p", { class: "http-hint" }, `The body is ${bytes(size)}, too large to show here. Open it in an editor tab.`)), pane;
-  read(invoke<string>("read_file", { path: x.bodyPath }), (text) => {
+  read(readBody(x), (text) => {
     const el = h("div", { class: "http-code http-response-code" });
     pane.append(el);
     let value = text;
@@ -2320,7 +2328,7 @@ async function compareExchanges(a: Exchange, b: Exchange) {
   const [older, newer] = a.time < b.time ? [a, b] : [b, a];
   const text = async (e: Exchange) => {
     if (!e.bodyPath) throw new Error("the history doesn't keep response bodies");
-    const body = await invoke<string>("read_file", { path: e.bodyPath });
+    const body = await readBody(e);
     try {
       return JSON.stringify(JSON.parse(body), null, 2);
     } catch {

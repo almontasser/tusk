@@ -1695,7 +1695,14 @@ files work in PhpStorm and VS Code's REST Client.
   go to a Netscape-format jar per project and environment (`-b` and `-c`). The
   history is an `index.json` of exchanges beside their body files, capped at
   100 unpinned ones. Global variables and the selected environment are in
-  `localStorage`, per project.
+  `localStorage`, per project. `readBody` reads a response body in the charset
+  its Content-Type names (`read_file` takes the name), so every view and script
+  sees the same text.
+- `src/httpclientdata.ts` has the client's pure parts, which Node tests:
+  `envDirs` lists the folders to search for environment files, nearest first,
+  `mergeEnvironments` and `flattenEnv` turn the two files into string variables
+  with dotted names for nested objects, and `responseCharset` reads a
+  Content-Type's charset.
 - `@laravel-session` requests read `XSRF-TOKEN` from the jar, fetching
   `/sanctum/csrf-cookie` (or `/`) first when it's missing, and add
   `X-XSRF-TOKEN`, `Origin`, and `Referer`. Laravel rotates the token in its
