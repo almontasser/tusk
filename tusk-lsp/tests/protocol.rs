@@ -264,6 +264,22 @@ fn files_created_while_indexing_are_indexed() {
     assert!(!found.to_string().contains("Late.php"), "{found}");
 }
 
+/// `initialize_finish` takes the editor's `initialized` notification, so the server registers its file watchers
+/// once it returns rather than when the main loop sees one; without them, the editor reports no changes on disk.
+#[test]
+fn registers_file_watchers_once_initialized() {
+    let mut c = Client::start(&[]);
+    let registration = loop {
+        if let Message::Request(r) = c.recv()
+            && r.method == request::RegisterCapability::METHOD
+        {
+            break r;
+        }
+    };
+    let watchers = registration.params["registrations"][0]["registerOptions"]["watchers"].to_string();
+    assert!(watchers.contains("**/*.php") && watchers.contains("composer.lock"), "{watchers}");
+}
+
 #[test]
 fn closing_a_file_goes_back_to_its_text_on_disk() {
     let mut c = indexed(&[("src/Box.php", "<?php\nclass Box {}\n")]);
@@ -320,6 +336,38 @@ fn searches_racing_edits_and_other_requests_all_finish() {
     }
     let answers = c.responses(&ids);
     assert!(answers.iter().all(|r| r.response_result.is_ok()), "{answers:?}");
+}
+
+/// A project scan holds the index's lock for a round of files at a time, so an edit made while it runs, and a
+/// request after the edit, are answered before it finishes. Holding it for the whole scan held them all up.
+#[test]
+fn edits_and_requests_go_between_a_project_scans_rounds() {
+    let mut files: Vec<(String, String)> = vec![("src/Box.php".into(), "<?php\nclass Box { public function open(): void {} }\n".into())];
+    for i in 0..300 {
+        files.push((format!("src/use{i}.php"), format!("<?php\nfunction f{i}(Box $b): int {{ $b->open(); return 'x'; }}\n")));
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let mut c = indexed(&files);
+    let box_uri = c.open("src/Box.php", "<?php\nclass Box { public function open(): void {} }\n");
+    let scan = c.send("tusk/projectProblems", json!({ "workDoneToken": "scan" }));
+    c.wait_for(|n| n.method == "$/progress" && n.params["token"] == "scan" && n.params["value"]["kind"] == "begin");
+    c.notify(notification::DidChangeTextDocument::METHOD, json!({
+        "textDocument": { "uri": box_uri, "version": 2 },
+        "contentChanges": [{ "range": { "start": { "line": 1, "character": 12 }, "end": { "line": 1, "character": 12 } }, "text": "public function shut(): void {} " }]
+    }));
+    let hover = c.send(request::HoverRequest::METHOD, json!({ "textDocument": { "uri": box_uri }, "position": { "line": 1, "character": 30 } }));
+    let first = loop {
+        if let Message::Response(r) = c.recv()
+            && (r.id == scan || r.id == hover)
+        {
+            break r;
+        }
+    };
+    assert_eq!(first.id, hover, "the scan answered first");
+    assert!(first.response_result.unwrap().to_string().contains("shut"));
+    // The scan still checks every file.
+    let problems = c.responses(&[scan]).remove(0).response_result.unwrap();
+    assert_eq!(problems.as_object().unwrap().keys().filter(|k| k.starts_with("src/use")).count(), 300);
 }
 
 /// Filament's color classes and an icon set's package, as installed, without an app to boot.
