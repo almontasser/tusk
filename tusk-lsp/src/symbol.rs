@@ -238,7 +238,7 @@ impl<'p, 'a> Resolver<'p, 'a> {
                 let word = text(k.value).to_ascii_lowercase();
                 match word.as_str() {
                     "self" | "static" => found(vec![Symbol::Class(self.enclosing_class(path)?)], false),
-                    "parent" => found(vec![Symbol::Class(self.parent_class(path)?)], false),
+                    "parent" => found(self.parent_classes(path).into_iter().map(Symbol::Class).collect(), false).filter(|f| !f.symbols.is_empty()),
                     _ => None,
                 }
             }
@@ -249,7 +249,7 @@ impl<'p, 'a> Resolver<'p, 'a> {
                     return found(vec![Symbol::Class(self.enclosing_class(path)?)], false);
                 }
                 if lower == "parent" {
-                    return found(vec![Symbol::Class(self.parent_class(path)?)], false);
+                    return found(self.parent_classes(path).into_iter().map(Symbol::Class).collect(), false).filter(|f| !f.symbols.is_empty());
                 }
                 // Names in `use` statements, type hints, `new`, `extends`, attributes, and the like.
                 let fqn = match self.parsed.names.resolve(&name.span()) {
@@ -326,7 +326,7 @@ impl<'p, 'a> Resolver<'p, 'a> {
     pub fn classes_of_class_expr(&self, expr: &Expression<'_>, path: &[Node<'_, '_>]) -> Vec<String> {
         match expr {
             Expression::Self_(_) | Expression::Static(_) => self.enclosing_class(path).into_iter().collect(),
-            Expression::Parent(_) => self.parent_class(path).into_iter().collect(),
+            Expression::Parent(_) => self.parent_classes(path),
             Expression::Identifier(id) => {
                 let fqn = match self.parsed.names.resolve(&id.span()) {
                     Some(fqn) => text(fqn),
@@ -357,11 +357,12 @@ impl<'p, 'a> Resolver<'p, 'a> {
         None
     }
 
-    fn parent_class(&self, path: &[Node<'_, '_>]) -> Option<String> {
-        let class = self.enclosing_class(path)?;
-        let meta = self.codebase.get_class_like(class.as_bytes())?;
-        let parent = meta.direct_parent_class?;
-        Some(display_class(&parent.as_str_lossy(), self.codebase))
+    /// The classes `parent` names: a class's parent, or in a trait, the parents it requires, which the index gives
+    /// a trait from the classes that use it (see `Index::infer_trait_parents`).
+    fn parent_classes(&self, path: &[Node<'_, '_>]) -> Vec<String> {
+        let Some(meta) = self.enclosing_class(path).and_then(|c| self.codebase.get_class_like(c.as_bytes())) else { return vec![] };
+        let parents: Vec<_> = if meta.kind.is_trait() { meta.require_extends.iter().copied().collect() } else { meta.direct_parent_class.into_iter().collect() };
+        parents.iter().map(|p| display_class(&p.as_str_lossy(), self.codebase)).collect()
     }
 
     fn variable_scope(&self, path: &[Node<'_, '_>]) -> (u32, u32) {

@@ -6220,7 +6220,9 @@ returns.
   reported. The diagnostics drop the `missing-required-parent` each class gets
   for not extending the others. When a class that uses the trait has no
   parent, or nothing uses it yet, `parent` stays untyped and the diagnostics
-  drop the `invalid-parent-type`.
+  drop the `invalid-parent-type`. Completion, hover, and go to definition read
+  `parent` in a trait as those same required parents (`parent_classes` in
+  `tusk-lsp/src/symbol.rs`), and completion lists their protected members.
 - **Changes:** each file keeps the names it declared. A change removes the
   ones the index still has from that file (two files can declare the same
   class, and only one wins the merge), scans the new text, and repopulates

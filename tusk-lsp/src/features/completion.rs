@@ -186,7 +186,11 @@ fn visible(codebase: &CodebaseMetadata, visibility: Visibility, declaring: &str,
     match visibility {
         Visibility::Public => true,
         Visibility::Protected => from.is_some_and(|f| {
-            f.eq_ignore_ascii_case(declaring) || codebase.class_extends(f.as_bytes(), declaring.as_bytes()) || codebase.class_extends(declaring.as_bytes(), f.as_bytes())
+            let related = |f: &[u8]| {
+                f.eq_ignore_ascii_case(declaring.as_bytes()) || codebase.class_extends(f, declaring.as_bytes()) || codebase.class_extends(declaring.as_bytes(), f)
+            };
+            // A trait runs as the classes it requires, which the index gives it from those that use it.
+            related(f.as_bytes()) || codebase.get_class_like(f.as_bytes()).is_some_and(|m| m.kind.is_trait() && m.require_extends.iter().any(|r| related(r.as_bytes())))
         }),
         Visibility::Private => from.is_some_and(|f| f.eq_ignore_ascii_case(declaring)),
     }
@@ -750,6 +754,15 @@ mod tests {
     }
 
     const LIB: &str = "<?php\nnamespace App\\Models;\n/** @property-read int $magic */\nclass Base {\n    public function save(array $o = []): bool { return true; }\n    protected function guard(): void {}\n    private function secret(): void {}\n    public static function create(): static { return new static; }\n    public static int $count = 0;\n}\nclass User extends Base {\n    const ROLE = 'admin';\n    public string $name = '';\n    private int $age = 0;\n    public function posts(): array { return []; }\n}\nenum Status: string { case Active = 'a'; case Gone = 'g'; }\nfunction helper(int $x): string { return ''; }\n";
+
+    #[test]
+    fn completes_parent_in_a_trait_from_the_classes_that_use_it() {
+        let lib = "<?php\nclass A { public function boot(): int { return 1; } protected function guard(): void {} private function secret(): void {} }\nclass B { public function only(): void {} }\nclass C extends A { use T; }\nclass D extends B { use T; }\n";
+        let items = complete_at(&[("lib.php", lib), ("t.php", "<?php\ntrait T {\n    function x() { parent::<|> }\n}\n")]);
+        assert_eq!(labels(&items), vec!["boot", "class", "guard", "only"]);
+        let items = complete_at(&[("lib.php", lib), ("t.php", "<?php\ntrait T {\n    function x() { $this-><|> }\n}\n")]);
+        assert!(["boot", "guard", "only", "x"].iter().all(|m| labels(&items).contains(&m.to_string())), "{:?}", labels(&items));
+    }
 
     #[test]
     fn completes_members_that_are_visible_from_here() {

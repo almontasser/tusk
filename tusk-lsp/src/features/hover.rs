@@ -356,6 +356,13 @@ mod tests {
     }
 
     #[test]
+    fn shows_parents_methods_in_a_trait() {
+        let lib = "<?php\nclass A { public function boot(): int { return 1; } }\nclass C extends A { use T; }\n";
+        let h = hover_text(&[("lib.php", lib), ("t.php", "<?php\ntrait T {\n    function x() { parent::bo<|>ot(); }\n}\n")]);
+        assert!(h.contains("public function boot(): int"), "{h}");
+    }
+
+    #[test]
     fn shows_built_in_functions_from_phps_stubs() {
         let h = hover_text(&[("t.php", "<?php str_con<|>tains('a', 'b');")]);
         assert!(h.contains("function str_contains(string $haystack, string $needle): bool"), "{h}");
