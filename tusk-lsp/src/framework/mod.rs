@@ -382,6 +382,29 @@ pub struct State {
     lazy_loading_hints: std::sync::atomic::AtomicBool,
 }
 
+/// A script [`State::php_script`] was asked for inside [`State::php_outside`], to run once its function returns.
+struct Wanted {
+    key: String,
+    script: String,
+    args: Vec<String>,
+    depends_on: Vec<String>,
+    tinker: bool,
+}
+
+thread_local! {
+    /// While [`State::php_outside`] runs its function on this thread, the scripts it asked for that weren't cached.
+    static WANTED: std::cell::RefCell<Option<Vec<Wanted>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Stops collecting scripts when [`State::php_outside`]'s function returns or panics.
+struct Collecting;
+
+impl Drop for Collecting {
+    fn drop(&mut self) {
+        WANTED.set(None);
+    }
+}
+
 struct Cached {
     value: Arc<Value>,
     /// Paths (relative to the root) whose changes make it stale; a prefix matches a folder.
@@ -420,6 +443,15 @@ impl State {
             // A failed run is cached as null, so it isn't retried until a file it depends on changes.
             return (!c.value.is_null()).then(|| c.value.clone());
         }
+        // Inside `php_outside`, it runs once the function returns.
+        let deferred = WANTED.with_borrow_mut(|wanted| {
+            let to_string = |s: &[&str]| s.iter().map(|s| s.to_string()).collect();
+            let w = Wanted { key: key.into(), script: script.into(), args: to_string(args), depends_on: to_string(depends_on), tinker };
+            wanted.as_mut().map(|wanted| wanted.push(w))
+        });
+        if deferred.is_some() {
+            return None;
+        }
         let php = self.php.get_or_init(|| php::detect(&self.root));
         let value = Arc::new(php::run(&self.root, php, script, args, tinker).unwrap_or(Value::Null));
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
@@ -446,12 +478,44 @@ impl State {
         cached.map(|(v, _)| v).filter(|v| !v.is_null())
     }
 
+    /// Runs `f`, which may hold the index's lock, with the PHP scripts it asks for run after it returns rather than
+    /// inside it, then runs it again with their results. A script can take seconds to boot the app, and while it
+    /// runs under the lock, each edit's index update waits for it, and so does every request after the edit.
+    pub fn php_outside<R>(&self, mut f: impl FnMut() -> R) -> R {
+        // Inside another, which runs the scripts.
+        if WANTED.with_borrow(Option::is_some) {
+            return f();
+        }
+        // Each pass caches the scripts it ran, so the next asks for fewer. A last pass runs the rest inside.
+        for _ in 0..3 {
+            let collecting = Collecting;
+            WANTED.set(Some(vec![]));
+            let result = f();
+            let wanted = WANTED.take().unwrap_or_default();
+            drop(collecting);
+            if wanted.is_empty() {
+                return result;
+            }
+            for w in wanted {
+                let args: Vec<&str> = w.args.iter().map(String::as_str).collect();
+                let depends_on: Vec<&str> = w.depends_on.iter().map(String::as_str).collect();
+                self.php_script(&w.key, &w.script, &args, &depends_on, w.tinker);
+            }
+        }
+        f()
+    }
+
     /// Stores a value computed without PHP, with the same invalidation.
     pub fn remember(&self, key: &str, depends_on: &[&str], compute: impl FnOnce() -> Value) -> Arc<Value> {
         if let Some(c) = self.cache.lock().get(key) {
             return c.value.clone();
         }
         let value = Arc::new(compute());
+        // In a pass of `php_outside` that went without a script, it may come from what's missing, so it's computed
+        // again in the next.
+        if WANTED.with_borrow(|w| w.as_ref().is_some_and(|w| !w.is_empty())) {
+            return value;
+        }
         let depends_on = depends_on.iter().map(|s| s.to_string()).collect();
         self.cache.lock().insert(key.to_string(), Cached { value: value.clone(), depends_on, at: Instant::now() });
         value
@@ -558,6 +622,31 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         };
         assert_eq!(value["n"], 7);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Needs `php` on `PATH`; skipped without it.
+    #[test]
+    fn runs_scripts_after_the_function_that_asks_for_them() {
+        if std::process::Command::new("php").arg("-v").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("tusk-php-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = State::new(dir.clone());
+        const SCRIPT: &str = "<?php echo json_encode(['n' => (int) $argv[1]]);";
+        let mut passes = vec![];
+        let n = state.php_outside(|| {
+            let found = state.php("k", SCRIPT, &["7"], &[]);
+            passes.push(found.is_some());
+            // What's computed from it is kept only once it has the script's value.
+            state.remember("from-k", &[], || found.map_or(Value::Null, |v| v["n"].clone()))
+        });
+        assert_eq!(passes, [false, true]);
+        assert_eq!(*n, 7);
+        assert_eq!(*state.remember("from-k", &[], || Value::Null), 7);
+        // Outside it, a script runs where it's asked for.
+        assert_eq!(state.php("j", SCRIPT, &["8"], &[]).unwrap()["n"], 8);
         let _ = std::fs::remove_dir_all(dir);
     }
 

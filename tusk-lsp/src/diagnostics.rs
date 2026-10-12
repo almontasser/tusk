@@ -115,7 +115,7 @@ pub fn check(snap: &Snapshot, doc: &Document) -> Vec<Diagnostic> {
         let components = crate::framework::laravel::blade_components(&snap.framework);
         blade_problems_in(&snap.index.read(), doc, &|p| snap.read(p), components.as_deref())
     };
-    let framework = crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics).unwrap_or_default();
+    let framework = snap.framework.php_outside(|| crate::features::with_ctx(snap, &doc.uri, crate::framework::diagnostics)).unwrap_or_default();
     out.extend(framework);
     out
 }

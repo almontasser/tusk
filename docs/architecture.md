@@ -6278,7 +6278,10 @@ returns.
   one.
 - **Request pool:** each request runs on the pool once the index has every
   edit made before it (`Indexer::ticket`), so it sees its own file's latest
-  symbols. A panic in a request answers with an error instead of stopping the
+  symbols. The outline, folding ranges, and selection ranges read only the
+  document, so they don't wait: while the project indexes, an opened file's
+  outline comes in 40 ms rather than after the index (0.5 to 0.7 s warm, 1.3
+  s cold). A panic in a request answers with an error instead of stopping the
   server. `$/cancelRequest` sets the request's flag (`Snapshot::cancel`): a
   request that hasn't started answers `RequestCancelled` at once, and
   references and project problems check it between files.
@@ -6294,7 +6297,15 @@ returns.
   index down (`php_problems_in`).
 - **Diagnostics thread:** checks an edited document as soon as the index has
   its change, and the other open documents once edits pause for 600 ms,
-  since they may depend on it.
+  since they may depend on it. A check holds the index's read lock, and the
+  next edit's update waits for it, so it runs no PHP under the lock (see
+  "Scripts outside the index's lock").
+- **Latency:** `examples/latency.rs` opens a file right after `initialize`,
+  then types three lines into its first method a character at a time,
+  asking for a completion and a hover after each keystroke and saving after
+  each pass. On a Laravel and Filament app (26,000 PHP files, warm cache),
+  completion takes 9 ms at the median, 20 ms at p95, and at most 65 ms, where
+  it took up to 4.7 s with PHP run under the index's lock; hover takes 4 ms.
 - **Stacks:** threads get 64 MB stacks, because Mago's parser and analyzer
   recurse once per level of nesting. So do the threads that scan files for the
   index (`scan_pool`); rayon's global pool has 2 MB.
@@ -6749,6 +6760,22 @@ an `artisan` file.
   the working directory. `State` caches each result until a file it depends
   on changes. A script that fails caches a failure. Features built on it then
   report no problems, rather than flag every call as Laravel LSP did.
+- **Scripts outside the index's lock:** requests and the diagnostics thread
+  run with `State::php_outside`. Inside it, a script that isn't cached isn't
+  run: it's noted and returns nothing, and `remember` keeps no value computed
+  in a pass that missed one. Once the request or check returns, which
+  drops the lock, the noted scripts run, and it runs again with their
+  results. Booting the app takes 0.3 to 2 s, and under the lock, the next
+  edit's index update waited for it, and so did every request after the edit:
+  after each save, which forgets the facts that depend on `app/`, the next
+  keystroke's completion took 0.7 to 1.2 s, and 4.7 s on the first check. The
+  requests with effects beyond their answer, `workspace/executeCommand` and
+  `tusk/projectProblems`, run once, as before. Icon completion in PHP loads
+  the icon sets only in a string, rather than on every completion.
+- **Translation entries:** the entries built from the translations script's
+  keys, each with a hover per locale, are kept for as long as the script's
+  value is (`entries` in `laravel/mod.rs`). An app's 4,100 keys took 50 ms to
+  build for every check of a file that calls `__()`, under the index's lock.
 - **Which PHP:** `framework/php.rs` detects it once per server, in Laravel
   LSP's order: `herd which-php`, `valet which-php`, then Sail (`sail ps`),
   Lando, and DDEV when the project has their files, then `php -r 'echo

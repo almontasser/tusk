@@ -1,7 +1,8 @@
 //! The protocol loop: document sync, the indexer thread, and dispatching requests to a thread pool.
 //!
 //! The main loop never waits on analysis. Edits update the open document at once and queue an index update on
-//! the indexer thread; each request runs on the pool once the index has caught up with the edits made before it.
+//! the indexer thread; each request runs on the pool once the index has caught up with the edits made before it,
+//! except those that read only the document.
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
@@ -387,11 +388,11 @@ impl Server {
         }
     }
 
-    /// Runs a request on the pool after the index catches up. A panic answers with an error instead of taking
-    /// the server down.
-    fn spawn(&self, id: RequestId, run: impl FnOnce(&Snapshot) -> Result<Value, String> + Send + 'static) {
+    /// Runs a request on the pool, once the index catches up when `indexed`. A panic answers with an error instead of
+    /// taking the server down.
+    fn spawn(&self, id: RequestId, indexed: bool, run: impl FnOnce(&Snapshot) -> Result<Value, String> + Send + 'static) {
         let snapshot = self.snapshot();
-        let ticket = self.indexer.ticket();
+        let ticket = if indexed { self.indexer.ticket() } else { 0 };
         let applied = self.indexer.applied.clone();
         let client = self.client.clone();
         let running = self.running.clone();
@@ -423,7 +424,15 @@ impl Server {
     fn request(&mut self, req: Request) {
         let Request { id, method, params } = req;
         if let Some(handler) = handlers::find(&method) {
-            self.spawn(id, move |snap| handler(snap, params));
+            // The outline, folding, and selection read only the document, so they don't wait for indexing.
+            let syntax_only = [request::DocumentSymbolRequest::METHOD, request::FoldingRangeRequest::METHOD, request::SelectionRangeRequest::METHOD].contains(&method.as_str());
+            // A handler runs again once the PHP it asked for has run outside the index's lock, unless it does more
+            // than answer.
+            let once = [request::ExecuteCommand::METHOD, "tusk/projectProblems"].contains(&method.as_str());
+            self.spawn(id, !syntax_only, move |snap| match once {
+                true => handler(snap, params),
+                false => snap.framework.php_outside(|| handler(snap, params.clone())),
+            });
             return;
         }
         match method.as_str() {

@@ -567,10 +567,19 @@ fn entries(kind: Kind, data: &Data<'_>) -> Option<Vec<Entry>> {
         }
         Kind::Translation => {
             let t = data.translations()?;
+            // An app's thousands of keys, each with a hover per locale, take tens of milliseconds to build, which
+            // each check of a file that names one would spend again: they're built once per translations value.
+            static BUILT: parking_lot::Mutex<Option<(std::sync::Arc<Value>, Vec<Entry>)>> = parking_lot::Mutex::new(None);
+            if let Some((from, built)) = &*BUILT.lock()
+                && std::sync::Arc::ptr_eq(from, &t)
+            {
+                return Some(built.clone());
+            }
             let keys = t["keys"].as_object()?;
             let default = t["default"].as_str().unwrap_or("en");
             let few = keys.len() < 200;
-            keys.iter()
+            let built: Vec<Entry> = keys
+                .iter()
                 .map(|(key, locales)| {
                     let mut e = Entry::new(key, CompletionItemKind::VALUE);
                     let chosen = locales.get(default).or_else(|| locales.as_object().and_then(|o| o.values().next()));
@@ -594,7 +603,9 @@ fn entries(kind: Kind, data: &Data<'_>) -> Option<Vec<Entry>> {
                     e.hover = Some(hover.join("\n\n"));
                     e
                 })
-                .collect()
+                .collect();
+            *BUILT.lock() = Some((t, built.clone()));
+            built
         }
         Kind::Middleware => data
             .middleware()?
