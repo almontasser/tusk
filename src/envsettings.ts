@@ -38,6 +38,8 @@ export function openEnvSettings(section?: string) {
 class EnvSettings {
   el = h("div", { class: "md-designer es-designer" });
   private model: monaco.editor.ITextModel | null = null;
+  /** The .env file's change listener, disposed when the tab closes. */
+  private listening?: monaco.IDisposable;
   private missing = false;
   private info: fapp.EnvSettingsInfo | null = null;
   private files: Record<string, string> = {};
@@ -55,7 +57,7 @@ class EnvSettings {
 
   show(section?: string) {
     this.section = section;
-    showEditorView("Environment", this.el, "settings", () => (view = null));
+    showEditorView("Environment", this.el, "settings", () => ((view = null), this.listening?.dispose()));
     if (!this.model && !this.missing) void this.load();
     this.render();
   }
@@ -64,7 +66,7 @@ class EnvSettings {
     if (!(await invoke<boolean>("path_exists", { path: this.path }))) return (this.missing = true), this.render();
     this.missing = false;
     this.model = await host.ensureModel(this.path);
-    this.model.onDidChangeContent(() => this.el.isConnected && this.render());
+    this.listening = this.model.onDidChangeContent(() => this.el.isConnected && this.render());
     await this.readProject();
   }
 

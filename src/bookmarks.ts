@@ -162,10 +162,14 @@ monaco.editor.onDidCreateModel((model) => {
   const path = model.uri.fsPath;
   if (model.uri.scheme !== "file") return;
   render(path);
-  // Save lines that edits moved.
+  // Save lines that edits moved, once typing pauses: each save writes the project's state file.
+  let moved = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   model.onDidChangeContent(() => {
-    if (inFile(path).length && syncLines(path)) persist();
-    else if (inFile(path).length) renderViewSoon();
+    if (!inFile(path).length) return;
+    moved = syncLines(path) || moved;
+    clearTimeout(timer);
+    timer = setTimeout(() => (moved ? persist() : renderView(), (moved = false)), 300);
   });
   model.onWillDispose(() => (syncLines(path), decorations.delete(path)));
 });
@@ -278,10 +282,6 @@ function renderView() {
   }
   tree.replaceChildren(...rows);
 }
-const renderViewSoon = (() => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return () => (clearTimeout(timer), (timer = setTimeout(renderView, 300)));
-})();
 
 /** Drag a bookmark onto another in its file, or a file onto another file, to reorder them. */
 function drag(row: HTMLElement, k: string) {

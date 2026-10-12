@@ -864,7 +864,7 @@ async function renamed(from: string, to: string) {
   );
   tabs.clear();
   entries.forEach(([p, t]) => tabs.set(p, t));
-  model.onDidChangeContent(() => showDirty(to));
+  watchDirty(to, model);
   const view = active === from ? editor.saveViewState() : viewStates.get(from);
   viewStates.delete(from);
   if (view) viewStates.set(to, view);
@@ -1115,7 +1115,13 @@ function collapseAll() {
 function addTab(path: string, model: monaco.editor.ITextModel) {
   if (tabs.has(path)) return;
   tabs.set(path, { model, saved: model.getAlternativeVersionId(), disk: model.getValue() });
-  model.onDidChangeContent(() => showDirty(path));
+  watchDirty(path, model);
+}
+
+/** Models whose edits update their tab's dot. A request tab keeps a file's model after its tab closes, so a reopened tab adds no second listener. */
+const dotted = new WeakSet<monaco.editor.ITextModel>();
+function watchDirty(path: string, model: monaco.editor.ITextModel) {
+  if (!dotted.has(model)) dotted.add(model), model.onDidChangeContent(() => showDirty(path));
 }
 
 /** Counts calls to openFile, so a file that loads after one you opened later doesn't take its place. */

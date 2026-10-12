@@ -131,7 +131,8 @@ swapped for blob URLs of the file's bytes (`read_file_bytes`, a
 preview renders again 150 ms after you stop typing. Every Monaco editor gets a
 scroll listener once (`onDidCreateEditor`), and the preview for the editor's
 model scrolls to the block at its top line, interpolating toward the next
-block (`previewScrollTop`). The sync runs one way, editor to preview.
+block (`previewScrollTop`). The sync runs one way, editor to preview, at most
+once per animation frame, since it reads the blocks' layout.
 
 ### Saving
 
@@ -3433,8 +3434,11 @@ replacement without the added line.
 - **Change markers.** `lineChanges` in `gitparse.ts` compares the editor text
   with the file at `HEAD` (`git show HEAD:<path>`, kept as lines until `HEAD`
   moves). It trims the lines both versions share at the start and end, then
-  runs a longest common subsequence on the rest. It runs 200 ms after you stop
-  typing, so the markers include unsaved edits. Each change carries a `block`
+  runs Myers' diff on the rest, whose cost follows the number of changed lines
+  rather than the distance between them: two edits 6,000 lines apart take under
+  a millisecond and stay two changes. Past 1,000 changed lines, the middle is
+  one modified block. It runs 200 ms after you stop typing, so the markers
+  include unsaved edits. Each change carries a `block`
   in the diff editor's line-change shape, which maps it to the HEAD lines.
   **Rollback** replaces the block's lines with HEAD's in one undoable edit.
   **Stage** diffs the index (`git show :./<path>`) against the editor text,
@@ -5209,7 +5213,8 @@ under a `HostKeyAlias`, and that a failing one names the command.
   value `bookmarks` with paths relative to the project, and drawn as
   decorations on open models so they follow edits. `syncLines` reads the lines
   back from the decorations (kept in the same order as the file's bookmarks)
-  before any change to the list, and edits that move lines save them. They
+  before any change to the list, and edits that move lines save them 300 ms
+  after typing stops. They
   sit in the glyph margin's left lane, so a line can show a bookmark and a
   breakpoint together. A mnemonic shows through one generated CSS class per
   character (`bookmark-m-<char>`), since Monaco's glyph margin takes only class
@@ -6967,7 +6972,22 @@ measurement.
   dot (`showDirty`) instead of redrawing every tab bar, and the status bar
   listens to one cursor event and counts a selection with
   `getValueLengthInRange`. Conflict shading, change markers, blame, the inline
-  problem, and the Problems panel wait for a pause.
+  problem, and the Problems panel wait for a pause. Bookmarks that edits move
+  are saved, and the Breakpoints tab redrawn, once typing pauses.
+- **Redraw only when something changed.** Servers publish a file's problems
+  again after every edit, mostly unchanged, so the Problems panel and the
+  status bar counts redraw only when a file's markers differ from the ones
+  drawn. Mago's quick-fix provider, which Monaco asks each time the caret
+  settles, returns at once for a line without Mago problems. The session saves
+  each time the caret or the scroll position settles, so each terminal keeps
+  its saved text until it prints or clears.
+- **Views stop listening when their tab closes.** A designer or view that
+  follows edits to its files (Access, Automations, Environment, Notifications,
+  Panel Settings, Import and Export, Scheduled Tasks, Widgets) disposes its
+  model listeners when its tab closes. Its element stays in the page when
+  parked, so `isConnected` doesn't tell a closed view from an open one.
+- **Read layout once a frame.** The Markdown preview's scroll sync reads its
+  blocks' positions in an animation frame, not in every scroll event.
 - **Load rarely used code on first use.** `xterm.js`, `marked` and DOMPurify,
   and the profiler are separate chunks, which took the main bundle from 4.53 MB
   to 4.10 MB. Monaco is the rest of it.
@@ -9657,3 +9677,12 @@ user code:
   `$_SERVER['HTTPS']`, the scheme, and the port instead, so `url()` and
   `request()->isSecure()` work without changes, and the proxy stays a byte
   copy.
+
+### 2026-10-12: Change markers use Myers' diff
+
+- The longest common subsequence filled a table of every line pair between the
+  first and the last edit, about 20 ms for two edits 2,000 lines apart, after
+  each pause in typing and in each pane. Past 4 million pairs it gave up and
+  marked everything between the edits as modified. Myers' diff costs about the
+  file's length times the number of changed lines, so typical edits take under
+  a millisecond however far apart they are.

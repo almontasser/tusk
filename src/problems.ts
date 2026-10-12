@@ -326,10 +326,26 @@ function render() {
 
 let pending: ReturnType<typeof setTimeout> | undefined;
 const renderSoon = () => (clearTimeout(pending), (pending = setTimeout(render, 200)));
-monaco.editor.onDidChangeMarkers(renderSoon);
+/**
+ * Each file's markers as last drawn. Servers publish a file's problems again after every edit, mostly unchanged, so
+ * the panel and the status bar redraw only when a file's markers differ.
+ */
+const drawnMarkers = new Map<string, string>();
+monaco.editor.onDidChangeMarkers((uris) => {
+  let changed = false;
+  for (const uri of uris) {
+    const key = uri.toString();
+    const markers = JSON.stringify(monaco.editor.getModelMarkers({ resource: uri }).map((m) => [m.owner, m.severity, m.message, m.source, m.code, m.startLineNumber, m.startColumn, m.endLineNumber, m.endColumn]));
+    if (drawnMarkers.get(key) === markers) continue;
+    changed = true;
+    markers === "[]" ? drawnMarkers.delete(key) : drawnMarkers.set(key, markers);
+  }
+  if (changed) renderSoon();
+});
 // A closing file keeps its last markers, which are newer than the scan, unless they're for changes you didn't save.
 monaco.editor.onDidCreateModel((model) =>
   model.onWillDispose(() => {
+    drawnMarkers.delete(model.uri.toString());
     const path = model.uri.fsPath;
     if (model.uri.scheme !== "file" || scan.root !== host.root() || !diagnosed.has(path) || host.unsaved(path)) return;
     const markers = monaco.editor.getModelMarkers({ resource: model.uri }).filter((m) => isShown(m.severity));

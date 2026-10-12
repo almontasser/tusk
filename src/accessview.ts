@@ -30,7 +30,8 @@ class AccessView implements AccessHost {
   accessError = "";
   host = host;
   private pending: Promise<unknown> = Promise.resolve();
-  private listening = new Set<string>();
+  /** Change listeners by path, disposed when the tab closes. */
+  private listening = new Map<string, { dispose(): void }>();
   private model: string;
 
   constructor(model: string) {
@@ -43,7 +44,7 @@ class AccessView implements AccessHost {
   }
 
   show() {
-    showEditorView(`${shortClass(this.model)} · Access`, this.el, "shield", () => open.delete(this.model));
+    showEditorView(`${shortClass(this.model)} · Access`, this.el, "shield", () => (open.delete(this.model), this.listening.forEach((l) => l.dispose())));
     if (!this.access) void this.loadAccess();
     this.render();
   }
@@ -70,10 +71,7 @@ class AccessView implements AccessHost {
   private async doc(path: string): Promise<Doc> {
     const model = await host.ensureModel(path);
     const text = model.getValue();
-    if (!this.listening.has(path)) {
-      this.listening.add(path);
-      model.onDidChangeContent(() => void this.refresh(path));
-    }
+    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.refresh(path)));
     return { path, model, text, outline: await fapp.outlineOf(text, path) };
   }
 

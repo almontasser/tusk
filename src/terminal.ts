@@ -19,8 +19,11 @@ import { onTheme } from "./themes";
  * with the tab's earlier output.
  */
 export type Restore = { title: string; cwd: string; command?: string[]; scrollback?: string };
-/** A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project. */
-type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; search?: SearchAddon; restore?: Restore; icon?: string; editorOnly?: boolean; stop?(): void };
+/**
+ * A panel tab: a terminal, or another view (without `term`). `restore` is set for tabs that come back with the project.
+ * `output` is the terminal's text as the session saves it, kept until the terminal prints or clears.
+ */
+type Session = { title: string; el: HTMLElement; exited: boolean; dispose(): void; term?: Terminal; fit?: FitAddon; search?: SearchAddon; restore?: Restore; icon?: string; editorOnly?: boolean; stop?(): void; output?: string };
 /** A panel tab, as the editor sees it after you drag the tab into an editor pane. */
 export type PanelTab = Session;
 
@@ -56,9 +59,12 @@ onTheme((t) => {
   [...sessions, ...docked].forEach((s) => s.term && (s.term.options.theme = theme()));
 });
 
-/** The shells and restorable commands that are still running, in tab order, with their output, for the session. */
+/**
+ * The shells and restorable commands that are still running, in tab order, with their output, for the session. The
+ * session saves each time the caret or the scroll position settles, so each terminal's text is read once per change.
+ */
 export const runningTerminals = (): Restore[] =>
-  [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => ({ ...s.restore!, scrollback: scrollbackText(s.term!.buffer.normal) }));
+  [...sessions, ...docked].filter((s) => s.restore && !s.exited).map((s) => ({ ...s.restore!, scrollback: (s.output ??= scrollbackText(s.term!.buffer.normal)) }));
 export const panelShown = () => panelVisible;
 export const hidePanel = () => showPanel(false);
 let changed = () => {};
@@ -171,7 +177,7 @@ export async function openTerminal(
       { label: "Copy", run: () => navigator.clipboard.writeText(term.getSelection()) },
       { label: "Paste", run: async () => term.paste(await navigator.clipboard.readText()) },
       { label: "Select All", run: () => term.selectAll() },
-      { label: "Clear", run: () => term.clear() },
+      { label: "Clear", run: () => clear(session) },
     ]);
   };
 
@@ -200,6 +206,7 @@ export async function openTerminal(
   }
   const restore = !command || restorable ? { title, cwd, command } : undefined;
   const session: Session = { title, term, fit, search, el, exited: false, dispose: () => {}, restore };
+  term.onWriteParsed(() => (session.output = undefined));
   linkFiles(term, () => restore?.cwd ?? cwd);
   // A shell's folder changes with `cd`, so after you press Enter, read where it is now.
   let cwdTimer: ReturnType<typeof setTimeout> | undefined;
@@ -536,7 +543,8 @@ const focusedSession = () => [...sessions, ...docked].find((s) => s.term && s.el
 /** Whether a terminal has focus, for ⌘F to find in it instead of in the editor. */
 export const terminalFocused = () => !!document.activeElement?.closest(".term");
 /** Clears the focused terminal's screen and scrollback, as its context menu's Clear does. */
-export const clearTerminal = () => focusedSession()?.term?.clear();
+export const clearTerminal = () => clear(focusedSession());
+const clear = (s: Session | undefined) => s?.term && (s.term.clear(), (s.output = undefined));
 
 /**
  * Opens the find bar over the terminal that has focus: matches highlight as you type, Enter and ⇧Enter go to the

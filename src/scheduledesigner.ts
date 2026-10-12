@@ -81,12 +81,13 @@ class ScheduleDesigner {
   private models: Record<string, fapp.ModelSummary> = {};
   private prunables: Prunable[] = [];
   private problem = "";
-  private listening = new Set<string>();
+  /** Change listeners by path, disposed when the tab closes. */
+  private listening = new Map<string, { dispose(): void }>();
 
   constructor(readonly root: string) {}
 
   show() {
-    showEditorView("Scheduled Tasks", this.el, "watch", () => (view = null));
+    showEditorView("Scheduled Tasks", this.el, "watch", () => ((view = null), this.listening.forEach((l) => l.dispose())));
     if (!this.loaded) void this.load();
     this.render();
   }
@@ -119,10 +120,7 @@ class ScheduleDesigner {
       const path = `${this.root}/${rel}`;
       if (!(await invoke<boolean>("path_exists", { path }).catch(() => false))) continue;
       const model = await host.ensureModel(path);
-      if (!this.listening.has(path)) {
-        this.listening.add(path);
-        model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
-      }
+      if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render())));
       const text = model.getValue();
       const outline = await fapp.outlineOf(text, path);
       const place = findPlace(kind, outline);

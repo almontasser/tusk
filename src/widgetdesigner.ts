@@ -62,7 +62,8 @@ class WidgetDesigner {
   private doc: Doc | null = null;
   private models: Record<string, fapp.ModelSummary> = {};
   private cat: Catalog | null = null;
-  private listening = false;
+  /** The file's change listener, disposed when the tab closes. */
+  private listening?: { dispose(): void };
   /** The resource list page whose table the widget can follow, when it's a resource's widget. */
   private listPage: { class: string; file: string; model: string } | null = null;
   /** What the widget shows now, read after each change; an error says why it can't. */
@@ -77,7 +78,7 @@ class WidgetDesigner {
   }
 
   show() {
-    showEditorView(`${this.file.split("/").pop()!.replace(/\.php$/, "")} · Widget`, this.el, "graph", () => open.delete(this.file));
+    showEditorView(`${this.file.split("/").pop()!.replace(/\.php$/, "")} · Widget`, this.el, "graph", () => (open.delete(this.file), this.listening?.dispose()));
     // The database may have changed since, as after a migration.
     if (!this.doc) void this.load();
     else this.readLive();
@@ -99,10 +100,7 @@ class WidgetDesigner {
 
   private async read() {
     const model = await host.ensureModel(this.file);
-    if (!this.listening) {
-      this.listening = true;
-      model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
-    }
+    this.listening ??= model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
     const text = model.getValue();
     const outline = await fapp.outlineOf(text, this.file);
     const cls = outline.classes.find((c) => c.name);

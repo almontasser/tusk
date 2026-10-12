@@ -27,7 +27,8 @@ class PorterDesigner {
   private doc: Doc | null = null;
   private columns: fapp.ModelDetails["columns"] = null;
   private setup: Awaited<ReturnType<typeof fapp.porters>> | null = null;
-  private listening = false;
+  /** The file's change listener, disposed when the tab closes. */
+  private listening?: { dispose(): void };
 
   constructor(private file: string) {}
 
@@ -36,7 +37,7 @@ class PorterDesigner {
   }
 
   show() {
-    showEditorView(`${this.file.split("/").pop()!.replace(/\.php$/, "")} · ${/Exporter\.php$/.test(this.file) ? "Export" : "Import"}`, this.el, "table", () => open.delete(this.file));
+    showEditorView(`${this.file.split("/").pop()!.replace(/\.php$/, "")} · ${/Exporter\.php$/.test(this.file) ? "Export" : "Import"}`, this.el, "table", () => (open.delete(this.file), this.listening?.dispose()));
     if (!this.doc) void this.load();
     this.render();
   }
@@ -52,10 +53,7 @@ class PorterDesigner {
 
   private async read() {
     const m = await host.ensureModel(this.file);
-    if (!this.listening) {
-      this.listening = true;
-      m.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
-    }
+    this.listening ??= m.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
     const text = m.getValue();
     const outline = await fapp.outlineOf(text, this.file);
     const cls = outline.classes.find((c) => c.name);
