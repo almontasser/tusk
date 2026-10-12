@@ -97,8 +97,9 @@ export async function generateResourceTests(file: string) {
       columns: table ? readColumns(table) : [],
       manageEdit: !!table && hasEditAction(table),
       policy: rules ? { rules, spatie: policy.spatie && policy.hasRoles } : null,
-      // Laravel's Pest.php applies RefreshDatabase to Feature tests only when the line isn't commented out.
-      refreshDatabase: !/^(?!\s*\/\/).*RefreshDatabase/m.test(pest),
+      // Laravel's Pest.php applies RefreshDatabase to Feature tests only when the line isn't commented out. Its
+      // `use Illuminate\...\RefreshDatabase;` import stays either way, so only `RefreshDatabase::class` counts.
+      refreshDatabase: !/^(?!\s*\/\/).*RefreshDatabase::class/m.test(pest),
     };
 
     const path = `${root}/${dir}/${className}.php`;

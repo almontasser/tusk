@@ -7,7 +7,7 @@ import { indentCode, mapValue, type OClass, phpFile, phpString, phpValue } from 
 import { columnFromDatabase, factoryFile, foreignKeyFor, type ModelSpec, type RelationType } from "./modelgen.ts";
 import type { Rule } from "./policygen.ts";
 
-export type FieldKind = "text" | "email" | "url" | "number" | "textarea" | "rich" | "bool" | "date" | "datetime" | "options" | "relation" | "enum" | "other";
+export type FieldKind = "text" | "email" | "url" | "number" | "password" | "textarea" | "rich" | "bool" | "date" | "datetime" | "options" | "relation" | "enum" | "other";
 export type TestField = {
   name: string;
   kind: FieldKind;
@@ -87,11 +87,13 @@ export function readFields(root: Root, model: { relations: { name: string; relat
       const owner = resolve(root, path.slice(0, i))?.entry.comp;
       if (owner && (isField(owner) || hasCall(owner, "relationship") || owner.calls.some((k) => CONDITIONAL.test(k.name)))) return;
     }
-    if (comp.calls.some((k) => CONDITIONAL.test(k.name))) return;
     const short = shortClass(comp.cls);
+    // A password field saves only when filled, `dehydrated(fn ($state) => filled($state))`, and a test fills it.
+    const password = short === "TextInput" && hasCall(comp, "password");
+    if (comp.calls.some((k) => CONDITIONAL.test(k.name) && !(password && k.name === "dehydrated"))) return;
     let kind: FieldKind = FIELDS[short] ?? "other";
     const field: TestField = { name: comp.name, kind, required: flag(comp, "required"), unique: hasCall(comp, "unique") };
-    if (short === "TextInput") kind = hasCall(comp, "password") ? "other" : hasCall(comp, "email") ? "email" : hasCall(comp, "url") ? "url" : hasCall(comp, "numeric") || hasCall(comp, "integer") ? "number" : "text";
+    if (short === "TextInput") kind = password ? "password" : hasCall(comp, "email") ? "email" : hasCall(comp, "url") ? "url" : hasCall(comp, "numeric") || hasCall(comp, "integer") ? "number" : "text";
     if (kind === "options") {
       const rel = comp.calls.find((k) => k.name === "relationship");
       const options = comp.calls.find((k) => k.name === "options" || k.name === "enum")?.args.items[0]?.value;
@@ -148,6 +150,8 @@ function fallback(f: TestField): string | null {
       return "fake()->unique()->safeEmail()";
     case "url":
       return "fake()->url()";
+    case "password":
+      return "'password'";
     case "number":
       return "fake()->numberBetween(1, 100)";
     case "textarea":
@@ -177,13 +181,16 @@ export function factoriesNeeded(s: Pick<TestSpec, "model" | "user" | "fields" | 
 }
 
 const list = (names: string[]) => `[${names.map(phpString).join(", ")}]`;
+/** `$array`'s entries for `keys`. Through a collection, as `Arr::only()` loses the string keys' type and Mago flags it. */
+const pick = (array: string, keys: string[]) => `collect(${array})->only(${list(keys)})->all()`;
 
 /** The tests for a resource, setup first. Classes are written `{{Fqn}}`. */
 export function testBlocks(s: TestSpec): TestBlock[] {
   const M = `{{${s.model}}}`;
   const live = (page: string) => `{{Livewire\\Livewire}}::test({{${page}}}::class)`;
   const rules = s.policy?.rules ?? {};
-  const filled = (f: TestField) => !s.factoryKeys || s.factoryKeys.includes(f.name);
+  // A factory's password is a hash, so a password field always gets a plain one.
+  const filled = (f: TestField) => f.kind !== "password" && (!s.factoryKeys || s.factoryKeys.includes(f.name));
   const usable = s.fields.filter((f) => f.kind !== "other" && (filled(f) || fallback(f) !== null));
   const fromFactory = usable.filter(filled).map((f) => f.name);
   const extra = usable.filter((f) => !filled(f));
@@ -191,7 +198,7 @@ export function testBlocks(s: TestSpec): TestBlock[] {
   const unfillable = s.fields.filter((f) => f.required && !usable.includes(f));
 
   // The data a create or edit fills: the factory's values for the form's fields, and type-made ones for the rest.
-  const factoryData = `{{Illuminate\\Support\\Arr}}::only(${M}::factory()->make()->getAttributes(), ${list(fromFactory)})`;
+  const factoryData = pick(`${M}::factory()->make()->getAttributes()`, fromFactory);
   const data =
     !extra.length
       ? `$data = ${fromFactory.length ? factoryData : "[]"};`
@@ -200,7 +207,7 @@ export function testBlocks(s: TestSpec): TestBlock[] {
   const saved = (key: string | null) => {
     const entries = comparable.filter((n) => fromFactory.includes(n) || extra.some((f) => f.name === n));
     if (!entries.length && !key) return "";
-    const only = entries.length === usable.length ? "$data" : `{{Illuminate\\Support\\Arr}}::only($data, ${list(entries)})`;
+    const only = entries.length === usable.length ? "$data" : pick("$data", entries);
     return `\n\n$this->assertDatabaseHas(${M}::class, ${key ? `[${phpString(s.keyName)} => $record->getKey(), ...${only}]` : only});`;
   };
 
@@ -263,7 +270,7 @@ export function testBlocks(s: TestSpec): TestBlock[] {
   if (s.pages.edit && !blocked.has("update"))
     test(
       `edits ${vowel(L)} ${L}`,
-      `${record}\n${data}\n${missing}\n{{Livewire\\Livewire}}::test({{${s.pages.edit}}}::class, ['record' => $record->getRouteKey()])${state.length ? `\n    ->assertSchemaStateSet({{Illuminate\\Support\\Arr}}::only($record->attributesToArray(), ${list(state)}))` : ""}\n    ->fillForm($data)\n    ->call('save')\n    ->assertHasNoFormErrors();${saved("record")}`,
+      `${record}\n${data}\n${missing}\n{{Livewire\\Livewire}}::test({{${s.pages.edit}}}::class, ['record' => $record->getRouteKey()])${state.length ? `\n    ->assertSchemaStateSet(${pick("$record->attributesToArray()", state)})` : ""}\n    ->fillForm($data)\n    ->call('save')\n    ->assertHasNoFormErrors();${saved("record")}`,
     );
   else if (s.pages.manage && s.manageEdit && !blocked.has("update"))
     test(`edits ${vowel(L)} ${L}`, `${record}\n${data}\n${missing}\n${live(s.pages.manage)}\n    ->callAction({{Filament\\Actions\\Testing\\TestAction}}::make('edit')->table($record), $data)\n    ->assertHasNoActionErrors();${saved("record")}`);

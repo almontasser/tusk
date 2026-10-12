@@ -18,6 +18,7 @@ test("reads the fields a test can fill", () => {
       ["title", "text", true, false],
       ["slug", "text", true, true],
       ["contact", "email", false, false],
+      ["secret", "password", false, false],
       ["price", "number", true, false],
       ["body", "rich", false, false],
       ["category_id", "relation", true, false],
@@ -68,14 +69,14 @@ test("writes Pest tests for list, create, edit, and each required and unique fie
   assert.match(code, /Filament::setCurrentPanel\('admin'\);/);
   assert.match(code, /it\('lists articles'[\s\S]*->assertCanRenderTableColumn\('category\.name'\)\n {8}->assertCanSeeTableRecords\(\$records\);/);
   // The factory's values for its fields, and type-made ones for the others.
-  assert.match(code, /\.\.\.Arr::only\(Article::factory\(\)->make\(\)->getAttributes\(\), \['title', 'slug', 'category_id', 'featured'\]\),\n {8}'contact' => fake\(\)->unique\(\)->safeEmail\(\),\n {8}'price' => fake\(\)->numberBetween\(1, 100\),\n {8}'body' => fake\(\)->paragraph\(\),\n {8}'status' => ArticleStatus::cases\(\)\[0\]->value,\n {8}'kind' => 'news',\n {8}'published_on' => now\(\)->toDateString\(\),\n {4}\];/);
+  assert.match(code, /\.\.\.collect\(Article::factory\(\)->make\(\)->getAttributes\(\)\)->only\(\['title', 'slug', 'category_id', 'featured'\]\)->all\(\),\n {8}'contact' => fake\(\)->unique\(\)->safeEmail\(\),\n {8}'secret' => 'password',\n {8}'price' => fake\(\)->numberBetween\(1, 100\),\n {8}'body' => fake\(\)->paragraph\(\),\n {8}'status' => ArticleStatus::cases\(\)\[0\]->value,\n {8}'kind' => 'news',\n {8}'published_on' => now\(\)->toDateString\(\),\n {4}\];/);
   assert.match(code, /\/\/ Fill cover too: Tusk can't make a value for this field\./);
   for (const f of ["title", "slug", "price", "category_id", "status", "featured", "cover"]) assert.match(code, new RegExp(`it\\('requires the ${f} field'`));
   assert.match(code, /it\('keeps the slug field unique'[\s\S]*->fillForm\(\['slug' => \$record->slug\]\)/);
   // Rich text and dates change as they save, so they aren't compared.
-  assert.match(code, /assertDatabaseHas\(Article::class, Arr::only\(\$data, \['title', 'slug', 'contact', 'price', 'category_id', 'status', 'kind', 'featured'\]\)\)/);
-  assert.match(code, /EditArticle::class, \['record' => \$record->getRouteKey\(\)\]\)\n {8}->assertSchemaStateSet\(Arr::only\(\$record->attributesToArray\(\), \['title', 'slug', 'category_id', 'featured'\]\)\)/);
-  assert.match(code, /assertDatabaseHas\(Article::class, \['id' => \$record->getKey\(\), \.\.\.Arr::only/);
+  assert.match(code, /assertDatabaseHas\(Article::class, collect\(\$data\)->only\(\['title', 'slug', 'contact', 'price', 'category_id', 'status', 'kind', 'featured'\]\)->all\(\)\)/);
+  assert.match(code, /EditArticle::class, \['record' => \$record->getRouteKey\(\)\]\)\n {8}->assertSchemaStateSet\(collect\(\$record->attributesToArray\(\)\)->only\(\['title', 'slug', 'category_id', 'featured'\]\)->all\(\)\)/);
+  assert.match(code, /assertDatabaseHas\(Article::class, \['id' => \$record->getKey\(\), \.\.\.collect/);
   assert.doesNotMatch(code, /keeps the list from/);
 });
 

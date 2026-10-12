@@ -30,6 +30,10 @@ class ArticleForm
                             ->unique(ignoreRecord: true),
                         TextInput::make('contact')
                             ->email(),
+                        TextInput::make('secret')
+                            ->password()
+                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->dehydrated(fn (?string $state): bool => filled($state)),
                         TextInput::make('price')
                             ->numeric()
                             ->required(),

@@ -5719,11 +5719,16 @@ tests:
   that are always on the form and save to the record, with their kind (text,
   email, number, toggle, date, relationship select, enum select, and so on),
   `required()`, and `unique()`. A field under a repeater, or under a layout
-  with a relationship, state path, or condition, is left out.
+  with a relationship, state path, or condition, is left out. A password
+  field is kept despite `dehydrated(fn ($state) => filled($state))`, since a
+  test fills it.
 - **Values:** the create and edit tests fill
-  `Arr::only(Model::factory()->make()->getAttributes(), [...])`: the raw
-  attributes, so enums and dates are the strings the form takes. Fields the
-  factory's `definition()` doesn't list get a value for their kind. Only kinds
+  `collect(Model::factory()->make()->getAttributes())->only([...])->all()`:
+  the raw attributes, so enums and dates are the strings the form takes. The
+  collection keeps the `array<string, mixed>` type that `assertDatabaseHas`
+  asks for, which `Arr::only()` loses. Fields the factory's `definition()`
+  doesn't list get a value for their kind, and a password field always gets
+  `'password'`, since the factory's is a hash. Only kinds
   that save as filled are compared with `assertDatabaseHas` and
   `assertSchemaStateSet`.
 - **Access:** the setup gives the acting user what the readable rules for
@@ -5731,6 +5736,10 @@ tests:
   roles through `findOrCreate`, and ownership by creating records with the
   user's ID. A rule that refuses everyone drops that page's tests. Each rule
   that can refuse gets a test that a new user gets 403.
+- **Database:** a Pest file adds `uses(RefreshDatabase::class)` unless a
+  line of `tests/Pest.php` that isn't commented out names
+  `RefreshDatabase::class`. Laravel's Pest.php imports the trait even with its
+  `->use(RefreshDatabase::class)` commented out, so the import doesn't count.
 - **Writing:** a new file is written whole by `testFile`, in Pest or as a
   PHPUnit class. An existing file is the user's code: `missingBlocks` finds
   the tests it lacks by their names, which are appended (Pest) or added as
