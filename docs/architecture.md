@@ -6210,6 +6210,13 @@ returns.
   `namespace`, so Symfony's `UnexpectedValueException` extended PHP's own, and
   Mago's populator, which follows parent chains without a limit, never
   finished. After a change, only the changed classes' chains are walked.
+- **`parent` in traits:** PHP resolves it to the parent of the class that uses
+  the trait, but Mago only accepts it with `@phpstan-require-extends` and
+  otherwise reports `invalid-parent-type`. After each populate, the index
+  (`infer_trait_parents`) gives a trait without one the parent that every
+  class using it shares, so `parent::` calls get that parent's types. When the
+  classes disagree, or nothing uses the trait yet, `parent` stays untyped and
+  the diagnostics drop the report.
 - **Changes:** each file keeps the names it declared. A change removes the
   ones the index still has from that file (two files can declare the same
   class, and only one wins the merge), scans the new text, and repopulates

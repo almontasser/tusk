@@ -153,8 +153,17 @@ fn analysis_issues<'a>(index: &crate::index::Index, arena: &'a LocalArena, path:
     let mago = &index.config.mago;
     let rel = path.strip_prefix(&index.config.root).unwrap_or(path);
     let analysis = analyze_with(&parsed, arena, index, mago.analyzer_settings(index.config.php_version));
-    issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref())));
+    issues.extend(analysis.issues.into_iter().filter(|i| mago.reports_analysis(rel, i.code.as_deref()) && !parent_in_trait(i, text)));
     (parsed, issues)
+}
+
+/// Mago reports `parent` in a trait whose parent the index couldn't tell (see `Index::infer_trait_parents`), but
+/// PHP takes the parent of whichever class uses the trait. The issue's secondary annotation is the type's name.
+fn parent_in_trait(issue: &Issue, text: &str) -> bool {
+    issue.code.as_deref() == Some("invalid-parent-type")
+        && issue.annotations.iter().any(|a| {
+            a.kind == AnnotationKind::Secondary && text.get(..a.span.start.offset as usize).is_some_and(|t| t.trim_end().to_ascii_lowercase().ends_with("trait"))
+        })
 }
 
 /// Mago's problems in the PHP of `doc`, a Blade view, read as [`checked_php`] lays it out, at the view's
@@ -295,6 +304,20 @@ mod tests {
             .collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn resolves_parent_in_a_trait_to_its_classes_parent() {
+        let codes = |code: &str| problems(code, "").into_iter().filter(|(s, _)| s == "mago").map(|(_, c)| c).collect::<Vec<_>>();
+        let base = "<?php\nclass Base { public function boot(): int { return 1; } }\n";
+        let t = "trait T {\n    public function x(): string { return parent::boot(); }\n}\n";
+        // Typed from the parent the classes share.
+        assert_eq!(codes(&format!("{base}{t}class C extends Base {{ use T; }}\n")), vec!["invalid-return-statement"]);
+        // Unknown without users, or with users that disagree, but not reported.
+        assert!(!codes(&format!("{base}{t}")).contains(&"invalid-parent-type".into()));
+        assert!(!codes(&format!("{base}{t}class C extends Base {{ use T; }}\nclass D {{ use T; }}\n")).contains(&"invalid-parent-type".into()));
+        // Still reported in a class without a parent.
+        assert!(codes("<?php\nclass C { public function x(): void { parent::x(); } }\n").contains(&"invalid-parent-type".into()));
     }
 
     #[test]
@@ -708,3 +731,4 @@ mod tests {
         }
     }
 }
+

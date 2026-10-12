@@ -174,6 +174,8 @@ pub struct Index {
     pest_own: HashMap<FileId, Vec<String>>,
     /// The classes made for the test files bound to traits, by test case and traits; see [`Index::sync_pest_classes`].
     pest_classes: Vec<((String, Vec<String>), Word)>,
+    /// The traits given the parent their classes share, and that parent; see [`Index::infer_trait_parents`].
+    trait_parents: Vec<(Word, Word)>,
     /// The validation rules each project file's classes declare, for files that declare any.
     pub validation: HashMap<FileId, Rules>,
     /// Changes with each build and each change to the project's code, and is never the same for two indexes, so
@@ -502,6 +504,7 @@ impl Index {
             pest_file: None,
             pest_own: HashMap::new(),
             pest_classes: vec![],
+            trait_parents: vec![],
             validation: HashMap::new(),
             generation: next_generation(),
             eloquent_files: HashMap::new(),
@@ -687,6 +690,7 @@ impl Index {
         break_inheritance_cycles(&mut self.codebase, None);
         populate_codebase(&mut self.codebase, &mut refs, WordSet::default(), HashSet::default());
         self.codebase.safe_symbols.clear();
+        self.infer_trait_parents();
         self.bind_pest_closures();
         self.pest_file = read(&self.config.root.join(PEST_FILE));
         self.pest_uses = self.pest_file.as_deref().map(|c| pest_bindings(self, c)).unwrap_or_default();
@@ -898,7 +902,42 @@ impl Index {
         populate_codebase(&mut self.codebase, &mut refs, safe, HashSet::default());
         // The analyzer skips "safe" symbols only in its diff mode, but nothing here needs the set kept.
         self.codebase.safe_symbols.clear();
+        self.infer_trait_parents();
         self.bind_pest_closures();
+    }
+
+    /// PHP resolves `parent` in a trait to the parent of the class that uses it, which Mago only knows from a
+    /// `@phpstan-require-extends`, reporting `parent` as invalid without one. A trait without one gets the parent
+    /// every class that uses it shares, so `parent::` calls have their types.
+    fn infer_trait_parents(&mut self) {
+        let key = |w: &Word| mago_word::word(w.as_str_lossy().to_ascii_lowercase().as_bytes());
+        // Taken out first: what the classes share may have changed. A trait scanned again has none.
+        for (name, parent) in std::mem::take(&mut self.trait_parents) {
+            if let Some(meta) = self.codebase.class_likes.get_mut(&name)
+                && meta.require_extends.len() == 1
+                && meta.require_extends.contains(&parent)
+            {
+                meta.require_extends.clear();
+            }
+        }
+        // Each used trait's shared parent, or `None` once two classes disagree or one has no parent.
+        let mut shared: HashMap<Word, Option<Word>> = HashMap::new();
+        for meta in self.codebase.class_likes.values().filter(|m| m.kind == SymbolKind::Class) {
+            let parent = meta.direct_parent_class.and_then(|p| self.codebase.get_class_like(p.as_bytes())).map(|p| p.name);
+            for t in &meta.used_traits {
+                shared.entry(key(t)).and_modify(|s| if *s != parent { *s = None }).or_insert(parent);
+            }
+        }
+        for (name, parent) in shared {
+            let Some(parent) = parent else { continue };
+            if let Some(meta) = self.codebase.class_likes.get_mut(&name)
+                && meta.kind == SymbolKind::Trait
+                && meta.require_extends.is_empty()
+            {
+                meta.require_extends.insert(parent);
+                self.trait_parents.push((name, parent));
+            }
+        }
     }
 
     /// Pest runs each test closure as a method of a test case. Its functions declare PHPUnit's `TestCase` as the
