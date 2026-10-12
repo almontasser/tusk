@@ -1468,7 +1468,7 @@ pub async fn deploy_read(server: Server, path: String) -> Result<Option<String>,
 }
 
 /// Which of `paths` (relative to a mapping's folder) its exclusions leave out.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn deploy_excluded(excludes: Vec<String>, paths: Vec<String>) -> Vec<bool> {
     let excludes = Excludes::new(&excludes);
     paths.iter().map(|p| excludes.matches(p)).collect()

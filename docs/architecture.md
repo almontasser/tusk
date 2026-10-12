@@ -44,6 +44,19 @@ one client per server, and Monaco merges their results.
 | `watch` | Watches a folder recursively and emits `fs-change` with the changed paths, gathered for 50 ms and without duplicates. |
 | `paths_exist` | Whether each of a batch of paths exists, in one call. |
 
+Tauri runs a command that isn't `async` on the main thread, which also draws
+the window, so any command that touches the disk, the network, the keychain, or
+another process is `async` or `#[tauri::command(async)]` and runs on a worker
+thread instead. Only commands that never wait stay on the main thread: those
+that set a cancel flag or queue a message on a channel. `pty_write`, `pty_resize`,
+`lsp_send`, and `ws_send` stay there on purpose, because the main thread runs
+commands in the order they arrive, so keystrokes and messages keep their order.
+Each terminal, language server, and WebSocket has a thread that does the actual
+writing. Output goes back in batches: a terminal joins what arrives while an
+event is sent into the next event, and the file watcher gathers changes for 50 ms.
+A command removes an entry from a shared list before closing it, so the list
+isn't locked while it closes.
+
 ### File tree
 
 The tree loads each folder only when you expand it, so large folders such as

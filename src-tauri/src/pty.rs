@@ -71,7 +71,9 @@ pub fn pty_spawn(
     let waiter = app.clone();
     std::thread::spawn(move || {
         let status = child.wait();
-        let ours = waiter.state::<PtyState>().0.lock().unwrap().remove(&id).is_some();
+        let session = waiter.state::<PtyState>().0.lock().unwrap().remove(&id);
+        let ours = session.is_some();
+        drop(session);
         let _ = exited.send(status.ok().filter(|_| ours).map(|s| s.exit_code()));
     });
 
@@ -114,6 +116,8 @@ pub fn pty_spawn(
     Ok(id)
 }
 
+/// Queues input for the session's writer thread. It stays on the main thread, which runs commands in the order they
+/// come, so keystrokes can't overtake each other; it never waits on the terminal.
 #[tauri::command]
 pub fn pty_write(state: State<PtyState>, id: u32, data: String) -> Result<(), String> {
     let sessions = state.0.lock().unwrap();
@@ -128,15 +132,18 @@ pub fn pty_resize(state: State<PtyState>, id: u32, rows: u16, cols: u16) -> Resu
     s.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+/// Off the main thread: dropping the session closes its pseudo-terminal, which on Windows can wait for its output.
+#[tauri::command(async)]
 pub fn pty_kill(state: State<PtyState>, id: u32) {
-    if let Some(mut s) = state.0.lock().unwrap().remove(&id) {
+    // Taken out first, so the list isn't locked while the session closes.
+    let session = state.0.lock().unwrap().remove(&id);
+    if let Some(mut s) = session {
         let _ = s.killer.kill();
     }
 }
 
 /// The folder a terminal's process is in, such as a shell after `cd`, so a restored shell starts there.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_cwd(state: State<PtyState>, id: u32) -> Option<String> {
     let pid = state.0.lock().unwrap().get(&id)?.pid?;
     process_cwd(pid).map(crate::slash)

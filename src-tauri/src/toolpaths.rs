@@ -247,7 +247,7 @@ pub(crate) fn quote(text: &str) -> String {
 }
 
 /// Applies Settings > Tools: writes a shim for each tool with a path, removes the others, and keeps the terminal's shell.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tools_configure(config: Config) -> Result<(), String> {
     #[cfg(unix)]
     {

@@ -101,7 +101,7 @@ fn secret() -> String {
 }
 
 /// The askpass program and socket for `gitOutput`, or None when the socket couldn't be opened.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn askpass_env() -> Option<(String, String)> {
     Some((std::env::current_exe().ok()?.to_string_lossy().into(), SOCKET.get()?.clone()))
 }

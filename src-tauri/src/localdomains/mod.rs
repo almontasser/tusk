@@ -554,7 +554,7 @@ pub async fn local_domains_serve(app: AppHandle, on: bool) -> Result<Vec<String>
 }
 
 /// Stops serving `name` from this process. Stopping a name that isn't served does nothing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn local_domain_stop(name: String) -> Result<(), String> {
     current().map_or(Ok(()), |me| me.unregister(&name))
 }

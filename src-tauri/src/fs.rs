@@ -296,7 +296,7 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
 }
 
 /// Stops watching, as when the project closes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unwatch(state: State<'_, WatchState>) {
     *state.0.lock().unwrap() = None;
 }
