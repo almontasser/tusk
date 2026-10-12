@@ -91,9 +91,9 @@ export const ago = (seconds: number, now = Date.now() / 1000) => {
 
 /**
  * Compares two versions of a file line by line and returns the changed ranges of the new
- * version, like `parseHunks`. Trims the common start and end, then runs a longest common
- * subsequence on the rest.
- * ponytail: quadratic LCS; above 4 million cell pairs the middle is marked modified as one block.
+ * version, like `parseHunks`. Trims the common start and end, then runs Myers' diff on the rest, whose cost grows
+ * with how many lines changed, not with how far apart the changes are, since it runs after each pause in typing.
+ * ponytail: past 1,000 changed lines the middle is marked modified as one block, which bounds the work at a few ms.
  */
 export function lineChanges(before: string[], after: string[]): LineChange[] {
   let start = 0;
@@ -116,14 +116,39 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
       ? { kind: "deleted", start: Math.max(at, 1), end: Math.max(at, 1), block }
       : { kind: removed === 0 ? "added" : "modified", start: at + 1, end: at + added, block };
   };
-  if (a.length * b.length > 4_000_000) return [hunk(a.length, b.length, a.length, b.length)];
+  // Myers: v[off + k] is the furthest x (an index into a) that d edits reach on diagonal k = x - y, coming down from
+  // diagonal k + 1 (an added line) or right from k - 1 (a removed one). Each step's part of v is kept, so the path
+  // can be walked back from the end.
+  const n = a.length;
+  const m = b.length;
+  const off = n + m + 1;
+  const v = new Int32Array(2 * off + 1);
+  const trace: Int32Array[] = [];
+  search: for (let d = 0; ; d++) {
+    if (d > 1000 || Math.abs(n - m) > 1000) return [hunk(n, m, n, m)];
+    trace.push(v.slice(off - d - 1, off + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) x++, y++;
+      v[off + k] = x;
+      if (x >= n && y >= m) break search;
+    }
+  }
 
-  // lcs[i * (b.length + 1) + j] is the LCS length of a[i..] and b[j..].
-  const w = b.length + 1;
-  const lcs = new Uint32Array((a.length + 1) * w);
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--)
-      lcs[i * w + j] = a[i] === b[j] ? lcs[(i + 1) * w + j + 1] + 1 : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
+  // Walking back marks each line kept (0), added (1), or removed (2), from the end.
+  const steps: number[] = [];
+  for (let d = trace.length - 1, x = n, y = m; d >= 0; d--) {
+    const t = trace[d]; // t[k + d + 1] is v[off + k] before step d
+    const k = x - y;
+    const prev = k === -d || (k !== d && t[k + d] < t[k + d + 2]) ? k + 1 : k - 1;
+    const px = t[prev + d + 1];
+    const py = px - prev;
+    while (x > px && y > py) steps.push(0), x--, y--;
+    if (d > 0) steps.push(x === px ? 1 : 2);
+    x = px;
+    y = py;
+  }
 
   const changes: LineChange[] = [];
   let i = 0;
@@ -134,18 +159,10 @@ export function lineChanges(before: string[], after: string[]): LineChange[] {
     if (removed || added) changes.push(hunk(removed, added, i, j));
     removed = added = 0;
   };
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      flush();
-      i++;
-      j++;
-    } else if (j < b.length && (i === a.length || lcs[i * w + j + 1] >= lcs[(i + 1) * w + j])) {
-      added++;
-      j++;
-    } else {
-      removed++;
-      i++;
-    }
+  for (const step of steps.reverse()) {
+    if (step === 0) flush(), i++, j++;
+    else if (step === 1) added++, j++;
+    else removed++, i++;
   }
   flush();
   return changes;

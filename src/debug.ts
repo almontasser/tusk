@@ -317,11 +317,12 @@ monaco.editor.onDidCreateModel((model) => {
   if (model.uri.scheme !== "file") return;
   renderBreakpoints(path);
   renderCurrentLine();
-  // Keep the saved lines in step with edits that move breakpoints.
+  // Keep the saved lines in step with edits that move breakpoints. The Breakpoints tab follows once typing pauses.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   model.onDidChangeContent(() => {
     if (!decorations.has(path)) return;
     breakpoints.set(path, breakpointsOf(path));
-    if (breakpoints.get(path)?.size) view.refresh();
+    if (breakpoints.get(path)?.size) clearTimeout(timer), (timer = setTimeout(view.refresh, 100));
   });
   model.onWillDispose(() => decorations.delete(path));
 });

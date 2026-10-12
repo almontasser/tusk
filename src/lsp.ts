@@ -194,6 +194,8 @@ monaco.languages.registerCodeActionProvider("php", {
     if (context.only?.startsWith("source")) return { actions: [], dispose() {} };
     const markers = context.markers.filter((m) => magoCategory[m.source ?? ""] && typeof m.code === "string");
     const actions: monaco.languages.CodeAction[] = [];
+    // Monaco asks for the light bulb each time the caret settles, so a line without Mago problems costs nothing.
+    if (!markers.length) return { actions, dispose() {} };
     const lines = model.getLinesContent();
     for (const m of markers) {
       const code = m.code as string;

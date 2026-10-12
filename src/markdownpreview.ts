@@ -11,12 +11,15 @@ type Preview = { el: HTMLElement; sync(ed: monaco.editor.ICodeEditor): void; clo
 const previews = new Map<string, Preview>();
 const openUrl = (url: string) => invoke("open_url", { url: url });
 
-// Each editor showing a previewed file scrolls its preview. Editors are hooked once, as they're created.
+// Each editor showing a previewed file scrolls its preview. Editors are hooked once, as they're created. A sync reads
+// the preview's layout, so it runs once a frame, with the editor's own drawing, not for every scroll event.
 const hooked = new WeakSet<monaco.editor.ICodeEditor>();
 const hook = (ed: monaco.editor.ICodeEditor) => {
   if (hooked.has(ed)) return;
   hooked.add(ed);
-  ed.onDidScrollChange((e) => e.scrollTopChanged && previews.get(ed.getModel()?.uri.toString() ?? "")?.sync(ed));
+  let frame = 0;
+  const sync = () => ((frame = 0), previews.get(ed.getModel()?.uri.toString() ?? "")?.sync(ed));
+  ed.onDidScrollChange((e) => e.scrollTopChanged && !frame && previews.size && (frame = requestAnimationFrame(sync)));
 };
 let hooking = false;
 

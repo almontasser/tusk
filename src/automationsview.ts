@@ -43,7 +43,8 @@ class AutomationsView {
   private doc: Doc | null = null;
   private error = "";
   private drafts: Rule[] = [];
-  private listening = new Set<string>();
+  /** Change listeners by path, disposed when the tab closes. */
+  private listening = new Map<string, { dispose(): void }>();
 
   constructor(private model: string) {}
 
@@ -65,7 +66,7 @@ class AutomationsView {
   }
 
   show() {
-    showEditorView(`${this.short} · Automations`, this.el, "zap", () => open.delete(this.model));
+    showEditorView(`${this.short} · Automations`, this.el, "zap", () => (open.delete(this.model), this.listening.forEach((l) => l.dispose())));
     if (!this.facts) void this.load();
     this.render();
   }
@@ -95,10 +96,7 @@ class AutomationsView {
   /** The observer's file with its outline, read again whenever it changes in the editor. */
   private async read(path: string, fqn: string): Promise<Doc> {
     const model = await host.ensureModel(path);
-    if (!this.listening.has(path)) {
-      this.listening.add(path);
-      model.onDidChangeContent(() => void this.refresh());
-    }
+    if (!this.listening.has(path)) this.listening.set(path, model.onDidChangeContent(() => void this.refresh()));
     const text = model.getValue();
     return { path, fqn, text, outline: await fapp.outlineOf(text, path) };
   }

@@ -74,7 +74,8 @@ class PanelSettings {
   private models: string[] = [];
   private modelInfo: Record<string, fapp.ModelSummary> = {};
   private error = "";
-  private listening = false;
+  /** The file's change listener, disposed when the tab closes. */
+  private listening?: { dispose(): void };
   private darkPreview = false;
 
   constructor(
@@ -87,7 +88,7 @@ class PanelSettings {
   }
 
   show() {
-    showEditorView(`${this.panelId} panel · Settings`, this.el, "settings-gear", () => open.delete(this.file));
+    showEditorView(`${this.panelId} panel · Settings`, this.el, "settings-gear", () => (open.delete(this.file), this.listening?.dispose()));
     if (!this.doc) void this.load();
     this.render();
   }
@@ -111,10 +112,7 @@ class PanelSettings {
 
   private async read() {
     const model = await host.ensureModel(this.file);
-    if (!this.listening) {
-      this.listening = true;
-      model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
-    }
+    this.listening ??= model.onDidChangeContent(() => void this.read().then(() => this.el.isConnected && this.render()));
     const text = model.getValue();
     this.doc = { path: this.file, model, text, outline: await fapp.outlineOf(text, this.file) };
   }

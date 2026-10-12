@@ -63,6 +63,14 @@ test("finds added, modified, and deleted lines between two versions", () => {
     { kind: "added", start: 6, end: 6 },
   ]);
   assert.deepEqual(lineChanges([], ["x"]), [{ kind: "added", start: 1, end: 1 }]);
+  // Edits far apart in a long file stay two changes, not one block from the first to the last.
+  const long = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const edited = long.map((l, i) => (i === 10 ? "x" : l));
+  edited.splice(4000, 0, "new");
+  assert.deepEqual(lineChanges(long, edited), [
+    { kind: "modified", start: 11, end: 11 },
+    { kind: "added", start: 4001, end: 4001 },
+  ]);
 });
 
 test("each change's block rolls it back or applies it alone", () => {
