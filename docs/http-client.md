@@ -232,7 +232,8 @@ Dynamic values change each time you send: `{{$uuid}}`, `{{$timestamp}}`,
 `{{$random.float(0, 1)}}`, `{{$random.alphabetic(8)}}`,
 `{{$random.alphanumeric(8)}}`, `{{$random.hexadecimal(8)}}`,
 `{{$random.numeric(6)}}`, `{{$random.email}}`, and `{{$random.bool}}`.
-`{{$dotenv.NAME}}` reads the project's `.env`.
+`{{$dotenv.NAME}}` reads the project's `.env`, and `{{$projectRoot}}` is the
+project's folder, such as in `< {{$projectRoot}}/data.json`.
 
 In the query, after the `?`, a variable's value is URL-encoded, as in PhpStorm.
 With `q` set to `C# & .NET`, `?q={{q}}` sends `?q=C%23%20%26%20.NET`. What you
@@ -256,7 +257,9 @@ with a `local` environment for `APP_URL` from `.env`.
 To edit every environment in one table, choose **Edit Environments…** in an
 environment menu, or run **HTTP Client: Edit Environments**. Private variables
 go in `http-client.private.env.json`, which is added to `.gitignore`, and the
-rest go in `http-client.env.json`. Names that look secret start as private.
+rest go in `http-client.env.json`. Names that look secret start as private. A
+nested object's values show with dotted names, such as `client.host`, and are
+saved back in the object.
 Empty cells that other environments fill are highlighted. **Open JSON** and
 **Open Private JSON** open the files.
 
@@ -314,9 +317,13 @@ of your own:
 { "office": { "host": "https://staging.example.com", "$proxy": "http://proxy.internal:3128" } }
 ```
 
+A `POST` without a body sends `Content-Length: 0` and no `Content-Type`, unless
+you set one.
+
 After the body, `>> ./out.json` saves the response to a file, adding a number
 when it exists, and `>>! ./out.json` replaces it. The path can use variables,
-such as `>> {{outDir}}/out.json`, which get the same values as the request's.
+such as `>> {{outDir}}/out.json` or `>> {{$projectRoot}}/out.json`, which get
+the same values as the request's.
 
 Cookies work like a browser's: responses' cookies are kept per environment and
 sent with later requests. **HTTP Client: Clear Cookies** in ⌘⇧A forgets them.

@@ -279,6 +279,8 @@ export async function scopes(path: string, text: string) {
       { label: "Global (set by a script)", vars: globals() },
       { label: "File", vars: parseHttp(text).vars },
       { label: env ? `Environment: ${env}` : "Environment", vars: env ? envs[env] : {} },
+      // PhpStorm's {{$projectRoot}}, such as in `>> {{$projectRoot}}/out.json`.
+      { label: "Project", vars: { $projectRoot: host.root() } },
     ],
   };
 }
@@ -490,10 +492,10 @@ export async function send(path: string, request: HttpRequest, options: SendOpti
   const dir = parentOf(path);
   const model = await host.ensureModel(path);
   const s = await scopes(path, model.getValue());
-  const [global, file, env] = s.list.map((l) => l.vars);
+  const [global, file, env, project] = s.list.map((l) => l.vars);
   let variables: Record<string, string> = { ...options.extraVars };
   const exchange: Exchange = { id: newId(), time: Date.now(), path, name: request.name, line: request.line, env: s.env, request: undefined!, heads: [], bodyPath: "", contentType: "", tests: [], logs: [], unresolved: [] };
-  const lookup = () => lookupIn([variables, globals(), file, env], s.dotenv);
+  const lookup = () => lookupIn([variables, globals(), file, env, project], s.dotenv);
   const scriptRequest = () => ({ method: request.method, url: request.url, headers: request.headers.filter((h) => h.enabled).map((h): [string, string] => [h.name, h.value]), body: request.body });
 
   if (request.preScript) {
@@ -738,7 +740,8 @@ monaco.languages.setLanguageConfiguration("http", {
 });
 // A request line starts the headers; a blank line starts the body, which is JSON when it starts with { or [.
 // Scripts between {% and %} are JavaScript.
-const methods = /(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT|GRPC)(?=\s)/;
+// A method is any uppercase word, such as GET or PROPFIND, before the URL.
+const methods = /^\s*[A-Z][A-Z-]*(?=\s+\S)/;
 // Monarch only embeds a language whose grammar has loaded, and Monaco loads JavaScript's and JSON's on first use,
 // so the http grammar loads them first.
 monaco.languages.onLanguage("http", async () => {
@@ -888,7 +891,7 @@ monaco.languages.registerHoverProvider("http", {
       if (position.column < from || position.column > to) continue;
       const name = m[1];
       const range = new monaco.Range(position.lineNumber, from, position.lineNumber, to);
-      if (name.startsWith("$")) {
+      if (name.startsWith("$") && name !== "$projectRoot") {
         const { dotenv: env } = await variablesFor(model);
         const value = name.startsWith("$dotenv.") ? env[name.slice(8)] : undefined;
         return { range, contents: [{ value: name.startsWith("$dotenv.") ? `**${name}** from .env: \`${value ?? "not set"}\`` : `**${name}**: a new value each time the request is sent` }] };

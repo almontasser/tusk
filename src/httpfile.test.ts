@@ -4,6 +4,8 @@ import { test } from "node:test";
 import {
   curlArgs,
   curlFollows,
+  envFiles,
+  envTable,
   formatRequest,
   header,
   bodyFromRules,
@@ -524,6 +526,30 @@ test("follows redirects as browsers do", () => {
   const load = loadArgs({ ...base, method: "POST" }, 2, 1, undefined, true);
   assert.ok(!load.includes("-X") && load.includes("--follow") && load.includes(""));
   assert.deepEqual(["curl 8.7.1 (x86_64-apple-darwin26.0)", "curl 8.16.0 (x)", "curl 9.0.0 (x)", "nonsense"].map(curlFollows), [false, true, true, false]);
+});
+
+test("sends an empty POST without curl's form Content-Type", () => {
+  const empty = curlArgs({ ...base, method: "POST" }, files).args;
+  assert.ok(empty.includes("Content-Type:"));
+  assert.ok(loadArgs({ ...base, method: "POST" }, 2, 1).includes("Content-Type:"));
+  // Your own Content-Type is sent instead, and a body's is left alone.
+  const own = curlArgs({ ...base, method: "POST", headers: [["content-type", "application/json"]] }, files).args;
+  assert.ok(!own.includes("Content-Type:") && own.includes("content-type: application/json"));
+  assert.ok(!curlArgs({ ...base, method: "POST", body: "a=1" }, files).args.includes("Content-Type:"));
+});
+
+test("round-trips nested and dotted environment values", () => {
+  const shared = { $shared: { "api.url": "http://x" }, dev: { client: { host: "h", auth: { user: "u" } }, "api.url": "http://dev" } };
+  const secret = { dev: { client: { token: "t" } } };
+  const t = envTable(shared, secret);
+  assert.deepEqual(
+    t.rows.map((r) => [r.name, r.values.dev]),
+    [["api.url", "http://dev"], ["client.host", "h"], ["client.auth.user", "u"], ["client.token", "t"]],
+  );
+  assert.deepEqual(envFiles(t), { shared, secret });
+  // A renamed nested variable is saved where its new dotted name says.
+  t.rows.find((r) => r.name === "client.host")!.name = "server.host";
+  assert.deepEqual(envFiles(t).shared.dev, { server: { host: "h" }, client: { auth: { user: "u" } }, "api.url": "http://dev" });
 });
 
 test("always decompresses, asking only for encodings curl can decode", () => {

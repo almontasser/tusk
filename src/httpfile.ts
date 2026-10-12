@@ -552,8 +552,13 @@ function methodArgs(p: Prepared, follow: boolean): string[] {
   const args = ["--speed-limit", "1", "--speed-time", String(Math.max(1, Math.ceil(p.timeout)))];
   if (p.method === "HEAD") args.push("--head");
   // An empty body still sends Content-Length: 0, which some servers require of a POST.
-  else if (p.method === "POST") !(p.body !== undefined || p.bodyFile || p.form?.length) && args.push("--data-binary", "");
-  else args.push("-X", p.method);
+  else if (p.method === "POST") {
+    if (!(p.body !== undefined || p.bodyFile || p.form?.length)) {
+      args.push("--data-binary", "");
+      // Without a Content-Type of your own, an empty `Content-Type:` stops curl's application/x-www-form-urlencoded.
+      if (!p.headers.some(([k]) => k.toLowerCase() === "content-type")) args.push("-H", "Content-Type:");
+    }
+  } else args.push("-X", p.method);
   if (p.followRedirects) args.push(follow ? "--follow" : "-L");
   return args;
 }
@@ -1452,6 +1457,8 @@ export type EnvRow = {
   values: Record<string, string | undefined>;
   /** The environments whose values a private variable has in the shared file, which keeps them. */
   sharedIn?: string[];
+  /** The keys of a value from a nested object, such as ["client", "host"] for client.host, which is saved nested. */
+  path?: string[];
 };
 /** Environments as a table: a column per environment, $shared first, and a row per variable. */
 export type EnvTable = { envs: string[]; rows: EnvRow[] };
@@ -1459,14 +1466,22 @@ export type EnvTable = { envs: string[]; rows: EnvRow[] };
 /** Names that look like secrets, which the environment editor keeps in the private file. */
 export const looksSecret = (name: string) => /token|secret|password|passwd|key|auth/i.test(name);
 
-/** The table for http-client.env.json and http-client.private.env.json. A variable in the private file is private. */
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+/** An environment's values with their keys, a nested object's values with each key on the way to them. */
+const leaves = (vars: unknown, path: string[] = []): [string[], unknown][] => (isObject(vars) ? Object.entries(vars).flatMap(([k, v]) => (isObject(v) ? leaves(v, [...path, k]) : [[[...path, k], v] as [string[], unknown]])) : []);
+
+/**
+ * The table for http-client.env.json and http-client.private.env.json. A variable in the private file is private. A
+ * nested object's values get dotted names, such as client.host, as requests use them.
+ */
 export function envTable(shared: EnvFile | null, secret: EnvFile | null): EnvTable {
   const envs = ["$shared", ...new Set([...Object.keys(shared ?? {}), ...Object.keys(secret ?? {})].filter((e) => e !== "$shared"))];
   const rows = new Map<string, EnvRow>();
   for (const [file, isPrivate] of [[shared, false], [secret, true]] as const)
     for (const [env, vars] of Object.entries(file ?? {}))
-      for (const [name, v] of Object.entries(vars ?? {})) {
-        const row = rows.get(name) ?? { name, private: false, values: {} };
+      for (const [path, v] of leaves(vars)) {
+        const name = path.join(".");
+        const row = rows.get(name) ?? { name, private: false, values: {}, ...(path.length > 1 ? { path } : {}) };
         row.private ||= isPrivate;
         if (!isPrivate) row.sharedIn = [...(row.sharedIn ?? []), env];
         row.values[env] = typeof v === "string" ? v : JSON.stringify(v);
@@ -1479,18 +1494,23 @@ export function envTable(shared: EnvFile | null, secret: EnvFile | null): EnvTab
 
 /**
  * The two files' contents for a table. Every environment stays in the shared file, even without values, so it
- * shows in the menus. A variable without any value gets an empty one in each environment, so it isn't lost.
+ * shows in the menus. A variable without any value gets an empty one in each environment, so it isn't lost. A
+ * variable from a nested object goes back in it; renamed, its dotted name says where.
  */
 export function envFiles(t: EnvTable): { shared: EnvFile; secret: EnvFile } {
   const real = t.envs.filter((e) => e !== "$shared");
   const out = { shared: {} as EnvFile, secret: {} as EnvFile };
   for (const env of t.envs) {
-    const vars = { shared: {} as Record<string, string>, secret: {} as Record<string, string> };
+    const vars = { shared: {} as Record<string, unknown>, secret: {} as Record<string, unknown> };
     for (const row of t.rows) {
       if (!row.name) continue;
       const unset = Object.values(row.values).every((v) => v === undefined);
       const value = unset && (real.includes(env) || (!real.length && env === "$shared")) ? "" : row.values[env];
-      if (value !== undefined) vars[row.private && !row.sharedIn?.includes(env) ? "secret" : "shared"][row.name] = value;
+      if (value === undefined) continue;
+      const keys = !row.path ? [row.name] : row.path.join(".") === row.name ? row.path : row.name.split(".");
+      let target = vars[row.private && !row.sharedIn?.includes(env) ? "secret" : "shared"];
+      for (const k of keys.slice(0, -1)) target = (target[k] = isObject(target[k]) ? target[k] : {}) as Record<string, unknown>;
+      target[keys.at(-1)!] = value;
     }
     if (env !== "$shared" || Object.keys(vars.shared).length) out.shared[env] = vars.shared;
     if (Object.keys(vars.secret).length) out.secret[env] = vars.secret;

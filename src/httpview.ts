@@ -694,6 +694,8 @@ export async function restoreHttpSession(session: HttpSession | undefined) {
 
 const panel = h("div", { class: "http-client" });
 const methodSelect = h("select", { class: "http-method", title: "Method" }, ...METHODS.map((m) => h("option", { value: m, textContent: m })));
+/** A method of the request's own, such as PROPFIND, shown only while that request is open. */
+const customMethod = h("option");
 const urlInput = h("input", { class: "http-url", placeholder: "{{host}}/api/posts", spellcheck: false, title: "URL. Use {{name}} for variables" });
 const urlPreview = h("div", { class: "http-url-preview" });
 const sendButton = h("button", { class: "primary http-send", title: keyText("Send (⌘⏎)") }, icon("play"), "Send");
@@ -770,7 +772,11 @@ function renderRequest() {
   // Typing in the URL isn't interrupted, but another tab's URL always shows.
   if (document.activeElement !== urlInput || formTab !== current) urlInput.value = r.url;
   formTab = current;
-  methodSelect.value = METHODS.includes(r.method) ? r.method : "GET";
+  const custom = r.method && !METHODS.includes(r.method) ? r.method : "";
+  if (custom) customMethod.value = customMethod.textContent = custom;
+  if (custom) methodSelect.append(customMethod);
+  else customMethod.remove();
+  methodSelect.value = custom || (METHODS.includes(r.method) ? r.method : "GET");
   methodSelect.dataset.method = r.method;
   if (current?.sending) {
     sendButton.replaceChildren(icon("close"), "Cancel");
