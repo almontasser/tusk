@@ -57,6 +57,9 @@ async function phpGrammar() {
 // Runs after Monaco's own loader, which sets the unchanged grammar.
 monaco.languages.onLanguage("php", async () => monaco.languages.setMonarchTokensProvider("php", (await phpGrammar()).language));
 
+// Scripts without an extension, such as Laravel's artisan, are PHP when the shebang says so.
+monaco.languages.register({ id: "php", firstLine: "#!.*\\bphp\\b" });
+
 // Blade templates get their own language, so PHP-only servers skip them. The grammar is Monaco's
 // PHP/HTML grammar with Blade states in front: echoes, directive arguments, and @php blocks hold PHP,
 // highlighted by the PHP grammar's own phpRoot rules, and they work inside tags and attribute values too.

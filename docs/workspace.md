@@ -543,6 +543,9 @@ you can also press:
 
 Drag a file or folder onto a folder to move it there.
 
+A file without an extension opens as PHP when its first line is a PHP shebang,
+such as `#!/usr/bin/env php` in Laravel's `artisan`.
+
 ### Hidden and excluded files
 
 Each project has two lists of patterns, which **Tools > Hidden Files and

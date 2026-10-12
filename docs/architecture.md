@@ -71,7 +71,8 @@ below it.
 ### Tabs and models
 
 Each open file is one Monaco model with a `file://` URI. Monaco picks the
-language from the file extension. Language servers identify documents by the
+language from the file extension, or from a `#!…php` shebang for files without
+one, such as `artisan`. Language servers identify documents by the
 same URI, so milestone 2 needs no path translation.
 
 A tab is dirty when the model's alternative version ID differs from the ID
