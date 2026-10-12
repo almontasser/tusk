@@ -15,15 +15,22 @@ export const DEFAULT_EXCLUDES = [
 /** Mago's `excludes` for the list. Mago matches a glob against file paths, so a folder glob needs `/**`. */
 export const magoExcludes = (list: string[]) => list.map((p) => (p.includes("*") ? `${p}/**` : p));
 
+/** Each pattern's regular expression, made once: the project tree tests every entry it draws against its lists. */
+const globs = new Map<string, RegExp>();
+
 /** Whether a folder, relative to the project, is inside one the list excludes. */
 export function covers(list: string[], rel: string) {
   return list.some((p) => {
-    const re = p
-      .split("/")
-      .map((part) => (part === "**" ? "\0" : part.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")))
-      .join("/")
-      .replace(/\0\//g, "(?:[^/]+/)*")
-      .replace(/\/\0$/, "(?:/[^/]+)*");
-    return new RegExp(`^${re}(?:/.*)?$`).test(rel);
+    let re = globs.get(p);
+    if (!re) {
+      const source = p
+        .split("/")
+        .map((part) => (part === "**" ? "\0" : part.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")))
+        .join("/")
+        .replace(/\0\//g, "(?:[^/]+/)*")
+        .replace(/\/\0$/, "(?:/[^/]+)*");
+      globs.set(p, (re = new RegExp(`^${source}(?:/.*)?$`)));
+    }
+    return re.test(rel);
   });
 }

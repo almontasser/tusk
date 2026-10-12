@@ -23,7 +23,7 @@ import { chooseRebaseBase, initRebase } from "./rebase";
 import { initStash, showStashes, stashChanges } from "./stash";
 import { branches, fetchAll, initBranches } from "./branches";
 import { initSync, push, updateProject } from "./sync";
-import { initCommitView, initRepository } from "./commitview";
+import { initCommitView, initRepository, render as renderCommitView } from "./commitview";
 import { initMerge, openMerge } from "./merge";
 import { clearCookies } from "./httpclient";
 import { detectAppAddress } from "./httplaravel";
@@ -1039,8 +1039,14 @@ async function renderDir(ul: HTMLUListElement, dir: string, onlyIfChanged = fals
   if (onlyIfChanged && listings.get(ul) === listing) return;
   listings.set(ul, listing);
   const states = new Map(entries.map((e) => [e, treeState(relative(e.path))]));
+  // A redraw for file-system events keeps the rows still there, with their open folders' listings, so a file added
+  // here doesn't collapse, reload, and draw again every open folder below.
+  const kept = new Map<string, Element>();
+  if (onlyIfChanged) for (const li of ul.children) kept.set((li.firstElementChild as HTMLElement).dataset.path!, li);
   ul.replaceChildren(
     ...entries.filter((e) => states.get(e) !== "omit").map((e) => {
+      const old = kept.get(e.path);
+      if (old?.firstElementChild!.classList.contains(e.is_dir ? "dir" : "file")) return old;
       const li = document.createElement("li");
       const row = document.createElement("div");
       row.className = `row ${e.is_dir ? "dir" : "file"}${states.get(e) ? ` ${states.get(e)}` : ""}`;
@@ -1561,9 +1567,10 @@ function fsChanged(payload: string[]) {
     const all = rescan;
     pending = new Set();
     rescan = false;
-    for (const path of paths) {
-      const model = monaco.editor.getModel(monaco.Uri.file(path));
-      if (!model) continue;
+    // Looked up from the open models, not each path's URI: a `composer install` reports tens of thousands of paths.
+    const opened = new Map(monaco.editor.getModels().filter((m) => m.uri.scheme === "file").map((m) => [m.uri.fsPath, m]));
+    for (const [path, model] of opened) {
+      if (!paths.has(path) || model.isDisposed()) continue;
       const version = model.getAlternativeVersionId();
       const text = await readText(path).catch(() => null);
       const tab = tabs.get(path);
@@ -1583,7 +1590,7 @@ function fsChanged(payload: string[]) {
       if (tab && tabs.get(path) === tab) (tab.saved = model.getAlternativeVersionId()), (tab.disk = text), changedOnDisk(path, null);
     }
     // Files without a model weren't open, so the loop above kept no version of them.
-    recordExternalChanges([...paths].filter((p) => !monaco.editor.getModel(monaco.Uri.file(p))));
+    recordExternalChanges([...paths].filter((p) => !opened.has(p)));
     void deployFilesDeleted([...paths]);
     if (paths.has(`${root}/composer.lock`)) checkComposerLock(root);
     projectFilesChanged(paths);
@@ -2209,11 +2216,16 @@ onSettings((s) =>
     a.keys = custom === undefined ? defaultKeys.get(a.label) : custom || undefined;
   }),
 );
-// The menu bar shows the shortcuts, so rebuild it when they change.
+// The menu bar shows the shortcuts, so rebuild it when they change. On a Mac the first build waits until the project
+// has opened: each of its hundreds of items is a call that Rust runs on the main thread, which held up the project's
+// own calls by a quarter of a second, and macOS shows Tauri's default menu meanwhile. Elsewhere the menu bar takes
+// room in the window, so it's built at once rather than move the page down later.
 let menuKeymap = "";
-onSettings((s) => {
-  if (JSON.stringify(s.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(s.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
-});
+let menuShown = !isMac;
+const updateMenu = () => {
+  if (menuShown && JSON.stringify(settings.keymap) !== menuKeymap) (menuKeymap = JSON.stringify(settings.keymap)), setMenu(actions).catch((e) => console.error("Menu:", e));
+};
+onSettings(updateMenu);
 setKeymapEditor(() => editKeymap());
 setFileOpener((path) => openFile(path), markSaved);
 
@@ -2404,7 +2416,7 @@ function showView(name: string) {
   $("sidebar").classList.remove("collapsed");
   document.querySelectorAll<HTMLElement>("#activitybar [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   document.querySelectorAll<HTMLElement>("#sidebar > section").forEach((s) => (s.hidden = s.id !== `view-${name}`));
-  if (name === "commit") refreshGit();
+  if (name === "commit") renderCommitView(), refreshGit();
   if (name === "prs") loadPullRequests();
   if (name === "database") loadTables();
   if (name === "composer") loadPackages();
@@ -2554,4 +2566,6 @@ try {
 } catch {}
 // Settings load first, so the project opens with the right theme and servers, and spell checking's
 // language server isn't started and then restarted when the settings arrive.
-settingsLoaded.then(() => (last ? openFolder(last).catch(showWelcome) : showWelcome()));
+const opened = settingsLoaded.then(() => (last ? openFolder(last).catch(showWelcome) : showWelcome()));
+// Opening can wait on tool setup or restored terminals, so the menu, with its shortcuts, waits a second at most.
+Promise.race([opened, new Promise((r) => setTimeout(r, 1000))]).finally(() => ((menuShown = true), updateMenu()));

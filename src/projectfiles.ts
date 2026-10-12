@@ -16,10 +16,11 @@ export async function editorConfigFor(path: string): Promise<Properties> {
   if (!top || !path.startsWith(top + "/")) return {};
   const dirs = [top];
   for (const part of path.slice(top.length + 1, path.lastIndexOf("/")).split("/").filter(Boolean)) dirs.push(`${dirs.at(-1)}/${part}`);
+  // All folders' files are asked for at once: a file deep in vendor would otherwise wait on one read per folder.
+  const texts = dirs.map((dir) => configs.get(dir) ?? configs.set(dir, invoke<string>("read_file", { path: `${dir}/.editorconfig` }).catch(() => null)).get(dir)!);
   const found = [];
-  for (const dir of dirs) {
-    if (!configs.has(dir)) configs.set(dir, invoke<string>("read_file", { path: `${dir}/.editorconfig` }).catch(() => null));
-    const text = await configs.get(dir)!;
+  for (const [i, dir] of dirs.entries()) {
+    const text = await texts[i];
     if (text !== null) found.push({ dir, text });
   }
   return propertiesFor(path, found);

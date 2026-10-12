@@ -274,8 +274,10 @@ pub fn watch(app: AppHandle, state: State<'_, WatchState>, path: String) -> Resu
             let _ = rescan_app.emit("fs-rescan", &root);
         }
         Ok(event) => {
-            // A save's temporary file comes and goes within the save; the saved file's own change is enough.
-            changed.lock().unwrap().extend(event.paths.iter().map(crate::slash).filter(|p| !p.ends_with(".tusk-save")));
+            // A save's temporary file comes and goes within the save; the saved file's own change is enough. Git's
+            // objects change only along with its index or refs, which are reported: `git add` of a big folder writes
+            // thousands of them.
+            changed.lock().unwrap().extend(event.paths.iter().map(crate::slash).filter(|p| !p.ends_with(".tusk-save") && !p.contains("/.git/objects/")));
         }
     })
     .map_err(|e| e.to_string())?;

@@ -46,7 +46,8 @@ function fileOfKey(key: string): { g: Group; f: FileStatus } | undefined {
 
 // ---- Rendering ----
 
-function render() {
+/** Draws the view. Git refreshes draw it only while it shows, so showing it draws it first (main.ts). */
+export function render() {
   const st = gitStatus();
   const empty = $("git-empty");
   empty.hidden = !!st;
@@ -409,7 +410,8 @@ export function initCommitView(hst: Host) {
   $("commit").onclick = () => commit(false);
   $("commit-push").onclick = () => commit(true);
   $("commit-message").onkeydown = (e) => void (e.key === "Enter" && mod(e) && (e.preventDefault(), commit(false)));
-  refreshListeners.push(render, () => {
+  // A branch switch can list thousands of files, and every file watcher batch refreshes git.
+  refreshListeners.push(() => !$("view-commit").hidden && render(), () => {
     const n = gitStatus()?.files.length ?? 0;
     document.querySelector<HTMLElement>('#activitybar [data-view="commit"]')!.dataset.count = n > 99 ? "99+" : n ? String(n) : "";
   });

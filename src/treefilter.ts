@@ -7,7 +7,10 @@ export const DEFAULT_HIDDEN = [".idea", ".phpunit.cache", ".phpunit.result.cache
 /** Shown dimmed, as PhpStorm marks excluded folders: dependencies and generated files. Local history skips them too. */
 export const DEFAULT_EXCLUDED = ["vendor", "node_modules", "storage", ".claude", "dist", "build"];
 
-const nameGlob = (pattern: string) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
+// Made once per pattern: the tree tests each entry it draws, and local history each path a checkout changes.
+const globs = new Map<string, RegExp>();
+const nameGlob = (pattern: string) =>
+  globs.get(pattern) ?? globs.set(pattern, new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`)).get(pattern)!;
 
 /**
  * Whether a path relative to the project is in a list, or inside a folder in it. A pattern without `/`, such as
