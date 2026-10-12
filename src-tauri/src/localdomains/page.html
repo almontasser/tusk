@@ -108,6 +108,33 @@
   .lead { margin: 0; max-width: 460px; font-size: 16px; line-height: 1.6; color: var(--muted); }
   .lead code { color: var(--text); }
 
+  .actions { margin-top: 28px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .run {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 22px 13px 18px;
+    border: 0;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #7076d6, #4b51b6);
+    color: #fff;
+    font: 600 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 10px 28px var(--glow), 0 2px 6px rgba(43, 46, 124, 0.35);
+    cursor: pointer;
+    transition: transform 0.15s, filter 0.15s, box-shadow 0.15s;
+  }
+  .run code { font-size: 14px; font-weight: 600; }
+  .run:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .run:active { transform: translateY(0); filter: brightness(0.96); }
+  .run:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .run:disabled { cursor: default; filter: saturate(0.7); transform: none; }
+  /* A play triangle, and a spinner while it starts. */
+  .glyph { width: 0; height: 0; border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent #fff; }
+  .busy .glyph { width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { font-size: 12.5px; color: var(--faint); }
+  .hint.error { color: #e5484d; }
+
   .waiting {
     margin-top: 26px;
     display: inline-flex;
@@ -156,7 +183,8 @@
   @media (max-height: 640px) { main { justify-content: flex-start; padding-top: 32px; } }
   @media (prefers-reduced-motion: reduce) {
     .logo, .signal::after { animation: none; }
-    .running a, .running a::after { transition: none; }
+    .running a, .running a::after, .run { transition: none; }
+    .busy .glyph { animation-duration: 2.4s; }
   }
 </style>
 </head>
@@ -166,8 +194,8 @@
   <div class="logo" aria-hidden="true">{{icon}}</div>
   <div class="code" aria-hidden="true">{{code}}</div>
   <h1><code>{{host}}</code> isn't {{verb}}</h1>
-  <p class="lead">{{explanation}}</p>
-  <div class="waiting" role="status"><span class="signal"></span>{{waiting}}</div>{{running}}
+  <p class="lead">{{explanation}}</p>{{action}}
+  <div class="waiting" role="status"><span class="signal"></span><span id="waiting">{{waiting}}</span></div>{{running}}
 </main>
 <footer><b>Tusk</b> · local proxy · {{code}} {{reason}}</footer>
 <script>
@@ -192,6 +220,36 @@
     }
     document.addEventListener("visibilitychange", poll);
     later();
+
+    // Asks Tusk to run the configuration that serves this address; the polling above opens the site once it's up.
+    var run = document.getElementById("run");
+    if (!run) return;
+    var hint = document.getElementById("run-hint"), label = document.getElementById("run-label"), waiting = document.getElementById("waiting");
+    var idle = { hint: hint.textContent, label: label.innerHTML, waiting: waiting.textContent };
+    function reset(message) {
+      run.disabled = false;
+      run.classList.remove("busy");
+      label.innerHTML = idle.label;
+      waiting.textContent = idle.waiting;
+      hint.textContent = message || idle.hint;
+      hint.classList.toggle("error", !!message);
+    }
+    run.addEventListener("click", function () {
+      run.disabled = true;
+      run.classList.add("busy");
+      label.textContent = "Starting…";
+      hint.textContent = idle.hint;
+      hint.classList.remove("error");
+      fetch("/__tusk/run", { method: "POST", headers: { "X-Tusk": "run" } }).then(function (r) {
+        if (!r.ok) return reset("Tusk couldn't run it from here. Run it from Tusk instead.");
+        waiting.textContent = "Starting in Tusk";
+        poll();
+        // Tusk may be asking a question, such as your password the first time. Let you try again after a while.
+        setTimeout(function () { reset(); }, 20000);
+      }, function () {
+        reset("Tusk didn't answer. Is it still open?");
+      });
+    });
   })();
 </script>
 </body>

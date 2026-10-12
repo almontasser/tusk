@@ -13,7 +13,7 @@ use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub use ca::ca_pem_path;
 
@@ -24,8 +24,13 @@ pub const FALLBACK_PORT: u16 = 8443;
 pub const HTTP_PORT: u16 = 80;
 /// The DNS responder's port on 127.0.0.1. Windows' NRPT rules can't name a port, so there it's 53.
 pub const DNS_PORT: u16 = if cfg!(windows) { 53 } else { 15353 };
-/// How often a process with routes checks whether the owner has quit.
+/// How often a process with routes checks whether the owner has quit, and picks up requests to run its servers.
 const TICK: Duration = Duration::from_secs(2);
+/// How long a request from the page to run a server waits for its window, so a click nobody saw doesn't start it later.
+const REQUEST_TTL: Duration = Duration::from_secs(30);
+
+/// Runs the configuration that serves a name, when the page asks.
+pub type RunHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// The folder every Tusk process shares. It's not the app's own folder, since dev builds use other identifiers.
 pub fn shared_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -61,6 +66,9 @@ pub struct Inner {
     dir: PathBuf,
     id: String,
     routes: Mutex<BTreeMap<String, u16>>,
+    /// The names this process's run configurations serve, with each configuration's name, for the page's Run button.
+    runnable: Mutex<BTreeMap<String, String>>,
+    on_run: Option<RunHook>,
     ca: RwLock<Arc<ca::Ca>>,
 }
 
@@ -76,6 +84,32 @@ impl Inner {
             return Some(*port);
         }
         others(&self.dir, &self.id).into_iter().find_map(|routes| routes.get(name).copied())
+    }
+
+    /// The configuration that serves `name` when it runs, in this process or another live one.
+    fn runnable(&self, name: &str) -> Option<String> {
+        if let Some(config) = self.runnable.lock().unwrap().get(name) {
+            return Some(config.clone());
+        }
+        others_in::<HashMap<String, String>>(&self.dir, &self.id, "runnable").into_iter().find_map(|r| r.get(name).cloned())
+    }
+
+    /// Asks the process whose configuration serves `name` to run it: this one at once, or another through a request
+    /// file it picks up on its next tick. False when no process can.
+    fn request_run(&self, name: &str) -> bool {
+        let mine = self.runnable.lock().unwrap().contains_key(name);
+        if mine {
+            if let Some(run) = &self.on_run {
+                run(name);
+            }
+            return true;
+        }
+        // Only names a process published get a file, so `name` is a valid label, not a path.
+        if self.runnable(name).is_none() {
+            return false;
+        }
+        let requests = self.dir.join("requests");
+        fs::create_dir_all(&requests).and_then(|_| fs::write(requests.join(name), b"")).is_ok()
     }
 
     /// Every name served now, by this process or another live one, sorted.
@@ -98,25 +132,34 @@ fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
     fs::write(&temp, data).and_then(|_| fs::rename(&temp, path)).map_err(|e| e.to_string())
 }
 
-/// The routes of every other live process. A process whose lock can be taken is gone, so its files are removed.
+/// The routes of every other live process.
 fn others(dir: &Path, me: &str) -> Vec<HashMap<String, u16>> {
-    let Ok(entries) = fs::read_dir(dir.join("routes")) else { return Vec::new() };
+    others_in(dir, me, "routes")
+}
+
+/// Every other live process's file in the folder `kind` (`routes` or `runnable`), parsed. A process whose lock in
+/// `routes` can be taken is gone, so its files are removed.
+fn others_in<T: serde::de::DeserializeOwned>(dir: &Path, me: &str, kind: &str) -> Vec<T> {
+    let Ok(entries) = fs::read_dir(dir.join(kind)) else { return Vec::new() };
     let mut found = Vec::new();
     for path in entries.flatten().map(|e| e.path()) {
-        if path.extension().is_none_or(|e| e != "json") || path.file_stem().is_some_and(|id| id == me) {
+        let Some(id) = path.file_stem().and_then(|id| id.to_str()).filter(|_| path.extension().is_some_and(|e| e == "json")) else { continue };
+        if id == me {
             continue;
         }
-        let lock = path.with_extension("lock");
+        let lock = dir.join("routes").join(format!("{id}.lock"));
         // A lock that can't be opened or taken for another reason is treated as live.
         let dead = match OpenOptions::new().write(true).open(&lock) {
             Ok(file) => file.try_lock().is_ok(),
             Err(e) => e.kind() == std::io::ErrorKind::NotFound,
         };
         if dead {
-            let _ = fs::remove_file(&path);
+            for kind in ["routes", "runnable"] {
+                let _ = fs::remove_file(dir.join(kind).join(format!("{id}.json")));
+            }
             let _ = fs::remove_file(&lock);
-        } else if let Some(routes) = fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()) {
-            found.push(routes);
+        } else if let Some(value) = fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()) {
+            found.push(value);
         }
     }
     found
@@ -138,14 +181,15 @@ pub struct Instance {
 }
 
 impl Instance {
-    /// Starts an instance in `dir`. It must be called inside a tokio runtime, which runs its takeover checks.
-    pub fn new(dir: PathBuf, ports: Ports, ca: ca::Ca) -> Result<Arc<Self>, String> {
+    /// Starts an instance in `dir`, which calls `on_run` when the page asks it to run a server. It must be called
+    /// inside a tokio runtime, which runs its takeover checks.
+    pub fn new(dir: PathBuf, ports: Ports, ca: ca::Ca, on_run: Option<RunHook>) -> Result<Arc<Self>, String> {
         let routes = dir.join("routes");
-        fs::create_dir_all(&routes).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&routes).and_then(|_| fs::create_dir_all(dir.join("runnable"))).map_err(|e| e.to_string())?;
         let id = random_id();
         let lock = File::create(routes.join(format!("{id}.lock"))).map_err(|e| e.to_string())?;
         lock.try_lock().map_err(|e| e.to_string())?;
-        let inner = Arc::new(Inner { dir, id, routes: Mutex::default(), ca: RwLock::new(Arc::new(ca)) });
+        let inner = Arc::new(Inner { dir, id, routes: Mutex::default(), runnable: Mutex::default(), on_run, ca: RwLock::new(Arc::new(ca)) });
         let me = Arc::new(Instance { inner, ports, owner: tokio::sync::Mutex::new(None), _lock: lock });
         let weak: Weak<Instance> = Arc::downgrade(&me);
         tokio::spawn(async move {
@@ -166,6 +210,30 @@ impl Instance {
 
     fn names(&self) -> Vec<String> {
         self.inner.routes.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Publishes the names this process's run configurations serve, with each configuration's name.
+    pub fn set_runnable(&self, runnable: BTreeMap<String, String>) -> Result<(), String> {
+        let path = self.inner.dir.join("runnable").join(format!("{}.json", self.inner.id));
+        write_atomic(&path, &serde_json::to_vec(&runnable).map_err(|e| e.to_string())?)?;
+        *self.inner.runnable.lock().unwrap() = runnable;
+        Ok(())
+    }
+
+    /// Runs the servers that another process's page asked for. Removing a request claims it, since only one
+    /// process's removal succeeds; a request older than `REQUEST_TTL` is dropped instead.
+    fn take_requests(&self) {
+        let names: Vec<String> = self.inner.runnable.lock().unwrap().keys().cloned().collect();
+        for name in names {
+            let path = self.inner.dir.join("requests").join(&name);
+            let Ok(meta) = fs::metadata(&path) else { continue };
+            let fresh = meta.modified().ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < REQUEST_TTL);
+            if fs::remove_file(&path).is_ok() && fresh {
+                if let Some(run) = &self.inner.on_run {
+                    run(&name);
+                }
+            }
+        }
     }
 
     /// Why `name` can't be served here, if something already serves it.
@@ -249,6 +317,7 @@ impl Instance {
     /// Takes over the listeners when the owner has quit and this process has routes. An owner steps down when
     /// owner.json is gone, which means another process removed the setup, and it has no routes of its own.
     async fn tick(&self) {
+        self.take_requests();
         let no_routes = self.inner.routes.lock().unwrap().is_empty();
         let mut owner = self.owner.lock().await;
         if owner.is_some() {
@@ -295,6 +364,7 @@ impl Drop for Instance {
         }
         let routes = self.inner.dir.join("routes");
         let _ = fs::remove_file(routes.join(format!("{}.json", self.inner.id)));
+        let _ = fs::remove_file(self.inner.dir.join("runnable").join(format!("{}.json", self.inner.id)));
         let _ = fs::remove_file(routes.join(format!("{}.lock", self.inner.id)));
     }
 }
@@ -315,14 +385,17 @@ fn current() -> Option<Arc<Instance>> {
     INSTANCE.lock().unwrap().clone()
 }
 
-fn instance(dir: &Path, ca: ca::Ca) -> Result<Arc<Instance>, String> {
+fn instance(app: &AppHandle, dir: &Path, ca: ca::Ca) -> Result<Arc<Instance>, String> {
     let mut slot = INSTANCE.lock().unwrap();
     if let Some(me) = slot.as_ref() {
         me.set_ca(ca);
         return Ok(me.clone());
     }
     let ports = Ports { https: HTTPS_PORT, fallback: FALLBACK_PORT, http: Some(HTTP_PORT), dns: DNS_PORT };
-    let me = Instance::new(dir.to_path_buf(), ports, ca)?;
+    // The frontend runs the configuration, as if you clicked Run.
+    let app = app.clone();
+    let on_run: RunHook = Arc::new(move |name: &str| _ = app.emit("local-domain-run", name));
+    let me = Instance::new(dir.to_path_buf(), ports, ca, Some(on_run))?;
     *slot = Some(me.clone());
     Ok(me)
 }
@@ -379,7 +452,7 @@ pub async fn local_domain_start(app: AppHandle, name: String) -> Result<DomainSt
         let dir = dir.clone();
         crate::blocking(move || ca::ensure(&dir)).await?
     };
-    let me = instance(&dir, loaded)?;
+    let me = instance(&app, &dir, loaded)?;
     // Checked before setup, so a taken name doesn't ask for a password first.
     if let Some(conflict) = me.conflict(&name) {
         return Err(conflict);
@@ -415,6 +488,26 @@ pub async fn local_domain_start(app: AppHandle, name: String) -> Result<DomainSt
         notes.push(format!("{name}.test doesn't resolve to this computer yet. The browser may need a minute, or a restart, to pick up the new DNS settings."));
     }
     Ok(DomainStart { url: url(&name, https_port), port, notes, can_use_port_443: cfg!(target_os = "linux") && https_port != HTTPS_PORT })
+}
+
+/// Publishes the names this window's run configurations serve, each with its configuration's name, so the page for
+/// a name that isn't running can offer to run it. An empty list starts nothing.
+#[tauri::command]
+pub async fn local_domains_runnable(app: AppHandle, runnable: BTreeMap<String, String>) -> Result<(), String> {
+    let runnable: BTreeMap<String, String> = runnable.into_iter().filter(|(name, _)| valid_name(name)).collect();
+    let me = match current() {
+        Some(me) => me,
+        None if runnable.is_empty() => return Ok(()),
+        None => {
+            let dir = shared_dir(&app)?;
+            let loaded = {
+                let dir = dir.clone();
+                crate::blocking(move || ca::ensure(&dir)).await?
+            };
+            instance(&app, &dir, loaded)?
+        }
+    };
+    me.set_runnable(runnable)
 }
 
 /// Stops serving `name` from this process. Stopping a name that isn't served does nothing.
@@ -535,6 +628,11 @@ mod tests {
 
     /// Like `get`, with `headers`, each line ending in CRLF.
     async fn request(port: u16, ca: &CertificateDer<'static>, name: &str, headers: &str) -> String {
+        send(port, ca, name, &format!("GET / HTTP/1.1\r\nHost: {name}\r\n{headers}\r\n")).await
+    }
+
+    /// Sends `raw` to `name` through the proxy on `port`, trusting `ca`, and returns the response.
+    async fn send(port: u16, ca: &CertificateDer<'static>, name: &str, raw: &str) -> String {
         let mut roots = rustls::RootCertStore::empty();
         roots.add(ca.clone()).unwrap();
         let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -545,7 +643,7 @@ mod tests {
         let tcp = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
         let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
         let mut tls = connector.connect(ServerName::try_from(name.to_string()).unwrap(), tcp).await.unwrap();
-        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n{headers}\r\n").as_bytes()).await.unwrap();
+        tls.write_all(raw.as_bytes()).await.unwrap();
         let mut response = Vec::new();
         let _ = tls.read_to_end(&mut response).await;
         String::from_utf8_lossy(&response).into_owned()
@@ -559,7 +657,7 @@ mod tests {
     async fn proxies_by_name() {
         let dir = temp_dir();
         let ports = test_ports();
-        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
         let shop = upstream("shop body").await;
         a.register("shop", shop).unwrap();
         let (https, notes) = a.ensure_listeners().await.unwrap();
@@ -599,7 +697,7 @@ mod tests {
         let ports = test_ports();
         // Another program on 127.0.0.1 takes loopback traffic even where a wildcard bind would succeed.
         let taken = TcpListener::bind((Ipv4Addr::LOCALHOST, ports.https)).await.unwrap();
-        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
         a.register("shop", upstream("shop body").await).unwrap();
         let (https, _) = a.ensure_listeners().await.unwrap();
         assert_eq!(https, ports.fallback);
@@ -621,7 +719,7 @@ mod tests {
         let ports = test_ports();
         let _https = TcpListener::bind((Ipv4Addr::LOCALHOST, ports.https)).await.unwrap();
         let _fallback = TcpListener::bind((Ipv4Addr::LOCALHOST, ports.fallback)).await.unwrap();
-        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
         a.register("shop", upstream("shop body").await).unwrap();
         let (https, _) = a.ensure_listeners().await.unwrap();
         assert!(https != 0 && https != ports.https && https != ports.fallback);
@@ -634,8 +732,8 @@ mod tests {
     async fn shares_and_hands_over_the_proxy() {
         let dir = temp_dir();
         let ports = test_ports();
-        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
-        let b = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap()).unwrap();
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
+        let b = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), None).unwrap();
         let ca = a.inner.ca().der.clone();
         a.register("a", upstream("a body").await).unwrap();
         a.ensure_listeners().await.unwrap();
@@ -664,6 +762,57 @@ mod tests {
         assert!(get(https, &ca, "b.test").await.ends_with("b body"));
         assert!(get(https, &ca, "a.test").await.starts_with("HTTP/1.1 404"));
         drop(b);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn runs_from_the_page() {
+        let dir = temp_dir();
+        let ports = test_ports();
+        let ran = Arc::new(Mutex::new(Vec::<String>::new()));
+        let hook = |who: &'static str| -> RunHook {
+            let ran = ran.clone();
+            Arc::new(move |name: &str| ran.lock().unwrap().push(format!("{who}:{name}")))
+        };
+        let a = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), Some(hook("a"))).unwrap();
+        let b = Instance::new(dir.clone(), ports.clone(), ca::ensure(&dir).unwrap(), Some(hook("b"))).unwrap();
+        let ca = a.inner.ca().der.clone();
+        a.register("shop", upstream("shop body").await).unwrap();
+        let (https, _) = a.ensure_listeners().await.unwrap();
+        a.set_runnable(BTreeMap::from([("own".to_string(), "Serve own".to_string())])).unwrap();
+        b.set_runnable(BTreeMap::from([("blog".to_string(), "Serve blog".to_string())])).unwrap();
+
+        // The page offers the configuration of whichever window has it.
+        let page = request(https, &ca, "blog.test", "Accept: text/html\r\n").await;
+        assert!(page.contains("id=\"run\"") && page.contains("Runs “Serve blog” in Tusk"), "{page}");
+        assert!(!request(https, &ca, "nope.test", "Accept: text/html\r\n").await.contains("id=\"run\""));
+
+        let post = |name: &str, origin: &str| format!("POST /__tusk/run HTTP/1.1\r\nHost: {name}:{https}\r\nOrigin: {origin}\r\nX-Tusk: run\r\nContent-Length: 0\r\n\r\n");
+        // This window's configuration runs at once.
+        let own = send(https, &ca, "own.test", &post("own.test", &format!("https://own.test:{https}"))).await;
+        assert!(own.starts_with("HTTP/1.1 202"), "{own}");
+        assert_eq!(*ran.lock().unwrap(), ["a:own"]);
+        // Another window's waits for that window's tick.
+        let other = send(https, &ca, "blog.test", &post("blog.test", &format!("https://blog.test:{https}"))).await;
+        assert!(other.starts_with("HTTP/1.1 202"), "{other}");
+        // Only the window with the configuration claims it, on a tick of its own or this one.
+        a.take_requests();
+        b.take_requests();
+        assert_eq!(*ran.lock().unwrap(), ["a:own", "b:blog"]);
+        assert!(!dir.join("requests/blog").exists());
+
+        // Another origin, a name nobody can run, and a stale request start nothing.
+        assert!(send(https, &ca, "blog.test", &post("blog.test", "https://evil.example")).await.starts_with("HTTP/1.1 403"));
+        assert!(send(https, &ca, "nope.test", &post("nope.test", &format!("https://nope.test:{https}"))).await.starts_with("HTTP/1.1 404"));
+        let stale = File::create(dir.join("requests/blog")).unwrap();
+        stale.set_modified(std::time::SystemTime::now() - Duration::from_secs(60)).unwrap();
+        b.take_requests();
+        assert_eq!(ran.lock().unwrap().len(), 2);
+        assert!(!dir.join("requests/blog").exists());
+
+        // A served name passes POSTs through to its server.
+        assert!(send(https, &ca, "shop.test", &post("shop.test", "x")).await.ends_with("shop body"));
+        drop((a, b));
         let _ = fs::remove_dir_all(dir);
     }
 }

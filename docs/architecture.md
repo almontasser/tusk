@@ -3061,6 +3061,23 @@ the `Host` header, such as `:8443`. Its inline script fetches the same URL
 every 2 seconds, pauses while the tab is hidden, and reloads once a reply
 lacks the marker header. Other clients get one line of plain text.
 
+**Running from the page.** Each window publishes the `.test` domains its run
+configurations serve, with each configuration's name: `publishRunnable` in
+`runner.ts` calls `local_domains_runnable` whenever the configurations or the
+project change, and the backend writes `runnable/<id>.json` in the shared
+folder. When a window can run a name that isn't served, the 404 page shows a
+**Run** button, which posts to `/__tusk/run` on the same address. The proxy
+answers that path only for a name nothing serves, and only from the page
+itself: the `Origin` must be the address, and the request must carry
+`X-Tusk: run`. A form can't send that header, and another site's fetch would
+need a preflight, which the proxy never allows. When the proxy's own window has
+the configuration, it emits `local-domain-run` to its frontend at once.
+Otherwise it writes `requests/<name>`, and the window with the configuration
+claims it on its next 2-second tick by removing the file, which only one
+window can do; a request older than 30 seconds is dropped. The frontend runs
+the configuration as **Run** would, unless it's already running, and the
+page reloads into the site once it answers.
+
 **The shared folder.** The backend keeps its state in `tusk-local-domains/`
 in the local data folder: `~/Library/Application Support` on macOS,
 `%LOCALAPPDATA%` on Windows, and `~/.local/share` on Linux. Development and
@@ -3068,8 +3085,9 @@ release builds share it. It holds `ca.pem` and `ca-key.pem`, the Tusk Local
 CA: ECDSA P-256, valid for 10 years, and name-constrained to `.test` with every
 IP address excluded, so it can't vouch for anything else. Leaf certificates are
 minted per name on first use and are valid for 30 days. The folder also holds
-`owner.lock` and `owner.json`, and each window's `routes/<id>.json` and
-`routes/<id>.lock`.
+`owner.lock` and `owner.json`; each window's `routes/<id>.json`,
+`routes/<id>.lock`, and `runnable/<id>.json`; and `requests/`, where the page
+asks another window to run a server.
 
 **Ports.** HTTPS listens on 443, and falls back to 8443 when it can't bind
 there. When 8443 is taken too, often by another dev tool, the system picks a

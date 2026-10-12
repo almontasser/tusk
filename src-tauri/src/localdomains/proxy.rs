@@ -178,17 +178,47 @@ async fn serve_tls(tcp: TcpStream, inner: Arc<Inner>, acceptor: TlsAcceptor) {
         None => ("404 Not Found", format!("{host} isn't running. Run its configuration in Tusk.")),
     };
     let head = read_head(&mut tls).await;
+    // Links to the other names keep the proxy's port, as when it runs on 8443.
+    let host_header = header(&head, "host").unwrap_or_default();
+    let suffix = host_header.rsplit_once(':').filter(|(_, p)| p.parse::<u16>().is_ok()).map_or(String::new(), |(_, p)| format!(":{p}"));
+    let label = host.strip_suffix(".test").unwrap_or_default();
+    if port.is_none() && request_line(&head) == Some(("POST", RUN_PATH)) {
+        let _ = tls.write_all(&respond(run_status(&head, &host, &suffix, || inner.request_run(label)), "text/plain", "", "Cache-Control: no-store\r\n")).await;
+        let _ = tls.shutdown().await;
+        return;
+    }
     let (kind, body) = if accepts_html(&head) {
-        // Links to the other names keep the proxy's port, as when it runs on 8443.
-        let host_header = header(&head, "host").unwrap_or_default();
-        let suffix = host_header.rsplit_once(':').filter(|(_, p)| p.parse::<u16>().is_ok()).map_or(String::new(), |(_, p)| format!(":{p}"));
-        ("text/html", page(&host, port, &inner.names(), &suffix))
+        let runnable = port.is_none().then(|| inner.runnable(label)).flatten();
+        ("text/html", page(&host, port, &inner.names(), &suffix, runnable.as_deref()))
     } else {
         ("text/plain", format!("{message}\n"))
     };
     let extra = "Retry-After: 2\r\nCache-Control: no-store\r\nX-Tusk-Proxy: unavailable\r\n";
     let _ = tls.write_all(&respond(status, kind, &body, extra)).await;
     let _ = tls.shutdown().await;
+}
+
+/// Where the page's Run button posts. Only the proxy answers it, since nothing serves the name yet.
+const RUN_PATH: &str = "/__tusk/run";
+
+/// The reply to the page's Run button. It must come from the page itself: the same origin, and a header that a
+/// form can't send and that another site's fetch can't send without a preflight, which the proxy never allows.
+fn run_status(head: &[u8], host: &str, suffix: &str, run: impl FnOnce() -> bool) -> &'static str {
+    let ours = header(head, "origin").is_some_and(|o| o == format!("https://{host}{suffix}")) && header(head, "x-tusk").as_deref() == Some("run");
+    if !ours {
+        "403 Forbidden"
+    } else if run() {
+        "202 Accepted"
+    } else {
+        "404 Not Found"
+    }
+}
+
+/// The request's method and path.
+fn request_line(head: &[u8]) -> Option<(&str, &str)> {
+    let line = std::str::from_utf8(head.split(|b| *b == b'\r').next()?).ok()?;
+    let mut words = line.split(' ');
+    Some((words.next()?, words.next()?))
 }
 
 const PAGE: &str = include_str!("page.html");
@@ -214,17 +244,26 @@ fn fill(template: &str, values: &[(&str, &str)]) -> String {
 }
 
 /// The page for `host` that isn't served: not running, or, with its `port`, not answering. The not-running
-/// page links to the `running` names, with `suffix` (such as `:8443`) after each.
-fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str) -> String {
+/// page links to the `running` names, with `suffix` (such as `:8443`) after each, and offers to run the
+/// configuration named `runnable` when a window has one that serves `host`.
+fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str, runnable: Option<&str>) -> String {
     use base64::Engine;
     let host = escape(host);
     let (tone, code, reason, verb, waiting) = match port {
         Some(_) => ("down", "502", "Bad Gateway", "answering", "Waiting for the server to answer"),
         None => ("off", "404", "Not Found", "running", "Waiting for it to start"),
     };
-    let explanation = match port {
-        Some(port) => format!("Tusk is serving this address, but nothing answers on port <code>{port}</code> yet. The server may still be starting, or it stopped. Check its terminal tab in Tusk. This page opens your site as soon as it answers."),
-        None => "Nothing in Tusk is serving this address. Run its configuration in Tusk, and this page opens your site as soon as it&#39;s up.".to_string(),
+    let explanation = match (port, runnable) {
+        (Some(port), _) => format!("Tusk is serving this address, but nothing answers on port <code>{port}</code> yet. The server may still be starting, or it stopped. Check its terminal tab in Tusk. This page opens your site as soon as it answers."),
+        (None, Some(_)) => "Nothing is serving this address yet. Run it from here or from Tusk, and this page opens your site as soon as it&#39;s up.".to_string(),
+        (None, None) => "Nothing in Tusk is serving this address. Run its configuration in Tusk, and this page opens your site as soon as it&#39;s up.".to_string(),
+    };
+    let action = match (port, runnable) {
+        (None, Some(config)) => format!(
+            "\n  <div class=\"actions\">\n    <button class=\"run\" id=\"run\" type=\"button\"><span class=\"glyph\" aria-hidden=\"true\"></span><span id=\"run-label\">Run <code>{host}</code></span></button>\n    <div class=\"hint\" id=\"run-hint\">Runs “{}” in Tusk</div>\n  </div>",
+            escape(config)
+        ),
+        _ => String::new(),
     };
     let running = match port {
         None if !running.is_empty() => {
@@ -254,6 +293,7 @@ fn page(host: &str, port: Option<u16>, running: &[String], suffix: &str) -> Stri
             ("host", &host),
             ("verb", verb),
             ("explanation", &explanation),
+            ("action", &action),
             ("waiting", waiting),
             ("running", &running),
         ],
@@ -340,7 +380,7 @@ mod tests {
     #[test]
     fn pages() {
         let running = ["shop".to_string(), "a\"b".to_string()];
-        let off = page("<script>", None, &running, ":8443");
+        let off = page("<script>", None, &running, ":8443", None);
         assert!(off.contains("<title>404 · &lt;script&gt; isn&#39;t running</title>") && off.contains("<body class=\"off\">"));
         assert!(off.contains("<div class=\"code\" aria-hidden=\"true\">404</div>") && off.contains("404 Not Found</footer>"));
         assert!(off.contains("<h1><code>&lt;script&gt;</code> isn't running</h1>") && !off.contains("<script>\""), "{off}");
@@ -349,11 +389,32 @@ mod tests {
         assert!(off.contains("https://a&quot;b.test:8443/") && !off.contains("{{"));
         // Tusk's icon, inline and as the favicon.
         assert!(off.contains("<div class=\"logo\" aria-hidden=\"true\"><svg") && off.contains("href=\"data:image/svg+xml;base64,"));
-        assert!(!page("shop.test", None, &[], "").contains("Running in Tusk"));
+        assert!(!page("shop.test", None, &[], "", None).contains("Running in Tusk"));
 
-        let down = page("shop.test", Some(18803), &running, "");
+        let down = page("shop.test", Some(18803), &running, "", Some("Serve"));
         assert!(down.contains("<body class=\"down\">") && down.contains(">502</div>") && down.contains("<code>shop.test</code> isn't answering"));
         assert!(down.contains("nothing answers on port <code>18803</code> yet") && !down.contains("Running in Tusk"));
+        assert!(!down.contains("id=\"run\""), "a server that's starting gets no Run button");
+
+        let runnable = page("blog.test", None, &[], "", Some("Serve <blog>"));
+        assert!(runnable.contains("<button class=\"run\" id=\"run\" type=\"button\">") && runnable.contains("Run <code>blog.test</code>"));
+        assert!(runnable.contains("Runs “Serve &lt;blog&gt;” in Tusk") && runnable.contains("Run it from here or from Tusk"));
+        assert!(!off.contains("id=\"run\""));
+    }
+
+    #[test]
+    fn run_requests() {
+        let head = |headers: &str| format!("POST /__tusk/run HTTP/1.1\r\nHost: blog.test:8443\r\n{headers}\r\n").into_bytes();
+        assert_eq!(request_line(&head("")), Some(("POST", "/__tusk/run")));
+        let ours = head("Origin: https://blog.test:8443\r\nX-Tusk: run\r\n");
+        assert_eq!(run_status(&ours, "blog.test", ":8443", || true), "202 Accepted");
+        assert_eq!(run_status(&ours, "blog.test", ":8443", || false), "404 Not Found");
+        // Another site's form or fetch: a different origin, or no header without a preflight.
+        let mut ran = false;
+        assert_eq!(run_status(&head("Origin: https://evil.example\r\nX-Tusk: run\r\n"), "blog.test", ":8443", || (ran = true, true).1), "403 Forbidden");
+        assert_eq!(run_status(&head("Origin: https://blog.test:8443\r\n"), "blog.test", ":8443", || (ran = true, true).1), "403 Forbidden");
+        assert_eq!(run_status(&head("X-Tusk: run\r\n"), "blog.test", ":8443", || (ran = true, true).1), "403 Forbidden");
+        assert!(!ran);
     }
 
     #[tokio::test]

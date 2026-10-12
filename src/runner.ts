@@ -2,6 +2,7 @@
 // state, and holds the ways to start them: the title bar's run widget, the gutter's run buttons, and Run Anything.
 import { invoke } from "@tauri-apps/api/core";
 import { appCacheDir } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
 import { monaco } from "./editor";
 import { h, icon, toast } from "./dom";
 import { confirm, type Item, pick, rank } from "./palette";
@@ -364,6 +365,41 @@ export async function removeTestDomains() {
   await Promise.all([...serving.map((r) => r.stopRoute!()), ...routeStops.values()]);
   const done = await withProgress("Removing .test domains and the certificate…", () => invoke("local_domains_remove").then(() => true), { error: "Can't remove the .test domains" });
   if (done) toast("Removed Tusk's .test domains and its local certificate.", { kind: "info" });
+  // Removing stopped this window's part of the proxy, so publish its domains again.
+  published = "";
+  publishRunnable();
+}
+
+/** What `publishRunnable` sent last, so it sends only changes. */
+let published = "";
+
+/** The configurations that serve a .test domain, the selected one first, so it wins a domain several serve. */
+function domainConfigs(root: string) {
+  const first = selected();
+  return [...(first ? [first] : []), ...configurations()].filter((e) => servesTestDomain(e.config)).map((e) => ({ name: domainFor(e.config, root), config: e.config }));
+}
+
+/**
+ * Tells Tusk's proxy which .test domains this window's configurations serve, with each configuration's name, so the
+ * page for a domain that isn't running offers to run it.
+ */
+function publishRunnable() {
+  const root = getRoot?.();
+  const runnable: Record<string, string> = {};
+  if (root) for (const { name, config } of domainConfigs(root)) runnable[name] ??= config.name;
+  const json = JSON.stringify(runnable);
+  if (json === published) return;
+  published = json;
+  invoke("local_domains_runnable", { runnable }).catch((e) => console.error("Can't publish this window's .test domains", e));
+}
+
+/** Runs the configuration that serves `name`, when its page in the browser asks, unless it's already running. */
+function runFromPage(name: string) {
+  const root = getRoot?.();
+  const match = root ? domainConfigs(root).find((d) => d.name === name) : undefined;
+  if (!match || runsOf(match.config.name).length) return;
+  toast(`Running “${match.config.name}” for https://${name}.test, as your browser asked.`, { kind: "info" });
+  runConfig(match.config);
 }
 
 /**
@@ -499,6 +535,7 @@ async function deleteConfiguration(name: string) {
 
 /** Draws the widget: the selected configuration, whether it runs, and its Run, Debug, Run with Coverage, and Stop buttons. */
 function renderWidget() {
+  publishRunnable();
   const el = document.getElementById("run-widget");
   if (!el) return;
   const current = getRoot?.() ? selected() : undefined;
@@ -764,6 +801,7 @@ export function initRunner(
 ) {
   showDiff = diff;
   loadProfiler = profiler;
+  listen<string>("local-domain-run", (e) => runFromPage(e.payload));
   getRoot = root;
   openAt = open;
   status = showStatus;
