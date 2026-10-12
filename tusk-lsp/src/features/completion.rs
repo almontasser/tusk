@@ -196,8 +196,34 @@ fn visible(codebase: &CodebaseMetadata, visibility: Visibility, declaring: &str,
     }
 }
 
-fn method_item(m: &FunctionLikeMetadata, class: &str, range: Range, ctx: &Ctx<'_>) -> CompletionItem {
-    let name = m.original_name.as_str_lossy().into_owned();
+/// A trait method's alias as the class or a parent writes it (`use M { M::__call as dynamicMacroCall; }`): Mago
+/// keeps only its lowercase form. That form when no source has it.
+fn alias_as_written(ctx: &Ctx<'_>, meta: &ClassLikeMetadata, alias: &str) -> String {
+    let codebase = &ctx.index.codebase;
+    let mut classes = std::iter::once(meta).chain(meta.all_parent_classes.iter().filter_map(|p| codebase.get_class_like(p.as_bytes())));
+    classes
+        .find_map(|c| {
+            let text = ctx.snap.text_of(&ctx.index, c.span.file_id)?;
+            let body = text.get(c.span.start.offset as usize..c.span.end.offset as usize)?;
+            let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+            let lower = body.to_ascii_lowercase();
+            lower.match_indices(alias).find_map(|(i, _)| {
+                let (before, after) = (lower.as_bytes().get(i.wrapping_sub(1)), lower.as_bytes().get(i + alias.len()));
+                let whole = !before.is_some_and(|b| word(*b)) && !after.is_some_and(|b| word(*b));
+                // `as dynamicMacroCall` or `as protected dynamicMacroCall`.
+                let mut head = lower[..i].trim_end();
+                if let Some(rest) = ["public", "protected", "private"].iter().find_map(|v| head.strip_suffix(v)) {
+                    head = rest.trim_end();
+                }
+                let keyword = head.strip_suffix("as").is_some_and(|h| !h.bytes().last().is_some_and(word));
+                (whole && keyword).then(|| body[i..i + alias.len()].to_string())
+            })
+        })
+        .unwrap_or_else(|| alias.to_string())
+}
+
+/// `name` is the method's name on the class, which differs from `m`'s for a trait method's alias.
+fn method_item(m: &FunctionLikeMetadata, name: String, class: &str, range: Range, ctx: &Ctx<'_>) -> CompletionItem {
     let label_detail = method_signature(ctx, m);
     let has_params = !m.parameters.is_empty();
     CompletionItem {
@@ -290,11 +316,20 @@ fn members(ctx: &Ctx<'_>, word_start: u32, _word: &str, range: Range, is_static:
                 continue;
             }
             let declaring = id.get_class_name().as_str_lossy().into_owned();
-            if !visible(codebase, mm.visibility, &declaring, enclosing.as_deref()) {
+            // `use M { __call as protected hidden; }` changes the visibility the class gives it.
+            let adapted = std::iter::once(meta)
+                .chain(meta.all_parent_classes.iter().filter_map(|p| codebase.get_class_like(p.as_bytes())))
+                .find_map(|c| c.trait_visibility_map.get(key).copied());
+            if !visible(codebase, adapted.unwrap_or(mm.visibility), &declaring, enclosing.as_deref()) {
                 continue;
             }
             if seen.insert(("m", key.as_str_lossy().into_owned())) {
-                out.push(method_item(m, class, range, ctx));
+                let name = if key.as_str_lossy().eq_ignore_ascii_case(&m.original_name.as_str_lossy()) {
+                    m.original_name.as_str_lossy().into_owned()
+                } else {
+                    alias_as_written(ctx, meta, &key.as_str_lossy())
+                };
+                out.push(method_item(m, name, class, range, ctx));
             }
         }
         let pseudo_methods = if is_static { &meta.static_pseudo_methods } else { &meta.pseudo_methods };
@@ -302,7 +337,7 @@ fn members(ctx: &Ctx<'_>, word_start: u32, _word: &str, range: Range, is_static:
             if let Some(m) = codebase.get_method(class.as_bytes(), pseudo.as_bytes())
                 && seen.insert(("m", pseudo.as_str_lossy().to_ascii_lowercase()))
             {
-                out.push(method_item(m, class, range, ctx));
+                out.push(method_item(m, m.original_name.as_str_lossy().into_owned(), class, range, ctx));
             }
         }
         properties(ctx, meta, class, is_static, enclosing.as_deref(), range, &mut seen, &mut out);
@@ -754,6 +789,20 @@ mod tests {
     }
 
     const LIB: &str = "<?php\nnamespace App\\Models;\n/** @property-read int $magic */\nclass Base {\n    public function save(array $o = []): bool { return true; }\n    protected function guard(): void {}\n    private function secret(): void {}\n    public static function create(): static { return new static; }\n    public static int $count = 0;\n}\nclass User extends Base {\n    const ROLE = 'admin';\n    public string $name = '';\n    private int $age = 0;\n    public function posts(): array { return []; }\n}\nenum Status: string { case Active = 'a'; case Gone = 'g'; }\nfunction helper(int $x): string { return ''; }\n";
+
+    #[test]
+    fn completes_a_trait_methods_alias_by_its_own_name() {
+        let lib = "<?php\ntrait M { public function __call($n, $a) {} }\nclass R {\n    use M {\n        M::__call as dynamicMacroCall;\n        M::__call as protected HiddenCall;\n    }\n    function g() { $this->hiddencall(); }\n    public function __call($n, $a) {}\n}\nclass S extends R {}\n";
+        for class in ["R", "S"] {
+            let items = complete_at(&[("lib.php", lib), ("t.php", &format!("<?php\nfunction f({class} $r) {{ $r-><|> }}\n"))]);
+            assert_eq!(labels(&items), vec!["__call", "dynamicMacroCall", "g"]);
+            let alias = items.iter().find(|i| i.label == "dynamicMacroCall").unwrap();
+            let Some(CompletionTextEdit::Edit(edit)) = &alias.text_edit else { panic!() };
+            assert_eq!(edit.new_text, "dynamicMacroCall($0)");
+        }
+        let items = complete_at(&[("t.php", &lib.replace("$this->hiddencall();", "$this-><|>"))]);
+        assert!(labels(&items).contains(&"HiddenCall".to_string()), "{:?}", labels(&items));
+    }
 
     #[test]
     fn completes_parent_in_a_trait_from_the_classes_that_use_it() {
